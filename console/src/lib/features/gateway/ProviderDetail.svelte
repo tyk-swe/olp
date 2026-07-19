@@ -45,6 +45,7 @@
     probeReady,
     providerEditValues,
     providerStatus,
+    supportsManualModelDeclaration,
     type ProviderEditValues
   } from './providerEditor';
 
@@ -246,12 +247,12 @@
 
   async function discoverDetail(current: Provider) {
     await run('detail-discover', async () => {
-      const updated = await discoverProviderModels(current);
-      queryClient.setQueryData(['provider', current.id], updated);
+      const discovery = await discoverProviderModels(current);
+      queryClient.setQueryData(['provider', current.id], discovery);
       clearCertificationResults();
       await resetDetailModels(current.id);
       await invalidateProviderSummaries(queryClient);
-      notice = `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} reviewed.`;
+      notice = `${discovery.observed_model_count} model${discovery.observed_model_count === 1 ? '' : 's'} observed; ${discovery.added_model_count} added, ${discovery.renamed_model_count} renamed, ${discovery.newly_missing_model_count} staged missing.`;
     });
   }
 
@@ -262,13 +263,13 @@
       return;
     }
     await run('detail-declare', async () => {
-      const updated = await declareProviderModels(current, names);
+      const discovery = await declareProviderModels(current, names);
       manualModelNames = '';
-      queryClient.setQueryData(['provider', current.id], updated);
+      queryClient.setQueryData(['provider', current.id], discovery);
       clearCertificationResults();
       await resetDetailModels(current.id);
       await invalidateProviderSummaries(queryClient);
-      notice = `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`;
+      notice = `${discovery.added_model_count} model${discovery.added_model_count === 1 ? '' : 's'} added for capability review.`;
     });
   }
 
@@ -295,9 +296,8 @@
       const updated = await getProvider(current.id);
       queryClient.setQueryData(['provider', current.id], updated);
       await refreshCurrentDetailModelPage(current.id);
-      probe = null;
       await invalidateProviderSummaries(queryClient);
-      notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
+      notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification.`;
     });
   }
 
@@ -354,6 +354,7 @@
 {:else if provider.data}
   {@const current = provider.data}
   {#if current.pending_activation}<div class="pending-banner" role="status"><strong>Revision {current.active_revision} remains live.</strong><span>Draft configuration and the draft-selected credential are not serving traffic. Test, certify, and activate to replace the runtime revision atomically.</span></div>{/if}
+  {#if current.missing_model_count > 0}<div class="pending-banner" role="status"><strong>{current.missing_model_count} model{current.missing_model_count === 1 ? '' : 's'} missing upstream.</strong><span>The active revision remains live. Disable or replace missing draft models, re-certify any reappeared model, then explicitly activate the reviewed revision.</span></div>{/if}
   <div class="detail-grid">
     <section class="card editor" aria-labelledby="configuration-heading">
       <div class="section-heading"><div><p class="eyebrow">Configuration</p><h2 id="configuration-heading">Connector context</h2></div><span class:success={current.active_revision != null && !current.pending_activation} class:warning={current.pending_activation} class="badge">{providerStatus(current)}</span></div>
@@ -366,8 +367,8 @@
         {#if hasCloudProject(current.kind)}<div class="form-field"><label for="detail-project">Cloud project</label><input id="detail-project" bind:value={editValues.cloudProject} /></div>{/if}
         {#if hasDeployment(current.kind)}<div class="form-field"><label for="detail-deployment">Cloud deployment</label><input id="detail-deployment" bind:value={editValues.deployment} /></div>{/if}
       </div>
-      <ol class="activation-checklist compact" aria-label="Provider activation requirements"><li class:complete={capabilitiesCertified(current)}>{capabilitiesCertified(current) ? '✓' : '1'} Capabilities certified</li><li class:complete={probeReady(current)}>{probeReady(current) ? '✓' : '2'} Completed draft tested</li></ol>
-      <div class="form-actions"><button class="button button-secondary" type="button" onclick={() => saveProvider(current)} disabled={Boolean(busy)}>Save draft</button><button class="button button-secondary" type="button" onclick={() => testDetail(current)} disabled={Boolean(busy) || current.state !== 'draft' || !capabilitiesCertified(current)}>{busy === 'detail-probe' ? 'Testing completed draft…' : 'Test completed draft'}</button><button class="button button-primary" type="button" onclick={() => activateDetail(current)} disabled={Boolean(busy) || !activationReady(current)}>Activate changes</button></div>
+       <ol class="activation-checklist compact" aria-label="Provider activation requirements"><li class:complete={probeReady(current)}>{probeReady(current) ? '✓' : '1'} Draft connection tested</li><li class:complete={capabilitiesCertified(current)}>{capabilitiesCertified(current) ? '✓' : '2'} Enabled capabilities certified</li></ol>
+       <div class="form-actions"><button class="button button-secondary" type="button" onclick={() => saveProvider(current)} disabled={Boolean(busy)}>Save draft</button><button class="button button-secondary" type="button" onclick={() => testDetail(current)} disabled={Boolean(busy) || current.state !== 'draft'}>{busy === 'detail-probe' ? 'Testing draft…' : 'Test draft'}</button><button class="button button-primary" type="button" onclick={() => activateDetail(current)} disabled={Boolean(busy) || !activationReady(current)}>Activate changes</button></div>
       {#if current.last_probe_at}<p class="audit-note">Last probe {new Date(current.last_probe_at).toLocaleString()}: {current.last_probe_status} — {current.last_probe_detail}</p>{/if}
     </section>
     <section class="card editor" aria-labelledby="credential-heading">
@@ -378,10 +379,10 @@
   </div>
   <section class="card editor models" aria-labelledby="models-heading">
     <div class="section-heading"><div><p class="eyebrow">Discovery</p><h2 id="models-heading">Models and capabilities</h2></div><a class="button button-secondary" href="/models">Inventory view</a></div>
-    <div class="discovery-row"><p class="muted">Refresh the inventory from the upstream model-list API. Existing capability certification is reconciled server-side.</p><button class="button button-secondary" type="button" onclick={() => discoverDetail(current)} disabled={Boolean(busy)}>{busy === 'detail-discover' ? 'Discovering…' : 'Run upstream discovery'}</button></div>
-    {#if current.kind === 'open_ai_compatible'}<details class="manual-fallback"><summary>Manual model identifiers</summary><p>Use only if this compatible endpoint has no list API. Models remain disabled until capability review.</p><div class="form-field"><label for="manual-models-detail">Upstream model identifiers</label><textarea id="manual-models-detail" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={() => declareDetailModels(current)} disabled={Boolean(busy)}>{busy === 'detail-declare' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
-    {#if current.model_count === 0}<div class="empty-state"><p>No models have been discovered.</p></div>{:else if detailModels.isPending}<div class="loading-state" role="status">Loading models…</div>{:else if detailModels.isError}<div class="inline-problem" role="alert">{message(detailModels.error)} <button class="button button-secondary" type="button" onclick={() => detailModels.refetch()}>Retry</button></div>{:else}<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead><tbody>{#each detailModels.data?.items ?? [] as model (model.id)}<tr><td><strong>{model.display_name}</strong><br /><code>{model.upstream_model}</code></td><td><CapabilityReview {model} options={capabilityOptions.data?.capabilities ?? []} optionsPending={capabilityOptions.isPending} optionsError={capabilityOptions.isError} disabled={Boolean(busy)} onSave={(enabled, capabilities) => reviewDetailModel(current, model.id, enabled, capabilities)} /><div class="certification-action"><button class="button button-secondary" type="button" onclick={() => certifyDetailModel(current, model.id)} disabled={Boolean(busy) || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>{#if certificationResults[model.id]}{@const result = certificationResults[model.id]}<span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span><ul class="certification-results">{#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li><code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}</li>{/each}</ul>{/if}</div></td></tr>{/each}</tbody></table></div><CursorPagination page={detailModelHistory.length + 1} hasPrevious={detailModelHistory.length > 0} hasNext={Boolean(detailModels.data?.nextCursor)} onPrevious={previousDetailModelPage} onNext={nextDetailModelPage} label="Provider model pages" />{/if}
-    {#if !activationReady(current)}<p class="audit-note">Every native and compatible tuple requires fresh server-owned certification. After the last change or certification, run the completed-draft connection test before activation.</p>{/if}
+    <div class="discovery-row"><p class="muted">Refresh the inventory from the upstream model-list API. Unchanged models retain review evidence; only two complete upstream misses stage a model as missing.</p><button class="button button-secondary" type="button" onclick={() => discoverDetail(current)} disabled={Boolean(busy)}>{busy === 'detail-discover' ? 'Discovering…' : 'Run upstream discovery'}</button></div>
+    {#if supportsManualModelDeclaration(current.kind)}<details class="manual-fallback"><summary>Manual model identifiers</summary><p>Use this fallback only when the provider cannot list every valid runtime target. Models remain disabled until capability review.</p><div class="form-field"><label for="manual-models-detail">Upstream model identifiers</label><textarea id="manual-models-detail" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={() => declareDetailModels(current)} disabled={Boolean(busy)}>{busy === 'detail-declare' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
+    {#if current.model_count === 0}<div class="empty-state"><p>No models have been discovered.</p></div>{:else if detailModels.isPending}<div class="loading-state" role="status">Loading models…</div>{:else if detailModels.isError}<div class="inline-problem" role="alert">{message(detailModels.error)} <button class="button button-secondary" type="button" onclick={() => detailModels.refetch()}>Retry</button></div>{:else}<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead><tbody>{#each detailModels.data?.items ?? [] as model (model.id)}<tr><td><strong>{model.display_name}</strong>{#if model.availability === 'missing'}<span class="badge warning">missing upstream</span>{/if}<br /><code>{model.upstream_model}</code></td><td><CapabilityReview {model} options={capabilityOptions.data?.capabilities ?? []} optionsPending={capabilityOptions.isPending} optionsError={capabilityOptions.isError} disabled={Boolean(busy) || model.availability === 'missing'} onSave={(enabled, capabilities) => reviewDetailModel(current, model.id, enabled, capabilities)} /><div class="certification-action"><button class="button button-secondary" type="button" onclick={() => certifyDetailModel(current, model.id)} disabled={Boolean(busy) || model.availability === 'missing' || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>{#if certificationResults[model.id]}{@const result = certificationResults[model.id]}<span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span><ul class="certification-results">{#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li><code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}</li>{/each}</ul>{/if}</div></td></tr>{/each}</tbody></table></div><CursorPagination page={detailModelHistory.length + 1} hasPrevious={detailModelHistory.length > 0} hasNext={Boolean(detailModels.data?.nextCursor)} onPrevious={previousDetailModelPage} onNext={nextDetailModelPage} label="Provider model pages" />{/if}
+    {#if !activationReady(current)}<p class="audit-note">Every enabled tuple requires server-owned certification and the current transport/credential context requires a successful draft connection test before activation.</p>{/if}
   </section>
   <section class="card editor revisions" aria-labelledby="provider-revisions-heading">
     <div class="section-heading"><div><p class="eyebrow">Immutable history</p><h2 id="provider-revisions-heading">Provider revisions</h2><p class="muted">Historical secrets and credential IDs are never returned. Restoring copies only non-secret configuration into a new draft and preserves the current credential selection.</p></div></div>

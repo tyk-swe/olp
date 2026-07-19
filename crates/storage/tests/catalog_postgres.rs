@@ -243,23 +243,24 @@ async fn catalog_lifecycle_is_versioned_audited_and_publishes_runtime() {
         .await
         .unwrap();
     let discovered = store.get_provider_catalog(provider_id).await.unwrap();
-    assert!(discovered.last_probe_at.is_none());
-    assert!(discovered.last_probe_status.is_none());
-    assert!(matches!(
-        store
-            .record_provider_probe(
-                provider_id,
-                provider.etag,
-                true,
-                "late success from the pre-discovery configuration",
-                actor,
-            )
-            .await,
-        Err(CatalogError::PreconditionFailed)
-    ));
+    assert!(discovered.last_probe_at.is_some());
+    assert_eq!(discovered.last_probe_status.as_deref(), Some("succeeded"));
+    store
+        .record_provider_probe(
+            provider_id,
+            provider.etag,
+            true,
+            "additional observation with the unchanged transport context",
+            actor,
+        )
+        .await
+        .unwrap();
     let after_stale_probe = store.get_provider_catalog(provider_id).await.unwrap();
-    assert!(after_stale_probe.last_probe_at.is_none());
-    assert!(after_stale_probe.last_probe_status.is_none());
+    assert!(after_stale_probe.last_probe_at.is_some());
+    assert_eq!(
+        after_stale_probe.last_probe_status.as_deref(),
+        Some("succeeded")
+    );
     assert!(matches!(
         store
             .activate_provider(
@@ -1265,54 +1266,12 @@ async fn catalog_lifecycle_is_versioned_audited_and_publishes_runtime() {
         )
         .await
         .unwrap();
-    assert!(matches!(
-        store
-            .activate_provider(
-                compatible_id,
-                post_patch_certified.etag,
-                actor,
-                "provider-compatible-activate-without-fresh-probe-01",
-            )
-            .await,
-        Err(ConfigurationError::ProviderIncomplete)
-    ));
-    store
-        .record_provider_probe(
-            compatible_id,
-            post_patch_certified.etag,
-            false,
-            "post-patch compatible probe failed",
-            actor,
-        )
-        .await
-        .unwrap();
-    assert!(matches!(
-        store
-            .activate_provider(
-                compatible_id,
-                post_patch_certified.etag,
-                actor,
-                "provider-compatible-activate-after-failed-probe-01",
-            )
-            .await,
-        Err(ConfigurationError::ProviderIncomplete)
-    ));
-    store
-        .record_provider_probe(
-            compatible_id,
-            post_patch_certified.etag,
-            true,
-            "post-patch compatible probe succeeded",
-            actor,
-        )
-        .await
-        .unwrap();
     store
         .activate_provider(
             compatible_id,
             post_patch_certified.etag,
             actor,
-            "provider-compatible-activate-certified-01",
+            "provider-compatible-activate-from-certification-01",
         )
         .await
         .unwrap();
@@ -1329,8 +1288,11 @@ async fn catalog_lifecycle_is_versioned_audited_and_publishes_runtime() {
 
 async fn certify_all_capabilities(store: &PgStore, provider_id: Uuid) {
     sqlx::query(
-        "UPDATE model_capabilities SET source = 'certified', certified_at = now() \
-         WHERE provider_model_id IN (SELECT id FROM provider_models WHERE provider_id = $1)",
+        "UPDATE model_capabilities mc SET source = 'certified', certified_at = now(), \
+                certification_context_id = p.certification_context_id, \
+                review_revision = pm.review_revision, certification_evidence_kind = 'test' \
+         FROM provider_models pm JOIN providers p ON p.id = pm.provider_id \
+         WHERE mc.provider_model_id = pm.id AND pm.provider_id = $1",
     )
     .bind(provider_id)
     .execute(store.pool())

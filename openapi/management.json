@@ -322,6 +322,12 @@
               "null"
             ]
           },
+          "evidence_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "mode": {
             "type": "string"
           },
@@ -372,11 +378,16 @@
             },
             "type": "array"
           },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
           "status": {
             "type": "string"
           }
         },
         "required": [
+          "run_id",
           "provider_id",
           "model_id",
           "status",
@@ -739,8 +750,18 @@
       },
       "DiscoverModelsRequest": {
         "properties": {
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ModelDiscoveryMode",
+                "description": "`upstream` observes the connector inventory. `manual` declares\ncompatible-endpoint identifiers without treating omissions as removals.\nWhen omitted, an empty model list means `upstream` and a nonempty list\nmeans `manual` for backwards-compatible API clients."
+              }
+            ]
+          },
           "models": {
-            "description": "Omit or pass an empty array to query the upstream model-list API.\nManual identifiers are a fallback for upstreams without a list API.\nAll discovered models start disabled and without capability claims until\nthe explicit review operation is completed.",
             "items": {
               "$ref": "#/components/schemas/DiscoveredModelRequest"
             },
@@ -1133,6 +1154,13 @@
           "data"
         ],
         "type": "object"
+      },
+      "ModelDiscoveryMode": {
+        "enum": [
+          "upstream",
+          "manual"
+        ],
+        "type": "string"
       },
       "OidcAuthorizationResponse": {
         "properties": {
@@ -2026,6 +2054,16 @@
               "null"
             ]
           },
+          "enabled_capability_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled_certified_capability_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "enabled_model_count": {
             "format": "int64",
             "minimum": 0,
@@ -2045,8 +2083,26 @@
             "format": "uuid",
             "type": "string"
           },
+          "invalid_enabled_model_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "kind": {
             "type": "string"
+          },
+          "last_model_discovery_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_model_discovery_status": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "last_probe_at": {
             "format": "date-time",
@@ -2067,6 +2123,11 @@
               "null"
             ]
           },
+          "missing_model_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "model_count": {
             "format": "int64",
             "minimum": 0,
@@ -2076,6 +2137,9 @@
             "type": "string"
           },
           "pending_activation": {
+            "type": "boolean"
+          },
+          "probe_ready": {
             "type": "boolean"
           },
           "runtime_credential_id": {
@@ -2109,12 +2173,17 @@
           "connector_ready",
           "etag",
           "pending_activation",
+          "probe_ready",
           "created_at",
           "updated_at",
           "model_count",
           "enabled_model_count",
           "capability_count",
-          "certified_capability_count"
+          "certified_capability_count",
+          "enabled_capability_count",
+          "enabled_certified_capability_count",
+          "missing_model_count",
+          "invalid_enabled_model_count"
         ],
         "type": "object"
       },
@@ -2255,6 +2324,49 @@
         ],
         "type": "object"
       },
+      "ProviderModelDiscoveryResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ProviderCatalogResponse"
+          },
+          {
+            "properties": {
+              "added_model_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "completed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "completeness": {
+                "type": "string"
+              },
+              "newly_missing_model_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "observed_model_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "renamed_model_count": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "completed_at",
+              "observed_model_count",
+              "added_model_count",
+              "renamed_model_count",
+              "newly_missing_model_count",
+              "completeness"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ProviderModelInventoryListResponse": {
         "properties": {
           "items": {
@@ -2321,6 +2433,9 @@
       },
       "ProviderModelResponse": {
         "properties": {
+          "availability": {
+            "type": "string"
+          },
           "capabilities": {
             "items": {
               "$ref": "#/components/schemas/CapabilityResponse"
@@ -2340,9 +2455,46 @@
           "enabled": {
             "type": "boolean"
           },
+          "first_seen_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "format": "uuid",
             "type": "string"
+          },
+          "inventory_source": {
+            "type": "string"
+          },
+          "last_certification_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_certification_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "missing_since": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "upstream_model": {
             "type": "string"
@@ -2353,6 +2505,8 @@
           "upstream_model",
           "display_name",
           "enabled",
+          "inventory_source",
+          "availability",
           "capabilities"
         ],
         "type": "object"
@@ -2773,6 +2927,16 @@
             "format": "date-time",
             "type": "string"
           },
+          "enabled_capability_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled_certified_capability_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "enabled_model_count": {
             "format": "int64",
             "minimum": 0,
@@ -2786,8 +2950,26 @@
             "format": "uuid",
             "type": "string"
           },
+          "invalid_enabled_model_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "kind": {
             "type": "string"
+          },
+          "last_model_discovery_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_model_discovery_status": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "last_probe_at": {
             "format": "date-time",
@@ -2802,6 +2984,11 @@
               "null"
             ]
           },
+          "missing_model_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "model_count": {
             "format": "int64",
             "minimum": 0,
@@ -2811,6 +2998,9 @@
             "type": "string"
           },
           "pending_activation": {
+            "type": "boolean"
+          },
+          "probe_ready": {
             "type": "boolean"
           },
           "state": {
@@ -2829,12 +3019,17 @@
           "connector_ready",
           "etag",
           "pending_activation",
+          "probe_ready",
           "created_at",
           "updated_at",
           "model_count",
           "enabled_model_count",
           "capability_count",
-          "certified_capability_count"
+          "certified_capability_count",
+          "enabled_capability_count",
+          "enabled_certified_capability_count",
+          "missing_model_count",
+          "invalid_enabled_model_count"
         ],
         "type": "object"
       },
@@ -8439,7 +8634,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                  "$ref": "#/components/schemas/ProviderModelDiscoveryResponse"
                 }
               }
             },

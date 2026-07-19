@@ -93,13 +93,17 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 pub use access::{AccessError, ApiKeyCreated, ApiKeyRevoked, NewApiKeyRecord};
 pub use catalog::{
     ApiKeyCatalogRecord, ApiKeyMutationResult, ApiKeyRotationResult,
-    CapabilityCertificationApplied, CapabilityCertificationOutcome, CapabilityRecord, CatalogError,
-    CatalogPage, CredentialVersionRecord, DiscoveredModelInput, ProviderCatalogRecord,
-    ProviderModelInventoryRecord, ProviderModelRecord, ProviderMutationResult,
-    ProviderRevisionCatalogRecord, ProviderRevisionDiff, ReplaceRouteDraftCatalogInput,
-    RotateApiKeyCatalogInput, RotateCredentialInput, RouteCatalogRecord, RouteDraftCatalogRecord,
-    RouteRevisionCatalogRecord, RouteRevisionDiff, RouteSimulation, RouteSimulationTarget,
-    RouteTargetRecord, StoredCredentialSecret, UpdateApiKeyCatalogInput, UpdateProviderCatalog,
+    CapabilityCertificationApplied, CapabilityCertificationOutcome, CapabilityCertificationResult,
+    CapabilityCertificationStarted, CapabilityRecord, CatalogError, CatalogPage,
+    CredentialVersionRecord, DiscoveredModelInput, ProviderCatalogRecord,
+    ProviderModelDiscoveryApplied, ProviderModelDiscoveryCompleteness,
+    ProviderModelDiscoveryOrigin, ProviderModelInventoryRecord, ProviderModelRecord,
+    ProviderMutationResult, ProviderRevisionCatalogRecord, ProviderRevisionDiff,
+    ReconcileProviderModelDiscoveryInput, ReplaceRouteDraftCatalogInput, RotateApiKeyCatalogInput,
+    RotateCredentialInput, RouteCatalogRecord, RouteDraftCatalogRecord, RouteRevisionCatalogRecord,
+    RouteRevisionDiff, RouteSimulation, RouteSimulationTarget, RouteTargetRecord,
+    ScheduledModelDiscoveryClaim, StoredCredentialSecret, UpdateApiKeyCatalogInput,
+    UpdateProviderCatalog,
 };
 pub use configuration::{
     ConfigurationError, NewProviderDraft, NewRouteDraft, NewRouteTarget, ProviderActivated,

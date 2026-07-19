@@ -41,6 +41,7 @@
     probeReady,
     requiresCredential,
     requiresSeedModel,
+    supportsManualModelDeclaration,
     validateProviderDraft
   } from './providerEditor';
 
@@ -148,21 +149,22 @@
   async function discoverWizardProvider() {
     if (!wizardProvider) return;
     await run('discover', async () => {
-      const discovered = await discoverProviderModels(wizardProvider!);
-      if (discovered.model_count === 0) {
-        throw new Error(
-          discovered.kind === 'open_ai_compatible'
-            ? 'The endpoint returned no models. Use the manual identifier fallback below if it has no model-list API.'
-            : 'The upstream returned no models. Verify its identity and cloud context, then retry discovery.'
-        );
-      }
-      wizardProvider = discovered;
+      const discovery = await discoverProviderModels(wizardProvider!);
+      wizardProvider = discovery;
       clearCertificationResults();
       wizardModelCursor = undefined;
       wizardModelHistory = [];
       await wizardModels.refetch();
-      wizardStep = 4;
       await invalidateProviderModelConsumers(queryClient);
+      if (discovery.model_count === 0) {
+        notice =
+          wizardProvider.kind === 'open_ai_compatible'
+            ? 'The endpoint returned no models. Retry discovery or use the manual identifier fallback below.'
+            : 'The upstream returned no models. Verify its identity and cloud context, then retry discovery.';
+        return;
+      }
+      wizardStep = 4;
+      notice = `${discovery.observed_model_count} model${discovery.observed_model_count === 1 ? '' : 's'} observed. Add or review models before activation.`;
     });
   }
 
@@ -174,7 +176,8 @@
       return;
     }
     await run('declare-models', async () => {
-      wizardProvider = await declareProviderModels(wizardProvider!, names);
+      const discovery = await declareProviderModels(wizardProvider!, names);
+      wizardProvider = discovery;
       clearCertificationResults();
       manualModelNames = '';
       wizardModelCursor = undefined;
@@ -182,6 +185,7 @@
       await wizardModels.refetch();
       wizardStep = 4;
       await invalidateProviderModelConsumers(queryClient);
+      notice = `${discovery.added_model_count} model${discovery.added_model_count === 1 ? '' : 's'} added for review.`;
     });
   }
 
@@ -208,8 +212,7 @@
       wizardProvider = await getProvider(wizardProvider!.id);
       await wizardModels.refetch();
       await invalidateProviderModelConsumers(queryClient);
-      probe = null;
-      notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
+      notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification.`;
     });
   }
 
@@ -290,14 +293,15 @@
     <p>The control plane performs a bounded connector-specific probe. No client request content is sent.</p>
     <dl><div><dt>Provider</dt><dd>{wizardProvider?.name}</dd></div><div><dt>Connector</dt><dd>{wizardProvider?.kind}</dd></div></dl>
     <button class="button button-primary" type="button" onclick={testWizardProvider} disabled={Boolean(busy)}>{busy === 'probe' ? 'Testing…' : 'Test connection'}</button>
+    {#if wizardProvider?.kind === 'open_ai_compatible'}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers now, then complete capability review. A successful compatible live certification supplies the required connectivity proof.</p><div class="form-field"><label for="manual-models-before-probe">Upstream model identifiers</label><textarea id="manual-models-before-probe" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Declare models for review'}</button></details>{/if}
   </section>
 {:else if wizardStep === 3}
   <section class="card stage" aria-labelledby="discovery-heading">
     <p class="eyebrow">Probe passed</p><h2 id="discovery-heading">Discover upstream models</h2>
     {#if probe}<p class="success-line">✓ {probe.detail}</p>{/if}
-    <p>The connector will call the upstream model-list API with the stored identity. Discovered models begin disabled until their capabilities are certified and reviewed.</p>
+    <p>The connector will call the upstream model-list API with the stored identity. Discovered models begin disabled until their capabilities are reviewed and certified.</p>
     <button class="button button-primary" type="button" onclick={discoverWizardProvider} disabled={Boolean(busy)}>{busy === 'discover' ? 'Discovering…' : 'Discover upstream models'}</button>
-    {#if wizardProvider?.kind === 'open_ai_compatible'}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually. They remain disabled and capability-empty until you complete the same review.</p><div class="form-field"><label for="manual-models-wizard">Upstream model identifiers</label><textarea id="manual-models-wizard" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
+    {#if wizardProvider && supportsManualModelDeclaration(wizardProvider.kind)}<details class="manual-fallback"><summary>Provider cannot list every model?</summary><p>Declare identifiers manually. They remain disabled and capability-empty until you complete the same review.</p><div class="form-field"><label for="manual-models-wizard">Upstream model identifiers</label><textarea id="manual-models-wizard" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
   </section>
 {:else if wizardStep === 4}
   <section class="card stage wide" aria-labelledby="capability-heading">
@@ -309,9 +313,9 @@
       {/each}
     </tbody></table></div>
     <CursorPagination page={wizardModelHistory.length + 1} hasPrevious={wizardModelHistory.length > 0} hasNext={Boolean(wizardModels.data?.nextCursor)} onPrevious={previousWizardModelPage} onNext={nextWizardModelPage} label="Provider wizard model pages" />
-    <ol class="activation-checklist" aria-label="Provider activation requirements"><li class:complete={capabilitiesCertified(wizardProvider)}>{capabilitiesCertified(wizardProvider) ? '✓' : '1'} Every enabled capability is server-certified</li><li class:complete={probeReady(wizardProvider)}>{probeReady(wizardProvider) ? '✓' : '2'} Completed draft passed an ETag-bound connection test</li></ol>
-    <div class="form-actions"><button class="button button-secondary" type="button" onclick={testWizardDraftForActivation} disabled={Boolean(busy) || !capabilitiesCertified(wizardProvider)}>{busy === 'final-probe' ? 'Testing completed draft…' : 'Test completed draft'}</button><button class="button button-primary" type="button" onclick={activateWizardProvider} disabled={Boolean(busy) || !activationReady(wizardProvider)}>{busy === 'activate' ? 'Activating…' : 'Activate provider'}</button></div>
-    {#if wizardProvider && !activationReady(wizardProvider)}<p class="audit-note">Activation stays disabled until every tuple has server-owned certification and the completed draft passes a fresh connection test. Any configuration, credential, discovery, or capability change invalidates that evidence.</p>{/if}
+    <ol class="activation-checklist" aria-label="Provider activation requirements"><li class:complete={probeReady(wizardProvider)}>{probeReady(wizardProvider) ? '✓' : '1'} Draft connection passed</li><li class:complete={capabilitiesCertified(wizardProvider)}>{capabilitiesCertified(wizardProvider) ? '✓' : '2'} Every enabled capability is server-certified</li></ol>
+    <div class="form-actions"><button class="button button-secondary" type="button" onclick={testWizardDraftForActivation} disabled={Boolean(busy)}>{busy === 'final-probe' ? 'Testing draft…' : 'Test draft'}</button><button class="button button-primary" type="button" onclick={activateWizardProvider} disabled={Boolean(busy) || !activationReady(wizardProvider)}>{busy === 'activate' ? 'Activating…' : 'Activate provider'}</button></div>
+    {#if wizardProvider && !activationReady(wizardProvider)}<p class="audit-note">Activation stays disabled until every enabled tuple has server-owned certification and the transport/credential context has passed a connection test.</p>{/if}
   </section>
 {:else}
   <section class="card stage complete-panel" aria-labelledby="activated-heading">

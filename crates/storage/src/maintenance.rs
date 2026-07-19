@@ -25,6 +25,8 @@ pub struct MaintenanceReport {
     pub request_rows: u64,
     pub usage_rows: u64,
     pub audit_rows: u64,
+    pub model_discovery_rows: u64,
+    pub certification_run_rows: u64,
     pub gap_rows: u64,
     pub usage_epoch_rows: u64,
     pub usage_receipt_rows: u64,
@@ -173,6 +175,38 @@ impl PgStore {
             .execute(&mut *transaction)
             .await?
             .rows_affected();
+        let model_discovery_rows =
+            sqlx::query("DELETE FROM provider_model_discovery_runs WHERE completed_at < $1")
+                .bind(audit_cutoff)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected();
+        sqlx::query(
+            "UPDATE capability_certification_runs SET status = 'superseded', completed_at = now() \
+             WHERE status = 'running' AND lease_expires_at < now()",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // Keep the run and its results while a currently certified tuple cites
+        // it as active evidence, even after normal operational history expires.
+        let certification_run_rows = sqlx::query(
+            "DELETE FROM capability_certification_runs run \
+             WHERE run.completed_at < $1 \
+               AND NOT EXISTS (SELECT 1 FROM model_capabilities capability \
+                               WHERE capability.certification_run_id = run.id \
+                                 AND capability.source = 'certified') \
+               AND NOT EXISTS (SELECT 1 FROM provider_revision_capabilities revision_capability \
+                               JOIN provider_revision_models revision_model \
+                                 ON revision_model.id = revision_capability.provider_revision_model_id \
+                               JOIN provider_revisions revision \
+                                 ON revision.id = revision_model.provider_revision_id \
+                               JOIN providers provider ON provider.active_revision_id = revision.id \
+                               WHERE revision_capability.certification_run_id = run.id)",
+        )
+        .bind(audit_cutoff)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
         let gap_rollup = sqlx::query(
             "WITH expired AS ( \
                DELETE FROM usage_ingestion_gaps \
@@ -291,6 +325,8 @@ impl PgStore {
             request_rows,
             usage_rows,
             audit_rows,
+            model_discovery_rows,
+            certification_run_rows,
             gap_rows,
             usage_epoch_rows,
             usage_receipt_rows,

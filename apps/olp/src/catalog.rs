@@ -16,10 +16,11 @@ use olp_providers::{
     ProviderFactory, certifiable_capabilities,
 };
 use olp_storage::{
-    ApiKeyCatalogRecord, CapabilityCertificationOutcome, CapabilityRecord, CatalogError,
+    ApiKeyCatalogRecord, CapabilityCertificationResult, CapabilityRecord, CatalogError,
     CredentialVersionRecord, DiscoveredModelInput, ProviderCatalogRecord,
-    ProviderModelInventoryRecord, ProviderModelRecord, ProviderRevisionCatalogRecord,
-    ProviderRevisionDiff, ReplaceRouteDraftCatalogInput, ReplayableIdempotency,
+    ProviderModelDiscoveryCompleteness, ProviderModelDiscoveryOrigin, ProviderModelInventoryRecord,
+    ProviderModelRecord, ProviderRevisionCatalogRecord, ProviderRevisionDiff,
+    ReconcileProviderModelDiscoveryInput, ReplaceRouteDraftCatalogInput, ReplayableIdempotency,
     RotateApiKeyCatalogInput, RotateCredentialInput, RouteCatalogRecord, RouteDraftCatalogRecord,
     RouteRevisionCatalogRecord, RouteRevisionDiff, RouteSimulation, RouteSimulationTarget,
     RouteTargetRecord, UpdateApiKeyCatalogInput, UpdateProviderCatalog, credential_aad,
@@ -210,7 +211,9 @@ pub fn router() -> Router<ApiState> {
         ProbeResponse,
         CapabilityInput,
         DiscoveredModelRequest,
+        ModelDiscoveryMode,
         DiscoverModelsRequest,
+        ProviderModelDiscoveryResponse,
         SetModelRequest,
         CapabilityCertificationItemResponse,
         CapabilityCertificationResponse,
@@ -349,6 +352,13 @@ pub struct ProviderModelResponse {
     pub display_name: String,
     pub enabled: bool,
     pub discovered_at: Option<DateTime<Utc>>,
+    pub inventory_source: String,
+    pub availability: String,
+    pub first_seen_at: Option<DateTime<Utc>>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub missing_since: Option<DateTime<Utc>>,
+    pub last_certification_status: Option<String>,
+    pub last_certification_at: Option<DateTime<Utc>>,
     pub capabilities: Vec<CapabilityResponse>,
 }
 
@@ -360,6 +370,13 @@ impl From<ProviderModelRecord> for ProviderModelResponse {
             display_name: value.display_name,
             enabled: value.enabled,
             discovered_at: value.discovered_at,
+            inventory_source: value.inventory_source,
+            availability: value.availability,
+            first_seen_at: value.first_seen_at,
+            last_seen_at: value.last_seen_at,
+            missing_since: value.missing_since,
+            last_certification_status: value.last_certification_status,
+            last_certification_at: value.last_certification_at,
             capabilities: value.capabilities.into_iter().map(Into::into).collect(),
         }
     }
@@ -408,12 +425,19 @@ pub struct ProviderSummaryResponse {
     pub pending_activation: bool,
     pub last_probe_at: Option<DateTime<Utc>>,
     pub last_probe_status: Option<String>,
+    pub probe_ready: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub model_count: u64,
     pub enabled_model_count: u64,
     pub capability_count: u64,
     pub certified_capability_count: u64,
+    pub enabled_capability_count: u64,
+    pub enabled_certified_capability_count: u64,
+    pub missing_model_count: u64,
+    pub invalid_enabled_model_count: u64,
+    pub last_model_discovery_at: Option<DateTime<Utc>>,
+    pub last_model_discovery_status: Option<String>,
 }
 
 impl From<ProviderCatalogRecord> for ProviderSummaryResponse {
@@ -429,12 +453,19 @@ impl From<ProviderCatalogRecord> for ProviderSummaryResponse {
             pending_activation: value.pending_activation,
             last_probe_at: value.last_probe_at,
             last_probe_status: value.last_probe_status,
+            probe_ready: value.probe_ready,
             created_at: value.created_at,
             updated_at: value.updated_at,
             model_count: value.model_count,
             enabled_model_count: value.enabled_model_count,
             capability_count: value.capability_count,
             certified_capability_count: value.certified_capability_count,
+            enabled_capability_count: value.enabled_capability_count,
+            enabled_certified_capability_count: value.enabled_certified_capability_count,
+            missing_model_count: value.missing_model_count,
+            invalid_enabled_model_count: value.invalid_enabled_model_count,
+            last_model_discovery_at: value.last_model_discovery_at,
+            last_model_discovery_status: value.last_model_discovery_status,
         }
     }
 }
@@ -462,12 +493,19 @@ pub struct ProviderCatalogResponse {
     pub last_probe_at: Option<DateTime<Utc>>,
     pub last_probe_status: Option<String>,
     pub last_probe_detail: Option<String>,
+    pub probe_ready: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub model_count: u64,
     pub enabled_model_count: u64,
     pub capability_count: u64,
     pub certified_capability_count: u64,
+    pub enabled_capability_count: u64,
+    pub enabled_certified_capability_count: u64,
+    pub missing_model_count: u64,
+    pub invalid_enabled_model_count: u64,
+    pub last_model_discovery_at: Option<DateTime<Utc>>,
+    pub last_model_discovery_status: Option<String>,
 }
 
 impl From<ProviderCatalogRecord> for ProviderCatalogResponse {
@@ -494,12 +532,19 @@ impl From<ProviderCatalogRecord> for ProviderCatalogResponse {
             last_probe_at: value.last_probe_at,
             last_probe_status: value.last_probe_status,
             last_probe_detail: value.last_probe_detail,
+            probe_ready: value.probe_ready,
             created_at: value.created_at,
             updated_at: value.updated_at,
             model_count: value.model_count,
             enabled_model_count: value.enabled_model_count,
             capability_count: value.capability_count,
             certified_capability_count: value.certified_capability_count,
+            enabled_capability_count: value.enabled_capability_count,
+            enabled_certified_capability_count: value.enabled_certified_capability_count,
+            missing_model_count: value.missing_model_count,
+            invalid_enabled_model_count: value.invalid_enabled_model_count,
+            last_model_discovery_at: value.last_model_discovery_at,
+            last_model_discovery_status: value.last_model_discovery_status,
         }
     }
 }
@@ -1510,10 +1555,10 @@ async fn probe_provider(
     // and persistence binds the result to the exact ETag captured above.
     let probe = connector.discover_models().await;
     let (succeeded, detail, discovered_models) = match probe {
-        Ok(models) => (
+        Ok(discovery) => (
             true,
             "Credentialed connector request succeeded.".to_owned(),
-            Some(models.len()),
+            Some(discovery.models.len()),
         ),
         Err(detail) => (false, detail, None),
     };
@@ -1547,7 +1592,10 @@ async fn probe_provider(
     )
 }
 
-async fn catalog_connector(state: &ApiState, provider_id: Uuid) -> Result<ProviderFacade, Problem> {
+pub(crate) async fn catalog_connector(
+    state: &ApiState,
+    provider_id: Uuid,
+) -> Result<ProviderFacade, Problem> {
     let store = require_store(state)?;
     let provider = store
         .get_provider_catalog(provider_id)
@@ -1591,6 +1639,102 @@ async fn catalog_connector(state: &ApiState, provider_id: Uuid) -> Result<Provid
     ProviderFactory::create(config, credential)
         .await
         .map_err(|error| validation("provider", &error.to_string()))
+}
+
+fn storage_discovery_completeness(
+    completeness: olp_providers::ModelDiscoveryCompleteness,
+) -> ProviderModelDiscoveryCompleteness {
+    match completeness {
+        olp_providers::ModelDiscoveryCompleteness::Complete => {
+            ProviderModelDiscoveryCompleteness::Complete
+        }
+        olp_providers::ModelDiscoveryCompleteness::Partial => {
+            ProviderModelDiscoveryCompleteness::Partial
+        }
+    }
+}
+
+fn discovered_model_input(model: olp_domain::DiscoveredProviderModel) -> DiscoveredModelInput {
+    DiscoveredModelInput {
+        upstream_model: model.id,
+        display_name: model.display_name,
+        enabled: false,
+        capabilities: Vec::new(),
+    }
+}
+
+/// Runs a bounded scheduled pass from a control-plane process. The standalone
+/// worker never receives the master key required to assemble catalog connectors.
+pub(crate) async fn run_scheduled_model_discovery_once(
+    state: &ApiState,
+    interval: chrono::Duration,
+) -> Result<usize, CatalogError> {
+    let store = state
+        .store
+        .as_ref()
+        .ok_or_else(|| CatalogError::Invalid("catalog storage is not configured".to_owned()))?;
+    let now = Utc::now();
+    let claims = store
+        .claim_due_model_discoveries(now - interval, now + chrono::Duration::minutes(15), 4)
+        .await?;
+    let outcomes = stream::iter(claims.into_iter().map(|claim| async move {
+        let discovery = match catalog_connector(state, claim.provider_id).await {
+            Ok(connector) => connector.discover_models().await,
+            Err(problem) => Err(problem.detail.into()),
+        };
+        match discovery {
+            Ok(discovery) => {
+                let models = discovery
+                    .models
+                    .into_iter()
+                    .map(discovered_model_input)
+                    .collect::<Vec<_>>();
+                match store
+                    .reconcile_provider_model_discovery(ReconcileProviderModelDiscoveryInput {
+                        provider_id: claim.provider_id,
+                        expected_etag: claim.expected_etag,
+                        models: &models,
+                        origin: ProviderModelDiscoveryOrigin::Scheduled,
+                        completeness: storage_discovery_completeness(discovery.completeness),
+                        actor: None,
+                        claim_id: Some(claim.claim_id),
+                    })
+                    .await
+                {
+                    Ok(_) => Ok(true),
+                    Err(CatalogError::PreconditionFailed) => {
+                        store
+                            .record_scheduled_model_discovery_superseded(
+                                &claim,
+                                "provider draft changed while scheduled discovery was running",
+                            )
+                            .await?;
+                        Ok(false)
+                    }
+                    Err(error) => {
+                        store
+                            .record_scheduled_model_discovery_failure(&claim, &error.to_string())
+                            .await?;
+                        Err(error)
+                    }
+                }
+            }
+            Err(detail) => {
+                store
+                    .record_scheduled_model_discovery_failure(&claim, &detail)
+                    .await?;
+                Ok(false)
+            }
+        }
+    }))
+    .buffer_unordered(4)
+    .collect::<Vec<_>>()
+    .await;
+    outcomes
+        .into_iter()
+        .try_fold(0_usize, |completed, outcome| {
+            outcome.map(|did_complete| completed + usize::from(did_complete))
+        })
 }
 
 fn provider_config(provider: &ProviderCatalogRecord) -> Result<ProviderConfig, String> {
@@ -1707,14 +1851,34 @@ pub struct DiscoveredModelRequest {
     pub display_name: String,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelDiscoveryMode {
+    Upstream,
+    Manual,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DiscoverModelsRequest {
-    /// Omit or pass an empty array to query the upstream model-list API.
-    /// Manual identifiers are a fallback for upstreams without a list API.
-    /// All discovered models start disabled and without capability claims until
-    /// the explicit review operation is completed.
+    /// `upstream` observes the connector inventory. `manual` declares
+    /// compatible-endpoint identifiers without treating omissions as removals.
+    /// When omitted, an empty model list means `upstream` and a nonempty list
+    /// means `manual` for backwards-compatible API clients.
+    pub mode: Option<ModelDiscoveryMode>,
     #[serde(default)]
     pub models: Vec<DiscoveredModelRequest>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ProviderModelDiscoveryResponse {
+    #[serde(flatten)]
+    pub provider: ProviderCatalogResponse,
+    pub completed_at: DateTime<Utc>,
+    pub observed_model_count: usize,
+    pub added_model_count: usize,
+    pub renamed_model_count: usize,
+    pub newly_missing_model_count: usize,
+    pub completeness: String,
 }
 
 #[utoipa::path(
@@ -1723,7 +1887,7 @@ pub struct DiscoverModelsRequest {
     tag = "providers",
     params(("provider_id" = Uuid, Path), ("If-Match" = String, Header)),
     request_body = DiscoverModelsRequest,
-    responses((status = 200, body = ProviderCatalogResponse), (status = 412, body = Problem), (status = 422, body = Problem))
+    responses((status = 200, body = ProviderModelDiscoveryResponse), (status = 412, body = Problem), (status = 422, body = Problem))
 )]
 async fn discover_provider_models(
     State(state): State<ApiState>,
@@ -1734,35 +1898,85 @@ async fn discover_provider_models(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json(payload)?;
-    let models: Vec<DiscoveredModelInput> = if request.models.is_empty() {
-        catalog_connector(&state, provider_id)
-            .await?
-            .discover_models()
-            .await
-            .map_err(|detail| validation("provider", &detail))?
-            .into_iter()
-            .map(|model| DiscoveredModelInput {
-                upstream_model: model.id,
-                display_name: model.display_name,
-                enabled: false,
-                capabilities: Vec::new(),
-            })
-            .collect()
-    } else {
-        request
-            .models
-            .into_iter()
-            .map(|model| DiscoveredModelInput {
-                upstream_model: model.upstream_model,
-                display_name: model.display_name,
-                enabled: false,
-                capabilities: Vec::new(),
-            })
-            .collect()
-    };
     let store = require_store(&state)?;
-    let etag = store
-        .discover_provider_models(provider_id, if_match(&headers)?, &models, principal.user_id)
+    let expected_etag = if_match(&headers)?;
+    let current = store
+        .get_provider_catalog(provider_id)
+        .await
+        .map_err(map_catalog)?;
+    if current.etag != expected_etag {
+        return Err(map_catalog(CatalogError::PreconditionFailed));
+    }
+    let mode = request.mode.unwrap_or(if request.models.is_empty() {
+        ModelDiscoveryMode::Upstream
+    } else {
+        ModelDiscoveryMode::Manual
+    });
+    let (models, origin, completeness) = match mode {
+        ModelDiscoveryMode::Upstream => {
+            if !request.models.is_empty() {
+                return Err(validation(
+                    "models",
+                    "Upstream discovery does not accept manually supplied model identifiers.",
+                ));
+            }
+            let discovery = catalog_connector(&state, provider_id)
+                .await?
+                .discover_models()
+                .await
+                .map_err(|detail| validation("provider", &detail))?;
+            let completeness = storage_discovery_completeness(discovery.completeness);
+            (
+                discovery
+                    .models
+                    .into_iter()
+                    .map(discovered_model_input)
+                    .collect::<Vec<_>>(),
+                ProviderModelDiscoveryOrigin::Upstream,
+                completeness,
+            )
+        }
+        ModelDiscoveryMode::Manual => {
+            if olp_providers::model_discovery_completeness(current.kind)
+                == olp_providers::ModelDiscoveryCompleteness::Complete
+            {
+                return Err(validation(
+                    "mode",
+                    "Manual declarations are unavailable when the provider has an authoritative model inventory.",
+                ));
+            }
+            if request.models.is_empty() {
+                return Err(validation(
+                    "models",
+                    "Manual model declaration requires at least one identifier.",
+                ));
+            }
+            (
+                request
+                    .models
+                    .into_iter()
+                    .map(|model| DiscoveredModelInput {
+                        upstream_model: model.upstream_model,
+                        display_name: model.display_name,
+                        enabled: false,
+                        capabilities: Vec::new(),
+                    })
+                    .collect::<Vec<_>>(),
+                ProviderModelDiscoveryOrigin::Manual,
+                ProviderModelDiscoveryCompleteness::Partial,
+            )
+        }
+    };
+    let applied = store
+        .reconcile_provider_model_discovery(ReconcileProviderModelDiscoveryInput {
+            provider_id,
+            expected_etag,
+            models: &models,
+            origin,
+            completeness,
+            actor: Some(principal.user_id),
+            claim_id: None,
+        })
         .await
         .map_err(map_catalog)?;
     let provider: ProviderCatalogResponse = store
@@ -1770,7 +1984,18 @@ async fn discover_provider_models(
         .await
         .map_err(map_catalog)?
         .into();
-    with_etag(Json(provider), etag)
+    with_etag(
+        Json(ProviderModelDiscoveryResponse {
+            provider,
+            completed_at: applied.completed_at,
+            observed_model_count: applied.observed_model_count,
+            added_model_count: applied.added_model_count,
+            renamed_model_count: applied.renamed_model_count,
+            newly_missing_model_count: applied.newly_missing_model_count,
+            completeness: applied.completeness.as_str().to_owned(),
+        }),
+        applied.etag,
+    )
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -1830,12 +2055,14 @@ pub struct CapabilityCertificationItemResponse {
     pub surface: String,
     pub mode: String,
     pub succeeded: bool,
+    pub evidence_kind: Option<String>,
     pub error_code: Option<String>,
     pub detail: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct CapabilityCertificationResponse {
+    pub run_id: Uuid,
     pub provider_id: Uuid,
     pub model_id: Uuid,
     pub status: String,
@@ -1870,62 +2097,34 @@ async fn certify_provider_model(
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let store = require_store(&state)?;
-    let provider = store
-        .get_provider_catalog(provider_id)
-        .await
-        .map_err(map_catalog)?;
-    if provider.etag != expected_etag {
-        return Err(map_catalog(CatalogError::PreconditionFailed));
-    }
-    if provider.state != olp_domain::ProviderState::Draft {
-        return Err(map_catalog(CatalogError::InUse));
-    }
-    let model = store
-        .get_provider_model_catalog(provider_id, model_id)
-        .await
-        .map_err(map_catalog)?;
-    if model.capabilities.is_empty() || model.capabilities.len() > 16 {
-        return Err(validation(
-            "capabilities",
-            "Review between 1 and 16 capability tuples before certification.",
-        ));
-    }
-    let upstream_model = model.upstream_model;
     let connector = catalog_connector(&state, provider_id).await?;
-    let results = stream::iter(model.capabilities.into_iter().map(|capability| {
+    let started = store
+        .begin_capability_certification(provider_id, model_id, expected_etag, principal.user_id)
+        .await
+        .map_err(map_catalog)?;
+    let run_id = started.run_id;
+    let upstream_model = started.upstream_model;
+    let (results, outcomes): (
+        Vec<CapabilityCertificationItemResponse>,
+        Vec<CapabilityCertificationResult>,
+    ) = stream::iter(started.capabilities.into_iter().map(|capability| {
         let connector = &connector;
         let upstream_model = &upstream_model;
         async move {
             let tuple = compatible_capability(&capability)?;
             let result = connector.certify_capability(upstream_model, tuple).await;
-            Ok::<_, Problem>(certification_item(capability, result))
+            Ok::<_, Problem>(certification_outcome(capability, result))
         }
     }))
     .buffered(4)
     .collect::<Vec<_>>()
     .await
     .into_iter()
-    .collect::<Result<Vec<_>, _>>()?;
-
-    let outcomes = results
-        .iter()
-        .map(|result| {
-            Ok::<_, Problem>(CapabilityCertificationOutcome {
-                operation: result.operation.parse().map_err(|_| Problem::internal())?,
-                surface: result.surface.parse().map_err(|_| Problem::internal())?,
-                mode: result.mode.parse().map_err(|_| Problem::internal())?,
-                succeeded: result.succeeded,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    .collect::<Result<Vec<_>, _>>()?
+    .into_iter()
+    .unzip();
     let applied = store
-        .apply_compatible_capability_certification(
-            provider_id,
-            model_id,
-            expected_etag,
-            principal.user_id,
-            &outcomes,
-        )
+        .complete_capability_certification(run_id, &outcomes)
         .await
         .map_err(map_catalog)?;
     let status = if applied.certified_count == applied.attempted_count {
@@ -1937,6 +2136,7 @@ async fn certify_provider_model(
     };
     with_etag(
         Json(CapabilityCertificationResponse {
+            run_id: applied.run_id,
             provider_id,
             model_id,
             status: status.to_owned(),
@@ -1957,53 +2157,73 @@ fn compatible_capability(capability: &CapabilityRecord) -> Result<CompatibleCapa
     })
 }
 
-fn certification_item(
+fn certification_outcome(
     capability: CapabilityRecord,
     result: Result<CapabilityCertificationEvidence, CompatibleCapabilityCertificationError>,
-) -> CapabilityCertificationItemResponse {
-    let (succeeded, error_code, detail) = match result {
+) -> (
+    CapabilityCertificationItemResponse,
+    CapabilityCertificationResult,
+) {
+    let (succeeded, evidence_kind, error_code, detail) = match result {
         Ok(CapabilityCertificationEvidence::LiveProbe) => (
             true,
+            Some("live_probe".to_owned()),
             None,
             "The endpoint completed the bounded request and passed the production response codec."
                 .to_owned(),
         ),
         Ok(CapabilityCertificationEvidence::NativeOpenAiModelDiscoveryAndConnectorContract) => (
             true,
+            Some("native_openai_model_discovery_and_connector_contract".to_owned()),
             None,
             "The official OpenAI endpoint returned the exact provider model from credentialed bounded discovery, and this tuple is in the closed native connector contract."
                 .to_owned(),
         ),
         Err(CompatibleCapabilityCertificationError::Unsupported) => (
             false,
+            None,
             Some("unsafe_or_unsupported_probe".to_owned()),
             "This tuple has no safe bounded live probe and was not certified.".to_owned(),
         ),
         Err(CompatibleCapabilityCertificationError::Transport { phase, class }) => (
             false,
+            None,
             Some(transport_failure_code(class).to_owned()),
             format!("The live endpoint probe failed during {phase:?}."),
         ),
         Err(CompatibleCapabilityCertificationError::InvalidResult) => (
             false,
+            None,
             Some("invalid_probe_result".to_owned()),
             "The live endpoint response did not prove the requested capability.".to_owned(),
         ),
         Err(CompatibleCapabilityCertificationError::ModelNotDiscovered) => (
             false,
+            None,
             Some("model_not_discovered".to_owned()),
             "Credentialed model discovery did not return the exact reviewed provider model."
                 .to_owned(),
         ),
     };
-    CapabilityCertificationItemResponse {
+    let response = CapabilityCertificationItemResponse {
         operation: capability.operation.to_string(),
         surface: capability.surface.to_string(),
         mode: capability.mode.to_string(),
         succeeded,
+        evidence_kind: evidence_kind.clone(),
+        error_code: error_code.clone(),
+        detail: detail.clone(),
+    };
+    let outcome = CapabilityCertificationResult {
+        operation: capability.operation,
+        surface: capability.surface,
+        mode: capability.mode,
+        succeeded,
+        evidence_kind,
         error_code,
         detail,
-    }
+    };
+    (response, outcome)
 }
 
 const fn transport_failure_code(class: olp_domain::AttemptFailureClass) -> &'static str {
@@ -3053,7 +3273,7 @@ mod tests {
         assert!(action["responses"].get("200").is_some());
         assert!(action["responses"].get("412").is_some());
 
-        let item = certification_item(
+        let (item, _) = certification_outcome(
             CapabilityRecord {
                 operation: "image_generation".parse().unwrap(),
                 surface: "open_ai".parse().unwrap(),
@@ -3069,7 +3289,7 @@ mod tests {
             Some("unsafe_or_unsupported_probe")
         );
 
-        let native = certification_item(
+        let (native, _) = certification_outcome(
             CapabilityRecord {
                 operation: "image_generation".parse().unwrap(),
                 surface: "open_ai".parse().unwrap(),

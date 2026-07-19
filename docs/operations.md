@@ -51,6 +51,11 @@ observability exposure.
 7. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. The chart
    provides a 1-GiB process budget in a 2-GiB volume; do not use the 64-MiB
    general `/tmp` mount.
+8. Review providers with pending upstream model drift. Control-plane discovery
+   runs every 24 hours by default (`OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS`);
+   two complete authoritative misses mark a previously confirmed model missing
+   in the draft only. The active immutable runtime remains live until an
+   operator reviews and activates a replacement revision.
 
 ![Usage dashboard showing completeness, request volume, and cost](assets/screenshots/usage.png)
 
@@ -59,14 +64,21 @@ proxy-key secrets, or master keys in tickets or diagnostic bundles.
 
 ### OpenAI-compatible capability certification
 
-After discovery, review at most 16 exact tuples per compatible model and run
+After discovery, review at most 16 exact tuples per model, test the
+draft connection, and run
 **Certify reviewed capabilities**. Certification sends only
 `OLP capability probe`, requests at most one generated token, uses production
 codecs, and persists neither prompt nor response. Only `succeeded` tuples are
 eligible; `partial` and `failed` remain declared. Remove unsupported media,
 asynchronous, or cross-surface claims, or use a separately qualified native
-connector. Re-certify after endpoint, model, or credential changes. Do not
-activate until every enabled tuple has a certification timestamp.
+connector. Re-certify after endpoint, credential, capability-review, or a
+missing-and-reappeared model change. Unchanged inventory observations preserve
+valid evidence. Do not activate until every enabled tuple has current-context
+certification evidence and the draft has a current-context connectivity proof.
+
+For an OpenAI-compatible endpoint without `/models`, manually declare its
+identifiers, review the tuples, and certify them. A successful bounded live
+certification also records the required current-context connectivity proof.
 
 ## Backup and restore
 

@@ -38,6 +38,13 @@ export type ProviderCapabilityOptions = Omit<
   'provider_kind'
 > & { provider_kind: ProviderKind };
 export type CapabilityCertification = Schemas['CapabilityCertificationResponse'];
+export type ProviderModelDiscovery = Omit<
+  Schemas['ProviderModelDiscoveryResponse'],
+  'kind' | 'auth_mode'
+> & {
+  kind: ProviderKind;
+  auth_mode: ProviderAuthMode;
+};
 export type ProviderRevision = Schemas['ProviderRevisionSummaryResponse'];
 export type ProviderRevisionDiff = Schemas['ProviderRevisionDiffResponse'];
 
@@ -135,25 +142,29 @@ export async function probeProvider(provider: Provider): Promise<ProviderProbe> 
   return result(response.data, response.error, response.response);
 }
 
-export async function discoverProviderModels(provider: Provider): Promise<Provider> {
+export async function discoverProviderModels(provider: Provider): Promise<ProviderModelDiscovery> {
   const response = await apiClient.POST('/api/v1/providers/{provider_id}/discovery', {
     params: {
       path: { provider_id: provider.id },
       header: { 'If-Match': provider.etag }
     },
-    body: { models: [] }
+    body: { mode: 'upstream', models: [] }
   });
-  return result(response.data, response.error, response.response) as Provider;
+  return result(response.data, response.error, response.response) as ProviderModelDiscovery;
 }
 
-/** Manual inventory fallback for compatible endpoints without a model-list API. */
-export async function declareProviderModels(provider: Provider, modelNames: string[]): Promise<Provider> {
+/** Manual inventory fallback for providers without a complete model-list API. */
+export async function declareProviderModels(
+  provider: Provider,
+  modelNames: string[]
+): Promise<ProviderModelDiscovery> {
   const response = await apiClient.POST('/api/v1/providers/{provider_id}/discovery', {
     params: {
       path: { provider_id: provider.id },
       header: { 'If-Match': provider.etag }
     },
     body: {
+      mode: 'manual',
       models: modelNames.map((model) => ({
         upstream_model: model,
         display_name: model,
@@ -162,7 +173,7 @@ export async function declareProviderModels(provider: Provider, modelNames: stri
       }))
     }
   });
-  return result(response.data, response.error, response.response) as Provider;
+  return result(response.data, response.error, response.response) as ProviderModelDiscovery;
 }
 
 export async function setProviderModel(

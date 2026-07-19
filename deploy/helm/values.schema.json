@@ -78,7 +78,8 @@
         "bootstrapTokenSecretKey",
         "trustedProxyCidrs",
         "publicOrigin",
-        "databaseMaxConnections"
+        "databaseMaxConnections",
+        "providerModelDiscoveryIntervalSeconds"
       ],
       "properties": {
         "databaseSecretName": { "type": "string", "minLength": 1 },
@@ -93,7 +94,8 @@
         "bootstrapTokenSecretKey": { "type": "string", "minLength": 1 },
         "trustedProxyCidrs": { "type": "string" },
         "publicOrigin": { "type": "string", "format": "uri", "minLength": 1 },
-        "databaseMaxConnections": { "type": "integer", "minimum": 1 }
+        "databaseMaxConnections": { "type": "integer", "minimum": 1 },
+        "providerModelDiscoveryIntervalSeconds": { "type": "integer", "minimum": 1 }
       }
     },
     "serviceAccount": {

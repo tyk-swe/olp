@@ -31,7 +31,9 @@
       return matchesText && matchesSurface;
     })
   );
-  const enabledCount = $derived(inventory.filter(({ model }) => model.enabled).length);
+  const enabledCount = $derived(
+    inventory.filter(({ model }) => model.enabled && model.availability === 'available').length
+  );
   const capabilityCount = $derived(inventory.reduce((count, { model }) => count + model.capabilities.length, 0));
   const providerCount = $derived(new Set(inventory.map((entry) => entry.provider_id)).size);
 
@@ -105,10 +107,10 @@
   <div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Provider</th><th>Capability tuples / provenance</th><th>Route eligibility</th></tr></thead><tbody>
     {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}
       <tr>
-        <td><strong>{entry.model.display_name}</strong><br /><code>{entry.model.upstream_model}</code></td>
+        <td><strong>{entry.model.display_name}</strong>{#if entry.model.availability === 'missing'}<span class="badge warning">missing upstream</span>{/if}<br /><code>{entry.model.upstream_model}</code></td>
         <td><a href={`/providers/${entry.provider_id}`}>{entry.provider_name}</a><br /><span class="badge">{entry.provider_kind.replaceAll('_', ' ')}</span></td>
         <td><div class="capabilities">{#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span class:success={capability.source === 'certified'} class:accent={capability.source !== 'certified'} class="badge"><strong>{capability.operation}</strong> {capability.surface} · {capability.mode} · {capability.source}</span>{/each}</div></td>
-        <td><label class="eligibility"><input type="checkbox" checked={entry.model.enabled} disabled={busyModel === entry.model.id} onchange={(event) => toggle(entry, event.currentTarget.checked)} /><span>{entry.model.enabled ? 'Enabled' : 'Disabled'}</span></label></td>
+        <td><label class="eligibility"><input type="checkbox" checked={entry.model.enabled} disabled={busyModel === entry.model.id || (entry.model.availability === 'missing' && !entry.model.enabled)} onchange={(event) => toggle(entry, event.currentTarget.checked)} /><span>{entry.model.enabled ? entry.model.availability === 'missing' ? 'Disable before activation' : 'Enabled' : 'Disabled'}</span></label></td>
       </tr>
     {/each}
   </tbody></table></div>

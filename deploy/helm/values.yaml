@@ -136,6 +136,8 @@ config:
   trustedProxyCidrs: ""
   publicOrigin: https://olp.example.com
   databaseMaxConnections: 20
+  # Control-plane cadence for credentialed upstream model inventory observations.
+  providerModelDiscoveryIntervalSeconds: 86400
 
 nodeSelector: {}
 tolerations: []

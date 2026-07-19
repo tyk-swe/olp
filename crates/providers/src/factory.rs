@@ -353,12 +353,41 @@ pub struct ProviderFacade {
     inner: ConcreteProvider,
 }
 
+/// Whether a successful discovery response is safe to use as an inventory
+/// snapshot. Compatible endpoints and configured deployment probes deliberately
+/// remain partial: their omission cannot establish that a model disappeared.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelDiscoveryCompleteness {
+    Complete,
+    Partial,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderModelDiscovery {
+    pub models: Vec<DiscoveredProviderModel>,
+    pub completeness: ModelDiscoveryCompleteness,
+}
+
+pub const fn model_discovery_completeness(kind: ProviderKind) -> ModelDiscoveryCompleteness {
+    match kind {
+        ProviderKind::OpenAi | ProviderKind::Anthropic | ProviderKind::Gemini => {
+            ModelDiscoveryCompleteness::Complete
+        }
+        // Bedrock only lists foundation models, while valid runtime targets can
+        // also be custom models or inference profiles.
+        ProviderKind::OpenAiCompatible
+        | ProviderKind::VertexAi
+        | ProviderKind::Bedrock
+        | ProviderKind::AzureOpenAi => ModelDiscoveryCompleteness::Partial,
+    }
+}
+
 impl ProviderFacade {
     pub fn into_transport(self) -> Arc<dyn ProviderTransport> {
         self.inner.into_transport()
     }
 
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, String> {
+    pub async fn discover_models(&self) -> Result<ProviderModelDiscovery, String> {
         self.inner.discover_models().await
     }
 
@@ -869,7 +898,7 @@ impl ConcreteProvider {
         }
     }
 
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, String> {
+    pub async fn discover_models(&self) -> Result<ProviderModelDiscovery, String> {
         let models = match &self.connector {
             ConcreteConnector::OpenAi(connector) => connector.discover_models().await,
             ConcreteConnector::Anthropic(connector) => connector.discover_models().await,
@@ -878,7 +907,11 @@ impl ConcreteProvider {
             ConcreteConnector::Bedrock(connector) => connector.discover_models().await,
             ConcreteConnector::AzureOpenAi(connector) => connector.discover_models().await,
         };
-        models.map_err(|error| error.to_string())
+        let models = models.map_err(|error| error.to_string())?;
+        Ok(ProviderModelDiscovery {
+            models,
+            completeness: model_discovery_completeness(self.kind),
+        })
     }
 
     pub async fn certify_capability(
@@ -1312,6 +1345,33 @@ mod tests {
             Surface::OpenAi,
             TransportMode::Unary,
         ));
+    }
+
+    #[test]
+    fn discovery_completeness_is_conservative_per_provider_kind() {
+        for kind in [
+            ProviderKind::OpenAi,
+            ProviderKind::Anthropic,
+            ProviderKind::Gemini,
+        ] {
+            assert_eq!(
+                model_discovery_completeness(kind),
+                ModelDiscoveryCompleteness::Complete,
+                "{kind:?}"
+            );
+        }
+        for kind in [
+            ProviderKind::OpenAiCompatible,
+            ProviderKind::VertexAi,
+            ProviderKind::Bedrock,
+            ProviderKind::AzureOpenAi,
+        ] {
+            assert_eq!(
+                model_discovery_completeness(kind),
+                ModelDiscoveryCompleteness::Partial,
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]

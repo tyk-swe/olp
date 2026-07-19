@@ -279,8 +279,9 @@ impl PgStore {
         {
             sqlx::query(
                 "INSERT INTO provider_models \
-                 (id, provider_id, upstream_model, display_name, enabled, discovered_at, created_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $6)",
+                 (id, provider_id, upstream_model, display_name, enabled, discovered_at, created_at, \
+                  inventory_source, availability, first_seen_at, last_seen_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $6, 'configured', 'available', $6, $6)",
             )
             .bind(model_id)
             .bind(provider.provider_id)
@@ -370,7 +371,7 @@ impl PgStore {
                     p.connector_ready, p.etag, p.active_credential_version_id, \
                     ar.credential_version_id AS previously_activated_credential_id, \
                     (p.last_probe_status = 'succeeded' AND p.last_probe_at IS NOT NULL \
-                     AND p.last_probe_at >= p.updated_at) AS probe_ready, \
+                     AND p.last_probe_context_id = p.certification_context_id) AS probe_ready, \
                     ((p.auth_mode IN ('adc', 'default_chain') \
                       AND p.active_credential_version_id IS NULL) OR EXISTS ( \
                          SELECT 1 FROM provider_credential_versions cv \
@@ -380,12 +381,16 @@ impl PgStore {
                             WHERE pm.provider_id = p.id AND pm.enabled) AS has_model, \
                     NOT EXISTS ( \
                       SELECT 1 FROM provider_models pm \
-                      WHERE pm.provider_id = p.id AND pm.enabled AND ( \
-                        NOT EXISTS (SELECT 1 FROM model_capabilities mc \
-                                    WHERE mc.provider_model_id = pm.id) OR \
-                        EXISTS (SELECT 1 FROM model_capabilities mc \
-                                WHERE mc.provider_model_id = pm.id \
-                                  AND mc.source <> 'certified'))) AS capabilities_ready \
+                       WHERE pm.provider_id = p.id AND pm.enabled AND ( \
+                         pm.availability <> 'available' OR \
+                         NOT EXISTS (SELECT 1 FROM model_capabilities mc \
+                                     WHERE mc.provider_model_id = pm.id) OR \
+                         EXISTS (SELECT 1 FROM model_capabilities mc \
+                                 WHERE mc.provider_model_id = pm.id \
+                                   AND (mc.source <> 'certified' \
+                                     OR mc.certification_context_id IS DISTINCT FROM p.certification_context_id \
+                                     OR mc.review_revision IS DISTINCT FROM pm.review_revision)))) \
+                       AS capabilities_ready \
              FROM providers p \
              LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
              WHERE p.id = $1 FOR UPDATE OF p",
@@ -458,8 +463,10 @@ impl PgStore {
         .await?;
         sqlx::query(
             "INSERT INTO provider_revision_capabilities \
-             (provider_revision_model_id, operation, surface, mode, source, certified_at) \
-             SELECT prm.id, mc.operation, mc.surface, mc.mode, mc.source, mc.certified_at \
+              (provider_revision_model_id, operation, surface, mode, source, certified_at, \
+               certification_context_id, certification_run_id, certification_evidence_kind) \
+              SELECT prm.id, mc.operation, mc.surface, mc.mode, mc.source, mc.certified_at, \
+                     mc.certification_context_id, mc.certification_run_id, mc.certification_evidence_kind \
              FROM provider_revision_models prm \
              JOIN model_capabilities mc ON mc.provider_model_id = prm.source_provider_model_id \
              WHERE prm.provider_revision_id = $1",

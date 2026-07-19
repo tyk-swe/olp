@@ -398,6 +398,7 @@ async fn catalog_http_flow_enforces_etags_roles_idempotency_and_one_time_secrets
         Method::POST,
         &format!("/api/v1/providers/{provider_id}/discovery"),
         Some(json!({
+            "mode": "manual",
             "models": [
                 {
                     "upstream_model": "compatible-model",
@@ -419,6 +420,7 @@ async fn catalog_http_flow_enforces_etags_roles_idempotency_and_one_time_secrets
     let discovery_etag = etag(&discovery);
     let discovery_body = response_json(discovery).await;
     assert_eq!(discovery_body["model_count"], 2);
+    assert_eq!(discovery_body["added_model_count"], 2);
     assert!(discovery_body.get("models").is_none());
     let first_model_page = send(
         &app,
@@ -465,6 +467,7 @@ async fn catalog_http_flow_enforces_etags_roles_idempotency_and_one_time_secrets
         Method::POST,
         &format!("/api/v1/providers/{provider_id}/discovery"),
         Some(json!({
+            "mode": "manual",
             "models": [{
                 "upstream_model": "compatible-model",
                 "display_name": "Compatible Model"

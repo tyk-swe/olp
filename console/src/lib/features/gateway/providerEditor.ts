@@ -31,11 +31,10 @@ export type ProviderEditValues = {
 export type ProviderReadiness = {
   state: string;
   enabled_model_count: number;
-  capability_count: number;
-  certified_capability_count: number;
+  invalid_enabled_model_count: number;
+  probe_ready: boolean;
   last_probe_at?: string | null;
   last_probe_status?: string | null;
-  updated_at: string;
 };
 
 export type ProviderStatusValue = Pick<ProviderReadiness, 'state'> & {
@@ -104,6 +103,10 @@ export function hasDeployment(kind: ProviderKind): boolean {
 
 export function hasApiVersion(kind: ProviderKind): boolean {
   return kind === 'azure_open_ai';
+}
+
+export function supportsManualModelDeclaration(kind: ProviderKind): boolean {
+  return !['open_ai', 'anthropic', 'gemini'].includes(kind);
 }
 
 export function validateProviderDraft(draft: ProviderDraft): string | null {
@@ -194,16 +197,14 @@ export function parseManualModelNames(value: string): string[] {
 }
 
 export function probeReady(current: ProviderReadiness | null | undefined): boolean {
-  if (!current?.last_probe_at || current.last_probe_status !== 'succeeded') return false;
-  return Date.parse(current.last_probe_at) >= Date.parse(current.updated_at);
+  return Boolean(current?.probe_ready);
 }
 
 export function capabilitiesCertified(current: ProviderReadiness | null | undefined): boolean {
   if (!current) return false;
   return (
     current.enabled_model_count > 0 &&
-    current.capability_count > 0 &&
-    current.capability_count === current.certified_capability_count
+    current.invalid_enabled_model_count === 0
   );
 }
 

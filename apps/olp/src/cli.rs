@@ -114,6 +114,13 @@ struct ServerArgs {
     /// Maximum simultaneously admitted TCP connections per HTTP listener.
     #[arg(long, env = "OLP_HTTP_MAX_CONNECTIONS", default_value_t = 1024)]
     http_max_connections: usize,
+    /// Cadence for automatic authoritative upstream model inventory refreshes.
+    #[arg(
+        long,
+        env = "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS",
+        default_value_t = 86_400_u64
+    )]
+    provider_model_discovery_interval_seconds: u64,
     #[arg(
         long,
         env = "OLP_PUBLIC_ORIGIN",
@@ -259,6 +266,18 @@ async fn serve(mode: ApiMode, args: ServerArgs, run_worker_in_process: bool) -> 
             std::io::Error::other("OLP_HTTP_MAX_CONNECTIONS must be greater than zero").into(),
         );
     }
+    if args.provider_model_discovery_interval_seconds == 0 {
+        return Err(std::io::Error::other(
+            "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS must be greater than zero",
+        )
+        .into());
+    }
+    if args.provider_model_discovery_interval_seconds > i64::MAX as u64 {
+        return Err(std::io::Error::other(
+            "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS is too large",
+        )
+        .into());
+    }
     if mode.serves_control() && args.key_hash_key_file.is_none() {
         return Err(std::io::Error::other(
             "OLP_KEY_HASH_KEY_FILE is required when serving the control plane",
@@ -353,6 +372,17 @@ async fn serve(mode: ApiMode, args: ServerArgs, run_worker_in_process: bool) -> 
             state.clone(),
             background_shutdown_receiver.clone(),
         )));
+    }
+    if mode.serves_control() {
+        if state.master_key.is_some() {
+            background_tasks.push(tokio::spawn(model_discovery_supervisor(
+                state.clone(),
+                Duration::from_secs(args.provider_model_discovery_interval_seconds),
+                background_shutdown_receiver.clone(),
+            )));
+        } else {
+            warn!("automatic model discovery is disabled because no master key is configured");
+        }
     }
     if let Some(url) = &args.valkey_url {
         background_tasks.push(tokio::spawn(runtime_hint_supervisor(
@@ -487,6 +517,37 @@ async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
         }
         if shutdown.changed().await.is_err() {
             return;
+        }
+    }
+}
+
+async fn model_discovery_supervisor(
+    state: ApiState,
+    discovery_interval: Duration,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    // A short local tick only finds rows that are due according to their
+    // durable timestamps. The PostgreSQL claim makes this safe across control
+    // replicas and avoids waiting a full cadence after a process restart.
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let interval_seconds = i64::try_from(discovery_interval.as_secs())
+        .expect("validated model discovery interval fits i64");
+    let discovery_interval = chrono::Duration::seconds(interval_seconds);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                match crate::catalog::run_scheduled_model_discovery_once(&state, discovery_interval).await {
+                    Ok(completed) if completed > 0 => info!(completed, "scheduled provider model discovery pass completed"),
+                    Ok(_) => {}
+                    Err(error) => warn!(%error, "scheduled provider model discovery pass failed"),
+                }
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
         }
     }
 }

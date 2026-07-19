@@ -48,14 +48,16 @@ export const operationOptions = [
 export function toRouteModelOptions(
   inventory: ProviderModelInventory[]
 ): RouteModelOption[] {
-  return inventory.map((entry) => ({
-    id: entry.model.id,
-    providerId: entry.provider_id,
-    providerName: entry.provider_name,
-    upstreamModel: entry.model.upstream_model,
-    label: `${entry.provider_name} · ${entry.model.display_name}`,
-    capabilities: entry.model.capabilities
-  }));
+  return inventory
+    .filter((entry) => entry.model.availability === 'available')
+    .map((entry) => ({
+      id: entry.model.id,
+      providerId: entry.provider_id,
+      providerName: entry.provider_name,
+      upstreamModel: entry.model.upstream_model,
+      label: `${entry.provider_name} · ${entry.model.display_name}`,
+      capabilities: entry.model.capabilities
+    }));
 }
 
 export function surfacesFor(operation: string): string[] {

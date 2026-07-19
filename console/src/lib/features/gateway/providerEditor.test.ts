@@ -17,6 +17,7 @@ import {
   providerStatus,
   requiresCredential,
   requiresSeedModel,
+  supportsManualModelDeclaration,
   validateProviderDraft,
   type ProviderEditValues
 } from './providerEditor';
@@ -59,6 +60,9 @@ describe('provider editor connector policy', () => {
     expect(hasApiVersion('azure_open_ai')).toBe(true);
     expect(hasDeployment('open_ai_compatible')).toBe(false);
     expect(hasApiVersion('open_ai_compatible')).toBe(false);
+    expect(supportsManualModelDeclaration('open_ai_compatible')).toBe(true);
+    expect(supportsManualModelDeclaration('bedrock')).toBe(true);
+    expect(supportsManualModelDeclaration('open_ai')).toBe(false);
   });
 
   it('enforces connector-specific creation requirements', () => {
@@ -172,19 +176,18 @@ describe('provider editor activation policy', () => {
   const readyDraft = {
     state: 'draft',
     enabled_model_count: 1,
-    capability_count: 2,
-    certified_capability_count: 2,
+    invalid_enabled_model_count: 0,
+    probe_ready: true,
     last_probe_at: '2026-07-12T12:01:00Z',
-    last_probe_status: 'succeeded',
-    updated_at: '2026-07-12T12:00:00Z'
+    last_probe_status: 'succeeded'
   };
 
-  it('requires certified capabilities and an ETag-bound successful probe', () => {
+  it('requires certified enabled capabilities and a successful context-bound probe', () => {
     expect(capabilitiesCertified(readyDraft)).toBe(true);
     expect(probeReady(readyDraft)).toBe(true);
     expect(activationReady(readyDraft)).toBe(true);
-    expect(activationReady({ ...readyDraft, certified_capability_count: 1 })).toBe(false);
-    expect(activationReady({ ...readyDraft, last_probe_at: '2026-07-12T11:59:00Z' })).toBe(false);
+    expect(activationReady({ ...readyDraft, invalid_enabled_model_count: 1 })).toBe(false);
+    expect(activationReady({ ...readyDraft, probe_ready: false })).toBe(false);
     expect(activationReady({ ...readyDraft, state: 'active' })).toBe(false);
   });
 

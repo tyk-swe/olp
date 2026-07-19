@@ -78,6 +78,10 @@ spec:
               value: {{ printf "%d" $mediaSpoolCapacity | quote }}
             - name: OLP_DATABASE_MAX_CONNECTIONS
               value: {{ $root.Values.config.databaseMaxConnections | quote }}
+            {{- if eq $componentName "control" }}
+            - name: OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS
+              value: {{ $root.Values.config.providerModelDiscoveryIntervalSeconds | quote }}
+            {{- end }}
             - name: OLP_DATABASE_URL
               valueFrom:
                 secretKeyRef:

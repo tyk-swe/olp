@@ -531,8 +531,11 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
 
 async fn certify_all_draft_capabilities(store: &PgStore, provider_id: Uuid) {
     sqlx::query(
-        "UPDATE model_capabilities SET source = 'certified', certified_at = now() \
-         WHERE provider_model_id IN (SELECT id FROM provider_models WHERE provider_id = $1)",
+        "UPDATE model_capabilities mc SET source = 'certified', certified_at = now(), \
+                certification_context_id = p.certification_context_id, \
+                review_revision = pm.review_revision, certification_evidence_kind = 'test' \
+         FROM provider_models pm JOIN providers p ON p.id = pm.provider_id \
+         WHERE mc.provider_model_id = pm.id AND pm.provider_id = $1",
     )
     .bind(provider_id)
     .execute(store.pool())

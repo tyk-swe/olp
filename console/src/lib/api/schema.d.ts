@@ -1234,6 +1234,7 @@ export interface components {
         CapabilityCertificationItemResponse: {
             detail: string;
             error_code?: string | null;
+            evidence_kind?: string | null;
             mode: string;
             operation: string;
             succeeded: boolean;
@@ -1249,6 +1250,8 @@ export interface components {
             /** Format: uuid */
             provider_id: string;
             results: components["schemas"]["CapabilityCertificationItemResponse"][];
+            /** Format: uuid */
+            run_id: string;
             status: string;
         };
         CapabilityInput: {
@@ -1354,12 +1357,7 @@ export interface components {
             version: number;
         };
         DiscoverModelsRequest: {
-            /**
-             * @description Omit or pass an empty array to query the upstream model-list API.
-             *     Manual identifiers are a fallback for upstreams without a list API.
-             *     All discovered models start disabled and without capability claims until
-             *     the explicit review operation is completed.
-             */
+            mode?: null | components["schemas"]["ModelDiscoveryMode"];
             models?: components["schemas"]["DiscoveredModelRequest"][];
         };
         DiscoveredModelRequest: {
@@ -1470,6 +1468,8 @@ export interface components {
             data: components["schemas"]["MediaJobItem"][];
             next_cursor?: string | null;
         };
+        /** @enum {string} */
+        ModelDiscoveryMode: "upstream" | "manual";
         OidcAuthorizationResponse: {
             authorization_url: string;
         };
@@ -1699,21 +1699,33 @@ export interface components {
             /** Format: int32 */
             draft_credential_version?: number | null;
             /** Format: int64 */
+            enabled_capability_count: number;
+            /** Format: int64 */
+            enabled_certified_capability_count: number;
+            /** Format: int64 */
             enabled_model_count: number;
             endpoint?: string | null;
             /** Format: uuid */
             etag: string;
             /** Format: uuid */
             id: string;
+            /** Format: int64 */
+            invalid_enabled_model_count: number;
             kind: string;
+            /** Format: date-time */
+            last_model_discovery_at?: string | null;
+            last_model_discovery_status?: string | null;
             /** Format: date-time */
             last_probe_at?: string | null;
             last_probe_detail?: string | null;
             last_probe_status?: string | null;
             /** Format: int64 */
+            missing_model_count: number;
+            /** Format: int64 */
             model_count: number;
             name: string;
             pending_activation: boolean;
+            probe_ready: boolean;
             /** Format: uuid */
             runtime_credential_id?: string | null;
             /** Format: int32 */
@@ -1758,6 +1770,15 @@ export interface components {
             items: components["schemas"]["ProviderSummaryResponse"][];
             next_cursor?: string | null;
         };
+        ProviderModelDiscoveryResponse: components["schemas"]["ProviderCatalogResponse"] & {
+            added_model_count: number;
+            /** Format: date-time */
+            completed_at: string;
+            completeness: string;
+            newly_missing_model_count: number;
+            observed_model_count: number;
+            renamed_model_count: number;
+        };
         ProviderModelInventoryListResponse: {
             items: components["schemas"]["ProviderModelInventoryResponse"][];
             next_cursor?: string | null;
@@ -1774,13 +1795,24 @@ export interface components {
             next_cursor?: string | null;
         };
         ProviderModelResponse: {
+            availability: string;
             capabilities: components["schemas"]["CapabilityResponse"][];
             /** Format: date-time */
             discovered_at?: string | null;
             display_name: string;
             enabled: boolean;
+            /** Format: date-time */
+            first_seen_at?: string | null;
             /** Format: uuid */
             id: string;
+            inventory_source: string;
+            /** Format: date-time */
+            last_certification_at?: string | null;
+            last_certification_status?: string | null;
+            /** Format: date-time */
+            last_seen_at?: string | null;
+            /** Format: date-time */
+            missing_since?: string | null;
             upstream_model: string;
         };
         ProviderMutationResponse: {
@@ -1906,19 +1938,31 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             /** Format: int64 */
+            enabled_capability_count: number;
+            /** Format: int64 */
+            enabled_certified_capability_count: number;
+            /** Format: int64 */
             enabled_model_count: number;
             /** Format: uuid */
             etag: string;
             /** Format: uuid */
             id: string;
+            /** Format: int64 */
+            invalid_enabled_model_count: number;
             kind: string;
+            /** Format: date-time */
+            last_model_discovery_at?: string | null;
+            last_model_discovery_status?: string | null;
             /** Format: date-time */
             last_probe_at?: string | null;
             last_probe_status?: string | null;
             /** Format: int64 */
+            missing_model_count: number;
+            /** Format: int64 */
             model_count: number;
             name: string;
             pending_activation: boolean;
+            probe_ready: boolean;
             state: string;
             /** Format: date-time */
             updated_at: string;
@@ -5106,7 +5150,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCatalogResponse"];
+                    "application/json": components["schemas"]["ProviderModelDiscoveryResponse"];
                 };
             };
             /** @description Authentication required. */

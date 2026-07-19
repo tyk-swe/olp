@@ -121,6 +121,8 @@ describe('Route Studio model eligibility', () => {
           display_name: 'GPT Test',
           enabled: true,
           discovered_at: '2026-07-12T12:00:00Z',
+          inventory_source: 'upstream',
+          availability: 'available',
           capabilities: modelOptions[0].capabilities
         }
       }
@@ -136,6 +138,28 @@ describe('Route Studio model eligibility', () => {
         capabilities: modelOptions[0].capabilities
       }
     ]);
+  });
+
+  it('excludes upstream-missing models from route choices', () => {
+    const inventory: ProviderModelInventory[] = [
+      {
+        provider_id: 'provider-a',
+        provider_name: 'Primary',
+        provider_kind: 'open_ai',
+        model: {
+          id: 'missing-model',
+          upstream_model: 'gpt-missing',
+          display_name: 'GPT Missing',
+          enabled: true,
+          discovered_at: '2026-07-12T12:00:00Z',
+          inventory_source: 'upstream',
+          availability: 'missing',
+          capabilities: modelOptions[0].capabilities
+        }
+      }
+    ];
+
+    expect(toRouteModelOptions(inventory)).toEqual([]);
   });
 
   it('uses only certified capabilities selected by the route', () => {
