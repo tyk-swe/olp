@@ -10,6 +10,7 @@
     optionsPending = false,
     optionsError = false,
     disabled = false,
+    disableOnly = false,
     onSave
   }: {
     model: ProviderModel;
@@ -17,6 +18,7 @@
     optionsPending?: boolean;
     optionsError?: boolean;
     disabled?: boolean;
+    disableOnly?: boolean;
     onSave: (enabled: boolean, capabilities: CapabilityDeclaration[]) => Promise<void>;
   } = $props();
 
@@ -94,18 +96,18 @@
 
 <div class="review">
   <div class="review-heading">
-    <label class="enable"><input type="checkbox" bind:checked={enabled} disabled={disabled} /> Eligible for routes</label>
-    <button class="button button-secondary" type="button" onclick={addCapability} disabled={disabled || !options.length}>Add capability</button>
+    <label class="enable"><input type="checkbox" bind:checked={enabled} disabled={disabled || (disableOnly && !enabled)} /> Eligible for routes</label>
+    <button class="button button-secondary" type="button" onclick={addCapability} disabled={disabled || disableOnly || !options.length}>Add capability</button>
   </div>
   {#if optionsPending}<p class="empty">Loading supported capability options…</p>{:else if optionsError}<p class="error" role="alert">Supported capability options could not be loaded.</p>{/if}
   {#if capabilities.length === 0}<p class="empty">No capabilities reviewed. This model cannot be enabled.</p>{/if}
   <div class="capability-list">
     {#each capabilities as capability, index (index)}
       <div class="capability-row">
-        <label><span class="sr-only">Operation {index + 1}</span><select value={capability.operation} onchange={(event) => update(index, 'operation', event.currentTarget.value)} disabled={disabled || !options.length}>{#each operations as operation (operation)}<option value={operation}>{operation.replaceAll('_', ' ')}</option>{/each}</select></label>
-        <label><span class="sr-only">Client surface {index + 1}</span><select value={capability.surface} onchange={(event) => update(index, 'surface', event.currentTarget.value)} disabled={disabled || !options.length}>{#each surfacesFor(capability.operation) as surface (surface)}<option value={surface}>{surface === 'open_ai' ? 'OpenAI' : surface === 'anthropic' ? 'Anthropic' : 'Gemini'}</option>{/each}</select></label>
-        <label><span class="sr-only">Mode {index + 1}</span><select value={capability.mode} onchange={(event) => update(index, 'mode', event.currentTarget.value)} disabled={disabled || !options.length}>{#each modesFor(capability) as mode (mode)}<option value={mode}>{mode}</option>{/each}</select></label>
-        <button class="remove" type="button" aria-label={`Remove capability ${index + 1}`} onclick={() => remove(index)} disabled={disabled}>×</button>
+        <label><span class="sr-only">Operation {index + 1}</span><select value={capability.operation} onchange={(event) => update(index, 'operation', event.currentTarget.value)} disabled={disabled || disableOnly || !options.length}>{#each operations as operation (operation)}<option value={operation}>{operation.replaceAll('_', ' ')}</option>{/each}</select></label>
+        <label><span class="sr-only">Client surface {index + 1}</span><select value={capability.surface} onchange={(event) => update(index, 'surface', event.currentTarget.value)} disabled={disabled || disableOnly || !options.length}>{#each surfacesFor(capability.operation) as surface (surface)}<option value={surface}>{surface === 'open_ai' ? 'OpenAI' : surface === 'anthropic' ? 'Anthropic' : 'Gemini'}</option>{/each}</select></label>
+        <label><span class="sr-only">Mode {index + 1}</span><select value={capability.mode} onchange={(event) => update(index, 'mode', event.currentTarget.value)} disabled={disabled || disableOnly || !options.length}>{#each modesFor(capability) as mode (mode)}<option value={mode}>{mode}</option>{/each}</select></label>
+        <button class="remove" type="button" aria-label={`Remove capability ${index + 1}`} onclick={() => remove(index)} disabled={disabled || disableOnly}>×</button>
       </div>
     {/each}
   </div>

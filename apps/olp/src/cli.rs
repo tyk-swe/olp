@@ -529,7 +529,7 @@ async fn model_discovery_supervisor(
     // A short local tick only finds rows that are due according to their
     // durable timestamps. The PostgreSQL claim makes this safe across control
     // replicas and avoids waiting a full cadence after a process restart.
-    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    let mut interval = tokio::time::interval(model_discovery_poll_interval(discovery_interval));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let interval_seconds = i64::try_from(discovery_interval.as_secs())
         .expect("validated model discovery interval fits i64");
@@ -550,6 +550,10 @@ async fn model_discovery_supervisor(
             }
         }
     }
+}
+
+fn model_discovery_poll_interval(discovery_interval: Duration) -> Duration {
+    discovery_interval.min(Duration::from_secs(60))
 }
 
 async fn media_reconciliation_supervisor(state: ApiState, mut shutdown: watch::Receiver<bool>) {
@@ -1502,6 +1506,22 @@ mod tests {
             PathBuf::from("/run/secrets/bootstrap")
         );
         assert_eq!(args.trusted_proxy_cidrs.len(), 2);
+    }
+
+    #[test]
+    fn model_discovery_polling_honors_sub_minute_cadences() {
+        assert_eq!(
+            model_discovery_poll_interval(Duration::from_secs(15)),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            model_discovery_poll_interval(Duration::from_secs(60)),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            model_discovery_poll_interval(Duration::from_secs(86_400)),
+            Duration::from_secs(60)
+        );
     }
 
     #[test]
