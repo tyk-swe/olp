@@ -1957,7 +1957,7 @@ impl PgStore {
         for model in models {
             let model_name = model.upstream_model.trim();
             let display_name = model.display_name.trim();
-            if let Some((model_id, existing_display_name, inventory_source, availability, _)) =
+            if let Some((model_id, existing_display_name, inventory_source, availability, misses)) =
                 existing.get(model_name)
             {
                 let renamed = existing_display_name != display_name;
@@ -1969,6 +1969,9 @@ impl PgStore {
                     catalog_changed = true;
                 }
                 if source_changed {
+                    catalog_changed = true;
+                }
+                if *misses != 0 {
                     catalog_changed = true;
                 }
                 if reappeared {
@@ -2032,9 +2035,11 @@ impl PgStore {
                 }
                 let next_misses = misses.saturating_add(1);
                 let newly_missing = availability != "missing" && next_misses >= 2;
-                if inventory_source != "upstream" {
-                    catalog_changed = true;
-                }
+                // The provider ETag protects the miss counter as well as the
+                // externally visible catalog. Rotating it here prevents two
+                // observations with one stale precondition from counting as
+                // two consecutive authoritative misses.
+                catalog_changed = true;
                 sqlx::query(
                     "UPDATE provider_models SET inventory_source = 'upstream', \
                             consecutive_missing_runs = $1, \

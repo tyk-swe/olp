@@ -166,19 +166,26 @@ async fn authoritative_model_drift_preserves_live_evidence_and_recovers_expired_
             .all(|capability| capability.source == olp_domain::CapabilitySource::Certified)
     );
 
-    let first_miss = store
-        .reconcile_provider_model_discovery(ReconcileProviderModelDiscoveryInput {
-            provider_id,
-            expected_etag: observed.etag,
-            models: &[],
-            origin: ProviderModelDiscoveryOrigin::Upstream,
-            completeness: ProviderModelDiscoveryCompleteness::Complete,
-            actor: Some(actor),
-            claim_id: None,
-        })
-        .await
-        .unwrap();
+    let missing_input = || ReconcileProviderModelDiscoveryInput {
+        provider_id,
+        expected_etag: observed.etag,
+        models: &[],
+        origin: ProviderModelDiscoveryOrigin::Upstream,
+        completeness: ProviderModelDiscoveryCompleteness::Complete,
+        actor: Some(actor),
+        claim_id: None,
+    };
+    let (first_attempt, concurrent_attempt) = tokio::join!(
+        store.reconcile_provider_model_discovery(missing_input()),
+        store.reconcile_provider_model_discovery(missing_input()),
+    );
+    let first_miss = match (first_attempt, concurrent_attempt) {
+        (Ok(applied), Err(CatalogError::PreconditionFailed))
+        | (Err(CatalogError::PreconditionFailed), Ok(applied)) => applied,
+        outcomes => panic!("concurrent stale discoveries returned {outcomes:?}"),
+    };
     assert_eq!(first_miss.newly_missing_model_count, 0);
+    assert_ne!(first_miss.etag, observed.etag);
     assert_eq!(
         store
             .get_provider_model_catalog(provider_id, model_id)

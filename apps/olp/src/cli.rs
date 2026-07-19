@@ -36,6 +36,12 @@ pub(crate) type AppError = Box<dyn Error + Send + Sync>;
 pub(crate) type AppResult<T> = Result<T, AppError>;
 const BACKGROUND_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Clone, Copy, Debug)]
+struct ModelDiscoveryInterval {
+    polling: Duration,
+    schedule: chrono::Duration,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "olp", version, about = "OpenLLMProxy")]
 struct Cli {
@@ -266,18 +272,10 @@ async fn serve(mode: ApiMode, args: ServerArgs, run_worker_in_process: bool) -> 
             std::io::Error::other("OLP_HTTP_MAX_CONNECTIONS must be greater than zero").into(),
         );
     }
-    if args.provider_model_discovery_interval_seconds == 0 {
-        return Err(std::io::Error::other(
-            "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS must be greater than zero",
-        )
-        .into());
-    }
-    if args.provider_model_discovery_interval_seconds > i64::MAX as u64 {
-        return Err(std::io::Error::other(
-            "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS is too large",
-        )
-        .into());
-    }
+    let model_discovery_interval = validate_model_discovery_interval(
+        args.provider_model_discovery_interval_seconds,
+        chrono::Utc::now(),
+    )?;
     if mode.serves_control() && args.key_hash_key_file.is_none() {
         return Err(std::io::Error::other(
             "OLP_KEY_HASH_KEY_FILE is required when serving the control plane",
@@ -377,7 +375,7 @@ async fn serve(mode: ApiMode, args: ServerArgs, run_worker_in_process: bool) -> 
         if state.master_key.is_some() {
             background_tasks.push(tokio::spawn(model_discovery_supervisor(
                 state.clone(),
-                Duration::from_secs(args.provider_model_discovery_interval_seconds),
+                model_discovery_interval,
                 background_shutdown_receiver.clone(),
             )));
         } else {
@@ -523,21 +521,19 @@ async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
 
 async fn model_discovery_supervisor(
     state: ApiState,
-    discovery_interval: Duration,
+    discovery_interval: ModelDiscoveryInterval,
     mut shutdown: watch::Receiver<bool>,
 ) {
     // A short local tick only finds rows that are due according to their
     // durable timestamps. The PostgreSQL claim makes this safe across control
     // replicas and avoids waiting a full cadence after a process restart.
-    let mut interval = tokio::time::interval(model_discovery_poll_interval(discovery_interval));
+    let mut interval =
+        tokio::time::interval(model_discovery_poll_interval(discovery_interval.polling));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let interval_seconds = i64::try_from(discovery_interval.as_secs())
-        .expect("validated model discovery interval fits i64");
-    let discovery_interval = chrono::Duration::seconds(interval_seconds);
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                match crate::catalog::run_scheduled_model_discovery_once(&state, discovery_interval).await {
+                match crate::catalog::run_scheduled_model_discovery_once(&state, discovery_interval.schedule).await {
                     Ok(completed) if completed > 0 => info!(completed, "scheduled provider model discovery pass completed"),
                     Ok(_) => {}
                     Err(error) => warn!(%error, "scheduled provider model discovery pass failed"),
@@ -550,6 +546,34 @@ async fn model_discovery_supervisor(
             }
         }
     }
+}
+
+fn validate_model_discovery_interval(
+    interval_seconds: u64,
+    now: chrono::DateTime<chrono::Utc>,
+) -> AppResult<ModelDiscoveryInterval> {
+    if interval_seconds == 0 {
+        return Err(std::io::Error::other(
+            "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS must be greater than zero",
+        )
+        .into());
+    }
+    let interval_seconds_i64 = i64::try_from(interval_seconds).map_err(|_| {
+        std::io::Error::other("OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS is too large")
+    })?;
+    let schedule = chrono::Duration::try_seconds(interval_seconds_i64).ok_or_else(|| {
+        std::io::Error::other("OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS is too large")
+    })?;
+    if now.checked_sub_signed(schedule).is_none() {
+        return Err(std::io::Error::other(
+            "OLP_PROVIDER_MODEL_DISCOVERY_INTERVAL_SECONDS is too large",
+        )
+        .into());
+    }
+    Ok(ModelDiscoveryInterval {
+        polling: Duration::from_secs(interval_seconds),
+        schedule,
+    })
 }
 
 fn model_discovery_poll_interval(discovery_interval: Duration) -> Duration {
@@ -1522,6 +1546,24 @@ mod tests {
             model_discovery_poll_interval(Duration::from_secs(86_400)),
             Duration::from_secs(60)
         );
+    }
+
+    #[test]
+    fn model_discovery_interval_rejects_chrono_overflow() {
+        let now = chrono::Utc::now();
+        let valid = validate_model_discovery_interval(86_400, now).unwrap();
+        assert_eq!(valid.polling, Duration::from_secs(86_400));
+        assert_eq!(valid.schedule, chrono::Duration::days(1));
+
+        assert!(validate_model_discovery_interval(0, now).is_err());
+
+        let chrono_max_seconds = (i64::MAX / 1_000) as u64;
+        assert!(chrono::Duration::try_seconds(chrono_max_seconds as i64).is_some());
+        assert!(validate_model_discovery_interval(chrono_max_seconds, now).is_err());
+
+        let duration_overflow = chrono_max_seconds + 1;
+        assert!(chrono::Duration::try_seconds(duration_overflow as i64).is_none());
+        assert!(validate_model_discovery_interval(duration_overflow, now).is_err());
     }
 
     #[test]
