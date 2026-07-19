@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "contract_id": "olp.enterprise.policy-v1-golden.v1",
+  "language_version": "1.0.0",
+  "negative_vectors": [
+    {
+      "id": "decimal-negative-zero-is-not-canonical",
+      "schema_path": "#/$defs/operand/oneOf/2/properties/decimal",
+      "value": "-0.000000000",
+      "expected": "schema_rejection"
+    }
+  ],
+  "vectors": [
+    {
+      "id": "credential-revoked-denies",
+      "program": {
+        "schema_version": 1,
+        "language_version": "1.0.0",
+        "program_id": "credential.revocation",
+        "revision_id": "00000000-0000-4000-8000-000000000001",
+        "phase": "credential",
+        "rules": [
+          {
+            "rule_id": "deny.revoked",
+            "when": {
+              "compare": "eq",
+              "left": { "field": "credential.status" },
+              "right": { "literal": "revoked" }
+            },
+            "actions": [{ "kind": "deny", "reason_code": "credential.revoked", "enforcement": "hard" }]
+          }
+        ],
+        "default_actions": []
+      },
+      "input": { "credential": { "status": "revoked" } },
+      "expected": {
+        "result": "actions",
+        "actions": [{ "kind": "deny", "reason_code": "credential.revoked", "enforcement": "hard" }],
+        "matched_rules": ["deny.revoked"]
+      }
+    },
+    {
+      "id": "decimal-comparison-is-exact",
+      "program": {
+        "schema_version": 1,
+        "language_version": "1.0.0",
+        "program_id": "admission.budget",
+        "revision_id": "00000000-0000-4000-8000-000000000002",
+        "phase": "admission",
+        "rules": [
+          {
+            "rule_id": "cap.expensive",
+            "when": {
+              "compare": "gt",
+              "left": { "field": "budget.projected_cost" },
+              "right": { "decimal": "10.000000000" }
+            },
+            "actions": [{ "kind": "cap_output", "reason_code": "budget.cap", "enforcement": "hard", "integer_value": 128 }]
+          }
+        ],
+        "default_actions": [{ "kind": "allow", "reason_code": "budget.within_limit", "enforcement": "hard" }]
+      },
+      "input": { "budget": { "projected_cost": "10.000000001" } },
+      "expected": {
+        "result": "actions",
+        "actions": [{ "kind": "cap_output", "reason_code": "budget.cap", "enforcement": "hard", "integer_value": 128 }],
+        "matched_rules": ["cap.expensive"]
+      }
+    },
+    {
+      "id": "missing-hard-input-denies",
+      "program": {
+        "schema_version": 1,
+        "language_version": "1.0.0",
+        "program_id": "route.health",
+        "revision_id": "00000000-0000-4000-8000-000000000003",
+        "phase": "route",
+        "rules": [
+          {
+            "rule_id": "healthy.only",
+            "when": {
+              "compare": "eq",
+              "left": { "field": "candidate.health_class" },
+              "right": { "literal": "healthy" }
+            },
+            "actions": [{
+              "kind": "filter_candidate",
+              "reason_code": "route.healthy",
+              "enforcement": "hard",
+              "candidate_ids": ["00000000-0000-4000-8000-000000000010"]
+            }]
+          }
+        ],
+        "default_actions": [{ "kind": "deny", "reason_code": "route.no_healthy_candidate", "enforcement": "hard" }]
+      },
+      "input": { "candidate": {} },
+      "expected": {
+        "result": "evaluation_error",
+        "error": "missing_required_input",
+        "disposition": "deny"
+      }
+    },
+    {
+      "id": "request-guard-redacts-sensitive-field",
+      "program": {
+        "schema_version": 1,
+        "language_version": "1.0.0",
+        "program_id": "request.guard",
+        "revision_id": "00000000-0000-4000-8000-000000000004",
+        "phase": "request_guard",
+        "rules": [
+          {
+            "rule_id": "redact.sensitive",
+            "when": { "const": true },
+            "actions": [{
+              "kind": "redact_field",
+              "reason_code": "request.sensitive",
+              "enforcement": "hard",
+              "field_path": "request.user_text"
+            }]
+          }
+        ],
+        "default_actions": []
+      },
+      "input": { "request": { "user_text": "ephemeral-content" } },
+      "expected": {
+        "result": "actions",
+        "actions": [{
+          "kind": "redact_field",
+          "reason_code": "request.sensitive",
+          "enforcement": "hard",
+          "field_path": "request.user_text"
+        }],
+        "matched_rules": ["redact.sensitive"]
+      }
+    },
+    {
+      "id": "attempt-result-stops-after-commitment",
+      "program": {
+        "schema_version": 1,
+        "language_version": "1.0.0",
+        "program_id": "attempt.commitment",
+        "revision_id": "00000000-0000-4000-8000-000000000005",
+        "phase": "attempt_result",
+        "rules": [
+          {
+            "rule_id": "stop.committed",
+            "when": { "const": true },
+            "actions": [{
+              "kind": "stop",
+              "reason_code": "attempt.committed",
+              "enforcement": "hard"
+            }]
+          }
+        ],
+        "default_actions": []
+      },
+      "input": { "attempt": { "commitment_state": "committed" } },
+      "expected": {
+        "result": "actions",
+        "actions": [{
+          "kind": "stop",
+          "reason_code": "attempt.committed",
+          "enforcement": "hard"
+        }],
+        "matched_rules": ["stop.committed"]
+      }
+    },
+    {
+      "id": "reconcile-commits-and-records-discrepancy",
+      "program": {
+        "schema_version": 1,
+        "language_version": "1.0.0",
+        "program_id": "reconcile.terminal",
+        "revision_id": "00000000-0000-4000-8000-000000000006",
+        "phase": "reconcile",
+        "rules": [
+          {
+            "rule_id": "commit.terminal",
+            "when": { "const": true },
+            "actions": [
+              {
+                "kind": "commit_reservation",
+                "reason_code": "reconcile.commit",
+                "enforcement": "hard"
+              },
+              {
+                "kind": "record_discrepancy",
+                "reason_code": "reconcile.discrepancy",
+                "enforcement": "advisory",
+                "name": "usage.estimated"
+              }
+            ]
+          }
+        ],
+        "default_actions": []
+      },
+      "input": { "usage": { "completeness": "estimated" } },
+      "expected": {
+        "result": "actions",
+        "actions": [
+          {
+            "kind": "commit_reservation",
+            "reason_code": "reconcile.commit",
+            "enforcement": "hard"
+          },
+          {
+            "kind": "record_discrepancy",
+            "reason_code": "reconcile.discrepancy",
+            "enforcement": "advisory",
+            "name": "usage.estimated"
+          }
+        ],
+        "matched_rules": ["commit.terminal"]
+      }
+    }
+  ]
+}

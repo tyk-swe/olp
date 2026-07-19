@@ -1,0 +1,755 @@
+{
+  "schema_version": 1,
+  "contract_id": "olp.enterprise.capacity-envelope.v1",
+  "decision_status": "accepted_target",
+  "approval_status": "approval_pending",
+  "effective_date": "2026-07-19",
+  "decision_issue": "XOD-87",
+  "target_release": "enterprise-beta",
+  "implementation_status": "not_implemented",
+  "qualification_status": "not_qualified",
+  "interpretation": "Values under beta_targets are blocking qualification targets for the immutable reference topology. They are not claims about the current OLP 2.0 implementation. A target becomes supported only after every referenced deterministic profile passes and its evidence record is approved.",
+  "maximum_composition_rule": "Individual cardinality maxima are constrained by every applicable aggregate byte and runtime-payload maximum; they are not an unconstrained Cartesian product. Activation rejects an environment that exceeds any aggregate even when each item is individually valid.",
+  "approval": {
+    "mechanism": "protected_repository_review_and_Linear_state_history",
+    "required_authorities": [
+      "gateway_security",
+      "reliability",
+      "storage_api",
+      "product_release"
+    ],
+    "evidence_source": "docs/enterprise/contracts/enterprise-beta-scorecard.json#/m0_contract_gate/decisions/4",
+    "required_evidence": [
+      "repository commit containing this exact contract",
+      "completed XOD-87 state history"
+    ],
+    "qualification_evidence": "signed evidence records matching evidence_record_schema",
+    "material_change_requires_new_approval": true
+  },
+  "reference_topology": {
+    "topology_id": "enterprise-beta-single-region-v1",
+    "region_count": 1,
+    "active_active_regions": false,
+    "kubernetes": {
+      "minimum_version": "1.35",
+      "zones": 3,
+      "gateway_replicas": 3,
+      "control_replicas": 2,
+      "worker_replicas": 2,
+      "pod_anti_affinity": "required_across_nodes_and_preferred_across_zones",
+      "gateway": {
+        "cpu_cores": 8,
+        "memory_gib": 16,
+        "http_max_connections": 16384
+      },
+      "control": {
+        "cpu_cores": 4,
+        "memory_gib": 8,
+        "http_max_connections": 1024
+      },
+      "worker": {
+        "cpu_cores": 4,
+        "memory_gib": 8
+      },
+      "connector_reference_instance": {
+        "cpu_cores": 4,
+        "memory_gib": 8,
+        "replicas_per_tested_type": 3
+      }
+    },
+    "postgresql": {
+      "major_version": 18,
+      "topology": "one_primary_two_synchronous_standbys_across_three_zones",
+      "synchronous_commit": "remote_apply",
+      "synchronous_standby_quorum": "ANY_1_OF_2",
+      "failover_candidate_requirement": "replayed_at_or_beyond_last_acknowledged_commit_LSN",
+      "ack_timeout_behavior": "fail_mutation_without_acknowledgement",
+      "primary_cpu_cores": 16,
+      "primary_memory_gib": 64,
+      "storage_class": "provisioned_10000_iops_or_equivalent",
+      "application_pool_connections_per_replica": 20,
+      "pitr_enabled": true,
+      "wal_archive_outside_cluster": true
+    },
+    "valkey": {
+      "major_minor": "9.1",
+      "topology": "one_primary_two_replicas_across_three_zones_with_automatic_failover",
+      "cpu_cores_per_node": 8,
+      "memory_gib_per_node": 32,
+      "persistent_storage_required": true,
+      "aof": "enabled",
+      "acknowledged_usage_fsync": "primary_and_both_replicas_before_acknowledgement",
+      "acknowledgement_mechanism": "WAITAOF_or_tested_equivalent_durable_quorum_protocol",
+      "failover_candidate_minimum_offset": "at_or_after_last_acknowledged_usage_offset",
+      "durable_ack_timeout_behavior": "retain_in_bounded_local_buffer_and_backpressure_or_fail_closed_before_overflow",
+      "maxmemory_policy": "noeviction"
+    },
+    "object_storage": {
+      "durable_media_required": true,
+      "versioning": true,
+      "encryption_at_rest": true,
+      "cross_account_or_off_cluster_backup": true
+    },
+    "network": {
+      "gateway_to_mock_provider_rtt_ms": 20,
+      "gateway_to_postgresql_rtt_ms_maximum": 2,
+      "gateway_to_valkey_rtt_ms_maximum": 2,
+      "packet_loss_percent_maximum": 0.01
+    }
+  },
+  "beta_targets": {
+    "scope_cardinality": {
+      "organizations_per_installation": 100,
+      "projects_per_organization": 100,
+      "projects_per_installation": 1000,
+      "environments_per_project": 20,
+      "environments_per_installation": 5000,
+      "global_users_per_installation": 100000,
+      "memberships_per_organization": 50000,
+      "groups_per_organization": 10000,
+      "group_memberships_per_organization": 500000,
+      "custom_roles_per_organization": 200,
+      "role_bindings_per_organization": 100000,
+      "applications_per_project": 1000,
+      "service_accounts_per_project": 1000
+    },
+    "provider_cardinality": {
+      "installed_connector_types_per_installation": 64,
+      "installed_versions_per_connector_type": 8,
+      "provider_connections_per_organization": 100,
+      "provider_connections_per_installation": 5000,
+      "credential_revisions_per_provider_connection": 100,
+      "provider_grants_per_environment": 100,
+      "models_per_provider_revision": 2000,
+      "capability_tuples_per_provider_revision": 32000,
+      "certification_tuples_per_management_action": 16,
+      "parallel_certification_requests_per_management_action": 4
+    },
+    "routing_and_policy_cardinality": {
+      "routes_per_environment": 1000,
+      "targets_per_route": 32,
+      "operations_per_route": 32,
+      "route_revisions_per_route": 1000,
+      "policy_programs_per_organization": 1000,
+      "policy_bindings_per_environment": 1000,
+      "compiled_policy_bytes_per_program": 65536,
+      "compiled_policy_bytes_per_environment_maximum": 2097152,
+      "compiled_policy_deduplication_key": "compiled_program_sha256",
+      "policy_nodes_per_program": 1000,
+      "policy_evaluation_steps_per_phase": 10000,
+      "quota_nodes_per_organization": 100000,
+      "budgets_per_organization": 10000
+    },
+    "credential_cardinality": {
+      "active_inference_credentials_per_environment": 10000,
+      "active_inference_credentials_per_installation": 250000,
+      "credential_authority_revisions_retained_per_credential": 100,
+      "active_management_sessions_per_user": 32,
+      "active_machine_credentials_per_service_account": 16
+    },
+    "runtime_cache": {
+      "known_environment_releases_per_installation": 5000,
+      "loaded_environment_runtimes_per_gateway": 256,
+      "environment_runtime_payload_bytes_maximum": 8388608,
+      "credential_authority_entries_per_gateway": 250000,
+      "concurrent_cold_loads_per_gateway": 32,
+      "one_inflight_load_per_environment": true,
+      "eviction_may_drop_pinned_runtime": false
+    },
+    "traffic": {
+      "sustained_unary_requests_per_second_per_gateway": 2000,
+      "sustained_unary_requests_per_second_fleet": 6000,
+      "burst_unary_requests_per_second_per_gateway_for_60_seconds": 3000,
+      "concurrent_streams_per_gateway": 5000,
+      "concurrent_streams_fleet": 15000,
+      "stream_events_per_second_per_gateway": 50000,
+      "sustained_control_mutations_per_second_per_control_replica": 100,
+      "sustained_control_reads_per_second_per_control_replica": 500,
+      "maximum_json_request_bytes": 2097152,
+      "maximum_media_request_bytes": 67108864,
+      "maximum_stream_event_bytes": 1048576,
+      "maximum_canonical_output_bytes_per_execution": 67108864,
+      "maximum_response_media_bytes_per_execution": 67108864,
+      "maximum_connector_begin_frame_bytes": 2162688,
+      "maximum_connector_unary_result_frame_bytes": 16842752,
+      "maximum_connector_stream_event_frame_bytes": 1064960,
+      "maximum_connector_grpc_message_bytes": 16842752
+    },
+    "durable_work": {
+      "usage_local_admission_buffer_events_per_gateway": 8192,
+      "usage_stream_backlog_events": 3600000,
+      "usage_stream_backlog_target_drain_minutes": 30,
+      "runtime_outbox_pending_rows": 100000,
+      "audit_export_pending_events": 1000000,
+      "async_media_jobs_live_per_environment": 10000,
+      "usage_event_replay_horizon_days": 7,
+      "acknowledged_usage_definition": "gateway releases its local event only after the Valkey primary and both replicas durably append through the acknowledged stream offset",
+      "request_metadata_retention_default_days": 30,
+      "raw_usage_retention_default_days": 90,
+      "audit_retention_default_days": 365
+    }
+  },
+  "slo_targets": {
+    "measurement_window_days": 30,
+    "gateway_successful_availability_percent": 99.9,
+    "gateway_excluded_failures": [
+      "upstream_provider_failure_after_olp_selected_a_healthy_certified_target",
+      "documented_customer_network_failure_outside_olp",
+      "customer_requested_denial_or_limit"
+    ],
+    "gateway_added_latency_at_target_load_ms": {
+      "p50_maximum": 5,
+      "p95_maximum": 15,
+      "p99_maximum": 30
+    },
+    "control_api_successful_availability_percent": 99.9,
+    "control_api_read_latency_ms": {
+      "p95_maximum": 250,
+      "p99_maximum": 500
+    },
+    "control_api_mutation_latency_ms": {
+      "p95_maximum": 500,
+      "p99_maximum": 1000
+    },
+    "cross_scope_security_incidents_allowed": 0,
+    "acknowledged_usage_events_lost_allowed": 0,
+    "silent_zero_usage_or_price_events_allowed": 0,
+    "monthly_error_budget_minutes_at_99_9_percent": 43.2
+  },
+  "propagation_targets": {
+    "admission_authority_freshness": {
+      "authorities": [
+        "credential_and_provider_dependency_security_authority",
+        "environment_release_head"
+      ],
+      "age_start": "completion_of_last_successful_authoritative_postgresql_read_and_validation_of_current_head",
+      "maximum_age_ms": 6000,
+      "at_or_below_maximum": "cached_new_request_may_proceed_only_when_every_other_security_and_runtime_fence_passes",
+      "beyond_maximum": "deny_new_public_authentication_before_runtime_selection",
+      "cache_miss_during_authority_unavailability": "deny",
+      "readiness_requires_within_maximum": true
+    },
+    "credential_revocation": {
+      "start": "authoritative_control_transaction_commit",
+      "end": "every_ready_gateway_denies_a_new_request",
+      "healthy_hint_p99_ms": 2000,
+      "missed_hint_hard_maximum_ms": 6000,
+      "inflight_committed_request_terminated": false
+    },
+    "credential_policy_update": {
+      "start": "authoritative_control_transaction_commit",
+      "end": "every_ready_gateway_applies_the_new_security_revision_to_a_new_request",
+      "healthy_hint_p99_ms": 2000,
+      "missed_hint_hard_maximum_ms": 6000
+    },
+    "provider_dependency_invalidation": {
+      "start": "provider_credential_or_grant_security_transaction_commit",
+      "end": "every_ready_gateway_rejects_an_environment_runtime_with_the_old_dependency_manifest_for_new_work",
+      "healthy_hint_p99_ms": 2000,
+      "missed_hint_hard_maximum_ms": 6000,
+      "waits_for_environment_republication": false,
+      "inflight_committed_request_terminated": false
+    },
+    "membership_or_service_account_deactivation": {
+      "start": "authoritative_identity_transaction_commit",
+      "end": "new_management_and_inference_authentication_is_denied",
+      "healthy_hint_p99_ms": 2000,
+      "hard_maximum_ms": 10000
+    },
+    "environment_activation": {
+      "start": "environment_release_transaction_commit",
+      "end": "every_ready_gateway_can_pin_the_new_environment_generation",
+      "healthy_hint_p99_ms": 2000,
+      "missed_hint_hard_maximum_ms": 6000,
+      "unrelated_environment_rebuild_allowed": false
+    },
+    "environment_rollback": {
+      "start": "rollback_release_transaction_commit",
+      "end": "every_ready_gateway_can_pin_the_new_monotonic_generation_containing_the_selected_old_config",
+      "healthy_hint_p99_ms": 2000,
+      "missed_hint_hard_maximum_ms": 6000
+    },
+    "environment_cold_load": {
+      "start": "authenticated_request_resolves_an_uncached_environment",
+      "end": "verified_runtime_and_transports_are_atomically_pinnable",
+      "p95_ms": 500,
+      "p99_ms": 2000,
+      "wrong_environment_fallback_allowed": false
+    },
+    "connector_quarantine": {
+      "start": "health_or_protocol_failure_crosses_the_accepted_threshold",
+      "end": "the_instance_receives_no_new_attempt",
+      "p99_ms": 5000
+    }
+  },
+  "recovery_targets": {
+    "gateway_replica_loss": {
+      "rpo_seconds": 0,
+      "rto_seconds": 120,
+      "evidence": "fleet_chaos"
+    },
+    "control_or_worker_replica_loss": {
+      "rpo_seconds": 0,
+      "rto_seconds": 300,
+      "evidence": "fleet_chaos_and_claim_safe_work"
+    },
+    "postgresql_primary_failover": {
+      "rpo_seconds": 0,
+      "rto_seconds": 300,
+      "required_mode": "synchronous_reference_topology"
+    },
+    "valkey_primary_failover": {
+      "rpo_seconds": 0,
+      "rto_seconds": 300,
+      "required_mode": "supported_HA_AOF_durable_quorum_ack_reference_topology",
+      "acknowledged_usage_loss_allowed": 0
+    },
+    "application_rollback": {
+      "rpo_seconds": 0,
+      "rto_seconds": 900,
+      "method": "supported_mixed_version_or_pre_upgrade_restore_contract"
+    },
+    "single_region_disaster": {
+      "rpo_seconds": 300,
+      "rto_seconds": 14400,
+      "active_active": false,
+      "requires": [
+        "off_cluster_PITR_material",
+        "object_storage_recovery",
+        "all_historical_master_keys",
+        "key_hash_key",
+        "connector_registry_and_signatures",
+        "security_authority_reconciliation_before_admission"
+      ]
+    },
+    "acknowledged_usage": {
+      "rpo_seconds": 0,
+      "reconciliation_rto_seconds": 3600,
+      "unknown_interval_behavior": "explicit_incomplete_gap_never_zero"
+    },
+    "durable_media_job": {
+      "rpo_seconds": 0,
+      "reconciliation_rto_seconds": 3600,
+      "local_ephemeral_spool_is_beta_authority": false
+    },
+    "credential_and_membership_security_after_restore": {
+      "stale_authority_admission_allowed": false,
+      "reconciliation_rto_seconds": 900
+    }
+  },
+  "current_2_0_baseline": {
+    "claim_level": "implementation_bounds_and_existing_tests_only_not_enterprise_qualification",
+    "fleet_runtime": "one installation-wide RuntimeBundle",
+    "default_http_max_connections": 1024,
+    "helm_gateway_http_max_connections": 16384,
+    "http2_concurrent_streams_per_connection": 100,
+    "database_max_connections_per_process": 20,
+    "usage_local_buffer_events_per_gateway": 8192,
+    "runtime_poll_interval_ms": 5000,
+    "existing_healthy_revocation_test_maximum_ms": 5000,
+    "existing_missed_hint_revocation_test_maximum_ms": 5500,
+    "existing_added_latency_slo_ms": {
+      "p95": 15,
+      "p99": 30
+    },
+    "existing_restore_script_reports_elapsed_time_but_enforces_rto": false,
+    "existing_capacity_load_profiles": false,
+    "anchors": [
+      "apps/olp/src/cli.rs",
+      "apps/olp/src/listener.rs",
+      "apps/olp/src/runtime.rs",
+      "docs/operations.md",
+      "docs/deployment.md",
+      "tests/ha/two-gateway.sh",
+      "scripts/restore-rehearsal.sh"
+    ]
+  },
+  "profile_defaults": {
+    "data_seed": 20260719,
+    "live_provider_network_allowed": false,
+    "fixture_provider": "deterministic_content_free_mock_connector",
+    "fixture_provider_first_byte_ms": 20,
+    "fixture_provider_stream_events": 32,
+    "fixture_provider_event_payload_bytes": 256,
+    "warmup_seconds": 300,
+    "measurement_seconds": 1800,
+    "cooldown_seconds": 60,
+    "independent_runs": 3,
+    "pass_rule": "every_run_passes_every_hard_assertion_and_the_worst_run_meets_all_percentile_targets",
+    "clock_skew_ms_maximum": 100,
+    "evidence_format": "olp.enterprise.capacity-evidence.v1"
+  },
+  "profile_runner_contract": {
+    "path": "scripts/run-capacity-profile.sh",
+    "present_at_m0": true,
+    "mode_at_m0": "deterministic_plan_renderer_only",
+    "execute_available_at_m0": false,
+    "execute_unavailable_until": "the selected profile implementation milestone provides its reviewed load runner and changes the profile implementation_status",
+    "plan_renderer_generates_load": false,
+    "plan_renderer_mutates_state": false,
+    "plan_output_is_qualification_evidence": false,
+    "contract_input_snapshot": "single_validated_mktemp_copy",
+    "source_change_before_output_completion": "fail_closed",
+    "implementation_milestones": ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8"],
+    "commands_at_m0_are_normative_invocation_specs_not_execution_evidence": true,
+    "plan_input_bounds": {
+      "seed": {"minimum": 0, "maximum": 4294967295},
+      "runs": {"minimum": 1, "maximum": 1000},
+      "duration_seconds": {"minimum": 1, "maximum": 2592000},
+      "gateway_replicas": {"minimum": 1, "maximum": 1000}
+    },
+    "required_common_inputs": [
+      "immutable_OLP_image_digest",
+      "immutable_runner_image_digests",
+      "reference_topology_manifest",
+      "contract_path_and_SHA256",
+      "profile_id",
+      "data_seed",
+      "run_number",
+      "isolated_generated_test_credentials"
+    ],
+    "placeholder_syntax": "UPPER_SNAKE_CASE",
+    "unresolved_placeholder_behavior": "reject_before_mutating_or_generating_load",
+    "live_provider_content_allowed": false,
+    "output_at_m0": "canonical deterministic plan JSON bound to the exact contract SHA256; never an execution or qualification evidence record",
+    "future_execution_output": "one evidence record plus content-free raw measurements bound by SHA256"
+  },
+  "profiles": {
+    "scope_cardinality": {
+      "profile_id": "CP-01",
+      "implementation_status": "planned_M1_to_M3",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh scope-cardinality --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719",
+      "deterministic_inputs": [
+        "organizations",
+        "projects",
+        "environments",
+        "users",
+        "memberships",
+        "groups",
+        "roles",
+        "service_accounts"
+      ],
+      "load": {
+        "control_reads_per_second_fleet": 1000,
+        "control_mutations_per_second_fleet": 200,
+        "read_mix_percent": {
+          "list_first_page": 40,
+          "list_cursor_page": 30,
+          "get_existing": 20,
+          "get_inaccessible_or_missing": 10
+        },
+        "mutation_mix_percent": {
+          "create": 20,
+          "update_with_etag": 40,
+          "disable_or_revoke": 20,
+          "idempotent_replay": 20
+        }
+      },
+      "assertions": [
+        "all_beta_target_cardinalities_import_without_constraint_or_memory_failure",
+        "scoped_list_and_get_p99_meet_control_read_SLO",
+        "cross_scope_queries_return_no_rows_and_no_foreign_cursor",
+        "resident_gateway_memory_stays_within_reference_limit"
+      ]
+    },
+    "configuration_compile": {
+      "profile_id": "CP-02",
+      "implementation_status": "planned_M1_M2_M4_M5",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh configuration-compile --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719",
+      "deterministic_inputs": [
+        "provider_connections",
+        "provider_revisions",
+        "models",
+        "capability_tuples",
+        "routes",
+        "targets",
+        "policies",
+        "credentials"
+      ],
+      "load": {
+        "simultaneous_environment_compiles": 32,
+        "one_saturating_environment": true,
+        "unrelated_active_environments": 255,
+        "policy_compiled_bytes": 2097152,
+        "runtime_payload_bytes_maximum": 8388608
+      },
+      "assertions": [
+        "one_envelope_saturating_environment_under_all_coupled_constraints_compiles_and_validates",
+        "policy_programs_are_deduplicated_by_digest_and_total_compiled_policy_bytes_do_not_exceed_2097152",
+        "serialized_environment_runtime_is_within_payload_bound",
+        "one_environment_activation_does_not_compile_an_unrelated_environment",
+        "compile_and_publish_p99_is_at_most_2000_ms"
+      ]
+    },
+    "gateway_unary": {
+      "profile_id": "CP-03",
+      "implementation_status": "planned_M2",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh gateway-unary --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719 --runs 3",
+      "load": {
+        "requests_per_second_fleet": 6000,
+        "duration_seconds": 1800,
+        "organizations": 100,
+        "active_environments": 275,
+        "routes_per_environment_sampled": 1000,
+        "environment_runtime_cache_hit_percent": 95,
+        "environment_runtime_cold_load_percent": 5,
+        "cache_churn_schedule": {
+          "resident_hot_environments_per_gateway": 19,
+          "rotating_cold_environments_per_gateway": 256,
+          "request_trace_period": 20,
+          "hot_requests_per_period": 19,
+          "cold_requests_per_period": 1,
+          "hot_selection": "touch_each_of_19_hot_environments_once_per_period",
+          "cold_selection": "round_robin_without_reuse_until_all_256_have_loaded",
+          "required_state": "19_hot_slots_and_the_237_most_recent_cold_ring_slots_in_the_256_entry_gateway_cache_so_the_next_of_256_cold_ids_is_absent",
+          "trace_repetitions": "repeat_the_same_seeded_schedule_for_every_run"
+        },
+        "operation_mix_percent": {
+          "generation_unary": 50,
+          "embeddings": 30,
+          "moderation": 20
+        },
+        "canonical_request_payload_mix_percent": {
+          "1024_bytes": 50,
+          "16384_bytes": 35,
+          "262144_bytes": 14,
+          "2097152_bytes": 1
+        },
+        "credential_state_mix_percent": {
+          "active": 98,
+          "revoked": 1,
+          "expired": 1
+        }
+      },
+      "assertions": [
+        "gateway_availability_and_added_latency_SLOs_pass",
+        "no_cross_scope_response_or_attempt",
+        "no_usage_admission_drop",
+        "no_silent_unpriced_or_incomplete_coercion",
+        "cpu_memory_and_connection_limits_do_not_thrash"
+      ]
+    },
+    "gateway_streaming": {
+      "profile_id": "CP-04",
+      "implementation_status": "planned_M2_M4",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh gateway-streaming --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719 --runs 3",
+      "load": {
+        "concurrent_streams_fleet": 15000,
+        "events_per_second_fleet": 150000,
+        "duration_seconds": 1800,
+        "events_per_stream": 32,
+        "event_payload_bytes": 256,
+        "event_interval_ms": 100,
+        "stream_lifetime_ms": 3200,
+        "stream_start_phase": "stream_index_mod_32_spread_across_100ms_intervals",
+        "terminal_replacement": "start_one_replacement_immediately_to_hold_15000_active_streams",
+        "request_payload_bytes": 1024,
+        "disconnect_percent": 2,
+        "precommit_provider_failure_percent": 1,
+        "postcommit_provider_failure_percent": 1,
+        "fault_schedule": "fault_percentages_run_in_separate_seeded_scenarios_after_the_steady_state_throughput_measurement; each terminal stream is immediately replaced"
+      },
+      "assertions": [
+        "all_streams_pin_one_credential_and_environment_generation",
+        "no_retry_after_commit",
+        "disconnect_cancellation_meets_connector_target",
+        "gateway_availability_and_added_latency_SLOs_pass",
+        "usage_terminal_state_is_exactly_once_or_explicitly_incomplete"
+      ]
+    },
+    "event_backlog": {
+      "profile_id": "CP-05",
+      "implementation_status": "planned_M6_M7",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh event-backlog --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719",
+      "faults": [
+        "pause_usage_workers_until_3600000_events_accumulate",
+        "pause_runtime_hint_publisher_until_100000_rows_accumulate",
+        "pause_audit_export_until_1000000_events_accumulate",
+        "kill_valkey_primary_immediately_after_durable_quorum_ack",
+        "kill_each_worker_during_claim_commit_and_ack"
+      ],
+      "load": {
+        "incoming_usage_events_per_second": 6000,
+        "backlog_events_at_worker_resume": 3600000,
+        "required_net_drain_events_per_second_minimum": 2000,
+        "runtime_outbox_pending_rows": 100000,
+        "audit_export_pending_events": 1000000
+      },
+      "assertions": [
+        "backlogs_drain_within_targets",
+        "no_duplicate_aggregate_or_audit_delivery",
+        "no_acknowledged_usage_loss",
+        "every_promoted_valkey_replica_starts_at_or_after_the_last_acknowledged_usage_offset",
+        "claim_leases_are_recovered",
+        "serving_SLO_remains_within_budget"
+      ]
+    },
+    "runtime_convergence": {
+      "profile_id": "CP-06",
+      "implementation_status": "planned_M2",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh runtime-convergence --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719 --gateway-replicas 3",
+      "preliminary_current_command": "bash tests/ha/two-gateway.sh",
+      "preliminary_current_evidence_is_beta_qualification": false,
+      "scenarios": [
+        "healthy_hint_credential_revocation",
+        "missed_hint_credential_revocation",
+        "independent_environment_activation",
+        "rollback_as_new_generation",
+        "cold_load_singleflight",
+        "eviction_with_pinned_request",
+        "postgresql_outage_with_loaded_LKG",
+        "valkey_hint_outage",
+        "mixed_authority_fence"
+      ],
+      "load": {
+        "gateway_replicas": 3,
+        "active_environments": 256,
+        "authority_mutations_per_second": 100,
+        "environment_activations_per_second": 20,
+        "cold_loads_per_gateway": 32,
+        "missed_hint_percent": 10
+      },
+      "assertions": [
+        "every_propagation_target_passes",
+        "no_unrelated_environment_generation_changes",
+        "mixed_security_and_runtime_authority_denies",
+        "no_request_or_stream_changes_generation",
+        "cold_failure_never_falls_back_to_another_environment"
+      ]
+    },
+    "recovery": {
+      "profile_id": "CP-07",
+      "implementation_status": "planned_M6",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh disaster-recovery --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719",
+      "future_execution_commands": [
+        "OLP_RESTORE_DATABASE_URL=postgres://isolated-rehearsal scripts/restore-rehearsal.sh BACKUP.dump --replace",
+        "OLP_REHEARSAL_DATABASE_URL=postgres://isolated-upgrade OLP_REHEARSAL_CONFIRM=destroy-target OLP_BIN=CANDIDATE_BINARY scripts/upgrade-rehearsal.sh BACKUP.dump",
+        "scripts/run-capacity-profile.sh disaster-recovery --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719 --execute"
+      ],
+      "placeholder_bindings": {
+        "BACKUP.dump": "immutable quiesced backup path plus metadata SHA256 produced for this run",
+        "CANDIDATE_BINARY": "candidate OLP binary path whose SHA256 equals the evidence record image/source identity",
+        "postgres://isolated-rehearsal": "fresh empty replacement database with destructive confirmation scoped to the run",
+        "postgres://isolated-upgrade": "fresh empty upgrade rehearsal database with destructive confirmation scoped to the run"
+      },
+      "scenarios": [
+        "gateway_pod_loss",
+        "control_pod_loss",
+        "worker_killed_before_and_after_commit",
+        "postgresql_primary_failover",
+        "valkey_primary_failover",
+        "object_store_transient_failure",
+        "application_rolling_upgrade_and_rollback",
+        "isolated_full_restore",
+        "single_region_disaster_rebuild",
+        "post_restore_security_authority_reconciliation"
+      ],
+      "assertions": [
+        "every_RPO_and_RTO_target_passes",
+        "no_application_role_is_a_single_point_of_failure",
+        "no_acknowledged_usage_or_media_job_is_lost",
+        "restored_revoked_authority_is_not_admitted",
+        "all_evidence_checksums_and_image_digests_are_recorded"
+      ]
+    },
+    "slo_soak": {
+      "profile_id": "CP-08",
+      "implementation_status": "planned_M8",
+      "qualification_status": "not_qualified",
+      "command": "scripts/run-capacity-profile.sh slo-soak --contract docs/enterprise/contracts/capacity-envelope.json --seed 20260719 --duration 24h",
+      "duration_seconds": 86400,
+      "load": {
+        "unary_requests_per_second_fleet": 6000,
+        "concurrent_streams_fleet": 15000,
+        "control_reads_per_second_fleet": 1000,
+        "control_mutations_per_second_fleet": 200,
+        "runtime_activations_per_minute": 60,
+        "connector_rolls_per_hour": 4,
+        "olp_role_rolls_per_hour": 2
+      },
+      "assertions": [
+        "gateway_and_control_SLOs_pass",
+        "runtime_and_revocation_propagation_passes_during_load",
+        "no_unbounded_memory_file_descriptor_label_or_table_growth",
+        "usage_audit_and_policy_completeness_reconcile",
+        "rolling_connector_and_olp_upgrade_stays_within_error_budget"
+      ]
+    }
+  },
+  "evidence_record_schema": {
+    "record_schema_version": 1,
+    "record_contract_id": "olp.enterprise.capacity-evidence.v1",
+    "required_fields": [
+      "profile_id",
+      "result",
+      "started_at",
+      "completed_at",
+      "source_commit_sha",
+      "capacity_contract_sha256",
+      "topology_id",
+      "topology_manifest_sha256",
+      "olp_image_digest",
+      "runner_image_digests",
+      "command",
+      "data_seed",
+      "raw_results_sha256",
+      "summary",
+      "approvals"
+    ],
+    "result_values": [
+      "passed",
+      "failed"
+    ],
+    "approvals_required": [
+      "reliability",
+      "gateway_security",
+      "product_release"
+    ],
+    "signature": {
+      "mechanism": "protected_repository_review_or_approved_attestation_store",
+      "binds": [
+        "record_bytes",
+        "raw_results_sha256",
+        "source_commit_sha",
+        "capacity_contract_sha256",
+        "topology_manifest_sha256",
+        "olp_image_digest"
+      ]
+    },
+    "forbidden_evidence": [
+      "unreviewed_local_summary",
+      "skipped_test",
+      "live_provider_prompt_or_response",
+      "plaintext_secret",
+      "mutable_image_tag_without_digest"
+    ]
+  },
+  "release_rule": {
+    "all_profiles_must_pass": [
+      "CP-01",
+      "CP-02",
+      "CP-03",
+      "CP-04",
+      "CP-05",
+      "CP-06",
+      "CP-07",
+      "CP-08"
+    ],
+    "waiver_allowed": false,
+    "lowering_target_requires": [
+      "superseding_ADR",
+      "updated_threat_model",
+      "renewed_required_authority_approval",
+      "design_partner_notification",
+      "fresh_profile_evidence"
+    ],
+    "exceeding_target_is_not_a_new_supported_claim_without_contract_update": true
+  }
+}

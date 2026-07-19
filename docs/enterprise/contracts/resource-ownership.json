@@ -1,0 +1,1765 @@
+{
+  "schema_version": 1,
+  "contract_id": "olp.enterprise.resource-ownership.v1",
+  "decision_status": "accepted_target",
+  "approval_status": "approval_pending",
+  "implementation_status": "not_implemented",
+  "qualification_status": "not_qualified",
+  "decision_issue": "XOD-83",
+  "approval": {
+    "required_authorities": [
+      "architecture_domain",
+      "gateway_security",
+      "product_console",
+      "storage_api"
+    ],
+    "evidence_source": "docs/enterprise/contracts/enterprise-beta-scorecard.json#/m0_contract_gate/decisions/0"
+  },
+  "decision": "../adr/0001-enterprise-resource-hierarchy.md",
+  "migration_inventory": {
+    "directory": "crates/storage/migrations",
+    "highest_reviewed_migration": "0027",
+    "create_table_count": 50,
+    "inventory_rule": "Every physical table introduced by a CREATE TABLE statement, including partitions and installation-internal tables, appears in tables exactly once. A migration that adds or removes a CREATE TABLE statement must update this contract."
+  },
+  "default_scope_contract": {
+    "uuid_namespace": "persisted installation.id",
+    "hierarchy": {
+      "organization": {
+        "uuid_v5_name": "olp/default-organization/v1",
+        "display_name_source": "installation.organization_name"
+      },
+      "project": {
+        "uuid_v5_name": "olp/default-project/v1",
+        "display_name": "Default",
+        "normalized_name": "default"
+      },
+      "environment": {
+        "uuid_v5_name": "olp/default-environment/v1",
+        "display_name": "Default",
+        "normalized_name": "default"
+      }
+    },
+    "legacy_role_mapping": {
+      "role_uuid_namespace": "default organization UUID",
+      "binding_scope": "default organization and all of its project/environment descendants",
+      "roles": {
+        "owner": {
+          "role_key": "olp.bootstrap.organization.owner.v1",
+          "uuid_v5_name": "olp/bootstrap-role/owner/v1",
+          "permissions": [
+            "read_configuration",
+            "manage_providers",
+            "manage_routes",
+            "manage_api_keys",
+            "read_team",
+            "manage_team",
+            "manage_sessions",
+            "read_operations",
+            "use_playground",
+            "manage_settings",
+            "manage_pricing"
+          ]
+        },
+        "operator": {
+          "role_key": "olp.bootstrap.organization.operator.v1",
+          "uuid_v5_name": "olp/bootstrap-role/operator/v1",
+          "permissions": [
+            "read_configuration",
+            "manage_providers",
+            "manage_routes",
+            "manage_api_keys",
+            "read_team",
+            "read_operations",
+            "use_playground",
+            "manage_settings",
+            "manage_pricing"
+          ]
+        },
+        "developer": {
+          "role_key": "olp.bootstrap.organization.developer.v1",
+          "uuid_v5_name": "olp/bootstrap-role/developer/v1",
+          "permissions": [
+            "read_configuration",
+            "manage_api_keys",
+            "read_operations",
+            "use_playground"
+          ]
+        },
+        "viewer": {
+          "role_key": "olp.bootstrap.organization.viewer.v1",
+          "uuid_v5_name": "olp/bootstrap-role/viewer/v1",
+          "permissions": [
+            "read_configuration",
+            "read_operations"
+          ]
+        }
+      },
+      "sources": [
+        "users.role",
+        "invitations.role",
+        "oidc_configurations.default_role",
+        "oidc_email_role_mappings.role",
+        "oidc_group_role_mappings.role"
+      ],
+      "user_state": {
+        "active": "create an active default-organization membership and mapped organization role binding",
+        "inactive": "create a disabled default-organization membership and mapped disabled role binding; do not authorize an existing session"
+      },
+      "invitation_state": {
+        "pending_unexpired": "preserve the bearer digest, expiry, inviter, and mapped target role in the default organization",
+        "accepted_or_expired": "retain only the existing lifecycle/evidence state; never mint a new bearer"
+      },
+      "oidc_state": "Map every non-null default, email, and group role value through roles; an unknown value aborts verification."
+    },
+    "settings_key_authority": {
+      "retention.requests_days": {
+        "authority": "organization",
+        "migration_scope": "default organization"
+      },
+      "retention.usage_days": {
+        "authority": "organization",
+        "migration_scope": "default organization"
+      },
+      "retention.audit_days": {
+        "authority": "organization",
+        "migration_scope": "default organization"
+      }
+    },
+    "unknown_setting_key_behavior": "abort migration verification; never guess or copy an unregistered key"
+  },
+  "scope_authorities": {
+    "installation": "Deployment and operator boundary; never an implicit tenant.",
+    "global_identity": "Installation-global identity with organization access only through memberships.",
+    "organization": "Security, identity, billing, residency, and provider-credential boundary.",
+    "project": "Ownership, application administration, and cost-allocation boundary inside one organization.",
+    "environment": "Independent runtime publication boundary inside one project.",
+    "action_scope": "The explicit installation/organization/project/environment scope of an audited or idempotent action.",
+    "event_scope": "Immutable organization/project/environment attribution copied when an operational fact is created.",
+    "installation_evidence": "Operator-only evidence that cannot safely be attributed to one tenant; it is not exposed through tenant APIs."
+  },
+  "policy_catalog": {
+    "deletion": {
+      "installation_root": "No in-place deletion. Destroying an installation is an operator-controlled deployment and data-destruction procedure.",
+      "global_identity_guarded": "Deactivate first. Physical deletion requires no live memberships, sessions, identity links, or retained legal/security dependency; historical actor IDs are tombstoned rather than rewritten.",
+      "scope_parent_async": "Mark deleting, revoke admission and credentials, drain work, apply retention, then delete unpublished children. Retained facts and immutable history keep scope IDs/tombstones.",
+      "configuration_restrict": "Disable first. Restrict physical deletion while any grant, active revision, runtime, fact, pricing provenance, or audit evidence references the row.",
+      "unpublished_child_cascade": "May cascade only with an unpublished parent. Once published or referenced by evidence, retain/restrict according to the parent history policy.",
+      "immutable_history": "Append-only after publication. Do not physically delete while referenced by a runtime, fact, rollback candidate, audit record, or supported recovery point.",
+      "credential_revoke": "Revoke immediately for new authentication/use. Retain encrypted/digested revision metadata while runtime, audit, or recovery evidence references it; never retain plaintext.",
+      "ephemeral_expiry": "Delete only after the explicit expiry/replay horizon; expiry must not erase required audit evidence.",
+      "fact_retention": "Immutable after creation except bounded reconciliation state. Delete only through scoped retention after required aggregation/evidence preservation.",
+      "installation_internal_retention": "Not tenant-mutable. Delete only through the documented operator maintenance/replay policy.",
+      "physical_partition": "Lifecycle is owned by the partitioned parent; never delete or expose it as an independent resource.",
+      "action_scoped": "Deletion follows the action's resolved scope and record class; tenant deletion cannot erase installation audit or another scope's evidence."
+    },
+    "transfer": {
+      "forbidden": "Ownership transfer across the authoritative boundary is not supported in beta. Clone/export, validate, activate, and delete the source.",
+      "inherited": "No independent transfer; the row remains with its parent.",
+      "global_identity_membership_only": "The global identity is not transferred. Access changes by adding or removing organization memberships and bindings.",
+      "grant_only": "The owned resource does not move. Explicit grants may be created or revoked inside the same organization.",
+      "not_applicable": "Installation-internal state or immutable facts cannot be transferred.",
+      "action_scope_fixed": "The action/fact keeps the scope captured at creation and cannot be reassigned."
+    },
+    "retention": {
+      "installation_lifetime": "Retain for the installation lifetime and through full restore.",
+      "identity_lifetime": "Retain while the identity or any membership/link is active, then under security/privacy policy with tombstoned historical actor references.",
+      "configuration_history": "Retain active and rollback-relevant revisions plus all versions referenced by runtime, fact, audit, export, or supported backup evidence.",
+      "credential_history": "Retain encrypted/digested revisions while referenced; plaintext is never durable. Revocation metadata is immutable evidence.",
+      "session_expiry": "Delete after session expiry or revocation once required audit evidence is emitted.",
+      "invitation_expiry": "Delete unaccepted invitations after expiry; retain acceptance/revocation as audit evidence rather than bearer material.",
+      "idempotency_expiry": "Delete an idempotency replay record only after its operation-specific replay window expires and any required audit evidence is emitted.",
+      "authorization_flow_expiry": "Delete encrypted/opaque flow state after its short explicit expiry.",
+      "public_auth_window": "Delete opaque admission buckets after their rolling window plus bounded skew.",
+      "request_metadata": "Default 30 days, bounded 1-3650 days, selected by the owning organization/environment policy and captured with the record.",
+      "usage_fact": "Default 90 days, bounded 1-3650 days, then aggregate without losing incompleteness, price provenance, or scope.",
+      "usage_aggregate": "Retain scoped aggregates until an explicit organization retention/export policy permits deletion; current 2.x behavior has no automatic hourly deletion.",
+      "audit_evidence": "Default 365 days, bounded 1-3650 days, subject to organization policy and installation security/legal minimums.",
+      "media_job": "After terminal deletion, retain metadata for the request-retention period; media bytes follow the separate durable-media lifecycle and are never stored here.",
+      "outbox": "Retain unpublished rows; retain published rows at least seven days before maintenance deletion.",
+      "usage_replay_receipt": "Retain for the seven-day replay horizon plus five-minute clock-skew grace.",
+      "usage_epoch": "Retain unresolved epochs indefinitely; delete gracefully closed or acknowledged epochs after usage retention.",
+      "usage_gap": "Retain raw gaps for usage retention, then roll into scoped or installation-only hourly evidence.",
+      "singleton_state": "Retain current installation coordination state; replacement is transactional and historical changes are audited where security-relevant.",
+      "pricing_history": "Retain every revision referenced by usage/runtime evidence and every supported export/recovery point.",
+      "physical_partition": "Same retention as the parent table."
+    },
+    "reference": {
+      "root": "Root installation record; all scoped hierarchy ultimately belongs to this installation.",
+      "global_identity": "May reference installation-global users, but authorization requires a current membership/binding; creator/actor references never grant access.",
+      "same_organization_composite": "Composite foreign keys must prove organization ancestry for parent and child. Cross-organization references are forbidden.",
+      "same_project_composite": "Composite foreign keys must prove organization and project ancestry for parent and child.",
+      "same_environment_composite": "Composite foreign keys must prove organization, project, and environment ancestry for parent and child.",
+      "provider_grant_required": "An environment may reference an organization provider/revision only through an active same-organization project/environment grant compiled into its runtime.",
+      "credential_lookup": "The opaque lookup ID is installation-unique only for pre-scope lookup. The resolved credential row proves one environment and reveals no scope before successful authentication.",
+      "event_scope_immutable": "Copy and constrain organization/project/environment at creation. Reads, rollups, and exports never infer scope from mutable resources.",
+      "action_scope_explicit": "Store an explicit scope kind and IDs. Polymorphic resource text is display metadata, not an authorization edge.",
+      "installation_internal": "No tenant API reference. If affected scope is known, emit a separately constrained scoped fact rather than exposing global state.",
+      "physical_partition": "Inherits schema, scope, and integrity from its partitioned parent.",
+      "pricing_same_organization": "Provider-specific prices and price revisions must reference providers in the same organization; environments pin immutable pricing references.",
+      "request_fact_composite": "Composite request ID, timestamp, and full scope must match the parent request/anchor and all referenced scoped dimensions."
+    },
+    "default_scope_migration": {
+      "installation_identity": "Add and persist installation.id; derive and persist versioned default organization/project/environment IDs without changing existing identifiers.",
+      "remain_global": "Keep installation/global authority; create memberships or scoped edges where required, without duplicating identity IDs.",
+      "attach_default_organization": "Backfill the deterministic default organization and preserve the existing row ID/revision.",
+      "attach_default_project": "Backfill the deterministic default project and preserve the existing row ID/revision.",
+      "attach_default_environment": "Backfill full default organization/project/environment ancestry and preserve the existing row ID/revision.",
+      "inherit_parent": "Backfill scope from an integrity-checked parent relationship; disagreement or orphaning fails verification.",
+      "derive_request_scope": "Backfill immutable scope from the request/anchor and verify every related credential, route, provider, and runtime belongs to it.",
+      "derive_action_scope": "Backfill from the typed action/resource relationship. Ambiguous polymorphic rows remain installation-only evidence; never guess by name.",
+      "split_settings": "Classify each allowlisted key as installation, organization, project, or environment; copy the current key only to its specified default authority.",
+      "create_default_provider_grants": "Attach provider ownership to the default organization and create explicit grants to the default project/environment before compiling an environment runtime.",
+      "split_usage_evidence": "Retain process-wide unknown-loss evidence as installation-only and create environment-scoped evidence only where immutable attribution is provable.",
+      "not_applicable_new_resource": "No 2.x row exists. Create the resource only through an explicitly scoped post-migration API after its feature gate is enabled.",
+      "physical_partition": "Inherits the requests backfill; partition rows are not independently migrated."
+    }
+  },
+  "tables": [
+    {
+      "name": "installation",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "installation",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["singleton = true"],
+        "note": "The current row has an organization_name but no installation ID and is not an organization resource."
+      },
+      "target": {
+        "authority": "installation",
+        "scope_columns": ["id"],
+        "uniqueness": ["one installation record per database"],
+        "deletion": "installation_root",
+        "transfer": "forbidden",
+        "retention": "installation_lifetime",
+        "reference": "root",
+        "default_scope_migration": "installation_identity"
+      }
+    },
+    {
+      "name": "users",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "global_user_identity",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["normalized email installation-wide"],
+        "note": "A fixed installation role currently grants permissions."
+      },
+      "target": {
+        "authority": "global_identity",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["normalized login email installation-wide"],
+        "deletion": "global_identity_guarded",
+        "transfer": "global_identity_membership_only",
+        "retention": "identity_lifetime",
+        "reference": "global_identity",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "invitations",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "organization_membership_invitation",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["token digest installation-wide", "one pending invitation per normalized email"],
+        "note": "Invitation grants a fixed installation role."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id"],
+        "uniqueness": ["token digest installation-wide", "organization_id + normalized email for one pending invitation"],
+        "deletion": "ephemeral_expiry",
+        "transfer": "forbidden",
+        "retention": "invitation_expiry",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "attach_default_organization"
+      }
+    },
+    {
+      "name": "sessions",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "management_session",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["session token digest installation-wide"],
+        "note": "The session inherits the user's fixed installation role."
+      },
+      "target": {
+        "authority": "global_identity",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["session token digest installation-wide"],
+        "deletion": "ephemeral_expiry",
+        "transfer": "global_identity_membership_only",
+        "retention": "session_expiry",
+        "reference": "global_identity",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "idempotency_records",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "management_idempotency_record",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["actor_user_id + operation + idempotency_key"],
+        "note": "Encrypted replay is scoped only by installation-global actor and operation."
+      },
+      "target": {
+        "authority": "action_scope",
+        "scope_columns": ["scope_kind", "organization_id", "project_id", "environment_id"],
+        "uniqueness": ["principal_id + scope_kind + scope IDs + semantic operation + idempotency_key"],
+        "deletion": "ephemeral_expiry",
+        "transfer": "action_scope_fixed",
+        "retention": "idempotency_expiry",
+        "reference": "action_scope_explicit",
+        "default_scope_migration": "derive_action_scope"
+      }
+    },
+    {
+      "name": "oidc_configurations",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "identity_provider_configuration",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["one singleton configuration installation-wide"],
+        "note": "Only one installation-wide OIDC configuration is supported."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id"],
+        "uniqueness": ["organization_id + normalized configuration name", "organization_id + issuer + client_id"],
+        "deletion": "configuration_restrict",
+        "transfer": "forbidden",
+        "retention": "credential_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "attach_default_organization"
+      }
+    },
+    {
+      "name": "oidc_identities",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "federated_identity_link",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["issuer + subject", "user_id + issuer", "management UUID"],
+        "note": "Issuer text currently acts as the configuration boundary."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "identity_provider_id"],
+        "uniqueness": ["identity_provider_id + subject", "organization_id + identity_provider_id + user_id"],
+        "deletion": "global_identity_guarded",
+        "transfer": "forbidden",
+        "retention": "identity_lifetime",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "providers",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "provider_connection",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["name installation-wide"],
+        "note": "Provider kind and construction are currently closed, in-process values."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id"],
+        "uniqueness": ["organization_id + normalized provider connection name"],
+        "deletion": "configuration_restrict",
+        "transfer": "grant_only",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "create_default_provider_grants"
+      }
+    },
+    {
+      "name": "provider_credential_versions",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "provider_credential_revision",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["provider_id + version", "provider_id + id for composite ownership"],
+        "note": "Ciphertext is revisioned and bound to its provider."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "provider_id"],
+        "uniqueness": ["organization_id + provider_id + version", "organization_id + provider_id + id"],
+        "deletion": "credential_revoke",
+        "transfer": "inherited",
+        "retention": "credential_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "provider_models",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "provider_model_draft",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["provider_id + upstream_model"],
+        "note": "Mutable discovery/catalog child of a provider."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "provider_id"],
+        "uniqueness": ["organization_id + provider_id + upstream_model"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "model_capabilities",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "provider_model_capability_evidence",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["provider_model_id + operation + surface + mode"],
+        "note": "Certification evidence belongs to a mutable provider model."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "provider_id", "provider_model_id"],
+        "uniqueness": ["organization_id + provider_model_id + operation + surface + mode"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "route_drafts",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route_draft",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["id", "routing_id after migration 0027"],
+        "note": "Slug collisions are currently controlled by activation/global route uniqueness."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["environment_id + id", "environment_id + routing_id", "at most one editable draft per environment route lineage"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "forbidden",
+        "retention": "configuration_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "attach_default_environment"
+      }
+    },
+    {
+      "name": "route_draft_operations",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route_draft_operation",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["route_draft_id + operation"],
+        "note": "Scope is inherited only through the global draft ID."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "route_draft_id"],
+        "uniqueness": ["environment_id + route_draft_id + operation"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "route_draft_targets",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route_draft_target",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["id", "route_draft_id + position", "routing_id after migration 0027"],
+        "note": "A target directly references an installation-global provider model."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "route_draft_id"],
+        "uniqueness": ["environment_id + id", "environment_id + route_draft_id + position", "environment_id + route_draft_id + routing_id"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "provider_grant_required",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "routes",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["slug installation-wide"],
+        "note": "The active revision is one installation-wide route lineage."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["environment_id + normalized route slug", "environment_id + id"],
+        "deletion": "configuration_restrict",
+        "transfer": "forbidden",
+        "retention": "configuration_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "attach_default_environment"
+      }
+    },
+    {
+      "name": "route_revisions",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route_revision",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["route_id + revision", "routing_id after migration 0027"],
+        "note": "Immutable activated configuration."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "route_id"],
+        "uniqueness": ["environment_id + route_id + revision", "environment_id + routing_id + revision"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "route_revision_operations",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route_revision_operation",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["route_revision_id + operation"],
+        "note": "Immutable child of a route revision."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "route_revision_id"],
+        "uniqueness": ["environment_id + route_revision_id + operation"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "route_revision_targets",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "route_revision_target",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["id", "route_revision_id + position", "routing_id after migration 0027"],
+        "note": "Immutable target but provider reference is installation-global."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "route_revision_id"],
+        "uniqueness": ["environment_id + id", "environment_id + route_revision_id + position", "environment_id + route_revision_id + routing_id"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "provider_grant_required",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "api_keys",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "inference_credential",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["lookup_id installation-wide", "name installation-wide"],
+        "note": "Digest, expiry, scopes, allowlist, and hard limits currently live in the fleet runtime."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["lookup_id installation-wide", "environment_id + normalized credential name", "environment_id + id"],
+        "deletion": "credential_revoke",
+        "transfer": "forbidden",
+        "retention": "credential_history",
+        "reference": "credential_lookup",
+        "default_scope_migration": "attach_default_environment"
+      }
+    },
+    {
+      "name": "api_key_scopes",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "inference_credential_scope",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["api_key_id + scope"],
+        "note": "Security-critical child of an API key."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "credential_id"],
+        "uniqueness": ["environment_id + credential_id + scope"],
+        "deletion": "credential_revoke",
+        "transfer": "inherited",
+        "retention": "credential_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "api_key_route_allowlist",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "inference_credential_route_grant",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["api_key_id + route_slug"],
+        "note": "Route identity is currently an installation-global slug."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "credential_id", "route_id"],
+        "uniqueness": ["environment_id + credential_id + route_id"],
+        "deletion": "credential_revoke",
+        "transfer": "inherited",
+        "retention": "credential_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "runtime_generations",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "environment_runtime_generation",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["global bigserial sequence", "generation UUID", "release digest"],
+        "note": "One compiled release includes all providers, routes, and API keys."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "environment_incarnation"],
+        "uniqueness": ["environment_id + ordinal", "environment_id + generation UUID", "environment_id + release digest + ordinal"],
+        "deletion": "immutable_history",
+        "transfer": "forbidden",
+        "retention": "configuration_history",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "attach_default_environment"
+      }
+    },
+    {
+      "name": "transactional_outbox",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "durable_domain_event",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["event UUID"],
+        "note": "Payload/event type currently carries no database-enforced tenant scope."
+      },
+      "target": {
+        "authority": "action_scope",
+        "scope_columns": ["scope_kind", "organization_id", "project_id", "environment_id"],
+        "uniqueness": ["event UUID installation-wide", "aggregate type + aggregate ID + aggregate sequence"],
+        "deletion": "installation_internal_retention",
+        "transfer": "action_scope_fixed",
+        "retention": "outbox",
+        "reference": "action_scope_explicit",
+        "default_scope_migration": "derive_action_scope"
+      }
+    },
+    {
+      "name": "pricing_revisions",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "pricing_revision",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["global revision number", "revision UUID"],
+        "note": "One immutable pricing history is shared installation-wide."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id"],
+        "uniqueness": ["organization_id + revision", "organization_id + revision UUID"],
+        "deletion": "immutable_history",
+        "transfer": "forbidden",
+        "retention": "pricing_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "attach_default_organization"
+      }
+    },
+    {
+      "name": "prices",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "price",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["pricing_revision_id + provider_kind + nullable provider_id + model + operation with NULLS NOT DISTINCT"],
+        "note": "Provider-specific overrides reference installation-global providers."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "pricing_revision_id"],
+        "uniqueness": ["organization_id + pricing_revision_id + provider_type + nullable provider_id + model + operation"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "pricing_history",
+        "reference": "pricing_same_organization",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "requests",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "request_fact",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["request UUID + started_at partition key"],
+        "note": "Attribution is by global API key, route slug, and runtime generation."
+      },
+      "target": {
+        "authority": "event_scope",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["organization_id + project_id + environment_id + request UUID + started_at"],
+        "deletion": "fact_retention",
+        "transfer": "action_scope_fixed",
+        "retention": "request_metadata",
+        "reference": "request_fact_composite",
+        "default_scope_migration": "derive_request_scope"
+      }
+    },
+    {
+      "name": "requests_default",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "request_default_partition",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["inherited from requests"],
+        "note": "Physical default partition, not an independent domain resource."
+      },
+      "target": {
+        "authority": "event_scope",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["inherited from requests"],
+        "deletion": "physical_partition",
+        "transfer": "not_applicable",
+        "retention": "physical_partition",
+        "reference": "physical_partition",
+        "default_scope_migration": "physical_partition"
+      }
+    },
+    {
+      "name": "attempts",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "provider_attempt_fact",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["attempt UUID + request_started_at partition linkage"],
+        "note": "Scope is inherited only through the global request relation."
+      },
+      "target": {
+        "authority": "event_scope",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["environment_id + attempt UUID", "environment_id + request UUID + attempt ordinal"],
+        "deletion": "fact_retention",
+        "transfer": "action_scope_fixed",
+        "retention": "request_metadata",
+        "reference": "request_fact_composite",
+        "default_scope_migration": "derive_request_scope"
+      }
+    },
+    {
+      "name": "usage_facts",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "usage_fact",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["usage fact UUID", "request anchor reference"],
+        "note": "Carries global API key/provider/route dimensions and explicit incomplete/unpriced state."
+      },
+      "target": {
+        "authority": "event_scope",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["environment_id + usage fact UUID", "environment_id + source event identity"],
+        "deletion": "fact_retention",
+        "transfer": "action_scope_fixed",
+        "retention": "usage_fact",
+        "reference": "request_fact_composite",
+        "default_scope_migration": "derive_request_scope"
+      }
+    },
+    {
+      "name": "usage_hourly",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "usage_hourly_aggregate",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["bucket + route + provider + model + operation + surface + API key"],
+        "note": "Additive retained totals have no tenant dimensions."
+      },
+      "target": {
+        "authority": "event_scope",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["full scope + bucket + route ID + provider ID + model + operation + surface + credential/application dimensions"],
+        "deletion": "fact_retention",
+        "transfer": "action_scope_fixed",
+        "retention": "usage_aggregate",
+        "reference": "event_scope_immutable",
+        "default_scope_migration": "attach_default_environment"
+      }
+    },
+    {
+      "name": "usage_ingestion_gaps",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "usage_ingestion_gap_evidence",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["gap UUID", "optional deduplication key"],
+        "note": "A gateway loss interval may cover requests whose individual scope is unknowable."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id", "scope_resolution", "organization_id", "project_id", "environment_id"],
+        "uniqueness": ["installation incident/deduplication key", "when attributed: environment_id + source interval identity"],
+        "deletion": "fact_retention",
+        "transfer": "not_applicable",
+        "retention": "usage_gap",
+        "reference": "installation_internal",
+        "default_scope_migration": "split_usage_evidence"
+      }
+    },
+    {
+      "name": "async_media_jobs",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "asynchronous_media_job",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["job UUID", "provider + upstream_job_id when present"],
+        "note": "References global API key, provider, and route slug; media handle metadata is bounded."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["environment_id + job UUID", "environment_id + provider revision + upstream_job_id"],
+        "deletion": "fact_retention",
+        "transfer": "forbidden",
+        "retention": "media_job",
+        "reference": "same_environment_composite",
+        "default_scope_migration": "attach_default_environment"
+      }
+    },
+    {
+      "name": "audit_events",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "audit_event",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["audit event UUID"],
+        "note": "Polymorphic resource text and actor do not enforce scope."
+      },
+      "target": {
+        "authority": "action_scope",
+        "scope_columns": ["scope_kind", "organization_id", "project_id", "environment_id"],
+        "uniqueness": ["audit event UUID installation-wide", "optional source event id + sink sequence"],
+        "deletion": "action_scoped",
+        "transfer": "action_scope_fixed",
+        "retention": "audit_evidence",
+        "reference": "action_scope_explicit",
+        "default_scope_migration": "derive_action_scope"
+      }
+    },
+    {
+      "name": "settings",
+      "introduced_in": "0001_initial.sql",
+      "resource_kind": "typed_setting",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["key installation-wide"],
+        "note": "Includes installation retention settings in an untyped global keyspace."
+      },
+      "target": {
+        "authority": "action_scope",
+        "scope_columns": ["scope_kind", "organization_id", "project_id", "environment_id"],
+        "uniqueness": ["scope kind + exact scope IDs + registered setting key"],
+        "deletion": "configuration_restrict",
+        "transfer": "forbidden",
+        "retention": "singleton_state",
+        "reference": "action_scope_explicit",
+        "default_scope_migration": "split_settings"
+      }
+    },
+    {
+      "name": "usage_request_anchors",
+      "introduced_in": "0004_usage_retention_anchors.sql",
+      "resource_kind": "usage_request_anchor",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["request_id + request_started_at"],
+        "note": "Allows usage to outlive request metadata."
+      },
+      "target": {
+        "authority": "event_scope",
+        "scope_columns": ["organization_id", "project_id", "environment_id"],
+        "uniqueness": ["full scope + request_id + request_started_at"],
+        "deletion": "fact_retention",
+        "transfer": "action_scope_fixed",
+        "retention": "usage_fact",
+        "reference": "request_fact_composite",
+        "default_scope_migration": "derive_request_scope"
+      }
+    },
+    {
+      "name": "oidc_email_role_mappings",
+      "introduced_in": "0005_oidc.sql",
+      "resource_kind": "identity_provider_email_mapping",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["configuration_id + normalized email"],
+        "note": "Maps directly to a fixed installation role."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "identity_provider_id"],
+        "uniqueness": ["organization_id + identity_provider_id + normalized email"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "oidc_group_role_mappings",
+      "introduced_in": "0005_oidc.sql",
+      "resource_kind": "identity_provider_group_mapping",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["configuration_id + group name"],
+        "note": "Maps asserted group text directly to a fixed installation role."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "identity_provider_id"],
+        "uniqueness": ["organization_id + identity_provider_id + normalized external group key"],
+        "deletion": "unpublished_child_cascade",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "oidc_authorization_flows",
+      "introduced_in": "0005_oidc.sql",
+      "resource_kind": "oidc_authorization_flow",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["flow UUID", "state digest installation-wide"],
+        "note": "Bound to one singleton configuration revision and optional global user."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "identity_provider_id"],
+        "uniqueness": ["flow UUID installation-wide", "state digest installation-wide"],
+        "deletion": "ephemeral_expiry",
+        "transfer": "forbidden",
+        "retention": "authorization_flow_expiry",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "pricing_currency",
+      "introduced_in": "0010_usage_integrity.sql",
+      "resource_kind": "organization_pricing_currency",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["singleton = true"],
+        "note": "All installation pricing currently uses one ISO currency."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id"],
+        "uniqueness": ["one default pricing currency per organization"],
+        "deletion": "configuration_restrict",
+        "transfer": "forbidden",
+        "retention": "pricing_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "attach_default_organization"
+      }
+    },
+    {
+      "name": "usage_loss_reporter_state",
+      "introduced_in": "0010_usage_integrity.sql",
+      "resource_kind": "usage_loss_reporter_coordination",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["singleton = true"],
+        "note": "Installation worker coordination, not tenant data."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["one current reporter state per installation"],
+        "deletion": "installation_internal_retention",
+        "transfer": "not_applicable",
+        "retention": "singleton_state",
+        "reference": "installation_internal",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "runtime_generation_provider_configs",
+      "introduced_in": "0013_runtime_fallback_integrity.sql",
+      "resource_kind": "runtime_provider_revision_snapshot",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["runtime_generation_id + provider_id"],
+        "note": "Release-time sidecar proves transport and credential revision pinning."
+      },
+      "target": {
+        "authority": "environment",
+        "scope_columns": ["organization_id", "project_id", "environment_id", "runtime_generation_id", "provider_grant_id"],
+        "uniqueness": ["environment_id + runtime_generation_id + provider grant/revision"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "provider_grant_required",
+        "default_scope_migration": "create_default_provider_grants"
+      }
+    },
+    {
+      "name": "provider_revisions",
+      "introduced_in": "0015_provider_revisions.sql",
+      "resource_kind": "provider_connection_revision",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["provider_id + revision", "provider_id + revision UUID"],
+        "note": "Immutable transport-affecting provider revision."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "provider_id"],
+        "uniqueness": ["organization_id + provider_id + revision", "organization_id + provider_id + revision UUID"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "provider_revision_models",
+      "introduced_in": "0015_provider_revisions.sql",
+      "resource_kind": "provider_revision_model",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["provider_revision_id + source model ID", "provider_revision_id + upstream model"],
+        "note": "Immutable model child of provider revision."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "provider_id", "provider_revision_id"],
+        "uniqueness": ["organization_id + provider_revision_id + source model ID", "organization_id + provider_revision_id + upstream model"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "provider_revision_capabilities",
+      "introduced_in": "0015_provider_revisions.sql",
+      "resource_kind": "provider_revision_capability_evidence",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["provider_revision_model_id + operation + surface + mode"],
+        "note": "Immutable declared/probed/certified evidence."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "provider_id", "provider_revision_id", "provider_revision_model_id"],
+        "uniqueness": ["organization_id + provider_revision_model_id + operation + surface + mode"],
+        "deletion": "immutable_history",
+        "transfer": "inherited",
+        "retention": "configuration_history",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "inherit_parent"
+      }
+    },
+    {
+      "name": "usage_consumer_health",
+      "introduced_in": "0016_usage_consumer_health.sql",
+      "resource_kind": "usage_consumer_coordination",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["consumer name"],
+        "note": "Process/consumer checkpoint used for readiness and backup safety."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["installation_id + consumer group name"],
+        "deletion": "installation_internal_retention",
+        "transfer": "not_applicable",
+        "retention": "singleton_state",
+        "reference": "installation_internal",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "public_auth_rate_limits",
+      "introduced_in": "0017_public_auth_hardening.sql",
+      "resource_kind": "public_auth_admission_bucket",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["action + bucket scope + opaque key digest"],
+        "note": "Pre-authentication defense intentionally cannot trust tenant scope."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["installation_id + action + bucket scope + opaque key digest"],
+        "deletion": "ephemeral_expiry",
+        "transfer": "not_applicable",
+        "retention": "public_auth_window",
+        "reference": "installation_internal",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "usage_gap_hourly",
+      "introduced_in": "0019_usage_gap_hourly.sql",
+      "resource_kind": "usage_gap_hourly_evidence",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["bucket + gateway instance + reason"],
+        "note": "Hourly additive evidence may represent an unattributable multi-scope loss interval."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id", "scope_resolution", "organization_id", "project_id", "environment_id"],
+        "uniqueness": ["scope resolution + exact scope IDs + bucket + bounded source class + reason"],
+        "deletion": "fact_retention",
+        "transfer": "not_applicable",
+        "retention": "usage_aggregate",
+        "reference": "installation_internal",
+        "default_scope_migration": "split_usage_evidence"
+      }
+    },
+    {
+      "name": "usage_gateway_epochs",
+      "introduced_in": "0020_usage_gateway_epochs.sql",
+      "resource_kind": "gateway_usage_epoch_evidence",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["one open epoch per gateway instance", "process epoch ID"],
+        "note": "One gateway process may serve many environments."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["installation_id + gateway instance for one open epoch", "installation_id + process epoch ID"],
+        "deletion": "installation_internal_retention",
+        "transfer": "not_applicable",
+        "retention": "usage_epoch",
+        "reference": "installation_internal",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "usage_event_receipts",
+      "introduced_in": "0023_usage_event_receipts.sql",
+      "resource_kind": "usage_replay_receipt",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["usage event UUID"],
+        "note": "Installation worker deduplication state, not a tenant query surface."
+      },
+      "target": {
+        "authority": "installation_evidence",
+        "scope_columns": ["installation_id"],
+        "uniqueness": ["installation_id + usage event UUID"],
+        "deletion": "installation_internal_retention",
+        "transfer": "not_applicable",
+        "retention": "usage_replay_receipt",
+        "reference": "installation_internal",
+        "default_scope_migration": "remain_global"
+      }
+    },
+    {
+      "name": "oidc_login_flow_consumptions",
+      "introduced_in": "0026_oidc_login_flow_consumptions.sql",
+      "resource_kind": "oidc_login_replay_fence",
+      "current": {
+        "authority": "installation",
+        "scope_columns": [],
+        "uniqueness": ["flow UUID installation-wide"],
+        "note": "Opaque one-time callback consumption record has no configuration reference."
+      },
+      "target": {
+        "authority": "organization",
+        "scope_columns": ["organization_id", "identity_provider_id"],
+        "uniqueness": ["flow UUID installation-wide", "organization_id + identity_provider_id + flow UUID"],
+        "deletion": "ephemeral_expiry",
+        "transfer": "forbidden",
+        "retention": "authorization_flow_expiry",
+        "reference": "same_organization_composite",
+        "default_scope_migration": "attach_default_organization"
+      }
+    }
+  ],
+  "planned_resources": [
+    {
+      "resource_kind": "organization",
+      "storage_disposition": "new",
+      "authority": "installation",
+      "scope_columns": ["installation_id"],
+      "uniqueness": ["installation_id + normalized organization name", "installation_id + organization UUID"],
+      "deletion": "scope_parent_async",
+      "transfer": "forbidden",
+      "retention": "installation_lifetime",
+      "reference": "root",
+      "default_scope_migration": "installation_identity"
+    },
+    {
+      "resource_kind": "project",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + normalized project name", "organization_id + project UUID"],
+      "deletion": "scope_parent_async",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "installation_identity"
+    },
+    {
+      "resource_kind": "environment",
+      "storage_disposition": "new",
+      "authority": "project",
+      "scope_columns": ["organization_id", "project_id"],
+      "uniqueness": ["project_id + normalized environment name", "organization_id + project_id + environment UUID", "environment incarnation UUID"],
+      "deletion": "scope_parent_async",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_project_composite",
+      "default_scope_migration": "installation_identity"
+    },
+    {
+      "resource_kind": "organization_membership",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "user_id"],
+      "uniqueness": ["organization_id + user_id"],
+      "deletion": "configuration_restrict",
+      "transfer": "global_identity_membership_only",
+      "retention": "identity_lifetime",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "remain_global"
+    },
+    {
+      "resource_kind": "group",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + normalized group name", "organization_id + external identity-provider group key when federated"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "identity_lifetime",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "attach_default_organization"
+    },
+    {
+      "resource_kind": "group_membership",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "group_id", "user_id"],
+      "uniqueness": ["organization_id + group_id + user_id + source"],
+      "deletion": "configuration_restrict",
+      "transfer": "inherited",
+      "retention": "identity_lifetime",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "attach_default_organization"
+    },
+    {
+      "resource_kind": "custom_role",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + normalized role name", "organization_id + role UUID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "attach_default_organization"
+    },
+    {
+      "resource_kind": "role_binding",
+      "storage_disposition": "new",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "principal_id", "role_id"],
+      "uniqueness": ["principal + role + exact resource scope"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "attach_default_organization"
+    },
+    {
+      "resource_kind": "application",
+      "storage_disposition": "new",
+      "authority": "project",
+      "scope_columns": ["organization_id", "project_id"],
+      "uniqueness": ["project_id + normalized application name", "project_id + application UUID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_project_composite",
+      "default_scope_migration": "attach_default_project"
+    },
+    {
+      "resource_kind": "service_account",
+      "storage_disposition": "new",
+      "authority": "project",
+      "scope_columns": ["organization_id", "project_id", "application_id"],
+      "uniqueness": ["project_id + normalized service-account name", "project_id + service-account UUID"],
+      "deletion": "credential_revoke",
+      "transfer": "forbidden",
+      "retention": "identity_lifetime",
+      "reference": "same_project_composite",
+      "default_scope_migration": "attach_default_project"
+    },
+    {
+      "resource_kind": "management_credential_revision",
+      "storage_disposition": "new",
+      "authority": "project",
+      "scope_columns": ["organization_id", "project_id", "service_account_id"],
+      "uniqueness": ["service_account_id + revision", "opaque lookup ID installation-wide when lookup is required"],
+      "deletion": "credential_revoke",
+      "transfer": "inherited",
+      "retention": "credential_history",
+      "reference": "same_project_composite",
+      "default_scope_migration": "attach_default_project"
+    },
+    {
+      "resource_kind": "provider_grant",
+      "storage_disposition": "new",
+      "authority": "project",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "provider_id"],
+      "uniqueness": ["project_id + nullable environment_id + provider_id"],
+      "deletion": "configuration_restrict",
+      "transfer": "grant_only",
+      "retention": "configuration_history",
+      "reference": "provider_grant_required",
+      "default_scope_migration": "create_default_provider_grants"
+    },
+    {
+      "resource_kind": "connector_type",
+      "storage_disposition": "new",
+      "authority": "installation",
+      "scope_columns": ["installation_id"],
+      "uniqueness": ["stable connector type ID + semantic major version", "registry name + version"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "root",
+      "default_scope_migration": "remain_global"
+    },
+    {
+      "resource_kind": "connector_installation",
+      "storage_disposition": "new",
+      "authority": "installation",
+      "scope_columns": ["installation_id", "connector_type_id"],
+      "uniqueness": ["connector type ID + installed version + instance identity"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "root",
+      "default_scope_migration": "remain_global"
+    },
+    {
+      "resource_kind": "external_secret_reference",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "provider_id"],
+      "uniqueness": ["organization_id + secret reference UUID", "provider revision + purpose"],
+      "deletion": "credential_revoke",
+      "transfer": "forbidden",
+      "retention": "credential_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "attach_default_organization"
+    },
+    {
+      "resource_kind": "credential_authority_entry",
+      "storage_disposition": "new projection from inference credentials",
+      "authority": "environment",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "environment_incarnation", "credential_id"],
+      "uniqueness": ["opaque lookup ID installation-wide", "credential ID + security revision"],
+      "deletion": "credential_revoke",
+      "transfer": "forbidden",
+      "retention": "credential_history",
+      "reference": "credential_lookup",
+      "default_scope_migration": "attach_default_environment"
+    },
+    {
+      "resource_kind": "provider_dependency_authority_entry",
+      "storage_disposition": "new security projection from provider credential and grant revisions",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "dependency_kind", "dependency_id"],
+      "uniqueness": ["dependency kind + dependency ID + dependency revision + security authority generation"],
+      "deletion": "credential_revoke",
+      "transfer": "forbidden",
+      "retention": "credential_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "create_default_provider_grants"
+    },
+    {
+      "resource_kind": "policy_set",
+      "storage_disposition": "new durable organization-owned policy namespace",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + normalized policy-set name", "organization_id + policy-set UUID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "policy_program_revision",
+      "storage_disposition": "new durable immutable revision",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "policy_set_id"],
+      "uniqueness": ["organization_id + policy-set ID + revision", "organization_id + program UUID + revision"],
+      "deletion": "immutable_history",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "policy_binding",
+      "storage_disposition": "new durable explicit binding; organization defaults are bindings, not implicit inheritance",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "application_id", "credential_id", "policy_set_id", "policy_program_revision_id"],
+      "uniqueness": ["phase + precedence + exact resource scope + policy-set ID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "compiled_policy_projection",
+      "storage_disposition": "non-durable immutable projection embedded in one environment runtime; never an independent table or mutation API",
+      "authority": "environment",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "runtime_generation_id"],
+      "uniqueness": ["environment runtime generation + compiled policy aggregate digest"],
+      "deletion": "immutable_history",
+      "transfer": "not_applicable",
+      "retention": "configuration_history",
+      "reference": "same_environment_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "saml_identity_provider_configuration",
+      "storage_disposition": "new durable organization configuration; raw SAML assertions remain non-durable external inputs",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + normalized provider name", "organization_id + exact entity ID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "scim_configuration",
+      "storage_disposition": "new durable organization provisioning endpoint configuration",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + SCIM configuration UUID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "scim_credential_revision",
+      "storage_disposition": "new durable digest/encrypted credential metadata; bearer plaintext is never durable",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "scim_configuration_id"],
+      "uniqueness": ["SCIM configuration + credential revision", "opaque lookup ID installation-wide"],
+      "deletion": "credential_revoke",
+      "transfer": "forbidden",
+      "retention": "credential_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "scim_resource_version",
+      "storage_disposition": "new durable organization-scoped external-resource mapping and version fence",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "scim_configuration_id"],
+      "uniqueness": ["organization_id + SCIM configuration + resource type + external ID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "identity_lifetime",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "approval_policy",
+      "storage_disposition": "new durable scoped approval rule",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id"],
+      "uniqueness": ["action kind + exact resource scope + revision"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "approval_request_and_decision",
+      "storage_disposition": "new durable immutable request plus append-only decisions; approval UI state is a projection",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "actor_id", "approval_policy_id"],
+      "uniqueness": ["approval request UUID", "request UUID + decision actor + decision revision"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "audit_evidence",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "break_glass_grant",
+      "storage_disposition": "new durable time-bounded scoped authority; every use emits separate audit evidence",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "principal_id"],
+      "uniqueness": ["grant UUID", "principal + exact scope + activation revision"],
+      "deletion": "credential_revoke",
+      "transfer": "forbidden",
+      "retention": "audit_evidence",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "network_egress_policy",
+      "storage_disposition": "new durable organization policy with environment/provider bindings; resolved DNS and connection state are non-durable",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "provider_id"],
+      "uniqueness": ["organization_id + normalized egress policy name + revision"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "durable_media_object",
+      "storage_disposition": "durable scoped metadata in PostgreSQL plus externally stored encrypted bytes; local spool is non-authoritative",
+      "authority": "event_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "request_id", "media_id"],
+      "uniqueness": ["organization_id + environment_id + opaque media ID", "object-store key bound to exact scope and digest"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "media_job",
+      "reference": "event_scope_immutable",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "audit_or_event_export_checkpoint",
+      "storage_disposition": "new durable scoped delivery cursor and gap evidence",
+      "authority": "organization",
+      "scope_columns": ["organization_id", "export_sink_id"],
+      "uniqueness": ["organization_id + sink ID + partition key"],
+      "deletion": "fact_retention",
+      "transfer": "forbidden",
+      "retention": "audit_evidence",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "audit_or_event_export_delivery",
+      "storage_disposition": "new durable content-free delivery receipt; exported payload lives only in the authorized external sink",
+      "authority": "event_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "export_sink_id"],
+      "uniqueness": ["sink ID + event ID + delivery attempt"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "audit_evidence",
+      "reference": "event_scope_immutable",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "declarative_document_revision",
+      "storage_disposition": "new durable canonical metadata-only desired-state document revision",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id"],
+      "uniqueness": ["document UUID + revision", "exact scope + document kind + normalized name + revision"],
+      "deletion": "immutable_history",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "declarative_apply_and_drift_observation",
+      "storage_disposition": "new durable scoped operation and content-free observed drift fact; Terraform local state is external and non-authoritative",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "document_revision_id"],
+      "uniqueness": ["operation UUID", "document revision + observed resource revision + observation time"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "audit_evidence",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "support_bundle_request_and_artifact",
+      "storage_disposition": "durable scoped request and redacted artifact metadata; encrypted bundle bytes are external, expiring, and never database content",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "requesting_principal_id"],
+      "uniqueness": ["support request UUID", "request UUID + artifact digest"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "audit_evidence",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "not_applicable_new_resource"
+    },
+    {
+      "resource_kind": "quota_definition",
+      "storage_disposition": "new",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "application_id", "credential_id"],
+      "uniqueness": ["quota kind + exact resource scope + policy revision"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "attach_default_environment"
+    },
+    {
+      "resource_kind": "quota_reservation",
+      "storage_disposition": "new",
+      "authority": "event_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "application_id", "credential_id"],
+      "uniqueness": ["reservation UUID", "request ID + quota definition + reservation phase"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "usage_fact",
+      "reference": "event_scope_immutable",
+      "default_scope_migration": "attach_default_environment"
+    },
+    {
+      "resource_kind": "budget_definition",
+      "storage_disposition": "new",
+      "authority": "action_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "application_id"],
+      "uniqueness": ["budget period + currency + exact resource scope + budget name"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "pricing_history",
+      "reference": "action_scope_explicit",
+      "default_scope_migration": "attach_default_project"
+    },
+    {
+      "resource_kind": "budget_reservation_and_reconciliation",
+      "storage_disposition": "new",
+      "authority": "event_scope",
+      "scope_columns": ["organization_id", "project_id", "environment_id", "application_id", "credential_id"],
+      "uniqueness": ["reservation UUID", "request ID + budget definition + reconciliation phase"],
+      "deletion": "fact_retention",
+      "transfer": "action_scope_fixed",
+      "retention": "usage_fact",
+      "reference": "event_scope_immutable",
+      "default_scope_migration": "attach_default_environment"
+    },
+    {
+      "resource_kind": "audit_or_event_export_sink",
+      "storage_disposition": "new",
+      "authority": "organization",
+      "scope_columns": ["organization_id"],
+      "uniqueness": ["organization_id + normalized sink name", "organization_id + sink UUID"],
+      "deletion": "configuration_restrict",
+      "transfer": "forbidden",
+      "retention": "configuration_history",
+      "reference": "same_organization_composite",
+      "default_scope_migration": "attach_default_organization"
+    }
+  ],
+  "contract_invariants": [
+    "No durable resource is implicitly global. Installation/global rows have an explicit rationale and no tenant API enumeration surface.",
+    "UUID possession never authorizes access; application authorization and composite database integrity both enforce ancestry.",
+    "RLS may add defense in depth but is not the sole isolation boundary.",
+    "Provider use crosses organization-to-environment ownership only through an explicit same-organization grant.",
+    "Provider credential and grant invalidations enter credential authority before a cached environment runtime may admit new work.",
+    "Operational and financial facts copy immutable scope at creation; rollups and exports never infer it from mutable configuration.",
+    "Public credential lookup IDs are installation-unique for pre-scope lookup but disclose no scope and cannot select a tenant.",
+    "Default-scope migration preserves existing IDs, revisions, secrets, route slugs, runtime evidence, and usage totals and aborts on ambiguous ancestry.",
+    "Cross-owner transfer is unsupported in beta; clone/export and reactivation preserve evidence boundaries.",
+    "Deletion cannot erase another scope's data or evidence and cannot make retained facts change ownership.",
+    "Durable records remain metadata-only; unknown usage or price remains incomplete or unpriced, never zero."
+  ]
+}

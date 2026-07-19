@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "contract_id": "olp.enterprise.policy.v1",
+  "decision_issue": "XOD-85",
+  "decision_status": "accepted_target",
+  "approval_status": "approval_pending",
+  "implementation_status": "not_implemented",
+  "qualification_status": "not_qualified",
+  "implementation_milestone": "M5",
+  "qualification_milestone": "M8",
+  "identity": {
+    "language_id": "olp.policy",
+    "language_version": "1.0.0",
+    "media_type": "application/vnd.olp.policy-program.v1+json",
+    "encoding": "utf-8_JSON",
+    "canonicalization": "RFC8785_JSON_Canonicalization_Scheme",
+    "digest": "sha256",
+    "unknown_field_or_operator_behavior": "reject_before_activation"
+  },
+  "artifacts": {
+    "program_schema": {
+      "path": "docs/enterprise/contracts/policy/policy-program-v1.schema.json",
+      "sha256": "c28e5ab728ab8a9dd23457e4d90c35e791eb17ce1a77846e2821454b66ca3084"
+    },
+    "golden_vectors": {
+      "path": "docs/enterprise/contracts/policy/policy-v1-golden.json",
+      "sha256": "1b19e577222a8af43843efcb3b85c83f2306147473353281e48c6d6495509c13"
+    }
+  },
+  "ownership": {
+    "policy_set": "organization",
+    "policy_program_revision": "organization",
+    "policy_binding": "action_scope",
+    "compiled_policy_projection": "environment_non_durable",
+    "organization_defaults": "resolved_to_explicit_environment_compile_inputs",
+    "runtime_pins": [
+      "policy_set_id",
+      "policy_program_revision_id",
+      "program_sha256",
+      "binding_revision_id",
+      "language_version",
+      "compiler_version",
+      "input_schema_version"
+    ]
+  },
+  "phase_order": [
+    "credential",
+    "admission",
+    "request_guard",
+    "route",
+    "attempt_result",
+    "reconcile"
+  ],
+  "phases": {
+    "credential": {
+      "content_access": false,
+      "inputs": ["scope", "principal", "credential", "operation", "surface", "mode", "source_class"],
+      "forbidden": ["credential_material", "raw_headers", "request_body", "client_asserted_scope"],
+      "actions": ["deny", "require_credential_class", "select_admission_policy"]
+    },
+    "admission": {
+      "content_access": false,
+      "inputs": ["request_context", "operation_metadata", "declared_bounds", "observed_bounds", "quota_state", "budget_state", "rounded_server_time"],
+      "forbidden": ["request_content", "response_content", "tool_content", "media_bytes", "provider_secrets"],
+      "actions": ["allow", "deny", "reserve_quota", "reserve_budget", "cap_output", "add_decision_tag"]
+    },
+    "request_guard": {
+      "content_access": true,
+      "inputs": ["bounded_canonical_text", "bounded_tool_schema", "bounded_tool_arguments", "media_type_and_size"],
+      "forbidden": ["provider_credentials", "raw_headers", "media_bytes", "prior_requests", "provider_response"],
+      "actions": ["allow", "deny", "redact_field", "remove_field"]
+    },
+    "route": {
+      "content_access": false,
+      "inputs": ["request_context", "certified_candidates", "grant_facts", "policy_facts", "health_class", "cost_class"],
+      "forbidden": ["request_content", "response_content", "secrets", "arbitrary_telemetry_labels"],
+      "actions": ["deny", "filter_candidate", "select_score_profile", "lower_attempts", "lower_concurrency", "lower_timeout"]
+    },
+    "attempt_result": {
+      "content_access": false,
+      "inputs": ["attempt_metadata", "error_class", "error_phase", "commitment_state", "usage_metadata"],
+      "forbidden": ["provider_error_text", "response_content", "raw_headers"],
+      "actions": ["stop", "continue", "mark_usage_incomplete"]
+    },
+    "reconcile": {
+      "content_access": false,
+      "inputs": ["reservations", "terminal_usage", "usage_completeness", "pricing_provenance", "budget_version", "quota_version"],
+      "forbidden": ["request_content", "response_content", "tool_content", "media_content", "credentials"],
+      "actions": ["commit_reservation", "release_reservation", "record_discrepancy", "mark_hard_control_unhealthy"]
+    }
+  },
+  "action_semantics": {
+    "parameter_groups": {
+      "none": ["allow", "deny", "stop", "continue", "mark_usage_incomplete", "commit_reservation", "release_reservation", "mark_hard_control_unhealthy"],
+      "name": ["require_credential_class", "select_admission_policy", "reserve_quota", "reserve_budget", "add_decision_tag", "select_score_profile", "record_discrepancy"],
+      "integer_value": ["cap_output", "lower_attempts", "lower_concurrency", "lower_timeout"],
+      "field_path": ["redact_field", "remove_field"],
+      "candidate_ids": ["filter_candidate"]
+    },
+    "parameter_rule": "Exactly the parameter named by the action's group is required; parameters from every other group are forbidden.",
+    "advisory_allowed_actions": ["add_decision_tag", "mark_usage_incomplete", "record_discrepancy"],
+    "hard_only_actions": [
+      "allow", "deny", "require_credential_class", "select_admission_policy", "reserve_quota", "reserve_budget",
+      "cap_output", "redact_field", "remove_field", "filter_candidate", "select_score_profile", "lower_attempts",
+      "lower_concurrency", "lower_timeout", "stop", "continue", "commit_reservation", "release_reservation",
+      "mark_hard_control_unhealthy"
+    ],
+    "invalid_parameter_or_advisory_combination": "reject_program_before_activation"
+  },
+  "type_system": {
+    "types": ["boolean", "int64", "decimal_29_9", "bounded_utf8", "closed_enum", "uuid", "timestamp_epoch_minute", "bounded_list", "null"],
+    "decimal": {
+      "precision": 29,
+      "scale": 9,
+      "canonical_text": "exactly_nine_fractional_digits_no_leading_plus_no_integer_leading_zero_negative_zero_forbidden",
+      "rounding": "round_half_even_only_at_typed_input_boundary",
+      "overflow": "evaluation_error"
+    },
+    "string_comparison": "utf8_bytewise_after_schema_declared_normalization; content_is_never_implicitly_normalized",
+    "missing_field": "evaluation_error_unless_checked_by_present_operator",
+    "null_is_missing": false,
+    "collection_order": "canonical_input_order_or_stable_resource_id_order_declared_by_input_schema",
+    "ambient_clock_or_randomness": false
+  },
+  "operators": {
+    "closed_set": ["const", "not", "all", "any", "compare", "present", "in"],
+    "comparison_set": ["eq", "ne", "lt", "lte", "gt", "gte"],
+    "regex_glob_substring_and_customer_functions": "forbidden_in_v1"
+  },
+  "evaluation": {
+    "rule_order": "document_order",
+    "boolean_order": "left_to_right_short_circuit",
+    "matching_rule_actions": "append_in_document_order",
+    "terminal_actions": ["deny", "stop"],
+    "default_actions": "run_only_when_no_rule_matches; an empty array means no_policy_change_and_continue_to_the_next_fixed_phase",
+    "loops_recursion_network_filesystem_customer_code": "forbidden",
+    "simulation_and_enforcement_evaluator": "identical_binary_and_phase_entrypoint",
+    "hard_failure": "deny_or_reject_activation_without_side_effect",
+    "advisory_failure": "skip_only_the_failed_action_when_that_action_explicitly_sets enforcement=advisory and its kind is advisory_allowed; emit a bounded audit outcome",
+    "bound_exhaustion": "evaluation_error"
+  },
+  "execution_boundary": {
+    "program_representation": "validated_declarative_data_only",
+    "execution_authority": "trusted_OLP_policy_evaluator_only",
+    "customer_provided_executable_payload_allowed": false,
+    "dynamic_code_loading_allowed": false,
+    "forbidden_models": [
+      "native_shared_library",
+      "extern_c_abi",
+      "libloading",
+      "customer_wasm",
+      "customer_javascript_or_script",
+      "general_purpose_bytecode",
+      "network_or_filesystem_extension",
+      "runtime_code_generation"
+    ]
+  },
+  "binding_composition": {
+    "scope_order_broad_to_narrow": ["organization", "project", "environment", "application", "credential"],
+    "within_scope_order": "phase_then_explicit_precedence_ascending_then_binding_uuid_bytewise",
+    "all_applicable_bindings_evaluated": true,
+    "narrower_scope_may_weaken_ancestor_hard_control": false,
+    "deny_and_stop": "dominant_and_terminal",
+    "allow": "never_cancels_a_deny_or_other_hard_restriction",
+    "candidate_filters": "set_intersection_only_and_never_add_an_uncertified_or_ungranted_candidate",
+    "caps_timeouts_concurrency_attempts": "minimum_of_all_applicable_values",
+    "required_credential_class": "strongest_class_in_the_server_owned_order",
+    "reservations": "every_distinct_applicable_quota_and_budget_reservation_applies",
+    "redaction_and_removal": "set_union_and_removed_data_cannot_be_reintroduced",
+    "decision_tags": "deduplicated_then_sorted_by_utf8_bytes",
+    "score_profile_conflict": "reject_activation_unless_the_narrower_profile_is_in_every_ancestor_allowlist",
+    "unresolved_action_conflict": "reject_activation"
+  },
+  "lifecycle": {
+    "states": ["draft", "validated", "compiled", "approval_pending", "active", "superseded", "disabled"],
+    "transition_order": "draft_to_validated_to_compiled_to_optional_approval_pending_to_active",
+    "validation": "schema_type_phase_visibility_action_parameter_and_bound_checks",
+    "compile": "canonical_program_and_all_applicable_bindings_produce_content_addressed_immutable_bytes",
+    "approval_required": "server_owned_approval_policy_decides_before_activation_and_cannot_be_bypassed_by_a_narrower_scope",
+    "activation": "publish_in_one_new_monotonic_environment_runtime_generation",
+    "active_revision_mutation": "forbidden",
+    "rollback": "select_a_prior_verified_program_in_a_new_program_revision_binding_revision_and_environment_generation_after_current_authority_checks",
+    "disabled_or_superseded_revision_new_activation": "forbidden"
+  },
+  "bounds": {
+    "policy_programs_per_organization": 1000,
+    "policy_bindings_per_environment": 1000,
+    "compiled_policy_bytes_per_program": 65536,
+    "compiled_policy_bytes_per_environment_maximum": 2097152,
+    "compiled_policy_deduplication_key": "compiled_program_sha256",
+    "policy_nodes_per_program": 1000,
+    "policy_nesting_per_program": 32,
+    "policy_evaluation_steps_per_phase": 10000,
+    "input_collection_items_per_phase": 4096,
+    "output_actions_per_phase": 32,
+    "string_bytes_per_value": 8192,
+    "decision_tags_per_phase": 16,
+    "reason_code_bytes": 64,
+    "maximum_composition": "all per-item limits remain subject to the compiled-per-environment and runtime payload aggregate bounds"
+  },
+  "privacy": {
+    "content_lifetime": "request_memory_only_in_request_guard",
+    "durable_decision_fields": [
+      "request_id", "scope_ids", "program_revision_id", "program_sha256", "binding_revision_id",
+      "phase", "result_class", "reason_codes", "action_kinds", "evaluation_steps", "duration_class"
+    ],
+    "durable_forbidden": ["request_content", "response_content", "tool_content", "media_bytes", "raw_headers", "credentials", "arbitrary_input_values"],
+    "metric_labels": ["phase", "result_class", "action_kind", "bounded_failure_class"]
+  },
+  "compatibility": {
+    "major": "remove_or_change_operator_type_phase_input_action_or_evaluation_meaning",
+    "minor": "add_optional_input_or_action_that_old_readers_ignore_and_producers_emit_only_after_reader_capability_gate",
+    "patch": "meaning_preserving_schema_or_diagnostic_correction",
+    "stored_program_reader_window": "N_and_N_minus_one_plus_maximum_program_retention",
+    "unknown_version_operator_or_action": "reject_activation",
+    "field_numbers_or_enum_ordinals_reused": false
+  },
+  "conformance": {
+    "required": [
+      "program_schema_validation", "golden_vectors", "phase_input_visibility_negative_tests",
+      "deterministic_replay", "simulation_enforcement_equality", "bound_exhaustion",
+      "hard_and_advisory_failure", "content_canary_sink_scan", "cross_version_decode"
+    ],
+    "golden_vectors_are_normative": true,
+    "planned_runner": "tests/policy-conformance",
+    "qualification_gate": "EB-05"
+  },
+  "current_implementation": {
+    "policy_ir_available": false,
+    "policy_evaluator_available": false,
+    "anchors": ["crates/domain/src/ports.rs", "apps/olp/src/runtime.rs"]
+  },
+  "approval": {
+    "required_authorities": ["architecture_domain", "gateway_security", "policy_economics", "storage_api"],
+    "evidence_source": "docs/enterprise/contracts/enterprise-beta-scorecard.json#/m0_contract_gate/decisions/2",
+    "evidence": ["protected_repository_review", "XOD-85_completion"]
+  }
+}

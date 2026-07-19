@@ -1,0 +1,371 @@
+syntax = "proto3";
+
+package olp.connector.v1;
+
+// ConnectorService is the only enterprise-beta connector service. OLP is the
+// client for every RPC. Transport authentication, message-size enforcement,
+// string-field bounds, and semantic stream/pagination state machines are
+// specified by connector-v1.json. No protobuf string is implicitly unbounded.
+service ConnectorService {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+  rpc Deconfigure(DeconfigureRequest) returns (DeconfigureResponse);
+  rpc DiscoverModels(DiscoverModelsRequest) returns (stream DiscoverModelsResponse);
+  rpc CertifyCapability(CertifyCapabilityRequest) returns (CertifyCapabilityResponse);
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+  rpc Execute(stream ExecuteClientFrame) returns (stream ExecuteServerFrame);
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+}
+
+enum Feature {
+  FEATURE_UNSPECIFIED = 0;
+  FEATURE_SERVER_STREAMING = 1;
+  FEATURE_REQUEST_MEDIA = 2;
+  FEATURE_RESPONSE_MEDIA = 3;
+  FEATURE_EXTERNAL_SECRET_REFERENCE = 4;
+  FEATURE_USAGE_V1 = 5;
+}
+
+enum CertificationOutcome {
+  CERTIFICATION_OUTCOME_UNSPECIFIED = 0;
+  CERTIFICATION_OUTCOME_ACCEPTED = 1;
+  CERTIFICATION_OUTCOME_REJECTED = 2;
+  CERTIFICATION_OUTCOME_INCONCLUSIVE = 3;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_READY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_UNAVAILABLE = 3;
+}
+
+enum ErrorPhase {
+  ERROR_PHASE_UNSPECIFIED = 0;
+  ERROR_PHASE_CONFIGURE = 1;
+  ERROR_PHASE_CONNECT = 2;
+  ERROR_PHASE_FIRST_BYTE = 3;
+  ERROR_PHASE_BODY = 4;
+  ERROR_PHASE_USAGE = 5;
+  ERROR_PHASE_CANCEL = 6;
+}
+
+enum ErrorClass {
+  ERROR_CLASS_UNSPECIFIED = 0;
+  ERROR_CLASS_AUTHENTICATION = 1;
+  ERROR_CLASS_AUTHORIZATION = 2;
+  ERROR_CLASS_CONFIGURATION = 3;
+  ERROR_CLASS_CONNECT = 4;
+  ERROR_CLASS_TIMEOUT = 5;
+  ERROR_CLASS_RATE_LIMIT = 6;
+  ERROR_CLASS_UPSTREAM_SERVER = 7;
+  ERROR_CLASS_UPSTREAM_CLIENT = 8;
+  ERROR_CLASS_PROTOCOL = 9;
+  ERROR_CLASS_CANCELLED = 10;
+  ERROR_CLASS_RESOURCE_EXHAUSTED = 11;
+  ERROR_CLASS_INCOMPATIBLE = 12;
+  ERROR_CLASS_AMBIGUOUS = 13;
+}
+
+enum IdempotencyClass {
+  IDEMPOTENCY_CLASS_UNSPECIFIED = 0;
+  IDEMPOTENCY_CLASS_SAFE = 1;
+  IDEMPOTENCY_CLASS_IDEMPOTENT = 2;
+  IDEMPOTENCY_CLASS_NON_IDEMPOTENT = 3;
+}
+
+enum ExecutionTerminalStatus {
+  EXECUTION_TERMINAL_STATUS_UNSPECIFIED = 0;
+  EXECUTION_TERMINAL_STATUS_SUCCEEDED = 1;
+  EXECUTION_TERMINAL_STATUS_CANCELLED = 2;
+}
+
+message ProtocolLimits {
+  uint64 maximum_message_bytes = 1;
+  uint64 maximum_begin_frame_bytes = 2;
+  uint64 maximum_unary_result_frame_bytes = 3;
+  uint64 maximum_stream_event_frame_bytes = 4;
+  uint64 maximum_media_chunk_frame_bytes = 5;
+  uint64 maximum_canonical_output_bytes_per_execution = 6;
+  uint64 maximum_response_media_bytes_per_execution = 7;
+  uint32 maximum_events_per_execution = 8;
+  uint64 maximum_canonical_request_bytes = 9;
+  uint64 maximum_unary_result_bytes = 10;
+  uint64 maximum_stream_event_bytes = 11;
+  uint64 maximum_media_chunk_bytes = 12;
+  uint32 maximum_request_media_items = 13;
+  uint64 maximum_request_media_bytes_per_execution = 14;
+  uint32 maximum_response_media_items = 15;
+  uint64 maximum_response_media_item_bytes = 16;
+  uint64 maximum_request_media_item_bytes = 17;
+}
+
+message HandshakeRequest {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  repeated Feature supported_features = 3;
+  string olp_instance_id = 4;
+  uint64 maximum_message_bytes = 5;
+}
+
+message HandshakeResponse {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  repeated Feature selected_features = 3;
+  string type_id = 4;
+  string version = 5;
+  string artifact_sha256 = 6;
+  string manifest_sha256 = 7;
+  string connector_instance_id = 8;
+  ProtocolLimits limits = 9;
+}
+
+message CredentialRevisionDelivery {
+  string slot_name = 1;
+  string credential_revision_id = 2;
+  bytes secret_value = 3;
+}
+
+message ExternalSecretReferenceRevisionDelivery {
+  string slot_name = 1;
+  string external_secret_reference_revision_id = 2;
+  bytes opaque_reference = 3;
+}
+
+message ConfigureRequest {
+  string configuration_id = 1;
+  string organization_id = 2;
+  string provider_connection_id = 3;
+  string provider_revision_id = 4;
+  string provider_grant_id = 5;
+  bytes config_json = 6;
+  string config_sha256 = 7;
+  repeated CredentialRevisionDelivery credential_revision_deliveries = 8;
+  repeated ExternalSecretReferenceRevisionDelivery external_secret_reference_revision_deliveries = 9;
+  string certified_capability_set_sha256 = 10;
+  string network_policy_id = 11;
+  string workload_isolation_policy_id = 12;
+  int64 deadline_unix_ms = 13;
+}
+
+message ConfigureResponse {
+  string configuration_handle = 1;
+  string config_sha256 = 2;
+  repeated string credential_revision_ids = 3;
+  repeated string external_secret_reference_revision_ids = 4;
+  bool ready = 5;
+}
+
+message DeconfigureRequest {
+  string configuration_handle = 1;
+  string stable_reason = 2;
+  int64 drain_deadline_unix_ms = 3;
+}
+
+message DeconfigureResponse {
+  bool accepted = 1;
+  bool already_retired = 2;
+}
+
+message DiscoverModelsRequest {
+  string configuration_handle = 1;
+  string draft_etag = 2;
+  uint32 page_limit = 3;
+  string cursor = 4;
+}
+
+message DiscoverModelsResponse {
+  // Only the final model in one page may carry a non-empty next_cursor. It must
+  // advance from every cursor previously observed for the same discovery.
+  // Duplicate model IDs or cursor loops invalidate the entire discovery.
+  string model_id = 1;
+  string display_name = 2;
+  string next_cursor = 3;
+}
+
+message Usage {
+  // Presence is significant: an absent unit is not equivalent to zero.
+  optional uint64 input_tokens = 1;
+  optional uint64 output_tokens = 2;
+  optional uint64 cached_input_tokens = 3;
+  optional uint64 media_units = 4;
+  string provider_request_id = 5;
+  string provider_usage_source = 6;
+  optional bool complete = 7;
+}
+
+message CertifyCapabilityRequest {
+  string configuration_handle = 1;
+  string draft_etag = 2;
+  string provider_model = 3;
+  string operation = 4;
+  string surface = 5;
+  string mode = 6;
+  string probe_nonce = 7;
+}
+
+message CertifyCapabilityResponse {
+  CertificationOutcome outcome = 1;
+  string stable_reason_code = 2;
+  Usage observed_usage = 3;
+}
+
+message CheckHealthRequest {
+  string configuration_handle = 1;
+  string probe_kind = 2;
+}
+
+message CheckHealthResponse {
+  HealthStatus status = 1;
+  string stable_reason_code = 2;
+  int64 observed_at_unix_ms = 3;
+  uint32 retry_after_ms = 4;
+}
+
+message MediaDescriptor {
+  string media_id = 1;
+  string declared_content_type = 2;
+  uint64 maximum_bytes = 3;
+  string sha256_when_known = 4;
+}
+
+message BeginExecution {
+  string execution_id = 1;
+  string request_id = 2;
+  string organization_id = 3;
+  string project_id = 4;
+  string environment_id = 5;
+  string runtime_generation_id = 6;
+  string provider_connection_id = 7;
+  string provider_revision_id = 8;
+  string provider_grant_id = 9;
+  string route_id = 10;
+  string target_id = 11;
+  string operation = 12;
+  string surface = 13;
+  string mode = 14;
+  string provider_model = 15;
+  bytes canonical_request = 16;
+  int64 deadline_unix_ms = 17;
+  IdempotencyClass idempotency_class = 18;
+  repeated MediaDescriptor request_media = 19;
+}
+
+message MediaChunk {
+  string execution_id = 1;
+  string media_id = 2;
+  uint32 sequence = 3;
+  bytes data = 4;
+}
+
+message MediaEnd {
+  string execution_id = 1;
+  string media_id = 2;
+  uint32 next_sequence = 3;
+  uint64 total_bytes = 4;
+  string sha256 = 5;
+}
+
+message CancelExecution {
+  string execution_id = 1;
+  string stable_reason = 2;
+}
+
+message ExecuteClientFrame {
+  // Semantic state: BeginExecution is first and unique. Declared media then
+  // advances by contiguous chunks to one MediaEnd; CancelExecution is the only
+  // client frame accepted after input completion. No frame follows cancel.
+  oneof frame {
+    BeginExecution begin_execution = 1;
+    MediaChunk media_chunk = 2;
+    MediaEnd media_end = 3;
+    CancelExecution cancel_execution = 4;
+  }
+}
+
+message ExecutionAccepted {
+  string execution_id = 1;
+}
+
+message CanonicalEvent {
+  string execution_id = 1;
+  uint64 sequence = 2;
+  bytes canonical_event = 3;
+}
+
+message CanonicalResult {
+  string execution_id = 1;
+  bytes canonical_result = 2;
+}
+
+message ResponseMediaStart {
+  string execution_id = 1;
+  string media_id = 2;
+  string declared_content_type = 3;
+  uint64 declared_maximum_bytes = 4;
+  string sha256_when_known = 5;
+}
+
+message ResponseMediaChunk {
+  string execution_id = 1;
+  string media_id = 2;
+  uint32 sequence = 3;
+  bytes data = 4;
+}
+
+message ResponseMediaEnd {
+  string execution_id = 1;
+  string media_id = 2;
+  uint32 next_sequence = 3;
+  uint64 total_bytes = 4;
+  string sha256 = 5;
+}
+
+message UsageReport {
+  string execution_id = 1;
+  Usage usage = 2;
+}
+
+message ExecutionError {
+  string execution_id = 1;
+  ErrorPhase phase = 2;
+  ErrorClass error_class = 3;
+  string stable_reason_code = 4;
+  string detail = 5;
+}
+
+message ExecutionDone {
+  string execution_id = 1;
+  ExecutionTerminalStatus status = 2;
+}
+
+message ExecuteServerFrame {
+  // Semantic state: ExecutionAccepted, when present, precedes output. Canonical
+  // result and event output are mutually exclusive. Every response media ID
+  // begins with one ResponseMediaStart, advances by contiguous chunks, and has
+  // one ResponseMediaEnd. UsageReport is optional, occurs at most once after
+  // every output frame, and moves the stream into a state where only the unique
+  // ExecutionError or ExecutionDone terminal frame is valid. Missing usage is
+  // incomplete and unpriced. Unknown or unspecified terminal status is invalid.
+  oneof frame {
+    ExecutionAccepted execution_accepted = 1;
+    CanonicalEvent canonical_event = 2;
+    CanonicalResult canonical_result = 3;
+    ResponseMediaChunk response_media_chunk = 4;
+    ResponseMediaEnd response_media_end = 5;
+    UsageReport usage_report = 6;
+    ExecutionError execution_error = 7;
+    ExecutionDone execution_done = 8;
+    ResponseMediaStart response_media_start = 9;
+  }
+}
+
+message CancelRequest {
+  string execution_id = 1;
+  string stable_reason = 2;
+}
+
+message CancelResponse {
+  bool accepted = 1;
+  bool already_terminal = 2;
+}

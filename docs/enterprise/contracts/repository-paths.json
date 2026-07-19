@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "contract_id": "olp.enterprise.repository-paths.v1",
+  "decision_status": "accepted_target",
+  "approval_status": "approval_pending",
+  "implementation_status": "implemented",
+  "qualification_status": "not_applicable",
+  "decision_issue": "XOD-87",
+  "approval": {
+    "required_authorities": [
+      "architecture_domain",
+      "product_release"
+    ],
+    "evidence_source": "docs/enterprise/contracts/enterprise-beta-scorecard.json#/m0_contract_gate/decisions/4"
+  },
+  "paths": [
+    { "path": "Cargo.toml", "kind": "file" },
+    { "path": "CONTRIBUTING.md", "kind": "file" },
+    { "path": "openapi/management.json", "kind": "file" },
+    { "path": "proto/olp/connector/v1/connector.proto", "kind": "file" },
+    { "path": "docs/enterprise/contracts/policy-v1.json", "kind": "file" },
+    { "path": "docs/enterprise/contracts/policy/policy-program-v1.schema.json", "kind": "file" },
+    { "path": "docs/enterprise/contracts/policy/policy-v1-golden.json", "kind": "file" },
+    { "path": "apps/olp", "kind": "directory" },
+    { "path": "apps/olp/src/runtime.rs", "kind": "file" },
+    { "path": "crates/domain", "kind": "directory" },
+    { "path": "crates/domain/src/canonical.rs", "kind": "file" },
+    { "path": "crates/domain/src/ports.rs", "kind": "file" },
+    { "path": "crates/domain/src/routing.rs", "kind": "file" },
+    { "path": "crates/protocols", "kind": "directory" },
+    { "path": "crates/providers", "kind": "directory" },
+    { "path": "crates/providers/src/factory.rs", "kind": "file" },
+    { "path": "crates/storage", "kind": "directory" },
+    { "path": "crates/storage/migrations/0001_initial.sql", "kind": "file" },
+    { "path": "crates/storage/migrations/0022_runtime_publication_isolation.sql", "kind": "file" },
+    { "path": "crates/storage/tests/upgrade_0021_postgres.rs", "kind": "file" },
+    { "path": "scripts/check-boundaries.sh", "kind": "file" },
+    { "path": "scripts/check-policy-v1-golden.jq", "kind": "file" },
+    { "path": "scripts/check-reference-connector-v1.sh", "kind": "file" },
+    { "path": "scripts/decide-upgrade-recovery.sh", "kind": "file" },
+    { "path": "scripts/restore-rehearsal.sh", "kind": "file" },
+    { "path": "scripts/test-migration-contract.sh", "kind": "file" },
+    { "path": "scripts/test-upgrade-recovery-decision.sh", "kind": "file" },
+    { "path": "scripts/upgrade-rehearsal.sh", "kind": "file" },
+    { "path": "tests/conformance", "kind": "directory" },
+    { "path": "tests/reference-connector-v1", "kind": "directory" },
+    { "path": "tests/reference-connector-v1/README.md", "kind": "file" },
+    { "path": "tests/reference-connector-v1/main.rs", "kind": "file" }
+  ]
+}

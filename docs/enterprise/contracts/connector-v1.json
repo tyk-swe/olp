@@ -1,0 +1,1382 @@
+{
+  "schema_version": 1,
+  "contract_id": "olp.enterprise.connector.v1",
+  "decision_status": "accepted_target",
+  "approval_status": "approval_pending",
+  "implementation_status": "not_implemented",
+  "qualification_status": "not_qualified",
+  "decision_issue": "XOD-85",
+  "implementation_milestone": "M4",
+  "qualification_milestone": "M8",
+  "current_implementation": {
+    "provider_identity": "closed ProviderKind enum",
+    "transport_boundary": "in-process Rust ProviderTransport trait",
+    "factory": "closed ProviderConfig and ConcreteConnector enums",
+    "external_protocol_available": false,
+    "policy_ir_available": false,
+    "anchors": [
+      "crates/domain/src/routing.rs",
+      "crates/domain/src/ports.rs",
+      "crates/providers/src/factory.rs",
+      "apps/olp/src/connectors.rs"
+    ]
+  },
+  "trust_model": {
+    "olp_role": "authenticated protocol client and policy enforcement point",
+    "connector_role": "untrusted provider adapter server isolated from OLP processes",
+    "forbidden_extension_models": [
+      "rust_cdylib",
+      "rust_dylib",
+      "native_shared_library",
+      "extern_c_provider_abi",
+      "libloading",
+      "customer_wasm_in_olp",
+      "customer_script_in_olp",
+      "arbitrary_customer_code_in_olp"
+    ],
+    "forbidden_connector_access": [
+      "postgresql",
+      "valkey",
+      "olp_management_api",
+      "olp_runtime_cache",
+      "another_connector_secret",
+      "host_filesystem"
+    ],
+    "server_asserted_authority_fields": [
+      "installation_id",
+      "organization_id",
+      "project_id",
+      "environment_id",
+      "provider_connection_id",
+      "provider_revision_id",
+      "provider_grant_id",
+      "runtime_generation_id",
+      "request_id",
+      "execution_id",
+      "route_id",
+      "target_id"
+    ]
+  },
+  "provider_type_id": {
+    "format": "dns_style",
+    "pattern": "^(?=.{3,128}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+    "minimum_bytes": 3,
+    "maximum_bytes": 128,
+    "case_sensitive": true,
+    "unknown_well_formed_values": "preserve_and_fail_closed_until_type_is_installed",
+    "example": "com.example.private-model"
+  },
+  "artifact_identity": {
+    "version_format": "semver_2",
+    "digest_algorithm": "sha256",
+    "manifest_canonicalization": "RFC8785_JSON_Canonicalization_Scheme",
+    "immutable_registry_key": [
+      "type_id",
+      "version",
+      "artifact_sha256"
+    ],
+    "required_supply_chain_evidence": [
+      "artifact_digest",
+      "manifest_digest",
+      "publisher_identity",
+      "signature_or_operator_attestation",
+      "sbom",
+      "provenance"
+    ]
+  },
+  "wire_protocol": {
+    "name": "olp.connector.v1",
+    "encoding": "protobuf",
+    "rpc": "grpc",
+    "http_version": "HTTP/2",
+    "protocol_major": 1,
+    "protocol_minor": 0,
+    "major_negotiation": "exact_match",
+    "minor_negotiation": "explicit_feature_intersection",
+    "compression": "disabled_by_default",
+    "olp_initiates_all_rpcs": true,
+    "protobuf_idl": {
+      "path": "proto/olp/connector/v1/connector.proto",
+      "sha256": "d932be2980825922f5f512f7c4babfefb0c4ac6de1501e3d8b96d5a5cfb5b102",
+      "syntax": "proto3",
+      "package": "olp.connector.v1",
+      "service": "ConnectorService",
+      "methods": [
+        "Handshake",
+        "Configure",
+        "Deconfigure",
+        "DiscoverModels",
+        "CertifyCapability",
+        "CheckHealth",
+        "Execute",
+        "Cancel"
+      ],
+      "compatibility_rule": "published_field_numbers_enum_values_service_names_and_rpc_shapes_are_permanent_within_v1; removed_fields_are_reserved; additions_must_be_optional_and_fail_closed_when_required_for_authority"
+    },
+    "message_size_enforcement": {
+      "maximum_negotiated_message_bytes": 16842752,
+      "limit_applies_to": "serialized_protobuf_message_after_decompression_including_unknown_fields",
+      "enforced_before_send": true,
+      "enforced_before_application_dispatch": true,
+      "oversize_behavior": "cancel_rpc_record_protocol_failure_and_quarantine_repeated_offender",
+      "grpc_transport_default_must_not_exceed_contract": true
+    },
+    "handshake_negotiation": {
+      "feature_registry": [
+        "FEATURE_SERVER_STREAMING",
+        "FEATURE_REQUEST_MEDIA",
+        "FEATURE_RESPONSE_MEDIA",
+        "FEATURE_EXTERNAL_SECRET_REFERENCE",
+        "FEATURE_USAGE_V1"
+      ],
+      "feature_unspecified_allowed": false,
+      "unknown_feature_behavior": "reject_handshake",
+      "duplicate_feature_behavior": "reject_handshake",
+      "selected_features_rule": "unique_subset_of_HandshakeRequest_supported_features_and_feature_registry",
+      "required_baseline_selected_features": [
+        "FEATURE_USAGE_V1"
+      ],
+      "feature_gates": {
+        "streaming_capability": "FEATURE_SERVER_STREAMING",
+        "nonempty_BeginExecution_request_media": "FEATURE_REQUEST_MEDIA",
+        "ResponseMediaStart": "FEATURE_RESPONSE_MEDIA",
+        "external_secret_reference_revision_deliveries": "FEATURE_EXTERNAL_SECRET_REFERENCE",
+        "UsageReport": "FEATURE_USAGE_V1"
+      },
+      "request_maximum_message_bytes": {
+        "minimum": 1,
+        "maximum": 16842752,
+        "source": "minimum_of_OLP_deployment_limit_and_contract_ceiling"
+      },
+      "protocol_limit_ceilings": {
+        "maximum_message_bytes": 16842752,
+        "maximum_begin_frame_bytes": 2162688,
+        "maximum_unary_result_frame_bytes": 16842752,
+        "maximum_stream_event_frame_bytes": 1064960,
+        "maximum_media_chunk_frame_bytes": 69632,
+        "maximum_canonical_output_bytes_per_execution": 67108864,
+        "maximum_response_media_bytes_per_execution": 67108864,
+        "maximum_events_per_execution": 65536,
+        "maximum_canonical_request_bytes": 2097152,
+        "maximum_unary_result_bytes": 16777216,
+        "maximum_stream_event_bytes": 1048576,
+        "maximum_media_chunk_bytes": 65536,
+        "maximum_request_media_items": 32,
+        "maximum_request_media_bytes_per_execution": 67108864,
+        "maximum_response_media_items": 8,
+        "maximum_response_media_item_bytes": 52428800,
+        "maximum_request_media_item_bytes": 52428800
+      },
+      "connector_limit_rule": "every_ProtocolLimits_field_is_present_nonzero_and_not_above_its_contract_ceiling",
+      "effective_limit_rule": "validated_connector_advertised_value_without_OLP_increase",
+      "response_maximum_message_bytes_rule": "not_above_HandshakeRequest_maximum_message_bytes_or_contract_ceiling",
+      "cross_field_rules": [
+        "canonical_request_bytes_not_above_begin_frame_bytes_not_above_message_bytes",
+        "unary_result_bytes_not_above_unary_result_frame_bytes_not_above_message_bytes",
+        "stream_event_bytes_not_above_stream_event_frame_bytes_not_above_message_bytes",
+        "media_chunk_bytes_not_above_media_chunk_frame_bytes_not_above_message_bytes",
+        "canonical_output_bytes_per_execution_not_below_unary_result_bytes",
+        "request_media_bytes_per_execution_not_below_request_media_item_bytes_or_media_chunk_bytes",
+        "response_media_bytes_per_execution_not_below_response_media_item_bytes_or_media_chunk_bytes"
+      ],
+      "zero_missing_above_ceiling_or_cross_field_failure_behavior": "reject_handshake_without_activation_or_fallback"
+    },
+    "plaintext_tcp_allowed": false,
+    "plaintext_uds_allowed": false,
+    "transports": {
+      "unix_domain_socket": {
+        "allowed": true,
+        "tls_minimum": "1.3",
+        "mutual_tls_required": true,
+        "socket_mode": "0660",
+        "peer_credentials_required": true,
+        "requirements": [
+          "same_pod_security_boundary",
+          "distinct_non_root_uids",
+          "dedicated_group_shared_only_by_olp_and_connector",
+          "expected_uid_and_gid_verified_from_peer_credentials",
+          "workload_identity_verified_by_mutual_tls",
+          "no_host_path"
+        ]
+      },
+      "tcp": {
+        "allowed": true,
+        "tls_minimum": "1.3",
+        "mutual_tls_required": true,
+        "certificate_name_validation_required": true
+      }
+    },
+    "workload_identity": {
+      "required_for_all_transports": true,
+      "recommended_scheme": "spiffe",
+      "connector_identity_components": [
+        "installation_id",
+        "type_id",
+        "version",
+        "instance_id"
+      ],
+      "olp_identity_roles": [
+        "gateway",
+        "control"
+      ],
+      "binds_handshake_fields": [
+        "protocol_major",
+        "protocol_minor",
+        "features",
+        "type_id",
+        "version",
+        "artifact_sha256",
+        "manifest_sha256",
+        "instance_id",
+        "limits"
+      ]
+    }
+  },
+  "wire_value_bounds": {
+    "measurement": "UTF-8_bytes_before_protobuf_encoding",
+    "validation_point": "before_send_and_before_application_dispatch",
+    "invalid_or_oversized_behavior": "reject_frame_as_protocol_error_without_logging_the_value",
+    "profiles": {
+      "authority_identifier": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "ASCII_OLP_opaque_identifier",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "configuration_handle": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 256,
+        "empty_allowed": false,
+        "syntax": "unpadded_base64url",
+        "pattern": "^[A-Za-z0-9_-]{1,256}$"
+      },
+      "stable_code_128": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "lowercase_stable_code",
+        "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+      },
+      "stable_code_64": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 64,
+        "empty_allowed": false,
+        "syntax": "lowercase_stable_code",
+        "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+      },
+      "optional_stable_code_64": {
+        "minimum_bytes": 0,
+        "maximum_bytes": 64,
+        "empty_allowed": true,
+        "syntax": "empty_or_lowercase_stable_code",
+        "pattern": "^(?:|[a-z][a-z0-9_.-]{0,63})$"
+      },
+      "provider_type_id": {
+        "minimum_bytes": 3,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "provider_type_id_contract"
+      },
+      "semantic_version": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 64,
+        "empty_allowed": false,
+        "syntax": "SemVer_2_without_leading_v",
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+      },
+      "sha256_hex": {
+        "minimum_bytes": 64,
+        "maximum_bytes": 64,
+        "empty_allowed": false,
+        "syntax": "lowercase_sha256_hex",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "optional_sha256_hex": {
+        "minimum_bytes": 0,
+        "maximum_bytes": 64,
+        "empty_allowed": true,
+        "syntax": "empty_or_lowercase_sha256_hex",
+        "pattern": "^(?:|[0-9a-f]{64})$"
+      },
+      "draft_etag": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "unpadded_base64url",
+        "pattern": "^[A-Za-z0-9_-]{1,128}$"
+      },
+      "probe_nonce": {
+        "minimum_bytes": 16,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "unpadded_base64url_with_at_least_96_bits_of_server_entropy",
+        "pattern": "^[A-Za-z0-9_-]{16,128}$"
+      },
+      "cursor": {
+        "minimum_bytes": 0,
+        "maximum_bytes": 1024,
+        "empty_allowed": true,
+        "syntax": "empty_or_unpadded_base64url",
+        "pattern": "^(?:|[A-Za-z0-9_-]{1,1024})$"
+      },
+      "model_identifier": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 512,
+        "empty_allowed": false,
+        "syntax": "valid_UTF-8_without_control_or_noncharacter_code_points"
+      },
+      "optional_display_name": {
+        "minimum_bytes": 0,
+        "maximum_bytes": 512,
+        "empty_allowed": true,
+        "syntax": "valid_UTF-8_without_control_or_noncharacter_code_points"
+      },
+      "media_identifier": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "ASCII_request_scoped_opaque_identifier",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "media_type": {
+        "minimum_bytes": 3,
+        "maximum_bytes": 128,
+        "empty_allowed": false,
+        "syntax": "lowercase_IANA_media_type_without_parameters_or_control_characters",
+        "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+      },
+      "optional_provider_request_id": {
+        "minimum_bytes": 0,
+        "maximum_bytes": 256,
+        "empty_allowed": true,
+        "syntax": "valid_UTF-8_without_control_or_noncharacter_code_points"
+      },
+      "optional_error_detail": {
+        "minimum_bytes": 0,
+        "maximum_bytes": 512,
+        "empty_allowed": true,
+        "syntax": "valid_UTF-8_without_control_or_noncharacter_code_points"
+      },
+      "secret_slot_name": {
+        "minimum_bytes": 1,
+        "maximum_bytes": 63,
+        "empty_allowed": false,
+        "syntax": "secret_slot_contract",
+        "pattern": "^[a-z][a-z0-9_]{0,62}$"
+      }
+    },
+    "protobuf_string_fields": {
+      "BeginExecution.environment_id": "authority_identifier",
+      "BeginExecution.execution_id": "authority_identifier",
+      "BeginExecution.mode": "stable_code_64",
+      "BeginExecution.operation": "stable_code_128",
+      "BeginExecution.organization_id": "authority_identifier",
+      "BeginExecution.project_id": "authority_identifier",
+      "BeginExecution.provider_connection_id": "authority_identifier",
+      "BeginExecution.provider_grant_id": "authority_identifier",
+      "BeginExecution.provider_model": "model_identifier",
+      "BeginExecution.provider_revision_id": "authority_identifier",
+      "BeginExecution.request_id": "authority_identifier",
+      "BeginExecution.route_id": "authority_identifier",
+      "BeginExecution.runtime_generation_id": "authority_identifier",
+      "BeginExecution.surface": "stable_code_64",
+      "BeginExecution.target_id": "authority_identifier",
+      "CancelExecution.execution_id": "authority_identifier",
+      "CancelExecution.stable_reason": "stable_code_128",
+      "CancelRequest.execution_id": "authority_identifier",
+      "CancelRequest.stable_reason": "stable_code_128",
+      "CanonicalEvent.execution_id": "authority_identifier",
+      "CanonicalResult.execution_id": "authority_identifier",
+      "CertifyCapabilityRequest.configuration_handle": "configuration_handle",
+      "CertifyCapabilityRequest.draft_etag": "draft_etag",
+      "CertifyCapabilityRequest.mode": "stable_code_64",
+      "CertifyCapabilityRequest.operation": "stable_code_128",
+      "CertifyCapabilityRequest.probe_nonce": "probe_nonce",
+      "CertifyCapabilityRequest.provider_model": "model_identifier",
+      "CertifyCapabilityRequest.surface": "stable_code_64",
+      "CertifyCapabilityResponse.stable_reason_code": "stable_code_128",
+      "CheckHealthRequest.configuration_handle": "configuration_handle",
+      "CheckHealthRequest.probe_kind": "stable_code_64",
+      "CheckHealthResponse.stable_reason_code": "stable_code_128",
+      "ConfigureRequest.certified_capability_set_sha256": "sha256_hex",
+      "ConfigureRequest.config_sha256": "sha256_hex",
+      "ConfigureRequest.configuration_id": "authority_identifier",
+      "ConfigureRequest.network_policy_id": "authority_identifier",
+      "ConfigureRequest.organization_id": "authority_identifier",
+      "ConfigureRequest.provider_connection_id": "authority_identifier",
+      "ConfigureRequest.provider_grant_id": "authority_identifier",
+      "ConfigureRequest.provider_revision_id": "authority_identifier",
+      "ConfigureRequest.workload_isolation_policy_id": "authority_identifier",
+      "ConfigureResponse.config_sha256": "sha256_hex",
+      "ConfigureResponse.configuration_handle": "configuration_handle",
+      "ConfigureResponse.credential_revision_ids": "authority_identifier",
+      "ConfigureResponse.external_secret_reference_revision_ids": "authority_identifier",
+      "CredentialRevisionDelivery.credential_revision_id": "authority_identifier",
+      "CredentialRevisionDelivery.slot_name": "secret_slot_name",
+      "DeconfigureRequest.configuration_handle": "configuration_handle",
+      "DeconfigureRequest.stable_reason": "stable_code_128",
+      "DiscoverModelsRequest.configuration_handle": "configuration_handle",
+      "DiscoverModelsRequest.cursor": "cursor",
+      "DiscoverModelsRequest.draft_etag": "draft_etag",
+      "DiscoverModelsResponse.display_name": "optional_display_name",
+      "DiscoverModelsResponse.model_id": "model_identifier",
+      "DiscoverModelsResponse.next_cursor": "cursor",
+      "ExecutionAccepted.execution_id": "authority_identifier",
+      "ExecutionDone.execution_id": "authority_identifier",
+      "ExecutionError.detail": "optional_error_detail",
+      "ExecutionError.execution_id": "authority_identifier",
+      "ExecutionError.stable_reason_code": "stable_code_128",
+      "ExternalSecretReferenceRevisionDelivery.external_secret_reference_revision_id": "authority_identifier",
+      "ExternalSecretReferenceRevisionDelivery.slot_name": "secret_slot_name",
+      "HandshakeRequest.olp_instance_id": "authority_identifier",
+      "HandshakeResponse.artifact_sha256": "sha256_hex",
+      "HandshakeResponse.connector_instance_id": "authority_identifier",
+      "HandshakeResponse.manifest_sha256": "sha256_hex",
+      "HandshakeResponse.type_id": "provider_type_id",
+      "HandshakeResponse.version": "semantic_version",
+      "MediaChunk.execution_id": "authority_identifier",
+      "MediaChunk.media_id": "media_identifier",
+      "MediaDescriptor.declared_content_type": "media_type",
+      "MediaDescriptor.media_id": "media_identifier",
+      "MediaDescriptor.sha256_when_known": "optional_sha256_hex",
+      "MediaEnd.execution_id": "authority_identifier",
+      "MediaEnd.media_id": "media_identifier",
+      "MediaEnd.sha256": "sha256_hex",
+      "ResponseMediaChunk.execution_id": "authority_identifier",
+      "ResponseMediaChunk.media_id": "media_identifier",
+      "ResponseMediaEnd.execution_id": "authority_identifier",
+      "ResponseMediaEnd.media_id": "media_identifier",
+      "ResponseMediaEnd.sha256": "sha256_hex",
+      "ResponseMediaStart.declared_content_type": "media_type",
+      "ResponseMediaStart.execution_id": "authority_identifier",
+      "ResponseMediaStart.media_id": "media_identifier",
+      "ResponseMediaStart.sha256_when_known": "optional_sha256_hex",
+      "Usage.provider_request_id": "optional_provider_request_id",
+      "Usage.provider_usage_source": "optional_stable_code_64",
+      "UsageReport.execution_id": "authority_identifier"
+    },
+    "protobuf_repeated_string_fields": {
+      "ConfigureResponse.credential_revision_ids": 32,
+      "ConfigureResponse.external_secret_reference_revision_ids": 32
+    },
+    "other_repeated_wire_fields": {
+      "HandshakeRequest.supported_features": 64,
+      "HandshakeResponse.selected_features": 64,
+      "ConfigureRequest.credential_revision_deliveries": 32,
+      "ConfigureRequest.external_secret_reference_revision_deliveries": 32,
+      "BeginExecution.request_media": 32
+    }
+  },
+  "manifest": {
+    "media_type": "application/vnd.olp.connector-manifest.v1+json",
+    "maximum_bytes": 65536,
+    "unknown_fields": "reject",
+    "required_fields": [
+      "schema_version",
+      "type_id",
+      "display_name",
+      "version",
+      "artifact_sha256",
+      "protocol",
+      "features",
+      "operations",
+      "auth_modes",
+      "config_schema",
+      "secret_slots",
+      "resource_profile"
+    ],
+    "field_bounds": {
+      "display_name_bytes": 128,
+      "description_bytes": 1024,
+      "features": 64,
+      "operations": 64,
+      "auth_modes": 32,
+      "secret_slots": 32,
+      "config_schema_bytes": 49152
+    },
+    "capability_claims_are_certification_evidence": false,
+    "configuration_schema_draft": "https://json-schema.org/draft/2020-12/schema",
+    "configuration_schema_evaluation": {
+      "metaschema_uri_must_equal": "https://json-schema.org/draft/2020-12/schema",
+      "metaschema_source": "pinned_embedded_copy_no_network_or_filesystem_resolution",
+      "unknown_keywords": "reject",
+      "vocabulary_keyword_allowed_in_connector_schema": false,
+      "implemented_vocabularies": [
+        "https://json-schema.org/draft/2020-12/vocab/core",
+        "https://json-schema.org/draft/2020-12/vocab/applicator",
+        "https://json-schema.org/draft/2020-12/vocab/unevaluated",
+        "https://json-schema.org/draft/2020-12/vocab/validation",
+        "https://json-schema.org/draft/2020-12/vocab/meta-data",
+        "https://json-schema.org/draft/2020-12/vocab/format-annotation",
+        "https://json-schema.org/draft/2020-12/vocab/format-assertion",
+        "https://json-schema.org/draft/2020-12/vocab/content"
+      ],
+      "unsupported_or_custom_vocabulary_behavior": "reject_even_when_declared_optional",
+      "content_keywords_behavior": "annotation_only_never_decode_fetch_or_dereference",
+      "reference_policy": {
+        "id_keyword_policy": "optional_at_root_only_urn_value_no_resolution_or_retrieval_effect",
+        "allowed_ref_form": "same_document_json_pointer_fragment_only",
+        "remote_references_allowed": false,
+        "relative_external_references_allowed": false,
+        "filesystem_references_allowed": false,
+        "anchors_allowed": false,
+        "dynamic_ref_allowed": false,
+        "dynamic_anchor_allowed": false,
+        "recursive_reference_cycles_allowed": false,
+        "maximum_reference_edges": 256,
+        "maximum_resolved_reference_depth": 16,
+        "unresolved_or_cyclic_behavior": "reject_manifest"
+      },
+      "regex_policy": {
+        "engine": "RE2_compatible_linear_time",
+        "length_unit": "utf8_bytes",
+        "applies_to_keywords": [
+          "pattern",
+          "patternProperties"
+        ],
+        "maximum_patterns": 64,
+        "maximum_pattern_bytes_each": 512,
+        "maximum_pattern_bytes_total": 8192,
+        "maximum_compiled_program_instructions_total": 10000,
+        "unsupported_construct_or_compile_failure_behavior": "reject_manifest"
+      },
+      "format_policy": {
+        "effective_vocabulary": "https://json-schema.org/draft/2020-12/vocab/format-assertion",
+        "metaschema_format_annotation_is_strengthened_to_assertion": true,
+        "behavior": "assert_allowlisted_formats_and_reject_unknown_format_names",
+        "allowlist": [
+          "date",
+          "date-time",
+          "duration",
+          "email",
+          "hostname",
+          "ipv4",
+          "ipv6",
+          "time",
+          "uri",
+          "uuid"
+        ]
+      },
+      "compilation_bounds": {
+        "maximum_schema_syntactic_nesting": 32,
+        "maximum_schema_nodes": 4096,
+        "maximum_keywords": 4096,
+        "maximum_applicator_branches": 256,
+        "maximum_compiled_bytes": 262144,
+        "maximum_wall_time_ms": 100,
+        "bound_exhaustion_behavior": "reject_manifest"
+      },
+      "validation_bounds": {
+        "maximum_evaluation_steps": 100000,
+        "maximum_resolved_reference_visits": 4096,
+        "maximum_reported_errors": 64,
+        "maximum_wall_time_ms": 100,
+        "unique_items_algorithm": "canonical_hash_with_collision_safe_equality",
+        "bound_exhaustion_behavior": "reject_configuration"
+      }
+    }
+  },
+  "configuration": {
+    "encoding": "RFC8785_canonical_JSON",
+    "maximum_bytes": 65536,
+    "maximum_nesting": 16,
+    "maximum_properties": 256,
+    "maximum_total_nodes": 4096,
+    "maximum_array_items_total": 4096,
+    "unknown_fields": "manifest_schema_decides_and_defaults_to_reject",
+    "secret_values_allowed": false,
+    "validated_before_persistence": true,
+    "pinned_values": [
+      "type_id",
+      "connector_version",
+      "artifact_sha256",
+      "config_sha256",
+      "manifest_sha256",
+      "provider_revision_id",
+      "provider_grant_id",
+      "credential_revision_ids",
+      "external_secret_reference_revision_ids",
+      "certified_capability_set_sha256",
+      "network_policy_id",
+      "workload_isolation_policy_id"
+    ]
+  },
+  "secrets": {
+    "slot_name_pattern": "^[a-z][a-z0-9_]{0,62}$",
+    "maximum_slots": 32,
+    "supported_delivery_modes": {
+      "olp_ephemeral": {
+        "description": "OLP resolves an immutable encrypted credential revision and delivers plaintext only on the authenticated channel to the configured instance.",
+        "maximum_secret_bytes_per_slot": 65536,
+        "zeroize_required": true,
+        "return_value_forbidden": true,
+        "configured_instance_scope": "one_provider_connection_and_provider_revision",
+        "zeroization_enforcement": "terminate_instance_and_reclaim_process_memory"
+      },
+      "external_reference": {
+        "description": "The connector resolves a bounded opaque reference to an immutable secret-manager version using its own workload identity.",
+        "maximum_reference_bytes": 4096,
+        "olp_dereferences": false,
+        "connector_must_allowlist_reference_schemes": true,
+        "immutable_secret_version_required": true,
+        "mutable_aliases_allowed": false
+      }
+    },
+    "scope_key": [
+      "organization_id",
+      "provider_connection_id",
+      "provider_revision_id",
+      "secret_authority_kind",
+      "secret_authority_revision_id",
+      "slot_name"
+    ],
+    "retirement": {
+      "new_executions": "reject_immediately",
+      "non_emergency_inflight_behavior": "drain_only_until_pinned_deadline",
+      "maximum_drain_ms": 900000,
+      "emergency_revocation_drain_ms": 0,
+      "deconfigure_ack_is_zeroization_evidence": false,
+      "enforcement_after_ack_or_deadline": "revoke_workload_identity_terminate_instance_and_reclaim_memory"
+    },
+    "forbidden_sinks": [
+      "manifest",
+      "configuration",
+      "discovery",
+      "certification",
+      "health",
+      "execution_error",
+      "usage",
+      "logs",
+      "metrics",
+      "traces",
+      "crash_reports",
+      "support_bundles"
+    ]
+  },
+  "rpc_operations": [
+    {
+      "name": "Handshake",
+      "shape": "unary",
+      "purpose": "authenticate and negotiate exact connector identity, protocol, features, and bounds",
+      "deadline_ms": 2000,
+      "idempotent": true,
+      "request_fields": [
+        "protocol_major",
+        "protocol_minor",
+        "supported_features",
+        "olp_instance_id",
+        "maximum_message_bytes"
+      ],
+      "response_fields": [
+        "protocol_major",
+        "protocol_minor",
+        "selected_features",
+        "type_id",
+        "version",
+        "artifact_sha256",
+        "manifest_sha256",
+        "connector_instance_id",
+        "limits"
+      ]
+    },
+    {
+      "name": "Configure",
+      "shape": "unary",
+      "purpose": "bind one immutable provider revision, config digest, secret authority revisions, certified capability set, and network/workload policy to an instance handle",
+      "deadline_ms": 10000,
+      "idempotent": true,
+      "request_fields": [
+        "configuration_id",
+        "organization_id",
+        "provider_connection_id",
+        "provider_revision_id",
+        "provider_grant_id",
+        "config_json",
+        "config_sha256",
+        "credential_revision_deliveries",
+        "external_secret_reference_revision_deliveries",
+        "certified_capability_set_sha256",
+        "network_policy_id",
+        "workload_isolation_policy_id",
+        "deadline_unix_ms"
+      ],
+      "response_fields": [
+        "configuration_handle",
+        "config_sha256",
+        "credential_revision_ids",
+        "external_secret_reference_revision_ids",
+        "ready"
+      ]
+    },
+    {
+      "name": "Deconfigure",
+      "shape": "unary",
+      "purpose": "atomically reject new executions for one configuration and request bounded drain and cleanup before enforced instance termination",
+      "deadline_ms": 2000,
+      "idempotent": true,
+      "request_fields": [
+        "configuration_handle",
+        "stable_reason",
+        "drain_deadline_unix_ms"
+      ],
+      "response_fields": [
+        "accepted",
+        "already_retired"
+      ],
+      "bounds": {
+        "drain_ms_maximum": 900000,
+        "emergency_drain_ms": 0
+      }
+    },
+    {
+      "name": "DiscoverModels",
+      "shape": "server_streaming",
+      "purpose": "return bounded model inventory for the exact configured provider revision",
+      "deadline_ms": 30000,
+      "idempotent": true,
+      "request_fields": [
+        "configuration_handle",
+        "draft_etag",
+        "page_limit",
+        "cursor"
+      ],
+      "response_fields": [
+        "model_id",
+        "display_name",
+        "next_cursor"
+      ],
+      "bounds": {
+        "page_limit_minimum": 1,
+        "models_emitted_per_page_maximum": 200,
+        "models_emitted_per_discovery_maximum": 2000,
+        "pages_requested_per_discovery_maximum": 2001,
+        "items_olp_may_read_across_pages_to_detect_overflow": 2001,
+        "discovery_count_scope": "configuration_handle_and_draft_etag_across_all_pages",
+        "overflow_item_persisted": false,
+        "overflow_behavior": "reject_discovery_without_persisting_partial_inventory",
+        "model_id_bytes": 512,
+        "display_name_bytes": 512,
+        "cursor_bytes": 1024,
+        "pagination": {
+          "initial_request_cursor": "empty",
+          "page_size_rule": "OLP_sends_page_limit_between_1_and_200_and_connector_emits_at_most_page_limit_models",
+          "next_cursor_placement": "empty_on_every_nonfinal_response_and_present_only_on_the_final_model_response_when_another_page_exists",
+          "empty_page_semantics": "stream_ends_without_a_response_and_discovery_is_complete",
+          "completion_signal": "final_model_response_has_empty_next_cursor_or_page_is_empty",
+          "progress_rule": "nonempty_next_cursor_must_differ_from_request_cursor_and_every_prior_cursor_in_this_discovery",
+          "cursor_binding": [
+            "configuration_handle",
+            "draft_etag",
+            "manifest_sha256"
+          ],
+          "cursor_is_opaque_to_olp": true,
+          "cursor_persisted_or_logged": false,
+          "cursor_repeat_or_loop_behavior": "reject_discovery_without_persisting_partial_inventory",
+          "duplicate_model_id_scope": "configuration_handle_and_draft_etag_across_all_pages",
+          "duplicate_model_id_behavior": "reject_discovery_without_persisting_partial_inventory",
+          "ordering_rule": "stable_for_the_exact_configuration_handle_draft_etag_and_manifest_digest",
+          "page_error_or_deadline_behavior": "reject_discovery_without_persisting_partial_inventory"
+        }
+      }
+    },
+    {
+      "name": "CertifyCapability",
+      "shape": "unary",
+      "purpose": "run one server-owned bounded probe for an exact model, operation, surface, and mode tuple",
+      "deadline_ms": 15000,
+      "idempotent": true,
+      "request_fields": [
+        "configuration_handle",
+        "draft_etag",
+        "provider_model",
+        "operation",
+        "surface",
+        "mode",
+        "probe_nonce"
+      ],
+      "response_fields": [
+        "outcome",
+        "stable_reason_code",
+        "observed_usage"
+      ],
+      "bounds": {
+        "tuples_per_management_action": 16,
+        "parallel_probes_per_management_action": 4,
+        "generated_tokens": 1
+      }
+    },
+    {
+      "name": "CheckHealth",
+      "shape": "unary",
+      "purpose": "report connector process and configured-instance health without exposing secrets or provider content",
+      "deadline_ms": 1000,
+      "idempotent": true,
+      "request_fields": [
+        "configuration_handle",
+        "probe_kind"
+      ],
+      "response_fields": [
+        "status",
+        "stable_reason_code",
+        "observed_at_unix_ms",
+        "retry_after_ms"
+      ],
+      "allowed_statuses": [
+        "ready",
+        "degraded",
+        "unavailable"
+      ]
+    },
+    {
+      "name": "Execute",
+      "shape": "bidirectional_streaming",
+      "purpose": "execute one pinned canonical attempt and stream bounded input media, output events or result, and terminal usage",
+      "deadline_ms": "min(request_deadline, route_deadline, attempt_deadline)",
+      "idempotent": "operation_contract",
+      "client_frames": [
+        "BeginExecution",
+        "MediaChunk",
+        "MediaEnd",
+        "CancelExecution"
+      ],
+      "server_frames": [
+        "ExecutionAccepted",
+        "CanonicalEvent",
+        "CanonicalResult",
+        "ResponseMediaStart",
+        "ResponseMediaChunk",
+        "ResponseMediaEnd",
+        "UsageReport",
+        "ExecutionError",
+        "ExecutionDone"
+      ]
+    },
+    {
+      "name": "Cancel",
+      "shape": "unary",
+      "purpose": "idempotently cancel an execution when stream cancellation alone cannot confirm connector cleanup",
+      "deadline_ms": 1000,
+      "idempotent": true,
+      "request_fields": [
+        "execution_id",
+        "stable_reason"
+      ],
+      "response_fields": [
+        "accepted",
+        "already_terminal"
+      ]
+    }
+  ],
+  "execution": {
+    "begin_required_fields": [
+      "execution_id",
+      "request_id",
+      "organization_id",
+      "project_id",
+      "environment_id",
+      "runtime_generation_id",
+      "provider_connection_id",
+      "provider_revision_id",
+      "provider_grant_id",
+      "route_id",
+      "target_id",
+      "operation",
+      "surface",
+      "mode",
+      "provider_model",
+      "canonical_request",
+      "deadline_unix_ms",
+      "idempotency_class"
+    ],
+    "maximum_canonical_request_bytes": 2097152,
+    "begin_frame_envelope_headroom_bytes": 65536,
+    "maximum_begin_frame_bytes": 2162688,
+    "maximum_unary_result_bytes": 16777216,
+    "unary_result_frame_envelope_headroom_bytes": 65536,
+    "maximum_unary_result_frame_bytes": 16842752,
+    "maximum_stream_event_bytes": 1048576,
+    "stream_event_frame_envelope_headroom_bytes": 16384,
+    "maximum_stream_event_frame_bytes": 1064960,
+    "maximum_canonical_output_bytes_per_execution": 67108864,
+    "maximum_events_per_execution": 65536,
+    "metadata_string_bounds": {
+      "authority_identifier_bytes_maximum": 128,
+      "operation_bytes_maximum": 128,
+      "surface_bytes_maximum": 64,
+      "mode_bytes_maximum": 64,
+      "provider_model_bytes_maximum": 512
+    },
+    "cumulative_output_accounting": "sum_raw_canonical_event_and_canonical_result_payload_bytes_before_translation_across_the_execution",
+    "cumulative_output_overflow_behavior": "cancel_stream_protocol_failure_discard_uncommitted_output_and_mark_usage_incomplete",
+    "event_sequence": {
+      "starts_at": 0,
+      "strictly_contiguous": true,
+      "one_terminal_frame": true,
+      "events_after_terminal": "protocol_error"
+    },
+    "stream_state_machine": {
+      "client_initial_state": "await_begin",
+      "client_states": [
+        {
+          "state": "await_begin",
+          "allowed_frames": [
+            "BeginExecution"
+          ],
+          "next_state": "input_open"
+        },
+        {
+          "state": "input_open",
+          "allowed_frames": [
+            "MediaChunk",
+            "MediaEnd",
+            "CancelExecution"
+          ],
+          "transition": "CancelExecution_to_client_terminal; all_declared_media_ended_to_input_complete"
+        },
+        {
+          "state": "input_complete",
+          "allowed_frames": [
+            "CancelExecution"
+          ],
+          "transition": "CancelExecution_to_client_terminal"
+        },
+        {
+          "state": "client_terminal",
+          "allowed_frames": []
+        }
+      ],
+      "server_initial_state": "await_acceptance",
+      "server_states": [
+        {
+          "state": "await_acceptance",
+          "allowed_frames": [
+            "ExecutionAccepted",
+            "UsageReport",
+            "ExecutionError"
+          ],
+          "transition": "ExecutionAccepted_to_output_open; UsageReport_to_preaccept_usage_reported; ExecutionError_to_server_terminal"
+        },
+        {
+          "state": "preaccept_usage_reported",
+          "allowed_frames": [
+            "ExecutionError"
+          ],
+          "transition": "ExecutionError_to_server_terminal"
+        },
+        {
+          "state": "output_open",
+          "allowed_frames": [
+            "CanonicalEvent",
+            "CanonicalResult",
+            "ResponseMediaStart",
+            "ResponseMediaChunk",
+            "ResponseMediaEnd",
+            "UsageReport",
+            "ExecutionError",
+            "ExecutionDone"
+          ],
+          "transition": "UsageReport_to_usage_reported; ExecutionError_or_ExecutionDone_to_server_terminal"
+        },
+        {
+          "state": "usage_reported",
+          "allowed_frames": [
+            "ExecutionError",
+            "ExecutionDone"
+          ],
+          "transition": "ExecutionError_or_ExecutionDone_to_server_terminal"
+        },
+        {
+          "state": "server_terminal",
+          "allowed_frames": []
+        }
+      ],
+      "rules": [
+        "exactly_one_BeginExecution_and_it_is_the_first_client_frame",
+        "every_frame_execution_id_matches_BeginExecution",
+        "request_media_ids_are_unique_and_declared_only_in_BeginExecution_request_media",
+        "each_declared_request_media_id_has_contiguous_chunks_from_zero_then_exactly_one_MediaEnd_and_no_later_frames",
+        "response_media_ids_are_fresh_and_declared_only_by_exactly_one_ResponseMediaStart",
+        "each_started_response_media_id_has_contiguous_chunks_from_zero_then_exactly_one_ResponseMediaEnd_and_no_later_frames",
+        "request_and_response_media_identifier_namespaces_are_distinct_and_cross_direction_reuse_is_rejected",
+        "ExecutionAccepted_occurs_at_most_once_before_any_output_payload",
+        "CanonicalResult_occurs_at_most_once_and_is_mutually_exclusive_with_CanonicalEvent",
+        "UsageReport_occurs_at_most_once_after_all_output_frames_and_only_a_terminal_frame_may_follow",
+        "exactly_one_of_ExecutionError_or_ExecutionDone_is_terminal",
+        "ExecutionDone_status_is_SUCCEEDED_or_CANCELLED_and_UNSPECIFIED_or_unknown_is_a_protocol_error",
+        "unknown_empty_out_of_state_or_post_terminal_frames_are_protocol_errors"
+      ]
+    },
+    "terminal_status": {
+      "allowed_execution_done_statuses": [
+        "EXECUTION_TERMINAL_STATUS_SUCCEEDED",
+        "EXECUTION_TERMINAL_STATUS_CANCELLED"
+      ],
+      "unspecified_or_unknown_behavior": "protocol_error_mark_usage_incomplete_and_discard_uncommitted_output"
+    },
+    "response_commit_authority": "olp",
+    "retry_after_commit": false,
+    "connector_retry_allowed": false,
+    "olp_retry_policy": "bounded_route_policy_and_stable_server_error_mapping"
+  },
+  "cancellation": {
+    "triggers": [
+      "client_disconnect",
+      "request_deadline",
+      "attempt_deadline",
+      "policy_denial",
+      "olp_shutdown",
+      "explicit_cancel"
+    ],
+    "mechanisms": [
+      "grpc_stream_cancellation",
+      "Cancel_rpc"
+    ],
+    "cancel_ack_target_ms": 250,
+    "resource_reclamation_target_ms": 5000,
+    "cancel_is_idempotent": true,
+    "cancel_does_not_make_mutation_retryable": true
+  },
+  "media": {
+    "connector_receives_filesystem_paths": false,
+    "request_scope_key": [
+      "execution_id",
+      "request",
+      "media_id"
+    ],
+    "response_scope_key": [
+      "execution_id",
+      "response",
+      "media_id"
+    ],
+    "cross_direction_media_id_reuse": "reject",
+    "chunk_maximum_bytes": 65536,
+    "chunk_frame_envelope_headroom_bytes": 4096,
+    "maximum_chunk_frame_bytes": 69632,
+    "request_media_items_maximum": 32,
+    "request_media_item_bytes_maximum": 52428800,
+    "request_media_total_bytes_maximum": 67108864,
+    "request_media_accounting": "sum_raw_MediaChunk_data_bytes_across_all_request_media_ids_for_the_execution",
+    "request_media_overflow_behavior": "cancel_stream_before_connector_dispatch_protocol_failure_and_discard_request_media",
+    "response_media_items_maximum": 8,
+    "response_media_item_bytes_maximum": 52428800,
+    "response_media_total_bytes_maximum": 67108864,
+    "response_media_accounting": "sum_raw_ResponseMediaChunk_data_bytes_across_all_media_ids_for_the_execution",
+    "response_media_overflow_behavior": "cancel_stream_protocol_failure_discard_uncommitted_media_and_mark_usage_incomplete",
+    "metadata_string_bounds": {
+      "media_id_bytes_maximum": 128,
+      "declared_content_type_bytes_maximum": 128,
+      "sha256_hex_bytes": 64
+    },
+    "request_descriptor_required_fields": [
+      "media_id",
+      "declared_content_type",
+      "maximum_bytes",
+      "sha256_when_known"
+    ],
+    "request_lifecycle": {
+      "declaration": "one_unique_MediaDescriptor_in_BeginExecution_request_media",
+      "descriptor_counted_against_item_limit_before_connector_dispatch": true,
+      "declared_maximum_bytes_minimum": 1,
+      "declared_maximum_bytes_maximum": 52428800,
+      "declared_maximum_must_fit_remaining_execution_total": true,
+      "declared_capacity_accounting": "sum_all_MediaDescriptor_maximum_bytes_must_not_exceed_request_media_total_bytes_maximum",
+      "initial_sequence": 0,
+      "sequence_rule": "strictly_contiguous_per_media_id",
+      "zero_byte_media_allowed": true,
+      "terminal_frame": "exactly_one_MediaEnd",
+      "terminal_validation": "total_bytes_and_sha256_match_observed_chunks_and_descriptor_when_known",
+      "chunk_before_declaration_or_after_end": "protocol_error"
+    },
+    "response_start_required_fields": [
+      "execution_id",
+      "media_id",
+      "declared_content_type",
+      "declared_maximum_bytes",
+      "sha256_when_known"
+    ],
+    "response_lifecycle": {
+      "declaration": "exactly_one_ResponseMediaStart_per_fresh_response_media_id",
+      "start_counted_against_item_limit_before_allocation": true,
+      "declared_maximum_bytes_minimum": 1,
+      "declared_maximum_bytes_maximum": 52428800,
+      "declared_maximum_must_fit_remaining_execution_total": true,
+      "declared_capacity_accounting": "sum_all_ResponseMediaStart_declared_maximum_bytes_must_not_exceed_response_media_total_bytes_maximum",
+      "initial_sequence": 0,
+      "sequence_rule": "strictly_contiguous_per_media_id",
+      "zero_byte_media_allowed": true,
+      "terminal_frame": "exactly_one_ResponseMediaEnd",
+      "terminal_validation": "total_bytes_and_sha256_match_observed_chunks_and_ResponseMediaStart_when_known",
+      "chunk_or_end_before_start_or_frame_after_end": "protocol_error"
+    },
+    "cleanup": "both_sides_release_on_success_error_cancel_or_deadline",
+    "cross_execution_handle_reuse": "reject"
+  },
+  "errors": {
+    "connector_detail_trusted": false,
+    "detail_maximum_bytes": 512,
+    "detail_persisted_or_logged": false,
+    "stable_phases": [
+      "configure",
+      "connect",
+      "first_byte",
+      "body",
+      "usage",
+      "cancel"
+    ],
+    "stable_classes": [
+      "authentication",
+      "authorization",
+      "configuration",
+      "connect",
+      "timeout",
+      "rate_limit",
+      "upstream_server",
+      "upstream_client",
+      "protocol",
+      "cancelled",
+      "resource_exhausted",
+      "incompatible",
+      "ambiguous"
+    ],
+    "retryability_authority": "olp",
+    "unknown_class_mapping": "protocol",
+    "unknown_phase_mapping": "body",
+    "malformed_error_mapping": "protocol"
+  },
+  "usage": {
+    "connector_is_pricing_authority": false,
+    "connector_is_completeness_authority": false,
+    "fields": [
+      "input_tokens",
+      "output_tokens",
+      "cached_input_tokens",
+      "media_units",
+      "provider_request_id",
+      "provider_usage_source",
+      "complete"
+    ],
+    "integer_maximum": 9007199254740991,
+    "provider_request_id_maximum_bytes": 256,
+    "missing_behavior": "usage_incomplete_and_unpriced",
+    "malformed_behavior": "usage_incomplete_and_unpriced",
+    "contradictory_behavior": "usage_incomplete_and_unpriced",
+    "unknown_pricing_behavior": "unpriced",
+    "silent_zero_allowed": false,
+    "terminal_report_count_minimum": 0,
+    "terminal_report_count_maximum": 1,
+    "successful_execution_expected_report_count": 1,
+    "missing_terminal_report_is_protocol_error": false
+  },
+  "resource_bounds": {
+    "grpc_message_maximum_bytes": 16842752,
+    "connector_instances_per_configured_revision": 32,
+    "negotiated_inflight_executions_per_instance_maximum": 1024,
+    "default_inflight_executions_per_instance": 256,
+    "queued_executions_per_instance": 0,
+    "handshake_connections_per_instance": 4,
+    "file_descriptors": "deployment_enforced",
+    "memory": "deployment_enforced",
+    "cpu": "deployment_enforced",
+    "processes": "deployment_enforced",
+    "egress": "deployment_allowlist_enforced",
+    "manifest_values_are_enforcement_authority": false
+  },
+  "workload_isolation": {
+    "run_as_non_root": true,
+    "read_only_root_filesystem": true,
+    "allow_privilege_escalation": false,
+    "host_network": false,
+    "host_pid": false,
+    "host_ipc": false,
+    "host_mounts": false,
+    "default_service_account_token": false,
+    "seccomp_profile": "RuntimeDefault_or_stronger",
+    "capabilities": "drop_all",
+    "egress_default": "deny",
+    "dedicated_workload_identity": true
+  },
+  "health": {
+    "readiness_is_distinct_from_liveness": true,
+    "traffic_success_substitutes_for_health": false,
+    "failure_grace_ms": 5000,
+    "stale_health_after_ms": 10000,
+    "freshness_clock": "OLP_monotonic_clock",
+    "freshness_age_start": "OLP_monotonic_completion_of_last_valid_CheckHealth_response",
+    "connector_observed_at_unix_ms_is_freshness_authority": false,
+    "observed_at_unix_ms_use": "diagnostic_only_after_bounded_skew_validation",
+    "observed_at_future_skew_ms_maximum": 300000,
+    "observed_at_past_skew_ms_maximum": 86400000,
+    "invalid_observed_at_behavior": "discard_timestamp_without_extending_health_eligibility",
+    "retry_after_ms_minimum": 0,
+    "retry_after_ms_maximum": 5000,
+    "retry_after_ms_behavior": "clamp_to_contract_and_never_extend_stale_health_deadline",
+    "unspecified_or_unknown_status_behavior": "reject_health_response_as_protocol_error",
+    "unavailable_instance_new_attempts": "exclude",
+    "all_instances_unavailable": "bounded_route_failover_or_unavailable",
+    "fleet_health_coordination_milestone": "M6"
+  },
+  "upgrade_and_rollback": {
+    "overwrite_registry_entry": false,
+    "pre_activation_gates": [
+      "supply_chain_policy",
+      "handshake",
+      "connector_conformance",
+      "configuration_validation",
+      "capability_certification"
+    ],
+    "runtime_pin": [
+      "type_id",
+      "connector_version",
+      "artifact_sha256",
+      "manifest_sha256",
+      "provider_revision_id",
+      "provider_grant_id",
+      "config_sha256",
+      "credential_revision_ids",
+      "external_secret_reference_revision_ids",
+      "certified_capability_set_sha256",
+      "network_policy_id",
+      "workload_isolation_policy_id"
+    ],
+    "old_and_new_instances_may_coexist": true,
+    "inflight_migration_between_versions": false,
+    "retired_configuration_accepts_new_executions": false,
+    "retired_secret_bearing_instance_termination_required": true,
+    "rollback": "publish_new_monotonic_provider_and_environment_revision_selecting_previous_verified_artifact",
+    "major_version_fallback": false
+  },
+  "failure_modes": [
+    {
+      "id": "connector.incompatible",
+      "detection": "registry_validation_or_handshake_mismatch",
+      "behavior": "reject_installation_or_activation_and_retain_last_verified_revision"
+    },
+    {
+      "id": "connector.unavailable_precommit",
+      "detection": "connect_or_health_failure",
+      "behavior": "record_bounded_failure_and_apply_existing_route_failover_budget"
+    },
+    {
+      "id": "connector.slow",
+      "detection": "deadline",
+      "behavior": "cancel_reclaim_and_failover_only_when_response_is_uncommitted"
+    },
+    {
+      "id": "connector.postcommit_failure",
+      "detection": "stream_or_protocol_failure_after_olp_commit",
+      "behavior": "terminate_response_and_never_retry"
+    },
+    {
+      "id": "connector.malformed_or_oversized",
+      "detection": "codec_sequence_or_bound_validation",
+      "behavior": "protocol_failure_quarantine_instance_and_preserve_incomplete_usage"
+    },
+    {
+      "id": "connector.compromised",
+      "detection": "security_or_behavioral_signal",
+      "behavior": "revoke_workload_identity_and_secrets_remove_readiness_and_publish_replacement_revision"
+    },
+    {
+      "id": "connector.secret_resolver_unavailable",
+      "detection": "configuration_or_execution_error",
+      "behavior": "fail_closed_without_secret_or_scope_fallback"
+    },
+    {
+      "id": "connector.deconfigure_unavailable_or_expired",
+      "detection": "deconfigure_error_or_drain_deadline",
+      "behavior": "reject_new_executions_revoke_workload_identity_terminate_instance_and_reclaim_memory"
+    }
+  ],
+  "stable_beta_surfaces": [
+    "manifest_v1",
+    "handshake_v1",
+    "configure_v1",
+    "deconfigure_v1",
+    "discovery_v1",
+    "certification_v1",
+    "health_v1",
+    "execute_v1",
+    "stream_v1",
+    "cancel_v1",
+    "media_v1",
+    "errors_v1",
+    "usage_v1"
+  ],
+  "explicitly_deferred": [
+    "in_process_plugin_abi",
+    "connector_callbacks_to_olp",
+    "connector_database_access",
+    "unbounded_extension_payloads",
+    "arbitrary_tool_execution",
+    "complete_vendor_native_api_parity",
+    "semantic_routing",
+    "hedging"
+  ],
+  "reference_connector_gate": {
+    "must_import_only_published_connector_sdk": true,
+    "may_depend_on_olp_domain_crate": false,
+    "requires_new_ProviderKind_variant": false,
+    "requires_olp_rebuild": false,
+    "m0_contract_build_proof": {
+      "status": "contract_build_proof_only",
+      "source": "tests/reference-connector-v1/main.rs",
+      "source_sha256": "4ba809b25a978c198182599a739fd5793e6eb4bf3085750cc262d539a72a53cf",
+      "checker": "scripts/check-reference-connector-v1.sh",
+      "language": "standalone_rustc_edition_2021",
+      "dependencies": "rust_standard_library_only",
+      "type_id": "com.example.external-fixture",
+      "proto_sha256": "d932be2980825922f5f512f7c4babfefb0c4ac6de1501e3d8b96d5a5cfb5b102",
+      "rpc_methods": [
+        "Handshake",
+        "Configure",
+        "Deconfigure",
+        "DiscoverModels",
+        "CertifyCapability",
+        "CheckHealth",
+        "Execute",
+        "Cancel"
+      ],
+      "imports_olp_domain": false,
+      "uses_ProviderKind": false,
+      "requires_olp_rebuild": false,
+      "published_sdk_used": false,
+      "published_sdk_available": false,
+      "grpc_transport_implemented": false,
+      "runtime_integration_implemented": false,
+      "satisfies_M4_reference_connector_gate": false,
+      "qualification_status": "not_qualified"
+    },
+    "required_scenarios": [
+      "compatible",
+      "incompatible",
+      "slow",
+      "unavailable",
+      "compromised",
+      "malformed_output",
+      "oversized_output",
+      "stream_commit_failure",
+      "cancellation",
+      "media_cleanup",
+      "secret_isolation",
+      "secret_rotation_drain",
+      "secret_revocation_forced_termination",
+      "missing_usage",
+      "upgrade_pin",
+      "rollback_pin"
+    ]
+  },
+  "approval": {
+    "required_authorities": [
+      "architecture_domain",
+      "gateway_security",
+      "provider_platform",
+      "storage_api"
+    ],
+    "required_evidence": [
+      "protected_repository_review",
+      "XOD-85_completion"
+    ],
+    "evidence_source": "docs/enterprise/contracts/enterprise-beta-scorecard.json#/m0_contract_gate/decisions/2"
+  }
+}

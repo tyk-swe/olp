@@ -22,6 +22,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install contract fixture compiler
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97" }
       - name: Lint GitHub Actions workflows
         shell: bash
         env:
@@ -57,6 +60,8 @@ jobs:
         run: scripts/check-release-version.sh
       - name: Require immutable supply-chain references
         run: scripts/check-supply-chain-pins.sh
+      - name: Validate frozen enterprise contracts
+        run: scripts/check-enterprise-contracts.sh
       - name: Verify Helm and Compose contracts
         run: scripts/verify-helm-contract.sh deploy/helm
       - name: Enforce dependency bans, licenses, and sources
