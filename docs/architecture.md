@@ -8,43 +8,29 @@ keep durable records free of request content.
 ## Contents
 
 - [Component boundaries](#component-boundaries)
-- [Enterprise control-plane contracts](#enterprise-control-plane-contracts)
 - [Runtime publication](#runtime-publication)
 - [Capability certification](#capability-certification)
 - [Data-safety invariants](#data-safety-invariants)
 
 ## Component boundaries
 
-Dependencies point toward `crates/domain`, which owns canonical types,
-routing, and ports without infrastructure dependencies. `crates/protocols`
-maps public wire formats to canonical operations. `crates/providers` owns
-upstream transports, provider authentication, and outbound HTTP policy.
-`crates/storage` owns PostgreSQL, the outbox, encryption, usage ingestion, and
-Valkey scripts. The `apps/olp` package composes those crates into the gateway,
-control, worker, migration, and administration process modes.
+Dependencies point toward `core`, which owns domain types, routing, and ports
+without infrastructure dependencies. `protocols` maps public wire formats to
+canonical operations; connector crates implement upstream transports;
+`persistence` owns PostgreSQL, the outbox, encryption, usage ingestion, and
+Valkey scripts. `http-api` composes these capabilities, while `apps/olp`
+contains process-mode and dependency wiring.
 
 ```text
-apps/olp ─┬─> crates/protocols ──> crates/domain
-          ├─> crates/providers ─┬─> crates/protocols
-          │                    └─> crates/domain
-          ├─> crates/storage ────> crates/domain
-          └─> crates/domain
+apps/olp ──> http-api ──> protocols ──> core
+   │             │             └──────────┘
+   │             ├────> connectors/* ───> core
+   │             └────> persistence ────> core
+   └──────────────────> persistence
 ```
 
 The console is a client-only static asset with no server routes or production
-Node adapter. `tests/conformance` is a test-only workspace package and is not a
-production process component. `scripts/check-boundaries.sh` enforces this
-dependency graph and the infrastructure ownership rules in CI.
-
-## Enterprise control-plane contracts
-
-The running 2.x implementation described below is installation-global. The
-accepted contracts for evolving it into an organization → project →
-environment control plane live in [`docs/enterprise`](enterprise/README.md).
-Those contracts freeze ownership, request/runtime authority, extension trust
-boundaries, compatibility policy, and enterprise-beta qualification targets.
-They intentionally do not claim that later-milestone tenant features are
-already implemented.
+Node adapter.
 
 ## Runtime publication
 

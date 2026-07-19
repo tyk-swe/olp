@@ -31,9 +31,6 @@ and third-party Actions and container images pinned.
 - `openapi/management.json` owns the tracked management API contract and
   requires `pnpm --dir console api:generate` after changes.
 - SQL migrations in `crates/storage/migrations/` are forward-only.
-- Accepted enterprise ownership, runtime, extension, and compatibility
-  decisions live in `docs/enterprise/`; changes require a superseding ADR and
-  matching machine-readable contract updates.
 - `release-metadata.env` records the migration included in the last completed
   release and is the CI upgrade-rehearsal baseline.
 - Helm defaults, schema, and templates in `deploy/helm/` change together.
@@ -61,7 +58,6 @@ Run the full suite before requesting review:
 
 ```sh
 ./scripts/check-boundaries.sh
-./scripts/check-enterprise-contracts.sh
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features

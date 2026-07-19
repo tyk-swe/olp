@@ -117,7 +117,6 @@ after UI changes with `pnpm --dir console screenshots`.
 | Document | Contents |
 |---|---|
 | [Architecture](docs/architecture.md) | Component boundaries, runtime publication, capability certification, data-safety invariants |
-| [Enterprise contracts](docs/enterprise/README.md) | Accepted ownership, runtime authority, extension, compatibility, security, capacity, and beta-gate decisions |
 | [Deployment](docs/deployment.md) | Helm-based production deployment, secrets, edge routing, readiness |
 | [Operations](docs/operations.md) | SLOs, monitoring, backup and restore, upgrades, incident response |
 | [Security policy](SECURITY.md) | Supported versions and vulnerability reporting |
@@ -133,7 +132,6 @@ the standard checks:
 ```bash
 pnpm --dir console install --frozen-lockfile
 ./scripts/check-boundaries.sh
-./scripts/check-enterprise-contracts.sh
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
