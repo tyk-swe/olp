@@ -94,6 +94,10 @@ export function isCompatibleEndpoint(kind: ProviderKind): boolean {
   return kind === 'open_ai_compatible' || kind === 'anthropic_compatible';
 }
 
+export function supportsExplicitProbeModel(kind: ProviderKind): boolean {
+  return kind === 'anthropic_compatible';
+}
+
 export function hasCloudRegion(kind: ProviderKind): boolean {
   return ['vertex_ai', 'bedrock'].includes(kind);
 }

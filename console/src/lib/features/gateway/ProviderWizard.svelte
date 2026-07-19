@@ -42,6 +42,7 @@
     probeReady,
     requiresCredential,
     requiresSeedModel,
+    supportsExplicitProbeModel,
     validateProviderDraft
   } from './providerEditor';
 
@@ -176,7 +177,7 @@
     }
     await run('declare-models', async () => {
       wizardProvider = await declareProviderModels(wizardProvider!, names);
-      if (wizardProvider.kind === 'anthropic_compatible') {
+      if (supportsExplicitProbeModel(wizardProvider.kind)) {
         probe = await probeProvider(wizardProvider, names[0]);
       }
       clearCertificationResults();
@@ -294,7 +295,7 @@
     <p>The control plane performs a bounded connector-specific probe. No client request content is sent.</p>
     <dl><div><dt>Provider</dt><dd>{wizardProvider?.name}</dd></div><div><dt>Connector</dt><dd>{wizardProvider?.kind}</dd></div></dl>
     <button class="button button-primary" type="button" onclick={testWizardProvider} disabled={Boolean(busy)}>{busy === 'probe' ? 'Testing…' : 'Test connection'}</button>
-    {#if wizardProvider && isCompatibleEndpoint(wizardProvider.kind)}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually to test a replacement model or continue capability review. Anthropic-compatible endpoints retry their bounded Messages request against the first declared model.</p><div class="form-field"><label for="manual-models-wizard-test">Upstream model identifiers</label><textarea id="manual-models-wizard-test" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
+    {#if wizardProvider && supportsExplicitProbeModel(wizardProvider.kind)}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually to test a replacement model or continue capability review. Anthropic-compatible endpoints retry their bounded Messages request against the first declared model.</p><div class="form-field"><label for="manual-models-wizard-test">Upstream model identifiers</label><textarea id="manual-models-wizard-test" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
   </section>
 {:else if wizardStep === 3}
   <section class="card stage" aria-labelledby="discovery-heading">

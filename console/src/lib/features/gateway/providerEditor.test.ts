@@ -17,6 +17,7 @@ import {
   providerStatus,
   requiresCredential,
   requiresSeedModel,
+  supportsExplicitProbeModel,
   validateProviderDraft,
   type ProviderEditValues
 } from './providerEditor';
@@ -60,6 +61,8 @@ describe('provider editor connector policy', () => {
     expect(hasApiVersion('azure_open_ai')).toBe(true);
     expect(hasDeployment('open_ai_compatible')).toBe(false);
     expect(hasApiVersion('open_ai_compatible')).toBe(false);
+    expect(supportsExplicitProbeModel('anthropic_compatible')).toBe(true);
+    expect(supportsExplicitProbeModel('open_ai_compatible')).toBe(false);
   });
 
   it('enforces connector-specific creation requirements', () => {
