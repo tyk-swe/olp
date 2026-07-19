@@ -18,8 +18,7 @@ use std::fmt;
 
 use crate::openai::{
     CompatibleCapability, CompatibleCapabilityCertificationError,
-    ConnectorConfig as OpenAiConnectorConfig, ConnectorTimeouts as OpenAiConnectorTimeouts,
-    OpenAiApiKey, OpenAiConnector,
+    ConnectorConfig as OpenAiConnectorConfig, OpenAiApiKey, OpenAiConnector,
 };
 use olp_domain::{
     AttemptFailureClass, DiscoveredProviderModel, OperationKind, ProviderOutput, ProviderRequest,
@@ -58,31 +57,12 @@ impl ConnectorConfig {
         })
     }
 
-    pub fn with_timeouts(
-        mut self,
-        timeouts: OpenAiConnectorTimeouts,
-    ) -> Result<Self, ConnectorBuildError> {
-        self.inner = self.inner.with_timeouts(timeouts)?;
-        Ok(self)
-    }
-
-    pub fn with_response_limits(
-        mut self,
-        max_response_bytes: usize,
-        max_event_bytes: usize,
-    ) -> Result<Self, ConnectorBuildError> {
-        self.inner = self
-            .inner
-            .with_response_limits(max_response_bytes, max_event_bytes)?;
-        Ok(self)
-    }
-
     #[cfg(test)]
     fn for_local_test(
         resource_endpoint: &str,
         deployment: &str,
         api_version: &str,
-        timeouts: OpenAiConnectorTimeouts,
+        timeouts: crate::openai::ConnectorTimeouts,
     ) -> Self {
         let endpoint = validate_resource_endpoint(resource_endpoint, true).unwrap();
         let base_url = deployment_base_url(&endpoint, deployment).unwrap();

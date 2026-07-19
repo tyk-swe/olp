@@ -2,7 +2,7 @@ import * as v from 'valibot';
 
 const optionalLimit = v.optional(v.pipe(v.number(), v.integer(), v.minValue(1)));
 
-export const apiKeySchema = v.object({
+const apiKeySchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(1, 'Enter a name.'), v.maxLength(100, 'Use 100 characters or fewer.')),
   requestsPerMinute: optionalLimit,
   tokensPerMinute: optionalLimit,

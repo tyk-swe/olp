@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-export const ownerFormSchema = v.pipe(
+const ownerFormSchema = v.pipe(
   v.object({
     displayName: v.pipe(
       v.string(),

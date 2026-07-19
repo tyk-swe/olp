@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test';
  * usage pipeline. No live backend is involved; every response is mocked.
  */
 
-export const ids = {
+const ids = {
   user: '01980100-0000-7000-8000-000000000001',
   generation: '01980100-0000-7000-8000-000000000002',
   providers: {
@@ -105,7 +105,7 @@ function providerSummary(input: {
   };
 }
 
-export const providerItems = [
+const providerItems = [
   providerSummary({
     id: ids.providers.openai,
     name: 'openai-production',
@@ -208,7 +208,7 @@ const supportTargets = [
   })
 ];
 
-export const activeRouteItems = [
+const activeRouteItems = [
   {
     id: ids.routes.support,
     slug: 'support-chat',
@@ -276,7 +276,7 @@ export const activeRouteItems = [
   }
 ];
 
-export const routeDraftItems = [
+const routeDraftItems = [
   {
     id: ids.drafts.vision,
     based_on_revision_id: null,
@@ -311,7 +311,7 @@ export async function mockRoutes(page: Page) {
   });
 }
 
-export const apiKeyItems = [
+const apiKeyItems = [
   {
     id: ids.keys.production,
     name: 'production-web-app',

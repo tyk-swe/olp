@@ -13,8 +13,7 @@ mod oauth;
 use std::{fmt, sync::Arc};
 
 use crate::gemini::{
-    BearerTokenProvider, ConnectorConfig as GeminiConnectorConfig,
-    ConnectorTimeouts as GeminiConnectorTimeouts, GeminiConnector,
+    BearerTokenProvider, ConnectorConfig as GeminiConnectorConfig, GeminiConnector,
 };
 use olp_domain::{
     DiscoveredProviderModel, ProviderOutput, ProviderRequest, ProviderTransport, TransportError,
@@ -53,32 +52,13 @@ impl ConnectorConfig {
         })
     }
 
-    pub fn with_timeouts(
-        mut self,
-        timeouts: GeminiConnectorTimeouts,
-    ) -> Result<Self, ConnectorBuildError> {
-        self.inner = self.inner.with_timeouts(timeouts)?;
-        Ok(self)
-    }
-
-    pub fn with_response_limits(
-        mut self,
-        max_response_bytes: usize,
-        max_event_bytes: usize,
-    ) -> Result<Self, ConnectorBuildError> {
-        self.inner = self
-            .inner
-            .with_response_limits(max_response_bytes, max_event_bytes)?;
-        Ok(self)
-    }
-
     #[cfg(test)]
     fn for_local_test(
         project: &str,
         location: &str,
         probe_model: &str,
         base_url: &str,
-        timeouts: GeminiConnectorTimeouts,
+        timeouts: crate::gemini::ConnectorTimeouts,
     ) -> Self {
         Self {
             inner: GeminiConnectorConfig::for_local_test(base_url, timeouts),
