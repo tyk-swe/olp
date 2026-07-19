@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, convert::Infallible, fmt, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
@@ -57,8 +57,8 @@ use crate::{
     },
     semantic_validation::{operation_for_provider, select_representable_attempts_filtered},
     streaming_response::{
-        ProtocolStreamEncoder, encode_server_sse_frame, encode_sse_frame,
-        protocol_streaming_response, send_stream_chunk, sse_response,
+        ProtocolStreamEncoder, TerminalFrames, encode_server_sse_frame, encode_sse_frame,
+        protocol_streaming_response, sse_stream,
     },
 };
 
@@ -478,13 +478,13 @@ fn responses_error_sse(error: &InferenceError) -> Bytes {
 }
 
 fn raw_media_streaming_response(state: ApiState, mut execution: RoutedEventExecution) -> Response {
-    let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, Infallible>>(32);
+    let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
         let mut next = Some(Ok(execution.first.clone()));
         let mut usage = UsageCapture::default();
         let mut failure = None;
-        let mut completed = false;
+        let mut terminal = None;
         while let Some(item) = next {
             let event = match item {
                 Ok(event) => event,
@@ -497,16 +497,13 @@ fn raw_media_streaming_response(state: ApiState, mut execution: RoutedEventExecu
             usage.observe_openai_media_event(&event);
             match raw_media_event_bytes(event) {
                 Ok(Some(bytes)) => {
-                    if !send_stream_chunk(&sender, bytes, execution.deadline).await {
-                        failure = Some(InferenceError::bad_gateway(
-                            "client_cancelled",
-                            "The client disconnected.",
-                        ));
+                    if let Err(error) = writer.send_or_fail(bytes, execution.deadline).await {
+                        failure = Some(error);
                         break;
                     }
                 }
                 Ok(None) => {
-                    completed = true;
+                    terminal = Some(TerminalFrames::empty());
                     break;
                 }
                 Err(error) => {
@@ -515,11 +512,8 @@ fn raw_media_streaming_response(state: ApiState, mut execution: RoutedEventExecu
                 }
             }
             next = tokio::select! {
-                () = sender.closed() => {
-                    failure = Some(InferenceError::bad_gateway(
-                        "client_cancelled",
-                        "The client disconnected.",
-                    ));
+                () = writer.closed() => {
+                    failure = Some(InferenceError::client_cancelled());
                     None
                 }
                 () = tokio::time::sleep_until(execution.deadline) => {
@@ -529,21 +523,20 @@ fn raw_media_streaming_response(state: ApiState, mut execution: RoutedEventExecu
                 next = events.next() => next,
             };
         }
-        if !completed && failure.is_none() {
+        if terminal.is_none() && failure.is_none() {
             failure = Some(InferenceError::bad_gateway(
                 "provider_protocol_error",
                 "The provider media stream ended without a terminal event.",
             ));
         }
-        if let Some(error) = &failure
-            && !sender.is_closed()
-        {
-            let _ = sender.try_send(Ok(openai_error_sse(error)));
-        }
+        drop(events);
+        writer.finish_stream(terminal, &mut failure, |error| {
+            TerminalFrames::one(openai_error_sse(error))
+        });
         emit_event_execution(&state, &execution, &usage, failure.as_ref());
         release_limits(&state, execution.lease.as_ref()).await;
     });
-    sse_response(receiver)
+    response
 }
 
 fn raw_media_event_bytes(event: CanonicalEvent) -> Result<Option<Bytes>, InferenceError> {
@@ -974,6 +967,31 @@ async fn video_create(
     // handle. Until the durable reservation succeeds, the multipart guard
     // remains armed so selection or PostgreSQL failures cannot leak uploads.
     form.disarm_cleanup();
+    // The accepted upstream create must outlive client disconnects. Capture
+    // the HTTP inference context before spawning so it keeps the original
+    // runtime generation, limits reservation, and metadata ownership.
+    let task = crate::spawn_http_inference_task(
+        &state,
+        complete_video_create(state.clone(), headers, operation, reserved, required_target),
+    );
+    match task.await {
+        Ok(result) => result,
+        Err(error) => {
+            error!(%error, "video create completion task stopped unexpectedly");
+            Err(InferenceError::unavailable(
+                "video_create_completion_unavailable",
+            ))
+        }
+    }
+}
+
+async fn complete_video_create(
+    state: ApiState,
+    headers: HeaderMap,
+    operation: Operation,
+    reserved: MediaJobRecord,
+    required_target: RequiredTarget,
+) -> Result<Response, InferenceError> {
     let mut executed = match execute_routed_result(
         &state,
         &headers,
@@ -995,11 +1013,20 @@ async fn video_create(
                 {
                     error!(job_id = %reserved.id, %persistence_error, "failed to mark ambiguous video creation");
                 }
-            } else if let Err(persistence_error) = require_inference_store(&state)?
-                .finalize_media_job_deletion(reserved.id)
-                .await
-            {
-                error!(job_id = %reserved.id, %persistence_error, "failed to retire abandoned video reservation");
+            } else {
+                match media_job_deletion_finalized(require_inference_store(&state)?, reserved.id)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        state.record_media_reconciliation_gap();
+                        error!(job_id = %reserved.id, "abandoned video reservation was not finalized");
+                    }
+                    Err(persistence_error) => {
+                        state.record_media_reconciliation_gap();
+                        error!(job_id = %reserved.id, %persistence_error, "failed to retire abandoned video reservation");
+                    }
+                }
             }
             return Err(error);
         }
@@ -1079,8 +1106,11 @@ async fn video_create(
         Ok(record) => record,
         Err(error) => {
             let identity_conflict = matches!(error, MediaJobError::UpstreamIdentityConflict);
-            let reconciliation_persisted = if identity_conflict {
-                true
+            // A compensation DELETE is only safe after PostgreSQL records the
+            // upstream identity and cleanup intent. An ambiguous attachment
+            // outcome can already have committed the active row.
+            let cleanup_intent_persisted = if identity_conflict {
+                false
             } else {
                 match require_inference_store(&state)?
                     .mark_media_job_create_cleanup_pending(
@@ -1090,64 +1120,78 @@ async fn video_create(
                     )
                     .await
                 {
-                    Ok(_) => true,
+                    Ok(record)
+                        if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
+                            && record.upstream_job_id.as_deref()
+                                == Some(upstream_job_id.as_str()) =>
+                    {
+                        true
+                    }
+                    Ok(record) => {
+                        error!(
+                            job_id = %reserved.id,
+                            lifecycle = record.lifecycle.as_str(),
+                            "video cleanup intent did not retain the upstream identity"
+                        );
+                        false
+                    }
                     Err(persistence_error) => {
                         error!(job_id = %reserved.id, %persistence_error, "failed to persist video cleanup reconciliation metadata");
                         false
                     }
                 }
             };
-            let mut cleanup = decode_video_delete(upstream_job_id);
-            set_video_route(&mut cleanup, executed.route_slug.as_str())?;
-            mark_missing_delete_as_success(&mut cleanup)?;
-            let mut compensation = if identity_conflict {
-                None
-            } else {
-                Some(
-                    execute_routed_result(
-                        &state,
-                        &headers,
-                        cleanup,
-                        TransportMode::Unary,
-                        Some(required_target),
-                    )
-                    .await,
+            let compensation_confirmed = if cleanup_intent_persisted {
+                let mut cleanup = decode_video_delete(upstream_job_id.clone());
+                set_video_route(&mut cleanup, executed.route_slug.as_str())?;
+                mark_missing_delete_as_success(&mut cleanup)?;
+                let mut compensation = execute_routed_result(
+                    &state,
+                    &headers,
+                    cleanup,
+                    TransportMode::Unary,
+                    Some(required_target),
                 )
-            };
-            let compensation_confirmed = match compensation.as_mut() {
-                Some(Ok(compensation))
-                    if matches!(
-                        compensation.result.as_ref(),
-                        CanonicalResult::VideoDelete(deleted) if deleted.deleted
-                    ) =>
-                {
-                    compensation.mark_success();
-                    true
+                .await;
+                match &mut compensation {
+                    Ok(compensation)
+                        if matches!(
+                            compensation.result.as_ref(),
+                            CanonicalResult::VideoDelete(deleted) if deleted.deleted
+                        ) =>
+                    {
+                        compensation.mark_success();
+                        true
+                    }
+                    Ok(compensation) => {
+                        let failure = incompatible_result("video deletion");
+                        compensation.mark_failure(&failure);
+                        false
+                    }
+                    Err(_) => false,
                 }
-                Some(Ok(compensation)) => {
-                    let failure = incompatible_result("video deletion");
-                    compensation.mark_failure(&failure);
-                    false
-                }
-                _ => false,
+            } else {
+                false
             };
             if compensation_confirmed {
-                if let Err(persistence_error) = require_inference_store(&state)?
-                    .finalize_media_job_deletion(reserved.id)
+                match media_job_deletion_finalized(require_inference_store(&state)?, reserved.id)
                     .await
                 {
-                    error!(job_id = %reserved.id, %persistence_error, "upstream cleanup succeeded but reconciliation tombstone failed");
-                    if !reconciliation_persisted {
+                    Ok(true) => {}
+                    Ok(false) => {
                         state.record_media_reconciliation_gap();
+                        error!(job_id = %reserved.id, "upstream cleanup succeeded but reconciliation tombstone was not finalized");
+                    }
+                    Err(persistence_error) => {
+                        state.record_media_reconciliation_gap();
+                        error!(job_id = %reserved.id, %persistence_error, "upstream cleanup succeeded but reconciliation tombstone failed");
                     }
                 }
             } else {
-                if !reconciliation_persisted {
-                    state.record_media_reconciliation_gap();
-                }
+                state.record_media_reconciliation_gap();
                 error!(
                     job_id = %reserved.id,
-                    upstream_job_id = %result.id,
+                    upstream_job_id = %upstream_job_id,
                     provider_id = %executed.provider_id,
                     route = %executed.route_slug,
                     "video create reconciliation gap requires operator attention"
@@ -1412,10 +1456,15 @@ async fn video_delete(
         executed.mark_failure(&failure);
         return Err(failure);
     }
-    require_inference_store(&state)?
-        .finalize_media_job_deletion(record.id)
+    let finalized = media_job_deletion_finalized(require_inference_store(&state)?, record.id)
         .await
         .map_err(media_job_error)?;
+    if !finalized {
+        state.record_media_reconciliation_gap();
+        let failure = InferenceError::unavailable("media_job_delete_reconciliation_pending");
+        executed.mark_failure(&failure);
+        return Err(failure);
+    }
     result.id = record.id.to_string();
     let response = encode_video_delete_response(&result).map_err(|error| {
         InferenceError::bad_gateway("provider_protocol_error", error.to_string())
@@ -1484,6 +1533,16 @@ async fn attach_media_job_with_retry(
         }
     }
     unreachable!("bounded attach retry returns on every final attempt")
+}
+
+async fn media_job_deletion_finalized(
+    store: &olp_storage::PgStore,
+    id: uuid::Uuid,
+) -> Result<bool, MediaJobError> {
+    if store.finalize_media_job_deletion(id).await? {
+        return Ok(true);
+    }
+    Ok(store.media_job(id).await?.lifecycle == MediaJobLifecycle::Deleted)
 }
 
 fn mark_missing_delete_as_success(operation: &mut Operation) -> Result<(), InferenceError> {
@@ -1676,10 +1735,13 @@ async fn reconcile_media_job_operation(
     ) {
         return Err("video_delete_not_confirmed");
     }
-    store
-        .finalize_media_job_deletion(record.id)
+    let finalized = media_job_deletion_finalized(store, record.id)
         .await
         .map_err(|_| "persistence_unavailable")?;
+    if !finalized {
+        state.record_media_reconciliation_gap();
+        return Err("persistence_unavailable");
+    }
     record.lifecycle = MediaJobLifecycle::Deleted;
     Ok(())
 }
@@ -2710,9 +2772,6 @@ async fn reserve_limits(
     lease_ttl: Duration,
 ) -> Result<Option<LimitLease>, InferenceError> {
     if let Some(reserved_tokens) = crate::http_inference_reserved_tokens() {
-        if !crate::http_multipart_token_reconciliation_required() {
-            return Ok(None);
-        }
         let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
             return Ok(None);
         };
@@ -2746,7 +2805,7 @@ async fn reserve_limits(
                 retry_after,
             }) => Err(InferenceError::rate_limited(dimension, retry_after)),
             Err(error) => {
-                error!(%error, "multipart TPM reconciliation failed closed");
+                error!(%error, "HTTP TPM reconciliation failed closed");
                 Err(InferenceError::unavailable(
                     "distributed_limits_unavailable",
                 ))
@@ -3878,108 +3937,84 @@ fn streaming_response(
     attempts: Vec<UsageAttempt>,
     attempt_started: tokio::time::Instant,
 ) -> Response {
-    let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, Infallible>>(32);
+    let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut encoder = OpenAiStreamEncoder::new(request_id, route_slug.as_str());
         let mut next = Some(Ok(first));
         let mut usage = UsageCapture::default();
-        let mut status_code = Some(StatusCode::OK.as_u16());
-        let mut error_class = None;
-        let mut saw_done = false;
-        let mut sent_done = false;
+        let mut failure = None;
+        let mut terminal = None;
         'provider: while let Some(item) = next {
             match item {
                 Ok(event) => {
-                    let terminal = matches!(event.kind, CanonicalEventKind::Done);
-                    saw_done |= terminal;
+                    let is_done = matches!(event.kind, CanonicalEventKind::Done);
                     usage.observe(&event);
-                    if let CanonicalEventKind::Error { error } = &event.kind {
-                        let failure = InferenceError::from_canonical(error);
-                        status_code = Some(failure.status.as_u16());
-                        error_class = Some(failure.code.to_owned());
-                    }
+                    let canonical_failure = match &event.kind {
+                        CanonicalEventKind::Error { error } => {
+                            Some(InferenceError::from_canonical(error))
+                        }
+                        _ => None,
+                    };
+                    let is_terminal = is_done || canonical_failure.is_some();
                     let encoded = match encoder.encode(event) {
                         Ok(encoded) => encoded,
-                        Err(failure) => {
-                            status_code = Some(failure.status.as_u16());
-                            error_class = Some(failure.code.to_owned());
-                            let _ =
-                                send_stream_chunk(&sender, openai_error_sse(&failure), deadline)
-                                    .await;
-                            let _ = send_stream_chunk(
-                                &sender,
-                                Bytes::from_static(b"data: [DONE]\n\n"),
-                                deadline,
-                            )
-                            .await;
-                            sent_done = true;
+                        Err(error) => {
+                            failure = Some(error);
                             break 'provider;
                         }
                     };
+                    if is_terminal {
+                        let mut encoded = encoded;
+                        if let Some(canonical_failure) = canonical_failure {
+                            failure = Some(canonical_failure);
+                            encoded.push(Bytes::from_static(b"data: [DONE]\n\n"));
+                        }
+                        terminal = Some(TerminalFrames::new(encoded));
+                        break 'provider;
+                    }
                     for bytes in encoded {
-                        if !send_stream_chunk(&sender, bytes, deadline).await {
-                            if sender.is_closed() {
-                                status_code = None;
-                                error_class = Some("client_cancelled".to_owned());
-                            } else {
-                                let failure = InferenceError::timeout();
-                                status_code = Some(failure.status.as_u16());
-                                error_class = Some(failure.code.to_owned());
-                            }
+                        if let Err(error) = writer.send_or_fail(bytes, deadline).await {
+                            failure = Some(error);
                             break 'provider;
                         }
                     }
-                    if terminal {
-                        sent_done = true;
-                        break 'provider;
-                    }
                 }
                 Err(error) => {
-                    let failure = InferenceError::from_transport(error);
-                    status_code = Some(failure.status.as_u16());
-                    error_class = Some(failure.code.to_owned());
-                    let _ = send_stream_chunk(&sender, openai_error_sse(&failure), deadline).await;
-                    let _ = send_stream_chunk(
-                        &sender,
-                        Bytes::from_static(b"data: [DONE]\n\n"),
-                        deadline,
-                    )
-                    .await;
-                    sent_done = true;
+                    failure = Some(InferenceError::from_transport(error));
                     break 'provider;
                 }
             }
             next = tokio::select! {
-                () = sender.closed() => {
-                    status_code = None;
-                    error_class = Some("client_cancelled".to_owned());
+                () = writer.closed() => {
+                    failure = Some(InferenceError::client_cancelled());
                     break 'provider;
                 }
                 () = tokio::time::sleep_until(deadline) => {
-                    let failure = InferenceError::timeout();
-                    status_code = Some(failure.status.as_u16());
-                    error_class = Some(failure.code.to_owned());
-                    let _ = sender.try_send(Ok(openai_error_sse(&failure)));
-                    let _ = sender.try_send(Ok(Bytes::from_static(b"data: [DONE]\n\n")));
-                    sent_done = true;
+                    failure = Some(InferenceError::timeout());
                     break 'provider;
                 }
                 next = events.next() => next,
             };
         }
-        if !saw_done && error_class.is_none() {
-            let failure = InferenceError::bad_gateway(
+        if terminal.is_none() && failure.is_none() {
+            failure = Some(InferenceError::bad_gateway(
                 "provider_protocol_error",
                 "The provider stream ended without a terminal event.",
-            );
-            status_code = Some(failure.status.as_u16());
-            error_class = Some(failure.code.to_owned());
-            let _ = sender.try_send(Ok(openai_error_sse(&failure)));
-        }
-        if !sent_done && !sender.is_closed() {
-            let _ = sender.try_send(Ok(Bytes::from_static(b"data: [DONE]\n\n")));
+            ));
         }
         drop(events);
+        writer.finish_stream(terminal, &mut failure, |error| {
+            TerminalFrames::new(vec![
+                openai_error_sse(error),
+                Bytes::from_static(b"data: [DONE]\n\n"),
+            ])
+        });
+        let status_code = failure
+            .as_ref()
+            .map_or(Some(StatusCode::OK.as_u16()), |error| {
+                (error.code != "client_cancelled").then_some(error.status.as_u16())
+            });
+        let error_class = failure.as_ref().map(|error| error.code.to_owned());
         emit_request_event(
             &state,
             generation_id,
@@ -4000,8 +4035,6 @@ fn streaming_response(
         );
         release_limits(&state, lease.as_ref()).await;
     });
-    let mut response = sse_response(receiver);
-    *response.status_mut() = StatusCode::OK;
     response
 }
 
@@ -5666,7 +5699,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_pre_reservation_marker_prevents_double_charging() {
+    async fn http_pre_reservation_marker_reuses_the_full_reservation() {
         let (state, key) = test_state(false);
         install_hard_limits(&state);
         let snapshot = state.runtime.pin();
@@ -5682,7 +5715,7 @@ mod tests {
         .unwrap();
         let lease = crate::HTTP_INFERENCE_LIMITS_RESERVED
             .scope(
-                4_096,
+                10_000,
                 reserve_limits(&state, api_key, &operation, lookup, Duration::from_secs(30)),
             )
             .await
@@ -5691,7 +5724,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multipart_request_above_baseline_requires_token_delta_reservation() {
+    async fn http_request_above_baseline_requires_token_delta_reservation() {
         let (state, key) = test_state(false);
         let pinned = state.runtime.pin();
         let mut api_keys = pinned.api_keys.clone();
@@ -5716,22 +5749,12 @@ mod tests {
             },
         ));
         let error = crate::HTTP_INFERENCE_LIMITS_RESERVED
-            .scope(2_000, async {
-                crate::HTTP_MULTIPART_TOKEN_RECONCILIATION
-                    .scope(
-                        (),
-                        reserve_limits(
-                            &state,
-                            api_key,
-                            &operation,
-                            lookup,
-                            Duration::from_secs(30),
-                        ),
-                    )
-                    .await
-            })
+            .scope(
+                2_000,
+                reserve_limits(&state, api_key, &operation, lookup, Duration::from_secs(30)),
+            )
             .await
-            .expect_err("missing delta limiter must fail closed above the multipart baseline");
+            .expect_err("missing delta limiter must fail closed above the HTTP baseline");
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.code, "distributed_limits_unavailable");
     }

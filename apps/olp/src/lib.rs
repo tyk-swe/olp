@@ -54,11 +54,12 @@ use olp_domain::{
     ApiKey, ApiKeyLookupId, ApiKeyStatus, MediaSpool, OperationKind, ProviderId, ProviderKind,
     ProviderTransport, RouteSlug, Surface, authorize_api_key,
 };
+use olp_protocols::openai::EmbeddingWireInput;
 use olp_storage::{
     DistributedLimiter, KeyHasher, LimitError, LimitLease, LimitRequest, MasterKey, PgStore,
     UsageConsumerStatus, UsageEmitter, UsageEpochHealth, UsageEvent,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock as AsyncRwLock;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -127,9 +128,9 @@ tokio::task_local! {
     /// second RPM/TPM reservation for the same request.
     static HTTP_INFERENCE_LIMITS_RESERVED: i64;
 
-    /// Present only for multipart reservations whose fixed pre-parse token
-    /// baseline must be reconciled against the decoded canonical request.
-    static HTTP_MULTIPART_TOKEN_RECONCILIATION: ();
+    /// Keeps the HTTP concurrency reservation alive while request work is
+    /// transferred to a detached inference task.
+    static HTTP_INFERENCE_RESERVATION_HOLD: InferenceReservation;
 }
 
 pub(crate) fn pin_inference_runtime(state: &ApiState) -> Arc<RuntimeBundle> {
@@ -144,12 +145,6 @@ pub(crate) fn http_inference_reserved_tokens() -> Option<i64> {
         .ok()
 }
 
-pub(crate) fn http_multipart_token_reconciliation_required() -> bool {
-    HTTP_MULTIPART_TOKEN_RECONCILIATION
-        .try_with(|()| ())
-        .is_ok()
-}
-
 pub(crate) fn claim_http_inference_metadata() {
     let _ = HTTP_INFERENCE_METADATA_CLAIMED.try_with(|claimed| {
         claimed.store(true, Ordering::Release);
@@ -158,45 +153,136 @@ pub(crate) fn claim_http_inference_metadata() {
 
 type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
+struct InferenceReservationInner {
+    release: Mutex<Option<ReleaseFuture>>,
+}
+
+#[derive(Clone)]
 struct InferenceReservation {
-    release: Option<ReleaseFuture>,
+    inner: Arc<InferenceReservationInner>,
 }
 
 impl InferenceReservation {
     fn distributed(limiter: Arc<DistributedLimiter>, lease: LimitLease) -> Self {
         Self {
-            release: Some(Box::pin(async move {
-                match tokio::time::timeout(Duration::from_millis(250), limiter.release(&lease))
-                    .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => {
-                        tracing::warn!(%error, "failed to release HTTP concurrency lease");
+            inner: Arc::new(InferenceReservationInner {
+                release: Mutex::new(Some(Box::pin(async move {
+                    match tokio::time::timeout(Duration::from_millis(250), limiter.release(&lease))
+                        .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            tracing::warn!(%error, "failed to release HTTP concurrency lease");
+                        }
+                        Err(_) => tracing::warn!("timed out releasing HTTP concurrency lease"),
                     }
-                    Err(_) => tracing::warn!("timed out releasing HTTP concurrency lease"),
-                }
-            })),
+                }))),
+            }),
         }
     }
 
     #[cfg(test)]
     fn for_test(release: impl Future<Output = ()> + Send + 'static) -> Self {
         Self {
-            release: Some(Box::pin(release)),
+            inner: Arc::new(InferenceReservationInner {
+                release: Mutex::new(Some(Box::pin(release))),
+            }),
         }
     }
 
-    async fn release(mut self) {
-        if let Some(release) = self.release.take() {
-            release.await;
+    async fn release(self) {
+        if let Some(release) = self.start_release() {
+            let _ = release.await;
         }
     }
 
-    fn spawn_release(&mut self) {
-        if let Some(release) = self.release.take() {
-            tokio::spawn(release);
+    fn spawn_release(&self) {
+        let _ = self.start_release();
+    }
+
+    fn start_release(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let release = self
+            .inner
+            .release
+            .lock()
+            .expect("HTTP reservation release mutex is not poisoned")
+            .take()?;
+        spawn_release_future(release)
+    }
+}
+
+/// Spawns a reservation release future on the current Tokio runtime, returning
+/// `None` when no runtime is available (e.g. the last owner drops off-runtime).
+fn spawn_release_future(release: ReleaseFuture) -> Option<tokio::task::JoinHandle<()>> {
+    let runtime = tokio::runtime::Handle::try_current().ok()?;
+    Some(runtime.spawn(release))
+}
+
+impl Drop for InferenceReservationInner {
+    fn drop(&mut self) {
+        let Some(release) = self
+            .release
+            .get_mut()
+            .expect("HTTP reservation release mutex is not poisoned")
+            .take()
+        else {
+            return;
+        };
+        if spawn_release_future(release).is_none() {
+            tracing::warn!("could not release HTTP concurrency lease outside a Tokio runtime");
         }
     }
+}
+
+#[derive(Clone)]
+struct HttpInferenceTaskContext {
+    runtime: Arc<RuntimeBundle>,
+    metadata_claimed: Option<Arc<AtomicBool>>,
+    reserved_tokens: Option<i64>,
+    reservation_hold: Option<InferenceReservation>,
+}
+
+impl HttpInferenceTaskContext {
+    fn capture(state: &ApiState) -> Self {
+        Self {
+            runtime: pin_inference_runtime(state),
+            metadata_claimed: HTTP_INFERENCE_METADATA_CLAIMED.try_with(Arc::clone).ok(),
+            reserved_tokens: http_inference_reserved_tokens(),
+            reservation_hold: HTTP_INFERENCE_RESERVATION_HOLD
+                .try_with(|reservation| reservation.clone())
+                .ok(),
+        }
+    }
+
+    async fn scope<F, T>(self, future: F) -> T
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let mut future: Pin<Box<dyn Future<Output = T> + Send>> = Box::pin(future);
+        if let Some(reservation) = self.reservation_hold {
+            future = Box::pin(HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, future));
+        }
+        if let Some(reserved_tokens) = self.reserved_tokens {
+            future = Box::pin(HTTP_INFERENCE_LIMITS_RESERVED.scope(reserved_tokens, future));
+        }
+        if let Some(metadata_claimed) = self.metadata_claimed {
+            future = Box::pin(HTTP_INFERENCE_METADATA_CLAIMED.scope(metadata_claimed, future));
+        }
+        HTTP_INFERENCE_RUNTIME.scope(self.runtime, future).await
+    }
+}
+
+pub(crate) fn spawn_http_inference_task<F, T>(
+    state: &ApiState,
+    future: F,
+) -> tokio::task::JoinHandle<T>
+where
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    let context = HttpInferenceTaskContext::capture(state);
+    tokio::spawn(context.scope(future))
 }
 
 struct ReleaseReservationBody {
@@ -1420,7 +1506,6 @@ async fn enforce_request_limits_inner(
             local_metadata,
             runtime,
             reserved_tokens,
-            false,
         )
         .await);
     }
@@ -1510,7 +1595,6 @@ async fn enforce_request_limits_inner(
         local_metadata,
         runtime,
         reserved_tokens,
-        is_multipart,
     )
     .await)
 }
@@ -1574,7 +1658,6 @@ async fn run_request_with_reservation(
     local_metadata: Option<LocalRequestMetadata>,
     runtime: Option<Arc<RuntimeBundle>>,
     reserved_tokens: Option<i64>,
-    reconcile_multipart_tokens: bool,
 ) -> Response {
     let metadata_claimed = runtime.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
     let run = async move {
@@ -1584,20 +1667,18 @@ async fn run_request_with_reservation(
         // this request even if a newer release activates concurrently.
         if let Some(reserved_tokens) = reserved_tokens {
             HTTP_INFERENCE_LIMITS_RESERVED
-                .scope(reserved_tokens, async move {
-                    if reconcile_multipart_tokens {
-                        HTTP_MULTIPART_TOKEN_RECONCILIATION
-                            .scope((), next.run(request))
-                            .await
-                    } else {
-                        next.run(request).await
-                    }
-                })
+                .scope(reserved_tokens, next.run(request))
                 .await
         } else {
             next.run(request).await
         }
     };
+    let run: Pin<Box<dyn Future<Output = Response> + Send>> =
+        if let Some(reservation_hold) = reservation.clone() {
+            Box::pin(HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation_hold, run))
+        } else {
+            Box::pin(run)
+        };
     let response = match (runtime, metadata_claimed.as_ref()) {
         (Some(runtime), Some(claimed)) => {
             HTTP_INFERENCE_METADATA_CLAIMED
@@ -1815,7 +1896,34 @@ fn estimate_http_json_request_tokens(path: &str, body: &[u8]) -> i64 {
     } else {
         1
     };
-    i64::try_from(encoded_body.saturating_add(baseline).max(1)).unwrap_or(i64::MAX)
+    let byte_estimate = encoded_body.saturating_add(baseline).max(1);
+    // Generation paths and embeddings are mutually exclusive, so the body is
+    // parsed at most once per request, and only for paths that consume it.
+    let embedding_token_floor = if path.ends_with("/embeddings") {
+        serde_json::from_slice::<EmbeddingTokenProbe>(body)
+            .ok()
+            .map(|probe| embedding_token_count(probe.input))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    i64::try_from(byte_estimate.max(embedding_token_floor)).unwrap_or(i64::MAX)
+}
+
+/// Probes only the `input` field of an embeddings request to estimate its
+/// token floor, reusing the canonical wire shape so token-array variants stay
+/// in sync with the request codec.
+#[derive(Deserialize)]
+struct EmbeddingTokenProbe {
+    input: EmbeddingWireInput,
+}
+
+fn embedding_token_count(input: EmbeddingWireInput) -> usize {
+    match input {
+        EmbeddingWireInput::Text(_) | EmbeddingWireInput::Texts(_) => 0,
+        EmbeddingWireInput::Tokens(tokens) => tokens.len(),
+        EmbeddingWireInput::TokenArrays(arrays) => arrays.iter().map(Vec::len).sum(),
+    }
 }
 
 fn estimate_http_non_json_request_tokens(path: &str) -> i64 {
@@ -3184,6 +3292,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn raw_json_tpm_estimate_counts_compact_embedding_token_arrays() {
+        let flat = serde_json::json!({
+            "model": "default",
+            "input": vec![0_u32; 100],
+        });
+        let nested = serde_json::json!({
+            "model": "default",
+            "input": vec![vec![0_u32; 40], vec![0_u32; 60]],
+        });
+        for body in [flat, nested] {
+            let body = serde_json::to_vec(&body).unwrap();
+            assert_eq!(
+                estimate_http_json_request_tokens("/openai/v1/embeddings", &body),
+                100
+            );
+        }
+    }
+
     #[tokio::test]
     async fn json_body_read_has_its_own_deadline_outside_route_layers() {
         let body =
@@ -3587,5 +3714,137 @@ mod tests {
                 "reservation was not released when consume={consume}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn concurrent_final_reservation_drops_release_once() {
+        let released = Arc::new(AtomicBool::new(false));
+        let release_signal = Arc::clone(&released);
+        let reservation = InferenceReservation::for_test(async move {
+            release_signal.store(true, Ordering::Release);
+        });
+        let left = reservation.clone();
+        let right = reservation.clone();
+        drop(reservation);
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let left_task = tokio::spawn({
+            let barrier = Arc::clone(&barrier);
+            async move {
+                barrier.wait().await;
+                drop(left);
+            }
+        });
+        let right_task = tokio::spawn(async move {
+            barrier.wait().await;
+            drop(right);
+        });
+        left_task.await.unwrap();
+        right_task.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !released.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the final reservation drop must schedule its release");
+    }
+
+    #[tokio::test]
+    async fn detached_inference_task_holds_the_http_reservation_after_request_cancellation() {
+        let released = Arc::new(AtomicBool::new(false));
+        let release_signal = Arc::clone(&released);
+        let reservation = InferenceReservation::for_test(async move {
+            release_signal.store(true, Ordering::Release);
+        });
+        let runtime = Arc::new(RuntimeManager::empty());
+        let state = ApiState::new(
+            ApiMode::Gateway,
+            None,
+            runtime,
+            "https://olp.example.test",
+            PathBuf::from("missing-console"),
+        );
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release_child = Arc::new(tokio::sync::Notify::new());
+        let (completed_sender, completed) = tokio::sync::oneshot::channel();
+        let started_wait = started.notified();
+        let outer = tokio::spawn({
+            let state = state.clone();
+            let reservation = reservation.clone();
+            let started = Arc::clone(&started);
+            let release_child = Arc::clone(&release_child);
+            async move {
+                HTTP_INFERENCE_RESERVATION_HOLD
+                    .scope(reservation, async move {
+                        let _task = spawn_http_inference_task(&state, async move {
+                            started.notify_one();
+                            release_child.notified().await;
+                            let _ = completed_sender.send(());
+                        });
+                        futures::future::pending::<()>().await;
+                    })
+                    .await;
+            }
+        });
+        drop(reservation);
+        started_wait.await;
+        outer.abort();
+        let _ = outer.await;
+        assert!(
+            !released.load(Ordering::Acquire),
+            "the detached task must retain the reservation after outer cancellation"
+        );
+
+        release_child.notify_one();
+        completed.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !released.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the final detached reservation owner must release the lease");
+    }
+
+    #[tokio::test]
+    async fn spawned_inference_task_inherits_the_http_execution_context() {
+        let runtime = Arc::new(RuntimeManager::empty());
+        let state = ApiState::new(
+            ApiMode::Gateway,
+            None,
+            Arc::clone(&runtime),
+            "https://olp.example.test",
+            PathBuf::from("missing-console"),
+        );
+        let pinned = runtime.pin();
+        let metadata_claimed = Arc::new(AtomicBool::new(false));
+        let reservation = InferenceReservation::for_test(async {});
+        let child_state = state.clone();
+        let (generation, reserved_tokens, has_reservation_hold) = HTTP_INFERENCE_RUNTIME
+            .scope(
+                Arc::clone(&pinned),
+                HTTP_INFERENCE_METADATA_CLAIMED.scope(
+                    Arc::clone(&metadata_claimed),
+                    HTTP_INFERENCE_LIMITS_RESERVED.scope(
+                        2_000,
+                        HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
+                            let task = spawn_http_inference_task(&state, async move {
+                                claim_http_inference_metadata();
+                                (
+                                    pin_inference_runtime(&child_state).generation.id,
+                                    http_inference_reserved_tokens(),
+                                    HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
+                                )
+                            });
+                            task.await.unwrap()
+                        }),
+                    ),
+                ),
+            )
+            .await;
+        assert_eq!(generation, pinned.generation.id);
+        assert_eq!(reserved_tokens, Some(2_000));
+        assert!(has_reservation_hold);
+        assert!(metadata_claimed.load(Ordering::Acquire));
     }
 }

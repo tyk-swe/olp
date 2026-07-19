@@ -38,6 +38,7 @@ const HTTP2_MAX_HEADER_LIST_BYTES: u32 = 32 * 1024;
 const HTTP2_MAX_PENDING_RESET_STREAMS: usize = 32;
 const HTTP2_MAX_LOCAL_ERROR_RESET_STREAMS: usize = 32;
 const HTTP2_MAX_CONNECTION_AGE: Duration = Duration::from_secs(5 * 60);
+const HTTP_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Hyper's HTTP/1 `max_buf_size` protects its parser, but it may read beyond
 /// the configured threshold before checking it. This wrapper makes the
@@ -302,6 +303,7 @@ async fn serve_connection(
     let connection_deadline = tokio::time::sleep(config.connection_max_age);
     tokio::pin!(connection_deadline);
     let mut draining = false;
+    let mut drain_deadline = None;
     let mut first_request_seen = false;
     loop {
         tokio::select! {
@@ -318,15 +320,26 @@ async fn serve_connection(
                 debug!(%peer, "closing connection before its first request exceeded the header/protocol deadline");
                 return;
             }
-            () = &mut connection_deadline => {
-                debug!(%peer, "closing connection at its maximum age");
-                return;
+            () = &mut connection_deadline, if !draining => {
+                debug!(%peer, "gracefully draining connection at its maximum age");
+                draining = true;
+                connection.as_mut().graceful_shutdown();
+                drain_deadline = Some(Box::pin(tokio::time::sleep(HTTP_CONNECTION_DRAIN_TIMEOUT)));
             }
             changed = shutdown.changed(), if !draining => {
                 if changed.is_err() || *shutdown.borrow() {
                     draining = true;
                     connection.as_mut().graceful_shutdown();
+                    drain_deadline = Some(Box::pin(tokio::time::sleep(HTTP_CONNECTION_DRAIN_TIMEOUT)));
                 }
+            }
+            () = async {
+                if let Some(deadline) = drain_deadline.as_mut() {
+                    deadline.await;
+                }
+            }, if draining => {
+                warn!(%peer, "forcing close after HTTP connection drain deadline");
+                return;
             }
         }
     }
@@ -429,7 +442,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http2_connection_is_closed_at_its_maximum_age() {
+    async fn http2_connection_starts_graceful_drain_at_its_maximum_age() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (shutdown, shutdown_receiver) = watch::channel(false);
@@ -452,12 +465,67 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut response = Vec::new();
-        tokio::time::timeout(Duration::from_secs(1), stream.read_to_end(&mut response))
+        // A graceful H2 drain sends GOAWAY but waits for the peer to close the
+        // connection. It must not force EOF while a peer can still finish an
+        // in-flight stream.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let mut response = [0_u8; 128];
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), stream.read(&mut response))
+                .await
+                .unwrap()
+                .unwrap()
+                > 0
+        );
+        drop(stream);
+        let _ = shutdown.send(true);
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_age_drains_an_active_http1_request() {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let app = Router::new().route(
+            "/",
+            get({
+                let entered = Arc::clone(&entered);
+                let release = Arc::clone(&release);
+                move || {
+                    let entered = Arc::clone(&entered);
+                    let release = Arc::clone(&release);
+                    async move {
+                        entered.notify_one();
+                        release.notified().await;
+                        "ok"
+                    }
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown, shutdown_receiver) = watch::channel(false);
+        let task = tokio::spawn(serve_http(
+            listener,
+            app,
+            HttpServerConfig {
+                max_connections: 1,
+                http1_header_timeout: Duration::from_secs(1),
+                connection_max_age: Duration::from_millis(50),
+            },
+            shutdown_receiver,
+        ));
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: example\r\n\r\n")
             .await
-            .expect("HTTP/2 connection must not retain its permit indefinitely")
             .unwrap();
-        assert!(!response.is_empty());
+        entered.notified().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        release.notify_one();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200"));
         let _ = shutdown.send(true);
         task.await.unwrap().unwrap();
     }

@@ -213,6 +213,25 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .await
         .unwrap();
     assert_eq!(running_refresh.progress_percent, Some(60.0));
+    // Retrying a successful upstream attachment must not overwrite a newer
+    // poll result while reporting the same durable upstream identity.
+    let retry = store
+        .attach_media_job_upstream(
+            second.id,
+            "upstream-video-2",
+            MediaJobUpdate {
+                state: MediaJobState::Queued,
+                progress_percent: Some(0.0),
+                content_available: false,
+                expires_at: None,
+                error_class: None,
+                last_polled_at: poll_base,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry.state, MediaJobState::Running);
+    assert_eq!(retry.progress_percent, Some(60.0));
     let stale = store
         .refresh_media_job(
             second.id,
