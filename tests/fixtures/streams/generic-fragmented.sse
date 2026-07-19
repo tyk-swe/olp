@@ -1,0 +1,9 @@
+: keepalive
+id: event-7
+event: token
+data: héllo 🌍
+data: second line
+retry: 250
+
+data: done
+

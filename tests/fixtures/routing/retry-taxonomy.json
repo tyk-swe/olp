@@ -1,0 +1,86 @@
+[
+  {
+    "name": "connect failure before commit",
+    "phase": "connect",
+    "class": "connect",
+    "response_committed": false,
+    "allows_failover": true
+  },
+  {
+    "name": "first-byte timeout before commit",
+    "phase": "first_byte",
+    "class": "timeout",
+    "response_committed": false,
+    "allows_failover": true
+  },
+  {
+    "name": "rate limit before commit",
+    "phase": "first_byte",
+    "class": "rate_limit",
+    "response_committed": false,
+    "allows_failover": true
+  },
+  {
+    "name": "upstream 5xx before commit",
+    "phase": "first_byte",
+    "class": "upstream_server",
+    "response_committed": false,
+    "allows_failover": true
+  },
+  {
+    "name": "upstream 4xx is terminal",
+    "phase": "first_byte",
+    "class": "upstream_client",
+    "response_committed": false,
+    "allows_failover": false
+  },
+  {
+    "name": "protocol failure is terminal",
+    "phase": "body",
+    "class": "protocol",
+    "response_committed": false,
+    "allows_failover": false
+  },
+  {
+    "name": "caller cancellation is terminal",
+    "phase": "body",
+    "class": "cancelled",
+    "response_committed": false,
+    "allows_failover": false
+  },
+  {
+    "name": "ambiguous non-idempotent failure is terminal",
+    "phase": "first_byte",
+    "class": "ambiguous",
+    "response_committed": false,
+    "allows_failover": false
+  },
+  {
+    "name": "connect class after commit is terminal",
+    "phase": "body",
+    "class": "connect",
+    "response_committed": true,
+    "allows_failover": false
+  },
+  {
+    "name": "timeout after commit is terminal",
+    "phase": "body",
+    "class": "timeout",
+    "response_committed": true,
+    "allows_failover": false
+  },
+  {
+    "name": "rate limit after commit is terminal",
+    "phase": "body",
+    "class": "rate_limit",
+    "response_committed": true,
+    "allows_failover": false
+  },
+  {
+    "name": "upstream 5xx after commit is terminal",
+    "phase": "body",
+    "class": "upstream_server",
+    "response_committed": true,
+    "allows_failover": false
+  }
+]

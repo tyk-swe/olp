@@ -1,0 +1,53 @@
+[package]
+name = "olp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+test-util = ["olp-providers/test-util"]
+
+[dependencies]
+arc-swap.workspace = true
+axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+clap.workspace = true
+encoding_rs.workspace = true
+futures.workspace = true
+http-body.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ipnet.workspace = true
+jsonwebtoken.workspace = true
+mime.workspace = true
+olp-domain.workspace = true
+olp-protocols.workspace = true
+olp-providers.workspace = true
+olp-storage.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+http.workspace = true
+http-body-util.workspace = true
+olp-providers = { workspace = true, features = ["test-util"] }
+sqlx.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

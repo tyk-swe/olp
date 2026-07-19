@@ -1,0 +1,42 @@
+{
+  "model": "team-chat",
+  "messages": [
+    {
+      "role": "developer",
+      "content": "Keep answers concise.",
+      "vendor_message_flag": true
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What is the weather?",
+          "cache_control": { "type": "ephemeral" }
+        }
+      ]
+    }
+  ],
+  "max_completion_tokens": 96,
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "weather",
+        "description": "Look up current weather",
+        "parameters": {
+          "type": "object",
+          "properties": { "city": { "type": "string" } },
+          "required": ["city"]
+        },
+        "strict": true
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "function",
+    "function": { "name": "weather" }
+  },
+  "service_tier": "priority"
+}

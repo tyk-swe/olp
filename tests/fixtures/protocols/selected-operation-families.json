@@ -1,0 +1,23 @@
+[
+  {"name":"openai_chat","codec":"openai_chat","surface":"open_ai","expected_operation":"generation","expected_route":"chat-route","wire":{"model":"chat-route","messages":[{"role":"user","content":"hello"}]}},
+  {"name":"openai_responses","codec":"openai_responses","surface":"open_ai","expected_operation":"generation","expected_route":"responses-route","wire":{"model":"responses-route","input":"hello"}},
+  {"name":"openai_response_input_tokens","codec":"openai_response_input_tokens","surface":"open_ai","expected_operation":"token_count","expected_route":"count-route","wire":{"model":"count-route","input":"hello"}},
+  {"name":"openai_embeddings","codec":"openai_embeddings","surface":"open_ai","expected_operation":"embeddings","expected_route":"embed-route","wire":{"model":"embed-route","input":["one","two"],"dimensions":2}},
+  {"name":"openai_image_generation","codec":"openai_image_generation","surface":"open_ai","expected_operation":"image_generation","expected_route":"image-route","wire":{"model":"image-route","prompt":"a cobalt square","n":1}},
+  {"name":"openai_image_edit","codec":"openai_image_edit","surface":"open_ai","expected_operation":"image_edit","expected_route":"edit-route","wire":{"model":"edit-route","image":[{"handle":"image-one","filename":"one.png","content_type":"image/png","content_length":16,"maximum_length":1024}],"prompt":"replace the sky"}},
+  {"name":"openai_image_variation","codec":"openai_image_variation","surface":"open_ai","expected_operation":"image_variation","expected_route":"variation-route","wire":{"model":"variation-route","image":{"handle":"image-one","filename":"one.png","content_type":"image/png","content_length":16,"maximum_length":1024},"n":2}},
+  {"name":"openai_speech","codec":"openai_speech","surface":"open_ai","expected_operation":"speech","expected_route":"speech-route","wire":{"model":"speech-route","input":"hello","voice":"coral","response_format":"mp3"}},
+  {"name":"openai_transcription","codec":"openai_transcription","surface":"open_ai","expected_operation":"transcription","expected_route":"transcription-route","wire":{"model":"transcription-route","file":{"handle":"audio-one","filename":"sample.wav","content_type":"audio/wav","content_length":16,"maximum_length":1024},"language":"en"}},
+  {"name":"openai_moderation","codec":"openai_moderation","surface":"open_ai","expected_operation":"moderation","expected_route":"moderation-route","wire":{"model":"moderation-route","input":["hello",{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]}},
+  {"name":"openai_video_create","codec":"openai_video_create","surface":"open_ai","expected_operation":"video_create","expected_route":"video-route","wire":{"model":"video-route","prompt":"a calm ocean","seconds":"8","size":"1280x720"}},
+  {"name":"openai_video_list","codec":"openai_video_list","surface":"open_ai","expected_operation":"video_list","expected_route":null,"wire":{"after":"video_1","limit":20,"order":"desc"}},
+  {"name":"openai_video_get","codec":"openai_video_get","surface":"open_ai","expected_operation":"video_get","expected_route":null,"wire":{"job_id":"video_1"}},
+  {"name":"openai_video_content","codec":"openai_video_content","surface":"open_ai","expected_operation":"video_content","expected_route":null,"wire":{"job_id":"video_1","variant":"thumbnail"}},
+  {"name":"openai_video_delete","codec":"openai_video_delete","surface":"open_ai","expected_operation":"video_delete","expected_route":null,"wire":{"job_id":"video_1"}},
+  {"name":"openai_model_list","codec":"openai_model_list","surface":"open_ai","expected_operation":"model_list","expected_route":null,"wire":{}},
+  {"name":"openai_model_get","codec":"openai_model_get","surface":"open_ai","expected_operation":"model_get","expected_route":"public-model","wire":{"model":"public-model"}},
+  {"name":"anthropic_messages","codec":"anthropic_messages","surface":"anthropic","expected_operation":"generation","expected_route":"claude-route","wire":{"model":"claude-route","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}},
+  {"name":"anthropic_count_tokens","codec":"anthropic_count_tokens","surface":"anthropic","expected_operation":"token_count","expected_route":"claude-count","wire":{"model":"claude-count","messages":[{"role":"user","content":"hello"}]}},
+  {"name":"gemini_generate_content","codec":"gemini_generate_content","surface":"gemini","expected_operation":"generation","expected_route":"gemini-route","wire":{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}},
+  {"name":"gemini_count_tokens","codec":"gemini_count_tokens","surface":"gemini","expected_operation":"token_count","expected_route":"gemini-count","wire":{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}}
+]

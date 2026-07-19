@@ -1,0 +1,7 @@
+{
+  "decoder": "anthropic-messages",
+  "fragment_bytes": 1,
+  "text": "héllo 🌍",
+  "done": true,
+  "total_tokens": 5
+}

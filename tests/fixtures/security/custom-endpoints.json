@@ -1,0 +1,109 @@
+[
+  {
+    "name": "official HTTPS endpoint",
+    "url": "https://api.openai.com/v1",
+    "accepted_at_configuration": true,
+    "requires_resolution_check": true
+  },
+  {
+    "name": "custom hostname requires post-DNS classification",
+    "url": "https://rebind.invalid/proxy/v1",
+    "accepted_at_configuration": true,
+    "requires_resolution_check": true
+  },
+  {
+    "name": "public IPv4 literal",
+    "url": "https://8.8.8.8/v1",
+    "accepted_at_configuration": true
+  },
+  {
+    "name": "public IPv6 literal",
+    "url": "https://[2606:4700:4700::1111]/v1",
+    "accepted_at_configuration": true
+  },
+  {
+    "name": "cleartext transport",
+    "url": "http://api.openai.com/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "unsupported URL scheme",
+    "url": "ftp://api.openai.com/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "userinfo credential smuggling",
+    "url": "https://user:secret@api.openai.com/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "query changes upstream request authority",
+    "url": "https://api.openai.com/v1?redirect=1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "fragment is forbidden",
+    "url": "https://api.openai.com/v1#fragment",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "IPv4 loopback",
+    "url": "https://127.0.0.1/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "RFC1918 private address",
+    "url": "https://10.0.0.1/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "cloud metadata address",
+    "url": "https://169.254.169.254/latest/meta-data",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "carrier-grade NAT address",
+    "url": "https://100.64.0.1/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "documentation-only address",
+    "url": "https://192.0.2.1/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "IPv6 loopback",
+    "url": "https://[::1]/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "IPv4-mapped IPv6 loopback",
+    "url": "https://[::ffff:127.0.0.1]/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "IPv6 unique-local address",
+    "url": "https://[fc00::1]/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "IPv6 link-local address",
+    "url": "https://[fe80::1]/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "deprecated IPv4 relay range",
+    "url": "https://192.88.99.1/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "NAT64 translation prefix",
+    "url": "https://[64:ff9b::7f00:1]/v1",
+    "accepted_at_configuration": false
+  },
+  {
+    "name": "6to4 transition prefix",
+    "url": "https://[2002:7f00:1::1]/v1",
+    "accepted_at_configuration": false
+  }
+]

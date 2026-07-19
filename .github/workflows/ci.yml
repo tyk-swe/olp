@@ -1,0 +1,640 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, stable]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="$RUNNER_TEMP/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tool_dir="$RUNNER_TEMP/actionlint"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --status
+          mkdir -p "$tool_dir"
+          tar -xzf "$archive" --directory "$tool_dir" actionlint
+          "$tool_dir/actionlint" -config-file .github/actionlint.yaml
+      - name: Install deployment lint dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep shellcheck
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.2.3
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile
+          failure-threshold: warning
+      - name: Shellcheck every operational script
+        run: >-
+          find scripts tests/ha tests/sdk-smoke
+          -type f -name '*.sh' -print0
+          | xargs -0 shellcheck
+      - name: Require consistent release metadata
+        run: scripts/check-release-version.sh
+      - name: Require immutable supply-chain references
+        run: scripts/check-supply-chain-pins.sh
+      - name: Verify Helm and Compose contracts
+        run: scripts/verify-helm-contract.sh deploy/helm
+      - name: Enforce dependency bans, licenses, and sources
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          manifest-path: Cargo.toml
+          command: check
+          command-arguments: bans licenses sources
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97", components: rustfmt, clippy }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          workspaces: .
+          cache-on-failure: true
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
+        with: { tool: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7" }
+      - name: Install boundary-check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+      - name: Enforce crate boundaries
+        run: ./scripts/check-boundaries.sh
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Compile fuzz targets
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+      - name: Run workspace coverage
+        run: >-
+          cargo llvm-cov nextest --locked --workspace --all-features
+          --lcov --output-path lcov.info --fail-under-lines 52
+      - name: Upload Rust coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: rust-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: lcov.info
+          if-no-files-found: ignore
+          retention-days: 7
+
+  console-chromium:
+    name: Console / Chromium
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with: { version: 11.10.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Install locked console dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify console
+        run: pnpm verify
+      - name: Install Chromium
+        if: ${{ !cancelled() }}
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run Storybook accessibility
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/storybook
+          PLAYWRIGHT_OUTPUT_DIR: test-results/storybook
+        run: pnpm test:storybook
+      - name: Run Chromium end-to-end tests
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/chromium
+          PLAYWRIGHT_OUTPUT_DIR: test-results/chromium
+        run: pnpm exec playwright test --project=chromium
+      - name: Upload Chromium Playwright diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && !cancelled()
+        with:
+          name: playwright-required-chromium-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            console/playwright-report
+            console/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  sdk-compatibility:
+    name: SDK compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with: { version: 11.10.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: tests/sdk-smoke/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          workspaces: .
+          cache-on-failure: true
+      - name: Install locked official SDK smoke clients
+        run: pnpm --dir tests/sdk-smoke install --frozen-lockfile
+      - name: Smoke official OpenAI, Anthropic, and Google GenAI SDKs
+        run: ./tests/sdk-smoke/run.sh
+
+  postgres-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+    env:
+      OLP_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+      OLP_TEST_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+      OLP_TEST_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
+      OLP_TEST_DATABASE_URL_PREFIX: postgres://olp:olp@localhost:5432
+      OLP_TEST_DATABASE_OWNER: olp
+      OLP_VALKEY_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with: { version: 11.10.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          workspaces: .
+          cache-on-failure: true
+      - name: Install PostgreSQL 18 client tools
+        shell: bash
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+      - name: Migrate the primary integration database
+        run: cargo run --locked -p olp -- migrate
+      - name: Run isolated PostgreSQL repository and HTTP suites
+        run: ./scripts/run-postgres-tests.sh
+      - name: Install Rust-hosted console integration dependencies
+        run: |
+          pnpm --dir console install --frozen-lockfile
+          pnpm --dir console exec playwright install --with-deps chromium
+      - name: Run Rust-hosted console setup and session integration
+        env:
+          OLP_CONSOLE_E2E_DATABASE_URL: postgres://olp:olp@localhost:5432/olp_console_e2e
+          OLP_CONSOLE_E2E_MASTER_KEY_FILE: /tmp/olp-console-e2e-master-key
+          OLP_CONSOLE_E2E_KEY_HASH_KEY_FILE: /tmp/olp-console-e2e-key-hash-key
+          OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE: /tmp/olp-console-e2e-bootstrap-token
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/integration
+          PLAYWRIGHT_OUTPUT_DIR: test-results/integration
+        run: |
+          psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE olp_console_e2e'
+          umask 077
+          openssl rand -base64 32 > "$OLP_CONSOLE_E2E_MASTER_KEY_FILE"
+          openssl rand -base64 32 > "$OLP_CONSOLE_E2E_KEY_HASH_KEY_FILE"
+          printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "$OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE"
+          pnpm --dir console test:integration
+      - name: Upload integration Playwright diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && !cancelled()
+        with:
+          name: playwright-postgres-integration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            console/playwright-report
+            console/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  required:
+    name: Required
+    if: always()
+    needs: [quality, rust, console-chromium, sdk-compatibility, postgres-integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every required-tier job to succeed
+        env:
+          QUALITY: ${{ needs.quality.result }}
+          RUST: ${{ needs.rust.result }}
+          CONSOLE_CHROMIUM: ${{ needs.console-chromium.result }}
+          SDK_COMPATIBILITY: ${{ needs.sdk-compatibility.result }}
+          POSTGRES_INTEGRATION: ${{ needs.postgres-integration.result }}
+        run: |
+          printf 'Quality: %s\nRust: %s\nConsole / Chromium: %s\nSDK compatibility: %s\nPostgreSQL integration: %s\n' \
+            "$QUALITY" "$RUST" "$CONSOLE_CHROMIUM" "$SDK_COMPATIBILITY" "$POSTGRES_INTEGRATION"
+          [[ $QUALITY == success && $RUST == success && $CONSOLE_CHROMIUM == success && \
+            $SDK_COMPATIBILITY == success && $POSTGRES_INTEGRATION == success ]]
+
+  browser-compatibility:
+    name: Console / ${{ matrix.label }}
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: firefox
+            browser: firefox
+            label: Firefox
+          - project: webkit
+            browser: webkit
+            label: WebKit
+          - project: mobile-chromium
+            browser: chromium
+            label: Mobile Chromium
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with: { version: 11.10.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Install locked console dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install ${{ matrix.browser }}
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Run ${{ matrix.label }} end-to-end tests
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/${{ matrix.project }}
+          PLAYWRIGHT_OUTPUT_DIR: test-results/${{ matrix.project }}
+        run: pnpm exec playwright test --project=${{ matrix.project }}
+      - name: Upload ${{ matrix.label }} Playwright diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && !cancelled()
+        with:
+          name: playwright-full-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            console/playwright-report
+            console/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ha:
+    name: High availability
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      toxiproxy:
+        image: ghcr.io/shopify/toxiproxy:2.12.0@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+        ports: ["8474:8474", "15432:15432"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          workspaces: .
+          cache-on-failure: true
+      - name: Install PostgreSQL 18 client tools
+        shell: bash
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+      - name: Build the HA binary
+        run: cargo build --locked -p olp
+      - name: Run two-gateway limits, LKG, missed-hint, and revocation proof
+        env:
+          OLP_HA_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
+          OLP_HA_DATABASE_URL_PREFIX: postgres://olp:olp@localhost:5432
+          OLP_HA_DATABASE_OWNER: olp
+          OLP_HA_DATABASE_APP_URL_PREFIX: postgres://olp:olp@localhost:15432
+          OLP_HA_TOXIPROXY_API: http://localhost:8474
+          OLP_HA_TOXIPROXY_NAME: olp-postgresql
+          OLP_BIN: target/debug/olp
+        shell: bash
+        run: |
+          for _ in $(seq 1 100); do
+            curl --fail --silent http://localhost:8474/version >/dev/null 2>&1 && break
+            sleep 0.1
+          done
+          curl --fail --silent --show-error http://localhost:8474/version >/dev/null
+          curl --fail --silent --show-error -X POST http://localhost:8474/proxies \
+            -H 'Content-Type: application/json' \
+            --data '{"name":"olp-postgresql","listen":"0.0.0.0:15432","upstream":"postgres:5432"}'
+          ./tests/ha/two-gateway.sh
+
+  upgrade-rehearsal:
+    name: Backup / restore / upgrade
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+    env:
+      OLP_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          workspaces: .
+          cache-on-failure: true
+      - name: Install PostgreSQL 18 client tools
+        shell: bash
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+      - name: Build and migrate the current release
+        run: |
+          cargo build --locked -p olp
+          target/debug/olp migrate
+      - name: Rehearse PostgreSQL backup, restore, and upgrade
+        shell: bash
+        run: |
+          [[ $(command -v pg_dump) == /usr/lib/postgresql/18/bin/pg_dump ]]
+          [[ $(command -v pg_restore) == /usr/lib/postgresql/18/bin/pg_restore ]]
+          pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 18([.]|$)'
+          pg_restore --version | grep -Eq '^pg_restore \(PostgreSQL\) 18([.]|$)'
+          psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE olp_restore' \
+            -c 'CREATE DATABASE olp_upgrade' \
+            -c 'CREATE DATABASE olp_previous'
+          backup=$(./scripts/backup.sh "$RUNNER_TEMP/olp-backups")
+          OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_restore \
+            ./scripts/restore-rehearsal.sh "$backup"
+          metadata_file=release-metadata.env
+          [[ -f $metadata_file ]] || {
+            echo "required release metadata file is missing: $metadata_file" >&2
+            exit 1
+          }
+          previous_migration=''
+          metadata_assignments=0
+          while IFS= read -r line || [[ -n $line ]]; do
+            [[ $line =~ ^[[:space:]]*($|#) ]] && continue
+            if [[ $line =~ ^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=([0-9]{4})$ ]]; then
+              previous_migration=${BASH_REMATCH[1]}
+              ((metadata_assignments += 1))
+              continue
+            fi
+            echo 'release metadata contains an unsupported line' >&2
+            exit 1
+          done < "$metadata_file"
+          (( metadata_assignments == 1 )) || {
+            echo 'release metadata must contain exactly one OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=NNNN assignment' >&2
+            exit 1
+          }
+          previous_version=$((10#$previous_migration))
+          OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
+            OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS=test-only \
+            target/debug/olp migrate --through-version "$previous_version"
+          previous_backup=$(OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
+            ./scripts/backup.sh "$RUNNER_TEMP/olp-previous-backups")
+          doctor_root=$(mktemp -d)
+          mkdir -p "$doctor_root/console" "$doctor_root/media"
+          printf '<!doctype html><html></html>\n' > "$doctor_root/console/index.html"
+          openssl rand -base64 32 > "$doctor_root/master-key"
+          openssl rand -base64 32 > "$doctor_root/key-hash"
+          chmod 600 "$doctor_root/master-key" "$doctor_root/key-hash"
+          OLP_REHEARSAL_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_upgrade \
+            OLP_REHEARSAL_CONFIRM=destroy-target \
+            OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION="$previous_migration" \
+            OLP_REHEARSAL_RUN_DOCTOR=true \
+            OLP_BIN=target/debug/olp \
+            OLP_VALKEY_URL=redis://localhost:6379 \
+            OLP_MASTER_KEY_FILE="$doctor_root/master-key" \
+            OLP_KEY_HASH_KEY_FILE="$doctor_root/key-hash" \
+            OLP_CONSOLE_DIR="$doctor_root/console" \
+            OLP_MEDIA_SPOOL_DIR="$doctor_root/media" \
+            ./scripts/upgrade-rehearsal.sh "$previous_backup"
+
+  advisory-audits:
+    name: Advisory audits
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with: { version: 11.10.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            console/pnpm-lock.yaml
+            tests/sdk-smoke/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97" }
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
+        with: { tool: "cargo-audit@0.22.2" }
+      - name: Install locked JavaScript dependencies
+        run: |
+          pnpm --dir console install --frozen-lockfile
+          pnpm --dir tests/sdk-smoke install --frozen-lockfile
+      - name: Audit Cargo advisories
+        run: cargo audit --deny warnings
+      - name: Audit console advisories
+        run: pnpm --dir console audit --audit-level high
+      - name: Audit SDK smoke advisories
+        run: pnpm --dir tests/sdk-smoke audit --prod --audit-level high
+
+  image:
+    name: Image / ${{ matrix.arch }}
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            tag: openllmproxy:ci-amd64
+          - arch: arm64
+            platform: linux/arm64
+            tag: openllmproxy:ci-arm64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        if: matrix.arch == 'arm64'
+        with:
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+      - name: Build ${{ matrix.platform }} image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          platforms: ${{ matrix.platform }}
+          tags: ${{ matrix.tag }}
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
+      - name: Smoke final ${{ matrix.arch }} image modes and packaged console
+        env:
+          OLP_IMAGE_PLATFORM: ${{ matrix.platform }}
+        run: ./scripts/smoke-image-modes.sh ${{ matrix.tag }}
+      - name: Generate ${{ matrix.arch }} SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ matrix.tag }}
+          syft-version: v1.46.0
+          format: spdx-json
+          output-file: openllmproxy-${{ matrix.arch }}.spdx.json
+          upload-artifact: false
+      - name: Scan ${{ matrix.arch }} image for HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ matrix.tag }}
+          version: v0.72.0
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Upload ${{ matrix.arch }} SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: openllmproxy-sbom-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openllmproxy-${{ matrix.arch }}.spdx.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  full:
+    name: Full
+    if: always() && github.event_name != 'pull_request'
+    needs:
+      - quality
+      - rust
+      - console-chromium
+      - sdk-compatibility
+      - postgres-integration
+      - required
+      - browser-compatibility
+      - ha
+      - upgrade-rehearsal
+      - advisory-audits
+      - image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every required and full-tier job to succeed
+        env:
+          QUALITY: ${{ needs.quality.result }}
+          RUST: ${{ needs.rust.result }}
+          CONSOLE_CHROMIUM: ${{ needs.console-chromium.result }}
+          SDK_COMPATIBILITY: ${{ needs.sdk-compatibility.result }}
+          POSTGRES_INTEGRATION: ${{ needs.postgres-integration.result }}
+          REQUIRED: ${{ needs.required.result }}
+          BROWSER_COMPATIBILITY: ${{ needs.browser-compatibility.result }}
+          HA: ${{ needs.ha.result }}
+          UPGRADE_REHEARSAL: ${{ needs.upgrade-rehearsal.result }}
+          ADVISORY_AUDITS: ${{ needs.advisory-audits.result }}
+          IMAGE: ${{ needs.image.result }}
+        run: |
+          printf '%s\n' \
+            "Quality: $QUALITY" \
+            "Rust: $RUST" \
+            "Console / Chromium: $CONSOLE_CHROMIUM" \
+            "SDK compatibility: $SDK_COMPATIBILITY" \
+            "PostgreSQL integration: $POSTGRES_INTEGRATION" \
+            "Required: $REQUIRED" \
+            "Browser compatibility: $BROWSER_COMPATIBILITY" \
+            "High availability: $HA" \
+            "Backup / restore / upgrade: $UPGRADE_REHEARSAL" \
+            "Advisory audits: $ADVISORY_AUDITS" \
+            "Images: $IMAGE"
+          [[ $QUALITY == success && $RUST == success && $CONSOLE_CHROMIUM == success && \
+            $SDK_COMPATIBILITY == success && $POSTGRES_INTEGRATION == success && \
+            $REQUIRED == success && $BROWSER_COMPATIBILITY == success && $HA == success && \
+            $UPGRADE_REHEARSAL == success && $ADVISORY_AUDITS == success && $IMAGE == success ]]

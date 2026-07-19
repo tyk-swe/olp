@@ -1,0 +1,41 @@
+{
+  "systemInstruction": {
+    "parts": [
+      { "text": "Keep answers concise.", "vendorSystem": true }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        { "text": "What is the weather?", "vendorText": 7 }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "weather",
+          "description": "Look up current weather",
+          "parameters": {
+            "type": "object",
+            "properties": { "city": { "type": "string" } },
+            "required": ["city"]
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 96,
+    "temperature": 0.25,
+    "topK": 20
+  },
+  "safetySettings": [
+    {
+      "category": "HARM_CATEGORY_HATE_SPEECH",
+      "threshold": "BLOCK_ONLY_HIGH"
+    }
+  ]
+}

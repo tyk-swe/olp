@@ -1,0 +1,12 @@
+{
+  "route": "team-claude",
+  "message_count": 2,
+  "tool_count": 1,
+  "source": "anthropic",
+  "extension_paths": [
+    "/system/0/cache_control",
+    "/messages/0/content/0/vendor_text_flag",
+    "/metadata"
+  ],
+  "upstream_model": "claude-fixture"
+}

@@ -1,0 +1,54 @@
+[package]
+name = "olp-providers"
+description = "Provider transports, discovery, OIDC networking, and outbound network policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+test-util = []
+
+[dependencies]
+aws-config = { version = "1.9.0", default-features = false, features = [
+    "behavior-version-latest",
+    "credentials-process",
+    "default-https-client",
+    "rt-tokio",
+    "sso",
+] }
+aws-credential-types = "1.3.0"
+aws-sdk-bedrock = { version = "1.148.0", default-features = false, features = [
+    "behavior-version-latest",
+    "default-https-client",
+    "rt-tokio",
+] }
+aws-sdk-bedrockruntime = { version = "1.136.0", default-features = false, features = [
+    "behavior-version-latest",
+    "default-https-client",
+    "rt-tokio",
+] }
+aws-smithy-types = "1.6.1"
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+google-cloud-auth = "1.13"
+http.workspace = true
+jsonwebtoken = { workspace = true, features = ["use_pem"] }
+olp-domain.workspace = true
+olp-protocols.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+aws-smithy-eventstream = "0.61.1"
+
+[lints]
+workspace = true

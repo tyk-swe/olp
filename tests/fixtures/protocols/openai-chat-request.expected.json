@@ -1,0 +1,13 @@
+{
+  "route": "team-chat",
+  "message_count": 2,
+  "tool_count": 1,
+  "source": "open_ai",
+  "extension_paths": [
+    "/service_tier",
+    "/messages/0/vendor_message_flag",
+    "/messages/1/content/0/cache_control",
+    "/tools/0/function/strict"
+  ],
+  "upstream_model": "gpt-fixture"
+}

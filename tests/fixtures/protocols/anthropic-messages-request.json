@@ -1,0 +1,37 @@
+{
+  "model": "team-claude",
+  "max_tokens": 128,
+  "stream": true,
+  "system": [
+    {
+      "type": "text",
+      "text": "Keep answers concise.",
+      "cache_control": { "type": "ephemeral" }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What is the weather?",
+          "vendor_text_flag": 7
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "weather",
+      "description": "Look up current weather",
+      "input_schema": {
+        "type": "object",
+        "properties": { "city": { "type": "string" } },
+        "required": ["city"]
+      }
+    }
+  ],
+  "tool_choice": { "type": "auto" },
+  "metadata": { "user_id": "fixture-user" }
+}

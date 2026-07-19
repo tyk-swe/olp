@@ -1,0 +1,22 @@
+[package]
+name = "olp-protocols"
+description = "Vendor protocol DTOs, canonical translations, and streaming codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+bytes.workspace = true
+olp-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

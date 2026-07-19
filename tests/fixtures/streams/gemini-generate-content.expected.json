@@ -1,0 +1,7 @@
+{
+  "decoder": "gemini-generate-content",
+  "fragment_bytes": 1,
+  "text": "héllo 🌍",
+  "done": true,
+  "total_tokens": 5
+}

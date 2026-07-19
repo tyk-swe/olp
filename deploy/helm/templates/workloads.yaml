@@ -1,0 +1,286 @@
+{{- $root := . -}}
+{{- $trustedProxyCidrs := trim $root.Values.config.trustedProxyCidrs -}}
+{{- if ge (int $root.Values.preStopDelaySeconds) (int $root.Values.terminationGracePeriodSeconds) -}}
+{{- fail "preStopDelaySeconds must be less than terminationGracePeriodSeconds" -}}
+{{- end -}}
+{{- if and $root.Values.ingress.enabled (empty $trustedProxyCidrs) -}}
+{{- fail "config.trustedProxyCidrs is required when ingress is enabled" -}}
+{{- end -}}
+{{- range $componentName := list "gateway" "control" -}}
+{{- $component := index $root.Values $componentName -}}
+{{- if $component.enabled }}
+{{ $mediaSpoolCapacity := int64 $root.Values.mediaSpool.capacityBytes -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "olp.componentFullname" (dict "root" $root "component" $componentName) }}
+  labels:
+    {{- include "olp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+spec:
+  replicas: {{ $component.replicas }}
+  revisionHistoryLimit: {{ $root.Values.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 8 }}
+        {{- with $root.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $root.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "olp.serviceAccountName" $root }}
+      automountServiceAccountToken: {{ $root.Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: olp
+          image: {{ include "olp.image" $root | quote }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          args: [{{ $componentName | quote }}]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: observability
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: OLP_LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: OLP_OBSERVABILITY_LISTEN_ADDR
+              value: "0.0.0.0:9090"
+            - name: OLP_HTTP_MAX_CONNECTIONS
+              value: {{ $component.httpMaxConnections | quote }}
+            - name: OLP_PUBLIC_ORIGIN
+              value: {{ $root.Values.config.publicOrigin | quote }}
+            - name: OLP_CONSOLE_DIR
+              value: /opt/olp/console
+            - name: OLP_MEDIA_SPOOL_DIR
+              value: {{ $root.Values.mediaSpool.path | quote }}
+            - name: OLP_MEDIA_SPOOL_CAPACITY_BYTES
+              value: {{ printf "%d" $mediaSpoolCapacity | quote }}
+            - name: OLP_DATABASE_MAX_CONNECTIONS
+              value: {{ $root.Values.config.databaseMaxConnections | quote }}
+            - name: OLP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "config.databaseSecretName is required" $root.Values.config.databaseSecretName | quote }}
+                  key: {{ required "config.databaseSecretKey is required" $root.Values.config.databaseSecretKey | quote }}
+            - name: OLP_VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "config.valkeySecretName is required" $root.Values.config.valkeySecretName | quote }}
+                  key: {{ required "config.valkeySecretKey is required" $root.Values.config.valkeySecretKey | quote }}
+            - name: OLP_MASTER_KEY_FILE
+              value: /run/secrets/master-key/key
+            - name: OLP_KEY_HASH_KEY_FILE
+              value: /run/secrets/key-hash/key
+            {{- if $trustedProxyCidrs }}
+            - name: OLP_TRUSTED_PROXY_CIDRS
+              value: {{ $trustedProxyCidrs | quote }}
+            {{- end }}
+            {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
+            - name: OLP_BOOTSTRAP_TOKEN_FILE
+              value: /run/secrets/bootstrap-token/token
+            {{- end }}
+          startupProbe:
+            httpGet: { path: /health/live, port: observability }
+            failureThreshold: 30
+            periodSeconds: 2
+            timeoutSeconds: 1
+          readinessProbe:
+            httpGet: { path: /health/ready, port: observability }
+            failureThreshold: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: { path: /health/live, port: observability }
+            failureThreshold: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /usr/local/bin/olp
+                  - internal-pre-stop
+                  - --seconds
+                  - {{ $root.Values.preStopDelaySeconds | quote }}
+          resources:
+            {{- toYaml $component.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: master-key
+              mountPath: /run/secrets/master-key
+              readOnly: true
+            - name: key-hash
+              mountPath: /run/secrets/key-hash
+              readOnly: true
+            {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
+            - name: bootstrap-token
+              mountPath: /run/secrets/bootstrap-token
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            - name: media-spool
+              mountPath: {{ $root.Values.mediaSpool.path | quote }}
+      volumes:
+        - name: master-key
+          secret:
+            secretName: {{ required "config.masterKeySecretName is required" $root.Values.config.masterKeySecretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "config.masterKeySecretKey is required" $root.Values.config.masterKeySecretKey | quote }}
+                path: key
+        - name: key-hash
+          secret:
+            secretName: {{ required "config.keyHashSecretName is required" $root.Values.config.keyHashSecretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "config.keyHashSecretKey is required" $root.Values.config.keyHashSecretKey | quote }}
+                path: key
+        {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
+        - name: bootstrap-token
+          secret:
+            secretName: {{ $root.Values.config.bootstrapTokenSecretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "config.bootstrapTokenSecretKey is required" $root.Values.config.bootstrapTokenSecretKey | quote }}
+                path: token
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: media-spool
+          emptyDir:
+            sizeLimit: {{ $root.Values.mediaSpool.volumeSizeLimit | quote }}
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or $component.topologySpread.enabled $root.Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- if $component.topologySpread.enabled }}
+        - maxSkew: {{ $component.topologySpread.maxSkew }}
+          topologyKey: {{ $component.topologySpread.topologyKey | quote }}
+          whenUnsatisfiable: {{ $component.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 14 }}
+        {{- end }}
+        {{- with $root.Values.topologySpreadConstraints }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+---
+{{- end }}
+{{- end }}
+
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "olp.componentFullname" (dict "root" . "component" "worker") }}
+  labels:
+    {{- include "olp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "olp.selectorLabels" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "olp.selectorLabels" (dict "root" . "component" "worker") | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "olp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: olp
+          image: {{ include "olp.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker"]
+          env:
+            - name: OLP_DATABASE_MAX_CONNECTIONS
+              value: {{ .Values.config.databaseMaxConnections | quote }}
+            - name: OLP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "config.databaseSecretName is required" .Values.config.databaseSecretName | quote }}
+                  key: {{ required "config.databaseSecretKey is required" .Values.config.databaseSecretKey | quote }}
+            - name: OLP_VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "config.valkeySecretName is required" .Values.config.valkeySecretName | quote }}
+                  key: {{ required "config.valkeySecretKey is required" .Values.config.valkeySecretKey | quote }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

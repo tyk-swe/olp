@@ -1,0 +1,13 @@
+# New-installation overlay. Use this only until the first owner has been
+# created, then recreate `olp` from compose.yaml alone before retiring the
+# bootstrap token file.
+services:
+  olp:
+    environment:
+      OLP_BOOTSTRAP_TOKEN_FILE: /run/secrets/olp_bootstrap_token
+    secrets:
+      - olp_bootstrap_token
+
+secrets:
+  olp_bootstrap_token:
+    file: ./secrets/olp_bootstrap_token

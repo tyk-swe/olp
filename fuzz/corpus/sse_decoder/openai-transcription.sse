@@ -1,0 +1,7 @@
+event: transcript.text.delta
+data: {"type":"transcript.text.delta","delta":"héllo"}
+
+event: transcript.text.done
+data: {"type":"transcript.text.done"}
+
+: end

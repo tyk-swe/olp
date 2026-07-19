@@ -1,0 +1,1 @@
+{"responseId":"gem-fuzz","modelVersion":"gemini-fuzz","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}

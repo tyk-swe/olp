@@ -1,0 +1,155 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/tyk-swe/olp
+  tag: ""
+  # When set, digest takes precedence over tag and pins the signed immutable
+  # release artifact (for example sha256:abc...).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+terminationGracePeriodSeconds: 300
+preStopDelaySeconds: 10
+revisionHistoryLimit: 3
+
+mediaSpool:
+  path: /var/lib/olp/media
+  capacityBytes: 1073741824
+  volumeSizeLimit: 2Gi
+
+gateway:
+  enabled: true
+  replicas: 2
+  # Sized for high streaming concurrency with headroom for unary traffic.
+  # Lower this for smaller deployments.
+  httpMaxConnections: 16384
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpread:
+    enabled: true
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "4", memory: 2Gi }
+
+control:
+  enabled: true
+  replicas: 1
+  httpMaxConnections: 1024
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  topologySpread:
+    enabled: false
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# Optional same-origin edge routing. The root and management API terminate at
+# control, while vendor inference prefixes terminate at gateway. Keep this off
+# when an external Gateway API/Ingress controller owns the equivalent routes.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: olp.example.com
+  tls:
+    enabled: true
+    secretName: olp-tls
+
+worker:
+  enabled: true
+  # The current outbox reader is single-consumer. Keep this at one until
+  # row claiming or leader election is implemented.
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+migration:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 300
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+config:
+  databaseSecretName: olp-postgresql
+  databaseSecretKey: url
+  valkeySecretName: olp-valkey
+  valkeySecretKey: url
+  masterKeySecretName: olp-master-key
+  masterKeySecretKey: key
+  keyHashSecretName: olp-key-hash-key
+  keyHashSecretKey: key
+  # Required only until the first installation owner is created. Leave empty
+  # for an already initialized installation; new control pods fail closed
+  # without this mounted secret.
+  bootstrapTokenSecretName: ""
+  bootstrapTokenSecretKey: token
+  # Comma-separated CIDRs for the ingress/controller peers allowed to provide
+  # X-Forwarded-For. Required when this chart's Ingress is enabled.
+  trustedProxyCidrs: ""
+  publicOrigin: https://olp.example.com
+  databaseMaxConnections: 20
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+monitoring:
+  enabled: false
+  namespace: ""
+  labels: {}
+  interval: 15s
+  scrapeTimeout: 5s
+  rules:
+    enabled: true
+    # Zero implements the default runbook policy: any sustained backlog warns.
+    # Raise this only with a documented installation-specific noise budget.
+    usagePendingThreshold: 0

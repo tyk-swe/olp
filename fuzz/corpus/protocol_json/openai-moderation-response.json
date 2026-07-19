@@ -1,0 +1,1 @@
+{"id":"modr_fuzz","model":"omni-moderation-latest","results":[{"flagged":false,"categories":{"violence":false},"category_scores":{"violence":0.01}}]}

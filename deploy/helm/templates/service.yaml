@@ -1,0 +1,50 @@
+{{- $root := . -}}
+{{- range $componentName := list "gateway" "control" -}}
+{{- $component := index $root.Values $componentName -}}
+{{- if and $component.enabled $component.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "olp.componentFullname" (dict "root" $root "component" $componentName) }}
+  labels:
+    {{- include "olp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+  {{- with $component.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $component.service.type }}
+  selector:
+    {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $component.service.port }}
+      protocol: TCP
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "olp.observabilityServiceFullname" (dict "root" $root "component" $componentName) }}
+  labels:
+    {{- include "olp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+    olp.openllmproxy.dev/observability: "true"
+spec:
+  # A ClusterIP Service has no external address. Keep it for kubelet probes
+  # and in-cluster monitoring; expose it only through a deliberate network
+  # policy or monitoring topology when the installation needs one.
+  type: ClusterIP
+  selector:
+    {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 4 }}
+  ports:
+    - name: observability
+      port: 9090
+      protocol: TCP
+      targetPort: observability
+      appProtocol: http
+---
+{{- end }}
+{{- end }}

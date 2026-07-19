@@ -1,0 +1,58 @@
+{{- if .Values.ingress.enabled }}
+{{- if not (and .Values.gateway.enabled .Values.gateway.service.enabled) -}}
+{{- fail "ingress requires gateway and gateway.service to be enabled" -}}
+{{- end -}}
+{{- if not (and .Values.control.enabled .Values.control.service.enabled) -}}
+{{- fail "ingress requires control and control.service to be enabled" -}}
+{{- end -}}
+{{- $host := required "ingress.host is required when ingress is enabled" .Values.ingress.host -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "olp.fullname" . }}
+  labels:
+    {{- include "olp.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ required "ingress.tls.secretName is required when TLS is enabled" .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          # Kubernetes Prefix matching chooses these vendor routes before the
+          # root console route. No rewrite is used: Rust receives its public
+          # protocol paths unchanged.
+          {{- range $path := list "/openai" "/anthropic" "/gemini" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "olp.componentFullname" (dict "root" $ "component" "gateway") }}
+                port:
+                  name: http
+          {{- end }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "olp.componentFullname" (dict "root" $ "component" "control") }}
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "olp.componentFullname" (dict "root" $ "component" "control") }}
+                port:
+                  name: http
+{{- end }}

@@ -1,0 +1,59 @@
+{
+  "name": "@openllmproxy/console",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:integration": "pnpm build && playwright test --config playwright.integration.config.ts",
+    "screenshots": "playwright test --config playwright.screenshots.config.ts",
+    "storybook": "storybook dev -p 6006",
+    "test:storybook": "storybook build && playwright test --config playwright.storybook.config.ts",
+    "api:generate": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts",
+    "api:check": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts --check",
+    "verify": "pnpm api:check && pnpm test && pnpm check && pnpm build"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@tanstack/svelte-query": "^6.1.36",
+    "bits-ui": "^2.18.1",
+    "layerchart": "^2.0.1",
+    "openapi-fetch": "^0.17.0",
+    "valibot": "^1.4.2"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.61.0",
+    "@storybook/addon-a11y": "^10.5.0",
+    "@storybook/svelte": "^10.5.0",
+    "@storybook/sveltekit": "^10.5.0",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.65.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tailwindcss/vite": "^4.3.1",
+    "@typescript-eslint/parser": "^8.61.1",
+    "eslint": "^10.5.0",
+    "eslint-plugin-svelte": "^3.19.0",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
+    "storybook": "^10.5.0",
+    "svelte": "^5.56.3",
+    "svelte-check": "^4.6.0",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3",
+    "vite": "8.0.16",
+    "vitest": "^4.1.9"
+  }
+}

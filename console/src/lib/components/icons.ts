@@ -1,0 +1,18 @@
+export type IconName =
+  | 'overview'
+  | 'provider'
+  | 'model'
+  | 'route'
+  | 'key'
+  | 'team'
+  | 'request'
+  | 'usage'
+  | 'health'
+  | 'audit'
+  | 'playground'
+  | 'settings'
+  | 'menu'
+  | 'sun'
+  | 'moon'
+  | 'chevron'
+  | 'arrow';

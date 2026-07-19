@@ -1,0 +1,92 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/olp",
+    "crates/domain",
+    "crates/protocols",
+    "crates/providers",
+    "crates/storage",
+    "tests/conformance",
+]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2024"
+rust-version = "1.97"
+license = "AGPL-3.0-only"
+repository = "https://github.com/tyk-swe/olp"
+
+[workspace.dependencies]
+aes-gcm = "0.10"
+arc-swap = "1"
+argon2 = "0.5"
+axum = { version = "0.8", features = ["http2", "json", "multipart", "tokio"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+encoding_rs = "0.8"
+futures = "0.3"
+hmac = "0.12"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["http1", "http2", "server", "server-auto", "service", "tokio"] }
+ipnet = "2"
+jsonwebtoken = { version = "10.4", default-features = false, features = ["aws_lc_rs"] }
+mime = "0.3"
+proptest = "1"
+rand = "0.9"
+redis = { version = "0.32", features = ["aio", "connection-manager", "streams", "tokio-comp"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "stream", "rustls"] }
+rustls = "0.23"
+rust_decimal = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.9", default-features = false, features = [
+    "chrono",
+    "json",
+    "macros",
+    "migrate",
+    "postgres",
+    "runtime-tokio",
+    "rust_decimal",
+    "tls-rustls-ring",
+    "uuid",
+] }
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "0.5", features = ["limit", "load-shed", "timeout", "util"] }
+tower-http = { version = "0.6", features = [
+    "catch-panic",
+    "compression-gzip",
+    "cors",
+    "fs",
+    "limit",
+    "request-id",
+    "sensitive-headers",
+    "set-header",
+    "timeout",
+    "trace",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+utoipa = { version = "5", features = ["chrono", "uuid"] }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v7"] }
+zeroize = { version = "1", features = ["derive"] }
+
+olp-domain = { path = "crates/domain", version = "2.0.0" }
+olp-protocols = { path = "crates/protocols", version = "2.0.0" }
+olp-providers = { path = "crates/providers", version = "2.0.0" }
+olp-storage = { path = "crates/storage", version = "2.0.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"

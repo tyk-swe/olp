@@ -1,0 +1,50 @@
+[package]
+name = "olp-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bytes = "1"
+futures = "0.3"
+libfuzzer-sys = "0.4"
+multer = "3.1"
+olp-domain = { path = "../crates/domain" }
+olp = { path = "../apps/olp", features = ["test-util"] }
+olp-protocols = { path = "../crates/protocols" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt"] }
+
+[[bin]]
+name = "sse_decoder"
+path = "fuzz_targets/sse_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "protocol_json"
+path = "fuzz_targets/protocol_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_metadata"
+path = "fuzz_targets/media_metadata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "multipart_parser"
+path = "fuzz_targets/multipart_parser.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

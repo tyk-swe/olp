@@ -1,0 +1,17 @@
+{
+  "fragment_bytes": 1,
+  "frames": [
+    {
+      "event": "token",
+      "data": "héllo 🌍\nsecond line",
+      "id": "event-7",
+      "retry_ms": 250
+    },
+    {
+      "event": null,
+      "data": "done",
+      "id": "event-7",
+      "retry_ms": null
+    }
+  ]
+}

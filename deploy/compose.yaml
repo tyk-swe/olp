@@ -1,0 +1,122 @@
+name: openllmproxy-v2
+
+x-database-environment: &database-environment
+  OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp:${POSTGRES_PASSWORD_URL_ENCODED:-olp}@postgres:5432/olp}
+  OLP_DATABASE_MAX_CONNECTIONS: ${OLP_DATABASE_MAX_CONNECTIONS:-20}
+
+x-application-environment: &application-environment
+  <<: *database-environment
+  OLP_LISTEN_ADDR: 0.0.0.0:8080
+  # Kept inside the Compose network: port 9090 is intentionally not listed
+  # under the application's host-published ports.
+  OLP_OBSERVABILITY_LISTEN_ADDR: 0.0.0.0:9090
+  OLP_HTTP_MAX_CONNECTIONS: ${OLP_HTTP_MAX_CONNECTIONS:-1024}
+  OLP_VALKEY_URL: ${OLP_VALKEY_URL:-redis://valkey:6379}
+  OLP_PUBLIC_ORIGIN: ${OLP_PUBLIC_ORIGIN:-http://localhost:8080}
+  OLP_CONSOLE_DIR: /opt/olp/console
+  OLP_MEDIA_SPOOL_DIR: /var/lib/olp/media
+  OLP_MEDIA_SPOOL_CAPACITY_BYTES: ${OLP_MEDIA_SPOOL_CAPACITY_BYTES:-1073741824}
+  OLP_MASTER_KEY_FILE: /run/secrets/olp_master_key
+  OLP_KEY_HASH_KEY_FILE: /run/secrets/olp_key_hash_key
+  RUST_LOG: ${RUST_LOG:-olp=info,tower_http=info}
+
+x-olp-container: &olp-container
+  image: openllmproxy:dev
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  read_only: true
+  # Compose bind-mounts file-backed secrets with host ownership. Run as the
+  # invoking non-root user so mode-0600 development secrets remain readable.
+  user: "${OLP_UID:-1000}:${OLP_GID:-1000}"
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+    # The application admits up to 50 MiB per image part. Keep a bounded 1-GiB
+    # application budget inside a 2-GiB filesystem so concurrent accepted
+    # uploads have explicit headroom for filesystem metadata and in-flight I/O.
+    - /var/lib/olp/media:size=2g,mode=0700,uid=${OLP_UID:-1000},gid=${OLP_GID:-1000}
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 512
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: olp
+      POSTGRES_USER: olp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-olp}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --host=127.0.0.1 --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    volumes:
+      # PostgreSQL 18 stores clusters below a major-version directory. Mounting
+      # the parent is required for durable data and link-mode major upgrades.
+      - postgres-data:/var/lib/postgresql
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  valkey:
+    image: valkey/valkey:9.1-alpine@sha256:a35428eba9043cc0b79dbe54100f0c92784f2de00ad09b01182bfb1c5c83d1bd
+    # Usage metadata is accepted into a Valkey Stream before PostgreSQL
+    # ingestion. AOF keeps acknowledged stream entries across restarts; limit
+    # counters may be runtime state, but accepted usage must not disappear.
+    command: ["valkey-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+    read_only: true
+    volumes:
+      - valkey-data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  migrate:
+    <<: *olp-container
+    command: ["migrate"]
+    environment: *database-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  olp:
+    <<: *olp-container
+    command: ["all"]
+    environment: *application-environment
+    ports:
+      - "${OLP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    secrets:
+      - olp_master_key
+      - olp_key_hash_key
+    restart: unless-stopped
+    stop_grace_period: 5m
+
+secrets:
+  olp_master_key:
+    file: ./secrets/olp_master_key
+  olp_key_hash_key:
+    file: ./secrets/olp_key_hash_key
+
+volumes:
+  postgres-data:
+  valkey-data:

@@ -1,0 +1,164 @@
+{
+  "snapshot": {
+    "generation": {
+      "id": "018f0000-0000-7000-8000-000000000001",
+      "ordinal": 42,
+      "activated_at": "2026-01-01T00:00:00Z"
+    },
+    "providers": {
+      "018f0000-0000-7000-8000-000000000101": {
+        "id": "018f0000-0000-7000-8000-000000000101",
+        "name": "alpha",
+        "kind": "open_ai",
+        "enabled": true,
+        "active_credential": null,
+        "capabilities": [
+          { "model": "gpt-alpha", "operation": "generation", "surface": "open_ai", "mode": "unary" },
+          { "model": "gpt-alpha", "operation": "generation", "surface": "open_ai", "mode": "streaming" }
+        ]
+      },
+      "018f0000-0000-7000-8000-000000000102": {
+        "id": "018f0000-0000-7000-8000-000000000102",
+        "name": "beta",
+        "kind": "open_ai",
+        "enabled": true,
+        "active_credential": null,
+        "capabilities": [
+          { "model": "gpt-beta", "operation": "generation", "surface": "open_ai", "mode": "unary" },
+          { "model": "gpt-beta", "operation": "generation", "surface": "open_ai", "mode": "streaming" }
+        ]
+      },
+      "018f0000-0000-7000-8000-000000000103": {
+        "id": "018f0000-0000-7000-8000-000000000103",
+        "name": "fallback",
+        "kind": "anthropic",
+        "enabled": true,
+        "active_credential": null,
+        "capabilities": [
+          { "model": "claude-fallback", "operation": "generation", "surface": "open_ai", "mode": "unary" }
+        ]
+      },
+      "018f0000-0000-7000-8000-000000000104": {
+        "id": "018f0000-0000-7000-8000-000000000104",
+        "name": "disabled-heavyweight",
+        "kind": "open_ai",
+        "enabled": false,
+        "active_credential": null,
+        "capabilities": [
+          { "model": "gpt-disabled", "operation": "generation", "surface": "open_ai", "mode": "unary" }
+        ]
+      }
+    },
+    "routes": {
+      "team-chat": {
+        "id": "018f0000-0000-7000-8000-000000000002",
+        "slug": "team-chat",
+        "operations": ["generation"],
+        "overall_timeout": 30000,
+        "max_attempts": 3,
+        "targets": [
+          {
+            "id": "018f0000-0000-7000-8000-000000000011",
+            "provider_id": "018f0000-0000-7000-8000-000000000101",
+            "provider_model": "gpt-alpha",
+            "priority": 0,
+            "weight": 1,
+            "timeout": 10000
+          },
+          {
+            "id": "018f0000-0000-7000-8000-000000000012",
+            "provider_id": "018f0000-0000-7000-8000-000000000102",
+            "provider_model": "gpt-beta",
+            "priority": 0,
+            "weight": 4,
+            "timeout": 10000
+          },
+          {
+            "id": "018f0000-0000-7000-8000-000000000013",
+            "provider_id": "018f0000-0000-7000-8000-000000000103",
+            "provider_model": "claude-fallback",
+            "priority": 10,
+            "weight": 100,
+            "timeout": 10000
+          },
+          {
+            "id": "018f0000-0000-7000-8000-000000000014",
+            "provider_id": "018f0000-0000-7000-8000-000000000104",
+            "provider_model": "gpt-disabled",
+            "priority": 0,
+            "weight": 1000,
+            "timeout": 10000
+          }
+        ]
+      }
+    },
+    "api_keys": {}
+  },
+  "cases": [
+    {
+      "name": "priority wins over fallback weight",
+      "route": "team-chat",
+      "operation": "generation",
+      "surface": "open_ai",
+      "mode": "unary",
+      "affinity": "tenant-a",
+      "expected_provider_ids": [
+        "018f0000-0000-7000-8000-000000000101",
+        "018f0000-0000-7000-8000-000000000102",
+        "018f0000-0000-7000-8000-000000000103"
+      ]
+    },
+    {
+      "name": "weighted rendezvous changes stable order by affinity",
+      "route": "team-chat",
+      "operation": "generation",
+      "surface": "open_ai",
+      "mode": "unary",
+      "affinity": "tenant-b",
+      "expected_provider_ids": [
+        "018f0000-0000-7000-8000-000000000102",
+        "018f0000-0000-7000-8000-000000000101",
+        "018f0000-0000-7000-8000-000000000103"
+      ]
+    },
+    {
+      "name": "streaming filters unary-only fallback",
+      "route": "team-chat",
+      "operation": "generation",
+      "surface": "open_ai",
+      "mode": "streaming",
+      "affinity": "tenant-a",
+      "expected_provider_ids": [
+        "018f0000-0000-7000-8000-000000000102",
+        "018f0000-0000-7000-8000-000000000101"
+      ]
+    },
+    {
+      "name": "surface is part of capability identity",
+      "route": "team-chat",
+      "operation": "generation",
+      "surface": "gemini",
+      "mode": "unary",
+      "affinity": "tenant-a",
+      "expected_error": "no_eligible_targets"
+    },
+    {
+      "name": "route operation declaration is enforced",
+      "route": "team-chat",
+      "operation": "embeddings",
+      "surface": "open_ai",
+      "mode": "unary",
+      "affinity": "tenant-a",
+      "expected_error": "operation_not_supported"
+    },
+    {
+      "name": "unknown slug never means provider slash model",
+      "route": "missing-route",
+      "operation": "generation",
+      "surface": "open_ai",
+      "mode": "unary",
+      "affinity": "tenant-a",
+      "expected_error": "route_not_found"
+    }
+  ]
+}

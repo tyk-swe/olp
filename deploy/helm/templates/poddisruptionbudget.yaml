@@ -1,0 +1,19 @@
+{{- $root := . -}}
+{{- range $componentName := list "gateway" "control" -}}
+{{- $component := index $root.Values $componentName -}}
+{{- if and $component.enabled $component.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "olp.componentFullname" (dict "root" $root "component" $componentName) }}
+  labels:
+    {{- include "olp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+spec:
+  minAvailable: {{ $component.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 6 }}
+---
+{{- end }}
+{{- end }}

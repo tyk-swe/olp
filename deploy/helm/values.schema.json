@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "config", "mediaSpool", "monitoring", "preStopDelaySeconds", "terminationGracePeriodSeconds"],
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": ["repository", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "gateway": { "$ref": "#/definitions/serverComponent" },
+    "control": { "$ref": "#/definitions/serverComponent" },
+    "ingress": {
+      "type": "object",
+      "required": ["enabled", "className", "annotations", "host", "tls"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$"
+        },
+        "tls": {
+          "type": "object",
+          "required": ["enabled", "secretName"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "secretName": { "type": "string", "maxLength": 253 }
+          }
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "required": ["enabled", "replicas", "resources"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "The current outbox reader is single-consumer."
+        },
+        "resources": { "type": "object" }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "required": ["enabled", "backoffLimit", "activeDeadlineSeconds", "ttlSecondsAfterFinished", "resources"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
+        "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+        "resources": { "type": "object" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "required": [
+        "databaseSecretName",
+        "databaseSecretKey",
+        "valkeySecretName",
+        "valkeySecretKey",
+        "masterKeySecretName",
+        "masterKeySecretKey",
+        "keyHashSecretName",
+        "keyHashSecretKey",
+        "bootstrapTokenSecretName",
+        "bootstrapTokenSecretKey",
+        "trustedProxyCidrs",
+        "publicOrigin",
+        "databaseMaxConnections"
+      ],
+      "properties": {
+        "databaseSecretName": { "type": "string", "minLength": 1 },
+        "databaseSecretKey": { "type": "string", "minLength": 1 },
+        "valkeySecretName": { "type": "string", "minLength": 1 },
+        "valkeySecretKey": { "type": "string", "minLength": 1 },
+        "masterKeySecretName": { "type": "string", "minLength": 1 },
+        "masterKeySecretKey": { "type": "string", "minLength": 1 },
+        "keyHashSecretName": { "type": "string", "minLength": 1 },
+        "keyHashSecretKey": { "type": "string", "minLength": 1 },
+        "bootstrapTokenSecretName": { "type": "string" },
+        "bootstrapTokenSecretKey": { "type": "string", "minLength": 1 },
+        "trustedProxyCidrs": { "type": "string" },
+        "publicOrigin": { "type": "string", "format": "uri", "minLength": 1 },
+        "databaseMaxConnections": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "required": ["create", "automountServiceAccountToken"],
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "automountServiceAccountToken": { "type": "boolean" }
+      }
+    },
+    "podAnnotations": { "$ref": "#/definitions/stringMap" },
+    "podLabels": { "$ref": "#/definitions/stringMap" },
+    "preStopDelaySeconds": { "type": "integer", "minimum": 0 },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },
+    "revisionHistoryLimit": { "type": "integer", "minimum": 0 },
+    "mediaSpool": {
+      "type": "object",
+      "required": ["path", "capacityBytes", "volumeSizeLimit"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/", "minLength": 2 },
+        "capacityBytes": {
+          "type": "integer",
+          "minimum": 268435456,
+          "maximum": 9007199254740991
+        },
+        "volumeSizeLimit": { "type": "string", "minLength": 2 }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "required": ["enabled", "namespace", "labels", "interval", "scrapeTimeout", "rules"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string" },
+        "labels": { "$ref": "#/definitions/stringMap" },
+        "interval": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$" },
+        "scrapeTimeout": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$" },
+        "rules": {
+          "type": "object",
+          "required": ["enabled", "usagePendingThreshold"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "usagePendingThreshold": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "serverComponent": {
+      "type": "object",
+      "required": ["enabled", "replicas", "httpMaxConnections", "service", "podDisruptionBudget", "resources", "topologySpread"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "httpMaxConnections": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "resources": { "type": "object" },
+        "topologySpread": {
+          "type": "object",
+          "required": ["enabled", "maxSkew", "topologyKey", "whenUnsatisfiable"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxSkew": { "type": "integer", "minimum": 1 },
+            "topologyKey": { "type": "string", "minLength": 1 },
+            "whenUnsatisfiable": { "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+          }
+        },
+        "service": {
+          "type": "object",
+          "required": ["enabled", "type", "port"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "annotations": { "$ref": "#/definitions/stringMap" }
+          }
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "required": ["enabled", "minAvailable"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minAvailable": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

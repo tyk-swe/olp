@@ -1,0 +1,1 @@
+tests/fixtures/streams/*.sse whitespace=-blank-at-eof

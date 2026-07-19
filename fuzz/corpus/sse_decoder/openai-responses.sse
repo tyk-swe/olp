@@ -1,0 +1,7 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_fuzz","model":"gpt-fuzz"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}
+
+: end

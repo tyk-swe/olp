@@ -1,0 +1,134 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Ready targets",
+      "id": 1,
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "red" }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "min(olp_ready{namespace=~\"$namespace\"})", "legendFormat": "minimum readiness" }]
+    },
+    {
+      "type": "stat",
+      "title": "Runtime generation",
+      "id": 2,
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "max(olp_runtime_generation{namespace=~\"$namespace\"})", "legendFormat": "generation" }]
+    },
+    {
+      "type": "stat",
+      "title": "Request success (5m)",
+      "id": 3,
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "red" }, { "color": "yellow", "value": 0.99 }, { "color": "green", "value": 0.999 }] } }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "min(olp_request_success_ratio_5m{namespace=~\"$namespace\"})", "legendFormat": "success ratio" }]
+    },
+    {
+      "type": "stat",
+      "title": "Requests observed (5m)",
+      "id": 4,
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "max(olp_requests_5m{namespace=~\"$namespace\"})", "legendFormat": "requests" }]
+    },
+    {
+      "type": "stat",
+      "title": "Upstream cancellations (5m)",
+      "id": 5,
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }, { "color": "yellow", "value": 1 }] } }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "max(olp_upstream_cancellations_5m{namespace=~\"$namespace\"})", "legendFormat": "cancelled attempts" }]
+    },
+    {
+      "type": "stat",
+      "title": "Degraded providers",
+      "id": 6,
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 0 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "count(max by (provider_id, provider_name, status) (olp_provider_health{namespace=~\"$namespace\",status=~\"degraded|unavailable\"}) == 1)", "legendFormat": "providers" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Request latency p95 / p99 (5m)",
+      "id": 7,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "max by (quantile) (olp_request_latency_seconds{namespace=~\"$namespace\"})", "legendFormat": "p{{quantile}}" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Provider success and latency (15m)",
+      "id": 8,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": { "defaults": {}, "overrides": [{ "matcher": { "id": "byRegexp", "options": "/.* latency/" }, "properties": [{ "id": "unit", "value": "s" }] }, { "matcher": { "id": "byRegexp", "options": "/.* success/" }, "properties": [{ "id": "unit", "value": "percentunit" }] }] },
+      "targets": [
+        { "refId": "A", "expr": "max by (provider_name) (olp_provider_success_ratio_15m{namespace=~\"$namespace\"})", "legendFormat": "{{provider_name}} success" },
+        { "refId": "B", "expr": "max by (provider_name) (olp_provider_latency_seconds_15m{namespace=~\"$namespace\"})", "legendFormat": "{{provider_name}} latency" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway memory working set",
+      "id": 9,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "max by (pod) (container_memory_working_set_bytes{namespace=~\"$namespace\",container=\"olp\",pod=~\".*gateway.*\"})", "legendFormat": "{{pod}}" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Metadata persistence and backlog",
+      "id": 10,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        { "refId": "A", "expr": "min(olp_usage_persistence_available{namespace=~\"$namespace\"})", "legendFormat": "persistence available" },
+        { "refId": "B", "expr": "sum(olp_usage_events_pending{namespace=~\"$namespace\"})", "legendFormat": "gateway pending" },
+        { "refId": "C", "expr": "max(olp_usage_consumer_pending_events{namespace=~\"$namespace\"} + olp_usage_consumer_lag_events{namespace=~\"$namespace\"})", "legendFormat": "consumer backlog" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Metadata loss and reconciliation gaps",
+      "id": 11,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(olp_usage_events_dropped_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "dropped/s" },
+        { "refId": "B", "expr": "sum(rate(olp_usage_events_abandoned_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "abandoned/s" },
+        { "refId": "C", "expr": "sum(rate(olp_media_reconciliation_gaps_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "media gaps/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Limiter and target circuits",
+      "id": 12,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "targets": [
+        { "refId": "A", "expr": "min(olp_distributed_limiter_available{namespace=~\"$namespace\"})", "legendFormat": "limiter available" },
+        { "refId": "B", "expr": "sum(olp_open_target_circuits{namespace=~\"$namespace\"})", "legendFormat": "open target circuits" }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["openllmproxy"],
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "query": { "query": "label_values(olp_ready, namespace)", "refId": "namespace-variable" },
+        "definition": "label_values(olp_ready, namespace)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "utc",
+  "title": "OpenLLMProxy Operations",
+  "uid": "openllmproxy-v2",
+  "version": 2
+}

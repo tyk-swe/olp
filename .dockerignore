@@ -1,0 +1,13 @@
+target/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+console/.svelte-kit/
+console/build/
+console/storybook-static/
+console/test-results/
+console/playwright-report/
+backups/
+**/.DS_Store
+**/*.log

@@ -1,0 +1,13 @@
+{
+  "route": "team-gemini",
+  "message_count": 2,
+  "tool_count": 1,
+  "source": "gemini",
+  "extension_paths": [
+    "/systemInstruction/parts/0/vendorSystem",
+    "/contents/0/parts/0/vendorText",
+    "/generationConfig/topK",
+    "/safetySettings"
+  ],
+  "upstream_model": null
+}

@@ -1,0 +1,4 @@
+data: {"responseId":"response-fixture","modelVersion":"gemini-fixture","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"héllo "}]}}]}
+
+data: {"responseId":"response-fixture","modelVersion":"gemini-fixture","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"🌍"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}
+
