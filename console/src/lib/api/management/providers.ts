@@ -125,12 +125,13 @@ export async function updateProvider(id: string, etag: string, input: UpdateProv
   return result(response.data, response.error, response.response) as Provider;
 }
 
-export async function probeProvider(provider: Provider): Promise<ProviderProbe> {
+export async function probeProvider(provider: Provider, model?: string): Promise<ProviderProbe> {
   const response = await apiClient.POST('/api/v1/providers/{provider_id}/probe', {
     params: {
       path: { provider_id: provider.id },
-      header: { 'If-Match': provider.etag }
-    } as never
+      header: { 'If-Match': provider.etag },
+      query: { model }
+    }
   });
   return result(response.data, response.error, response.response);
 }

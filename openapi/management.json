@@ -8867,6 +8867,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Exact model for an Anthropic-compatible Messages probe",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

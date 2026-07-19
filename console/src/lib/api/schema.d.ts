@@ -5364,7 +5364,10 @@ export interface operations {
     };
     probe_provider: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Exact model for an Anthropic-compatible Messages probe */
+                model?: string;
+            };
             header: {
                 /** @description Exact provider draft ETag being probed */
                 "If-Match": string;

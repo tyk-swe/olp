@@ -351,48 +351,15 @@ async fn catalog_http_flow_enforces_etags_roles_idempotency_and_one_time_secrets
     .await;
     assert_eq!(replacement_inventory.status(), StatusCode::OK);
     let replacement_inventory_etag = etag(&replacement_inventory);
-    let anthropic_models = send(
+    let replacement_probe = send(
         &app,
-        Method::GET,
-        &format!("/api/v1/providers/{anthropic_id}/models?limit=100"),
+        Method::POST,
+        &format!("/api/v1/providers/{anthropic_id}/probe?model=replacement-model"),
         None,
-        Some(&cookie),
-        None,
-        None,
-        None,
-    )
-    .await;
-    let seed_model_id = response_json(anthropic_models).await["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|model| model["upstream_model"] == "compatible-model")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let disabled_seed = send(
-        &app,
-        Method::PATCH,
-        &format!("/api/v1/providers/{anthropic_id}/models/{seed_model_id}"),
-        Some(json!({"enabled": false, "capabilities": []})),
         Some(&cookie),
         Some(&csrf),
         None,
         Some(&replacement_inventory_etag),
-    )
-    .await;
-    assert_eq!(disabled_seed.status(), StatusCode::OK);
-    let disabled_seed_etag = etag(&disabled_seed);
-    let replacement_probe = send(
-        &app,
-        Method::POST,
-        &format!("/api/v1/providers/{anthropic_id}/probe"),
-        None,
-        Some(&cookie),
-        Some(&csrf),
-        None,
-        Some(&disabled_seed_etag),
     )
     .await;
     assert_eq!(replacement_probe.status(), StatusCode::OK);

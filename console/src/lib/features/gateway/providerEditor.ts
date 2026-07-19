@@ -141,18 +141,19 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
 }
 
 export function buildCreateProviderInput(draft: ProviderDraft): CreateProviderInput {
+  const model = draft.model.trim();
   return {
     name: draft.name.trim(),
     kind: draft.kind,
     credential: draft.credential || undefined,
-    model: draft.model.trim() || null,
+    model: model || null,
     endpoint: hasCustomEndpoint(draft.kind) ? draft.endpoint.trim() || null : null,
     api_version: hasApiVersion(draft.kind) ? draft.apiVersion.trim() || null : null,
     cloud_region: hasCloudRegion(draft.kind) ? draft.cloudRegion.trim() || null : null,
     cloud_project: hasCloudProject(draft.kind) ? draft.cloudProject.trim() || null : null,
     deployment: hasDeployment(draft.kind) ? draft.deployment.trim() || null : null,
     auth_mode: draft.authMode,
-    display_name: draft.name.trim()
+    display_name: model ? draft.name.trim() : null
   };
 }
 

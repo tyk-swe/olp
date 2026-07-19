@@ -177,7 +177,7 @@
     await run('declare-models', async () => {
       wizardProvider = await declareProviderModels(wizardProvider!, names);
       if (wizardProvider.kind === 'anthropic_compatible') {
-        probe = await probeProvider(wizardProvider);
+        probe = await probeProvider(wizardProvider, names[0]);
       }
       clearCertificationResults();
       manualModelNames = '';

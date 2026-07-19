@@ -1479,13 +1479,20 @@ pub struct ProbeResponse {
     pub discovered_models: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProbeQuery {
+    /// Optional exact model for an Anthropic-compatible Messages probe.
+    pub model: Option<String>,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/providers/{provider_id}/probe",
     tag = "providers",
     params(
         ("provider_id" = Uuid, Path),
-        ("If-Match" = String, Header, description = "Exact provider draft ETag being probed")
+        ("If-Match" = String, Header, description = "Exact provider draft ETag being probed"),
+        ("model" = Option<String>, Query, description = "Exact model for an Anthropic-compatible Messages probe")
     ),
     responses(
         (status = 200, body = ProbeResponse),
@@ -1497,6 +1504,7 @@ async fn probe_provider(
     State(state): State<ApiState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    Query(query): Query<ProbeQuery>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
@@ -1513,7 +1521,22 @@ async fn probe_provider(
     // Configuration-only checks are intentionally not accepted as activation
     // evidence. A probe always performs a bounded credentialed upstream call,
     // and persistence binds the result to the exact ETag captured above.
-    let probe = match (provider.kind, provider.probe_model.as_deref()) {
+    let explicit_model = query
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    if query.model.is_some() && explicit_model.is_none() {
+        return Err(validation("model", "Probe model must not be blank."));
+    }
+    if explicit_model.is_some() && provider.kind != ProviderKind::AnthropicCompatible {
+        return Err(validation(
+            "model",
+            "An explicit probe model is supported only for Anthropic-compatible providers.",
+        ));
+    }
+    let probe_model = explicit_model.or(provider.probe_model.as_deref());
+    let probe = match (provider.kind, probe_model) {
         (ProviderKind::AnthropicCompatible, Some(model)) => {
             connector.probe_model(model).await.map(|()| None)
         }
@@ -3113,6 +3136,17 @@ mod tests {
         let document = serde_json::to_value(CatalogApiDoc::openapi()).unwrap();
         let action = &document["paths"]["/api/v1/providers/{provider_id}/probe"]["post"];
         assert!(action.get("requestBody").is_none());
+        assert!(
+            action["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|parameter| {
+                    parameter["name"] == "model"
+                        && parameter["in"] == "query"
+                        && parameter["required"] == false
+                })
+        );
         assert!(
             action["parameters"]
                 .as_array()

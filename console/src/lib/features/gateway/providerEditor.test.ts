@@ -121,6 +121,20 @@ describe('provider editor API mappings', () => {
     });
   });
 
+  it('omits seed display metadata when an Anthropic-compatible provider has no seed model', () => {
+    expect(
+      buildCreateProviderInput({
+        ...apiKeyDraft,
+        kind: 'anthropic_compatible',
+        endpoint: ' https://models.example.com/v1 ',
+        model: ''
+      })
+    ).toMatchObject({
+      model: null,
+      display_name: null
+    });
+  });
+
   it('never sends a native provider endpoint or cloud context back to the API', () => {
     const values: ProviderEditValues = {
       name: ' Primary OpenAI ',
