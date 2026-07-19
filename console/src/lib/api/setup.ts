@@ -7,7 +7,7 @@ type Schemas = components['schemas'];
 export type SetupStatus = Schemas['SetupStatus'];
 export type CreateOwnerInput = Schemas['SetupRequest'];
 
-export type SetupUser = Schemas['UserResponse'] & { role: 'owner' };
+type SetupUser = Schemas['UserResponse'] & { role: 'owner' };
 
 export type CreateOwnerResponse = Omit<Schemas['SessionResponse'], 'user'> & { user: SetupUser };
 

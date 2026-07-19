@@ -1,4 +1,4 @@
-export type FieldErrors = Record<string, string[]>;
+type FieldErrors = Record<string, string[]>;
 
 export type ProblemDetails = {
   type?: string;

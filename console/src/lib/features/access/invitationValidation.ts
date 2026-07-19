@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-export const invitationAcceptanceSchema = v.pipe(
+const invitationAcceptanceSchema = v.pipe(
   v.object({
     displayName: v.pipe(
       v.string(),

@@ -4,7 +4,6 @@ import { ApiProblem } from './http';
 
 export type RequestSummary = components['schemas']['RequestSummary'];
 export type RequestDetail = components['schemas']['RequestDetailResponse'];
-export type Attempt = components['schemas']['AttemptResponse'];
 export type AuditEvent = components['schemas']['AuditEventResponse'];
 export type RuntimeGeneration = components['schemas']['RuntimeGenerationItem'];
 export type MediaJob = components['schemas']['MediaJobItem'];
@@ -63,13 +62,13 @@ export type UsageGatewayEpochState =
   | 'unresolved'
   | 'acknowledged';
 
-export type UsageRangeCoverage = {
+type UsageRangeCoverage = {
   range_complete: boolean;
   approximate: boolean;
   excluded_partial_aggregate_boundaries: number;
 };
 
-export type UsageConsumerStatus = {
+type UsageConsumerStatus = {
   state: 'unknown' | 'healthy' | 'backlogged' | 'stale';
   pending_events: number;
   lag_events: number;
@@ -84,10 +83,10 @@ type UsageVisibility = {
   complete: boolean;
 };
 
-export type UsageSummary = components['schemas']['UsageSummaryResponse'] & UsageVisibility;
-export type UsageCompleteness = components['schemas']['UsageCompletenessResponse'] & UsageVisibility;
-export type UsageSeriesResult = { data: UsagePoint[]; coverage: UsageRangeCoverage };
-export type UsageBreakdownResult = {
+type UsageSummary = components['schemas']['UsageSummaryResponse'] & UsageVisibility;
+type UsageCompleteness = components['schemas']['UsageCompletenessResponse'] & UsageVisibility;
+type UsageSeriesResult = { data: UsagePoint[]; coverage: UsageRangeCoverage };
+type UsageBreakdownResult = {
   data: UsageBreakdownItem[];
   coverage: UsageRangeCoverage;
 };
