@@ -206,6 +206,8 @@ mod tests {
             ("open_ai", "generation", "anthropic", "unary"),
             ("open_ai_compatible", "embeddings", "open_ai", "unary"),
             ("open_ai_compatible", "generation", "gemini", "streaming"),
+            ("anthropic_compatible", "generation", "anthropic", "unary"),
+            ("anthropic_compatible", "token_count", "gemini", "unary"),
             ("azure_open_ai", "image_generation", "open_ai", "streaming"),
             ("azure_open_ai", "token_count", "anthropic", "unary"),
             ("anthropic", "generation", "anthropic", "streaming"),
@@ -226,6 +228,7 @@ mod tests {
         for (kind, operation, surface, mode) in [
             ("open_ai", "embeddings", "anthropic", "unary"),
             ("open_ai_compatible", "moderation", "gemini", "unary"),
+            ("anthropic_compatible", "embeddings", "anthropic", "unary"),
             ("azure_open_ai", "image_generation", "anthropic", "unary"),
             ("anthropic", "embeddings", "anthropic", "unary"),
             ("anthropic", "generation", "open_ai", "async"),

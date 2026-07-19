@@ -263,6 +263,26 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
 
     MIGRATOR.run(store.pool()).await.unwrap();
 
+    let pricing_revision_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO pricing_revisions (id, revision, effective_at, created_by) \
+         VALUES ($1, 1, now(), $2)",
+    )
+    .bind(pricing_revision_id)
+    .bind(owner.user_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO prices \
+         (pricing_revision_id, provider_kind, model, operation, input_per_million, currency) \
+         VALUES ($1, 'anthropic_compatible', 'upgrade-model', 'generation', 1, 'USD')",
+    )
+    .bind(pricing_revision_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
     let migrated_etag: Uuid =
         sqlx::query_scalar("SELECT configuration_etag FROM oidc_authorization_flows WHERE id = $1")
             .bind(flow_id)

@@ -121,7 +121,9 @@ fn validate_for_provider(
         ProviderKind::OpenAi | ProviderKind::AzureOpenAi | ProviderKind::OpenAiCompatible => {
             validate_openai(operation, provider_model)
         }
-        ProviderKind::Anthropic => validate_anthropic(operation, provider_model),
+        ProviderKind::Anthropic | ProviderKind::AnthropicCompatible => {
+            validate_anthropic(operation, provider_model)
+        }
         ProviderKind::Gemini | ProviderKind::VertexAi => validate_gemini(operation, provider_model),
         ProviderKind::Bedrock => {
             olp_providers::validate_bedrock_operation(operation).map_err(|error| error.to_string())

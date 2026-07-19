@@ -1,4 +1,4 @@
-//! Direct Anthropic connector with a fail-closed custom-endpoint boundary.
+//! Anthropic-wire-compatible connector with a fail-closed endpoint boundary.
 //!
 //! DNS is resolved, classified, and pinned into a redirect-free client whose
 //! connection pool is reused only for an unchanged, periodically revalidated
@@ -120,8 +120,8 @@ impl ConnectorConfig {
         Ok(self)
     }
 
-    #[cfg(test)]
-    fn for_local_test(base_url: &str, timeouts: ConnectorTimeouts) -> Self {
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn for_local_test(base_url: &str, timeouts: ConnectorTimeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
         endpoint.set_connect_timeout(timeouts.connect);
         Self {

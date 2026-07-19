@@ -21,6 +21,7 @@ use crate::{
 pub enum ProviderKind {
     OpenAi,
     Anthropic,
+    AnthropicCompatible,
     Gemini,
     VertexAi,
     Bedrock,
@@ -29,9 +30,10 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::OpenAi,
         Self::Anthropic,
+        Self::AnthropicCompatible,
         Self::Gemini,
         Self::VertexAi,
         Self::Bedrock,
@@ -44,6 +46,7 @@ impl ProviderKind {
         match self {
             Self::OpenAi => "open_ai",
             Self::Anthropic => "anthropic",
+            Self::AnthropicCompatible => "anthropic_compatible",
             Self::Gemini => "gemini",
             Self::VertexAi => "vertex_ai",
             Self::Bedrock => "bedrock",
@@ -74,9 +77,11 @@ impl ProviderKind {
         );
 
         match self {
-            Self::Anthropic | Self::Gemini | Self::VertexAi | Self::Bedrock => {
-                shared_canonical_operation
-            }
+            Self::Anthropic
+            | Self::AnthropicCompatible
+            | Self::Gemini
+            | Self::VertexAi
+            | Self::Bedrock => shared_canonical_operation,
             Self::OpenAi | Self::OpenAiCompatible | Self::AzureOpenAi => {
                 shared_canonical_operation
                     || (matches!(surface, Surface::OpenAi)
@@ -130,6 +135,7 @@ impl FromStr for ProviderKind {
         match value {
             "open_ai" => Ok(Self::OpenAi),
             "anthropic" => Ok(Self::Anthropic),
+            "anthropic_compatible" => Ok(Self::AnthropicCompatible),
             "gemini" => Ok(Self::Gemini),
             "vertex_ai" => Ok(Self::VertexAi),
             "bedrock" => Ok(Self::Bedrock),
@@ -700,6 +706,11 @@ mod tests {
             Surface::OpenAi,
             TransportMode::Unary,
         ));
+        assert!(ProviderKind::AnthropicCompatible.supports_capability(
+            OperationKind::TokenCount,
+            Surface::Gemini,
+            TransportMode::Unary,
+        ));
         assert!(!ProviderKind::Anthropic.supports_capability(
             OperationKind::Embeddings,
             Surface::Anthropic,
@@ -708,6 +719,11 @@ mod tests {
         assert!(!ProviderKind::OpenAiCompatible.supports_capability(
             OperationKind::Moderation,
             Surface::Gemini,
+            TransportMode::Unary,
+        ));
+        assert!(!ProviderKind::AnthropicCompatible.supports_capability(
+            OperationKind::Embeddings,
+            Surface::Anthropic,
             TransportMode::Unary,
         ));
 

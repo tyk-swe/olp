@@ -107,6 +107,9 @@ pub enum ProviderConfig {
         endpoint: Option<String>,
         api_version: Option<String>,
     },
+    AnthropicCompatible {
+        endpoint: String,
+    },
     Gemini {
         endpoint: Option<String>,
     },
@@ -134,6 +137,7 @@ impl ProviderConfig {
             Self::OpenAi { .. } => ProviderKind::OpenAi,
             Self::OpenAiCompatible { .. } => ProviderKind::OpenAiCompatible,
             Self::Anthropic { .. } => ProviderKind::Anthropic,
+            Self::AnthropicCompatible { .. } => ProviderKind::AnthropicCompatible,
             Self::Gemini { .. } => ProviderKind::Gemini,
             Self::VertexAi { .. } => ProviderKind::VertexAi,
             Self::Bedrock { .. } => ProviderKind::Bedrock,
@@ -173,6 +177,16 @@ impl ProviderConfig {
                 cloud_project: None,
                 deployment: None,
                 api_version: api_version.as_deref(),
+                auth_mode: ProviderAuthMode::ApiKey,
+                probe_model: None,
+            },
+            Self::AnthropicCompatible { endpoint } => ConnectorSpec {
+                kind: ProviderKind::AnthropicCompatible,
+                endpoint: Some(endpoint),
+                cloud_region: None,
+                cloud_project: None,
+                deployment: None,
+                api_version: None,
                 auth_mode: ProviderAuthMode::ApiKey,
                 probe_model: None,
             },
@@ -371,15 +385,59 @@ impl ProviderFacade {
             .certify_capability(provider_model, capability)
             .await
     }
+
+    /// Performs the smallest Messages-compatible credentialed request for an
+    /// operator-supplied model. This is connectivity evidence only; it does
+    /// not promote any capability in the catalog.
+    pub async fn probe_model(&self, provider_model: &str) -> Result<(), String> {
+        self.certify_capability(
+            provider_model,
+            CompatibleCapability {
+                operation: OperationKind::Generation,
+                surface: Surface::Anthropic,
+                mode: TransportMode::Unary,
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+    }
 }
 
-#[derive(Clone, Default)]
-pub struct OpenAiConnectorOverrideRegistry {
-    inner: Arc<RwLock<BTreeMap<Uuid, Arc<OpenAiConnector>>>>,
+/// A prebuilt connector that can be substituted for catalog connectivity
+/// probes. This is a test/installation seam; production wiring never installs
+/// an override.
+pub trait ConnectorOverride: Send + Sync + 'static {
+    /// Whether this connector family serves the requested provider kind.
+    fn matches_kind(kind: ProviderKind) -> bool;
+    /// Wraps a registered connector into a runnable provider facade.
+    fn into_facade(connector: Arc<Self>, kind: ProviderKind) -> ProviderFacade;
 }
 
-impl OpenAiConnectorOverrideRegistry {
-    pub fn register(&self, provider_id: Uuid, connector: OpenAiConnector) {
+pub struct ConnectorOverrideRegistry<C: ConnectorOverride> {
+    inner: Arc<RwLock<BTreeMap<Uuid, Arc<C>>>>,
+}
+
+// Manual `Clone`/`Default` avoid deriving a `C: Clone`/`C: Default` bound the
+// connectors do not satisfy; the `Arc`-wrapped map is Clone/Default for any `C`.
+impl<C: ConnectorOverride> Clone for ConnectorOverrideRegistry<C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl<C: ConnectorOverride> Default for ConnectorOverrideRegistry<C> {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(BTreeMap::new())),
+        }
+    }
+}
+
+impl<C: ConnectorOverride> ConnectorOverrideRegistry<C> {
+    pub fn register(&self, provider_id: Uuid, connector: C) {
         self.inner
             .write()
             .expect("catalog connector registry lock poisoned")
@@ -387,7 +445,7 @@ impl OpenAiConnectorOverrideRegistry {
     }
 
     pub fn get(&self, provider_id: Uuid, kind: ProviderKind) -> Option<ProviderFacade> {
-        if !matches!(kind, ProviderKind::OpenAi | ProviderKind::OpenAiCompatible) {
+        if !C::matches_kind(kind) {
             return None;
         }
         self.inner
@@ -395,12 +453,40 @@ impl OpenAiConnectorOverrideRegistry {
             .expect("catalog connector registry lock poisoned")
             .get(&provider_id)
             .cloned()
-            .map(|connector| ProviderFacade {
-                inner: ConcreteProvider {
-                    kind,
-                    connector: ConcreteConnector::OpenAi(connector),
-                },
-            })
+            .map(|connector| C::into_facade(connector, kind))
+    }
+}
+
+impl ConnectorOverride for OpenAiConnector {
+    fn matches_kind(kind: ProviderKind) -> bool {
+        matches!(kind, ProviderKind::OpenAi | ProviderKind::OpenAiCompatible)
+    }
+
+    fn into_facade(connector: Arc<Self>, kind: ProviderKind) -> ProviderFacade {
+        ProviderFacade {
+            inner: ConcreteProvider {
+                kind,
+                connector: ConcreteConnector::OpenAi(connector),
+            },
+        }
+    }
+}
+
+impl ConnectorOverride for AnthropicConnector {
+    fn matches_kind(kind: ProviderKind) -> bool {
+        matches!(
+            kind,
+            ProviderKind::Anthropic | ProviderKind::AnthropicCompatible
+        )
+    }
+
+    fn into_facade(connector: Arc<Self>, kind: ProviderKind) -> ProviderFacade {
+        ProviderFacade {
+            inner: ConcreteProvider {
+                kind,
+                connector: ConcreteConnector::Anthropic(connector),
+            },
+        }
     }
 }
 
@@ -411,6 +497,7 @@ fn raw_credential_kind(spec: ConnectorSpec<'_>) -> Result<RawCredentialKind, Pro
         ProviderKind::OpenAi
         | ProviderKind::OpenAiCompatible
         | ProviderKind::Anthropic
+        | ProviderKind::AnthropicCompatible
         | ProviderKind::Gemini
         | ProviderKind::AzureOpenAi
             if spec.auth_mode == ProviderAuthMode::ApiKey =>
@@ -420,6 +507,7 @@ fn raw_credential_kind(spec: ConnectorSpec<'_>) -> Result<RawCredentialKind, Pro
         ProviderKind::OpenAi
         | ProviderKind::OpenAiCompatible
         | ProviderKind::Anthropic
+        | ProviderKind::AnthropicCompatible
         | ProviderKind::Gemini
         | ProviderKind::AzureOpenAi => Err(ProviderError::configuration(format!(
             "Unsupported {} authentication mode {}",
@@ -469,6 +557,18 @@ pub const fn supports_capability_certification(
                 TransportMode::Unary
             )
         ),
+        ProviderKind::AnthropicCompatible => matches!(
+            (operation, surface, mode),
+            (
+                OperationKind::Generation,
+                Surface::OpenAi | Surface::Anthropic | Surface::Gemini,
+                TransportMode::Unary | TransportMode::Streaming
+            ) | (
+                OperationKind::TokenCount,
+                Surface::OpenAi | Surface::Anthropic | Surface::Gemini,
+                TransportMode::Unary
+            )
+        ),
         ProviderKind::AzureOpenAi => matches!(
             (operation, mode),
             (
@@ -510,7 +610,7 @@ fn validate_connector_credential(
         )
         .map(|_| ())
         .map_err(ProviderError::credential),
-        ProviderKind::Anthropic => AnthropicApiKey::new(
+        ProviderKind::Anthropic | ProviderKind::AnthropicCompatible => AnthropicApiKey::new(
             text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
@@ -571,7 +671,13 @@ async fn build_connector(
                 text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
             )
             .map_err(ProviderError::credential)?;
-            ConcreteConnector::Anthropic(Arc::new(AnthropicConnector::new(configuration, key)))
+            ConcreteConnector::Anthropic(Arc::new(match kind {
+                ProviderKind::Anthropic => AnthropicConnector::new(configuration, key),
+                ProviderKind::AnthropicCompatible => {
+                    AnthropicConnector::new_compatible(configuration, key)
+                }
+                _ => unreachable!("Anthropic configuration has an Anthropic provider kind"),
+            }))
         }
         ConnectorConfiguration::Gemini(configuration) => {
             let key = GeminiApiKey::new(
@@ -674,7 +780,7 @@ fn connector_configuration(
                 })
                 .map_err(ProviderError::configuration)
         }
-        ProviderKind::Anthropic => {
+        ProviderKind::Anthropic | ProviderKind::AnthropicCompatible => {
             require_api_key_auth(spec)?;
             let mut configuration = spec
                 .endpoint
@@ -682,7 +788,9 @@ fn connector_configuration(
                 .transpose()
                 .map_err(ProviderError::configuration)?
                 .unwrap_or_default();
-            if let Some(version) = spec.api_version {
+            if spec.kind == ProviderKind::Anthropic
+                && let Some(version) = spec.api_version
+            {
                 configuration = configuration
                     .with_api_version(version.to_owned())
                     .map_err(ProviderError::configuration)?;
@@ -923,6 +1031,16 @@ impl ConcreteProvider {
                 .await
                 .map(|()| CapabilityCertificationEvidence::LiveProbe)
             }
+            (ConcreteConnector::Anthropic(connector), ProviderKind::AnthropicCompatible) => {
+                execute_native_capability_probe(
+                    connector.as_ref(),
+                    ProviderKind::AnthropicCompatible,
+                    provider_model,
+                    capability,
+                )
+                .await
+                .map(|()| CapabilityCertificationEvidence::LiveProbe)
+            }
             (ConcreteConnector::Gemini(connector), ProviderKind::Gemini) => {
                 execute_native_capability_probe(
                     connector.as_ref(),
@@ -1015,6 +1133,7 @@ fn native_probe_operation(
         (
             ProviderKind::OpenAi
             | ProviderKind::Anthropic
+            | ProviderKind::AnthropicCompatible
             | ProviderKind::Gemini
             | ProviderKind::VertexAi
             | ProviderKind::Bedrock,
@@ -1045,6 +1164,7 @@ fn native_probe_operation(
         (
             ProviderKind::OpenAi
             | ProviderKind::Anthropic
+            | ProviderKind::AnthropicCompatible
             | ProviderKind::Gemini
             | ProviderKind::VertexAi
             | ProviderKind::Bedrock,
@@ -1211,6 +1331,12 @@ mod tests {
                 CredentialKind::ApiKey,
             ),
             (
+                ProviderConfig::AnthropicCompatible {
+                    endpoint: "https://provider.example.test/v1".to_owned(),
+                },
+                CredentialKind::ApiKey,
+            ),
+            (
                 ProviderConfig::Gemini { endpoint: None },
                 CredentialKind::ApiKey,
             ),
@@ -1300,6 +1426,18 @@ mod tests {
             Surface::Anthropic,
             TransportMode::Unary,
         ));
+        assert!(supports_capability_certification(
+            ProviderKind::AnthropicCompatible,
+            OperationKind::Generation,
+            Surface::Gemini,
+            TransportMode::Streaming,
+        ));
+        assert!(!supports_capability_certification(
+            ProviderKind::AnthropicCompatible,
+            OperationKind::Embeddings,
+            Surface::Anthropic,
+            TransportMode::Unary,
+        ));
         assert!(!supports_capability_certification(
             ProviderKind::OpenAiCompatible,
             OperationKind::ImageGeneration,
@@ -1321,6 +1459,7 @@ mod tests {
             (ProviderKind::OpenAiCompatible, 5),
             (ProviderKind::AzureOpenAi, 11),
             (ProviderKind::Anthropic, 9),
+            (ProviderKind::AnthropicCompatible, 9),
             (ProviderKind::Gemini, 9),
             (ProviderKind::VertexAi, 9),
             (ProviderKind::Bedrock, 9),
@@ -1335,7 +1474,7 @@ mod tests {
 
     #[test]
     fn catalog_openai_test_override_is_available_for_native_and_compatible_providers() {
-        let registry = OpenAiConnectorOverrideRegistry::default();
+        let registry = ConnectorOverrideRegistry::<OpenAiConnector>::default();
         let provider_id = Uuid::from_u128(1);
         registry.register(
             provider_id,

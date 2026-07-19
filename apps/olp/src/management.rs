@@ -1472,8 +1472,9 @@ impl fmt::Debug for WriteOnlySecret {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateProviderRequest {
     pub name: String,
-    /// `open_ai` uses the official endpoint; `open_ai_compatible` requires an
-    /// explicit HTTPS endpoint and live certification of reviewed capabilities.
+    /// Native `open_ai` and `anthropic` use their official endpoints.
+    /// Compatible variants require an explicit HTTPS endpoint and live
+    /// certification of reviewed capabilities.
     pub kind: String,
     pub endpoint: Option<String>,
     pub cloud_region: Option<String>,
@@ -1600,6 +1601,27 @@ fn require_create_auth_mode(errors: &mut FieldErrors, actual: &str, expected: &s
     }
 }
 
+/// Resolves a compatible provider's endpoint, recording an endpoint error
+/// when the request omits one. Returns the kind/base-url/surface triple the
+/// caller's kind-resolution match expects.
+fn require_create_endpoint(
+    errors: &mut FieldErrors,
+    request: &CreateProviderRequest,
+    kind: ProviderKind,
+    surface: &'static str,
+) -> (ProviderKind, String, Option<&'static str>) {
+    match request.endpoint.clone() {
+        Some(endpoint) => (kind, endpoint, Some(surface)),
+        None => {
+            errors
+                .entry("endpoint".to_owned())
+                .or_default()
+                .push("An HTTPS endpoint is required.".to_owned());
+            (kind, String::new(), Some(surface))
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProviderResponse {
     #[schema(value_type = String, format = Uuid)]
@@ -1689,21 +1711,18 @@ async fn create_provider(
                 .unwrap_or_else(|| "https://api.openai.com/v1/".to_owned()),
             Some("open_ai"),
         ),
-        "open_ai_compatible" => {
-            if let Some(endpoint) = request.endpoint.clone() {
-                (ProviderKind::OpenAiCompatible, endpoint, Some("open_ai"))
-            } else {
-                errors
-                    .entry("endpoint".to_owned())
-                    .or_default()
-                    .push("An HTTPS endpoint is required.".to_owned());
-                (
-                    ProviderKind::OpenAiCompatible,
-                    String::new(),
-                    Some("open_ai"),
-                )
-            }
-        }
+        "open_ai_compatible" => require_create_endpoint(
+            &mut errors,
+            &request,
+            ProviderKind::OpenAiCompatible,
+            "open_ai",
+        ),
+        "anthropic_compatible" => require_create_endpoint(
+            &mut errors,
+            &request,
+            ProviderKind::AnthropicCompatible,
+            "anthropic",
+        ),
         "anthropic" => (
             ProviderKind::Anthropic,
             request
@@ -1740,7 +1759,7 @@ async fn create_provider(
                 .entry("kind".to_owned())
                 .or_default()
                 .push(
-                    "Use open_ai, open_ai_compatible, anthropic, gemini, vertex_ai, azure_open_ai, or bedrock."
+                    "Use open_ai, open_ai_compatible, anthropic, anthropic_compatible, gemini, vertex_ai, azure_open_ai, or bedrock."
                         .to_owned(),
                 );
             (ProviderKind::OpenAi, String::new(), Some("open_ai"))
@@ -1756,6 +1775,7 @@ async fn create_provider(
         ProviderKind::OpenAi
             | ProviderKind::OpenAiCompatible
             | ProviderKind::Anthropic
+            | ProviderKind::AnthropicCompatible
             | ProviderKind::Gemini
             | ProviderKind::AzureOpenAi
     ) || matches!(
@@ -1779,7 +1799,7 @@ async fn create_provider(
             );
             reject_create_cloud_fields(&mut errors, &request);
         }
-        ProviderKind::OpenAiCompatible => {
+        ProviderKind::OpenAiCompatible | ProviderKind::AnthropicCompatible => {
             require_create_auth_mode(&mut errors, &auth_mode, "api_key");
             reject_create_cloud_fields(&mut errors, &request);
         }
@@ -1957,6 +1977,9 @@ async fn create_provider(
             endpoint: Some(base_url.clone()),
             api_version: request.api_version.clone(),
         },
+        ProviderKind::AnthropicCompatible => ProviderConfig::AnthropicCompatible {
+            endpoint: base_url.clone(),
+        },
         ProviderKind::Gemini => ProviderConfig::Gemini {
             endpoint: Some(base_url.clone()),
         },
@@ -2025,7 +2048,9 @@ async fn create_provider(
                 kind,
                 endpoint: matches!(
                     kind,
-                    ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi
+                    ProviderKind::OpenAiCompatible
+                        | ProviderKind::AnthropicCompatible
+                        | ProviderKind::AzureOpenAi
                 )
                 .then_some(base_url),
                 cloud_region: request.cloud_region.clone(),

@@ -438,8 +438,9 @@ impl PgStore {
                  WHERE pm.provider_id = p.id \
              ) stats ON true \
              LEFT JOIN LATERAL ( \
-                 SELECT pm.upstream_model FROM provider_models pm \
-                 WHERE pm.provider_id = p.id ORDER BY pm.id LIMIT 1 \
+                  SELECT pm.upstream_model FROM provider_models pm \
+                  WHERE pm.provider_id = p.id \
+                  ORDER BY pm.enabled DESC, pm.created_at DESC, pm.id DESC LIMIT 1 \
              ) probe ON true \
              WHERE ($1::uuid IS NULL OR p.id > $1) ORDER BY p.id LIMIT $2",
         )
@@ -490,8 +491,9 @@ impl PgStore {
                  WHERE pm.provider_id = p.id \
              ) stats ON true \
              LEFT JOIN LATERAL ( \
-                 SELECT pm.upstream_model FROM provider_models pm \
-                 WHERE pm.provider_id = p.id ORDER BY pm.id LIMIT 1 \
+                  SELECT pm.upstream_model FROM provider_models pm \
+                  WHERE pm.provider_id = p.id \
+                  ORDER BY pm.enabled DESC, pm.created_at DESC, pm.id DESC LIMIT 1 \
              ) probe ON true \
              WHERE p.id = $1",
         )
@@ -1954,7 +1956,11 @@ impl PgStore {
             return Err(CatalogError::InUse);
         }
         let provider_kind = provider.get::<String, _>("kind");
-        if provider_kind != "open_ai_compatible" {
+        let is_compatible_kind = matches!(
+            provider_kind.as_str(),
+            "open_ai_compatible" | "anthropic_compatible"
+        );
+        if !is_compatible_kind {
             let last_probe_at: Option<DateTime<Utc>> = provider.get("last_probe_at");
             let updated_at: DateTime<Utc> = provider.get("updated_at");
             let has_fresh_probe = provider
@@ -1979,7 +1985,7 @@ impl PgStore {
         let Some(model_discovered_at) = discovered_at_row else {
             return Err(CatalogError::NotFound);
         };
-        if provider_kind != "open_ai_compatible" && model_discovered_at.is_none() {
+        if !is_compatible_kind && model_discovered_at.is_none() {
             return Err(CatalogError::Invalid(
                 "native capability certification requires a discovered provider model".to_owned(),
             ));

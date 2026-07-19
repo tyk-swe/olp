@@ -26,6 +26,7 @@ pub mod openai;
 #[allow(dead_code)]
 mod vertex;
 
+pub use anthropic::AnthropicConnector;
 pub use anthropic::validate_operation as validate_anthropic_operation;
 pub use bedrock::validate_operation as validate_bedrock_operation;
 pub use factory::*;

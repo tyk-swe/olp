@@ -64,9 +64,9 @@ exact provider, model, and operation. Safe operations use bounded live probes.
 Each enabled native model must have at least one tuple, and every tuple must be
 certified. OpenAI media and video operations that would require user media,
 billable generation, or job mutation may instead use credentialed bounded
-discovery and the closed native connector matrix. Generic OpenAI-compatible
-providers cannot use that fallback. Probe results are stored only when the
-captured draft ETag is still current.
+discovery and the closed native connector matrix. Generic OpenAI- and
+Anthropic-compatible providers cannot use that fallback. Probe results are
+stored only when the captured draft ETag is still current.
 
 Browser-reviewed tuples for a generic provider are stored as `declared` and
 remain ineligible. The explicit per-model certification action reuses the
@@ -75,6 +75,15 @@ and response codecs. It permits at most 16 reviewed tuples and four concurrent
 requests. Safe probes cover OpenAI generation (unary and streaming),
 embeddings, Responses input-token counting, and unary moderation. Media upload
 or generation, asynchronous video, and cross-protocol claims fail closed.
+
+An `anthropic_compatible` provider uses the Anthropic Messages wire contract:
+an explicit HTTPS endpoint, `x-api-key`, and the fixed
+`anthropic-version: 2023-06-01` header. It is an upstream connector and is
+separate from OLP's inbound `/anthropic/v1` compatibility API. A configured
+model receives a bounded one-token Messages connectivity probe; without one,
+the connector probes `/models`. Operators can declare models manually when an
+endpoint has no model-list API, then rerun the Messages probe and certify each
+reviewed tuple live.
 
 Every attempted tuple is downgraded before results are applied; only an exact
 successful probe receives `source = certified` and `certified_at`. Declared-only

@@ -57,7 +57,7 @@ observability exposure.
 Never place prompts, outputs, raw headers, provider credentials, sessions,
 proxy-key secrets, or master keys in tickets or diagnostic bundles.
 
-### OpenAI-compatible capability certification
+### Compatible-provider capability certification
 
 After discovery, review at most 16 exact tuples per compatible model and run
 **Certify reviewed capabilities**. Certification sends only
@@ -67,6 +67,14 @@ eligible; `partial` and `failed` remain declared. Remove unsupported media,
 asynchronous, or cross-surface claims, or use a separately qualified native
 connector. Re-certify after endpoint, model, or credential changes. Do not
 activate until every enabled tuple has a certification timestamp.
+
+`anthropic_compatible` endpoints require HTTPS, an API key sent in
+`x-api-key`, and the fixed `anthropic-version: 2023-06-01` header. They use
+the Messages and token-count contracts and can certify only generation (unary
+or streaming) and unary token-counting across the OpenAI, Anthropic, and
+Gemini client surfaces. If `/models` is unavailable, declare one or more model
+identifiers manually and rerun the connection test; it issues a bounded
+one-token Messages request against a declared model.
 
 ## Backup and restore
 

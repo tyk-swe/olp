@@ -1314,8 +1314,9 @@ export interface components {
             display_name?: string | null;
             endpoint?: string | null;
             /**
-             * @description `open_ai` uses the official endpoint; `open_ai_compatible` requires an
-             *     explicit HTTPS endpoint and live certification of reviewed capabilities.
+             * @description Native `open_ai` and `anthropic` use their official endpoints.
+             *     Compatible variants require an explicit HTTPS endpoint and live
+             *     certification of reviewed capabilities.
              */
             kind: string;
             /**
@@ -1599,7 +1600,7 @@ export interface components {
         /** @enum {string} */
         PriceOperation: "generation" | "embeddings" | "token_count" | "image_generation" | "image_edit" | "image_variation" | "speech" | "transcription" | "video_create" | "video_list" | "video_get" | "video_content" | "video_delete" | "moderation" | "model_list" | "model_get";
         /** @enum {string} */
-        PriceProviderKind: "open_ai" | "anthropic" | "gemini" | "vertex_ai" | "bedrock" | "azure_open_ai" | "open_ai_compatible";
+        PriceProviderKind: "open_ai" | "anthropic" | "anthropic_compatible" | "gemini" | "vertex_ai" | "bedrock" | "azure_open_ai" | "open_ai_compatible";
         PriceRequest: {
             currency: string;
             input_per_million?: string | null;

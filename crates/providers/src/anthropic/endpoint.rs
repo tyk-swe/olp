@@ -22,7 +22,7 @@ pub(crate) struct Endpoint {
     base_url: Url,
     client_connect_timeout: Duration,
     client_pool: Arc<ClientPool>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     allow_unsafe_test_target: bool,
 }
 
@@ -32,7 +32,7 @@ impl Clone for Endpoint {
             base_url: self.base_url.clone(),
             client_connect_timeout: self.client_connect_timeout,
             client_pool: Arc::new(ClientPool::default()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             allow_unsafe_test_target: self.allow_unsafe_test_target,
         }
     }
@@ -118,12 +118,12 @@ impl Endpoint {
             base_url,
             client_connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             client_pool: Arc::new(ClientPool::default()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             allow_unsafe_test_target: allow_unsafe_target,
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn for_local_test(value: &str) -> Self {
         Self::parse_with_policy(value, true).expect("local test endpoint must be valid")
     }
@@ -215,9 +215,9 @@ impl Endpoint {
         if addresses.is_empty() {
             return Err(EndpointError::NoAddresses);
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         let allow_unsafe_target = self.allow_unsafe_test_target;
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-util")))]
         let allow_unsafe_target = false;
         if !allow_unsafe_target {
             for address in &addresses {

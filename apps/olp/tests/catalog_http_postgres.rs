@@ -16,6 +16,10 @@ use axum::{
 };
 use http_body_util::BodyExt as _;
 use olp::{ApiMode, ApiState, RuntimeManager, public_router};
+use olp_providers::anthropic::{
+    AnthropicApiKey, AnthropicConnector, ConnectorConfig as AnthropicConnectorConfig,
+    ConnectorTimeouts as AnthropicConnectorTimeouts,
+};
 use olp_providers::openai::{ConnectorConfig, ConnectorTimeouts, OpenAiApiKey, OpenAiConnector};
 use olp_storage::{MasterKey, PgStore};
 use serde_json::{Value, json};
@@ -276,6 +280,125 @@ async fn catalog_http_flow_enforces_etags_roles_idempotency_and_one_time_secrets
     catalog_state.register_catalog_openai_connector_for_test(
         Uuid::parse_str(&provider_id).unwrap(),
         mock_provider.connector("sk-openai-test-secret"),
+    );
+    let anthropic = send(
+        &app,
+        Method::POST,
+        "/api/v1/providers",
+        Some(json!({
+            "name": "anthropic-compatible-primary",
+            "kind": "anthropic_compatible",
+            "endpoint": "https://anthropic-compatible.example/v1/",
+            "credential": "anthropic-compatible-secret",
+            "model": "compatible-model",
+            "display_name": "Compatible Model"
+        })),
+        Some(&cookie),
+        Some(&csrf),
+        Some("provider-anthropic-compatible-create-0001"),
+        None,
+    )
+    .await;
+    assert_eq!(anthropic.status(), StatusCode::CREATED);
+    let anthropic_etag = etag(&anthropic);
+    let anthropic_id = response_json(anthropic).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mock_anthropic = MockAnthropicProvider::spawn().await;
+    catalog_state.register_catalog_anthropic_connector_for_test(
+        Uuid::parse_str(&anthropic_id).unwrap(),
+        mock_anthropic.connector("anthropic-compatible-secret"),
+    );
+    let anthropic_probe = send(
+        &app,
+        Method::POST,
+        &format!("/api/v1/providers/{anthropic_id}/probe"),
+        None,
+        Some(&cookie),
+        Some(&csrf),
+        None,
+        Some(&anthropic_etag),
+    )
+    .await;
+    assert_eq!(anthropic_probe.status(), StatusCode::OK);
+    let anthropic_probe = response_json(anthropic_probe).await;
+    assert_eq!(anthropic_probe["probe_type"], "connector_connectivity");
+    assert_eq!(anthropic_probe["discovered_models"], Value::Null);
+    assert_eq!(
+        mock_anthropic.last_api_key().as_deref(),
+        Some("anthropic-compatible-secret")
+    );
+    assert_eq!(
+        mock_anthropic.last_api_version().as_deref(),
+        Some("2023-06-01")
+    );
+    let replacement_inventory = send(
+        &app,
+        Method::POST,
+        &format!("/api/v1/providers/{anthropic_id}/discovery"),
+        Some(json!({
+            "models": [{
+                "upstream_model": "replacement-model",
+                "display_name": "Replacement Model"
+            }]
+        })),
+        Some(&cookie),
+        Some(&csrf),
+        None,
+        Some(&anthropic_etag),
+    )
+    .await;
+    assert_eq!(replacement_inventory.status(), StatusCode::OK);
+    let replacement_inventory_etag = etag(&replacement_inventory);
+    let anthropic_models = send(
+        &app,
+        Method::GET,
+        &format!("/api/v1/providers/{anthropic_id}/models?limit=100"),
+        None,
+        Some(&cookie),
+        None,
+        None,
+        None,
+    )
+    .await;
+    let seed_model_id = response_json(anthropic_models).await["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["upstream_model"] == "compatible-model")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let disabled_seed = send(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/providers/{anthropic_id}/models/{seed_model_id}"),
+        Some(json!({"enabled": false, "capabilities": []})),
+        Some(&cookie),
+        Some(&csrf),
+        None,
+        Some(&replacement_inventory_etag),
+    )
+    .await;
+    assert_eq!(disabled_seed.status(), StatusCode::OK);
+    let disabled_seed_etag = etag(&disabled_seed);
+    let replacement_probe = send(
+        &app,
+        Method::POST,
+        &format!("/api/v1/providers/{anthropic_id}/probe"),
+        None,
+        Some(&cookie),
+        Some(&csrf),
+        None,
+        Some(&disabled_seed_etag),
+    )
+    .await;
+    assert_eq!(replacement_probe.status(), StatusCode::OK);
+    assert_eq!(
+        mock_anthropic.last_model().as_deref(),
+        Some("replacement-model")
     );
     let provider_replay = send(
         &app,
@@ -1512,6 +1635,66 @@ struct MockOpenAiProvider {
     state: MockOpenAiState,
 }
 
+#[derive(Clone)]
+struct MockAnthropicState {
+    api_keys: Arc<Mutex<Vec<String>>>,
+    api_versions: Arc<Mutex<Vec<String>>>,
+    models: Arc<Mutex<Vec<String>>>,
+}
+
+struct MockAnthropicProvider {
+    base_url: String,
+    state: MockAnthropicState,
+}
+
+impl MockAnthropicProvider {
+    async fn spawn() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let state = MockAnthropicState {
+            api_keys: Arc::new(Mutex::new(Vec::new())),
+            api_versions: Arc::new(Mutex::new(Vec::new())),
+            models: Arc::new(Mutex::new(Vec::new())),
+        };
+        let app = Router::new()
+            .route("/v1/messages", post(mock_anthropic_messages))
+            .with_state(state.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        Self {
+            base_url: format!("http://{address}/v1/"),
+            state,
+        }
+    }
+
+    fn connector(&self, api_key: &str) -> AnthropicConnector {
+        AnthropicConnector::new_compatible(
+            AnthropicConnectorConfig::for_local_test(
+                &self.base_url,
+                AnthropicConnectorTimeouts {
+                    connect: Duration::from_secs(1),
+                    first_byte: Duration::from_secs(1),
+                    idle: Duration::from_secs(1),
+                },
+            ),
+            AnthropicApiKey::new(api_key).unwrap(),
+        )
+    }
+
+    fn last_api_key(&self) -> Option<String> {
+        self.state.api_keys.lock().unwrap().last().cloned()
+    }
+
+    fn last_api_version(&self) -> Option<String> {
+        self.state.api_versions.lock().unwrap().last().cloned()
+    }
+
+    fn last_model(&self) -> Option<String> {
+        self.state.models.lock().unwrap().last().cloned()
+    }
+}
+
 impl MockOpenAiProvider {
     async fn spawn() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1591,6 +1774,42 @@ async fn mock_openai_embeddings(
         "model": body["model"],
         "data": [{"object": "embedding", "index": 0, "embedding": [0.25]}],
         "usage": {"prompt_tokens": 1, "total_tokens": 1}
+    }))
+}
+
+async fn mock_anthropic_messages(
+    State(state): State<MockAnthropicState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    state.api_keys.lock().unwrap().push(
+        headers
+            .get("x-api-key")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned(),
+    );
+    state.api_versions.lock().unwrap().push(
+        headers
+            .get("anthropic-version")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned(),
+    );
+    state
+        .models
+        .lock()
+        .unwrap()
+        .push(body["model"].as_str().unwrap_or_default().to_owned());
+    Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "model": body["model"],
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "usage": {"input_tokens": 1, "output_tokens": 1}
     }))
 }
 

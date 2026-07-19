@@ -316,6 +316,12 @@ fn provider_config(
             endpoint: provider.endpoint.clone(),
             api_version: provider.api_version.clone(),
         },
+        ProviderKind::AnthropicCompatible => ProviderConfig::AnthropicCompatible {
+            endpoint: required(
+                provider.endpoint.as_ref(),
+                "Anthropic-compatible endpoint is missing",
+            )?,
+        },
         ProviderKind::Gemini => ProviderConfig::Gemini {
             endpoint: provider.endpoint.clone(),
         },

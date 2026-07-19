@@ -622,7 +622,7 @@
             ]
           },
           "kind": {
-            "description": "`open_ai` uses the official endpoint; `open_ai_compatible` requires an\nexplicit HTTPS endpoint and live certification of reviewed capabilities.",
+            "description": "Native `open_ai` and `anthropic` use their official endpoints.\nCompatible variants require an explicit HTTPS endpoint and live\ncertification of reviewed capabilities.",
             "type": "string"
           },
           "model": {
@@ -1661,6 +1661,7 @@
         "enum": [
           "open_ai",
           "anthropic",
+          "anthropic_compatible",
           "gemini",
           "vertex_ai",
           "bedrock",

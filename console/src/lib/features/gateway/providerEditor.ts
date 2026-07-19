@@ -87,7 +87,11 @@ export function requiresSeedModel(kind: ProviderKind): boolean {
 }
 
 export function hasCustomEndpoint(kind: ProviderKind): boolean {
-  return ['open_ai_compatible', 'azure_open_ai'].includes(kind);
+  return ['open_ai_compatible', 'anthropic_compatible', 'azure_open_ai'].includes(kind);
+}
+
+export function isCompatibleEndpoint(kind: ProviderKind): boolean {
+  return kind === 'open_ai_compatible' || kind === 'anthropic_compatible';
 }
 
 export function hasCloudRegion(kind: ProviderKind): boolean {
@@ -116,8 +120,10 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
       ? 'Name, Vertex probe model, and the selected identity fields are required.'
       : 'Name and the selected identity fields are required.';
   }
-  if (draft.kind === 'open_ai_compatible' && !draft.endpoint.trim()) {
-    return 'An HTTPS endpoint is required for an OpenAI-compatible provider.';
+  if (isCompatibleEndpoint(draft.kind) && !draft.endpoint.trim()) {
+    const label =
+      draft.kind === 'anthropic_compatible' ? 'Anthropic-compatible' : 'OpenAI-compatible';
+    return `An HTTPS endpoint is required for an ${label} provider.`;
   }
   if (draft.kind === 'vertex_ai' && (!draft.cloudProject.trim() || !draft.cloudRegion.trim())) {
     return 'Vertex AI requires a cloud project and location.';

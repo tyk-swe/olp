@@ -7,8 +7,8 @@
 OpenLLMProxy is a self-hosted AI gateway and control plane. It exposes
 OpenAI-, Anthropic-, and Gemini-compatible APIs and routes requests to OpenAI,
 Anthropic, Gemini, Vertex AI, Azure OpenAI, AWS Bedrock, and certified
-OpenAI-compatible providers — behind one stable endpoint, one key inventory,
-and one audit trail.
+OpenAI- and Anthropic-compatible providers, behind one stable endpoint, one
+key inventory, and one audit trail.
 
 ![OpenLLMProxy console — overview dashboard](docs/assets/screenshots/overview.png)
 

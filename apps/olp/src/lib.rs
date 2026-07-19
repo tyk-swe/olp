@@ -79,8 +79,8 @@ pub use management::management_openapi;
 pub use media_spool::create_bounded_media_spool_for_test;
 pub use media_spool::create_media_spool;
 pub use olp_providers::{
-    CredentialKind, OpenAiConnector, ProviderConfig, ProviderCredential, ProviderError,
-    ProviderFactory,
+    ConnectorOverrideRegistry, CredentialKind, OpenAiConnector, ProviderConfig, ProviderCredential,
+    ProviderError, ProviderFactory,
 };
 pub use problem::{FieldErrors, Problem};
 pub use runtime::{RuntimeBundle, RuntimeInstallError, RuntimeManager};
@@ -459,7 +459,8 @@ pub struct ApiState {
     pub media_spool: Arc<dyn MediaSpool>,
     multipart_admission: MultipartAdmissionState,
     pub transports: TransportRegistry,
-    catalog_openai_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
+    catalog_openai_connectors: olp_providers::ConnectorOverrideRegistry<OpenAiConnector>,
+    catalog_anthropic_connectors: ConnectorOverrideRegistry<olp_providers::AnthropicConnector>,
     pub public_origin: Arc<str>,
     pub console_dir: Arc<PathBuf>,
     pub session_ttl: chrono::Duration,
@@ -518,6 +519,7 @@ impl ApiState {
             multipart_admission,
             transports: TransportRegistry::default(),
             catalog_openai_connectors: Default::default(),
+            catalog_anthropic_connectors: Default::default(),
             public_origin: Arc::from(public_origin.into().trim_end_matches('/')),
             console_dir: Arc::new(console_dir.into()),
             session_ttl: chrono::Duration::hours(12),
@@ -593,6 +595,26 @@ impl ApiState {
         kind: ProviderKind,
     ) -> Option<olp_providers::ProviderFacade> {
         self.catalog_openai_connectors.get(provider_id, kind)
+    }
+
+    /// Installs a prebuilt Anthropic-compatible connector for catalog tests.
+    /// Production wiring never installs an override.
+    #[doc(hidden)]
+    pub fn register_catalog_anthropic_connector_for_test(
+        &self,
+        provider_id: uuid::Uuid,
+        connector: olp_providers::AnthropicConnector,
+    ) {
+        self.catalog_anthropic_connectors
+            .register(provider_id, connector);
+    }
+
+    pub(crate) fn catalog_anthropic_connector(
+        &self,
+        provider_id: uuid::Uuid,
+        kind: ProviderKind,
+    ) -> Option<olp_providers::ProviderFacade> {
+        self.catalog_anthropic_connectors.get(provider_id, kind)
     }
 
     fn media_reconciliation_gap_count(&self) -> u64 {

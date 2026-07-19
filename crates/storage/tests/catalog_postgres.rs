@@ -1316,6 +1316,105 @@ async fn catalog_lifecycle_is_versioned_audited_and_publishes_runtime() {
         )
         .await
         .unwrap();
+
+    // Anthropic-compatible drafts share the generic endpoint activation rule:
+    // manually declared models require exact live certification and a fresh
+    // probe, but never a `/models` provenance record.
+    let anthropic_compatible_id = Uuid::now_v7();
+    let anthropic_compatible_credential_id = Uuid::now_v7();
+    let anthropic_compatible_model_id = Uuid::now_v7();
+    let anthropic_compatible_secret = master_key
+        .seal(
+            b"anthropic-compatible-secret",
+            &credential_aad(
+                anthropic_compatible_id,
+                anthropic_compatible_credential_id,
+                1,
+            ),
+        )
+        .unwrap();
+    let anthropic_compatible = store
+        .create_provider_draft(
+            NewProviderDraft {
+                provider_id: anthropic_compatible_id,
+                credential_id: Some(anthropic_compatible_credential_id),
+                model_id: Some(anthropic_compatible_model_id),
+                name: "anthropic-compatible-draft".to_owned(),
+                kind: ProviderKind::AnthropicCompatible,
+                endpoint: Some("https://anthropic-compatible.example/v1/".to_owned()),
+                cloud_region: None,
+                cloud_project: None,
+                deployment: None,
+                api_version: None,
+                auth_mode: "api_key".parse().unwrap(),
+                connector_ready: true,
+                credential: Some(anthropic_compatible_secret),
+                model: Some("manual-model".to_owned()),
+                display_name: Some("Manual Model".to_owned()),
+                model_enabled: true,
+                surface: Some("anthropic".parse().unwrap()),
+                actor,
+                idempotency_key: "provider-anthropic-compatible-create-01".to_owned(),
+            },
+            test_replay(&master_key, "provider-anthropic-compatible-create-01"),
+            empty_created_response,
+        )
+        .await
+        .unwrap()
+        .expect_executed();
+    assert!(matches!(
+        store
+            .activate_provider(
+                anthropic_compatible_id,
+                anthropic_compatible.etag,
+                actor,
+                "provider-anthropic-compatible-activate-uncertified-01",
+            )
+            .await,
+        Err(ConfigurationError::ProviderIncomplete)
+    ));
+    let anthropic_certified = store
+        .apply_compatible_capability_certification(
+            anthropic_compatible_id,
+            anthropic_compatible_model_id,
+            anthropic_compatible.etag,
+            actor,
+            &[CapabilityCertificationOutcome {
+                operation: "generation".parse().unwrap(),
+                surface: "anthropic".parse().unwrap(),
+                mode: "unary".parse().unwrap(),
+                succeeded: true,
+            }],
+        )
+        .await
+        .unwrap();
+    store
+        .record_provider_probe(
+            anthropic_compatible_id,
+            anthropic_certified.etag,
+            true,
+            "Anthropic-compatible Messages probe succeeded",
+            actor,
+        )
+        .await
+        .unwrap();
+    store
+        .activate_provider(
+            anthropic_compatible_id,
+            anthropic_certified.etag,
+            actor,
+            "provider-anthropic-compatible-activate-certified-01",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_provider_catalog(anthropic_compatible_id)
+            .await
+            .unwrap()
+            .state,
+        olp_domain::ProviderState::Active
+    );
     let certification_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_events WHERE action = 'provider.model.certify' \
          AND resource_id = $1",

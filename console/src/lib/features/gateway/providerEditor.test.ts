@@ -48,6 +48,7 @@ describe('provider editor connector policy', () => {
     expect(requiresSeedModel('vertex_ai')).toBe(true);
     expect(requiresSeedModel('open_ai')).toBe(false);
     expect(hasCustomEndpoint('open_ai_compatible')).toBe(true);
+    expect(hasCustomEndpoint('anthropic_compatible')).toBe(true);
     expect(hasCustomEndpoint('azure_open_ai')).toBe(true);
     expect(hasCustomEndpoint('open_ai')).toBe(false);
     expect(hasCloudRegion('vertex_ai')).toBe(true);
@@ -64,6 +65,9 @@ describe('provider editor connector policy', () => {
   it('enforces connector-specific creation requirements', () => {
     expect(validateProviderDraft({ ...apiKeyDraft, kind: 'open_ai_compatible' })).toBe(
       'An HTTPS endpoint is required for an OpenAI-compatible provider.'
+    );
+    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'anthropic_compatible' })).toBe(
+      'An HTTPS endpoint is required for an Anthropic-compatible provider.'
     );
     expect(
       validateProviderDraft({

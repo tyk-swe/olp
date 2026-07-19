@@ -1115,11 +1115,16 @@ fn validate_provider_update(
                 return Err("Native OpenAI uses the official endpoint; use an OpenAI-compatible provider for a custom endpoint.".to_owned());
             }
         }
-        ProviderKind::OpenAiCompatible => {
+        ProviderKind::OpenAiCompatible | ProviderKind::AnthropicCompatible => {
             require_auth_mode(request, "api_key")?;
             reject_cloud_fields(request)?;
             if request.endpoint.is_none() {
-                return Err("An OpenAI-compatible HTTPS endpoint is required".to_owned());
+                let label = if kind == ProviderKind::OpenAiCompatible {
+                    "OpenAI"
+                } else {
+                    "Anthropic"
+                };
+                return Err(format!("An {label}-compatible HTTPS endpoint is required"));
             }
         }
         ProviderKind::Anthropic => {
@@ -1508,12 +1513,24 @@ async fn probe_provider(
     // Configuration-only checks are intentionally not accepted as activation
     // evidence. A probe always performs a bounded credentialed upstream call,
     // and persistence binds the result to the exact ETag captured above.
-    let probe = connector.discover_models().await;
+    let probe = match (provider.kind, provider.probe_model.as_deref()) {
+        (ProviderKind::AnthropicCompatible, Some(model)) => {
+            connector.probe_model(model).await.map(|()| None)
+        }
+        _ => connector
+            .discover_models()
+            .await
+            .map(|models| Some(models.len())),
+    };
     let (succeeded, detail, discovered_models) = match probe {
-        Ok(models) => (
+        Ok(discovered_models) => (
             true,
-            "Credentialed connector request succeeded.".to_owned(),
-            Some(models.len()),
+            if discovered_models.is_none() {
+                "Credentialed Messages request succeeded.".to_owned()
+            } else {
+                "Credentialed connector request succeeded.".to_owned()
+            },
+            discovered_models,
         ),
         Err(detail) => (false, detail, None),
     };
@@ -1555,6 +1572,9 @@ async fn catalog_connector(state: &ApiState, provider_id: Uuid) -> Result<Provid
         .map_err(map_catalog)?;
     let config = provider_config(&provider).map_err(|detail| validation("provider", &detail))?;
     if let Some(connector) = state.catalog_openai_connector(provider_id, config.kind()) {
+        return Ok(connector);
+    }
+    if let Some(connector) = state.catalog_anthropic_connector(provider_id, config.kind()) {
         return Ok(connector);
     }
     let credential_kind = ProviderFactory::credential_kind(&config)
@@ -1627,6 +1647,9 @@ fn provider_config_fields(
         ProviderKind::Anthropic => ProviderConfig::Anthropic {
             endpoint,
             api_version,
+        },
+        ProviderKind::AnthropicCompatible => ProviderConfig::AnthropicCompatible {
+            endpoint: required(endpoint, "Anthropic-compatible endpoint is missing")?,
         },
         ProviderKind::Gemini => ProviderConfig::Gemini { endpoint },
         ProviderKind::VertexAi => ProviderConfig::VertexAi {

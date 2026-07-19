@@ -1501,6 +1501,7 @@ fn if_match(headers: &HeaderMap) -> Result<Uuid, Problem> {
 enum PriceProviderKind {
     OpenAi,
     Anthropic,
+    AnthropicCompatible,
     Gemini,
     VertexAi,
     Bedrock,
@@ -1513,6 +1514,7 @@ impl From<PriceProviderKind> for ProviderKind {
         match value {
             PriceProviderKind::OpenAi => Self::OpenAi,
             PriceProviderKind::Anthropic => Self::Anthropic,
+            PriceProviderKind::AnthropicCompatible => Self::AnthropicCompatible,
             PriceProviderKind::Gemini => Self::Gemini,
             PriceProviderKind::VertexAi => Self::VertexAi,
             PriceProviderKind::Bedrock => Self::Bedrock,

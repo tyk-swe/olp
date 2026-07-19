@@ -37,6 +37,7 @@
     hasCloudRegion,
     hasCustomEndpoint,
     hasDeployment,
+    isCompatibleEndpoint,
     parseManualModelNames,
     probeReady,
     requiresCredential,
@@ -151,7 +152,7 @@
       const discovered = await discoverProviderModels(wizardProvider!);
       if (discovered.model_count === 0) {
         throw new Error(
-          discovered.kind === 'open_ai_compatible'
+          isCompatibleEndpoint(discovered.kind)
             ? 'The endpoint returned no models. Use the manual identifier fallback below if it has no model-list API.'
             : 'The upstream returned no models. Verify its identity and cloud context, then retry discovery.'
         );
@@ -175,6 +176,9 @@
     }
     await run('declare-models', async () => {
       wizardProvider = await declareProviderModels(wizardProvider!, names);
+      if (wizardProvider.kind === 'anthropic_compatible') {
+        probe = await probeProvider(wizardProvider);
+      }
       clearCertificationResults();
       manualModelNames = '';
       wizardModelCursor = undefined;
@@ -275,7 +279,7 @@
       <div class="form-field"><label for="provider-name">Provider name</label><input id="provider-name" autocomplete="off" bind:value={draft.name} placeholder="production-openai" required /></div>
       <div class="form-field"><label for="auth-mode">Authentication</label><select id="auth-mode" bind:value={draft.authMode}>{#each authOptions as option (option[0])}<option value={option[0]}>{option[1]}</option>{/each}</select></div>
       <div class="form-field"><label for="initial-model">{seedModelRequired ? 'Vertex probe model' : 'Seed model (optional)'}</label><input id="initial-model" autocomplete="off" bind:value={draft.model} placeholder={seedModelRequired ? 'publishers/google/models/gemini-2.5-pro' : 'gpt-5.4'} required={seedModelRequired} /><small>{seedModelRequired ? 'Vertex requires a publisher model because it has no global model-list operation.' : 'Used for the initial connector probe; upstream discovery follows.'}</small></div>
-      {#if hasCustomEndpoint(draft.kind)}<div class="form-field full"><label for="provider-endpoint">{draft.kind === 'azure_open_ai' ? 'Azure resource endpoint' : 'Compatible endpoint'}</label><input id="provider-endpoint" type="url" autocomplete="off" bind:value={draft.endpoint} placeholder={draft.kind === 'open_ai_compatible' ? 'https://models.example.com/v1' : 'https://resource.openai.azure.com'} required /><small>Custom endpoints must be HTTPS and pass the gateway SSRF policy.</small></div>{/if}
+      {#if hasCustomEndpoint(draft.kind)}<div class="form-field full"><label for="provider-endpoint">{draft.kind === 'azure_open_ai' ? 'Azure resource endpoint' : draft.kind === 'anthropic_compatible' ? 'Anthropic-compatible endpoint' : 'OpenAI-compatible endpoint'}</label><input id="provider-endpoint" type="url" autocomplete="off" bind:value={draft.endpoint} placeholder={draft.kind === 'azure_open_ai' ? 'https://resource.openai.azure.com' : 'https://models.example.com/v1'} required /><small>Custom endpoints must be HTTPS and pass the gateway SSRF policy.</small></div>{/if}
       {#if hasApiVersion(draft.kind)}<div class="form-field"><label for="api-version">API version</label><input id="api-version" autocomplete="off" bind:value={draft.apiVersion} required /></div>{/if}
       {#if hasCloudRegion(draft.kind)}<div class="form-field"><label for="cloud-region">Cloud region</label><input id="cloud-region" autocomplete="off" bind:value={draft.cloudRegion} placeholder="us-east-1" required /></div>{/if}
       {#if hasCloudProject(draft.kind)}<div class="form-field"><label for="cloud-project">Cloud project</label><input id="cloud-project" autocomplete="off" bind:value={draft.cloudProject} placeholder="my-gcp-project" required /></div>{/if}
@@ -290,6 +294,7 @@
     <p>The control plane performs a bounded connector-specific probe. No client request content is sent.</p>
     <dl><div><dt>Provider</dt><dd>{wizardProvider?.name}</dd></div><div><dt>Connector</dt><dd>{wizardProvider?.kind}</dd></div></dl>
     <button class="button button-primary" type="button" onclick={testWizardProvider} disabled={Boolean(busy)}>{busy === 'probe' ? 'Testing…' : 'Test connection'}</button>
+    {#if wizardProvider && isCompatibleEndpoint(wizardProvider.kind)}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually to test a replacement model or continue capability review. Anthropic-compatible endpoints retry their bounded Messages request against the first declared model.</p><div class="form-field"><label for="manual-models-wizard-test">Upstream model identifiers</label><textarea id="manual-models-wizard-test" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
   </section>
 {:else if wizardStep === 3}
   <section class="card stage" aria-labelledby="discovery-heading">
@@ -297,7 +302,7 @@
     {#if probe}<p class="success-line">✓ {probe.detail}</p>{/if}
     <p>The connector will call the upstream model-list API with the stored identity. Discovered models begin disabled until their capabilities are certified and reviewed.</p>
     <button class="button button-primary" type="button" onclick={discoverWizardProvider} disabled={Boolean(busy)}>{busy === 'discover' ? 'Discovering…' : 'Discover upstream models'}</button>
-    {#if wizardProvider?.kind === 'open_ai_compatible'}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually. They remain disabled and capability-empty until you complete the same review.</p><div class="form-field"><label for="manual-models-wizard">Upstream model identifiers</label><textarea id="manual-models-wizard" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
+    {#if wizardProvider && isCompatibleEndpoint(wizardProvider.kind)}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually. Anthropic-compatible endpoints retry their bounded Messages request against the first declared model; models remain disabled and capability-empty until you complete review.</p><div class="form-field"><label for="manual-models-wizard">Upstream model identifiers</label><textarea id="manual-models-wizard" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
   </section>
 {:else if wizardStep === 4}
   <section class="card stage wide" aria-labelledby="capability-heading">

@@ -65,12 +65,26 @@ enum ResponseKind {
 pub struct AnthropicConnector {
     config: ConnectorConfig,
     api_key: AnthropicApiKey,
+    provider_kind: ProviderKind,
 }
 
 impl AnthropicConnector {
     #[must_use]
     pub fn new(config: ConnectorConfig, api_key: AnthropicApiKey) -> Self {
-        Self { config, api_key }
+        Self {
+            config,
+            api_key,
+            provider_kind: ProviderKind::Anthropic,
+        }
+    }
+
+    #[must_use]
+    pub fn new_compatible(config: ConnectorConfig, api_key: AnthropicApiKey) -> Self {
+        Self {
+            config,
+            api_key,
+            provider_kind: ProviderKind::AnthropicCompatible,
+        }
     }
 
     /// Lists the upstream model catalog through the same pinned-DNS and
@@ -184,7 +198,7 @@ impl AnthropicConnector {
         &self,
         request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
-        validate_request_envelope(&request)?;
+        validate_request_envelope(self.provider_kind, &request)?;
         let (url, body, response_kind, streaming) = self.encode_request(&request).await?;
 
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
@@ -515,6 +529,7 @@ impl fmt::Debug for AnthropicConnector {
         formatter
             .debug_struct("AnthropicConnector")
             .field("config", &self.config)
+            .field("provider_kind", &self.provider_kind)
             .field("api_key", &"[REDACTED]")
             .finish()
     }
@@ -529,15 +544,18 @@ impl ProviderTransport for AnthropicConnector {
     }
 }
 
-fn validate_request_envelope(request: &ProviderRequest) -> Result<(), TransportError> {
+fn validate_request_envelope(
+    provider_kind: ProviderKind,
+    request: &ProviderRequest,
+) -> Result<(), TransportError> {
     if request.metadata.operation != request.operation.kind() {
         return Err(protocol_error(
             "request metadata operation does not match the canonical operation",
         ));
     }
-    if request.attempt.provider_kind != ProviderKind::Anthropic {
+    if request.attempt.provider_kind != provider_kind {
         return Err(protocol_error(
-            "Anthropic connector received an attempt for another provider kind",
+            "Anthropic-compatible connector received an attempt for another provider kind",
         ));
     }
     if request.metadata.mode == TransportMode::Async {
@@ -1274,6 +1292,13 @@ mod tests {
         )
     }
 
+    fn compatible_connector(base_url: &str) -> AnthropicConnector {
+        AnthropicConnector::new_compatible(
+            ConnectorConfig::for_local_test(base_url, ConnectorTimeouts::default()),
+            AnthropicApiKey::new("upstream-secret").unwrap(),
+        )
+    }
+
     fn response(content_type: &str, body: &[u8]) -> Vec<u8> {
         let headers = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -1336,6 +1361,40 @@ mod tests {
         assert!(request.contains("x-api-key: upstream-secret"));
         assert!(request.contains("anthropic-version: 2023-06-01"));
         assert!(request.contains("\"model\":\"claude-sonnet-4-5\""));
+    }
+
+    #[tokio::test]
+    async fn compatible_connector_accepts_only_its_exact_provider_kind() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "id":"msg_1","type":"message","role":"assistant",
+            "content":[{"type":"text","text":"hello back"}],
+            "model":"claude-sonnet-4-5","stop_reason":"end_turn","stop_sequence":null,
+            "usage":{"input_tokens":2,"output_tokens":2}
+        }))
+        .unwrap();
+        let (base, captured) = spawn_mock(MockResponse {
+            chunks: vec![(Duration::ZERO, response("application/json", &body))],
+        })
+        .await;
+        let mut request = generation(false);
+        request.attempt.provider_kind = ProviderKind::AnthropicCompatible;
+        let events = collect(&compatible_connector(&base), request).await;
+        assert!(matches!(
+            events.last().map(|event| &event.kind),
+            Some(CanonicalEventKind::Done)
+        ));
+        let request = String::from_utf8(captured.await.unwrap())
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(request.contains("x-api-key: upstream-secret"));
+        assert!(request.contains("anthropic-version: 2023-06-01"));
+
+        let (base, _) = spawn_mock(MockResponse { chunks: Vec::new() }).await;
+        let error = compatible_connector(&base)
+            .execute(generation(false))
+            .await
+            .unwrap_err();
+        assert_eq!(error.class, AttemptFailureClass::Protocol);
     }
 
     #[tokio::test]
