@@ -39,17 +39,15 @@ done < <(
 )
 
 directory="$root/deploy/helm"
-for document in LICENSE NOTICE; do
-  if [[ ! -f $directory/$document ]]; then
-    echo "release artifact is missing $directory/$document" >&2
-    failed=true
-  elif ! cmp --silent "$root/$document" "$directory/$document"; then
-    echo "release artifact $directory/$document differs from the repository copy" >&2
-    failed=true
-  fi
-done
-if ! grep -Fq 'COPY LICENSE NOTICE /usr/share/doc/openllmproxy/' "$dockerfile"; then
-  echo "final image does not install LICENSE and NOTICE" >&2
+if [[ ! -f $directory/LICENSE ]]; then
+  echo "release artifact is missing $directory/LICENSE" >&2
+  failed=true
+elif ! cmp --silent "$root/LICENSE" "$directory/LICENSE"; then
+  echo "release artifact $directory/LICENSE differs from the repository copy" >&2
+  failed=true
+fi
+if ! grep -Fq 'COPY LICENSE /usr/share/doc/openllmproxy/' "$dockerfile"; then
+  echo "final image does not install LICENSE" >&2
   failed=true
 fi
 

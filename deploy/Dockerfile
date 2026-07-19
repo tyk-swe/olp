@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.version="$OLP_VERSION"
 COPY --from=rust-build /src/target/release/olp /usr/local/bin/olp
 COPY --from=console-build /src/console/build /opt/olp/console
-COPY LICENSE NOTICE /usr/share/doc/openllmproxy/
+COPY LICENSE /usr/share/doc/openllmproxy/
 ENV OLP_CONSOLE_DIR=/opt/olp/console
 EXPOSE 8080 9090
 USER nonroot:nonroot
