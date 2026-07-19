@@ -1,15 +1,12 @@
-use std::{
-    collections::{BTreeMap, VecDeque},
-    fmt,
-    future::ready,
-    pin::Pin,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{collections::BTreeMap, fmt, future::ready};
+
+#[cfg(test)]
+use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+#[cfg(test)]
 use bytes::Bytes;
-use futures::{Stream, StreamExt, stream};
+use futures::{StreamExt, stream};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use olp_domain::{
     AttemptFailureClass, CanonicalEvent, CanonicalResult, ContentPart, DiscoveredProviderModel,
@@ -24,16 +21,31 @@ use olp_protocols::gemini::{
     validate_count_tokens_request,
 };
 use reqwest::{Response, Url};
-use tokio::time::{Instant, Sleep, timeout};
+use tokio::time::{Instant, timeout};
 use zeroize::Zeroizing;
 
 use crate::gemini::{
     BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey,
     endpoint::EndpointError, headers::sanitize_forward_headers,
 };
+use crate::transport_io::{
+    CanonicalEventDecoder, DecodedEventStream, ProviderResponseIo, ReqwestByteStream,
+    bounded_duration,
+};
 
-type ReqwestByteStream =
-    Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>>;
+const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
+
+impl CanonicalEventDecoder for GeminiGenerateContentStreamDecoder {
+    type Error = olp_protocols::gemini::StreamError;
+
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, Self::Error> {
+        Self::push(self, bytes)
+    }
+
+    fn finish(&mut self) -> Result<Vec<CanonicalEvent>, Self::Error> {
+        Self::finish(self)
+    }
+}
 
 /// Validates the concrete canonical request with the production Gemini
 /// encoders before routing. This is especially important for cross-origin
@@ -129,20 +141,21 @@ impl GeminiConnector {
                 client.get(url).headers(headers).send(),
             )
             .await
-            .map_err(|_| first_byte_timeout())?
+            .map_err(|_| RESPONSE_IO.first_byte_timeout())?
             .map_err(map_send_error)?;
             if !response.status().is_success() {
                 return Err(self.map_error_response(response, attempt_deadline).await);
             }
-            require_content_type(&response, "application/json")?;
-            let body = read_bounded_body(
-                response,
-                first_byte_deadline,
-                attempt_deadline,
-                self.config.timeouts.idle,
-                self.config.max_response_bytes,
-            )
-            .await?;
+            RESPONSE_IO.require_content_type(&response, "application/json")?;
+            let body = RESPONSE_IO
+                .read_bounded_body(
+                    response,
+                    first_byte_deadline,
+                    attempt_deadline,
+                    self.config.timeouts.idle,
+                    self.config.max_response_bytes,
+                )
+                .await?;
             let value: serde_json::Value = serde_json::from_slice(&body).map_err(|error| {
                 protocol_body_error(format!("Gemini model discovery is not valid JSON: {error}"))
             })?;
@@ -219,20 +232,21 @@ impl GeminiConnector {
                 .send(),
         )
         .await
-        .map_err(|_| first_byte_timeout())?
+        .map_err(|_| RESPONSE_IO.first_byte_timeout())?
         .map_err(map_send_error)?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
-        require_content_type(&response, "application/json")?;
-        let body = read_bounded_body(
-            response,
-            first_byte_deadline,
-            attempt_deadline,
-            self.config.timeouts.idle,
-            self.config.max_response_bytes,
-        )
-        .await?;
+        RESPONSE_IO.require_content_type(&response, "application/json")?;
+        let body = RESPONSE_IO
+            .read_bounded_body(
+                response,
+                first_byte_deadline,
+                attempt_deadline,
+                self.config.timeouts.idle,
+                self.config.max_response_bytes,
+            )
+            .await?;
         let response: CountTokensResponse = serde_json::from_slice(&body).map_err(|error| {
             protocol_body_error(format!(
                 "Google token-count probe is not valid JSON: {error}"
@@ -255,7 +269,7 @@ impl GeminiConnector {
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
         let connect_timeout = bounded_duration(
             self.config.timeouts.connect,
-            remaining(attempt_deadline, TransportPhase::Connect)?,
+            RESPONSE_IO.remaining(attempt_deadline, TransportPhase::Connect)?,
         );
         // No credential is copied into request state before DNS validation and
         // per-attempt address pinning have succeeded.
@@ -267,7 +281,7 @@ impl GeminiConnector {
             .map_err(map_endpoint_error)?;
 
         let mut headers = sanitize_forward_headers(&HeaderMap::new());
-        let auth_wait = remaining(attempt_deadline, TransportPhase::Connect)?;
+        let auth_wait = RESPONSE_IO.remaining(attempt_deadline, TransportPhase::Connect)?;
         timeout(auth_wait, self.insert_authentication_header(&mut headers))
             .await
             .map_err(|_| {
@@ -297,14 +311,15 @@ impl GeminiConnector {
                 .map_err(|_| protocol_error("request ID cannot be represented as a header"))?,
         );
 
-        let send_wait = remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(first_byte_timeout)?;
+        let send_wait = RESPONSE_IO
+            .remaining_until(first_byte_deadline, attempt_deadline)
+            .ok_or_else(|| RESPONSE_IO.first_byte_timeout())?;
         let response = timeout(
             send_wait,
             client.post(url).headers(headers).body(body).send(),
         )
         .await
-        .map_err(|_| first_byte_timeout())?
+        .map_err(|_| RESPONSE_IO.first_byte_timeout())?
         .map_err(map_send_error)?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
@@ -403,15 +418,16 @@ impl GeminiConnector {
         first_byte_deadline: Instant,
         attempt_deadline: Instant,
     ) -> Result<ProviderOutput, TransportError> {
-        require_content_type(&response, "application/json")?;
-        let body = read_bounded_body(
-            response,
-            first_byte_deadline,
-            attempt_deadline,
-            self.config.timeouts.idle,
-            self.config.max_response_bytes,
-        )
-        .await?;
+        RESPONSE_IO.require_content_type(&response, "application/json")?;
+        let body = RESPONSE_IO
+            .read_bounded_body(
+                response,
+                first_byte_deadline,
+                attempt_deadline,
+                self.config.timeouts.idle,
+                self.config.max_response_bytes,
+            )
+            .await?;
         match kind {
             ResponseKind::Generation => {
                 let response: GenerateContentResponse =
@@ -453,13 +469,14 @@ impl GeminiConnector {
         attempt_deadline: Instant,
         preserve_raw_frames: bool,
     ) -> Result<ProviderEventStream, TransportError> {
-        require_content_type(&response, "text/event-stream")?;
+        RESPONSE_IO.require_content_type(&response, "text/event-stream")?;
         let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let first_wait = remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(first_byte_timeout)?;
+        let first_wait = RESPONSE_IO
+            .remaining_until(first_byte_deadline, attempt_deadline)
+            .ok_or_else(|| RESPONSE_IO.first_byte_timeout())?;
         let first = timeout(first_wait, source.next())
             .await
-            .map_err(|_| first_byte_timeout())?
+            .map_err(|_| RESPONSE_IO.first_byte_timeout())?
             .ok_or_else(|| {
                 transport_error(
                     TransportPhase::FirstByte,
@@ -468,14 +485,22 @@ impl GeminiConnector {
                     "Gemini stream ended before its first body byte",
                 )
             })?
-            .map_err(map_first_body_error)?;
+            .map_err(|error| RESPONSE_IO.map_first_body_error(error))?;
         let source = Box::pin(stream::once(ready(Ok(first))).chain(source));
-        let bytes = DeadlineByteStream::new(source, self.config.timeouts.idle, attempt_deadline);
+        let bytes = RESPONSE_IO.after_first_byte_stream(
+            source,
+            self.config.timeouts.idle,
+            attempt_deadline,
+        );
         let decoder = GeminiGenerateContentStreamDecoder::with_max_event_bytes_and_raw_passthrough(
             self.config.max_event_bytes,
             preserve_raw_frames,
         );
-        Ok(Box::pin(DecodedEventStream::new(bytes, decoder)))
+        Ok(Box::pin(DecodedEventStream::new(
+            RESPONSE_IO,
+            bytes,
+            decoder,
+        )))
     }
 
     async fn map_error_response(
@@ -485,14 +510,15 @@ impl GeminiConnector {
     ) -> TransportError {
         let status = response.status();
         let deadline = Instant::now() + self.config.timeouts.first_byte;
-        let message = match read_bounded_body(
-            response,
-            deadline,
-            attempt_deadline,
-            self.config.timeouts.idle,
-            self.config.max_response_bytes.min(64 * 1024),
-        )
-        .await
+        let message = match RESPONSE_IO
+            .read_bounded_body(
+                response,
+                deadline,
+                attempt_deadline,
+                self.config.timeouts.idle,
+                self.config.max_response_bytes.min(64 * 1024),
+            )
+            .await
         {
             Ok(body) => self.safe_upstream_error_message(status, &body),
             Err(_) => format!("Gemini returned HTTP {status}"),
@@ -749,212 +775,6 @@ fn bearer_header(token: &crate::gemini::SecretBearerToken) -> Result<HeaderValue
         .map_err(|_| protocol_error("Google OAuth token cannot be represented as a header"))
 }
 
-fn require_content_type(response: &Response, expected: &'static str) -> Result<(), TransportError> {
-    let valid = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected));
-    if valid {
-        Ok(())
-    } else {
-        Err(transport_error(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Protocol,
-            false,
-            format!("Gemini response must use content type {expected}"),
-        ))
-    }
-}
-
-async fn read_bounded_body(
-    response: Response,
-    first_byte_deadline: Instant,
-    attempt_deadline: Instant,
-    idle_timeout: Duration,
-    maximum: usize,
-) -> Result<Vec<u8>, TransportError> {
-    let mut source = response.bytes_stream();
-    let mut output = Vec::new();
-    let mut first = true;
-    loop {
-        let wait = if first {
-            remaining_until(first_byte_deadline, attempt_deadline).ok_or_else(first_byte_timeout)?
-        } else {
-            bounded_duration(
-                idle_timeout,
-                remaining(attempt_deadline, TransportPhase::Body)?,
-            )
-        };
-        let next = timeout(wait, source.next()).await.map_err(|_| {
-            if first {
-                first_byte_timeout()
-            } else {
-                body_idle_timeout()
-            }
-        })?;
-        let Some(chunk) = next else { break };
-        let chunk = chunk.map_err(|error| {
-            if first {
-                map_first_body_error(error)
-            } else {
-                map_body_error(error, false)
-            }
-        })?;
-        first = false;
-        if output.len().saturating_add(chunk.len()) > maximum {
-            return Err(protocol_body_error(format!(
-                "Gemini response exceeded the {maximum} byte limit"
-            )));
-        }
-        output.extend_from_slice(&chunk);
-    }
-    if first {
-        return Err(transport_error(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Protocol,
-            false,
-            "Gemini response body was empty",
-        ));
-    }
-    Ok(output)
-}
-
-struct DeadlineByteStream {
-    source: ReqwestByteStream,
-    idle_timeout: Duration,
-    idle_sleep: Pin<Box<Sleep>>,
-    attempt_deadline: Instant,
-    terminal: bool,
-}
-
-impl DeadlineByteStream {
-    fn new(source: ReqwestByteStream, idle_timeout: Duration, attempt_deadline: Instant) -> Self {
-        Self {
-            source,
-            idle_timeout,
-            idle_sleep: Box::pin(tokio::time::sleep_until(
-                (Instant::now() + idle_timeout).min(attempt_deadline),
-            )),
-            attempt_deadline,
-            terminal: false,
-        }
-    }
-}
-
-impl Stream for DeadlineByteStream {
-    type Item = Result<Bytes, TransportError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.terminal {
-            return Poll::Ready(None);
-        }
-        if Instant::now() >= self.attempt_deadline {
-            self.terminal = true;
-            return Poll::Ready(Some(Err(attempt_body_timeout())));
-        }
-        match self.source.as_mut().poll_next(context) {
-            Poll::Ready(Some(Ok(chunk))) => {
-                let wake = (Instant::now() + self.idle_timeout).min(self.attempt_deadline);
-                self.idle_sleep.as_mut().reset(wake);
-                return Poll::Ready(Some(Ok(chunk)));
-            }
-            Poll::Ready(Some(Err(error))) => {
-                self.terminal = true;
-                return Poll::Ready(Some(Err(map_body_error(error, false))));
-            }
-            Poll::Ready(None) => {
-                self.terminal = true;
-                return Poll::Ready(None);
-            }
-            Poll::Pending => {}
-        }
-        if self.idle_sleep.as_mut().poll(context).is_ready() {
-            self.terminal = true;
-            return Poll::Ready(Some(Err(if Instant::now() >= self.attempt_deadline {
-                attempt_body_timeout()
-            } else {
-                body_idle_timeout()
-            })));
-        }
-        Poll::Pending
-    }
-}
-
-struct DecodedEventStream {
-    bytes: DeadlineByteStream,
-    decoder: GeminiGenerateContentStreamDecoder,
-    queued: VecDeque<CanonicalEvent>,
-    committed: bool,
-    terminal: bool,
-}
-
-impl DecodedEventStream {
-    fn new(bytes: DeadlineByteStream, decoder: GeminiGenerateContentStreamDecoder) -> Self {
-        Self {
-            bytes,
-            decoder,
-            queued: VecDeque::new(),
-            committed: false,
-            terminal: false,
-        }
-    }
-
-    fn protocol_error(&self, message: impl Into<String>) -> TransportError {
-        transport_error(
-            TransportPhase::Body,
-            AttemptFailureClass::Protocol,
-            self.committed,
-            message,
-        )
-    }
-}
-
-impl Stream for DecodedEventStream {
-    type Item = Result<CanonicalEvent, TransportError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            if let Some(event) = self.queued.pop_front() {
-                self.committed = true;
-                return Poll::Ready(Some(Ok(event)));
-            }
-            if self.terminal {
-                return Poll::Ready(None);
-            }
-            match Pin::new(&mut self.bytes).poll_next(context) {
-                Poll::Ready(Some(Ok(chunk))) => match self.decoder.push(&chunk) {
-                    Ok(events) => self.queued.extend(events),
-                    Err(error) => {
-                        self.terminal = true;
-                        return Poll::Ready(Some(Err(
-                            self.protocol_error(format!("invalid Gemini event stream: {error}"))
-                        )));
-                    }
-                },
-                Poll::Ready(Some(Err(mut error))) => {
-                    self.terminal = true;
-                    error.response_committed = self.committed;
-                    return Poll::Ready(Some(Err(error)));
-                }
-                Poll::Ready(None) => {
-                    self.terminal = true;
-                    match self.decoder.finish() {
-                        Ok(events) => self.queued.extend(events),
-                        Err(error) => {
-                            return Poll::Ready(Some(Err(self.protocol_error(format!(
-                                "truncated Gemini event stream: {error}"
-                            )))));
-                        }
-                    }
-                }
-                Poll::Pending => return Poll::Pending,
-            }
-        }
-    }
-}
-
 fn safe_upstream_error_message(status: StatusCode, body: &[u8], api_key: &str) -> String {
     let message = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
@@ -987,29 +807,6 @@ fn source_extensions(
     SourceExtensions::new(surface, values)
 }
 
-fn bounded_duration(configured: Duration, remaining: Duration) -> Duration {
-    configured.min(remaining)
-}
-
-fn remaining(deadline: Instant, phase: TransportPhase) -> Result<Duration, TransportError> {
-    deadline
-        .checked_duration_since(Instant::now())
-        .ok_or_else(|| {
-            transport_error(
-                phase,
-                AttemptFailureClass::Timeout,
-                false,
-                "Gemini attempt deadline elapsed",
-            )
-        })
-}
-
-fn remaining_until(phase_deadline: Instant, attempt_deadline: Instant) -> Option<Duration> {
-    phase_deadline
-        .min(attempt_deadline)
-        .checked_duration_since(Instant::now())
-}
-
 fn map_endpoint_error(error: EndpointError) -> TransportError {
     let class = if matches!(error, EndpointError::DnsTimeout) {
         AttemptFailureClass::Timeout
@@ -1032,7 +829,7 @@ fn map_send_error(error: reqwest::Error) -> TransportError {
             "Gemini connection failed",
         )
     } else if error.is_timeout() {
-        first_byte_timeout()
+        RESPONSE_IO.first_byte_timeout()
     } else {
         transport_error(
             TransportPhase::FirstByte,
@@ -1041,59 +838,6 @@ fn map_send_error(error: reqwest::Error) -> TransportError {
             "Gemini request failed before response headers",
         )
     }
-}
-
-fn map_first_body_error(error: reqwest::Error) -> TransportError {
-    transport_error(
-        TransportPhase::FirstByte,
-        if error.is_timeout() {
-            AttemptFailureClass::Timeout
-        } else {
-            AttemptFailureClass::Connect
-        },
-        false,
-        "Gemini response body failed before its first byte",
-    )
-}
-
-fn map_body_error(error: reqwest::Error, committed: bool) -> TransportError {
-    transport_error(
-        TransportPhase::Body,
-        if error.is_timeout() {
-            AttemptFailureClass::Timeout
-        } else {
-            AttemptFailureClass::Connect
-        },
-        committed,
-        "Gemini response body failed",
-    )
-}
-
-fn first_byte_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::FirstByte,
-        AttemptFailureClass::Timeout,
-        false,
-        "Gemini first-byte deadline elapsed",
-    )
-}
-
-fn body_idle_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::Body,
-        AttemptFailureClass::Timeout,
-        false,
-        "Gemini response idle deadline elapsed",
-    )
-}
-
-fn attempt_body_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::Body,
-        AttemptFailureClass::Timeout,
-        false,
-        "Gemini attempt deadline elapsed while reading the response",
-    )
 }
 
 fn protocol_error(message: impl Into<String>) -> TransportError {

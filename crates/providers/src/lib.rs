@@ -23,6 +23,7 @@ mod oidc;
 mod openai;
 #[cfg(any(test, feature = "test-util"))]
 pub mod openai;
+mod transport_io;
 #[allow(dead_code)]
 mod vertex;
 

@@ -62,6 +62,8 @@ use crate::{
     },
 };
 
+mod execution;
+
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route("/openai/v1/chat/completions", post(chat_completions))
@@ -230,132 +232,36 @@ async fn execute_event_operation_for_surface_inner(
     surface: Surface,
     mode: TransportMode,
 ) -> Result<RoutedEventExecution, InferenceError> {
-    let AuthenticatedProxyKey {
-        runtime: snapshot,
-        key,
-        lookup_id,
-    } = authenticate_proxy_key(state, plaintext_key)?;
-    let route_slug = operation
-        .route()
-        .cloned()
-        .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    let operation_kind = operation.kind();
-    authorize_api_key(&key, Some(&route_slug), operation_kind, Utc::now())
-        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
-    let request_id = RequestId::new();
-    let request_started_at = Utc::now();
-    let request_started = tokio::time::Instant::now();
-    let lease = reserve_limits(
-        state,
-        &key,
-        &operation,
-        lookup_id.as_str(),
-        snapshot
-            .routes
-            .get(&route_slug)
-            .map(|route| route.overall_timeout.as_duration())
-            .unwrap_or(Duration::from_secs(30))
-            .saturating_add(Duration::from_secs(30)),
-    )
-    .await?;
-    let attempts = match select_representable_attempts_filtered(
-        &snapshot,
-        &route_slug,
-        &operation,
-        surface,
-        mode,
-        request_id.as_uuid().as_bytes(),
-        |_, target| state.circuits.is_selectable(target.id),
-    ) {
-        Ok(attempts) => attempts,
-        Err(failure) => {
-            emit_request_event(
-                state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &route_slug,
-                &[],
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.status.as_u16()),
-                Some(failure.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                surface,
-                operation_kind.as_str(),
-            );
-            release_limits(state, lease.as_ref()).await;
-            return Err(failure);
-        }
-    };
-    let route = snapshot
-        .routes
-        .get(&route_slug)
-        .expect("attempt selection returned a known route");
-    let result = execute_with_failover(
-        &snapshot,
+    let execution::CompletedExecution { context, success } =
+        execution::execute_operation(state, plaintext_key, operation, surface, mode, None).await?;
+    let ExecutionSuccess {
+        output,
+        deadline,
         attempts,
-        RequestMetadata {
-            request_id,
-            operation: operation_kind,
-            surface,
-            mode,
-        },
-        operation,
-        route.overall_timeout.as_duration(),
-        state.media_spool.clone(),
-        &state.circuits,
-    )
-    .await;
-    let success = match result {
-        Ok(success) => success,
-        Err(failure) => {
-            emit_request_event(
-                state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &route_slug,
-                &failure.attempts,
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.error.status.as_u16()),
-                Some(failure.error.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                surface,
-                operation_kind.as_str(),
-            );
-            release_limits(state, lease.as_ref()).await;
-            return Err(failure.error);
-        }
-    };
-    let ExecutionOutput::Events { first, events } = success.output else {
-        release_limits(state, lease.as_ref()).await;
+        attempt_started,
+    } = success;
+    let ExecutionOutput::Events { first, events } = output else {
+        release_limits(state, context.lease.as_ref()).await;
         return Err(incompatible_result("generation"));
     };
     crate::claim_http_inference_metadata();
+    let first_byte_ms = elapsed_ms(context.request_started.elapsed());
     Ok(RoutedEventExecution {
         first,
         events,
-        deadline: success.deadline,
-        lease,
-        generation_id: snapshot.generation.id.as_uuid(),
-        api_key_id: key.id.as_uuid(),
-        request_id: request_id.as_uuid(),
-        route_slug,
-        surface,
-        operation_kind,
-        request_started_at,
-        request_started,
-        attempt_started: success.attempt_started,
-        attempts: success.attempts,
-        first_byte_ms: elapsed_ms(request_started.elapsed()),
+        deadline,
+        lease: context.lease,
+        generation_id: context.generation_id,
+        api_key_id: context.api_key_id,
+        request_id: context.request_id.as_uuid(),
+        route_slug: context.route_slug,
+        surface: context.surface,
+        operation_kind: context.operation_kind,
+        request_started_at: context.request_started_at,
+        request_started: context.request_started,
+        attempt_started,
+        attempts,
+        first_byte_ms,
     })
 }
 
@@ -3203,177 +3109,75 @@ async fn execute_routed_result_for_surface_inner(
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    let AuthenticatedProxyKey {
-        runtime: snapshot,
-        key,
-        lookup_id,
-    } = authenticate_proxy_key(state, plaintext_key)?;
-    let route_slug = operation
-        .route()
-        .cloned()
-        .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    let operation_kind = operation.kind();
-    authorize_api_key(&key, Some(&route_slug), operation_kind, Utc::now())
-        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
-    let request_id = RequestId::new();
-    let request_started_at = Utc::now();
-    let request_started = tokio::time::Instant::now();
-    let lease = reserve_limits(
+    let execution::CompletedExecution { context, success } = execution::execute_operation(
         state,
-        &key,
-        &operation,
-        lookup_id.as_str(),
-        snapshot
-            .routes
-            .get(&route_slug)
-            .map(|route| route.overall_timeout.as_duration())
-            .unwrap_or(Duration::from_secs(30))
-            .saturating_add(Duration::from_secs(30)),
-    )
-    .await?;
-    let attempts = match select_representable_attempts_filtered(
-        &snapshot,
-        &route_slug,
-        &operation,
+        plaintext_key,
+        operation,
         surface,
         mode,
-        request_id.as_uuid().as_bytes(),
-        |_, target| {
-            state.circuits.is_selectable(target.id)
-                && required_target.as_ref().is_none_or(|required| {
-                    target.provider_id.as_uuid() == required.provider_id
-                        && target.provider_model == required.provider_model
-                })
-        },
-    ) {
-        Ok(attempts) => attempts,
-        Err(error) => {
-            let failure = if required_target.is_some() && error.code == "no_eligible_provider" {
-                InferenceError::unavailable("media_job_target_unavailable")
-            } else {
-                error
-            };
-            emit_request_event(
-                state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &route_slug,
-                &[],
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.status.as_u16()),
-                Some(failure.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                surface,
-                operation_kind.as_str(),
-            );
-            release_limits(state, lease.as_ref()).await;
-            return Err(failure);
-        }
-    };
-    let route = snapshot
-        .routes
-        .get(&route_slug)
-        .expect("attempt selection returned a known route");
-    let execution = execute_with_failover(
-        &snapshot,
-        attempts,
-        RequestMetadata {
-            request_id,
-            operation: operation_kind,
-            surface,
-            mode,
-        },
-        operation,
-        route.overall_timeout.as_duration(),
-        state.media_spool.clone(),
-        &state.circuits,
+        required_target,
     )
-    .await;
-    let success = match execution {
-        Ok(success) => success,
-        Err(failure) => {
-            emit_request_event(
-                state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &route_slug,
-                &failure.attempts,
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.error.status.as_u16()),
-                Some(failure.error.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                surface,
-                operation_kind.as_str(),
-            );
-            release_limits(state, lease.as_ref()).await;
-            return Err(failure.error);
-        }
-    };
-    let ExecutionOutput::Result(result) = success.output else {
+    .await?;
+    let ExecutionSuccess {
+        output,
+        attempts,
+        attempt_started,
+        ..
+    } = success;
+    let ExecutionOutput::Result(result) = output else {
         let failure = InferenceError::bad_gateway(
             "provider_protocol_error",
             "The provider returned an event stream for a unary result operation.",
         );
         emit_request_event(
             state,
-            snapshot.generation.id.as_uuid(),
-            key.id.as_uuid(),
-            request_id.as_uuid(),
-            &route_slug,
-            &success.attempts,
-            request_started_at,
-            request_started,
-            Some(success.attempt_started),
-            Some(elapsed_ms(request_started.elapsed())),
+            context.generation_id,
+            context.api_key_id,
+            context.request_id.as_uuid(),
+            &context.route_slug,
+            &attempts,
+            context.request_started_at,
+            context.request_started,
+            Some(attempt_started),
+            Some(elapsed_ms(context.request_started.elapsed())),
             Some(failure.status.as_u16()),
             Some(failure.code.to_owned()),
             true,
             &UsageCapture::default(),
-            surface,
-            operation_kind.as_str(),
+            context.surface,
+            context.operation_kind.as_str(),
         );
-        release_limits(state, lease.as_ref()).await;
+        release_limits(state, context.lease.as_ref()).await;
         return Err(failure);
     };
     let usage = usage_from_result(&result);
-    let first_byte_ms = elapsed_ms(request_started.elapsed());
-    release_limits(state, lease.as_ref()).await;
-    let final_attempt = success
-        .attempts
+    let first_byte_ms = elapsed_ms(context.request_started.elapsed());
+    release_limits(state, context.lease.as_ref()).await;
+    let final_attempt = attempts
         .last()
         .expect("a successful execution has one provider attempt");
     crate::claim_http_inference_metadata();
     Ok(RoutedUnaryResult {
         result,
-        request_id,
-        api_key_id: key.id.as_uuid(),
-        route_slug: route_slug.clone(),
+        request_id: context.request_id,
+        api_key_id: context.api_key_id,
+        route_slug: context.route_slug.clone(),
         provider_id: final_attempt.provider_id,
         provider_model: final_attempt.upstream_model.clone(),
         completion: Some(UnaryExecutionCompletion {
             state: state.clone(),
-            generation_id: snapshot.generation.id.as_uuid(),
-            api_key_id: key.id.as_uuid(),
-            request_id: request_id.as_uuid(),
-            route_slug: route_slug.clone(),
-            attempts: success.attempts,
-            request_started_at,
-            request_started,
-            attempt_started: success.attempt_started,
+            generation_id: context.generation_id,
+            api_key_id: context.api_key_id,
+            request_id: context.request_id.as_uuid(),
+            route_slug: context.route_slug,
+            attempts,
+            request_started_at: context.request_started_at,
+            request_started: context.request_started,
+            attempt_started,
             first_byte_ms,
             usage,
-            surface,
-            operation: operation_kind.as_str(),
+            surface: context.surface,
+            operation: context.operation_kind.as_str(),
         }),
     })
 }
@@ -5696,6 +5500,45 @@ mod tests {
         };
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.code, "distributed_limits_unavailable");
+    }
+
+    #[tokio::test]
+    async fn required_target_unavailability_is_normalized_by_shared_execution_kernel() {
+        let (state, key) = test_state(false);
+        install_result(
+            &state,
+            OperationKind::TokenCount,
+            CanonicalResult::TokenCount(olp_domain::TokenCountResult {
+                input_tokens: 1,
+                extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            }),
+        );
+        let request: ResponseInputTokensRequest = serde_json::from_value(json!({
+            "model": "default",
+            "input": "hello"
+        }))
+        .unwrap();
+        let operation = decode_response_input_tokens(request).unwrap();
+
+        let error = match execute_routed_result_for_surface_inner(
+            &state,
+            &key,
+            operation,
+            Surface::OpenAi,
+            TransportMode::Unary,
+            Some(RequiredTarget {
+                provider_id: uuid::Uuid::now_v7(),
+                provider_model: "unavailable-model".to_owned(),
+            }),
+        )
+        .await
+        {
+            Ok(_) => panic!("a missing pinned target must not fall back to another target"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "media_job_target_unavailable");
     }
 
     #[tokio::test]
