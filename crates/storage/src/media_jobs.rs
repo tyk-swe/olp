@@ -414,18 +414,33 @@ impl PgStore {
         }
         validate_update(&update)?;
         let result = sqlx::query(
-            "UPDATE async_media_jobs SET
-                upstream_job_id = $2,
-                state = $3::media_job_state,
-                lifecycle_state = 'active',
-                progress_percent = $4,
-                content_available = $5,
-                expires_at = $6,
-                error_class = $7,
-                last_polled_at = $8,
-                reconciliation_error = NULL,
-                etag = uuidv7()
-             WHERE id = $1 AND lifecycle_state IN ('creating', 'create_ambiguous')",
+            "WITH attached AS (
+                UPDATE async_media_jobs SET
+                    upstream_job_id = $2,
+                    state = $3::media_job_state,
+                    lifecycle_state = 'active',
+                    progress_percent = $4,
+                    content_available = $5,
+                    expires_at = $6,
+                    error_class = $7,
+                    last_polled_at = $8,
+                    reconciliation_error = NULL,
+                    etag = uuidv7()
+                 WHERE id = $1 AND lifecycle_state IN ('creating', 'create_ambiguous')
+                 RETURNING *
+             )
+             SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
+                    p.name AS provider_name, j.provider_model, j.route_slug,
+                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
+                    j.progress_percent::real AS progress_percent,
+                    j.content_available, j.expires_at, j.error_class,
+                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
+                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
+                    j.reconciliation_attempts, j.next_reconciliation_at,
+                    j.last_reconciliation_at, j.etag,
+                    j.created_at, j.updated_at
+             FROM attached j
+             JOIN providers p ON p.id = j.provider_id",
         )
         .bind(id)
         .bind(upstream_job_id)
@@ -435,11 +450,23 @@ impl PgStore {
         .bind(update.expires_at)
         .bind(update.error_class)
         .bind(update.last_polled_at)
-        .execute(self.pool())
+        .fetch_optional(self.pool())
         .await;
         match result {
-            Ok(result) if result.rows_affected() == 1 => self.media_job(id).await,
-            Ok(_) => Err(self.missing_or_changed(id).await?),
+            // Return the row from the same statement that made it active. A
+            // connection failure after commit is retried by the caller, so a
+            // subsequent active row with this exact identity is also success.
+            Ok(Some(row)) => media_job_from_row(&row),
+            Ok(None) => {
+                let current = self.media_job(id).await?;
+                if current.lifecycle == MediaJobLifecycle::Active
+                    && current.upstream_job_id.as_deref() == Some(upstream_job_id)
+                {
+                    Ok(current)
+                } else {
+                    Err(MediaJobError::PreconditionFailed)
+                }
+            }
             Err(error) if is_upstream_identity_conflict(&error) => {
                 Err(MediaJobError::UpstreamIdentityConflict)
             }

@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    future::Future,
     path::{Path, PathBuf},
     sync::{
         Arc, RwLock,
@@ -38,9 +39,19 @@ struct Entry {
 /// media. Handles are random identifiers and never expose filesystem paths.
 pub(crate) struct FileMediaSpool {
     root: PathBuf,
-    entries: RwLock<BTreeMap<String, Entry>>,
-    used_bytes: AtomicU64,
+    entries: Arc<RwLock<BTreeMap<String, Entry>>>,
+    used_bytes: Arc<AtomicU64>,
     capacity_bytes: u64,
+}
+
+/// Returns reserved capacity to the shared accounting counter, asserting the
+/// bookkeeping never underflows. Shared by direct releases and the detached
+/// removal task so the two paths cannot drift apart.
+fn release_used_bytes(used_bytes: &AtomicU64, bytes: u64) {
+    if bytes != 0 {
+        let previous = used_bytes.fetch_sub(bytes, Ordering::AcqRel);
+        debug_assert!(previous >= bytes, "media spool accounting underflow");
+    }
 }
 
 impl FileMediaSpool {
@@ -64,8 +75,8 @@ impl FileMediaSpool {
         create_private_directory(&root)?;
         Ok(Arc::new(Self {
             root,
-            entries: RwLock::new(BTreeMap::new()),
-            used_bytes: AtomicU64::new(0),
+            entries: Arc::new(RwLock::new(BTreeMap::new())),
+            used_bytes: Arc::new(AtomicU64::new(0)),
             capacity_bytes,
         }))
     }
@@ -80,10 +91,7 @@ impl FileMediaSpool {
     }
 
     fn release(&self, bytes: u64) {
-        if bytes != 0 {
-            let previous = self.used_bytes.fetch_sub(bytes, Ordering::AcqRel);
-            debug_assert!(previous >= bytes, "media spool accounting underflow");
-        }
+        release_used_bytes(&self.used_bytes, bytes);
     }
 
     fn entry(&self, handle: &MediaHandle) -> Result<Entry, MediaSpoolError> {
@@ -123,6 +131,49 @@ impl Drop for PendingWrite<'_> {
         if !self.committed {
             self.spool.release(self.reserved);
             let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Owns removed bookkeeping in the unlink task, which continues after the
+/// request awaiting removal is canceled.
+struct PendingRemoval {
+    entries: Arc<RwLock<BTreeMap<String, Entry>>>,
+    used_bytes: Arc<AtomicU64>,
+    handle: String,
+    entry: Option<Entry>,
+}
+
+impl PendingRemoval {
+    fn release(mut self) {
+        let entry = self
+            .entry
+            .take()
+            .expect("pending media removal always owns an entry");
+        release_used_bytes(&self.used_bytes, entry.content_length);
+    }
+
+    fn restore(&mut self) -> Result<(), MediaSpoolError> {
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|_| MediaSpoolError::Unavailable)?;
+        let entry = self
+            .entry
+            .take()
+            .expect("pending media removal always owns an entry");
+        entries.insert(self.handle.clone(), entry);
+        Ok(())
+    }
+}
+
+impl Drop for PendingRemoval {
+    fn drop(&mut self) {
+        let Some(entry) = self.entry.take() else {
+            return;
+        };
+        if let Ok(mut entries) = self.entries.write() {
+            entries.insert(self.handle.clone(), entry);
         }
     }
 }
@@ -265,35 +316,59 @@ impl MediaSpool for FileMediaSpool {
     }
 
     fn remove<'a>(&'a self, handle: &'a MediaHandle) -> BoxFuture<'a, Result<(), MediaSpoolError>> {
-        Box::pin(async move {
-            validate_handle(handle.as_str())?;
-            let entry = self
-                .entries
-                .write()
-                .map_err(|_| MediaSpoolError::Unavailable)?
-                .remove(handle.as_str())
-                .ok_or(MediaSpoolError::NotFound)?;
-            match fs::remove_file(&entry.path).await {
+        Box::pin(self.remove_with(handle, fs::remove_file))
+    }
+}
+
+impl FileMediaSpool {
+    async fn remove_with<F, Fut>(
+        &self,
+        handle: &MediaHandle,
+        unlink: F,
+    ) -> Result<(), MediaSpoolError>
+    where
+        F: FnOnce(PathBuf) -> Fut + Send + 'static,
+        Fut: Future<Output = std::io::Result<()>> + Send + 'static,
+    {
+        validate_handle(handle.as_str())?;
+        let entry = self
+            .entries
+            .write()
+            .map_err(|_| MediaSpoolError::Unavailable)?
+            .remove(handle.as_str())
+            .ok_or(MediaSpoolError::NotFound)?;
+        let path = entry.path.clone();
+        let pending = PendingRemoval {
+            entries: Arc::clone(&self.entries),
+            used_bytes: Arc::clone(&self.used_bytes),
+            handle: handle.as_str().to_owned(),
+            entry: Some(entry),
+        };
+        // Tokio's filesystem work can continue in its blocking pool after an
+        // awaiting request is canceled. Keep the entry guard in this detached
+        // task so successful unlink and capacity release stay coupled.
+        tokio::spawn(async move {
+            let mut pending = pending;
+            match unlink(path).await {
                 Ok(()) => {
-                    self.release(entry.content_length);
+                    pending.release();
                     Ok(())
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    self.release(entry.content_length);
+                    pending.release();
                     Err(MediaSpoolError::NotFound)
                 }
                 Err(_) => {
                     // Preserve both the handle and its capacity reservation so
                     // a transient filesystem error cannot silently overbook
                     // the configured spool budget.
-                    self.entries
-                        .write()
-                        .map_err(|_| MediaSpoolError::Unavailable)?
-                        .insert(handle.as_str().to_owned(), entry);
+                    pending.restore()?;
                     Err(MediaSpoolError::Unavailable)
                 }
             }
         })
+        .await
+        .map_err(|_| MediaSpoolError::Unavailable)?
     }
 }
 
@@ -340,7 +415,10 @@ fn create_private_directory(path: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, time::Duration};
+
     use futures::stream;
+    use tokio::sync::Notify;
 
     use super::*;
 
@@ -404,6 +482,75 @@ mod tests {
         assert_eq!(rejected, MediaSpoolError::Unavailable);
 
         spool.remove(&first.handle).await.unwrap();
+        let second = spool
+            .put(MediaUpload {
+                filename: "second.bin".into(),
+                content_type: None,
+                maximum_length: 1,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"x"))])),
+            })
+            .await
+            .unwrap();
+        spool.remove(&second.handle).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_unlink_completes_bookkeeping_after_physical_deletion() {
+        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let artifact = spool
+            .put(MediaUpload {
+                filename: "first.bin".into(),
+                content_type: None,
+                maximum_length: 4,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"data"))])),
+            })
+            .await
+            .unwrap();
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let entered_wait = entered.notified();
+        let task = tokio::spawn({
+            let spool = Arc::clone(&spool);
+            let handle = artifact.handle.clone();
+            let entered = Arc::clone(&entered);
+            let release = Arc::clone(&release);
+            async move {
+                spool
+                    .remove_with(&handle, move |path| async move {
+                        std::fs::remove_file(path)?;
+                        entered.notify_one();
+                        release.notified().await;
+                        Ok(())
+                    })
+                    .await
+            }
+        });
+        entered_wait.await;
+        task.abort();
+        let _ = task.await;
+
+        assert_eq!(
+            spool.open(&artifact.handle).await.unwrap_err(),
+            MediaSpoolError::NotFound
+        );
+        let rejected = spool
+            .put(MediaUpload {
+                filename: "second.bin".into(),
+                content_type: None,
+                maximum_length: 1,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"x"))])),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(rejected, MediaSpoolError::Unavailable);
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while spool.used_bytes.load(Ordering::Acquire) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("detached unlink must release capacity after caller cancellation");
         let second = spool
             .put(MediaUpload {
                 filename: "second.bin".into(),
