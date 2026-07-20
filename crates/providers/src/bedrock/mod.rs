@@ -80,6 +80,7 @@ impl ConnectorConfig {
         })
     }
 
+    #[cfg(test)]
     pub fn with_timeouts(mut self, timeouts: ConnectorTimeouts) -> Result<Self, ConfigError> {
         validate_timeouts(timeouts)?;
         self.timeouts = timeouts;
@@ -88,9 +89,9 @@ impl ConnectorConfig {
 
     /// Overrides both Bedrock endpoints for an isolated local emulator.
     ///
-    /// Production provider drafts do not expose this setting. It exists for
-    /// connector conformance tests and opt-in development environments only.
-    #[cfg(any(test, feature = "test-util"))]
+    /// Production provider drafts do not expose this setting. It exists only
+    /// for connector tests.
+    #[cfg(test)]
     pub fn with_endpoint_url(
         mut self,
         endpoint_url: impl Into<String>,
@@ -199,8 +200,10 @@ impl fmt::Debug for StaticCredentials {
 pub enum ConfigError {
     #[error("AWS region is invalid")]
     InvalidRegion,
+    #[cfg(test)]
     #[error("connector timeouts must all be greater than zero")]
     ZeroTimeout,
+    #[cfg(test)]
     #[error("connector endpoint override is invalid")]
     InvalidEndpoint,
 }
@@ -227,6 +230,7 @@ fn validate_region(region: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_timeouts(timeouts: ConnectorTimeouts) -> Result<(), ConfigError> {
     if timeouts.connect.is_zero() || timeouts.first_byte.is_zero() || timeouts.idle.is_zero() {
         return Err(ConfigError::ZeroTimeout);

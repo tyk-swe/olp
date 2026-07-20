@@ -21,7 +21,6 @@
   let errors = $state<OwnerFormErrors>({});
   let submissionError = $state('');
   let submitting = $state(false);
-  let idempotencyKey = crypto.randomUUID();
 
   const serverToFormField: Record<string, keyof OwnerFormValues> = {
     display_name: 'displayName',
@@ -60,7 +59,6 @@
           email: values.email.trim(),
           password: values.password
         },
-        idempotencyKey,
         values.setupToken
       );
       setCsrfToken(result.csrf_token);
@@ -68,9 +66,6 @@
     } catch (error) {
       if (error instanceof ApiProblem) {
         if (!applyServerErrors(error)) submissionError = error.problem.detail ?? error.problem.title;
-        if (error.problem.status >= 400 && error.problem.status < 500) {
-          idempotencyKey = crypto.randomUUID();
-        }
       } else {
         submissionError = 'The control API could not be reached. Check the service and try again.';
       }

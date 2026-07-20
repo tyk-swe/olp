@@ -544,6 +544,46 @@ async fn rejects_attempts_for_another_provider_kind_before_transport() {
 }
 
 #[test]
+fn authentication_transport_accepts_only_its_explicit_provider_identities() {
+    let bearer = OpenAiConnector::new(
+        ConnectorConfig::default(),
+        OpenAiApiKey::new("upstream-secret").unwrap(),
+    );
+    assert!(bearer.accepts_provider_kind(ProviderKind::OpenAi));
+    assert!(bearer.accepts_provider_kind(ProviderKind::OpenAiCompatible));
+    assert!(!bearer.accepts_provider_kind(ProviderKind::AzureOpenAi));
+
+    let api_key = OpenAiConnector::new_for_azure_openai(
+        ConnectorConfig::default(),
+        OpenAiApiKey::new("upstream-secret").unwrap(),
+    );
+    assert!(api_key.accepts_provider_kind(ProviderKind::AzureOpenAi));
+    assert!(!api_key.accepts_provider_kind(ProviderKind::OpenAi));
+    assert!(!api_key.accepts_provider_kind(ProviderKind::OpenAiCompatible));
+}
+
+#[tokio::test]
+async fn model_operations_are_rejected_as_installation_local() {
+    let connector = OpenAiConnector::new(
+        ConnectorConfig::default(),
+        OpenAiApiKey::new("upstream-secret").unwrap(),
+    );
+    let mut request = fixture_request(false);
+    request.metadata.operation = OperationKind::ModelList;
+    request.operation = serde_json::from_value(serde_json::json!({
+        "operation": "models",
+        "request": {"kind": "list"}
+    }))
+    .unwrap();
+
+    let error = connector.execute(request).await.unwrap_err();
+    assert_eq!(
+        error.message,
+        "model operations are installation-local and are not routed to providers"
+    );
+}
+
+#[test]
 fn rejects_invalid_or_mismatched_modes_before_transport() {
     let mut image = image_request(false);
     image.metadata.mode = TransportMode::Streaming;

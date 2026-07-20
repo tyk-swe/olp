@@ -146,6 +146,7 @@ impl Endpoint {
             .map_err(|error| EndpointError::InvalidUrl(error.to_string()))
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn set_connect_timeout(&mut self, value: Duration) {
         self.client_connect_timeout = value;
     }

@@ -25,7 +25,7 @@ pub struct CompatibleCapability {
 
 /// Server-owned evidence accepted only for the official native OpenAI
 /// connector. Generic compatible endpoints must continue to use exact live
-/// probes through [`OpenAiConnector::certify_compatible_capability`].
+/// probes through [`OpenAiConnector::certify_openai_compatible_capability`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeOpenAiCertificationEvidence {
     LiveProbe,
@@ -53,13 +53,18 @@ impl OpenAiConnector {
     /// the compatible endpoint proves the exact operation and transport mode;
     /// cross-protocol surfaces and operations that require user media or create
     /// costly asynchronous jobs intentionally fail closed.
-    pub async fn certify_compatible_capability(
+    pub(crate) async fn certify_openai_compatible_capability(
         &self,
         provider_model: &str,
         capability: CompatibleCapability,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
-        self.execute_probe_operations(provider_model, capability, probe_operations(capability)?)
-            .await
+        self.execute_probe_operations(
+            ProviderKind::OpenAiCompatible,
+            provider_model,
+            capability,
+            probe_operations(capability)?,
+        )
+        .await
     }
 
     /// Certifies an official native OpenAI tuple. Safe content-minimal live
@@ -71,15 +76,20 @@ impl OpenAiConnector {
     ///
     /// Callers must never use this fallback for generic OpenAI-compatible
     /// endpoints. Their capability breadth remains live-probe-only through
-    /// [`Self::certify_compatible_capability`].
-    pub async fn certify_native_openai_capability(
+    /// [`Self::certify_openai_compatible_capability`].
+    pub(crate) async fn certify_native_openai_capability(
         &self,
         provider_model: &str,
         capability: CompatibleCapability,
     ) -> Result<NativeOpenAiCertificationEvidence, CompatibleCapabilityCertificationError> {
-        if probe_operations(capability).is_ok() {
-            self.certify_compatible_capability(provider_model, capability)
-                .await?;
+        if let Ok(operations) = probe_operations(capability) {
+            self.execute_probe_operations(
+                ProviderKind::OpenAi,
+                provider_model,
+                capability,
+                operations,
+            )
+            .await?;
             return Ok(NativeOpenAiCertificationEvidence::LiveProbe);
         }
         if !native_openai_discovery_contract(capability) {
@@ -97,12 +107,25 @@ impl OpenAiConnector {
         Ok(NativeOpenAiCertificationEvidence::ModelDiscoveryAndConnectorContract)
     }
 
-    /// Proves only the Chat Completions transport for a canonical generation
-    /// tuple. Azure uses this bounded probe to test a deployment path before
-    /// its operation breadth is known. Full OpenAI-surface generation
-    /// certification must still use [`Self::certify_compatible_capability`],
-    /// which proves both Chat Completions and Responses.
-    pub async fn certify_chat_completions_capability(
+    /// Proves an Azure deployment's exact operation tuple while preserving its
+    /// provider identity through the shared OpenAI wire transport.
+    pub(crate) async fn certify_azure_openai_capability(
+        &self,
+        provider_model: &str,
+        capability: CompatibleCapability,
+    ) -> Result<(), CompatibleCapabilityCertificationError> {
+        self.execute_probe_operations(
+            ProviderKind::AzureOpenAi,
+            provider_model,
+            capability,
+            probe_operations(capability)?,
+        )
+        .await
+    }
+
+    /// Proves only Azure's Chat Completions transport for a canonical
+    /// generation tuple before the deployment's operation breadth is known.
+    pub(crate) async fn certify_azure_openai_chat_completions_capability(
         &self,
         provider_model: &str,
         mode: TransportMode,
@@ -113,12 +136,18 @@ impl OpenAiConnector {
             mode,
         };
         let operation = generation_probe_operation(mode, false)?;
-        self.execute_probe_operations(provider_model, capability, vec![operation])
-            .await
+        self.execute_probe_operations(
+            ProviderKind::AzureOpenAi,
+            provider_model,
+            capability,
+            vec![operation],
+        )
+        .await
     }
 
     async fn execute_probe_operations(
         &self,
+        provider_kind: ProviderKind,
         provider_model: &str,
         capability: CompatibleCapability,
         operations: Vec<Operation>,
@@ -136,7 +165,7 @@ impl OpenAiConnector {
                     route_id: RouteId::new(),
                     target_id: TargetId::new(),
                     provider_id: ProviderId::new(),
-                    provider_kind: ProviderKind::OpenAiCompatible,
+                    provider_kind,
                     provider_model: provider_model.to_owned(),
                     timeout: DurationMs::new(PROBE_TIMEOUT_MS),
                     priority: 0,
@@ -370,7 +399,7 @@ mod tests {
         .await;
         let connector = connector(&base_url);
         connector
-            .certify_compatible_capability(
+            .certify_openai_compatible_capability(
                 "compatible-model",
                 CompatibleCapability {
                     operation: OperationKind::Generation,
@@ -401,7 +430,7 @@ mod tests {
     async fn malformed_success_response_is_not_certified() {
         let (base_url, _) = spawn_json_response(br#"{"not":"a chat response"}"#.to_vec()).await;
         let error = connector(&base_url)
-            .certify_compatible_capability(
+            .certify_openai_compatible_capability(
                 "compatible-model",
                 CompatibleCapability {
                     operation: OperationKind::Generation,
@@ -441,7 +470,7 @@ mod tests {
         ])
         .await;
         connector(&base_url)
-            .certify_compatible_capability(
+            .certify_openai_compatible_capability(
                 "compatible-model",
                 CompatibleCapability {
                     operation: OperationKind::Generation,
@@ -502,7 +531,7 @@ mod tests {
         ] {
             let (base_url, request) = spawn_json_response(body).await;
             connector(&base_url)
-                .certify_compatible_capability(
+                .certify_openai_compatible_capability(
                     "compatible-model",
                     CompatibleCapability {
                         operation,
@@ -533,7 +562,7 @@ mod tests {
         ] {
             assert_eq!(
                 connector
-                    .certify_compatible_capability("compatible-model", capability)
+                    .certify_openai_compatible_capability("compatible-model", capability)
                     .await
                     .unwrap_err(),
                 CompatibleCapabilityCertificationError::Unsupported
@@ -614,7 +643,7 @@ mod tests {
         };
         assert_eq!(
             connector
-                .certify_compatible_capability("generic-model", media)
+                .certify_openai_compatible_capability("generic-model", media)
                 .await
                 .unwrap_err(),
             CompatibleCapabilityCertificationError::Unsupported

@@ -6,7 +6,7 @@ use olp_domain::{
 };
 use tokio::time::{Instant, timeout};
 
-use crate::openai::{ConnectorConfig, OpenAiApiKey, headers::sanitize_forward_headers};
+use crate::openai::{ConnectorConfig, OpenAiApiKey};
 
 mod errors;
 mod media;
@@ -27,8 +27,8 @@ pub struct OpenAiConnector {
 
 #[derive(Clone, Copy, Debug)]
 enum AuthStyle {
-    Bearer,
-    ApiKeyHeader,
+    OpenAiBearer,
+    AzureApiKey,
 }
 
 impl OpenAiConnector {
@@ -37,7 +37,7 @@ impl OpenAiConnector {
         Self {
             config,
             api_key,
-            auth_style: AuthStyle::Bearer,
+            auth_style: AuthStyle::OpenAiBearer,
         }
     }
 
@@ -45,20 +45,20 @@ impl OpenAiConnector {
     /// The endpoint retains the same DNS pinning, redirect, retry, and private
     /// address protections as the ordinary OpenAI connector.
     #[must_use]
-    pub fn new_with_api_key_header(config: ConnectorConfig, api_key: OpenAiApiKey) -> Self {
+    pub(crate) fn new_for_azure_openai(config: ConnectorConfig, api_key: OpenAiApiKey) -> Self {
         Self {
             config,
             api_key,
-            auth_style: AuthStyle::ApiKeyHeader,
+            auth_style: AuthStyle::AzureApiKey,
         }
     }
 
     fn attach_auth(&self, headers: &mut HeaderMap) -> Result<(), TransportError> {
         match self.auth_style {
-            AuthStyle::Bearer => {
+            AuthStyle::OpenAiBearer => {
                 headers.insert(header::AUTHORIZATION, bearer_header(&self.api_key)?);
             }
-            AuthStyle::ApiKeyHeader => {
+            AuthStyle::AzureApiKey => {
                 headers.insert("api-key", raw_api_key_header(&self.api_key)?);
             }
         }
@@ -84,7 +84,7 @@ impl OpenAiConnector {
             .endpoint
             .resource_url("models")
             .map_err(map_endpoint_error)?;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.attach_auth(&mut headers)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;

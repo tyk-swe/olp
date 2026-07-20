@@ -33,6 +33,7 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
@@ -48,6 +49,11 @@ http-body-util.workspace = true
 olp-providers = { workspace = true, features = ["test-util"] }
 sqlx.workspace = true
 tempfile = "3"
+
+[[test]]
+name = "catalog_http_postgres"
+path = "tests/catalog_http_postgres.rs"
+required-features = ["test-util"]
 
 [lints]
 workspace = true

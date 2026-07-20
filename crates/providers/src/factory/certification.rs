@@ -91,7 +91,7 @@ impl ConcreteProvider {
     ) -> Result<CapabilityCertificationEvidence, CompatibleCapabilityCertificationError> {
         match (&self.connector, self.kind) {
             (ConcreteConnector::OpenAi(connector), ProviderKind::OpenAiCompatible) => connector
-                .certify_compatible_capability(provider_model, capability)
+                .certify_openai_compatible_capability(provider_model, capability)
                 .await
                 .map(|()| CapabilityCertificationEvidence::LiveProbe),
             (ConcreteConnector::AzureOpenAi(connector), ProviderKind::AzureOpenAi) => connector

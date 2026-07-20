@@ -8,8 +8,6 @@ use olp_protocols::openai::{
 };
 use tokio::time::{Instant, timeout};
 
-use crate::openai::headers::sanitize_forward_headers;
-
 use super::super::{OpenAiConnector, errors::*, media::*};
 
 pub(super) async fn execute(
@@ -79,7 +77,7 @@ pub(super) async fn execute(
         .map_err(map_endpoint_error)?;
 
     let first_byte_deadline = Instant::now() + connector.config.timeouts.first_byte;
-    let mut headers = sanitize_forward_headers(&HeaderMap::new());
+    let mut headers = HeaderMap::new();
     connector.attach_auth(&mut headers)?;
     headers.insert(
         header::CONTENT_TYPE,

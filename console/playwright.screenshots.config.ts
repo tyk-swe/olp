@@ -27,6 +27,8 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         colorScheme: 'light',
+        locale: 'en-US',
+        timezoneId: 'UTC',
         viewport: { width: 1440, height: 900 },
         deviceScaleFactor: 2
       }

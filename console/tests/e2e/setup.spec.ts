@@ -14,8 +14,7 @@ test('creates the first owner through the local setup contract', async ({ page }
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
   let setupComplete = false;
   let submittedBody: unknown;
-  let idempotencyKey: string | null = null;
-  let setupToken: string | null = null;
+  let submittedHeaders: Record<string, string> = {};
 
   await page.route('**/api/v1/setup/status', async (route) => {
     await route.fulfill({ json: { setup_required: !setupComplete } });
@@ -47,8 +46,7 @@ test('creates the first owner through the local setup contract', async ({ page }
   await page.route('**/api/v1/setup', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     submittedBody = route.request().postDataJSON();
-    idempotencyKey = route.request().headers()['idempotency-key'] ?? null;
-    setupToken = route.request().headers()['x-olp-setup-token'] ?? null;
+    submittedHeaders = route.request().headers();
     setupComplete = true;
     await route.fulfill({
       status: 201,
@@ -88,8 +86,8 @@ test('creates the first owner through the local setup contract', async ({ page }
     password: 'correct horse battery staple',
     display_name: 'Ada Owner'
   });
-  expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-  expect(setupToken).toBe('test-bootstrap-token');
+  expect(submittedHeaders['idempotency-key']).toBeUndefined();
+  expect(submittedHeaders['x-olp-setup-token']).toBe('test-bootstrap-token');
 });
 
 test('setup form validation is keyboard-visible and specific', async ({ page }) => {

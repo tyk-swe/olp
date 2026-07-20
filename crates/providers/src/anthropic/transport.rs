@@ -26,9 +26,7 @@ use reqwest::{Response, Url};
 use tokio::time::{Instant, timeout};
 use zeroize::Zeroizing;
 
-use crate::anthropic::{
-    AnthropicApiKey, ConnectorConfig, endpoint::EndpointError, headers::sanitize_forward_headers,
-};
+use crate::anthropic::{AnthropicApiKey, ConnectorConfig, endpoint::EndpointError};
 use crate::transport_io::{
     CanonicalEventDecoder, DecodedEventStream, ProviderResponseIo, ReqwestByteStream,
     bounded_duration,
@@ -113,7 +111,7 @@ impl AnthropicConnector {
                     query.append_pair("after_id", after_id);
                 }
             }
-            let mut headers = sanitize_forward_headers(&HeaderMap::new());
+            let mut headers = HeaderMap::new();
             headers.insert("x-api-key", secret_header(&self.api_key)?);
             headers.insert(
                 "anthropic-version",
@@ -214,7 +212,7 @@ impl AnthropicConnector {
             .map_err(map_endpoint_error)?;
 
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         headers.insert("x-api-key", secret_header(&self.api_key)?);
         headers.insert(
             "anthropic-version",
@@ -326,7 +324,7 @@ impl AnthropicConnector {
                 ))
             }
             Operation::Models(_) => Err(protocol_error(
-                "canonical model response values are not yet defined; model list/get is unavailable",
+                "model operations are installation-local and are not routed to providers",
             )),
             operation => Err(protocol_error(format!(
                 "Anthropic connector does not support {:?}",

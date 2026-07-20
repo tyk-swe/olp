@@ -21,6 +21,7 @@ use super::{
         check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
     },
 };
+use crate::usage_tasks::UsageTaskTracker;
 
 struct DropSignal(Arc<AtomicBool>);
 
@@ -248,6 +249,7 @@ async fn coordinated_shutdown_keeps_background_tasks_alive_while_http_drains() {
         observability_server,
         async {},
         listener_shutdown,
+        UsageTaskTracker::default(),
         background_shutdown,
     ));
     drain_started_receiver.await.unwrap();

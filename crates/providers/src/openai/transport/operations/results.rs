@@ -49,7 +49,7 @@ pub(super) async fn execute(
                 AttemptFailureClass::Protocol,
                 false,
                 format!(
-                    "OpenAI connector does not yet transport {:?}",
+                    "canonical {:?} operations are not routed through the OpenAI result transport",
                     operation.kind()
                 ),
             ));

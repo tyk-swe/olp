@@ -29,10 +29,10 @@ use super::{
     limits::CleanupMediaStream,
     media::open_response_media,
     media_jobs::{
-        attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
-        media_job_error, media_job_result, media_job_state, owned_media_job,
-        refresh_video_list_record, require_inference_store, select_video_create_target,
-        set_video_route, valid_upstream_media_job_id,
+        mark_missing_delete_as_success, media_job_deletion_finalized, media_job_error,
+        media_job_result, media_job_state, owned_media_job, refresh_video_list_record,
+        require_inference_store, select_video_create_target, set_video_route,
+        valid_upstream_media_job_id,
     },
     multipart::parse_multipart,
 };
@@ -215,7 +215,9 @@ async fn complete_video_create(
             .map(|error| format!("{:?}", error.class).to_lowercase()),
         last_polled_at: Utc::now(),
     };
-    let record = attach_media_job_with_retry(&state, reserved.id, &upstream_job_id, update).await;
+    let record = require_inference_store(&state)?
+        .attach_media_job_upstream(reserved.id, &upstream_job_id, update)
+        .await;
     let record = match record {
         Ok(record) => record,
         Err(error) => {

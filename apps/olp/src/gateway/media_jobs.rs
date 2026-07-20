@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
 
 use axum::http::{HeaderMap, StatusCode};
 use chrono::Utc;
@@ -60,29 +60,6 @@ pub(super) fn select_video_create_target(
             provider_model: attempt.provider_model,
         },
     ))
-}
-
-pub(super) async fn attach_media_job_with_retry(
-    state: &ApiState,
-    id: uuid::Uuid,
-    upstream_job_id: &str,
-    update: MediaJobUpdate,
-) -> Result<MediaJobRecord, MediaJobError> {
-    let store = require_inference_store(state)
-        .map_err(|_| MediaJobError::Invalid("media persistence is not configured".to_owned()))?;
-    for attempt in 0..3 {
-        match store
-            .attach_media_job_upstream(id, upstream_job_id, update.clone())
-            .await
-        {
-            Ok(record) => return Ok(record),
-            Err(MediaJobError::Database(_)) if attempt < 2 => {
-                tokio::time::sleep(Duration::from_millis(25 * (attempt + 1))).await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    unreachable!("bounded attach retry returns on every final attempt")
 }
 
 pub(super) async fn media_job_deletion_finalized(

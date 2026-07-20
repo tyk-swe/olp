@@ -222,7 +222,8 @@ where
     E: ProtocolStreamEncoder,
 {
     let (writer, response) = sse_stream();
-    tokio::spawn(async move {
+    let usage_tasks = state.usage_tasks.clone();
+    let _ = usage_tasks.spawn(async move {
         let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
         let mut next = Some(Ok(execution.first.clone()));
         let mut usage = UsageCapture::default();

@@ -9,7 +9,6 @@
 
 mod certification;
 mod endpoint;
-mod headers;
 mod transport;
 
 use std::{fmt, time::Duration};
@@ -44,6 +43,7 @@ impl Default for ConnectorTimeouts {
 }
 
 impl ConnectorTimeouts {
+    #[cfg(any(test, feature = "test-util"))]
     fn validate(self) -> Result<Self, ConnectorBuildError> {
         if self.connect.is_zero() {
             return Err(ConnectorBuildError::ZeroTimeout("connect"));
@@ -85,6 +85,7 @@ impl ConnectorConfig {
         })
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_timeouts(
         mut self,
         timeouts: ConnectorTimeouts,
@@ -94,6 +95,7 @@ impl ConnectorConfig {
         Ok(self)
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_response_limits(
         mut self,
         max_response_bytes: usize,
@@ -164,8 +166,10 @@ pub enum ConnectorBuildError {
     EmptyApiKey,
     #[error("OpenAI API key must contain visible ASCII characters only")]
     InvalidApiKey,
+    #[cfg(any(test, feature = "test-util"))]
     #[error("OpenAI connector {0} timeout must be greater than zero")]
     ZeroTimeout(&'static str),
+    #[cfg(any(test, feature = "test-util"))]
     #[error("OpenAI connector {0} limit must be greater than zero")]
     ZeroLimit(&'static str),
 }

@@ -136,13 +136,18 @@ impl HttpInferenceTaskContext {
 pub(crate) fn spawn_http_inference_task<F, T>(
     state: &ApiState,
     future: F,
-) -> tokio::task::JoinHandle<T>
+) -> tokio::sync::oneshot::Receiver<T>
 where
     F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
     let context = HttpInferenceTaskContext::capture(state);
-    tokio::spawn(context.scope(future))
+    let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
+    let _ = state.usage_tasks.spawn(async move {
+        let result = context.scope(future).await;
+        let _ = result_sender.send(result);
+    });
+    result_receiver
 }
 
 pub(super) async fn enforce_request_limits(

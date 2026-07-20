@@ -15,23 +15,21 @@ use super::{AuthStyle, OpenAiConnector, errors::transport_error};
 pub(super) use super::streams::require_content_type;
 
 impl OpenAiConnector {
+    pub(super) fn accepts_provider_kind(&self, provider_kind: ProviderKind) -> bool {
+        match self.auth_style {
+            AuthStyle::OpenAiBearer => matches!(
+                provider_kind,
+                ProviderKind::OpenAi | ProviderKind::OpenAiCompatible
+            ),
+            AuthStyle::AzureApiKey => provider_kind == ProviderKind::AzureOpenAi,
+        }
+    }
+
     pub(super) async fn execute_request(
         &self,
         request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
-        let provider_kind_matches = match self.auth_style {
-            AuthStyle::Bearer => matches!(
-                request.attempt.provider_kind,
-                ProviderKind::OpenAi | ProviderKind::OpenAiCompatible
-            ),
-            // Compatibility probes use OpenAiCompatible before the Azure
-            // wrapper executes real attempts as AzureOpenAi.
-            AuthStyle::ApiKeyHeader => matches!(
-                request.attempt.provider_kind,
-                ProviderKind::AzureOpenAi | ProviderKind::OpenAiCompatible
-            ),
-        };
-        if !provider_kind_matches {
+        if !self.accepts_provider_kind(request.attempt.provider_kind) {
             return Err(transport_error(
                 TransportPhase::Connect,
                 AttemptFailureClass::Protocol,
@@ -62,10 +60,7 @@ impl OpenAiConnector {
                 TransportPhase::Connect,
                 AttemptFailureClass::Protocol,
                 false,
-                format!(
-                    "OpenAI connector does not yet transport {:?}",
-                    request.operation.kind()
-                ),
+                "model operations are installation-local and are not routed to providers",
             )),
         }
     }

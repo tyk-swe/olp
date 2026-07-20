@@ -110,6 +110,53 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         Some(runtime_generation_id)
     );
     assert_eq!(reservation.provider_revision_id, Some(provider_revision_id));
+    sqlx::query("CREATE SEQUENCE media_attach_fault_attempts")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE media_attach_fault_control (
+             mode text NOT NULL CHECK (mode IN ('transient', 'permanent', 'ambiguous'))
+         )",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO media_attach_fault_control VALUES ('transient')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE FUNCTION inject_media_attach_fault() RETURNS trigger
+         LANGUAGE plpgsql AS $$
+         DECLARE
+             fault_mode text;
+             attempt bigint;
+         BEGIN
+             SELECT mode INTO STRICT fault_mode FROM media_attach_fault_control;
+             attempt := nextval('media_attach_fault_attempts');
+             IF fault_mode = 'transient' AND attempt = 1 THEN
+                 RAISE EXCEPTION 'injected serialization failure' USING ERRCODE = '40001';
+             ELSIF fault_mode = 'permanent' THEN
+                 RAISE EXCEPTION 'injected permanent failure' USING ERRCODE = 'P0001';
+             ELSIF fault_mode = 'ambiguous' THEN
+                 RAISE EXCEPTION 'injected ambiguous completion' USING ERRCODE = '08006';
+             END IF;
+             RETURN NEW;
+         END;
+         $$",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER aaa_media_attach_fault
+         BEFORE UPDATE ON async_media_jobs
+         FOR EACH ROW EXECUTE FUNCTION inject_media_attach_fault()",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     let first = store
         .attach_media_job_upstream(
             first_id,
@@ -126,6 +173,32 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .await
         .unwrap();
     assert_eq!(first.lifecycle, MediaJobLifecycle::Active);
+    let transient_attempts: i64 =
+        sqlx::query_scalar("SELECT last_value FROM media_attach_fault_attempts")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(transient_attempts, 2);
+
+    let mismatched_identity = store
+        .attach_media_job_upstream(
+            first_id,
+            "different-upstream-video",
+            attachment_update(MediaJobState::Queued, 0.0),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        mismatched_identity,
+        MediaJobError::PreconditionFailed
+    ));
+    let unchanged = store.media_job(first_id).await.unwrap();
+    assert_eq!(
+        unchanged.upstream_job_id.as_deref(),
+        Some("upstream-video-1")
+    );
+    assert_eq!(unchanged.etag, first.etag);
+
     let second_id = Uuid::now_v7();
     store
         .reserve_media_job(NewMediaJobReservation {
@@ -140,6 +213,22 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         })
         .await
         .unwrap();
+    let identity_conflict = store
+        .attach_media_job_upstream(
+            second_id,
+            "upstream-video-1",
+            attachment_update(MediaJobState::Running, 10.0),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        identity_conflict,
+        MediaJobError::UpstreamIdentityConflict
+    ));
+    assert_eq!(
+        store.media_job(second_id).await.unwrap().lifecycle,
+        MediaJobLifecycle::Creating
+    );
     let second = store
         .attach_media_job_upstream(
             second_id,
@@ -196,6 +285,109 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             .await,
         Err(MediaJobError::Invalid(_))
     ));
+
+    let permanent_id = Uuid::now_v7();
+    store
+        .reserve_media_job(NewMediaJobReservation {
+            id: permanent_id,
+            runtime_generation_id,
+            api_key_id,
+            provider_id,
+            provider_model: "video-model".to_owned(),
+            route_slug: "video-default".to_owned(),
+            operation: "video_create".parse().unwrap(),
+            surface: "open_ai".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    sqlx::query("UPDATE media_attach_fault_control SET mode = 'permanent'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query("ALTER SEQUENCE media_attach_fault_attempts RESTART WITH 1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let permanent_error = store
+        .attach_media_job_upstream(
+            permanent_id,
+            "upstream-video-permanent",
+            attachment_update(MediaJobState::Queued, 0.0),
+        )
+        .await
+        .unwrap_err();
+    let MediaJobError::Database(permanent_error) = permanent_error else {
+        panic!("permanent PostgreSQL fault must remain a database error");
+    };
+    assert_eq!(
+        permanent_error
+            .as_database_error()
+            .and_then(sqlx::error::DatabaseError::code)
+            .as_deref(),
+        Some("P0001")
+    );
+    let permanent_attempts: i64 =
+        sqlx::query_scalar("SELECT last_value FROM media_attach_fault_attempts")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(permanent_attempts, 1);
+    let permanent_record = store.media_job(permanent_id).await.unwrap();
+    assert_eq!(permanent_record.lifecycle, MediaJobLifecycle::Creating);
+    assert!(permanent_record.upstream_job_id.is_none());
+    let ambiguous_id = Uuid::now_v7();
+    store
+        .reserve_media_job(NewMediaJobReservation {
+            id: ambiguous_id,
+            runtime_generation_id,
+            api_key_id,
+            provider_id,
+            provider_model: "video-model".to_owned(),
+            route_slug: "video-default".to_owned(),
+            operation: "video_create".parse().unwrap(),
+            surface: "open_ai".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    sqlx::query("UPDATE media_attach_fault_control SET mode = 'ambiguous'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query("ALTER SEQUENCE media_attach_fault_attempts RESTART WITH 1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let ambiguous_error = store
+        .attach_media_job_upstream(
+            ambiguous_id,
+            "upstream-video-ambiguous",
+            attachment_update(MediaJobState::Queued, 0.0),
+        )
+        .await
+        .unwrap_err();
+    let MediaJobError::Database(ambiguous_error) = ambiguous_error else {
+        panic!("ambiguous PostgreSQL fault must remain a database error");
+    };
+    assert_eq!(
+        ambiguous_error
+            .as_database_error()
+            .and_then(sqlx::error::DatabaseError::code)
+            .as_deref(),
+        Some("08006")
+    );
+    let ambiguous_attempts: i64 =
+        sqlx::query_scalar("SELECT last_value FROM media_attach_fault_attempts")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(ambiguous_attempts, 3);
+    let ambiguous_record = store.media_job(ambiguous_id).await.unwrap();
+    assert_eq!(ambiguous_record.lifecycle, MediaJobLifecycle::Creating);
+    assert!(ambiguous_record.upstream_job_id.is_none());
+    sqlx::query("DROP TRIGGER aaa_media_attach_fault ON async_media_jobs")
+        .execute(store.pool())
+        .await
+        .unwrap();
 
     let poll_base = Utc::now();
     let running_refresh = store
@@ -429,5 +621,16 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         "file",
     ] {
         assert!(!columns.iter().any(|column| column == prohibited));
+    }
+}
+
+fn attachment_update(state: MediaJobState, progress_percent: f32) -> MediaJobUpdate {
+    MediaJobUpdate {
+        state,
+        progress_percent: Some(progress_percent),
+        content_available: false,
+        expires_at: None,
+        error_class: None,
+        last_polled_at: Utc::now(),
     }
 }

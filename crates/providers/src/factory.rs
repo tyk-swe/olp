@@ -1,6 +1,7 @@
 mod assembly;
 mod certification;
 mod configuration;
+#[cfg(any(test, feature = "test-util"))]
 mod overrides;
 
 pub use crate::openai::{
@@ -11,6 +12,7 @@ pub use certification::{
     CapabilityCertificationEvidence, certifiable_capabilities, supports_capability_certification,
 };
 pub use configuration::{CredentialKind, ProviderConfig, ProviderCredential, ProviderError};
+#[cfg(any(test, feature = "test-util"))]
 pub use overrides::OpenAiConnectorOverrideRegistry;
 
 #[cfg(test)]

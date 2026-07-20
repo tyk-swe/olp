@@ -110,7 +110,7 @@ impl AzureOpenAiConnector {
     pub fn new(config: ConnectorConfig, api_key: AzureOpenAiApiKey) -> Self {
         let inference_key = OpenAiApiKey::new(api_key.0.as_str().to_owned())
             .expect("Azure key validation is at least as strict as OpenAI key validation");
-        let inner = OpenAiConnector::new_with_api_key_header(config.inner, inference_key);
+        let inner = OpenAiConnector::new_for_azure_openai(config.inner, inference_key);
         Self {
             resource_endpoint: config.resource_endpoint,
             deployment: config.deployment,
@@ -127,7 +127,10 @@ impl AzureOpenAiConnector {
     pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         let chat = self
             .inner
-            .certify_chat_completions_capability(&self.deployment, TransportMode::Unary)
+            .certify_azure_openai_chat_completions_capability(
+                &self.deployment,
+                TransportMode::Unary,
+            )
             .await;
         if let Err(chat_error) = chat {
             let embedding_capability = CompatibleCapability {
@@ -137,7 +140,7 @@ impl AzureOpenAiConnector {
             };
             if let Err(embedding_error) = self
                 .inner
-                .certify_compatible_capability(&self.deployment, embedding_capability)
+                .certify_azure_openai_capability(&self.deployment, embedding_capability)
                 .await
             {
                 return Err(deployment_probe_error(chat_error, embedding_error));
@@ -155,7 +158,7 @@ impl AzureOpenAiConnector {
     /// Cross-origin generation uses Chat Completions, the translation path
     /// selected when no OpenAI endpoint hint exists. Media/job tuples are not
     /// certified until a safe content-minimal probe exists.
-    pub async fn certify_deployment_capability(
+    pub(crate) async fn certify_deployment_capability(
         &self,
         provider_model: &str,
         capability: CompatibleCapability,
@@ -168,11 +171,11 @@ impl AzureOpenAiConnector {
         {
             return self
                 .inner
-                .certify_chat_completions_capability(provider_model, capability.mode)
+                .certify_azure_openai_chat_completions_capability(provider_model, capability.mode)
                 .await;
         }
         self.inner
-            .certify_compatible_capability(
+            .certify_azure_openai_capability(
                 provider_model,
                 CompatibleCapability {
                     surface: Surface::OpenAi,

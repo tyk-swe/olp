@@ -17,7 +17,7 @@ use crate::{
     ApiKeyMaterial, EncryptedSecret, IdempotencyOutcome, IdempotencyResponse, PersistenceError,
     PgStore, PublishedRelease, ReplayableIdempotency, RuntimeCompileError,
     catalog_validation::{
-        checked_limit, enforce_provider_revision_diff_limit, validate_capability, validate_model,
+        checked_limit, enforce_provider_revision_diff_limit, validate_model,
         validate_provider_capability, validate_provider_update, validate_route_input,
     },
     runtime_compiler::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},

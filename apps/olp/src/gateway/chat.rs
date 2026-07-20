@@ -307,7 +307,8 @@ fn streaming_response(
     attempt_started: tokio::time::Instant,
 ) -> Response {
     let (writer, response) = sse_stream();
-    tokio::spawn(async move {
+    let usage_tasks = state.usage_tasks.clone();
+    let _ = usage_tasks.spawn(async move {
         let mut encoder = OpenAiStreamEncoder::new(request_id, route_slug.as_str());
         let mut next = Some(Ok(first));
         let mut usage = UsageCapture::default();

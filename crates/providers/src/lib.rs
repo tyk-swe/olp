@@ -2,29 +2,23 @@
 //! OIDC HTTP, and the shared outbound-network security policy.
 
 #[cfg(not(any(test, feature = "test-util")))]
-#[allow(dead_code)]
 mod anthropic;
 #[cfg(any(test, feature = "test-util"))]
 pub mod anthropic;
-#[allow(dead_code)]
 mod azure_openai;
-#[allow(dead_code)]
 mod bedrock;
 mod factory;
 #[cfg(not(any(test, feature = "test-util")))]
-#[allow(dead_code)]
 mod gemini;
 #[cfg(any(test, feature = "test-util"))]
 pub mod gemini;
 mod http_egress;
 mod oidc;
 #[cfg(not(any(test, feature = "test-util")))]
-#[allow(dead_code)]
 mod openai;
 #[cfg(any(test, feature = "test-util"))]
 pub mod openai;
 mod transport_io;
-#[allow(dead_code)]
 mod vertex;
 
 pub use anthropic::validate_operation as validate_anthropic_operation;

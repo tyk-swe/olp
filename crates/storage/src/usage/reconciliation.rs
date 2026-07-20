@@ -323,23 +323,6 @@ impl PgStore {
         .bind(graceful_close)
         .execute(&mut *transaction)
         .await?;
-        // Keep the pre-epoch cumulative checkpoint current during rolling
-        // upgrades and rollback. New code never reads it for epoch detection.
-        sqlx::query(
-            "INSERT INTO usage_loss_reporter_state \
-             (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
-             VALUES ($1, $2, $3, $4, $5) \
-             ON CONFLICT (gateway_instance) DO UPDATE SET \
-               process_epoch = EXCLUDED.process_epoch, dropped = EXCLUDED.dropped, \
-               abandoned = EXCLUDED.abandoned, updated_at = EXCLUDED.updated_at",
-        )
-        .bind(gateway_instance)
-        .bind(snapshot.process_epoch)
-        .bind(dropped)
-        .bind(abandoned)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await?;
         transaction.commit().await?;
         Ok(UsageLossReport {
             reported_events: u64::try_from(event_count)

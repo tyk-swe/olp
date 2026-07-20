@@ -1,13 +1,15 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::future::select_all;
-use olp_storage::{DistributedLimiter, MasterKey, PgStore, RuntimeHintSubscriber, UsageEmitter};
+use olp_storage::{
+    DistributedLimiter, MasterKey, PersistenceError, PgStore, RuntimeHintSubscriber, UsageEmitter,
+};
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 use tracing::{error, info, warn};
 
 use crate::{
     ApiMode, ApiState, LimiterManager, RuntimeManager, TransportRegistry, create_media_spool,
-    reconcile_media_jobs_once,
+    reconcile_media_jobs_once, usage_tasks::UsageTaskTracker,
 };
 use crate::{
     connectors::{load_connector_config, reload_persisted_connectors},
@@ -118,6 +120,47 @@ pub(super) async fn serve(
     let observability_listener = TcpListener::bind(args.observability_listen_addr).await?;
     let (background_shutdown_sender, background_shutdown_receiver) = watch::channel(false);
     let (listener_shutdown_sender, listener_shutdown_receiver) = watch::channel(false);
+    let usage_runtime = if mode.serves_gateway() {
+        args.valkey_url.as_ref().map(|url| {
+            // Install usage before cloning state into any autonomous producer.
+            let (emitter, receiver) = UsageEmitter::bounded(8_192);
+            state.usage = Some(emitter.clone());
+            let gateway_instance = format!(
+                "{}:{}",
+                std::env::var("HOSTNAME").unwrap_or_else(|_| "olp".to_owned()),
+                args.listen_addr
+            );
+            let (writer_shutdown, writer_shutdown_receiver) = watch::channel(false);
+            let usage_writer_url = url.clone();
+            let writer = tokio::spawn(async move {
+                match receiver
+                    .run_connecting(&usage_writer_url, "olp:v2:usage", writer_shutdown_receiver)
+                    .await
+                {
+                    Ok(()) => true,
+                    Err(error) => {
+                        error!(%error, "usage stream writer stopped");
+                        false
+                    }
+                }
+            });
+            let reporter = tokio::spawn(usage_loss_reporter(
+                store.clone(),
+                emitter.clone(),
+                gateway_instance.clone(),
+                background_shutdown_receiver.clone(),
+            ));
+            UsageRuntime {
+                emitter,
+                gateway_instance,
+                writer_shutdown,
+                writer,
+                reporter,
+            }
+        })
+    } else {
+        None
+    };
     let mut background_tasks: Vec<JoinHandle<()>> = Vec::new();
     background_tasks.push(spawn_runtime_poller(
         Arc::clone(&state.runtime),
@@ -127,10 +170,10 @@ pub(super) async fn serve(
         background_shutdown_receiver.clone(),
     ));
     if mode.serves_gateway() {
-        background_tasks.push(tokio::spawn(media_reconciliation_supervisor(
+        let _ = state.usage_tasks.spawn(media_reconciliation_supervisor(
             state.clone(),
             background_shutdown_receiver.clone(),
-        )));
+        ));
     }
     if let Some(url) = &args.valkey_url {
         background_tasks.push(tokio::spawn(runtime_hint_supervisor(
@@ -148,34 +191,6 @@ pub(super) async fn serve(
             background_shutdown_receiver.clone(),
         )));
 
-        if mode.serves_gateway() {
-            // Install the bounded local emitter even when Valkey is not up yet.
-            // Its connection loop exposes retry/pending state and preserves events
-            // until the configured bound is reached.
-            let (emitter, receiver) = UsageEmitter::bounded(8_192);
-            state.usage = Some(emitter.clone());
-            let gateway_instance = format!(
-                "{}:{}",
-                std::env::var("HOSTNAME").unwrap_or_else(|_| "olp".to_owned()),
-                args.listen_addr
-            );
-            background_tasks.push(tokio::spawn(usage_loss_reporter(
-                store.clone(),
-                emitter,
-                gateway_instance,
-                background_shutdown_receiver.clone(),
-            )));
-            let usage_writer_url = url.clone();
-            let usage_writer_shutdown = background_shutdown_receiver.clone();
-            background_tasks.push(tokio::spawn(async move {
-                if let Err(error) = receiver
-                    .run_connecting(&usage_writer_url, "olp:v2:usage", usage_writer_shutdown)
-                    .await
-                {
-                    error!(%error, "usage stream writer stopped");
-                }
-            }));
-        }
         if run_worker_in_process {
             background_tasks.push(tokio::spawn(outbox_supervisor(
                 store.clone(),
@@ -212,6 +227,7 @@ pub(super) async fn serve(
         listener::HttpServerConfig::public(args.http_max_connections),
         listener_shutdown_receiver.clone(),
     );
+    let usage_tasks = state.usage_tasks.clone();
     // This listener has its own router-level concurrency cap. Constrain its
     // connection envelope too so metrics traffic cannot occupy the public
     // listener's entire process-level resource budget.
@@ -226,9 +242,25 @@ pub(super) async fn serve(
         observability_server,
         shutdown_signal(),
         listener_shutdown_sender,
+        usage_tasks.clone(),
         background_shutdown_sender,
     )
     .await;
+    if let Some(mut usage) = usage_runtime {
+        let (producers_clean, reporter_clean) = tokio::join!(
+            usage_tasks.wait(BACKGROUND_SHUTDOWN_TIMEOUT),
+            stop_usage_reporter(&mut usage.reporter),
+        );
+        if !producers_clean {
+            warn!("usage-producing tasks did not drain cleanly; leaving the process epoch open");
+        }
+        if !reporter_clean {
+            warn!("usage-loss reporter did not stop cleanly before final checkpointing");
+        }
+        stop_usage_runtime(store.clone(), usage, producers_clean).await;
+    } else if !usage_tasks.wait(BACKGROUND_SHUTDOWN_TIMEOUT).await {
+        warn!("detached inference tasks did not drain cleanly");
+    }
     stop_background_tasks(background_tasks, BACKGROUND_SHUTDOWN_TIMEOUT).await;
     public_result?;
     observability_result?;
@@ -240,6 +272,7 @@ pub(super) async fn coordinate_shutdown<Public, Observability, Signal>(
     observability_server: Observability,
     signal: Signal,
     listener_shutdown: watch::Sender<bool>,
+    usage_tasks: UsageTaskTracker,
     background_shutdown: watch::Sender<bool>,
 ) -> (Public::Output, Observability::Output)
 where
@@ -253,6 +286,7 @@ where
     };
     let (public_result, observability_result, ()) =
         tokio::join!(public_server, observability_server, stop_listeners);
+    usage_tasks.close();
     let _ = background_shutdown.send(true);
     (public_result, observability_result)
 }
@@ -266,6 +300,105 @@ pub(super) async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
         if shutdown.changed().await.is_err() {
             return;
         }
+    }
+}
+
+struct UsageRuntime {
+    emitter: UsageEmitter,
+    gateway_instance: String,
+    writer_shutdown: watch::Sender<bool>,
+    writer: JoinHandle<bool>,
+    reporter: JoinHandle<()>,
+}
+
+async fn stop_usage_reporter(reporter: &mut JoinHandle<()>) -> bool {
+    match tokio::time::timeout(BACKGROUND_SHUTDOWN_TIMEOUT, &mut *reporter).await {
+        Ok(Ok(())) => true,
+        Ok(Err(error)) => {
+            warn!(%error, "usage-loss reporter task stopped unexpectedly");
+            false
+        }
+        Err(_) => {
+            reporter.abort();
+            let _ = reporter.await;
+            false
+        }
+    }
+}
+
+async fn stop_usage_runtime(store: PgStore, mut usage: UsageRuntime, producers_clean: bool) {
+    let _ = usage.writer_shutdown.send(true);
+    let writer_clean =
+        match tokio::time::timeout(BACKGROUND_SHUTDOWN_TIMEOUT, &mut usage.writer).await {
+            Ok(Ok(clean)) => clean,
+            Ok(Err(error)) => {
+                warn!(%error, "usage stream writer task stopped unexpectedly");
+                false
+            }
+            Err(_) => {
+                warn!("usage stream writer did not stop before the shutdown deadline; aborting it");
+                usage.writer.abort();
+                let _ = usage.writer.await;
+                false
+            }
+        };
+    let snapshot = usage.emitter.snapshot();
+    let graceful = producers_clean && writer_clean && snapshot.gracefully_drained();
+    if !graceful {
+        warn!(
+            producers_clean,
+            writer_clean,
+            pending = snapshot.pending(),
+            "usage shutdown was incomplete; checkpointing an open process epoch"
+        );
+    }
+    final_usage_checkpoint(&store, &usage.gateway_instance, &snapshot, graceful).await;
+}
+
+async fn final_usage_checkpoint(
+    store: &PgStore,
+    gateway_instance: &str,
+    snapshot: &olp_storage::UsageBufferSnapshot,
+    graceful: bool,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+    let mut backoff = Duration::from_millis(100);
+    loop {
+        let checkpoint = async {
+            if graceful {
+                store
+                    .close_usage_buffer_epoch(gateway_instance, snapshot)
+                    .await
+            } else {
+                store
+                    .report_usage_buffer_loss(gateway_instance, snapshot)
+                    .await
+            }
+        };
+        match tokio::time::timeout_at(deadline, checkpoint).await {
+            Ok(Ok(_)) => return,
+            Ok(Err(PersistenceError::Database(error)))
+                if tokio::time::Instant::now() < deadline =>
+            {
+                warn!(%error, %gateway_instance, "final usage-loss checkpoint failed; retrying");
+            }
+            Ok(Err(error)) => {
+                error!(%error, %gateway_instance, lost = snapshot.lost(), "final usage-loss checkpoint could not be persisted");
+                return;
+            }
+            Err(_) => {
+                error!(%gateway_instance, lost = snapshot.lost(), "final usage-loss checkpoint timed out");
+                return;
+            }
+        }
+        if tokio::time::timeout_at(deadline, tokio::time::sleep(backoff))
+            .await
+            .is_err()
+        {
+            error!(%gateway_instance, lost = snapshot.lost(), "final usage-loss checkpoint timed out");
+            return;
+        }
+        backoff = (backoff * 2).min(Duration::from_millis(500));
     }
 }
 
@@ -315,25 +448,7 @@ async fn usage_loss_reporter(
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
-                    // Let the stream writer close its receiver and account for
-                    // accepted-but-abandoned entries, then durably checkpoint
-                    // the final counters before graceful process exit.
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
-                    loop {
-                        let snapshot = emitter.snapshot();
-                        match store.close_usage_buffer_epoch(&gateway_instance, &snapshot).await {
-                            Ok(_) => return,
-                            Err(error) if tokio::time::Instant::now() < deadline => {
-                                warn!(%error, %gateway_instance, "final usage-loss checkpoint failed; retrying");
-                                tokio::time::sleep(Duration::from_millis(200)).await;
-                            }
-                            Err(error) => {
-                                error!(%error, %gateway_instance, lost = snapshot.lost(), "final usage-loss checkpoint could not be persisted");
-                                return;
-                            }
-                        }
-                    }
+                    return;
                 }
             }
         }

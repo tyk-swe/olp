@@ -26,7 +26,7 @@ use zeroize::Zeroizing;
 
 use crate::gemini::{
     BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey,
-    endpoint::EndpointError, headers::sanitize_forward_headers,
+    endpoint::EndpointError,
 };
 use crate::transport_io::{
     CanonicalEventDecoder, DecodedEventStream, ProviderResponseIo, ReqwestByteStream,
@@ -132,7 +132,7 @@ impl GeminiConnector {
                     query.append_pair("pageToken", page_token);
                 }
             }
-            let mut headers = sanitize_forward_headers(&HeaderMap::new());
+            let mut headers = HeaderMap::new();
             self.insert_authentication_header(&mut headers).await?;
             headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
             let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
@@ -215,7 +215,7 @@ impl GeminiConnector {
             .count_tokens_url(provider_model)
             .map_err(map_endpoint_error)?;
         let body = br#"{"contents":[{"role":"user","parts":[{"text":"health"}]}]}"#;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.insert_authentication_header(&mut headers).await?;
         headers.insert(
             header::CONTENT_TYPE,
@@ -280,7 +280,7 @@ impl GeminiConnector {
             .await
             .map_err(map_endpoint_error)?;
 
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         let auth_wait = RESPONSE_IO.remaining(attempt_deadline, TransportPhase::Connect)?;
         timeout(auth_wait, self.insert_authentication_header(&mut headers))
             .await
@@ -402,7 +402,7 @@ impl GeminiConnector {
                 ))
             }
             Operation::Models(_) => Err(protocol_error(
-                "canonical model response values are not yet defined; model list/get is unavailable",
+                "model operations are installation-local and are not routed to providers",
             )),
             operation => Err(protocol_error(format!(
                 "Gemini connector does not support {:?}",

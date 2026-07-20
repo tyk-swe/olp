@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::PgStore;
@@ -6,6 +9,24 @@ use super::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
     NewMediaJobReservation, media_surface_storage_value, queries::media_job_from_row,
 };
+
+const ATTACH_MAX_ATTEMPTS: usize = 3;
+const ATTACH_RETRY_BASE_DELAY_MS: u64 = 25;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum AttachmentErrorClass {
+    DefiniteTransient,
+    AmbiguousCompletion,
+    Permanent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AttachmentProbe {
+    Attached,
+    SafeToRetry,
+    NotFound,
+    PreconditionFailed,
+}
 
 impl PgStore {
     /// Persists the public OLP job ID and exact selected target before a
@@ -64,64 +85,165 @@ impl PgStore {
             ));
         }
         validate_update(&update)?;
-        let result = sqlx::query(
-            "WITH attached AS (
-                UPDATE async_media_jobs SET
-                    upstream_job_id = $2,
-                    state = $3::media_job_state,
-                    lifecycle_state = 'active',
-                    progress_percent = $4,
-                    content_available = $5,
-                    expires_at = $6,
-                    error_class = $7,
-                    last_polled_at = $8,
-                    reconciliation_error = NULL,
-                    etag = uuidv7()
-                 WHERE id = $1 AND lifecycle_state IN ('creating', 'create_ambiguous')
-                 RETURNING *
-             )
-             SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
-                    p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
-                    j.progress_percent::real AS progress_percent,
-                    j.content_available, j.expires_at, j.error_class,
-                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
-                    j.reconciliation_attempts, j.next_reconciliation_at,
-                    j.last_reconciliation_at, j.etag,
-                    j.created_at, j.updated_at
-             FROM attached j
-             JOIN providers p ON p.id = j.provider_id",
+        for attempt in 0..ATTACH_MAX_ATTEMPTS {
+            let result = sqlx::query(
+                "WITH attached AS (
+                    UPDATE async_media_jobs SET
+                        upstream_job_id = $2,
+                        state = $3::media_job_state,
+                        lifecycle_state = 'active',
+                        progress_percent = $4,
+                        content_available = $5,
+                        expires_at = $6,
+                        error_class = $7,
+                        last_polled_at = $8,
+                        reconciliation_error = NULL,
+                        etag = uuidv7()
+                     WHERE id = $1 AND lifecycle_state IN ('creating', 'create_ambiguous')
+                       AND (upstream_job_id IS NULL OR upstream_job_id = $2)
+                     RETURNING *
+                 )
+                 SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
+                        p.name AS provider_name, j.provider_model, j.route_slug,
+                        j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
+                        j.progress_percent::real AS progress_percent,
+                        j.content_available, j.expires_at, j.error_class,
+                        j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
+                        j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
+                        j.reconciliation_attempts, j.next_reconciliation_at,
+                        j.last_reconciliation_at, j.etag,
+                        j.created_at, j.updated_at
+                 FROM attached j
+                 JOIN providers p ON p.id = j.provider_id",
+            )
+            .bind(id)
+            .bind(upstream_job_id)
+            .bind(update.state.as_str())
+            .bind(update.progress_percent)
+            .bind(update.content_available)
+            .bind(update.expires_at)
+            .bind(update.error_class.as_deref())
+            .bind(update.last_polled_at)
+            .fetch_optional(self.pool())
+            .await;
+            match result {
+                Ok(Some(row)) => return media_job_from_row(&row),
+                Ok(None) => match self.resolve_media_job_attachment(id, upstream_job_id).await {
+                    Ok(record) => return Ok(record),
+                    Err(error)
+                        if attempt + 1 < ATTACH_MAX_ATTEMPTS
+                            && is_retryable_attachment_error(&error) => {}
+                    Err(error) => return Err(error),
+                },
+                Err(error) if is_upstream_identity_conflict(&error) => {
+                    return Err(MediaJobError::UpstreamIdentityConflict);
+                }
+                Err(error) => match classify_attachment_error(&error) {
+                    AttachmentErrorClass::Permanent => return Err(error.into()),
+                    AttachmentErrorClass::DefiniteTransient
+                        if attempt + 1 == ATTACH_MAX_ATTEMPTS =>
+                    {
+                        return Err(error.into());
+                    }
+                    AttachmentErrorClass::DefiniteTransient => {}
+                    AttachmentErrorClass::AmbiguousCompletion => {
+                        match self.probe_media_job_attachment(id, upstream_job_id).await {
+                            Ok(AttachmentProbe::Attached) => {
+                                match self
+                                    .load_active_media_job_attachment(id, upstream_job_id)
+                                    .await
+                                {
+                                    Ok(record) => return Ok(record),
+                                    Err(error)
+                                        if attempt + 1 < ATTACH_MAX_ATTEMPTS
+                                            && is_retryable_attachment_error(&error) => {}
+                                    Err(error) => return Err(error),
+                                }
+                            }
+                            Ok(AttachmentProbe::SafeToRetry)
+                                if attempt + 1 < ATTACH_MAX_ATTEMPTS => {}
+                            Err(probe_error)
+                                if attempt + 1 < ATTACH_MAX_ATTEMPTS
+                                    && classify_attachment_error(&probe_error)
+                                        != AttachmentErrorClass::Permanent => {}
+                            Ok(AttachmentProbe::SafeToRetry) | Err(_) => {
+                                return Err(error.into());
+                            }
+                            Ok(AttachmentProbe::NotFound) => {
+                                return Err(MediaJobError::NotFound);
+                            }
+                            Ok(AttachmentProbe::PreconditionFailed) => {
+                                return Err(MediaJobError::PreconditionFailed);
+                            }
+                        }
+                    }
+                },
+            }
+            tokio::time::sleep(Duration::from_millis(
+                ATTACH_RETRY_BASE_DELAY_MS * (attempt as u64 + 1),
+            ))
+            .await;
+        }
+        unreachable!("bounded media attachment retry returns on its final attempt")
+    }
+
+    async fn resolve_media_job_attachment(
+        &self,
+        id: Uuid,
+        upstream_job_id: &str,
+    ) -> Result<MediaJobRecord, MediaJobError> {
+        match self.probe_media_job_attachment(id, upstream_job_id).await? {
+            AttachmentProbe::Attached => {
+                self.load_active_media_job_attachment(id, upstream_job_id)
+                    .await
+            }
+            AttachmentProbe::NotFound => Err(MediaJobError::NotFound),
+            AttachmentProbe::SafeToRetry | AttachmentProbe::PreconditionFailed => {
+                Err(MediaJobError::PreconditionFailed)
+            }
+        }
+    }
+
+    async fn probe_media_job_attachment(
+        &self,
+        id: Uuid,
+        upstream_job_id: &str,
+    ) -> Result<AttachmentProbe, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT lifecycle_state, upstream_job_id
+             FROM async_media_jobs
+             WHERE id = $1",
         )
         .bind(id)
-        .bind(upstream_job_id)
-        .bind(update.state.as_str())
-        .bind(update.progress_percent)
-        .bind(update.content_available)
-        .bind(update.expires_at)
-        .bind(update.error_class)
-        .bind(update.last_polled_at)
         .fetch_optional(self.pool())
-        .await;
-        match result {
-            // Return the row from the same statement that made it active. A
-            // connection failure after commit is retried by the caller, so a
-            // subsequent active row with this exact identity is also success.
-            Ok(Some(row)) => media_job_from_row(&row),
-            Ok(None) => {
-                let current = self.media_job(id).await?;
-                if current.lifecycle == MediaJobLifecycle::Active
-                    && current.upstream_job_id.as_deref() == Some(upstream_job_id)
-                {
-                    Ok(current)
-                } else {
-                    Err(MediaJobError::PreconditionFailed)
-                }
+        .await?;
+        let Some(row) = row else {
+            return Ok(AttachmentProbe::NotFound);
+        };
+        let lifecycle = row.try_get::<String, _>("lifecycle_state")?;
+        let stored_upstream_id = row.try_get::<Option<String>, _>("upstream_job_id")?;
+        let exact_identity = stored_upstream_id.as_deref() == Some(upstream_job_id);
+        Ok(match lifecycle.as_str() {
+            "active" if exact_identity => AttachmentProbe::Attached,
+            "creating" | "create_ambiguous" if stored_upstream_id.is_none() || exact_identity => {
+                AttachmentProbe::SafeToRetry
             }
-            Err(error) if is_upstream_identity_conflict(&error) => {
-                Err(MediaJobError::UpstreamIdentityConflict)
-            }
-            Err(error) => Err(error.into()),
+            _ => AttachmentProbe::PreconditionFailed,
+        })
+    }
+
+    async fn load_active_media_job_attachment(
+        &self,
+        id: Uuid,
+        upstream_job_id: &str,
+    ) -> Result<MediaJobRecord, MediaJobError> {
+        let record = self.media_job(id).await?;
+        if record.lifecycle == MediaJobLifecycle::Active
+            && record.upstream_job_id.as_deref() == Some(upstream_job_id)
+        {
+            Ok(record)
+        } else {
+            Err(MediaJobError::PreconditionFailed)
         }
     }
 
@@ -349,6 +471,36 @@ fn is_upstream_identity_conflict(error: &sqlx::Error) -> bool {
         .as_database_error()
         .and_then(sqlx::error::DatabaseError::constraint)
         == Some("async_media_jobs_upstream_unique_idx")
+}
+
+pub(super) fn classify_attachment_error(error: &sqlx::Error) -> AttachmentErrorClass {
+    match error {
+        sqlx::Error::Database(database) => classify_attachment_sqlstate(database.code().as_deref()),
+        sqlx::Error::Io(_) | sqlx::Error::Protocol(_) | sqlx::Error::WorkerCrashed => {
+            AttachmentErrorClass::AmbiguousCompletion
+        }
+        sqlx::Error::PoolTimedOut | sqlx::Error::Tls(_) => AttachmentErrorClass::DefiniteTransient,
+        _ => AttachmentErrorClass::Permanent,
+    }
+}
+
+pub(super) fn classify_attachment_sqlstate(code: Option<&str>) -> AttachmentErrorClass {
+    match code {
+        Some(code) if code.starts_with("08") => AttachmentErrorClass::AmbiguousCompletion,
+        Some("40003") => AttachmentErrorClass::AmbiguousCompletion,
+        Some(
+            "40001" | "40P01" | "53300" | "53400" | "55P03" | "57014" | "57P01" | "57P02" | "57P03",
+        ) => AttachmentErrorClass::DefiniteTransient,
+        _ => AttachmentErrorClass::Permanent,
+    }
+}
+
+fn is_retryable_attachment_error(error: &MediaJobError) -> bool {
+    matches!(
+        error,
+        MediaJobError::Database(error)
+            if classify_attachment_error(error) != AttachmentErrorClass::Permanent
+    )
 }
 
 pub(super) fn validate_update(update: &MediaJobUpdate) -> Result<(), MediaJobError> {

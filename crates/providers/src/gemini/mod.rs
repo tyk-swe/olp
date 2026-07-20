@@ -6,7 +6,6 @@
 //! Ambient proxies and reqwest retries are disabled.
 
 mod endpoint;
-mod headers;
 mod transport;
 
 use std::{fmt, sync::Arc, time::Duration};
@@ -39,6 +38,7 @@ impl Default for ConnectorTimeouts {
 }
 
 impl ConnectorTimeouts {
+    #[cfg(any(test, feature = "test-util"))]
     fn validate(self) -> Result<Self, ConnectorBuildError> {
         for (name, value) in [
             ("connect", self.connect),
@@ -82,6 +82,7 @@ impl ConnectorConfig {
         })
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_timeouts(
         mut self,
         timeouts: ConnectorTimeouts,
@@ -91,6 +92,7 @@ impl ConnectorConfig {
         Ok(self)
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_response_limits(
         mut self,
         max_response_bytes: usize,
@@ -201,8 +203,10 @@ pub enum ConnectorBuildError {
     EmptyApiKey,
     #[error("Gemini API key must contain visible ASCII characters only")]
     InvalidApiKey,
+    #[cfg(any(test, feature = "test-util"))]
     #[error("Gemini connector {0} timeout must be greater than zero")]
     ZeroTimeout(&'static str),
+    #[cfg(any(test, feature = "test-util"))]
     #[error("Gemini connector {0} limit must be greater than zero")]
     ZeroLimit(&'static str),
 }

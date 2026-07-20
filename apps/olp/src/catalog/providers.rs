@@ -806,6 +806,7 @@ pub(super) async fn catalog_connector(
         .await
         .map_err(map_catalog)?;
     let config = provider_config(&provider).map_err(|detail| validation("provider", &detail))?;
+    #[cfg(any(test, feature = "test-util"))]
     if let Some(connector) = state.catalog_openai_connector(provider_id, config.kind()) {
         return Ok(connector);
     }

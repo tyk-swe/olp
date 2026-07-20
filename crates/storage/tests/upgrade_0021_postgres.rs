@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use olp_storage::{MIGRATOR, NewOwner, PgStore, hash_password};
+use olp_storage::{MIGRATOR, NewOwner, PgStore, UsageBufferSnapshot, hash_password};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -34,7 +34,11 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     let restored_draft_id = Uuid::now_v7();
     let restored_matching_target_id = Uuid::now_v7();
     let restored_edited_target_id = Uuid::now_v7();
+    let legacy_usage_epoch = Uuid::now_v7();
+    let authoritative_usage_epoch = Uuid::now_v7();
     let observed_at = Utc::now() - Duration::days(2);
+    let usage_epoch_started_at = observed_at - Duration::minutes(1);
+    let usage_epoch_updated_at = observed_at;
 
     sqlx::query(
         "INSERT INTO providers \
@@ -261,7 +265,94 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .await
     .unwrap();
 
+    sqlx::query(
+        "INSERT INTO usage_loss_reporter_state \
+         (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
+         VALUES ('upgrade-usage-gateway', $1, 91, 17, $2)",
+    )
+    .bind(legacy_usage_epoch)
+    .bind(usage_epoch_updated_at)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO usage_gateway_epochs \
+         (gateway_instance, process_epoch, started_at, accepted, persisted, dropped, abandoned, \
+          retrying, writer_closed, updated_at) \
+         VALUES ('upgrade-usage-gateway', $1, $2, 13, 8, 3, 2, true, false, $3)",
+    )
+    .bind(authoritative_usage_epoch)
+    .bind(usage_epoch_started_at)
+    .bind(usage_epoch_updated_at)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    let authoritative_epoch_before: serde_json::Value = sqlx::query_scalar(
+        "SELECT to_jsonb(epoch) FROM usage_gateway_epochs epoch \
+         WHERE gateway_instance = 'upgrade-usage-gateway'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
     MIGRATOR.run(store.pool()).await.unwrap();
+
+    let legacy_usage_table_absent: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.usage_loss_reporter_state') IS NULL")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert!(legacy_usage_table_absent);
+    let authoritative_epoch_after: serde_json::Value = sqlx::query_scalar(
+        "SELECT to_jsonb(epoch) FROM usage_gateway_epochs epoch \
+         WHERE gateway_instance = 'upgrade-usage-gateway'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(authoritative_epoch_after, authoritative_epoch_before);
+
+    let loss_at = Utc::now();
+    let open_snapshot = UsageBufferSnapshot {
+        process_epoch: authoritative_usage_epoch,
+        started_at: usage_epoch_started_at,
+        accepted: 14,
+        persisted: 9,
+        dropped: 4,
+        abandoned: 2,
+        retrying: false,
+        closed: false,
+        first_loss_at: Some(loss_at),
+        last_loss_at: Some(loss_at),
+    };
+    let reported = store
+        .report_usage_buffer_loss("upgrade-usage-gateway", &open_snapshot)
+        .await
+        .unwrap();
+    assert_eq!(reported.reported_dropped, 1);
+    assert_eq!(reported.reported_abandoned, 0);
+    assert!(!reported.process_epoch_changed);
+    let closed = store
+        .close_usage_buffer_epoch(
+            "upgrade-usage-gateway",
+            &UsageBufferSnapshot {
+                persisted: 12,
+                closed: true,
+                ..open_snapshot
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(closed.reported_events, 0);
+    let gracefully_closed: bool = sqlx::query_scalar(
+        "SELECT gracefully_closed_at IS NOT NULL FROM usage_gateway_epochs \
+         WHERE gateway_instance = 'upgrade-usage-gateway' AND process_epoch = $1",
+    )
+    .bind(authoritative_usage_epoch)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(gracefully_closed);
 
     let migrated_etag: Uuid =
         sqlx::query_scalar("SELECT configuration_etag FROM oidc_authorization_flows WHERE id = $1")

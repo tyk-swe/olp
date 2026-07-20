@@ -207,7 +207,6 @@ impl PgStore {
                 .execute(&mut *transaction)
                 .await?;
             for capability in &model.capabilities {
-                validate_capability(capability)?;
                 sqlx::query(
                     "INSERT INTO model_capabilities \
                      (provider_model_id, operation, surface, mode, source, certified_at) \
@@ -266,7 +265,6 @@ impl PgStore {
         }
         let mut unique = BTreeSet::new();
         for capability in capabilities {
-            validate_capability(capability)?;
             let tuple = (
                 capability.operation.as_str(),
                 capability.surface.as_str(),
@@ -370,13 +368,6 @@ impl PgStore {
         }
         let mut submitted = BTreeSet::new();
         for outcome in outcomes {
-            validate_capability(&CapabilityRecord {
-                operation: outcome.operation,
-                surface: outcome.surface,
-                mode: outcome.mode,
-                source: CapabilitySource::Declared,
-                certified_at: None,
-            })?;
             if !submitted.insert((outcome.operation, outcome.surface, outcome.mode)) {
                 return Err(CatalogError::Invalid(
                     "certification capability tuples must be unique".to_owned(),

@@ -27,6 +27,7 @@ mod semantic_validation;
 mod services;
 mod static_console;
 mod streaming_response;
+mod usage_tasks;
 mod vendor_gateway;
 
 use std::{
@@ -41,7 +42,9 @@ use std::{
 };
 
 use arc_swap::ArcSwapOption;
-use olp_domain::{MediaSpool, ProviderId, ProviderKind, ProviderTransport};
+#[cfg(any(test, feature = "test-util"))]
+use olp_domain::ProviderKind;
+use olp_domain::{MediaSpool, ProviderId, ProviderTransport};
 use olp_storage::{DistributedLimiter, KeyHasher, MasterKey, PgStore, UsageEmitter};
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
@@ -58,9 +61,10 @@ pub use media_spool::create_media_spool;
 pub use observability::{
     observability_router, refresh_observability_cache, spawn_observability_cache,
 };
+#[cfg(any(test, feature = "test-util"))]
+pub use olp_providers::OpenAiConnector;
 pub use olp_providers::{
-    CredentialKind, OpenAiConnector, ProviderConfig, ProviderCredential, ProviderError,
-    ProviderFactory,
+    CredentialKind, ProviderConfig, ProviderCredential, ProviderError, ProviderFactory,
 };
 pub use problem::{FieldErrors, Problem};
 pub use proxy::{TrustedProxyCidr, TrustedProxyCidrParseError, public_auth_source};
@@ -115,11 +119,13 @@ pub struct ApiState {
     bootstrap_token_digest: Arc<AsyncRwLock<Option<Zeroizing<[u8; 32]>>>>,
     pub master_key: Option<Arc<MasterKey>>,
     pub usage: Option<UsageEmitter>,
+    pub(crate) usage_tasks: usage_tasks::UsageTaskTracker,
     pub(crate) circuits: circuit::CircuitBreaker,
     media_reconciliation_gaps: Arc<AtomicU64>,
     pub media_spool: Arc<dyn MediaSpool>,
     multipart_admission: MultipartAdmissionState,
     pub transports: TransportRegistry,
+    #[cfg(any(test, feature = "test-util"))]
     catalog_openai_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
     pub public_origin: Arc<str>,
     pub console_dir: Arc<PathBuf>,
@@ -173,11 +179,13 @@ impl ApiState {
             bootstrap_token_digest: Arc::new(AsyncRwLock::new(None)),
             master_key: None,
             usage: None,
+            usage_tasks: usage_tasks::UsageTaskTracker::default(),
             circuits: circuit::CircuitBreaker::default(),
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
             media_spool,
             multipart_admission,
             transports: TransportRegistry::default(),
+            #[cfg(any(test, feature = "test-util"))]
             catalog_openai_connectors: Default::default(),
             public_origin: Arc::from(public_origin.into().trim_end_matches('/')),
             console_dir: Arc::new(console_dir.into()),
@@ -239,6 +247,7 @@ impl ApiState {
     /// the production custom-endpoint SSRF policy. Production wiring never
     /// installs an override.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn register_catalog_openai_connector_for_test(
         &self,
         provider_id: uuid::Uuid,
@@ -248,6 +257,7 @@ impl ApiState {
             .register(provider_id, connector);
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn catalog_openai_connector(
         &self,
         provider_id: uuid::Uuid,

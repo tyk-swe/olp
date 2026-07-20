@@ -7,7 +7,6 @@
 //! connector performs no hidden retries.
 
 mod endpoint;
-mod headers;
 mod transport;
 
 use std::{fmt, time::Duration};
@@ -40,6 +39,7 @@ impl Default for ConnectorTimeouts {
 }
 
 impl ConnectorTimeouts {
+    #[cfg(any(test, feature = "test-util"))]
     fn validate(self) -> Result<Self, ConnectorBuildError> {
         for (name, value) in [
             ("connect", self.connect),
@@ -95,6 +95,7 @@ impl ConnectorConfig {
         Ok(self)
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_timeouts(
         mut self,
         timeouts: ConnectorTimeouts,
@@ -104,6 +105,7 @@ impl ConnectorConfig {
         Ok(self)
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_response_limits(
         mut self,
         max_response_bytes: usize,
@@ -167,8 +169,10 @@ pub enum ConnectorBuildError {
     InvalidApiKey,
     #[error("Anthropic API version must contain visible ASCII characters only")]
     InvalidApiVersion,
+    #[cfg(any(test, feature = "test-util"))]
     #[error("Anthropic connector {0} timeout must be greater than zero")]
     ZeroTimeout(&'static str),
+    #[cfg(any(test, feature = "test-util"))]
     #[error("Anthropic connector {0} limit must be greater than zero")]
     ZeroLimit(&'static str),
 }

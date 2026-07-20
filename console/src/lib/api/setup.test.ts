@@ -25,7 +25,7 @@ describe('setup API', () => {
     expect(request.redirect).toBe('error');
   });
 
-  it('posts only the backend owner contract with an idempotency key', async () => {
+  it('posts only the backend owner contract and setup token', async () => {
     const responseBody = {
       user: {
         id: '01980000-0000-7000-8000-000000000001',
@@ -46,7 +46,6 @@ describe('setup API', () => {
     await expect(
       createOwner(
         { email: 'owner@example.com', password: 'long secure phrase', display_name: 'Ada Owner' },
-        'idempotency-value',
         'bootstrap-token-value'
       )
     ).resolves.toEqual(responseBody);
@@ -61,7 +60,7 @@ describe('setup API', () => {
         display_name: 'Ada Owner'
       })
     );
-    expect(request.headers.get('idempotency-key')).toBe('idempotency-value');
+    expect(request.headers.has('idempotency-key')).toBe(false);
     expect(request.headers.get('x-olp-setup-token')).toBe('bootstrap-token-value');
   });
 

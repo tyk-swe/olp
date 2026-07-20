@@ -51,8 +51,12 @@ for entry in "${tests[@]}"; do
     --command="DROP DATABASE IF EXISTS ${database} WITH (FORCE)"
   createdb --maintenance-db="$OLP_TEST_DATABASE_ADMIN_URL" --owner="$owner" "$database"
   echo "running ${package}/${test_name} against isolated ${database}"
+  feature_args=()
+  if [[ $package == olp ]]; then
+    feature_args=(--features test-util)
+  fi
   OLP_TEST_DATABASE_URL="${OLP_TEST_DATABASE_URL_PREFIX%/}/${database}" \
-    cargo test --locked -p "$package" --test "$test_name" -- \
+    cargo test --locked -p "$package" "${feature_args[@]}" --test "$test_name" -- \
       --ignored --test-threads=1
   index=$((index + 1))
 done
