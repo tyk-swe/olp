@@ -1,43 +1,142 @@
-//! Common authenticated execution setup shared by event and unary routes.
-//!
-//! This keeps authorization, rate-limit reservations, attempt selection, and
-//! early failure telemetry on one path. The parent module remains responsible
-//! for adapting a successful provider output to the appropriate HTTP shape.
+//! Shared authentication and execution setup for inference surfaces.
 
-use std::time::Duration;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use axum::http::HeaderMap;
 use chrono::Utc;
 use olp_domain::{
-    Operation, OperationKind, RequestId, RequestMetadata, RouteSlug, Surface, TransportMode,
-    authorize_api_key,
+    ApiKey, ApiKeyLookupId, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId,
+    RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
 };
 use olp_storage::{LimitLease, UsageAttempt};
 
-use crate::{ApiState, semantic_validation::select_representable_attempts_filtered};
-
-use super::{
-    ExecutionSuccess, InferenceError, RequiredTarget, UsageCapture, authenticate_proxy_key,
-    emit_request_event, execute_with_failover, release_limits, reserve_limits,
+use crate::{
+    ApiState, event_completion::collect_provider_events,
+    semantic_validation::select_representable_attempts_filtered,
 };
 
-pub(super) struct ExecutionContext {
+use super::{
+    error::InferenceError,
+    failover::{ExecutionOutput, ExecutionSuccess, execute_with_failover},
+    limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
+    telemetry::{
+        UnaryExecutionCompletion, UsageCapture, elapsed_ms, emit_request_event, usage_from_result,
+    },
+};
+
+pub(crate) struct RoutedEventExecution {
+    pub(crate) first: CanonicalEvent,
+    pub(crate) events: olp_domain::ProviderEventStream,
+    pub(crate) deadline: tokio::time::Instant,
+    pub(crate) lease: Option<LimitLease>,
     pub(super) generation_id: uuid::Uuid,
     pub(super) api_key_id: uuid::Uuid,
-    pub(super) request_id: RequestId,
-    pub(super) route_slug: RouteSlug,
+    pub request_id: uuid::Uuid,
+    pub route_slug: RouteSlug,
+    pub(super) surface: Surface,
     pub(super) operation_kind: OperationKind,
     pub(super) request_started_at: chrono::DateTime<Utc>,
     pub(super) request_started: tokio::time::Instant,
-    pub(super) lease: Option<LimitLease>,
-    pub(super) surface: Surface,
+    pub(super) attempt_started: tokio::time::Instant,
+    pub(super) attempts: Vec<UsageAttempt>,
+    pub(super) first_byte_ms: u64,
 }
 
-pub(super) struct CompletedExecution {
-    pub(super) context: ExecutionContext,
-    pub(super) success: ExecutionSuccess,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RequiredTarget {
+    pub provider_id: uuid::Uuid,
+    pub provider_model: String,
 }
 
-pub(super) async fn execute_operation(
+pub(super) struct AuthenticatedProxyKey {
+    pub(super) runtime: Arc<crate::RuntimeBundle>,
+    pub(super) key: ApiKey,
+    pub(super) lookup_id: ApiKeyLookupId,
+}
+
+pub(super) fn authenticate_proxy_key(
+    state: &ApiState,
+    plaintext_key: &str,
+) -> Result<AuthenticatedProxyKey, InferenceError> {
+    let runtime = crate::pin_inference_runtime(state);
+    let key_hasher = state
+        .key_hasher
+        .as_ref()
+        .ok_or_else(|| InferenceError::unavailable("api_key_authentication_unavailable"))?;
+    let lookup = key_hasher
+        .lookup_id(plaintext_key)
+        .map_err(|_| InferenceError::unauthorized())?;
+    let lookup_id = ApiKeyLookupId::parse(lookup).map_err(|_| InferenceError::unauthorized())?;
+    let key = runtime
+        .api_keys
+        .get(&lookup_id)
+        .ok_or_else(InferenceError::unauthorized)?;
+    key_hasher
+        .parse_and_verify(plaintext_key, key.digest.as_bytes())
+        .map_err(|_| InferenceError::unauthorized())?;
+    let key = key.clone();
+    Ok(AuthenticatedProxyKey {
+        runtime,
+        key,
+        lookup_id,
+    })
+}
+
+pub(super) fn authenticate_key(
+    state: &ApiState,
+    headers: &HeaderMap,
+    operation: OperationKind,
+    route: Option<&RouteSlug>,
+) -> Result<ApiKey, InferenceError> {
+    let plaintext = bearer_token(headers)?;
+    let authenticated = authenticate_proxy_key(state, plaintext)?;
+    authorize_api_key(&authenticated.key, route, operation, Utc::now())
+        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+    Ok(authenticated.key)
+}
+
+pub(super) fn bearer_token(headers: &HeaderMap) -> Result<&str, InferenceError> {
+    let authorization = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(InferenceError::unauthorized)?;
+    let (scheme, token) = authorization
+        .split_once(' ')
+        .ok_or_else(InferenceError::unauthorized)?;
+    if !scheme.eq_ignore_ascii_case("bearer")
+        || token.is_empty()
+        || token.contains(char::is_whitespace)
+    {
+        return Err(InferenceError::unauthorized());
+    }
+    Ok(token)
+}
+
+pub(super) fn incompatible_result(operation: &'static str) -> InferenceError {
+    InferenceError::bad_gateway(
+        "provider_protocol_error",
+        format!("The provider returned an incompatible {operation} response."),
+    )
+}
+
+struct ExecutionContext {
+    generation_id: uuid::Uuid,
+    api_key_id: uuid::Uuid,
+    request_id: RequestId,
+    route_slug: RouteSlug,
+    operation_kind: OperationKind,
+    request_started_at: chrono::DateTime<Utc>,
+    request_started: tokio::time::Instant,
+    lease: Option<LimitLease>,
+    surface: Surface,
+}
+
+struct CompletedExecution {
+    context: ExecutionContext,
+    success: ExecutionSuccess,
+}
+
+async fn execute_operation(
     state: &ApiState,
     plaintext_key: &str,
     operation: Operation,
@@ -169,4 +268,367 @@ fn emit_early_failure(
         context.surface,
         context.operation_kind.as_str(),
     );
+}
+
+pub(super) async fn execute_event_operation(
+    state: &ApiState,
+    headers: &HeaderMap,
+    operation: Operation,
+    mode: TransportMode,
+) -> Result<RoutedEventExecution, InferenceError> {
+    let plaintext_key = bearer_token(headers)?;
+    execute_event_operation_for_surface(state, plaintext_key, operation, Surface::OpenAi, mode)
+        .await
+}
+
+pub(crate) async fn execute_event_operation_for_surface(
+    state: &ApiState,
+    plaintext_key: &str,
+    operation: Operation,
+    surface: Surface,
+    mode: TransportMode,
+) -> Result<RoutedEventExecution, InferenceError> {
+    let request_media = RequestMediaGuard::new(
+        state.media_spool.clone(),
+        operation_media_handles(&operation),
+    );
+    let result =
+        execute_event_operation_for_surface_inner(state, plaintext_key, operation, surface, mode)
+            .await;
+    request_media.cleanup().await;
+    result
+}
+
+pub(super) async fn execute_event_operation_for_surface_inner(
+    state: &ApiState,
+    plaintext_key: &str,
+    operation: Operation,
+    surface: Surface,
+    mode: TransportMode,
+) -> Result<RoutedEventExecution, InferenceError> {
+    let CompletedExecution { context, success } =
+        execute_operation(state, plaintext_key, operation, surface, mode, None).await?;
+    let ExecutionSuccess {
+        output,
+        deadline,
+        attempts,
+        attempt_started,
+    } = success;
+    let ExecutionOutput::Events { first, events } = output else {
+        release_limits(state, context.lease.as_ref()).await;
+        return Err(incompatible_result("generation"));
+    };
+    crate::claim_http_inference_metadata();
+    let first_byte_ms = elapsed_ms(context.request_started.elapsed());
+    Ok(RoutedEventExecution {
+        first,
+        events,
+        deadline,
+        lease: context.lease,
+        generation_id: context.generation_id,
+        api_key_id: context.api_key_id,
+        request_id: context.request_id.as_uuid(),
+        route_slug: context.route_slug,
+        surface: context.surface,
+        operation_kind: context.operation_kind,
+        request_started_at: context.request_started_at,
+        request_started: context.request_started,
+        attempt_started,
+        attempts,
+        first_byte_ms,
+    })
+}
+
+pub(crate) struct RoutedUnaryResult {
+    pub result: Box<CanonicalResult>,
+    pub request_id: RequestId,
+    pub api_key_id: uuid::Uuid,
+    pub route_slug: RouteSlug,
+    pub provider_id: uuid::Uuid,
+    pub provider_model: String,
+    completion: Option<UnaryExecutionCompletion>,
+}
+
+impl RoutedUnaryResult {
+    pub(crate) fn mark_success(&mut self) {
+        if let Some(completion) = self.completion.take() {
+            completion.emit(None);
+        }
+    }
+
+    pub(crate) fn mark_failure(&mut self, failure: &InferenceError) {
+        if let Some(completion) = self.completion.take() {
+            completion.emit(Some(failure));
+        }
+    }
+
+    pub(super) fn mark_outcome<T>(&mut self, outcome: &Result<T, InferenceError>) {
+        match outcome {
+            Ok(_) => self.mark_success(),
+            Err(failure) => self.mark_failure(failure),
+        }
+    }
+}
+
+impl Drop for RoutedUnaryResult {
+    fn drop(&mut self) {
+        let Some(completion) = self.completion.take() else {
+            return;
+        };
+        let failure = InferenceError::bad_gateway(
+            "provider_protocol_error",
+            "The provider result was not representable on the client protocol.",
+        );
+        completion.emit(Some(&failure));
+    }
+}
+
+pub(super) async fn execute_unary_result(
+    state: &ApiState,
+    headers: &HeaderMap,
+    operation: Operation,
+) -> Result<RoutedUnaryResult, InferenceError> {
+    execute_routed_result(state, headers, operation, TransportMode::Unary, None).await
+}
+
+pub(super) async fn execute_routed_result(
+    state: &ApiState,
+    headers: &HeaderMap,
+    operation: Operation,
+    mode: TransportMode,
+    required_target: Option<RequiredTarget>,
+) -> Result<RoutedUnaryResult, InferenceError> {
+    let plaintext_key = bearer_token(headers)?;
+    execute_routed_result_for_surface(
+        state,
+        plaintext_key,
+        operation,
+        Surface::OpenAi,
+        mode,
+        required_target,
+    )
+    .await
+}
+
+pub(crate) async fn execute_routed_result_for_surface(
+    state: &ApiState,
+    plaintext_key: &str,
+    operation: Operation,
+    surface: Surface,
+    mode: TransportMode,
+    required_target: Option<RequiredTarget>,
+) -> Result<RoutedUnaryResult, InferenceError> {
+    let request_media = RequestMediaGuard::new(
+        state.media_spool.clone(),
+        operation_media_handles(&operation),
+    );
+    let result = execute_routed_result_for_surface_inner(
+        state,
+        plaintext_key,
+        operation,
+        surface,
+        mode,
+        required_target,
+    )
+    .await;
+    request_media.cleanup().await;
+    result
+}
+
+pub(super) async fn execute_routed_result_for_surface_inner(
+    state: &ApiState,
+    plaintext_key: &str,
+    operation: Operation,
+    surface: Surface,
+    mode: TransportMode,
+    required_target: Option<RequiredTarget>,
+) -> Result<RoutedUnaryResult, InferenceError> {
+    let CompletedExecution { context, success } = execute_operation(
+        state,
+        plaintext_key,
+        operation,
+        surface,
+        mode,
+        required_target,
+    )
+    .await?;
+    let ExecutionSuccess {
+        output,
+        attempts,
+        attempt_started,
+        ..
+    } = success;
+    let ExecutionOutput::Result(result) = output else {
+        let failure = InferenceError::bad_gateway(
+            "provider_protocol_error",
+            "The provider returned an event stream for a unary result operation.",
+        );
+        emit_request_event(
+            state,
+            context.generation_id,
+            context.api_key_id,
+            context.request_id.as_uuid(),
+            &context.route_slug,
+            &attempts,
+            context.request_started_at,
+            context.request_started,
+            Some(attempt_started),
+            Some(elapsed_ms(context.request_started.elapsed())),
+            Some(failure.status.as_u16()),
+            Some(failure.code.to_owned()),
+            true,
+            &UsageCapture::default(),
+            context.surface,
+            context.operation_kind.as_str(),
+        );
+        release_limits(state, context.lease.as_ref()).await;
+        return Err(failure);
+    };
+    let usage = usage_from_result(&result);
+    let first_byte_ms = elapsed_ms(context.request_started.elapsed());
+    release_limits(state, context.lease.as_ref()).await;
+    let final_attempt = attempts
+        .last()
+        .expect("a successful execution has one provider attempt");
+    crate::claim_http_inference_metadata();
+    Ok(RoutedUnaryResult {
+        result,
+        request_id: context.request_id,
+        api_key_id: context.api_key_id,
+        route_slug: context.route_slug.clone(),
+        provider_id: final_attempt.provider_id,
+        provider_model: final_attempt.upstream_model.clone(),
+        completion: Some(UnaryExecutionCompletion {
+            state: state.clone(),
+            generation_id: context.generation_id,
+            api_key_id: context.api_key_id,
+            request_id: context.request_id.as_uuid(),
+            route_slug: context.route_slug,
+            attempts,
+            request_started_at: context.request_started_at,
+            request_started: context.request_started,
+            attempt_started,
+            first_byte_ms,
+            usage,
+            surface: context.surface,
+            operation: context.operation_kind.as_str(),
+        }),
+    })
+}
+
+pub(crate) fn authenticate_model_access(
+    state: &ApiState,
+    plaintext_key: &str,
+    operation: OperationKind,
+) -> Result<(Arc<crate::RuntimeBundle>, ApiKey), InferenceError> {
+    let authenticated = authenticate_proxy_key(state, plaintext_key)?;
+    authorize_api_key(&authenticated.key, None, operation, Utc::now())
+        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+    Ok((authenticated.runtime, authenticated.key))
+}
+
+pub(crate) async fn reserve_model_limits(
+    state: &ApiState,
+    key: &ApiKey,
+    plaintext_key: &str,
+    surface: Surface,
+) -> Result<Option<LimitLease>, InferenceError> {
+    let hasher = state
+        .key_hasher
+        .as_ref()
+        .ok_or_else(|| InferenceError::unavailable("api_key_authentication_unavailable"))?;
+    let lookup = hasher
+        .lookup_id(plaintext_key)
+        .map_err(|_| InferenceError::unauthorized())?;
+    let operation = Operation::Models(olp_domain::ModelOperation::List {
+        extensions: olp_domain::SourceExtensions::new(surface, BTreeMap::new()),
+    });
+    reserve_limits(state, key, &operation, lookup, Duration::from_secs(30)).await
+}
+
+pub(crate) async fn release_model_limits(state: &ApiState, lease: Option<&LimitLease>) {
+    release_limits(state, lease).await;
+}
+
+pub(crate) struct SessionGenerationExecution {
+    pub events: Vec<CanonicalEvent>,
+    pub request_id: RequestId,
+    pub route_slug: RouteSlug,
+    pub latency_ms: u64,
+}
+
+/// Executes a management-session playground request through the exact same
+/// capability selection, provider transport, deadline, cancellation, and
+/// failover machinery as API-key inference. The caller owns session/RBAC
+/// authorization. Content and usage are intentionally not emitted or stored.
+pub(crate) async fn execute_session_generation(
+    state: &ApiState,
+    operation: Operation,
+    surface: Surface,
+) -> Result<SessionGenerationExecution, InferenceError> {
+    let request_media = RequestMediaGuard::new(
+        state.media_spool.clone(),
+        operation_media_handles(&operation),
+    );
+    let result = execute_session_generation_inner(state, operation, surface).await;
+    request_media.cleanup().await;
+    result
+}
+
+async fn execute_session_generation_inner(
+    state: &ApiState,
+    operation: Operation,
+    surface: Surface,
+) -> Result<SessionGenerationExecution, InferenceError> {
+    if operation.kind() != OperationKind::Generation {
+        return Err(InferenceError::invalid_request(
+            "The playground supports generation only.",
+        ));
+    }
+    let snapshot = state.runtime.pin();
+    let route_slug = operation
+        .route()
+        .cloned()
+        .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
+    let request_id = RequestId::new();
+    let attempts = select_representable_attempts_filtered(
+        &snapshot,
+        &route_slug,
+        &operation,
+        surface,
+        TransportMode::Unary,
+        request_id.as_uuid().as_bytes(),
+        |_, target| state.circuits.is_selectable(target.id),
+    )?;
+    let route = snapshot
+        .routes
+        .get(&route_slug)
+        .expect("attempt selection returned a known route");
+    let started = tokio::time::Instant::now();
+    let execution = execute_with_failover(
+        &snapshot,
+        attempts,
+        RequestMetadata {
+            request_id,
+            operation: OperationKind::Generation,
+            surface,
+            mode: TransportMode::Unary,
+        },
+        operation,
+        route.overall_timeout.as_duration(),
+        state.media_spool.clone(),
+        &state.circuits,
+    )
+    .await;
+    let success = execution.map_err(|failure| failure.error)?;
+    let ExecutionOutput::Events { first, mut events } = success.output else {
+        return Err(incompatible_result("generation"));
+    };
+    let events = collect_provider_events(first, &mut events, success.deadline).await?;
+    Ok(SessionGenerationExecution {
+        events,
+        request_id,
+        route_slug,
+        latency_ms: elapsed_ms(started.elapsed()),
+    })
 }
