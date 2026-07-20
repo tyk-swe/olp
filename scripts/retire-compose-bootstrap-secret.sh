@@ -12,7 +12,7 @@ marker="$secrets_dir/.olp_bootstrap_retired"
   echo "Compose secrets directory does not exist: $secrets_dir" >&2
   exit 1
 }
-for key in olp_master_key olp_key_hash_key; do
+for key in olp_master_key olp_auth_hmac_key; do
   path="$secrets_dir/$key"
   if [[ -L $path || ! -f $path ]]; then
     echo "required long-lived Compose secret is unavailable: $path" >&2

@@ -3,7 +3,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use chrono::Utc;
 use olp_domain::{CanonicalEvent, CanonicalEventKind, CanonicalResult, RouteSlug, Surface};
-use olp_storage::{UsageAttempt, UsageEvent};
+use olp_storage::{RequestAttemptMetadata, RequestMetadataEvent};
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
 use serde_json::Value;
 use tracing::error;
@@ -48,7 +48,7 @@ pub(super) struct UnaryExecutionCompletion {
     pub(super) api_key_id: uuid::Uuid,
     pub(super) request_id: uuid::Uuid,
     pub(super) route_slug: RouteSlug,
-    pub(super) attempts: Vec<UsageAttempt>,
+    pub(super) attempts: Vec<RequestAttemptMetadata>,
     pub(super) request_started_at: chrono::DateTime<Utc>,
     pub(super) request_started: tokio::time::Instant,
     pub(super) attempt_started: tokio::time::Instant,
@@ -211,7 +211,7 @@ pub(super) fn emit_request_event(
     api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
     route_slug: &RouteSlug,
-    attempts: &[UsageAttempt],
+    attempts: &[RequestAttemptMetadata],
     request_started_at: chrono::DateTime<Utc>,
     request_started: tokio::time::Instant,
     final_attempt_started: Option<tokio::time::Instant>,
@@ -224,7 +224,7 @@ pub(super) fn emit_request_event(
     operation: &'static str,
 ) {
     crate::claim_http_inference_metadata();
-    if let Some(emitter) = &state.usage {
+    if let Some(emitter) = &state.request_metadata {
         let request_completed_at = Utc::now();
         let mut attempts = attempts.to_vec();
         if let (Some(final_attempt), Some(started)) = (attempts.last_mut(), final_attempt_started) {
@@ -239,7 +239,7 @@ pub(super) fn emit_request_event(
         let upstream_model = attempts
             .last()
             .map(|attempt| attempt.upstream_model.clone());
-        let result = emitter.emit(UsageEvent {
+        let result = emitter.emit(RequestMetadataEvent {
             event_id: uuid::Uuid::now_v7(),
             request_id,
             runtime_generation_id: generation_id,

@@ -159,10 +159,12 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
-    let hasher = Arc::new(KeyHasher::new([3; 32]));
+    let auth_hmac_key = Arc::new(AuthHmacKey::new([3; 32]));
     let token = base64::engine::general_purpose::STANDARD.encode([7_u8; 32]);
-    let digest = hasher.bootstrap_token_digest_from_base64(&token).unwrap();
-    state.key_hasher = Some(hasher);
+    let digest = auth_hmac_key
+        .bootstrap_token_digest_from_base64(&token)
+        .unwrap();
+    state.auth_hmac_key = Some(auth_hmac_key);
     state.set_bootstrap_token_digest(digest);
     assert_eq!(state.verify_bootstrap_token(Some(&token)).await, Some(true));
     assert_eq!(
@@ -298,8 +300,8 @@ async fn stale_metrics_do_not_change_the_readiness_contract() {
 }
 
 fn inference_state(limited: bool) -> (ApiState, String) {
-    let key_hasher = Arc::new(KeyHasher::new([19; 32]));
-    let material = key_hasher.generate_api_key();
+    let auth_hmac_key = Arc::new(AuthHmacKey::new([19; 32]));
+    let material = auth_hmac_key.generate_api_key();
     let plaintext = material.expose_once().to_owned();
     let lookup_id = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
     let runtime = Arc::new(RuntimeManager::empty());
@@ -341,7 +343,7 @@ fn inference_state(limited: bool) -> (ApiState, String) {
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
-    state.key_hasher = Some(key_hasher);
+    state.auth_hmac_key = Some(auth_hmac_key);
     (state, plaintext)
 }
 
@@ -367,11 +369,11 @@ fn local_metadata_detection_is_method_and_surface_exact() {
 
 #[tokio::test]
 async fn local_metadata_event_is_content_free_and_reconcilable() {
-    let (usage, mut receiver) = UsageEmitter::bounded(1);
+    let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(1);
     let generation_id = uuid::Uuid::now_v7();
     let api_key_id = uuid::Uuid::now_v7();
     LocalRequestMetadata {
-        usage: Some(usage),
+        request_metadata: Some(request_metadata),
         request_started_at: chrono::Utc::now(),
         runtime_generation_id: generation_id,
         api_key_id,
@@ -424,11 +426,11 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
         HeaderValue::from_static("session=secret"),
     );
     request.headers_mut().insert(
-        HeaderName::from_static(management::CSRF_HEADER),
+        HeaderName::from_static(management_api::CSRF_HEADER),
         HeaderValue::from_static("csrf-secret"),
     );
     request.headers_mut().insert(
-        HeaderName::from_static(management::SETUP_TOKEN_HEADER),
+        HeaderName::from_static(management_api::SETUP_TOKEN_HEADER),
         HeaderValue::from_static("bootstrap-secret"),
     );
     request.headers_mut().insert(
@@ -688,7 +690,7 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
-    state.key_hasher = Some(Arc::new(KeyHasher::new([3; 32])));
+    state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([3; 32])));
     let app = public_router(state);
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     for (path, header_name, expected_pointer) in [
@@ -810,8 +812,8 @@ async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode
 #[tokio::test]
 async fn malformed_inference_json_without_hard_limits_reaches_native_decoder() {
     let (mut state, key) = inference_state(false);
-    let (usage, mut receiver) = UsageEmitter::bounded(2);
-    state.usage = Some(usage);
+    let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(request_metadata);
     let response = public_router(state)
         .oneshot(
             Request::post("/openai/v1/chat/completions")

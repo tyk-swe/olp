@@ -17,6 +17,7 @@ mod health;
 mod helpers;
 mod media_jobs;
 mod pricing;
+mod request_metadata;
 mod requests;
 mod runtime;
 mod settings;
@@ -45,12 +46,12 @@ pub(crate) fn router() -> Router<ApiState> {
             get(usage::completeness::usage_completeness),
         )
         .route(
-            "/api/v1/usage/gateway-epochs",
-            get(usage::epochs::list_usage_gateway_epochs),
+            "/api/v1/request-metadata/gateway-epochs",
+            get(request_metadata::list_request_metadata_gateway_epochs),
         )
         .route(
-            "/api/v1/usage/gateway-epochs/{process_epoch}/acknowledge",
-            axum::routing::post(usage::epochs::acknowledge_usage_gateway_epoch),
+            "/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge",
+            axum::routing::post(request_metadata::acknowledge_request_metadata_gateway_epoch),
         )
         .route("/api/v1/audit", get(audit::list_audit_events))
         .route("/api/v1/health/ready", get(health::management_readiness))
@@ -81,8 +82,8 @@ pub(crate) fn router() -> Router<ApiState> {
         usage::summary::usage_summary,
         usage::breakdown::usage_breakdown,
         usage::completeness::usage_completeness,
-        usage::epochs::list_usage_gateway_epochs,
-        usage::epochs::acknowledge_usage_gateway_epoch,
+        request_metadata::list_request_metadata_gateway_epochs,
+        request_metadata::acknowledge_request_metadata_gateway_epoch,
         audit::list_audit_events,
         health::management_readiness,
         health::provider_health,
@@ -102,15 +103,15 @@ pub(crate) fn router() -> Router<ApiState> {
         media_jobs::MediaJobListResponse,
         usage::series::UsagePointResponse,
         usage::UsageRangeCoverageResponse,
-        usage::UsageConsumerStatusResponse,
+        request_metadata::RequestMetadataConsumerStatusResponse,
         usage::series::UsageTimeSeriesResponse,
         usage::summary::UsageSummaryResponse,
         usage::breakdown::UsageBreakdownItem,
         usage::breakdown::UsageBreakdownResponse,
         usage::completeness::UsageCompletenessResponse,
-        usage::epochs::UsageGatewayEpochListResponse,
-        usage::epochs::UsageGatewayEpochResponse,
-        usage::epochs::UsageEpochAcknowledgementResponse,
+        request_metadata::RequestMetadataGatewayEpochListResponse,
+        request_metadata::RequestMetadataGatewayEpochResponse,
+        request_metadata::RequestMetadataEpochAcknowledgementResponse,
         audit::AuditEventResponse,
         audit::AuditListResponse,
         HealthResponse,
@@ -134,6 +135,7 @@ pub(crate) fn router() -> Router<ApiState> {
         (name = "requests"),
         (name = "media-jobs"),
         (name = "usage"),
+        (name = "request-metadata"),
         (name = "audit"),
         (name = "health"),
         (name = "runtime"),

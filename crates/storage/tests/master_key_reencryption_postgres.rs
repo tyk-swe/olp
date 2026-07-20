@@ -15,7 +15,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "Master-key integration".to_owned(),
+            installation_name: "Master-key integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),
@@ -42,7 +42,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         .unwrap();
     sqlx::query(
         "INSERT INTO providers (id, name, kind, state, auth_mode, etag, created_by) \
-         VALUES ($1, 'rotation-provider', 'open_ai', 'draft', 'api_key', $2, $3)",
+         VALUES ($1, 'rotation-provider', 'openai', 'draft', 'api_key', $2, $3)",
     )
     .bind(provider_id)
     .bind(Uuid::now_v7())

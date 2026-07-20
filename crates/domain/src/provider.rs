@@ -1,4 +1,4 @@
-//! Closed provider and catalog policy values shared across application layers.
+//! Closed provider and configuration policy values shared across application layers.
 
 use std::{fmt, str::FromStr};
 

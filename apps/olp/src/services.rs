@@ -6,18 +6,18 @@
 
 use std::sync::Arc;
 
-use olp_storage::{KeyHasher, MasterKey, PgStore};
+use olp_storage::{AuthHmacKey, MasterKey, PgStore};
 use thiserror::Error;
 
 use crate::{ApiMode, ApiState, RuntimeManager, TransportRegistry};
 
 #[derive(Clone)]
-pub struct CatalogService {
+pub struct ConfigurationService {
     pub(crate) store: PgStore,
     pub(crate) master_key: Option<Arc<MasterKey>>,
 }
 
-impl CatalogService {
+impl ConfigurationService {
     #[must_use]
     pub fn store(&self) -> &PgStore {
         &self.store
@@ -32,7 +32,7 @@ impl CatalogService {
 #[derive(Clone)]
 pub struct IdentityService {
     pub(crate) store: PgStore,
-    pub(crate) key_hasher: Arc<KeyHasher>,
+    pub(crate) auth_hmac_key: Arc<AuthHmacKey>,
 }
 
 impl IdentityService {
@@ -42,8 +42,8 @@ impl IdentityService {
     }
 
     #[must_use]
-    pub fn key_hasher(&self) -> &KeyHasher {
-        &self.key_hasher
+    pub fn auth_hmac_key(&self) -> &AuthHmacKey {
+        &self.auth_hmac_key
     }
 }
 
@@ -103,7 +103,7 @@ impl WorkerService {
 #[derive(Clone)]
 pub enum ModeServices {
     All {
-        catalog: CatalogService,
+        configuration: ConfigurationService,
         identity: IdentityService,
         inference: InferenceService,
         operations: OperationsService,
@@ -112,7 +112,7 @@ pub enum ModeServices {
         inference: InferenceService,
     },
     Control {
-        catalog: CatalogService,
+        configuration: ConfigurationService,
         identity: IdentityService,
         operations: OperationsService,
     },
@@ -122,8 +122,8 @@ pub enum ModeServices {
 pub enum ApiStartupError {
     #[error("{0} mode requires PostgreSQL storage")]
     Storage(ApiMode),
-    #[error("{0} mode requires the API-key hash key")]
-    KeyHasher(ApiMode),
+    #[error("{0} mode requires the authentication HMAC key")]
+    AuthHmacKey(ApiMode),
 }
 
 impl std::fmt::Display for ApiMode {
@@ -147,25 +147,25 @@ impl ApiState {
             runtime: Arc::clone(&self.runtime),
             transports: self.transports.clone(),
         };
-        let catalog = || CatalogService {
+        let configuration = || ConfigurationService {
             store: store.clone(),
             master_key: self.master_key.clone(),
         };
         let identity = || {
-            self.key_hasher
+            self.auth_hmac_key
                 .clone()
-                .map(|key_hasher| IdentityService {
+                .map(|auth_hmac_key| IdentityService {
                     store: store.clone(),
-                    key_hasher,
+                    auth_hmac_key,
                 })
-                .ok_or(ApiStartupError::KeyHasher(self.mode))
+                .ok_or(ApiStartupError::AuthHmacKey(self.mode))
         };
         let operations = || OperationsService {
             store: store.clone(),
         };
         match self.mode {
             ApiMode::All => Ok(ModeServices::All {
-                catalog: catalog(),
+                configuration: configuration(),
                 identity: identity()?,
                 inference: inference(),
                 operations: operations(),
@@ -174,7 +174,7 @@ impl ApiState {
                 inference: inference(),
             }),
             ApiMode::Control => Ok(ModeServices::Control {
-                catalog: catalog(),
+                configuration: configuration(),
                 identity: identity()?,
                 operations: operations(),
             }),
@@ -190,7 +190,7 @@ mod tests {
 
     use super::*;
 
-    fn state(mode: ApiMode, with_store: bool, with_key_hasher: bool) -> ApiState {
+    fn state(mode: ApiMode, with_store: bool, with_auth_hmac_key: bool) -> ApiState {
         let store = with_store.then(|| {
             let pool = PgPoolOptions::new()
                 .connect_lazy("postgres://olp:olp@127.0.0.1/olp")
@@ -204,8 +204,8 @@ mod tests {
             "https://olp.example.test",
             PathBuf::from("missing-console"),
         );
-        if with_key_hasher {
-            state.key_hasher = Some(Arc::new(KeyHasher::new([7; 32])));
+        if with_auth_hmac_key {
+            state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([7; 32])));
         }
         state
     }
@@ -224,11 +224,11 @@ mod tests {
     async fn control_surfaces_require_identity_dependencies_but_gateway_does_not() {
         assert_eq!(
             state(ApiMode::All, true, false).mode_services().err(),
-            Some(ApiStartupError::KeyHasher(ApiMode::All))
+            Some(ApiStartupError::AuthHmacKey(ApiMode::All))
         );
         assert_eq!(
             state(ApiMode::Control, true, false).mode_services().err(),
-            Some(ApiStartupError::KeyHasher(ApiMode::Control))
+            Some(ApiStartupError::AuthHmacKey(ApiMode::Control))
         );
         assert!(matches!(
             state(ApiMode::Gateway, true, false).mode_services(),

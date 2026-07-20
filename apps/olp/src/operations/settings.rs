@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::helpers::{map_operations, not_found};
 use crate::{
     ApiState, Problem,
-    management::{
+    management_api::{
         Permission, json_payload, require_mutation_session, require_permission,
         require_read_session, require_store,
     },

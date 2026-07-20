@@ -25,8 +25,30 @@ dashboard="$(dirname "$chart")/monitoring/grafana-dashboard.json"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+
+legacy_secrets="$work/legacy-compose-secrets"
+install -d -m 700 "$legacy_secrets"
+printf 'legacy-key-fixture\n' > "$legacy_secrets/olp_key_hash_key"
+chmod 600 "$legacy_secrets/olp_key_hash_key"
+legacy_auth_hmac_key_checksum=$(sha256sum "$legacy_secrets/olp_key_hash_key")
+if OLP_COMPOSE_SECRETS_DIR="$legacy_secrets" \
+  "$compose_secret_helper" >"$work/legacy-compose-error" 2>&1; then
+  echo "Compose secret preparation replaced a legacy authentication HMAC key" >&2
+  exit 1
+fi
+[[ $(sha256sum "$legacy_secrets/olp_key_hash_key") == "$legacy_auth_hmac_key_checksum" && \
+  ! -e "$legacy_secrets/olp_auth_hmac_key" && \
+  ! -e "$legacy_secrets/olp_master_key" ]] || {
+  echo "Compose legacy authentication HMAC key guard changed secret files" >&2
+  exit 1
+}
+grep -Fq 'move or securely copy the existing bytes' "$work/legacy-compose-error" || {
+  echo "Compose legacy authentication HMAC key guard is not actionable" >&2
+  exit 1
+}
+
 OLP_COMPOSE_SECRETS_DIR="$work/compose-secrets" "$compose_secret_helper" >/dev/null
-for secret in olp_master_key olp_key_hash_key olp_bootstrap_token; do
+for secret in olp_master_key olp_auth_hmac_key olp_bootstrap_token; do
   [[ -f "$work/compose-secrets/$secret" ]] || {
     echo "Compose quick-start did not generate $secret" >&2
     exit 1
@@ -37,7 +59,7 @@ for secret in olp_master_key olp_key_hash_key olp_bootstrap_token; do
   }
 done
 master_key_checksum=$(sha256sum "$work/compose-secrets/olp_master_key")
-key_hash_checksum=$(sha256sum "$work/compose-secrets/olp_key_hash_key")
+auth_hmac_key_checksum=$(sha256sum "$work/compose-secrets/olp_auth_hmac_key")
 OLP_COMPOSE_SECRETS_DIR="$work/compose-secrets" \
   "$compose_bootstrap_retirement_helper" >/dev/null
 [[ ! -e "$work/compose-secrets/olp_bootstrap_token" && \
@@ -51,7 +73,7 @@ OLP_COMPOSE_SECRETS_DIR="$work/compose-secrets" "$compose_secret_helper" >/dev/n
   exit 1
 }
 [[ $(sha256sum "$work/compose-secrets/olp_master_key") == "$master_key_checksum" && \
-  $(sha256sum "$work/compose-secrets/olp_key_hash_key") == "$key_hash_checksum" ]] || {
+  $(sha256sum "$work/compose-secrets/olp_auth_hmac_key") == "$auth_hmac_key_checksum" ]] || {
   echo "Compose bootstrap retirement changed a long-lived key" >&2
   exit 1
 }
@@ -69,6 +91,11 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set mediaSpool.capacityBytes=9007199254740991 \
   > "$work/max-spool-manifests.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set-string config.valkeySecretName=migration-preflight-valkey \
+  --set-string config.valkeySecretKey=migration-preflight-url \
+  --show-only templates/migration-job.yaml \
+  > "$work/migration-manifest.yaml"
 long_fullname="$(printf 'a%.0s' {1..63})"
 helm template olp "$chart" --namespace olp --set fullnameOverride="$long_fullname" \
   > "$work/long-name-manifests.yaml"
@@ -109,6 +136,8 @@ for expected in \
   'sizeLimit: "2Gi"' \
   'containerPort: 9090' \
   'name: observability' \
+  'name: OLP_AUTH_HMAC_KEY_FILE' \
+  'value: /run/secrets/auth-hmac-key/key' \
   'name: OLP_HTTP_MAX_CONNECTIONS' \
   'value: "16384"' \
   'value: "1073741824"' \
@@ -116,6 +145,16 @@ for expected in \
   'olp-openllmproxy-control-observability'; do
   grep -Fq "$expected" "$work/manifests.yaml" || {
     echo "rendered Helm contract is missing: $expected" >&2
+    exit 1
+  }
+done
+
+for expected in \
+  'name: OLP_VALKEY_URL' \
+  'name: "migration-preflight-valkey"' \
+  'key: "migration-preflight-url"'; do
+  grep -Fq "$expected" "$work/migration-manifest.yaml" || {
+    echo "rendered migration Job is missing its Valkey preflight dependency: $expected" >&2
     exit 1
   }
 done
@@ -155,6 +194,10 @@ grep -Fq 'OLP_OBSERVABILITY_LISTEN_ADDR: 0.0.0.0:9090' "$compose_file" || {
   echo "Compose does not start the private observability listener" >&2
   exit 1
 }
+grep -Fq 'OLP_AUTH_HMAC_KEY_FILE: /run/secrets/olp_auth_hmac_key' "$compose_file" || {
+  echo "Compose does not mount the authentication HMAC key" >&2
+  exit 1
+}
 grep -Fq "OLP_HTTP_MAX_CONNECTIONS: \${OLP_HTTP_MAX_CONNECTIONS:-1024}" "$compose_file" || {
   echo "Compose does not expose the public-listener connection cap" >&2
   exit 1
@@ -174,8 +217,16 @@ grep -Fq 'EXPOSE 8080 9090' "$dockerfile" || {
   exit 1
 }
 docker compose -f "$compose_file" config > "$work/compose.yaml"
+docker compose -f "$compose_file" config --format json > "$work/compose.json"
 docker compose -f "$compose_file" -f "$bootstrap_compose_file" config \
   > "$work/compose-bootstrap.yaml"
+jq -e '
+  .services.migrate.environment.OLP_VALKEY_URL == "redis://valkey:6379" and
+  .services.migrate.depends_on.valkey.condition == "service_healthy"
+' "$work/compose.json" >/dev/null || {
+  echo "Compose migration must wait for and preflight Valkey" >&2
+  exit 1
+}
 if rg -q 'OLP_BOOTSTRAP_TOKEN_FILE|olp_bootstrap_token' "$work/compose.yaml"; then
   echo "rendered base Compose configuration still requires the bootstrap token" >&2
   exit 1
@@ -201,13 +252,24 @@ for expected in \
   'path: /api' \
   'path: /' \
   'alert: OLPReadinessAbsent' \
-  'alert: OLPUsageConsumerBacklogHigh' \
+  'alert: OLPRequestMetadataEventsDropped' \
+  'alert: OLPRequestMetadataEventsAbandoned' \
+  'alert: OLPRequestMetadataPersistenceUnavailable' \
+  'alert: OLPRequestMetadataBacklogHigh' \
+  'alert: OLPRequestMetadataConsumerBacklogHigh' \
+  'olp_request_metadata_events_pending' \
   'olp_ready{namespace="olp"'; do
   grep -Fq "$expected" "$work/edge-manifests.yaml" || {
     echo "rendered edge/monitoring contract is missing: $expected" >&2
     exit 1
   }
 done
+
+if rg -q 'OLPUsage(Events|Persistence|Backlog|Consumer)|olp_usage_(events|persistence|consumer|gateway|stream)' \
+  "$work/edge-manifests.yaml"; then
+  echo "rendered monitoring contract contains legacy usage-named request metadata telemetry" >&2
+  exit 1
+fi
 
 if awk '
   /^kind: Ingress$/ { ingress=1 }

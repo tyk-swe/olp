@@ -49,7 +49,7 @@ const apiKeyAuthOptions: readonly AuthOption[] = [['api_key', 'Stored API key']]
 
 export function createProviderDraft(): ProviderDraft {
   return {
-    kind: 'open_ai',
+    kind: 'openai',
     name: '',
     endpoint: '',
     apiVersion: '',
@@ -87,7 +87,7 @@ export function requiresSeedModel(kind: ProviderKind): boolean {
 }
 
 export function hasCustomEndpoint(kind: ProviderKind): boolean {
-  return ['open_ai_compatible', 'azure_open_ai'].includes(kind);
+  return ['openai_compatible', 'azure_openai'].includes(kind);
 }
 
 export function hasCloudRegion(kind: ProviderKind): boolean {
@@ -99,11 +99,11 @@ export function hasCloudProject(kind: ProviderKind): boolean {
 }
 
 export function hasDeployment(kind: ProviderKind): boolean {
-  return kind === 'azure_open_ai';
+  return kind === 'azure_openai';
 }
 
 export function hasApiVersion(kind: ProviderKind): boolean {
-  return kind === 'azure_open_ai';
+  return kind === 'azure_openai';
 }
 
 export function validateProviderDraft(draft: ProviderDraft): string | null {
@@ -116,7 +116,7 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
       ? 'Name, Vertex probe model, and the selected identity fields are required.'
       : 'Name and the selected identity fields are required.';
   }
-  if (draft.kind === 'open_ai_compatible' && !draft.endpoint.trim()) {
+  if (draft.kind === 'openai_compatible' && !draft.endpoint.trim()) {
     return 'An HTTPS endpoint is required for an OpenAI-compatible provider.';
   }
   if (draft.kind === 'vertex_ai' && (!draft.cloudProject.trim() || !draft.cloudRegion.trim())) {
@@ -126,7 +126,7 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
     return 'AWS Bedrock requires a cloud region.';
   }
   if (
-    draft.kind === 'azure_open_ai' &&
+    draft.kind === 'azure_openai' &&
     (!draft.endpoint.trim() || !draft.deployment.trim() || !draft.apiVersion.trim())
   ) {
     return 'Azure OpenAI requires its resource endpoint, deployment, and API version.';

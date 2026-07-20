@@ -43,7 +43,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
             "email": "owner@example.test",
             "password": "correct horse battery staple",
             "display_name": "Owner",
-            "organization_name": "HTTP identity test"
+            "installation_name": "HTTP identity test"
         }),
         None,
         None,

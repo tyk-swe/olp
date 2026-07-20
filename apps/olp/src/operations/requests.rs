@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::helpers::{map_operations, page_limit, validate_time_range};
 use crate::{
     ApiState, Problem,
-    management::{Permission, require_permission, require_read_session, require_store},
+    management_api::{Permission, require_permission, require_read_session, require_store},
 };
 
 #[derive(Debug, Deserialize, IntoParams)]

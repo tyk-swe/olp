@@ -4,7 +4,7 @@ mod route_fixtures;
 use olp_domain::{
     OperationKind, RouteSlug, RuntimeSnapshot, Surface, TransportMode, select_attempts,
 };
-use olp_storage::{NewOwner, PgStore, ReplaceRouteDraftCatalogInput, SessionMaterial};
+use olp_storage::{NewOwner, PgStore, ReplaceRouteDraftInput, SessionMaterial};
 use route_fixtures::{DraftFixture, insert_provider};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     let (owner, _) = store
         .setup_owner_with_session(
             NewOwner {
-                organization_name: "Route simulation".to_owned(),
+                installation_name: "Route simulation".to_owned(),
                 email: "owner@route-simulation.test".to_owned(),
                 display_name: "Owner".to_owned(),
                 password_hash: "test-password-hash".to_owned(),
@@ -39,16 +39,12 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
         &[primary.model_id, fallback.model_id],
     )
     .await;
-    let initial_targets = store
-        .get_route_draft_catalog(draft.id)
-        .await
-        .unwrap()
-        .targets;
+    let initial_targets = store.get_route_draft(draft.id).await.unwrap().targets;
     let replacement_etag = store
-        .replace_route_draft_catalog(
+        .replace_route_draft(
             draft.id,
             draft.etag,
-            &ReplaceRouteDraftCatalogInput {
+            &ReplaceRouteDraftInput {
                 slug: "simulation".to_owned(),
                 operations: vec!["video_get".parse().unwrap()],
                 overall_timeout_ms: 30_000,
@@ -62,7 +58,7 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
         )
         .await
         .unwrap();
-    let draft = store.get_route_draft_catalog(draft.id).await.unwrap();
+    let draft = store.get_route_draft(draft.id).await.unwrap();
     assert!(
         draft
             .targets
@@ -77,10 +73,10 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
 
     let seed = "route-draft-simulation-affinity";
     let simulation = store
-        .simulate_route_draft_catalog(
+        .simulate_route_draft(
             draft.id,
             "video_get".parse().unwrap(),
-            "open_ai".parse().unwrap(),
+            "openai".parse().unwrap(),
             "unary".parse().unwrap(),
             seed,
         )

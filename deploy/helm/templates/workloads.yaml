@@ -90,8 +90,8 @@ spec:
                   key: {{ required "config.valkeySecretKey is required" $root.Values.config.valkeySecretKey | quote }}
             - name: OLP_MASTER_KEY_FILE
               value: /run/secrets/master-key/key
-            - name: OLP_KEY_HASH_KEY_FILE
-              value: /run/secrets/key-hash/key
+            - name: OLP_AUTH_HMAC_KEY_FILE
+              value: /run/secrets/auth-hmac-key/key
             {{- if $trustedProxyCidrs }}
             - name: OLP_TRUSTED_PROXY_CIDRS
               value: {{ $trustedProxyCidrs | quote }}
@@ -131,8 +131,8 @@ spec:
             - name: master-key
               mountPath: /run/secrets/master-key
               readOnly: true
-            - name: key-hash
-              mountPath: /run/secrets/key-hash
+            - name: auth-hmac-key
+              mountPath: /run/secrets/auth-hmac-key
               readOnly: true
             {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
             - name: bootstrap-token
@@ -151,12 +151,12 @@ spec:
             items:
               - key: {{ required "config.masterKeySecretKey is required" $root.Values.config.masterKeySecretKey | quote }}
                 path: key
-        - name: key-hash
+        - name: auth-hmac-key
           secret:
-            secretName: {{ required "config.keyHashSecretName is required" $root.Values.config.keyHashSecretName | quote }}
+            secretName: {{ required "config.authHmacKeySecretName is required" $root.Values.config.authHmacKeySecretName | quote }}
             defaultMode: 0440
             items:
-              - key: {{ required "config.keyHashSecretKey is required" $root.Values.config.keyHashSecretKey | quote }}
+              - key: {{ required "config.authHmacKeySecretKey is required" $root.Values.config.authHmacKeySecretKey | quote }}
                 path: key
         {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
         - name: bootstrap-token

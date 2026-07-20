@@ -677,6 +677,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/request-metadata/gateway-epochs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_request_metadata_gateway_epochs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["acknowledge_request_metadata_gateway_epoch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/requests": {
         parameters: {
             query?: never;
@@ -1045,38 +1077,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/usage/gateway-epochs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_usage_gateway_epochs"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/usage/gateway-epochs/{process_epoch}/acknowledge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["acknowledge_usage_gateway_epoch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -1150,13 +1150,13 @@ export interface components {
             password: string;
             token: string;
         };
-        ApiKeyCatalogResponse: {
+        ApiKeyDetailResponse: {
             allowed_routes: string[];
             /** Format: date-time */
             created_at: string;
             /**
              * Format: uuid
-             * @description The operator who issued this team-scoped key.
+             * @description The operator who issued this installation-scoped key.
              */
             created_by: string;
             created_by_email: string;
@@ -1181,13 +1181,13 @@ export interface components {
             tokens_per_minute?: number | null;
         };
         ApiKeyListResponse: {
-            items: components["schemas"]["ApiKeyCatalogResponse"][];
+            items: components["schemas"]["ApiKeyDetailResponse"][];
             next_cursor?: string | null;
         };
         ApiKeyMutationResponse: {
             /** Format: uuid */
             etag: string;
-            runtime_generation: components["schemas"]["RuntimeGenerationCatalogResponse"];
+            runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
         };
         AttemptResponse: {
             committed: boolean;
@@ -1314,7 +1314,7 @@ export interface components {
             display_name?: string | null;
             endpoint?: string | null;
             /**
-             * @description `open_ai` uses the official endpoint; `open_ai_compatible` requires an
+             * @description `openai` uses the official endpoint; `openai_compatible` requires an
              *     explicit HTTPS endpoint and live certification of reviewed capabilities.
              */
             kind: string;
@@ -1385,27 +1385,27 @@ export interface components {
             media_reconciliation_stale: number;
             /** Format: int64 */
             media_reconciliation_unbound: number;
+            request_metadata_complete: boolean;
+            request_metadata_consumer: string;
+            /** Format: date-time */
+            request_metadata_consumer_checked_at?: string | null;
+            /** Format: int64 */
+            request_metadata_consumer_heartbeat_age_seconds?: number | null;
+            /** Format: int64 */
+            request_metadata_consumer_lag_events: number;
+            /** Format: date-time */
+            request_metadata_consumer_oldest_pending_at?: string | null;
+            /** Format: int64 */
+            request_metadata_consumer_pending_events: number;
+            /** Format: int64 */
+            request_metadata_gateway_open_epochs: number;
+            /** Format: int64 */
+            request_metadata_gateway_unresolved_epochs: number;
+            /** Format: int64 */
+            request_metadata_gateway_unresolved_event_lower_bound: number;
+            /** Format: int64 */
+            request_metadata_historical_uncertain_gaps: number;
             status: string;
-            usage_complete: boolean;
-            usage_consumer: string;
-            /** Format: date-time */
-            usage_consumer_checked_at?: string | null;
-            /** Format: int64 */
-            usage_consumer_heartbeat_age_seconds?: number | null;
-            /** Format: int64 */
-            usage_consumer_lag_events: number;
-            /** Format: date-time */
-            usage_consumer_oldest_pending_at?: string | null;
-            /** Format: int64 */
-            usage_consumer_pending_events: number;
-            /** Format: int64 */
-            usage_historical_uncertain_gaps: number;
-            /** Format: int64 */
-            usage_open_epochs: number;
-            /** Format: int64 */
-            usage_unresolved_epochs: number;
-            /** Format: int64 */
-            usage_unresolved_event_lower_bound: number;
         };
         InvitationListResponse: {
             data: components["schemas"]["InvitationResponse"][];
@@ -1599,7 +1599,7 @@ export interface components {
         /** @enum {string} */
         PriceOperation: "generation" | "embeddings" | "token_count" | "image_generation" | "image_edit" | "image_variation" | "speech" | "transcription" | "video_create" | "video_list" | "video_get" | "video_content" | "video_delete" | "moderation" | "model_list" | "model_get";
         /** @enum {string} */
-        PriceProviderKind: "open_ai" | "anthropic" | "gemini" | "vertex_ai" | "bedrock" | "azure_open_ai" | "open_ai_compatible";
+        PriceProviderKind: "openai" | "anthropic" | "gemini" | "vertex_ai" | "bedrock" | "azure_openai" | "openai_compatible";
         PriceRequest: {
             currency: string;
             input_per_million?: string | null;
@@ -1674,12 +1674,12 @@ export interface components {
         ProviderCapabilityOptionsResponse: {
             /**
              * @description Capability tuples with a safe server-owned certification path for this
-             *     provider kind. Catalog validation may support additional future tuples.
+             *     provider kind. Configuration validation may support additional future tuples.
              */
             capabilities: components["schemas"]["CapabilityInput"][];
             provider_kind: string;
         };
-        ProviderCatalogResponse: {
+        ProviderDetailResponse: {
             /** Format: int32 */
             active_revision?: number | null;
             api_version?: string | null;
@@ -1792,7 +1792,7 @@ export interface components {
             etag: string;
             /** Format: uuid */
             provider_id: string;
-            runtime_generation?: null | components["schemas"]["RuntimeGenerationCatalogResponse"];
+            runtime_generation?: null | components["schemas"]["RuntimeGenerationResponse"];
         };
         ProviderResponse: {
             /** Format: uuid */
@@ -1865,7 +1865,7 @@ export interface components {
         ProviderRevisionRestoreResponse: {
             /** @description Always false: historical credential material is never restored. */
             credential_restored: boolean;
-            provider: components["schemas"]["ProviderCatalogResponse"];
+            provider: components["schemas"]["ProviderDetailResponse"];
         };
         ProviderRevisionSummaryResponse: {
             /** Format: date-time */
@@ -1949,6 +1949,62 @@ export interface components {
             data: components["schemas"]["RequestSummary"][];
             next_cursor?: string | null;
         };
+        RequestMetadataConsumerStatusResponse: {
+            /** Format: date-time */
+            checked_at?: string | null;
+            /** Format: int64 */
+            heartbeat_age_seconds?: number | null;
+            /** Format: int64 */
+            lag_events: number;
+            /** Format: date-time */
+            oldest_pending_at?: string | null;
+            /** Format: int64 */
+            pending_events: number;
+            state: string;
+        };
+        RequestMetadataEpochAcknowledgementResponse: {
+            /** Format: date-time */
+            acknowledged_at: string;
+            /** Format: uuid */
+            acknowledged_by?: string | null;
+            gateway_instance: string;
+            /** Format: uuid */
+            process_epoch: string;
+        };
+        RequestMetadataGatewayEpochListResponse: {
+            data: components["schemas"]["RequestMetadataGatewayEpochResponse"][];
+            next_cursor?: string | null;
+        };
+        RequestMetadataGatewayEpochResponse: {
+            /** Format: int64 */
+            abandoned: number;
+            /** Format: int64 */
+            accepted: number;
+            /** Format: date-time */
+            acknowledged_at?: string | null;
+            /** Format: uuid */
+            acknowledged_by?: string | null;
+            /** Format: int64 */
+            dropped: number;
+            gateway_instance: string;
+            /** Format: date-time */
+            gracefully_closed_at?: string | null;
+            /** Format: int64 */
+            persisted: number;
+            /** Format: uuid */
+            process_epoch: string;
+            retrying: boolean;
+            /** Format: date-time */
+            stale_detected_at?: string | null;
+            /** Format: date-time */
+            started_at: string;
+            state: string;
+            /** Format: int64 */
+            uncertain_event_lower_bound: number;
+            /** Format: date-time */
+            updated_at: string;
+            writer_closed: boolean;
+        };
         RequestSummary: {
             /** Format: uuid */
             api_key_id: string;
@@ -1989,7 +2045,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             lookup_id: string;
-            runtime_generation: components["schemas"]["RuntimeGenerationCatalogResponse"];
+            runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
             secret: string;
         };
         RotateCredentialRequest: {
@@ -2004,7 +2060,7 @@ export interface components {
             route_id: string;
             runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
         };
-        RouteCatalogResponse: {
+        RouteDetailResponse: {
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -2014,7 +2070,7 @@ export interface components {
             revision_count: number;
             slug: string;
         };
-        RouteDraftCatalogResponse: {
+        RouteDraftDetailResponse: {
             /** Format: uuid */
             based_on_revision_id?: string | null;
             /** Format: date-time */
@@ -2030,12 +2086,12 @@ export interface components {
             overall_timeout_ms: number;
             slug: string;
             state: string;
-            targets: components["schemas"]["RouteTargetCatalogResponse"][];
+            targets: components["schemas"]["RouteTargetResponse"][];
             /** Format: date-time */
             updated_at: string;
         };
         RouteDraftListResponse: {
-            items: components["schemas"]["RouteDraftCatalogResponse"][];
+            items: components["schemas"]["RouteDraftDetailResponse"][];
             next_cursor?: string | null;
         };
         RouteDraftResponse: {
@@ -2047,7 +2103,7 @@ export interface components {
             state: string;
         };
         RouteListResponse: {
-            items: components["schemas"]["RouteCatalogResponse"][];
+            items: components["schemas"]["RouteDetailResponse"][];
             next_cursor?: string | null;
         };
         RouteRevisionDiffResponse: {
@@ -2087,7 +2143,7 @@ export interface components {
             slug: string;
             /** Format: uuid */
             source_draft_id: string;
-            targets: components["schemas"]["RouteTargetCatalogResponse"][];
+            targets: components["schemas"]["RouteTargetResponse"][];
         };
         RouteSimulationResponse: {
             deterministic_seed: string;
@@ -2109,7 +2165,18 @@ export interface components {
             /** Format: uuid */
             target_id: string;
         };
-        RouteTargetCatalogResponse: {
+        RouteTargetRequest: {
+            /** Format: int32 */
+            priority: number;
+            /** Format: uuid */
+            provider_id: string;
+            provider_model: string;
+            /** Format: int64 */
+            timeout_ms: number;
+            /** Format: int32 */
+            weight: number;
+        };
+        RouteTargetResponse: {
             /** Format: uuid */
             id: string;
             /** Format: int32 */
@@ -2126,23 +2193,6 @@ export interface components {
             timeout_ms: number;
             /** Format: int32 */
             weight: number;
-        };
-        RouteTargetRequest: {
-            /** Format: int32 */
-            priority: number;
-            /** Format: uuid */
-            provider_id: string;
-            provider_model: string;
-            /** Format: int64 */
-            timeout_ms: number;
-            /** Format: int32 */
-            weight: number;
-        };
-        RuntimeGenerationCatalogResponse: {
-            /** Format: uuid */
-            id: string;
-            /** Format: int64 */
-            sequence: number;
         };
         RuntimeGenerationItem: {
             /** Format: date-time */
@@ -2212,7 +2262,7 @@ export interface components {
         SetupRequest: {
             display_name: string;
             email: string;
-            organization_name?: string;
+            installation_name?: string;
             password: string;
         };
         SetupStatus: {
@@ -2277,78 +2327,22 @@ export interface components {
         };
         UsageCompletenessResponse: {
             complete: boolean;
-            consumer: components["schemas"]["UsageConsumerStatusResponse"];
             coverage: components["schemas"]["UsageRangeCoverageResponse"];
             currency?: string | null;
             estimated_cost?: string | null;
             /** Format: int64 */
             incomplete_count: number;
             /** Format: int64 */
-            ingestion_gap_events: number;
-            /** Format: int64 */
             priced_count: number;
             /** Format: int64 */
             request_count: number;
+            request_metadata_consumer: components["schemas"]["RequestMetadataConsumerStatusResponse"];
             /** Format: int64 */
-            uncertain_gap_count: number;
+            request_metadata_gap_events: number;
+            /** Format: int64 */
+            uncertain_request_metadata_gap_count: number;
             /** Format: int64 */
             unpriced_count: number;
-        };
-        UsageConsumerStatusResponse: {
-            /** Format: date-time */
-            checked_at?: string | null;
-            /** Format: int64 */
-            heartbeat_age_seconds?: number | null;
-            /** Format: int64 */
-            lag_events: number;
-            /** Format: date-time */
-            oldest_pending_at?: string | null;
-            /** Format: int64 */
-            pending_events: number;
-            state: string;
-        };
-        UsageEpochAcknowledgementResponse: {
-            /** Format: date-time */
-            acknowledged_at: string;
-            /** Format: uuid */
-            acknowledged_by?: string | null;
-            gateway_instance: string;
-            /** Format: uuid */
-            process_epoch: string;
-        };
-        UsageGatewayEpochListResponse: {
-            data: components["schemas"]["UsageGatewayEpochResponse"][];
-            next_cursor?: string | null;
-        };
-        UsageGatewayEpochResponse: {
-            /** Format: int64 */
-            abandoned: number;
-            /** Format: int64 */
-            accepted: number;
-            /** Format: date-time */
-            acknowledged_at?: string | null;
-            /** Format: uuid */
-            acknowledged_by?: string | null;
-            /** Format: int64 */
-            dropped: number;
-            gateway_instance: string;
-            /** Format: date-time */
-            gracefully_closed_at?: string | null;
-            /** Format: int64 */
-            persisted: number;
-            /** Format: uuid */
-            process_epoch: string;
-            retrying: boolean;
-            /** Format: date-time */
-            stale_detected_at?: string | null;
-            /** Format: date-time */
-            started_at: string;
-            state: string;
-            /** Format: int64 */
-            uncertain_event_lower_bound: number;
-            /** Format: date-time */
-            updated_at: string;
-            writer_closed: boolean;
         };
         UsagePointResponse: {
             /** Format: date-time */
@@ -2375,28 +2369,28 @@ export interface components {
         UsageSummaryResponse: {
             cached_input_tokens: string;
             complete: boolean;
-            consumer: components["schemas"]["UsageConsumerStatusResponse"];
             coverage: components["schemas"]["UsageRangeCoverageResponse"];
             currency?: string | null;
             estimated_cost?: string | null;
             /** Format: int64 */
             incomplete_count: number;
-            /**
-             * Format: int64
-             * @description Exact loss plus known in-flight lower bounds from unclean epochs.
-             */
-            ingestion_gap_events: number;
             input_tokens: string;
             media_units: string;
             output_tokens: string;
             /** Format: int64 */
             request_count: number;
+            request_metadata_consumer: components["schemas"]["RequestMetadataConsumerStatusResponse"];
+            /**
+             * Format: int64
+             * @description Exact loss plus known in-flight lower bounds from unclean epochs.
+             */
+            request_metadata_gap_events: number;
             /**
              * Format: int64
              * @description Unclean gateway epochs make completeness unknown even when their last
              *     durable in-flight lower bound was zero.
              */
-            uncertain_gap_count: number;
+            uncertain_request_metadata_gap_count: number;
             /** Format: int64 */
             unpriced_count: number;
         };
@@ -2557,7 +2551,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Master key, key hasher, or database unavailable */
+            /** @description Master key, authentication HMAC key, or database unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2584,7 +2578,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApiKeyCatalogResponse"];
+                    "application/json": components["schemas"]["ApiKeyDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -2848,7 +2842,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Master key, key hasher, or database unavailable */
+            /** @description Master key, authentication HMAC key, or database unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4595,7 +4589,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCatalogResponse"];
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -4659,7 +4653,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCatalogResponse"];
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -5106,7 +5100,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCatalogResponse"];
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -5239,7 +5233,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCatalogResponse"];
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -5452,7 +5446,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCatalogResponse"];
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -5818,6 +5812,125 @@ export interface operations {
             };
         };
     };
+    list_request_metadata_gateway_epochs: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+                /** @description Filter by open, gracefully_closed, unresolved, or acknowledged. */
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request metadata gateway process epoch page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestMetadataGatewayEpochListResponse"];
+                };
+            };
+            /** @description Invalid cursor or state filter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    acknowledge_request_metadata_gateway_epoch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                process_epoch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unclean gateway epoch acknowledged; retained completeness evidence is unchanged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestMetadataEpochAcknowledgementResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unclean gateway epoch not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_requests: {
         parameters: {
             query?: {
@@ -6100,7 +6213,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RouteDraftCatalogResponse"];
+                    "application/json": components["schemas"]["RouteDraftDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -6164,7 +6277,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RouteDraftCatalogResponse"];
+                    "application/json": components["schemas"]["RouteDraftDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -6549,7 +6662,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RouteCatalogResponse"];
+                    "application/json": components["schemas"]["RouteDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -6783,7 +6896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RouteDraftCatalogResponse"];
+                    "application/json": components["schemas"]["RouteDraftDetailResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -7525,125 +7638,6 @@ export interface operations {
             };
         };
     };
-    list_usage_gateway_epochs: {
-        parameters: {
-            query?: {
-                cursor?: string;
-                limit?: number;
-                /** @description Filter by open, gracefully_closed, unresolved, or acknowledged. */
-                state?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Metadata-only gateway process epoch page */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UsageGatewayEpochListResponse"];
-                };
-            };
-            /** @description Invalid cursor or state filter */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description Authentication required. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description The request could not be completed. */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-        };
-    };
-    acknowledge_usage_gateway_epoch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                process_epoch: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Unclean gateway epoch acknowledged; retained completeness evidence is unchanged */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UsageEpochAcknowledgementResponse"];
-                };
-            };
-            /** @description Authentication required. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description Unclean gateway epoch not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description The request could not be completed. */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-        };
-    };
     usage_summary: {
         parameters: {
             query: {
@@ -7788,7 +7782,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Role cannot view the team */
+            /** @description Role cannot view access */
             403: {
                 headers: {
                     [name: string]: unknown;

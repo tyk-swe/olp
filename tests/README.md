@@ -3,17 +3,18 @@
 This directory contains the framework-independent conformance corpus, the
 official SDK smoke test, and pointers to the fuzz targets.
 
-## Fixture corpus
+## Conformance harness and corpus
 
 `fixtures/` is a framework-independent corpus of bounded JSON and UTF-8 SSE
 examples. It covers protocol translation, fragmented streams, routing and retry
-decisions, and custom-endpoint security. The Rust reference harness never makes
-live DNS or provider requests.
+decisions, and custom-endpoint security. `conformance/` is the Rust reference
+conformance harness for that corpus; it never makes live DNS or provider
+requests.
 
 Run it from the repository root:
 
 ```sh
-cargo test -p olp-conformance-fixtures
+cargo test -p olp-conformance
 ```
 
 Each fixture is limited to 64 KiB. Treat fixture changes as contract changes:

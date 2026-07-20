@@ -19,7 +19,7 @@ impl OpenAiConnectorOverrideRegistry {
     pub fn register(&self, provider_id: Uuid, connector: OpenAiConnector) {
         self.inner
             .write()
-            .expect("catalog connector registry lock poisoned")
+            .expect("certification probe connector registry lock poisoned")
             .insert(provider_id, Arc::new(connector));
     }
 
@@ -29,7 +29,7 @@ impl OpenAiConnectorOverrideRegistry {
         }
         self.inner
             .read()
-            .expect("catalog connector registry lock poisoned")
+            .expect("certification probe connector registry lock poisoned")
             .get(&provider_id)
             .cloned()
             .map(|connector| ProviderFacade {

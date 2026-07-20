@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
-use olp_conformance_fixtures::{MAX_FIXTURE_BYTES, fixture_root, read_fixture};
+use olp_conformance::{MAX_FIXTURE_BYTES, fixture_root, read_fixture};
 
 fn visit(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
     for entry in fs::read_dir(directory)

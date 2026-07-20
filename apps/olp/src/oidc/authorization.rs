@@ -25,7 +25,7 @@ use super::session::{
 };
 use crate::{
     ApiState, Problem,
-    management::{require_mutation_session, require_store},
+    management_api::{require_mutation_session, require_store},
 };
 
 #[derive(Debug, Serialize, ToSchema)]

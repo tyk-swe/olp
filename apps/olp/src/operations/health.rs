@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::helpers::{map_operations, page_limit};
 use crate::{
     ApiState, FieldErrors, HealthResponse, Problem,
-    management::{Permission, require_permission, require_read_session, require_store},
+    management_api::{Permission, require_permission, require_read_session, require_store},
 };
 
 #[utoipa::path(

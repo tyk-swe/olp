@@ -234,7 +234,7 @@ impl InferenceError {
         Self {
             status,
             code: "upstream_error",
-            kind: crate::openai_response::error_type(error.class),
+            kind: super::openai_http::error_type(error.class),
             message: error.message.clone(),
             retry_after: None,
         }

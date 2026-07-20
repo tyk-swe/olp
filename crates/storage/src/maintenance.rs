@@ -4,11 +4,13 @@ use thiserror::Error;
 
 use crate::{
     PgStore,
-    usage::{USAGE_EVENT_FUTURE_SKEW_MINUTES, USAGE_EVENT_REPLAY_HORIZON_DAYS},
+    request_metadata::{
+        REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES, REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
+    },
 };
 
 const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
-const USAGE_RECEIPT_DELETE_BATCH: i64 = 250_000;
+const REQUEST_METADATA_RECEIPT_DELETE_BATCH: i64 = 250_000;
 
 #[derive(Debug, Error)]
 pub enum MaintenanceError {
@@ -21,13 +23,13 @@ pub enum MaintenanceError {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MaintenanceReport {
     pub rollup_rows: u64,
-    pub gap_rollup_rows: u64,
+    pub request_metadata_gap_rollup_rows: u64,
     pub request_rows: u64,
     pub usage_rows: u64,
     pub audit_rows: u64,
-    pub gap_rows: u64,
-    pub usage_epoch_rows: u64,
-    pub usage_receipt_rows: u64,
+    pub request_metadata_gap_rows: u64,
+    pub request_metadata_epoch_rows: u64,
+    pub request_metadata_receipt_rows: u64,
     pub session_rows: u64,
     pub invitation_rows: u64,
     pub idempotency_rows: u64,
@@ -173,9 +175,9 @@ impl PgStore {
             .execute(&mut *transaction)
             .await?
             .rows_affected();
-        let gap_rollup = sqlx::query(
+        let request_metadata_gap_rollup = sqlx::query(
             "WITH expired AS ( \
-               DELETE FROM usage_ingestion_gaps \
+               DELETE FROM request_metadata_ingestion_gaps \
                WHERE reported_at < $1 \
                  AND (deduplication_key IS NULL OR \
                       reported_at < now() - make_interval( \
@@ -183,22 +185,22 @@ impl PgStore {
                RETURNING gateway_instance, reason, event_count, certainty, \
                          first_observed_at, last_observed_at \
              ), rolled AS ( \
-             INSERT INTO usage_gap_hourly \
+             INSERT INTO request_metadata_gap_hourly \
                (bucket, gateway_instance, reason, event_count, uncertain_gap_count, \
                 first_observed_at, last_observed_at) \
              SELECT date_trunc('hour', first_observed_at), gateway_instance, reason, \
                     SUM(event_count), \
-                    COUNT(*) FILTER (WHERE certainty = 'lower_bound'::usage_gap_certainty), \
+                    COUNT(*) FILTER (WHERE certainty = 'lower_bound'::request_metadata_gap_certainty), \
                     MIN(first_observed_at), MAX(last_observed_at) \
              FROM expired \
              GROUP BY date_trunc('hour', first_observed_at), gateway_instance, reason \
              ON CONFLICT (bucket, gateway_instance, reason) DO UPDATE SET \
-               event_count = usage_gap_hourly.event_count + EXCLUDED.event_count, \
-               uncertain_gap_count = usage_gap_hourly.uncertain_gap_count \
+               event_count = request_metadata_gap_hourly.event_count + EXCLUDED.event_count, \
+               uncertain_gap_count = request_metadata_gap_hourly.uncertain_gap_count \
                                      + EXCLUDED.uncertain_gap_count, \
-               first_observed_at = LEAST(usage_gap_hourly.first_observed_at, \
+               first_observed_at = LEAST(request_metadata_gap_hourly.first_observed_at, \
                                          EXCLUDED.first_observed_at), \
-               last_observed_at = GREATEST(usage_gap_hourly.last_observed_at, \
+               last_observed_at = GREATEST(request_metadata_gap_hourly.last_observed_at, \
                                            EXCLUDED.last_observed_at) \
              RETURNING 1 \
              ) \
@@ -206,16 +208,18 @@ impl PgStore {
                     (SELECT count(*) FROM expired) AS gap_rows",
         )
         .bind(usage_cutoff)
-        .bind(USAGE_EVENT_REPLAY_HORIZON_DAYS)
-        .bind(USAGE_EVENT_FUTURE_SKEW_MINUTES)
+        .bind(REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS)
+        .bind(REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES)
         .fetch_one(&mut *transaction)
         .await?;
-        let gap_rollup_rows = u64::try_from(gap_rollup.get::<i64, _>("rollup_rows"))
-            .expect("PostgreSQL COUNT is non-negative");
-        let gap_rows = u64::try_from(gap_rollup.get::<i64, _>("gap_rows"))
-            .expect("PostgreSQL COUNT is non-negative");
-        let usage_epoch_rows = sqlx::query(
-            "DELETE FROM usage_gateway_epochs \
+        let request_metadata_gap_rollup_rows =
+            u64::try_from(request_metadata_gap_rollup.get::<i64, _>("rollup_rows"))
+                .expect("PostgreSQL COUNT is non-negative");
+        let request_metadata_gap_rows =
+            u64::try_from(request_metadata_gap_rollup.get::<i64, _>("gap_rows"))
+                .expect("PostgreSQL COUNT is non-negative");
+        let request_metadata_epoch_rows = sqlx::query(
+            "DELETE FROM request_metadata_gateway_epochs \
              WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1) \
                 OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)",
         )
@@ -223,19 +227,19 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?
         .rows_affected();
-        let usage_receipt_rows = sqlx::query(
+        let request_metadata_receipt_rows = sqlx::query(
             "WITH expired AS ( \
-               SELECT ctid FROM usage_event_receipts \
+               SELECT ctid FROM request_metadata_event_receipts \
                WHERE recorded_at < now() - make_interval( \
                    days => $1::integer, mins => $2::integer) \
                LIMIT $3 FOR UPDATE SKIP LOCKED \
              ) \
-             DELETE FROM usage_event_receipts receipt USING expired \
+             DELETE FROM request_metadata_event_receipts receipt USING expired \
              WHERE receipt.ctid = expired.ctid",
         )
-        .bind(USAGE_EVENT_REPLAY_HORIZON_DAYS)
-        .bind(USAGE_EVENT_FUTURE_SKEW_MINUTES)
-        .bind(USAGE_RECEIPT_DELETE_BATCH)
+        .bind(REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS)
+        .bind(REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES)
+        .bind(REQUEST_METADATA_RECEIPT_DELETE_BATCH)
         .execute(&mut *transaction)
         .await?
         .rows_affected();
@@ -287,13 +291,13 @@ impl PgStore {
         transaction.commit().await?;
         Ok(MaintenanceReport {
             rollup_rows: rollups,
-            gap_rollup_rows,
+            request_metadata_gap_rollup_rows,
             request_rows,
             usage_rows,
             audit_rows,
-            gap_rows,
-            usage_epoch_rows,
-            usage_receipt_rows,
+            request_metadata_gap_rows,
+            request_metadata_epoch_rows,
+            request_metadata_receipt_rows,
             session_rows,
             invitation_rows,
             idempotency_rows,

@@ -1,5 +1,5 @@
 [package]
-name = "olp-conformance-fixtures"
+name = "olp-conformance"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

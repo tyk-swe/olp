@@ -55,10 +55,10 @@ impl PgStore {
         let now = Utc::now();
         let normalized_email = owner.email.trim().to_lowercase();
         sqlx::query(
-            "INSERT INTO installation (singleton, organization_name, created_at, updated_at) \
+            "INSERT INTO installation (singleton, installation_name, created_at, updated_at) \
              VALUES (true, $1, $2, $2)",
         )
-        .bind(owner.organization_name.trim())
+        .bind(owner.installation_name.trim())
         .bind(now)
         .execute(&mut *transaction)
         .await?;

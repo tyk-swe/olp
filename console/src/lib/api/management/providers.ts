@@ -4,14 +4,21 @@ import { collectCursorPages, getAbortSignal, result, type CursorPage, type ReadS
 
 type Schemas = components['schemas'];
 
-export type ProviderKind = Schemas['PriceProviderKind'];
+export type ProviderKind =
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'vertex_ai'
+  | 'bedrock'
+  | 'azure_openai'
+  | 'openai_compatible';
 export type ProviderAuthMode =
   | 'api_key'
   | 'adc'
   | 'service_account'
   | 'default_chain'
   | 'static';
-export type Provider = Omit<Schemas['ProviderCatalogResponse'], 'kind' | 'auth_mode'> & {
+export type Provider = Omit<Schemas['ProviderDetailResponse'], 'kind' | 'auth_mode'> & {
   kind: ProviderKind;
   auth_mode: ProviderAuthMode;
 };

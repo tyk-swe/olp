@@ -5,8 +5,20 @@ use uuid::Uuid;
 
 use crate::{EncryptedSecret, PersistenceError, PublishedRelease, RuntimeCompileError};
 
-mod providers;
-mod routes;
+mod provider_lifecycle;
+mod resources;
+mod route_lifecycle;
+mod validation;
+
+pub use resources::{
+    ApiKeyMutationResult, ApiKeyRecord, ApiKeyRotationResult, CapabilityCertificationApplied,
+    CapabilityCertificationOutcome, CapabilityRecord, ConfigurationPage, CredentialVersionRecord,
+    DiscoveredModelInput, ProviderModelInventoryRecord, ProviderModelRecord,
+    ProviderMutationResult, ProviderRecord, ProviderRevisionDiff, ProviderRevisionRecord,
+    ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput, RouteDraftRecord,
+    RouteRecord, RouteRevisionDiff, RouteRevisionRecord, RouteSimulation, RouteSimulationTarget,
+    RouteTargetRecord, StoredCredentialSecret, UpdateApiKeyInput, UpdateProvider,
+};
 
 #[derive(Debug, Error)]
 pub enum ConfigurationError {
@@ -20,6 +32,17 @@ pub enum ConfigurationError {
     ProviderIncomplete,
     #[error("provider ETag does not match")]
     PreconditionFailed,
+    #[error("configuration resource does not exist")]
+    NotFound,
+    #[error("configuration resource is in use")]
+    InUse,
+    #[error("configuration mutation is invalid: {0}")]
+    Invalid(String),
+    #[error("provider revision diff exceeds the {maximum} {dimension} per-revision server limit")]
+    ProviderRevisionDiffTooLarge {
+        dimension: &'static str,
+        maximum: usize,
+    },
     #[error("route draft does not exist")]
     RouteNotFound,
     #[error("route draft is not validated")]

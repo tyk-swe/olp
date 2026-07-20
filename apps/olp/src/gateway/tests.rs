@@ -29,7 +29,7 @@ use olp_protocols::openai::{
     ChatCompletionRequest, ResponseInputTokensRequest, decode_chat_completion,
     decode_response_input_tokens,
 };
-use olp_storage::KeyHasher;
+use olp_storage::AuthHmacKey;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -591,8 +591,8 @@ impl ProviderTransport for FiniteStaticTransport {
 }
 
 fn test_state(streaming: bool) -> (ApiState, String) {
-    let key_hasher = Arc::new(KeyHasher::new([7; 32]));
-    let material = key_hasher.generate_api_key();
+    let auth_hmac_key = Arc::new(AuthHmacKey::new([7; 32]));
+    let material = auth_hmac_key.generate_api_key();
     let plaintext = material.expose_once().to_owned();
     let lookup = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
     let route_slug = RouteSlug::parse("default").unwrap();
@@ -698,7 +698,7 @@ fn test_state(streaming: bool) -> (ApiState, String) {
         "https://olp.test",
         "console",
     );
-    state.key_hasher = Some(key_hasher);
+    state.auth_hmac_key = Some(auth_hmac_key);
     (state, plaintext)
 }
 
@@ -898,8 +898,8 @@ fn raw_media_event(sequence: u64, event: &str, data: Value) -> CanonicalEvent {
 #[tokio::test]
 async fn unary_openai_route_authenticates_routes_and_encodes() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut usage) = olp_storage::UsageEmitter::bounded(4);
-    state.usage = Some(emitter);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(4);
+    state.request_metadata = Some(emitter);
     let response = tokio::time::timeout(
         Duration::from_millis(250),
         crate::public_router(state).oneshot(
@@ -920,7 +920,7 @@ async fn unary_openai_route_authenticates_routes_and_encodes() {
     let value: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["model"], "default");
     assert_eq!(value["choices"][0]["message"]["content"], "hello from OLP");
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.status_code, Some(200));
     assert_eq!(event.attempts.len(), 1);
     assert!(event.committed);
@@ -1032,7 +1032,12 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
     install_hard_limits(&state);
     let snapshot = state.runtime.pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
-    let lookup = state.key_hasher.as_ref().unwrap().lookup_id(&key).unwrap();
+    let lookup = state
+        .auth_hmac_key
+        .as_ref()
+        .unwrap()
+        .lookup_id(&key)
+        .unwrap();
     let operation = decode_chat_completion(
         serde_json::from_value(json!({
             "model": "default",
@@ -1065,7 +1070,12 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
     reinstall_api_keys(&state, api_keys);
     let snapshot = state.runtime.pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
-    let lookup = state.key_hasher.as_ref().unwrap().lookup_id(&key).unwrap();
+    let lookup = state
+        .auth_hmac_key
+        .as_ref()
+        .unwrap()
+        .lookup_id(&key)
+        .unwrap();
     let operation = Operation::Images(olp_domain::ImageOperation::Edit(
         olp_domain::ImageEditRequest {
             route: RouteSlug::parse("default").unwrap(),
@@ -1225,8 +1235,8 @@ fn multipart(fields: &[(&str, &str)], file_name: &str, bytes: &str) -> String {
 #[tokio::test]
 async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     let (mut state, key) = test_state(true);
-    let (emitter, mut usage) = olp_storage::UsageEmitter::bounded(8);
-    state.usage = Some(emitter);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(8);
+    state.request_metadata = Some(emitter);
 
     install_event_stream(
         &state,
@@ -1251,7 +1261,7 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     assert!(body.contains("chat stream"));
     assert!(body.contains("\"prompt_tokens\":7"));
     assert!(body.ends_with("data: [DONE]\n\n"));
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::Generation);
     assert_eq!(event.input_tokens, Some(7));
     assert_eq!(event.output_tokens, Some(3));
@@ -1277,7 +1287,7 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     assert!(body.contains("responses stream"));
     assert!(body.contains("event: response.completed"));
     assert!(!body.contains("chat.completion.chunk"));
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::Generation);
     assert_eq!(event.input_tokens, Some(7));
     assert!(event.usage_complete);
@@ -1286,8 +1296,8 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
 #[tokio::test]
 async fn canonical_stream_error_is_not_persisted_as_success() {
     let (mut state, key) = test_state(true);
-    let (emitter, mut usage) = olp_storage::UsageEmitter::bounded(2);
-    state.usage = Some(emitter);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
     install_event_stream(
         &state,
         OperationKind::Generation,
@@ -1321,7 +1331,7 @@ async fn canonical_stream_error_is_not_persisted_as_success() {
         body.contains("error") || body.contains("failed"),
         "stream body was {body:?}"
     );
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.status_code, Some(429));
     assert_ne!(event.error_class.as_deref(), None);
     assert!(event.committed);
@@ -1330,8 +1340,8 @@ async fn canonical_stream_error_is_not_persisted_as_success() {
 #[tokio::test]
 async fn incompatible_unary_result_is_finalized_as_protocol_failure() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut usage) = olp_storage::UsageEmitter::bounded(2);
-    state.usage = Some(emitter);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
     install_result(
         &state,
         OperationKind::TokenCount,
@@ -1349,7 +1359,7 @@ async fn incompatible_unary_result_is_finalized_as_protocol_failure() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.status_code, Some(502));
     assert_eq!(
         event.error_class.as_deref(),
@@ -1417,8 +1427,8 @@ async fn real_router_generation_streams_report_truncation_in_native_envelopes() 
 #[tokio::test]
 async fn image_speech_and_transcription_stream_native_sse_and_usage_through_router() {
     let (mut state, key) = test_state(true);
-    let (emitter, mut usage) = olp_storage::UsageEmitter::bounded(8);
-    state.usage = Some(emitter);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(8);
+    state.request_metadata = Some(emitter);
 
     install_event_stream(
         &state,
@@ -1448,7 +1458,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
     let body = response_text(response).await;
     assert!(body.contains("event: image_generation.partial_image"));
     assert!(body.contains("event: image_generation.completed"));
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::ImageGeneration);
     assert_eq!(event.input_tokens, Some(4));
     assert!(event.usage_complete);
@@ -1482,7 +1492,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
     assert!(body.contains("event: speech.audio.delta"));
     assert!(body.contains("\"audio\":\"bXAz\""));
     assert!(body.contains("event: speech.audio.done"));
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::Speech);
     assert_eq!(event.input_tokens, Some(2));
     assert!(event.usage_complete);
@@ -1519,7 +1529,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
     let body = response_text(response).await;
     assert!(body.contains("event: transcript.text.delta"));
     assert!(body.contains("event: transcript.text.done"));
-    let event = usage.recv_next().await.unwrap();
+    let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::Transcription);
     assert_eq!(event.input_tokens, Some(3));
     assert!(event.usage_complete);

@@ -24,7 +24,6 @@ use tracing::warn;
 use crate::{
     ApiState, MultipartRequestAdmission,
     image_response::streaming_image_json_response,
-    openai_response::error_sse as openai_error_sse,
     streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
 };
 
@@ -36,6 +35,7 @@ use super::{
     },
     limits::{CleanupMediaStream, release_limits},
     multipart::{media_spool_error, parse_multipart},
+    openai_http::error_sse as openai_error_sse,
     telemetry::{UsageCapture, emit_event_execution},
 };
 

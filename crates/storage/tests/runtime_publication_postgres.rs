@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use olp_domain::{ApiKeyLimits, ApiKeyScope, RuntimeSnapshot};
 use olp_storage::{
-    IdempotencyOutcome, IdempotencyResponse, KeyHasher, MasterKey, NewApiKeyRecord, NewOwner,
+    AuthHmacKey, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewApiKeyRecord, NewOwner,
     PgStore, ReplayableIdempotency, hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
@@ -18,7 +18,7 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "Runtime publication integration".to_owned(),
+            installation_name: "Runtime publication integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),
@@ -39,11 +39,11 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
     let creating_store = store.clone();
     let actor = owner.user_id;
     let creation = tokio::spawn(async move {
-        let hasher = KeyHasher::new([31; 32]);
+        let auth_hmac_key = AuthHmacKey::new([31; 32]);
         let master_key = MasterKey::new(1, [37; 32]);
         let key = NewApiKeyRecord {
             name: "waiting key".to_owned(),
-            material: hasher.generate_api_key(),
+            material: auth_hmac_key.generate_api_key(),
             scopes: vec![ApiKeyScope::Inference],
             allowed_routes: Vec::new(),
             limits: ApiKeyLimits::default(),
@@ -81,8 +81,8 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
         "key creation did not wait for the publication lock"
     );
 
-    let winner_hasher = KeyHasher::new([41; 32]);
-    let winner_material = winner_hasher.generate_api_key();
+    let winner_auth_hmac_key = AuthHmacKey::new([41; 32]);
+    let winner_material = winner_auth_hmac_key.generate_api_key();
     let winner_id = Uuid::now_v7();
     sqlx::query(
         "INSERT INTO api_keys \

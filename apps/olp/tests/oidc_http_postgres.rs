@@ -92,7 +92,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
             "email": "owner@example.test",
             "password": "correct horse battery staple",
             "display_name": "Local Owner",
-            "organization_name": "OIDC integration"
+            "installation_name": "OIDC integration"
         }),
         None,
         None,

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use olp_storage::{KeyHasher, MasterKey, MasterKeyEncryptionStatus, PgStore};
+use olp_storage::{AuthHmacKey, MasterKey, MasterKeyEncryptionStatus, PgStore};
 use zeroize::Zeroizing;
 
 use super::{AppResult, config::DatabaseArgs};
@@ -9,17 +9,17 @@ pub(super) async fn connect_store(args: &DatabaseArgs) -> AppResult<PgStore> {
     Ok(PgStore::connect(&args.database_url, args.database_max_connections).await?)
 }
 
-pub(super) async fn load_key_hasher(path: &Path) -> AppResult<KeyHasher> {
+pub(super) async fn load_auth_hmac_key(path: &Path) -> AppResult<AuthHmacKey> {
     let encoded = Zeroizing::new(tokio::fs::read_to_string(path).await?);
-    Ok(KeyHasher::from_base64(&encoded)?)
+    Ok(AuthHmacKey::from_base64(&encoded)?)
 }
 
 pub(super) async fn load_bootstrap_token_digest(
     path: &Path,
-    hasher: &KeyHasher,
+    auth_hmac_key: &AuthHmacKey,
 ) -> AppResult<[u8; 32]> {
     let encoded = Zeroizing::new(tokio::fs::read_to_string(path).await?);
-    Ok(hasher.bootstrap_token_digest_from_base64(&encoded)?)
+    Ok(auth_hmac_key.bootstrap_token_digest_from_base64(&encoded)?)
 }
 
 pub(super) async fn load_master_key(path: &Path) -> AppResult<MasterKey> {

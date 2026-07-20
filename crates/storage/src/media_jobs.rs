@@ -204,24 +204,5 @@ pub struct MediaJobUpdate {
     pub last_polled_at: DateTime<Utc>,
 }
 
-const fn media_surface_storage_value(surface: Surface) -> &'static str {
-    match surface {
-        Surface::OpenAi => "openai",
-        Surface::Anthropic => "anthropic",
-        Surface::Gemini => "gemini",
-    }
-}
-
-fn parse_media_surface_storage_value(value: &str) -> Result<Surface, MediaJobError> {
-    match value {
-        "openai" => Ok(Surface::OpenAi),
-        "anthropic" => Ok(Surface::Anthropic),
-        "gemini" => Ok(Surface::Gemini),
-        _ => Err(MediaJobError::Invalid(
-            "database returned an unknown surface".to_owned(),
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests;

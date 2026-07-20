@@ -69,7 +69,7 @@ pub(super) fn optional_u16(value: Option<i32>, name: &str) -> Result<Option<u16>
         .map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
 }
 
-pub(super) fn checked_u64(value: i64, name: &str) -> Result<u64, OperationsError> {
+pub(crate) fn checked_u64(value: i64, name: &str) -> Result<u64, OperationsError> {
     u64::try_from(value).map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
 }
 
@@ -90,6 +90,6 @@ pub(super) fn optional_i32_u64(
         .map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
 }
 
-pub(super) fn trimmed_optional(value: Option<String>) -> Option<String> {
+pub(crate) fn trimmed_optional(value: Option<String>) -> Option<String> {
     value.map(|value| value.trim().to_owned())
 }

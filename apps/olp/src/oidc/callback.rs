@@ -26,7 +26,7 @@ use super::session::{
 };
 use crate::{
     ApiState, Problem,
-    management::{require_read_session, require_store},
+    management_api::{require_read_session, require_store},
 };
 
 const TOKEN_RESPONSE_LIMIT: usize = 256 * 1024;

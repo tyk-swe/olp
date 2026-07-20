@@ -18,12 +18,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_domain::Surface;
-use olp_storage::{UsageEmitter, UsageEvent};
+use olp_storage::{RequestMetadataEmitter, RequestMetadataEvent};
 
 use crate::{
     ApiState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES,
-    MAX_MEDIA_BODY_BYTES, Problem, RuntimeBundle, gateway, management, proxy::public_auth_source,
-    router::REQUEST_BODY_TIMEOUT, vendor_gateway,
+    MAX_MEDIA_BODY_BYTES, Problem, RuntimeBundle, gateway, management_api,
+    proxy::public_auth_source, router::REQUEST_BODY_TIMEOUT,
 };
 
 mod limits;
@@ -154,11 +154,11 @@ pub(super) async fn enforce_request_limits(
     match enforce_request_limits_inner(&state, request, next, surface).await {
         Ok(response) => response,
         Err(RequestLimitRejection::Problem(problem)) => match surface {
-            Some(surface) => vendor_gateway::problem_response(surface, problem),
+            Some(surface) => gateway::problem_response(surface, problem),
             None => problem.into_response(),
         },
         Err(RequestLimitRejection::Inference(error)) => match surface {
-            Some(surface) => vendor_gateway::inference_error_response(surface, error),
+            Some(surface) => gateway::inference_error_response(surface, error),
             None => Problem::from(error).into_response(),
         },
     }
@@ -183,7 +183,7 @@ impl From<gateway::InferenceError> for RequestLimitRejection {
 
 #[derive(Clone)]
 pub(super) struct LocalRequestMetadata {
-    pub(super) usage: Option<UsageEmitter>,
+    pub(super) request_metadata: Option<RequestMetadataEmitter>,
     pub(super) request_started_at: chrono::DateTime<chrono::Utc>,
     pub(super) runtime_generation_id: uuid::Uuid,
     pub(super) api_key_id: uuid::Uuid,
@@ -195,7 +195,7 @@ pub(super) struct LocalRequestMetadata {
 
 impl LocalRequestMetadata {
     pub(super) fn emit(self, status: axum::http::StatusCode) {
-        let Some(usage) = self.usage else {
+        let Some(request_metadata) = self.request_metadata else {
             return;
         };
         let completed_at = chrono::Utc::now();
@@ -206,7 +206,7 @@ impl LocalRequestMetadata {
             .try_into()
             .unwrap_or(u64::MAX);
         let operation = self.operation;
-        let event = UsageEvent {
+        let event = RequestMetadataEvent {
             event_id: uuid::Uuid::now_v7(),
             request_id: uuid::Uuid::now_v7(),
             runtime_generation_id: self.runtime_generation_id,
@@ -237,7 +237,7 @@ impl LocalRequestMetadata {
             unpriced: true,
             attempts: Vec::new(),
         };
-        if let Err(error) = usage.emit(event) {
+        if let Err(error) = request_metadata.emit(event) {
             tracing::warn!(%error, operation, "local request metadata was not queued");
         }
     }
@@ -447,7 +447,7 @@ async fn enforce_request_limits_inner(
         .transpose()?;
     let local_metadata = authenticated.as_ref().and_then(|authenticated| {
         metadata_operation.map(|(operation, route_slug)| LocalRequestMetadata {
-            usage: state.usage.clone(),
+            request_metadata: state.request_metadata.clone(),
             request_started_at,
             runtime_generation_id: authenticated.runtime_generation_id,
             api_key_id: authenticated.key.id.as_uuid(),
@@ -646,7 +646,7 @@ async fn preauthorize_first_owner_setup(
     if !store
         .setup_required()
         .await
-        .map_err(management::map_persistence)?
+        .map_err(management_api::map_persistence)?
     {
         return Err(Problem::conflict(
             "setup_already_completed",
@@ -655,7 +655,7 @@ async fn preauthorize_first_owner_setup(
         .into());
     }
     let supplied_token = headers
-        .get(management::SETUP_TOKEN_HEADER)
+        .get(management_api::SETUP_TOKEN_HEADER)
         .and_then(|value| value.to_str().ok());
     match state.verify_bootstrap_token(supplied_token).await {
         Some(true) => {}
@@ -669,7 +669,7 @@ async fn preauthorize_first_owner_setup(
             return Err(Problem::service_unavailable("bootstrap_token_not_configured").into());
         }
     }
-    management::enforce_origin(state, headers)?;
+    management_api::enforce_origin(state, headers)?;
     Ok(FirstOwnerSetupAuthorized)
 }
 

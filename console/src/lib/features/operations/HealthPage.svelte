@@ -2,11 +2,11 @@
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
-    acknowledgeUsageGatewayEpoch,
+    acknowledgeRequestMetadataGatewayEpoch,
     getReadiness,
     listProviderHealth,
     listRuntimeGenerations,
-    listUsageGatewayEpochs,
+    listRequestMetadataGatewayEpochs,
     usageCompleteness
   } from '$lib/api/operations';
   import { formatDate } from './format';
@@ -28,7 +28,7 @@
         listProviderHealth(15),
         listRuntimeGenerations(generationCursor),
         usageCompleteness({ start: start.toISOString(), end: end.toISOString() }),
-        listUsageGatewayEpochs('unresolved', epochCursor)
+        listRequestMetadataGatewayEpochs('unresolved', epochCursor)
       ]);
       return { readiness, providers, generations, persistence, epochs };
     },
@@ -75,7 +75,7 @@
     epochError = '';
     epochNotice = '';
     try {
-      await acknowledgeUsageGatewayEpoch(processEpoch);
+      await acknowledgeRequestMetadataGatewayEpoch(processEpoch);
       epochNotice = `Epoch ${processEpoch} acknowledged. Historical completeness evidence remains retained.`;
       await health.refetch();
     } catch (error) {
@@ -109,18 +109,18 @@
 
   <section class="card persistence" aria-labelledby="persistence-title">
     <div class="health-icon" class:ok={health.data.persistence.complete} aria-hidden="true">{health.data.persistence.complete ? '✓' : '!'}</div>
-    <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{health.data.persistence.complete ? 'Usage persistence is complete' : 'Usage persistence needs attention'}</h2><p>{health.data.persistence.ingestion_gap_events} gap-event lower bound · {health.data.persistence.uncertain_gap_count} uncertain gateway epochs · {health.data.persistence.incomplete_count} incomplete requests · {health.data.persistence.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p></div>
+    <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{health.data.persistence.complete ? 'Usage accounting is complete' : 'Usage accounting needs attention'}</h2><p>{health.data.persistence.request_metadata_gap_events} request metadata gap-event lower bound · {health.data.persistence.uncertain_request_metadata_gap_count} uncertain request metadata epochs · {health.data.persistence.incomplete_count} incomplete requests · {health.data.persistence.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p></div>
   </section>
 
   <section class="section" aria-labelledby="epochs-title">
-    <div class="section-heading"><div><p class="eyebrow">Usage durability</p><h2 id="epochs-title">Unresolved gateway epochs</h2><p class="section-description">An unclean process epoch keeps readiness degraded until an operator investigates and acknowledges it. Acknowledgement is audited and never deletes its retained loss or uncertainty evidence.</p></div><span class:warning={health.data.epochs.data.length > 0} class:success={health.data.epochs.data.length === 0} class="badge">{health.data.epochs.data.length} on page</span></div>
+    <div class="section-heading"><div><p class="eyebrow">Request metadata durability</p><h2 id="epochs-title">Unresolved gateway epochs</h2><p class="section-description">An unclean process epoch keeps readiness degraded until an operator investigates and acknowledges it. Acknowledgement is audited and never deletes its retained loss or uncertainty evidence.</p></div><span class:warning={health.data.epochs.data.length > 0} class:success={health.data.epochs.data.length === 0} class="badge">{health.data.epochs.data.length} on page</span></div>
     {#if epochNotice}<div class="inline-notice" role="status">{epochNotice}</div>{/if}
     {#if epochError}<div class="inline-problem" role="alert">{epochError}</div>{/if}
     {#if health.data.epochs.data.length === 0 && epochHistory.length === 0}
       <div class="card empty-state">No unclean gateway epoch awaits acknowledgement.</div>
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved usage gateway epochs"><table class="data-table"><caption class="sr-only">Unclean gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Detected</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each health.data.epochs.data as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><br /><code>{epoch.process_epoch}</code></td><td>{formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
+      <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved request metadata gateway epochs"><table class="data-table"><caption class="sr-only">Unclean request metadata gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Detected</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each health.data.epochs.data as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><br /><code>{epoch.process_epoch}</code></td><td>{formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
       <CursorPagination page={epochHistory.length + 1} hasPrevious={epochHistory.length > 0} hasNext={Boolean(health.data.epochs.next_cursor)} onPrevious={previousEpochPage} onNext={nextEpochPage} label="Unresolved gateway epoch pages" />
     {/if}
   </section>

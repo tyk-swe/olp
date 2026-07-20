@@ -164,11 +164,11 @@ pub(super) fn authenticate_inference_headers(
         Surface::Gemini => inference_header_token(headers, "x-goog-api-key"),
     }
     .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
-    let hasher = state
-        .key_hasher
+    let auth_hmac_key = state
+        .auth_hmac_key
         .as_ref()
         .ok_or_else(|| crate::Problem::service_unavailable("api_key_authentication_unavailable"))?;
-    let lookup = hasher
+    let lookup = auth_hmac_key
         .lookup_id(token)
         .map_err(|_| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
         .to_owned();
@@ -179,7 +179,7 @@ pub(super) fn authenticate_inference_headers(
         .api_keys
         .get(&lookup_id)
         .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
-    hasher
+    auth_hmac_key
         .parse_and_verify(token, key.digest.as_bytes())
         .map_err(|_| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
     if key.status != ApiKeyStatus::Active

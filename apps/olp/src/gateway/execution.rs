@@ -8,7 +8,7 @@ use olp_domain::{
     ApiKey, ApiKeyLookupId, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId,
     RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
 };
-use olp_storage::{LimitLease, UsageAttempt};
+use olp_storage::{LimitLease, RequestAttemptMetadata};
 
 use crate::{
     ApiState, event_completion::collect_provider_events,
@@ -38,7 +38,7 @@ pub(crate) struct RoutedEventExecution {
     pub(super) request_started_at: chrono::DateTime<Utc>,
     pub(super) request_started: tokio::time::Instant,
     pub(super) attempt_started: tokio::time::Instant,
-    pub(super) attempts: Vec<UsageAttempt>,
+    pub(super) attempts: Vec<RequestAttemptMetadata>,
     pub(super) first_byte_ms: u64,
 }
 
@@ -59,11 +59,11 @@ pub(super) fn authenticate_proxy_key(
     plaintext_key: &str,
 ) -> Result<AuthenticatedProxyKey, InferenceError> {
     let runtime = crate::pin_inference_runtime(state);
-    let key_hasher = state
-        .key_hasher
+    let auth_hmac_key = state
+        .auth_hmac_key
         .as_ref()
         .ok_or_else(|| InferenceError::unavailable("api_key_authentication_unavailable"))?;
-    let lookup = key_hasher
+    let lookup = auth_hmac_key
         .lookup_id(plaintext_key)
         .map_err(|_| InferenceError::unauthorized())?;
     let lookup_id = ApiKeyLookupId::parse(lookup).map_err(|_| InferenceError::unauthorized())?;
@@ -71,7 +71,7 @@ pub(super) fn authenticate_proxy_key(
         .api_keys
         .get(&lookup_id)
         .ok_or_else(InferenceError::unauthorized)?;
-    key_hasher
+    auth_hmac_key
         .parse_and_verify(plaintext_key, key.digest.as_bytes())
         .map_err(|_| InferenceError::unauthorized())?;
     let key = key.clone();
@@ -247,7 +247,7 @@ async fn execute_operation(
 fn emit_early_failure(
     state: &ApiState,
     context: &ExecutionContext,
-    attempts: &[UsageAttempt],
+    attempts: &[RequestAttemptMetadata],
     failure: &InferenceError,
 ) {
     emit_request_event(
@@ -533,11 +533,11 @@ pub(crate) async fn reserve_model_limits(
     plaintext_key: &str,
     surface: Surface,
 ) -> Result<Option<LimitLease>, InferenceError> {
-    let hasher = state
-        .key_hasher
+    let auth_hmac_key = state
+        .auth_hmac_key
         .as_ref()
         .ok_or_else(|| InferenceError::unavailable("api_key_authentication_unavailable"))?;
-    let lookup = hasher
+    let lookup = auth_hmac_key
         .lookup_id(plaintext_key)
         .map_err(|_| InferenceError::unauthorized())?;
     let operation = Operation::Models(olp_domain::ModelOperation::List {

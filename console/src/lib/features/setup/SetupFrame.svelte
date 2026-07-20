@@ -17,7 +17,7 @@
       <p class="eyebrow">Private AI gateway</p>
       <h1 id="setup-introduction">One control point for every model route.</h1>
       <p>
-        Connect providers, publish stable routes, and give your team fresh keys without storing
+        Connect providers, publish stable routes, and issue installation-scoped keys without storing
         prompts or model output.
       </p>
     </div>

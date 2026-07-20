@@ -39,6 +39,41 @@ fn media_job_surface_preserves_wire_contract() {
 }
 
 #[test]
+fn pricing_provider_kind_uses_current_wire_names_only() {
+    assert_eq!(
+        serde_json::to_value(pricing::PriceProviderKind::OpenAi).unwrap(),
+        "openai"
+    );
+    assert_eq!(
+        serde_json::to_value(pricing::PriceProviderKind::AzureOpenAi).unwrap(),
+        "azure_openai"
+    );
+    assert_eq!(
+        serde_json::to_value(pricing::PriceProviderKind::OpenAiCompatible).unwrap(),
+        "openai_compatible"
+    );
+    for legacy in ["open_ai", "azure_open_ai", "open_ai_compatible"] {
+        assert!(
+            serde_json::from_value::<pricing::PriceProviderKind>(legacy.into()).is_err(),
+            "accepted legacy provider kind {legacy}"
+        );
+    }
+    let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
+    assert_eq!(
+        document["components"]["schemas"]["PriceProviderKind"]["enum"],
+        serde_json::json!([
+            "openai",
+            "anthropic",
+            "gemini",
+            "vertex_ai",
+            "bedrock",
+            "azure_openai",
+            "openai_compatible"
+        ])
+    );
+}
+
+#[test]
 fn audit_contract_omits_unavailable_request_provenance() {
     let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
     let properties = document["components"]["schemas"]["AuditEventResponse"]["properties"]
@@ -70,13 +105,29 @@ fn usage_series_and_breakdown_publish_flat_query_parameters() {
 }
 
 #[test]
-fn usage_contract_exposes_unclean_epoch_uncertainty() {
+fn usage_contract_names_request_metadata_evidence_precisely() {
     let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
     for schema in ["UsageSummaryResponse", "UsageCompletenessResponse"] {
         let properties = document["components"]["schemas"][schema]["properties"]
             .as_object()
             .unwrap();
-        assert!(properties.contains_key("ingestion_gap_events"));
-        assert!(properties.contains_key("uncertain_gap_count"));
+        assert!(properties.contains_key("request_metadata_gap_events"));
+        assert!(properties.contains_key("uncertain_request_metadata_gap_count"));
+        assert!(properties.contains_key("request_metadata_consumer"));
     }
+}
+
+#[test]
+fn request_metadata_gateway_epochs_have_their_own_api_namespace() {
+    let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
+    assert!(
+        document["paths"]
+            .get("/api/v1/request-metadata/gateway-epochs")
+            .is_some()
+    );
+    assert!(
+        document["paths"]
+            .get("/api/v1/usage/gateway-epochs")
+            .is_none()
+    );
 }

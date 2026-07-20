@@ -88,16 +88,16 @@ done < <(rg -n --no-heading -o 'path[[:space:]]*=[[:space:]]*"[^"]+"' \
 metadata="$(cargo metadata --locked --no-deps --format-version 1)"
 actual_packages="$(jq -r '.packages[].name' <<<"$metadata" | sort)"
 expected_packages="$(printf '%s\n' \
-  olp olp-conformance-fixtures olp-domain olp-protocols olp-providers olp-storage | sort)"
+  olp olp-conformance olp-domain olp-protocols olp-providers olp-storage | sort)"
 if [[ "$actual_packages" != "$expected_packages" ]]; then
-  echo "workspace packages do not match the five-crate architecture plus conformance fixtures:" >&2
+  echo "workspace packages do not match the five production crates plus the conformance harness:" >&2
   printf '%s\n' "$actual_packages" >&2
   violations=1
 fi
 
 actual_dag="$(jq -r '
   .packages[]
-  | select(.name != "olp-conformance-fixtures")
+  | select(.name != "olp-conformance")
   | .name as $package
   | ([.dependencies[] | select(.path != null and .kind != "dev") | .name] | unique | sort | join(",")) as $dependencies
   | "\($package)\t\($dependencies)"

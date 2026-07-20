@@ -119,7 +119,7 @@ impl RuntimeManager {
         &self,
         release: &PublishedRelease,
     ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
-        let mut snapshot: RuntimeSnapshot = serde_json::from_slice(&release.payload)?;
+        let mut snapshot = RuntimeSnapshot::from_persisted_slice(&release.payload)?;
         if snapshot.generation.id.as_uuid() != release.generation_id {
             return Err(RuntimeInstallError::GenerationMismatch);
         }

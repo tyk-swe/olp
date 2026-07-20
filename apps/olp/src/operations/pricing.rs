@@ -17,7 +17,7 @@ use uuid::Uuid;
 use super::helpers::{PageQuery, map_operations, page_limit};
 use crate::{
     ApiState, Problem,
-    management::{
+    management_api::{
         Permission, idempotency_http_response, json_payload, map_persistence,
         require_idempotency_key, require_mutation_session, require_permission,
         require_read_session, require_store,
@@ -27,12 +27,15 @@ use crate::{
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum PriceProviderKind {
+    #[serde(rename = "openai")]
     OpenAi,
     Anthropic,
     Gemini,
     VertexAi,
     Bedrock,
+    #[serde(rename = "azure_openai")]
     AzureOpenAi,
+    #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
 }
 

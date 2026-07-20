@@ -109,7 +109,7 @@ const providerItems = [
   providerSummary({
     id: ids.providers.openai,
     name: 'openai-production',
-    kind: 'open_ai',
+    kind: 'openai',
     modelCount: 6,
     enabledModelCount: 4,
     revision: 5
@@ -413,7 +413,7 @@ export async function mockRecentRequests(page: Page) {
       id: '01980100-0000-7000-8000-000000000601',
       route: 'support-chat',
       operation: 'generation',
-      surface: 'open_ai',
+      surface: 'openai',
       startedMinutesAgo: 2,
       latencyMs: 812,
       statusCode: 200,
@@ -437,7 +437,7 @@ export async function mockRecentRequests(page: Page) {
       id: '01980100-0000-7000-8000-000000000603',
       route: 'embeddings-index',
       operation: 'embeddings',
-      surface: 'open_ai',
+      surface: 'openai',
       startedMinutesAgo: 9,
       latencyMs: 148,
       statusCode: 200,
@@ -449,7 +449,7 @@ export async function mockRecentRequests(page: Page) {
       id: '01980100-0000-7000-8000-000000000604',
       route: 'support-chat',
       operation: 'generation',
-      surface: 'open_ai',
+      surface: 'openai',
       startedMinutesAgo: 14,
       latencyMs: 655,
       statusCode: 200,
@@ -507,7 +507,7 @@ export async function mockUsage(page: Page) {
     approximate: false,
     excluded_partial_aggregate_boundaries: 0
   };
-  const consumer = {
+  const request_metadata_consumer = {
     state: 'healthy',
     pending_events: 0,
     lag_events: 0,
@@ -529,10 +529,10 @@ export async function mockUsage(page: Page) {
           currency: 'USD',
           unpriced_count: 0,
           incomplete_count: 0,
-          ingestion_gap_events: 0,
-          uncertain_gap_count: 0,
+          request_metadata_gap_events: 0,
+          uncertain_request_metadata_gap_count: 0,
           coverage,
-          consumer,
+          request_metadata_consumer,
           complete: true
         }
       });
@@ -592,12 +592,12 @@ export async function mockUsage(page: Page) {
         priced_count: totalRequests,
         unpriced_count: 0,
         incomplete_count: 0,
-        ingestion_gap_events: 0,
-        uncertain_gap_count: 0,
+        request_metadata_gap_events: 0,
+        uncertain_request_metadata_gap_count: 0,
         estimated_cost: totalCost.toFixed(2),
         currency: 'USD',
         coverage,
-        consumer
+        request_metadata_consumer
       }
     });
   });

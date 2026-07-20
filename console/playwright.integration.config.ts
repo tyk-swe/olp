@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 const databaseUrl = process.env.OLP_CONSOLE_E2E_DATABASE_URL;
 const masterKeyFile = process.env.OLP_CONSOLE_E2E_MASTER_KEY_FILE;
-const keyHashKeyFile = process.env.OLP_CONSOLE_E2E_KEY_HASH_KEY_FILE;
+const authHmacKeyFile = process.env.OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE;
 const bootstrapTokenFile = process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE;
 if (!databaseUrl) {
   throw new Error('OLP_CONSOLE_E2E_DATABASE_URL is required for the Rust-hosted console integration');
@@ -10,8 +10,8 @@ if (!databaseUrl) {
 if (!masterKeyFile) {
   throw new Error('OLP_CONSOLE_E2E_MASTER_KEY_FILE is required for invitation integration');
 }
-if (!keyHashKeyFile) {
-  throw new Error('OLP_CONSOLE_E2E_KEY_HASH_KEY_FILE is required for control-plane authentication');
+if (!authHmacKeyFile) {
+  throw new Error('OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE is required for control-plane authentication');
 }
 if (!bootstrapTokenFile) {
   throw new Error('OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE is required for first-run setup');
@@ -55,7 +55,7 @@ export default defineConfig({
         OLP_PUBLIC_ORIGIN: 'http://localhost:4175',
         OLP_CONSOLE_DIR: 'build',
         OLP_MASTER_KEY_FILE: masterKeyFile,
-        OLP_KEY_HASH_KEY_FILE: keyHashKeyFile,
+        OLP_AUTH_HMAC_KEY_FILE: authHmacKeyFile,
         OLP_BOOTSTRAP_TOKEN_FILE: bootstrapTokenFile,
         OLP_ALLOW_INSECURE_OIDC_FOR_TESTS: 'test-only'
       }

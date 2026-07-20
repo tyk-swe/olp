@@ -1,4 +1,4 @@
-use olp_conformance_fixtures::read_json;
+use olp_conformance::read_json;
 use olp_domain::{GenerationRequest, Operation, Surface};
 use olp_protocols::{
     anthropic::{MessagesRequest, decode_messages_request, encode_messages_request},

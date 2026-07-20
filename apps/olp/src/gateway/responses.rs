@@ -17,7 +17,6 @@ use crate::{
     ApiState,
     event_completion::collect_provider_events,
     json_media::{admit_openai_response_input_tokens, admit_openai_responses, cleanup_admitted},
-    openai_response::unix_seconds,
     streaming_response::{
         ProtocolStreamEncoder, encode_server_sse_frame, encode_sse_frame,
         protocol_streaming_response,
@@ -31,6 +30,7 @@ use super::{
         incompatible_result,
     },
     limits::release_limits,
+    openai_http::unix_seconds,
     telemetry::{UsageCapture, emit_event_execution},
 };
 

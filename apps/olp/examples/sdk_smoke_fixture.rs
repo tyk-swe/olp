@@ -16,7 +16,7 @@ use olp_domain::{
     RuntimeGenerationId, RuntimeSnapshot, Surface, Target, TargetId, TransportError, TransportMode,
     TransportPhase, Usage,
 };
-use olp_storage::KeyHasher;
+use olp_storage::AuthHmacKey;
 use serde::Serialize;
 
 const ROUTE_SLUG: &str = "sdk-smoke-route";
@@ -115,8 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|_| "OLP_SDK_SMOKE_METADATA must name a private output file")?;
     let address = env::var("OLP_SDK_SMOKE_ADDR").unwrap_or_else(|_| "127.0.0.1:0".to_owned());
 
-    let key_hasher = Arc::new(KeyHasher::new([73; 32]));
-    let key_material = key_hasher.generate_api_key();
+    let auth_hmac_key = Arc::new(AuthHmacKey::new([73; 32]));
+    let key_material = auth_hmac_key.generate_api_key();
     let plaintext_key = key_material.expose_once().to_owned();
     let lookup_id = ApiKeyLookupId::parse(key_material.lookup_id.clone())?;
     let provider_id = ProviderId::new();
@@ -196,7 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_address = listener.local_addr()?;
     let origin = format!("http://{local_address}");
     let mut state = ApiState::new(ApiMode::Gateway, None, runtime, &origin, "console");
-    state.key_hasher = Some(key_hasher);
+    state.auth_hmac_key = Some(auth_hmac_key);
 
     tokio::fs::write(
         &metadata_path,

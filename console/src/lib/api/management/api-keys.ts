@@ -4,7 +4,7 @@ import { collectCursorPages, getAbortSignal, result, type CursorPage, type ReadS
 
 type Schemas = components['schemas'];
 
-export type ApiKey = Schemas['ApiKeyCatalogResponse'];
+export type ApiKey = Schemas['ApiKeyDetailResponse'];
 export type CreateApiKeyInput = Schemas['CreateApiKeyRequest'];
 export type UpdateApiKeyInput = Schemas['UpdateApiKeyRequest'];
 export type ApiKeyMutation = Schemas['ApiKeyMutationResponse'];

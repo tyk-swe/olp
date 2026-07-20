@@ -18,7 +18,7 @@ response, and master-key rotation.
 Measure the gateway at the client-facing listener. The target-load SLO is
 99.9% successful availability excluding upstream-provider failures, with no
 more than 15 ms p95 and 30 ms p99 added latency. The OLP on-call owns service
-availability and metadata completeness; provider owners own upstream
+availability and request metadata completeness; provider owners own upstream
 credentials, quotas, and model availability.
 
 Scrape each in-cluster gateway and control `*-observability` Service on port
@@ -27,9 +27,10 @@ separately; public listener requests for those paths intentionally return 404.
 Readiness snapshots refresh every five seconds and expensive metrics rollups
 every fifteen seconds, so page on stale snapshot freshness telemetry as well as
 an absent readiness signal. Page when readiness is absent for five minutes,
-usage events are dropped or abandoned, usage persistence is unavailable, or the
-distributed limiter is unavailable while hard limits are configured. Warn when
-a usage backlog remains nonzero for ten minutes. The supplied Prometheus rules
+request metadata events are dropped or abandoned, request metadata persistence
+is unavailable, or the distributed limiter is unavailable while hard limits
+are configured. Warn when a request metadata backlog remains nonzero for ten
+minutes. The supplied Prometheus rules
 implement these defaults, one ServiceMonitor per HTTP component prevents a
 healthy gateway from hiding control failure, and the Grafana dashboard is a
 starting point. See [deployment.md](deployment.md) for edge routing and private
@@ -46,7 +47,7 @@ observability exposure.
 5. Review provider health, authentication failures, owner or role changes,
    credential rotations, and route activations in the audit stream.
 6. When offboarding a user, review the API-key inventory for keys attributed
-   to them and explicitly rotate or revoke the appropriate team-scoped keys.
+   to them and explicitly rotate or revoke the appropriate installation-scoped keys.
    Deactivating a user deliberately does not revoke those keys automatically.
 7. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. The chart
    provides a 1-GiB process budget in a 2-GiB volume; do not use the 64-MiB
@@ -79,12 +80,13 @@ For a production recovery point:
 
 The script independently requires a zero and no-more-than-30-second-old durable
 worker checkpoint. Without the quiescence assertion, the manifest records
-`usage_stream_drained: false` and the dump is not a production recovery point.
+`request_metadata_stream_drained: false` and the dump is not a production recovery point.
 The output is a mode-`0600` custom-format dump, checksum, and manifest.
 
 Treat the dump as sensitive: it contains password hashes, session and proxy-key
 digests, and encrypted provider/OIDC credentials. Mounted master-key and
-key-hash files are excluded; back them up separately in the secret manager.
+authentication HMAC key files are excluded; back them up separately in the
+secret manager.
 Losing any historical master key makes records encrypted with that version
 unrecoverable.
 
@@ -98,12 +100,45 @@ OIDC redirects or provider credentials.
 
 ## Upgrade
 
+### Naming migration prerequisites
+
+This release deliberately removes the previous deployment-setting names. Before
+starting the candidate, update `OLP_PORT` to `OLP_HOST_PORT`,
+`OLP_KEY_HASH_KEY_FILE` to `OLP_AUTH_HMAC_KEY_FILE`, and
+`OLP_BACKUP_USAGE_CHECKPOINT_MAX_AGE_SECONDS` to
+`OLP_BACKUP_REQUEST_METADATA_CHECKPOINT_MAX_AGE_SECONDS`. Keep the existing
+authentication HMAC key bytes; replacing them invalidates API keys and
+bootstrap-token digests. For Compose, move
+`deploy/secrets/olp_key_hash_key` to `deploy/secrets/olp_auth_hmac_key` and
+update `OLP_PUBLIC_ORIGIN` if the host port changed.
+
+For Helm, update `config.keyHashSecretName` and `config.keyHashSecretKey` to
+`config.authHmacKeySecretName` and `config.authHmacKeySecretKey`, and rename
+monitoring values from `usage*` to `requestMetadata*`. Copy the existing Secret
+without exposing or regenerating its data before applying the new values:
+
+```console
+kubectl --namespace "$NAMESPACE" get secret olp-key-hash-key -o json \
+  | jq 'del(.metadata.creationTimestamp, .metadata.resourceVersion, .metadata.uid) \
+        | .metadata.name = "olp-auth-hmac-key"' \
+  | kubectl --namespace "$NAMESPACE" apply -f -
+test "$(kubectl --namespace "$NAMESPACE" get secret olp-key-hash-key -o jsonpath='{.data.key}' | sha256sum)" = \
+     "$(kubectl --namespace "$NAMESPACE" get secret olp-auth-hmac-key -o jsonpath='{.data.key}' | sha256sum)"
+```
+
+Do not delete the old Secret until the candidate workloads are healthy and the
+rollback decision point has passed. The application does not accept old
+deployment-setting names as aliases.
+
 1. Verify the immutable OCI digest and any signature, provenance, SBOM, and
    vulnerability information required by the deployment process.
 2. Run `scripts/upgrade-rehearsal.sh` with a recent backup and candidate binary
    against an isolated database. It restores and migrates twice, derives the
    target versions from tracked migration files, and rejects an incomplete or
-   non-idempotent result. For a manual N-1 or release rehearsal, set
+   non-idempotent result. Point `OLP_VALKEY_URL` at a fresh isolated Valkey;
+   never use the active production Valkey because its legacy stream may still
+   be receiving traffic before the maintenance window. For a manual N-1 or
+   release rehearsal, set
    `OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS` to the exact expected count. CI
    builds its N-1 fixture from
    `release-metadata.env`; after a release completes, release operators update
@@ -117,7 +152,15 @@ OIDC redirects or provider credentials.
    there are no active requests and no media-reconciliation process left that
    can write PostgreSQL. Then leave the old worker running only until both
    Stream pending and lag are durably zero, scale that worker workload to zero,
-   and confirm both values remain zero. Pre-upgrade persisted login flows may
+   confirm both values remain zero, and verify `XLEN olp:v2:usage` is zero. The
+   candidate migration hook, startup, and `doctor` preflight reject a nonempty
+   legacy stream with instructions to drain it under the previous release;
+   they never read or delete it. The migration hook checks Valkey before it
+   connects to or changes PostgreSQL. If pending and lag are both zero but
+   `XLEN` is nonzero, the remaining entries were acknowledged before a failed
+   deletion. Back up Valkey, run `XTRIM olp:v2:usage MAXLEN 0`, and verify
+   `XLEN` is zero before starting the candidate. Pre-upgrade persisted login
+   flows may
    complete only through their existing ten-minute expiry; authenticated link
    flows keep their normal expiry. Users whose login flow expires must restart
    it after the candidate is ready.
@@ -126,8 +169,10 @@ OIDC redirects or provider credentials.
    key files in the secret manager. This is the recovery point; a backup taken
    before quiescence is not a substitute.
 5. Run the Helm upgrade with a timeout of at least 20 minutes. Its pre-upgrade
-   migration hook completes before Helm rolls the candidate control, worker,
-   and gateway Deployments; those Deployments may roll concurrently. Keep
+   migration hook reads `config.valkeySecretName` and fails before changing the
+   database unless the legacy stream is empty. The hook completes before Helm
+   rolls the candidate control, worker, and gateway Deployments; those
+   Deployments may roll concurrently. Keep
    management and admission frozen until the migration succeeded and every
    workload is on the candidate. The database independently rejects N-1
    runtime publications, non-additive usage rollups, and OIDC completions.
@@ -137,19 +182,19 @@ OIDC redirects or provider credentials.
    every running image digest. Preserve `maxUnavailable: 0`, the 10-second
    pre-stop delay, and five-minute termination grace period.
 6. Resume admission and OIDC initiation. For 30 minutes, verify readiness,
-   zero usage backlog, generation convergence, usage completeness, provider
+   zero request metadata backlog, generation convergence, usage completeness, provider
    probes, error rate, and added latency.
 
-The supported usage-delivery and exact-replay window is seven days. Durable
+The supported request metadata delivery and exact-replay window is seven days. Durable
 event receipts are removed after that bound plus the five-minute clock-skew
 grace. Page on backlog long before the window expires; an entry first delivered
 outside it is rejected and recorded as uncertain completeness evidence rather
 than risk double-counting an hourly aggregate. Maintenance runs bounded receipt
 cleanup every minute. Capacity PostgreSQL for up to
 `sustained_requests_per_second * 604800` receipt rows plus the event/request
-unique indexes, and alert on table growth or cleanup lag. During a usage
-incident, restore or reconcile the Stream within seven days and do not extend
-the window by suspending database maintenance.
+unique indexes, and alert on table growth or cleanup lag. During a request
+metadata delivery incident, restore or reconcile the Stream within seven days
+and do not extend the window by suspending database maintenance.
 
 Migrations are forward-only. Once migrations 0022-0024 apply, an N-1 binary
 rollback is unsupported: its runtime, usage-maintenance, and OIDC writes fail
@@ -169,7 +214,7 @@ readiness, and runtime generation before redirecting traffic.
   outage `/health/ready` remains successful but reports `status: degraded` and
   `limits: unavailable`, allowing Kubernetes to route unlimited keys; alert on
   dependency fields and metrics.
-- **Usage persistence:** Continue inference only with explicit business
+- **Request metadata persistence:** Continue inference only with explicit business
   acceptance of incomplete cost data. Preserve logs and Stream state, suspend
   retention, record the affected interval, and reconcile request, attempt,
   usage, and gap counts. Never report an outage gap as zero cost.
@@ -177,20 +222,20 @@ readiness, and runtime generation before redirecting traffic.
 ### Unclean gateway epochs
 
 An unclean process epoch is uncertain, not proof that every event was lost.
-Readiness and `olp_usage_gateway_unresolved_epochs` remain degraded until an
+Readiness and `olp_request_metadata_gateway_unresolved_epochs` remain degraded until an
 owner or operator compares its bounds with the durable worker checkpoint,
 Stream state, and request/attempt records. After recording the decision, list
 and acknowledge the epoch:
 
 ```text
-GET  /api/v1/usage/gateway-epochs?state=unresolved
-POST /api/v1/usage/gateway-epochs/{process_epoch}/acknowledge
+GET  /api/v1/request-metadata/gateway-epochs?state=unresolved
+POST /api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge
 ```
 
 Acknowledgement is idempotent, session- and CSRF/Origin-protected, requires
 settings-management permission, and emits an audit event. It clears the
 unresolved readiness condition but not raw or hourly gap evidence;
-`usage_historical_uncertain_gaps` and affected usage windows remain incomplete.
+`olp_request_metadata_historical_uncertain_gaps` and affected usage windows remain incomplete.
 Retention never removes unacknowledged epochs and removes acknowledged or
 gracefully closed leases only after rollup.
 
@@ -202,14 +247,14 @@ event count and timestamps from the durable consumer checkpoint, Valkey/AOF
 inventory, and monitoring, then record it idempotently:
 
 ```console
-export OLP_CONFIRM_FRESH_VALKEY_LOSS=record-explicit-gap
-scripts/checkpoint-lost-usage-stream.sh incident-123 42 exact \
+export OLP_CONFIRM_REQUEST_METADATA_STREAM_LOSS=record-explicit-gap
+scripts/record-request-metadata-stream-loss.sh incident-123 42 exact \
   2026-07-13T01:00:00Z 2026-07-13T01:02:00Z
 ```
 
 Use `lower-bound` only when an exact count is impossible, and retain that
 limitation in the incident record; cost exports remain incomplete. The helper
-removes the stale consumer-health checkpoint, writes a content-free audit
+removes the stale request metadata consumer-health checkpoint, writes a content-free audit
 event, and prevents double counting by incident ID. Start the replacement
 Valkey and worker only after recording the gap, then require a new checkpoint.
 

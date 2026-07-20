@@ -1,9 +1,9 @@
 use chrono::{Duration, Utc};
 use olp_domain::{ApiKeyLimits, ApiKeyScope, Role};
 use olp_storage::{
-    AccessError, CatalogError, IdempotencyOutcome, IdempotencyResponse, KeyHasher, MasterKey,
-    NewApiKeyRecord, NewInvitation, NewOwner, PgStore, ReplayableIdempotency,
-    RotateApiKeyCatalogInput, TeamError, hash_password, idempotency_fingerprint,
+    AccessError, AuthHmacKey, ConfigurationError, IdempotencyOutcome, IdempotencyResponse,
+    IdentityError, MasterKey, NewApiKeyRecord, NewInvitation, NewOwner, PgStore,
+    ReplayableIdempotency, RotateApiKeyInput, hash_password, idempotency_fingerprint,
 };
 use serde_json::{Value, json};
 use sqlx::Executor as _;
@@ -17,7 +17,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "Idempotency replay integration".to_owned(),
+            installation_name: "Idempotency replay integration".to_owned(),
             email: "owner@idempotency.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),
@@ -141,7 +141,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 |_| panic!("a mismatched request must not execute"),
             )
             .await,
-        Err(TeamError::IdempotencyConflict)
+        Err(IdentityError::IdempotencyConflict)
     ));
 
     // A second transaction carrying the same key observes the nonblocking
@@ -176,11 +176,11 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 |_| panic!("a concurrent duplicate must not execute"),
             )
             .await,
-        Err(TeamError::IdempotencyInProgress)
+        Err(IdentityError::IdempotencyInProgress)
     ));
     concurrent_transaction.rollback().await.unwrap();
 
-    let hasher = KeyHasher::new([9; 32]);
+    let auth_hmac_key = AuthHmacKey::new([9; 32]);
     let create_key = "api-key-replay-test-001";
     let create_fingerprint = idempotency_fingerprint(&json!({
         "name": "Replay key",
@@ -188,7 +188,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         "allowed_routes": []
     }))
     .unwrap();
-    let first_material = hasher.generate_api_key();
+    let first_material = auth_hmac_key.generate_api_key();
     let first_secret = first_material.expose_once().to_owned();
     let first_key = store
         .create_api_key_record(
@@ -237,7 +237,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
             .starts_with("olp_v2_")
     );
 
-    let replay_material = hasher.generate_api_key();
+    let replay_material = auth_hmac_key.generate_api_key();
     let replayed_key = store
         .create_api_key_record(
             &NewApiKeyRecord {
@@ -266,11 +266,11 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         "expected_etag": created_key.etag
     }))
     .unwrap();
-    let rotation_material = hasher.generate_api_key();
+    let rotation_material = auth_hmac_key.generate_api_key();
     let rotation_secret = rotation_material.expose_once().to_owned();
     let first_rotation = store
-        .rotate_api_key_catalog(
-            RotateApiKeyCatalogInput {
+        .rotate_api_key(
+            RotateApiKeyInput {
                 id: created_key.id,
                 material: &rotation_material,
                 expected_etag: created_key.etag,
@@ -306,10 +306,10 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
     };
     let first_rotation_parts = first_rotation_response.into_parts();
 
-    let discarded_rotation_material = hasher.generate_api_key();
+    let discarded_rotation_material = auth_hmac_key.generate_api_key();
     let replayed_rotation = store
-        .rotate_api_key_catalog(
-            RotateApiKeyCatalogInput {
+        .rotate_api_key(
+            RotateApiKeyInput {
                 id: created_key.id,
                 material: &discarded_rotation_material,
                 expected_etag: created_key.etag,
@@ -335,7 +335,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         "allowed_routes": []
     }))
     .unwrap();
-    let changed_material = hasher.generate_api_key();
+    let changed_material = auth_hmac_key.generate_api_key();
     assert!(matches!(
         store
             .create_api_key_record(
@@ -361,11 +361,11 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         "expected_etag": "different"
     }))
     .unwrap();
-    let changed_rotation_material = hasher.generate_api_key();
+    let changed_rotation_material = auth_hmac_key.generate_api_key();
     assert!(matches!(
         store
-            .rotate_api_key_catalog(
-                RotateApiKeyCatalogInput {
+            .rotate_api_key(
+                RotateApiKeyInput {
                     id: created_key.id,
                     material: &changed_rotation_material,
                     expected_etag: created_key.etag,
@@ -376,6 +376,6 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 |_| panic!("a mismatched rotation must not execute"),
             )
             .await,
-        Err(CatalogError::IdempotencyConflict)
+        Err(ConfigurationError::IdempotencyConflict)
     ));
 }

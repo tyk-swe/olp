@@ -15,7 +15,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     let (owner, _) = store
         .setup_owner_with_session(
             NewOwner {
-                organization_name: "Fallback integrity".to_owned(),
+                installation_name: "Fallback integrity".to_owned(),
                 email: "owner@fallback.test".to_owned(),
                 display_name: "Owner".to_owned(),
                 password_hash: "test-password-hash".to_owned(),
@@ -32,7 +32,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     sqlx::query(
         "INSERT INTO providers \
          (id, name, kind, state, endpoint, auth_mode, etag, created_by) \
-         VALUES ($1, 'fallback-provider', 'open_ai', 'active'::provider_state, \
+         VALUES ($1, 'fallback-provider', 'openai', 'active'::provider_state, \
                  'https://old.example.test/v1/', 'api_key', $2, $3)",
     )
     .bind(provider_id)

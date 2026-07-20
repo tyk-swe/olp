@@ -26,7 +26,7 @@ function providerRecord(state = 'active') {
   return {
     id: ids.provider,
     name: 'production-openai',
-    kind: 'open_ai',
+    kind: 'openai',
     state,
     auth_mode: 'api_key',
     connector_ready: true,
@@ -61,7 +61,7 @@ function revision(id: string, number: number) {
     revision: number,
     source_etag: '01980000-0000-7000-8000-000000000a08',
     name: 'production-openai',
-    kind: 'open_ai',
+    kind: 'openai',
     endpoint: null,
     cloud_region: null,
     cloud_project: null,
@@ -100,7 +100,7 @@ test('provider studio compares redacted history and restores non-secret configur
         connector_changed: false, endpoint_changed: true, cloud_context_changed: false,
         deployment_changed: false, api_version_changed: false, credential_changed: true,
         models_added: [], models_changed: ['gpt-test'], models_removed: [],
-        capabilities_added: ['gpt-test/generation/open_ai/streaming'], capabilities_removed: []
+        capabilities_added: ['gpt-test/generation/openai/streaming'], capabilities_removed: []
       } });
       return;
     }
@@ -128,7 +128,7 @@ test('provider studio compares redacted history and restores non-secret configur
   await expect(page.getByRole('heading', { name: 'Provider revisions' })).toBeVisible();
   await page.getByRole('button', { name: 'Compare' }).click();
   await expect(page.getByRole('region', { name: 'Provider revision 1 to 2 diff' })).toContainText('Endpoint changed');
-  await expect(page.getByText('gpt-test/generation/open_ai/streaming')).toBeVisible();
+  await expect(page.getByText('gpt-test/generation/openai/streaming')).toBeVisible();
   await expect(page.getByText(/credential metadata version 2/)).toBeVisible();
   await expect(page.getByText('historical-credential-secret')).toHaveCount(0);
 
@@ -151,7 +151,7 @@ test('media job explorer stays metadata-only through list and detail', async ({ 
     provider_model: 'sora-test',
     route: 'video-route',
     operation: 'video_create',
-    surface: 'open_ai',
+    surface: 'openai',
     state: 'running',
     lifecycle: 'active',
     progress_percent: 42,

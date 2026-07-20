@@ -2,7 +2,7 @@
   "route": "team-chat",
   "message_count": 2,
   "tool_count": 1,
-  "source": "open_ai",
+  "source": "openai",
   "extension_paths": [
     "/service_tier",
     "/messages/0/vendor_message_flag",

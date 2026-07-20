@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_storage::{
-    CatalogError, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobState,
-    MediaJobUpdate, NewMediaJobReservation, NewOwner, PgStore, hash_password,
+    ConfigurationError, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,
+    MediaJobState, MediaJobUpdate, NewMediaJobReservation, NewOwner, PgStore, hash_password,
 };
 use uuid::Uuid;
 
@@ -14,7 +14,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "Media jobs integration".to_owned(),
+            installation_name: "Media jobs integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),
@@ -100,7 +100,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             provider_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
-            surface: "open_ai".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
         })
         .await
         .unwrap();
@@ -136,7 +136,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             provider_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
-            surface: "open_ai".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
         })
         .await
         .unwrap();
@@ -302,7 +302,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             provider_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
-            surface: "open_ai".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
         })
         .await
         .unwrap();
@@ -403,14 +403,14 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     assert_eq!(summary.unbound, 1);
     assert!(matches!(
         store
-            .disable_provider_catalog(
+            .disable_provider(
                 provider_id,
                 provider_etag,
                 owner.user_id,
                 "media-provider-disable-01",
             )
             .await,
-        Err(CatalogError::InUse)
+        Err(ConfigurationError::InUse)
     ));
 
     let columns: Vec<String> = sqlx::query_scalar(

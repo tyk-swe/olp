@@ -89,7 +89,7 @@
   let notice = $state('');
   let seed = $state('setup-preview');
   let simulationOperation = $state('generation');
-  let simulationSurface = $state('open_ai');
+  let simulationSurface = $state('openai');
   let simulationMode = $state('streaming');
   let simulation = $state<RouteSimulation | null>(null);
   let activation = $state<RouteActivation | null>(null);
@@ -127,7 +127,7 @@
       simulationOperation = operations[0] ?? 'generation';
     }
     const surfaces = surfacesFor(simulationOperation);
-    if (!surfaces.includes(simulationSurface)) simulationSurface = surfaces[0] ?? 'open_ai';
+    if (!surfaces.includes(simulationSurface)) simulationSurface = surfaces[0] ?? 'openai';
     const modes = modesFor(simulationOperation);
     if (!modes.includes(simulationMode)) simulationMode = modes[0] ?? 'unary';
   });

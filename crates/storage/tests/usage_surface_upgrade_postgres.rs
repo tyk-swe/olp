@@ -1,5 +1,5 @@
 use chrono::{Duration, Timelike, Utc};
-use olp_storage::{MIGRATOR, PgStore, UsageConsumerState, UsageFilters};
+use olp_storage::{MIGRATOR, PgStore, RequestMetadataConsumerState, UsageFilters};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -212,7 +212,7 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     assert_eq!(cold, ("unknown".to_owned(), 4));
 
     sqlx::query(
-        "INSERT INTO usage_consumer_health \
+        "INSERT INTO request_metadata_consumer_health \
          (singleton, pending_events, lag_events, checked_at) VALUES (true, 0, 0, $1)",
     )
     .bind(now)
@@ -257,8 +257,11 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     assert_eq!(completeness.priced_count, 7);
     assert_eq!(completeness.unpriced_count, 0);
     assert_eq!(completeness.incomplete_count, 5);
-    assert_eq!(completeness.ingestion_gap_events, 5);
+    assert_eq!(completeness.request_metadata_gap_events, 5);
     assert!(completeness.coverage.range_complete);
-    assert_eq!(completeness.consumer.state, UsageConsumerState::Healthy);
+    assert_eq!(
+        completeness.request_metadata_consumer.state,
+        RequestMetadataConsumerState::Healthy
+    );
     assert!(!completeness.complete);
 }

@@ -1,4 +1,4 @@
-use olp_conformance_fixtures::read_json;
+use olp_conformance::read_json;
 use olp_domain::{
     AttemptFailureClass, OperationKind, RouteSlug, RoutingError, RuntimeSnapshot, Surface,
     TransportError, TransportMode, TransportPhase, select_attempts,

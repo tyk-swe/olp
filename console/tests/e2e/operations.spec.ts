@@ -32,12 +32,12 @@ test('request explorer filters metadata and opens an accessible attempt timeline
     const path = new URL(route.request().url()).pathname;
     if (path === `/api/v1/requests/${requestId}`) {
       await route.fulfill({ json: {
-        id: requestId, runtime_generation_id: generationId, api_key_id: keyId, route: 'support-chat', operation: 'generation', surface: 'open_ai', started_at: '2026-07-12T12:00:00Z', completed_at: '2026-07-12T12:00:00.245Z', status_code: 200, error_class: null, total_latency_ms: 245, first_byte_ms: 81, attempt_count: 1, input_tokens: 42, output_tokens: 18, cached_input_tokens: 0, estimated_cost: '0.00125', unpriced: false, usage_complete: true,
+        id: requestId, runtime_generation_id: generationId, api_key_id: keyId, route: 'support-chat', operation: 'generation', surface: 'openai', started_at: '2026-07-12T12:00:00Z', completed_at: '2026-07-12T12:00:00.245Z', status_code: 200, error_class: null, total_latency_ms: 245, first_byte_ms: 81, attempt_count: 1, input_tokens: 42, output_tokens: 18, cached_input_tokens: 0, estimated_cost: '0.00125', unpriced: false, usage_complete: true,
         attempts: [{ id: '01980000-0000-7000-8000-000000000105', provider_id: providerId, provider_name: 'Primary OpenAI', upstream_model: 'gpt-test', ordinal: 1, started_at: '2026-07-12T12:00:00Z', completed_at: '2026-07-12T12:00:00.245Z', status_code: 200, error_class: null, latency_ms: 245, first_byte_ms: 81, committed: true }]
       }});
       return;
     }
-    await route.fulfill({ json: { data: [{ id: requestId, runtime_generation_id: generationId, api_key_id: keyId, route: 'support-chat', operation: 'generation', surface: 'open_ai', started_at: '2026-07-12T12:00:00Z', completed_at: '2026-07-12T12:00:00.245Z', status_code: 200, error_class: null, total_latency_ms: 245, first_byte_ms: 81, attempt_count: 1, input_tokens: 42, output_tokens: 18, cached_input_tokens: 0, estimated_cost: '0.00125', unpriced: false, usage_complete: true }], next_cursor: null } });
+    await route.fulfill({ json: { data: [{ id: requestId, runtime_generation_id: generationId, api_key_id: keyId, route: 'support-chat', operation: 'generation', surface: 'openai', started_at: '2026-07-12T12:00:00Z', completed_at: '2026-07-12T12:00:00.245Z', status_code: 200, error_class: null, total_latency_ms: 245, first_byte_ms: 81, attempt_count: 1, input_tokens: 42, output_tokens: 18, cached_input_tokens: 0, estimated_cost: '0.00125', unpriced: false, usage_complete: true }], next_cursor: null } });
   });
 
   await page.goto('/requests');
@@ -64,19 +64,19 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({ page
   await mockSession(page);
   const point = { bucket: '2026-07-12T12:00:00Z', request_count: 12, input_tokens: '420', output_tokens: '180', estimated_cost: '0.45', unpriced_count: 1, incomplete_count: 0 };
   const coverage = { range_complete: false, approximate: true, excluded_partial_aggregate_boundaries: 1 };
-  const consumer = { state: 'stale', pending_events: 4, lag_events: 7, oldest_pending_at: '2026-07-12T11:59:00Z', checked_at: '2026-07-12T12:00:00Z', heartbeat_age_seconds: 61 };
+  const request_metadata_consumer = { state: 'stale', pending_events: 4, lag_events: 7, oldest_pending_at: '2026-07-12T11:59:00Z', checked_at: '2026-07-12T12:00:00Z', heartbeat_age_seconds: 61 };
   await page.route('**/api/v1/usage/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/summary')) await route.fulfill({ json: { request_count: 12, input_tokens: '420', output_tokens: '180', cached_input_tokens: '0', media_units: '0', estimated_cost: '0.45', unpriced_count: 1, incomplete_count: 0, ingestion_gap_events: 0, uncertain_gap_count: 1, coverage, consumer, complete: false } });
+    if (path.endsWith('/summary')) await route.fulfill({ json: { request_count: 12, input_tokens: '420', output_tokens: '180', cached_input_tokens: '0', media_units: '0', estimated_cost: '0.45', unpriced_count: 1, incomplete_count: 0, request_metadata_gap_events: 0, uncertain_request_metadata_gap_count: 1, coverage, request_metadata_consumer, complete: false } });
     else if (path.endsWith('/time-series')) await route.fulfill({ json: { data: [point], coverage } });
     else if (path.endsWith('/breakdown')) await route.fulfill({ json: { data: [{ dimension: 'support-chat', request_count: 12, input_tokens: '420', output_tokens: '180', estimated_cost: '0.45', unpriced_count: 1, incomplete_count: 0 }], coverage } });
-    else await route.fulfill({ json: { complete: false, request_count: 12, priced_count: 11, unpriced_count: 1, incomplete_count: 0, ingestion_gap_events: 0, uncertain_gap_count: 1, estimated_cost: '0.45', coverage, consumer } });
+    else await route.fulfill({ json: { complete: false, request_count: 12, priced_count: 11, unpriced_count: 1, incomplete_count: 0, request_metadata_gap_events: 0, uncertain_request_metadata_gap_count: 1, estimated_cost: '0.45', coverage, request_metadata_consumer } });
   });
 
   await page.goto('/usage');
   await expect(page.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
-  await expect(page.getByText('Usage worker heartbeat is stale')).toBeVisible();
-  const persistence = page.getByRole('region', { name: 'Usage persistence and range coverage' });
+  await expect(page.getByText('Request metadata worker heartbeat is stale')).toBeVisible();
+  const persistence = page.getByRole('region', { name: 'Request metadata persistence and usage range coverage' });
   await expect(persistence).toContainText('Stale');
   await expect(persistence.getByText('Pending acknowledgements').locator('..')).toContainText('4');
   await expect(persistence.getByText('Stream lag').locator('..')).toContainText('7');
@@ -92,11 +92,11 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
   let epochOpen = true;
   let epochAcknowledged = false;
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
-  await page.route('**/api/v1/health/ready', async (route) => route.fulfill({ json: { status: 'ok', generation: 8, database: 'ok', limits: 'ok', usage_complete: true } }));
+  await page.route('**/api/v1/health/ready', async (route) => route.fulfill({ json: { status: 'ok', generation: 8, database: 'ok', limits: 'ok', request_metadata_complete: true } }));
   await page.route('**/api/v1/provider-health*', async (route) => route.fulfill({ json: { window_minutes: 15, data: [{ provider_id: providerId, provider_name: 'Primary OpenAI', provider_kind: 'openai', provider_state: 'active', status: 'healthy', last_probe_at: '2026-07-12T12:00:00Z', last_probe_status: 'success', last_probe_detail: 'Authenticated', last_attempt_at: '2026-07-12T12:00:00Z', attempt_count: 10, success_count: 10, rate_limit_count: 0, server_error_count: 0, transport_error_count: 0, average_latency_ms: 98 }] } }));
   await page.route('**/api/v1/runtime-generations*', async (route) => route.fulfill({ json: { data: [{ id: generationId, sequence: 8, sha256: 'a'.repeat(64), created_by: keyId, created_by_email: 'owner@example.com', created_at: '2026-07-12T12:00:00Z' }], next_cursor: null } }));
-  await page.route('**/api/v1/usage/completeness*', async (route) => route.fulfill({ json: { complete: true, request_count: 10, priced_count: 10, unpriced_count: 0, incomplete_count: 0, ingestion_gap_events: 0, uncertain_gap_count: 0, estimated_cost: '0.01' } }));
-  await page.route('**/api/v1/usage/gateway-epochs**', async (route) => {
+  await page.route('**/api/v1/usage/completeness*', async (route) => route.fulfill({ json: { complete: true, request_count: 10, priced_count: 10, unpriced_count: 0, incomplete_count: 0, request_metadata_gap_events: 0, uncertain_request_metadata_gap_count: 0, request_metadata_consumer: { state: 'healthy', pending_events: 0, lag_events: 0 }, estimated_cost: '0.01' } }));
+  await page.route('**/api/v1/request-metadata/gateway-epochs**', async (route) => {
     if (route.request().method() === 'POST') {
       epochAcknowledged = true;
       epochOpen = false;
@@ -128,7 +128,7 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
   await emulateTwoHundredPercentZoom(page);
   await page.goto('/health');
   await expect(page.getByRole('heading', { name: 'Health' })).toBeVisible();
-  await expect(page.getByText('Usage persistence is complete')).toBeVisible();
+  await expect(page.getByText('Usage accounting is complete')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Unresolved gateway epochs' })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Acknowledge epoch' }).click();

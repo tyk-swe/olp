@@ -28,7 +28,7 @@
     <circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="19" cy="18" r="2"></circle><path d="M7 6h3a4 4 0 0 1 4 4v4a4 4 0 0 0 3 3.9M14 10a4 4 0 0 1 3-3.9"></path>
   {:else if name === 'key'}
     <circle cx="8" cy="15" r="4"></circle><path d="m11 12 8-8m-3 3 2 2m-5 1 2 2"></path>
-  {:else if name === 'team'}
+  {:else if name === 'access'}
     <circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 14a4.5 4.5 0 0 1 3.5 4.4"></path>
   {:else if name === 'request'}
     <path d="M6 3h9l4 4v14H6z"></path><path d="M14 3v5h5M9 13h7M9 17h5"></path>

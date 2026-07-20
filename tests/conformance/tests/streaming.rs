@@ -1,4 +1,4 @@
-use olp_conformance_fixtures::{read_fixture, read_json};
+use olp_conformance::{read_fixture, read_json};
 use olp_domain::{CanonicalEvent, CanonicalEventKind, validate_event_sequence};
 use olp_protocols::{
     anthropic::AnthropicMessagesStreamDecoder,

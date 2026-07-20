@@ -8,7 +8,7 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_storage::KeyHasher;
+use olp_storage::AuthHmacKey;
 
 use crate::{ApiState, Problem};
 
@@ -120,13 +120,13 @@ fn resolve_auth_source<'a>(
     state: &'a ApiState,
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
-) -> Result<(String, &'a Arc<KeyHasher>), Problem> {
+) -> Result<(String, &'a Arc<AuthHmacKey>), Problem> {
     let source = public_auth_source(state, headers, peer)?;
-    let hasher = state
-        .key_hasher
+    let auth_hmac_key = state
+        .auth_hmac_key
         .as_ref()
-        .ok_or_else(|| Problem::service_unavailable("key_hash_key_not_configured"))?;
-    Ok((source, hasher))
+        .ok_or_else(|| Problem::service_unavailable("auth_hmac_key_not_configured"))?;
+    Ok((source, auth_hmac_key))
 }
 
 pub(crate) fn public_auth_source_digest(
@@ -134,8 +134,8 @@ pub(crate) fn public_auth_source_digest(
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
 ) -> Result<[u8; 32], Problem> {
-    let (source, hasher) = resolve_auth_source(state, headers, peer)?;
-    Ok(hasher.public_auth_source_digest(&source))
+    let (source, auth_hmac_key) = resolve_auth_source(state, headers, peer)?;
+    Ok(auth_hmac_key.public_auth_source_digest(&source))
 }
 
 pub(crate) fn public_auth_source_target_digests(
@@ -144,9 +144,9 @@ pub(crate) fn public_auth_source_target_digests(
     peer: Option<SocketAddr>,
     target: &str,
 ) -> Result<([u8; 32], [u8; 32]), Problem> {
-    let (source, hasher) = resolve_auth_source(state, headers, peer)?;
+    let (source, auth_hmac_key) = resolve_auth_source(state, headers, peer)?;
     Ok((
-        hasher.public_auth_source_digest(&source),
-        hasher.public_auth_source_target_digest(&source, target),
+        auth_hmac_key.public_auth_source_digest(&source),
+        auth_hmac_key.public_auth_source_target_digest(&source, target),
     ))
 }

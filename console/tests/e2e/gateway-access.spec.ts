@@ -59,7 +59,7 @@ function providerRecord(
   return {
     id: ids.provider,
     name: 'production-openai',
-    kind: 'open_ai',
+    kind: 'openai',
     state,
     auth_mode: 'api_key',
     connector_ready: true,
@@ -117,8 +117,8 @@ const modelRecord = {
   enabled: true,
   discovered_at: now,
   capabilities: [
-    { operation: 'generation', surface: 'open_ai', mode: 'streaming', source: 'declared' },
-    { operation: 'generation', surface: 'open_ai', mode: 'unary', source: 'declared' }
+    { operation: 'generation', surface: 'openai', mode: 'streaming', source: 'declared' },
+    { operation: 'generation', surface: 'openai', mode: 'unary', source: 'declared' }
   ]
 };
 
@@ -140,13 +140,13 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
   const probeEtags: string[] = [];
   let certificationEtag = '';
 
-  await page.route('**/api/v1/provider-kinds/open_ai/capabilities', async (route) => {
+  await page.route('**/api/v1/provider-kinds/openai/capabilities', async (route) => {
     await route.fulfill({
       json: {
-        provider_kind: 'open_ai',
+        provider_kind: 'openai',
         capabilities: [
-          { operation: 'generation', surface: 'open_ai', mode: 'unary' },
-          { operation: 'generation', surface: 'open_ai', mode: 'streaming' }
+          { operation: 'generation', surface: 'openai', mode: 'unary' },
+          { operation: 'generation', surface: 'openai', mode: 'streaming' }
         ]
       }
     });
@@ -159,7 +159,7 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
     if (pathname === '/api/v1/providers' && request.method() === 'POST') {
       createBody = request.postDataJSON();
       createHeaders = await request.allHeaders();
-      await route.fulfill({ status: 201, json: { id: ids.provider, name: 'production-openai', kind: 'open_ai', state: 'draft', model: 'gpt-5.4', etag: currentProvider.etag } });
+      await route.fulfill({ status: 201, json: { id: ids.provider, name: 'production-openai', kind: 'openai', state: 'draft', model: 'gpt-5.4', etag: currentProvider.etag } });
       return;
     }
     if (pathname === `/api/v1/providers/${ids.provider}` && request.method() === 'GET') {
@@ -249,7 +249,7 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
   await expect(page.getByText('sk-upstream-secret')).toHaveCount(0);
   expect(createBody).toMatchObject({
     name: 'production-openai',
-    kind: 'open_ai',
+    kind: 'openai',
     model: 'gpt-5.4',
     credential: 'sk-upstream-secret',
     endpoint: null,
@@ -344,7 +344,7 @@ test('provider detail resets provider-wide model mutations and retains row-local
     provider_id: ids.provider,
     revision: 1,
     name: 'production-openai',
-    kind: 'open_ai',
+    kind: 'openai',
     connector_ready: true,
     model_count: 2,
     enabled_model_count: 1,
@@ -355,7 +355,7 @@ test('provider detail resets provider-wide model mutations and retains row-local
     activated_by: ids.user
   };
   let currentProvider = providerRecord('active', [certifiedModelRecord], {
-    kind: 'open_ai_compatible',
+    kind: 'openai_compatible',
     endpoint: 'https://models.example.test/v1/',
     model_count: 2,
     active_revision: 1,
@@ -372,11 +372,11 @@ test('provider detail resets provider-wide model mutations and retains row-local
     };
   }
 
-  await page.route('**/api/v1/provider-kinds/open_ai_compatible/capabilities', async (route) => {
+  await page.route('**/api/v1/provider-kinds/openai_compatible/capabilities', async (route) => {
     await route.fulfill({
       json: {
-        provider_kind: 'open_ai_compatible',
-        capabilities: [{ operation: 'generation', surface: 'open_ai', mode: 'unary' }]
+        provider_kind: 'openai_compatible',
+        capabilities: [{ operation: 'generation', surface: 'openai', mode: 'unary' }]
       }
     });
   });
@@ -572,7 +572,7 @@ test('provider detail keeps the live revision and credential until a certified d
   await mockSession(page);
   const nextCredential = '01980000-0000-7000-8000-000000000104';
   let currentProvider = providerRecord('active', [certifiedModelRecord], {
-    kind: 'open_ai_compatible',
+    kind: 'openai_compatible',
     endpoint: 'https://models.example.test/v1/',
     active_revision: 1,
     pending_activation: false
@@ -621,7 +621,7 @@ test('provider detail keeps the live revision and credential until a certified d
         ...certifiedModelRecord,
         capabilities: certifiedModelRecord.capabilities.map((capability) => ({ ...capability, source: 'declared', certified_at: null }))
       }], {
-        kind: 'open_ai_compatible',
+        kind: 'openai_compatible',
         endpoint: 'https://models.example.test/v1/',
         active_revision: 1,
         pending_activation: true,
@@ -669,7 +669,7 @@ test('provider detail keeps the live revision and credential until a certified d
     if (pathname.endsWith('/activate')) {
       activationEtag = (await request.allHeaders())['if-match'];
       currentProvider = providerRecord('active', [certifiedModelRecord], {
-        kind: 'open_ai_compatible',
+        kind: 'openai_compatible',
         endpoint: 'https://models.example.test/v1/',
         active_revision: 2,
         pending_activation: false,
@@ -822,7 +822,7 @@ test('model inventory pages the global catalog and updates through provider ETag
             items: [{
               provider_id: ids.provider,
               provider_name: 'production-openai',
-              provider_kind: 'open_ai',
+              provider_kind: 'openai',
               model: { ...certifiedModelRecord, enabled: firstEnabled }
             }],
             next_cursor: 'opaque-next-model'
@@ -884,7 +884,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
         items: [{
           provider_id: ids.provider,
           provider_name: 'production-openai',
-          provider_kind: 'open_ai',
+          provider_kind: 'openai',
           model: certifiedModelRecord
         }],
         next_cursor: null
@@ -906,7 +906,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
     }
     if (pathname.endsWith('/simulate')) {
       simulationBody = request.postDataJSON();
-      await route.fulfill({ json: { deterministic_seed: 'setup-preview', operation: 'generation', surface: 'open_ai', mode: 'streaming', targets: [{ target_id: ids.target, provider_id: ids.provider, provider_name: 'production-openai', provider_model: 'gpt-5.4', priority: 1, eligible: true, reason: null, attempt: 1 }] } });
+      await route.fulfill({ json: { deterministic_seed: 'setup-preview', operation: 'generation', surface: 'openai', mode: 'streaming', targets: [{ target_id: ids.target, provider_id: ids.provider, provider_name: 'production-openai', provider_model: 'gpt-5.4', priority: 1, eligible: true, reason: null, attempt: 1 }] } });
       return;
     }
     if (pathname.endsWith('/validate')) {
@@ -942,7 +942,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   await expect(page.getByText('Eligible in priority group 1')).toBeVisible();
   expect(simulationBody).toEqual({
     operation: 'generation',
-    surface: 'open_ai',
+    surface: 'openai',
     mode: 'streaming',
     seed: 'setup-preview'
   });
@@ -1132,7 +1132,7 @@ test('route revision diff and restore-as-draft remain explicit', async ({ page }
   expect(restoreCalled).toBe(true);
 });
 
-test('team roles, one-time invitations, sessions, and OIDC are API-backed', async ({ page }) => {
+test('access roles, one-time invitations, sessions, and OIDC are API-backed', async ({ page }) => {
   await mockSession(page);
   const members = [
     { id: ids.user, email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner', active: true, etag: '01980000-0000-7000-8000-000000000411', created_at: now, updated_at: now },
@@ -1181,8 +1181,8 @@ test('team roles, one-time invitations, sessions, and OIDC are API-backed', asyn
     await route.fulfill({ json: { authorization_url: '/oidc-test-redirect' } });
   });
 
-  await page.goto('/team');
-  await expect(page.getByRole('heading', { name: 'Team & Access' })).toBeVisible();
+  await page.goto('/access');
+  await expect(page.getByRole('heading', { name: 'Access', exact: true })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByLabel('Role for Grace Developer').selectOption('operator');
   await expect(page.getByText('Grace Developer is now operator.')).toBeVisible();

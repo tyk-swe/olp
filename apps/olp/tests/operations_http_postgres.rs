@@ -12,7 +12,9 @@ use olp::{
     refresh_observability_cache,
 };
 use olp_domain::Surface;
-use olp_storage::{MasterKey, PgStore, UsageAttempt, UsageEvent, UsageGap};
+use olp_storage::{
+    MasterKey, PgStore, RequestAttemptMetadata, RequestMetadataEvent, RequestMetadataGap,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -50,7 +52,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
             "email": "owner@example.test",
             "password": "correct horse battery staple",
             "display_name": "Owner",
-            "organization_name": "Operations HTTP test"
+            "installation_name": "Operations HTTP test"
         })),
         RequestHeaders::default(),
     )
@@ -68,7 +70,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         "INSERT INTO providers
          (id, name, kind, state, auth_mode, etag, created_by,
           last_probe_at, last_probe_status, last_probe_detail)
-         VALUES ($1, 'operations-http-provider', 'open_ai', 'active', 'api_key', $2, $3,
+         VALUES ($1, 'operations-http-provider', 'openai', 'active', 'api_key', $2, $3,
                  now(), 'succeeded', 'mock probe succeeded')",
     )
     .bind(provider_id)
@@ -109,7 +111,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         Some(json!({
             "effective_at": (observed_at - Duration::minutes(1)).to_rfc3339(),
             "prices": [{
-                "provider_kind": "open_ai",
+                "provider_kind": "openai",
                 "provider_id": provider_id,
                 "model": "mock-model",
                 "operation": "generation",
@@ -140,7 +142,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         Some(json!({
             "effective_at": (observed_at - Duration::minutes(1)).to_rfc3339(),
             "prices": [{
-                "provider_kind": "open_ai",
+                "provider_kind": "openai",
                 "provider_id": provider_id,
                 "model": "mock-model",
                 "operation": "generation",
@@ -166,7 +168,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         Some(json!({
             "effective_at": (observed_at - Duration::minutes(1)).to_rfc3339(),
             "prices": [{
-                "provider_kind": "open_ai",
+                "provider_kind": "openai",
                 "provider_id": provider_id,
                 "model": "mock-model",
                 "operation": "generation",
@@ -192,7 +194,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         Some(json!({
             "effective_at": (observed_at + Duration::days(1)).to_rfc3339(),
             "prices": [{
-                "provider_kind": "open_ai",
+                "provider_kind": "openai",
                 "provider_id": provider_id,
                 "model": "mock-model",
                 "operation": "generation",
@@ -215,7 +217,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     let request_id = Uuid::now_v7();
     let started_at = observed_at - Duration::milliseconds(25);
     store
-        .persist_usage_event(&UsageEvent {
+        .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
             request_id,
             runtime_generation_id: generation_id,
@@ -239,7 +241,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
             media_units: None,
             usage_complete: true,
             unpriced: false,
-            attempts: vec![UsageAttempt {
+            attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -256,8 +258,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .await
         .unwrap();
     store
-        .report_usage_gap_once(
-            UsageGap {
+        .report_request_metadata_gap_once(
+            RequestMetadataGap {
                 gateway_instance: "http-integration".to_owned(),
                 event_count: 2,
                 reason: "injected_http_gap".to_owned(),
@@ -269,7 +271,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .await
         .unwrap();
     store
-        .report_usage_consumer_health(2, 3, Some(Utc::now() - Duration::seconds(30)))
+        .report_request_metadata_consumer_health(2, 3, Some(Utc::now() - Duration::seconds(30)))
         .await
         .unwrap();
 
@@ -296,9 +298,15 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     .await;
     assert_eq!(summary.status(), StatusCode::OK);
     let summary_body = response_json(summary).await;
-    assert_eq!(summary_body["consumer"]["state"], "backlogged");
-    assert_eq!(summary_body["consumer"]["pending_events"], 2);
-    assert_eq!(summary_body["consumer"]["lag_events"], 3);
+    assert_eq!(
+        summary_body["request_metadata_consumer"]["state"],
+        "backlogged"
+    );
+    assert_eq!(
+        summary_body["request_metadata_consumer"]["pending_events"],
+        2
+    );
+    assert_eq!(summary_body["request_metadata_consumer"]["lag_events"], 3);
     assert_eq!(summary_body["complete"], false);
 
     let series = get(
@@ -332,8 +340,11 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     )
     .await;
     let completeness_body = response_json(completeness).await;
-    assert_eq!(completeness_body["ingestion_gap_events"], 2);
-    assert_eq!(completeness_body["consumer"]["state"], "backlogged");
+    assert_eq!(completeness_body["request_metadata_gap_events"], 2);
+    assert_eq!(
+        completeness_body["request_metadata_consumer"]["state"],
+        "backlogged"
+    );
     assert_eq!(completeness_body["complete"], false);
 
     refresh_observability_cache(&observability_state).await;
@@ -341,29 +352,34 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert_eq!(ready.status(), StatusCode::OK);
     let ready_body = response_json(ready).await;
     assert_eq!(ready_body["status"], "degraded");
-    assert_eq!(ready_body["usage_complete"], false);
-    assert_eq!(ready_body["usage_consumer"], "backlogged");
-    assert_eq!(ready_body["usage_consumer_pending_events"], 2);
-    assert_eq!(ready_body["usage_consumer_lag_events"], 3);
+    assert_eq!(ready_body["request_metadata_complete"], false);
+    assert_eq!(ready_body["request_metadata_consumer"], "backlogged");
+    assert_eq!(ready_body["request_metadata_consumer_pending_events"], 2);
+    assert_eq!(ready_body["request_metadata_consumer_lag_events"], 3);
 
     let management_ready = get(&app, "/api/v1/health/ready", &cookie).await;
     assert_eq!(management_ready.status(), StatusCode::OK);
     let management_ready_body = response_json(management_ready).await;
     assert_eq!(management_ready_body["status"], "degraded");
-    assert_eq!(management_ready_body["usage_complete"], false);
-    assert_eq!(management_ready_body["usage_consumer"], "backlogged");
+    assert_eq!(management_ready_body["request_metadata_complete"], false);
+    assert_eq!(
+        management_ready_body["request_metadata_consumer"],
+        "backlogged"
+    );
 
-    sqlx::query("UPDATE usage_consumer_health SET checked_at = now() - interval '1 minute'")
-        .execute(store.pool())
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE request_metadata_consumer_health SET checked_at = now() - interval '1 minute'",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     refresh_observability_cache(&observability_state).await;
     let stale_ready = get(&observability, "/health/ready", &cookie).await;
     assert_eq!(stale_ready.status(), StatusCode::OK);
     let stale_ready_body = response_json(stale_ready).await;
     assert_eq!(stale_ready_body["status"], "degraded");
-    assert_eq!(stale_ready_body["usage_consumer"], "stale");
-    assert_eq!(stale_ready_body["usage_complete"], false);
+    assert_eq!(stale_ready_body["request_metadata_consumer"], "stale");
+    assert_eq!(stale_ready_body["request_metadata_complete"], false);
 
     refresh_observability_cache(&observability_state).await;
     let metrics = get(&observability, "/metrics", &cookie).await;
@@ -379,10 +395,10 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     )
     .unwrap();
     assert!(metrics.contains("olp_ready 1"));
-    assert!(metrics.contains("olp_usage_consumer_pending_events 2"));
-    assert!(metrics.contains("olp_usage_consumer_lag_events 3"));
-    assert!(metrics.contains("olp_usage_consumer_healthy 0"));
-    assert!(metrics.contains("olp_usage_consumer_stale 1"));
+    assert!(metrics.contains("olp_request_metadata_consumer_pending_events 2"));
+    assert!(metrics.contains("olp_request_metadata_consumer_lag_events 3"));
+    assert!(metrics.contains("olp_request_metadata_consumer_healthy 0"));
+    assert!(metrics.contains("olp_request_metadata_consumer_stale 1"));
     assert!(metrics.contains("olp_operational_metrics_available 1"));
     assert!(metrics.contains("olp_request_success_ratio_5m"));
     assert!(metrics.contains("olp_request_latency_seconds{quantile=\"0.95\"}"));
@@ -390,7 +406,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert!(metrics.contains("olp_provider_health{"));
 
     store
-        .report_usage_consumer_health(0, 0, None)
+        .report_request_metadata_consumer_health(0, 0, None)
         .await
         .unwrap();
 
@@ -412,7 +428,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
             request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
             estimated_cost, unpriced_count, incomplete_count, currency
          ) VALUES (
-            $1, 'archived-http', $2, 'mock-model', 'generation', 'open_ai', $3,
+            $1, 'archived-http', $2, 'mock-model', 'generation', 'openai', $3,
             4, 40, 20, 5, 0, 0.000080000000, 0, 0, 'USD'
          )",
     )

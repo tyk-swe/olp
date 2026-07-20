@@ -35,10 +35,10 @@ pub enum PersistenceError {
     Serialize(#[from] serde_json::Error),
     #[error("session lifetime must be positive and representable")]
     InvalidSessionTtl,
-    #[error("usage gap metadata is invalid")]
-    InvalidUsageGap,
-    #[error("usage event timing or status metadata is invalid")]
-    InvalidUsageEvent,
+    #[error("request metadata gap is invalid")]
+    InvalidRequestMetadataGap,
+    #[error("request metadata event timing or status is invalid")]
+    InvalidRequestMetadataEvent,
     #[error("stored {0} is outside the supported closed set")]
     InvalidStoredValue(&'static str),
     #[error("idempotency replay encryption failed")]
@@ -125,20 +125,21 @@ impl PgStore {
     /// Records a gap exactly once for a durable source identity such as a
     /// Valkey Stream entry or decoded event ID. This closes the commit-before-
     /// acknowledgement crash window without storing content.
-    pub async fn report_usage_gap_once(
+    pub async fn report_request_metadata_gap_once(
         &self,
-        gap: UsageGap,
+        gap: RequestMetadataGap,
         deduplication_key: &str,
     ) -> Result<bool, PersistenceError> {
         if deduplication_key.is_empty() || deduplication_key.len() > 256 {
-            return Err(PersistenceError::InvalidUsageGap);
+            return Err(PersistenceError::InvalidRequestMetadataGap);
         }
-        self.insert_usage_gap(gap, Some(deduplication_key)).await
+        self.insert_request_metadata_gap(gap, Some(deduplication_key))
+            .await
     }
 
-    async fn insert_usage_gap(
+    async fn insert_request_metadata_gap(
         &self,
-        gap: UsageGap,
+        gap: RequestMetadataGap,
         deduplication_key: Option<&str>,
     ) -> Result<bool, PersistenceError> {
         if gap.event_count <= 0
@@ -146,10 +147,10 @@ impl PgStore {
             || gap.reason.trim().is_empty()
             || gap.last_observed_at < gap.first_observed_at
         {
-            return Err(PersistenceError::InvalidUsageGap);
+            return Err(PersistenceError::InvalidRequestMetadataGap);
         }
         let result = sqlx::query(
-            "INSERT INTO usage_ingestion_gaps \
+            "INSERT INTO request_metadata_ingestion_gaps \
              (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at, \
               deduplication_key) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) \
@@ -169,7 +170,7 @@ impl PgStore {
 }
 
 pub struct NewOwner {
-    pub organization_name: String,
+    pub installation_name: String,
     pub email: String,
     pub display_name: String,
     pub password_hash: String,
@@ -179,7 +180,7 @@ impl fmt::Debug for NewOwner {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("NewOwner")
-            .field("organization_name", &self.organization_name)
+            .field("installation_name", &self.installation_name)
             .field("email", &self.email)
             .field("display_name", &self.display_name)
             .field("password_hash", &"[REDACTED]")
@@ -288,7 +289,7 @@ impl fmt::Debug for OutboxRecord {
 }
 
 #[derive(Debug, Clone)]
-pub struct UsageGap {
+pub struct RequestMetadataGap {
     pub gateway_instance: String,
     pub event_count: i64,
     pub reason: String,

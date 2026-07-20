@@ -1,4 +1,4 @@
-use olp_conformance_fixtures::read_json;
+use olp_conformance::read_json;
 use olp_providers::anthropic::ConnectorConfig as AnthropicConnectorConfig;
 use olp_providers::gemini::ConnectorConfig as GeminiConnectorConfig;
 use olp_providers::openai::ConnectorConfig as OpenAiConnectorConfig;

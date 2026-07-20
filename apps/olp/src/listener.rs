@@ -135,7 +135,7 @@ pub(crate) struct HttpServerConfig {
 }
 
 impl HttpServerConfig {
-    pub(crate) fn public(max_connections: usize) -> Self {
+    pub(crate) fn standard(max_connections: usize) -> Self {
         Self {
             max_connections,
             http1_header_timeout: Duration::from_secs(10),

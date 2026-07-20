@@ -8,6 +8,7 @@ use crate::RequestId;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
+    #[serde(rename = "openai")]
     OpenAi,
     Anthropic,
     Gemini,
@@ -19,7 +20,7 @@ impl Surface {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::OpenAi => "open_ai",
+            Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
             Self::Gemini => "gemini",
         }
@@ -31,7 +32,7 @@ impl FromStr for Surface {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "open_ai" => Ok(Self::OpenAi),
+            "openai" => Ok(Self::OpenAi),
             "anthropic" => Ok(Self::Anthropic),
             "gemini" => Ok(Self::Gemini),
             _ => Err(InvalidSurface),

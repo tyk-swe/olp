@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::error::map_oidc;
 use crate::{
     ApiState, Problem,
-    management::{require_mutation_session, require_read_session, require_store},
+    management_api::{require_mutation_session, require_read_session, require_store},
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]

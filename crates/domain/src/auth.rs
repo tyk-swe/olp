@@ -65,8 +65,8 @@ pub enum Permission {
     ManageProviders,
     ManageRoutes,
     ManageApiKeys,
-    ReadTeam,
-    ManageTeam,
+    ReadAccess,
+    ManageAccess,
     ManageSessions,
     ReadOperations,
     UsePlayground,
@@ -80,8 +80,8 @@ impl Permission {
         Self::ManageProviders,
         Self::ManageRoutes,
         Self::ManageApiKeys,
-        Self::ReadTeam,
-        Self::ManageTeam,
+        Self::ReadAccess,
+        Self::ManageAccess,
         Self::ManageSessions,
         Self::ReadOperations,
         Self::UsePlayground,
@@ -100,7 +100,7 @@ impl Role {
                 Permission::ManageProviders
                     | Permission::ManageRoutes
                     | Permission::ManageApiKeys
-                    | Permission::ReadTeam
+                    | Permission::ReadAccess
                     | Permission::ReadConfiguration
                     | Permission::ReadOperations
                     | Permission::UsePlayground
@@ -272,8 +272,8 @@ mod tests {
                 | Permission::ManageProviders
                 | Permission::ManageRoutes
                 | Permission::ManageApiKeys
-                | Permission::ReadTeam
-                | Permission::ManageTeam
+                | Permission::ReadAccess
+                | Permission::ManageAccess
                 | Permission::ManageSessions
                 | Permission::ReadOperations
                 | Permission::UsePlayground
@@ -285,12 +285,12 @@ mod tests {
                 | Permission::ManageProviders
                 | Permission::ManageRoutes
                 | Permission::ManageApiKeys
-                | Permission::ReadTeam
+                | Permission::ReadAccess
                 | Permission::ReadOperations
                 | Permission::UsePlayground
                 | Permission::ManageSettings
                 | Permission::ManagePricing => true,
-                Permission::ManageTeam | Permission::ManageSessions => false,
+                Permission::ManageAccess | Permission::ManageSessions => false,
             },
             Role::Developer => match permission {
                 Permission::ReadConfiguration
@@ -299,8 +299,8 @@ mod tests {
                 | Permission::UsePlayground => true,
                 Permission::ManageProviders
                 | Permission::ManageRoutes
-                | Permission::ReadTeam
-                | Permission::ManageTeam
+                | Permission::ReadAccess
+                | Permission::ManageAccess
                 | Permission::ManageSessions
                 | Permission::ManageSettings
                 | Permission::ManagePricing => false,
@@ -310,8 +310,8 @@ mod tests {
                 Permission::ManageProviders
                 | Permission::ManageRoutes
                 | Permission::ManageApiKeys
-                | Permission::ReadTeam
-                | Permission::ManageTeam
+                | Permission::ReadAccess
+                | Permission::ManageAccess
                 | Permission::ManageSessions
                 | Permission::UsePlayground
                 | Permission::ManageSettings
@@ -340,5 +340,17 @@ mod tests {
             assert_eq!(role.to_string(), role.as_str());
         }
         assert_eq!("administrator".parse::<Role>(), Err(InvalidRole));
+    }
+
+    #[test]
+    fn access_permission_strings_are_stable() {
+        assert_eq!(
+            serde_json::to_string(&Permission::ReadAccess).unwrap(),
+            r#""read_access""#
+        );
+        assert_eq!(
+            serde_json::to_string(&Permission::ManageAccess).unwrap(),
+            r#""manage_access""#
+        );
     }
 }

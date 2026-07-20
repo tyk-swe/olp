@@ -1,7 +1,6 @@
 //! Axum delivery adapter for management, inference, the static operator
 //! console, and the separately bound private observability surface.
 
-mod catalog;
 mod circuit;
 mod cli;
 mod connectors;
@@ -10,12 +9,10 @@ mod gateway;
 mod image_response;
 mod json_media;
 mod listener;
-mod management;
+mod management_api;
 mod media_spool;
 mod observability;
 mod oidc;
-mod openai_models;
-mod openai_response;
 mod operations;
 mod playground;
 mod problem;
@@ -27,7 +24,6 @@ mod semantic_validation;
 mod services;
 mod static_console;
 mod streaming_response;
-mod vendor_gateway;
 
 use std::{
     collections::BTreeMap,
@@ -42,7 +38,7 @@ use std::{
 
 use arc_swap::ArcSwapOption;
 use olp_domain::{MediaSpool, ProviderId, ProviderKind, ProviderTransport};
-use olp_storage::{DistributedLimiter, KeyHasher, MasterKey, PgStore, UsageEmitter};
+use olp_storage::{AuthHmacKey, DistributedLimiter, MasterKey, PgStore, RequestMetadataEmitter};
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
@@ -51,7 +47,7 @@ use request_admission::MultipartAdmissionState;
 
 pub use cli::run_cli;
 pub use gateway::reconcile_media_jobs_once;
-pub use management::management_openapi;
+pub use management_api::management_openapi;
 #[cfg(any(test, feature = "test-util"))]
 pub use media_spool::create_bounded_media_spool_for_test;
 pub use media_spool::create_media_spool;
@@ -67,7 +63,7 @@ pub use proxy::{TrustedProxyCidr, TrustedProxyCidrParseError, public_auth_source
 pub use router::{public_router, try_public_router};
 pub use runtime::{RuntimeBundle, RuntimeInstallError, RuntimeManager};
 pub use services::{
-    ApiStartupError, CatalogService, IdentityService, InferenceService, ModeServices,
+    ApiStartupError, ConfigurationService, IdentityService, InferenceService, ModeServices,
     OperationsService, WorkerService,
 };
 
@@ -110,17 +106,17 @@ pub struct ApiState {
     pub store: Option<PgStore>,
     pub runtime: Arc<RuntimeManager>,
     pub limiter: LimiterManager,
-    pub key_hasher: Option<Arc<KeyHasher>>,
+    pub auth_hmac_key: Option<Arc<AuthHmacKey>>,
     trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     bootstrap_token_digest: Arc<AsyncRwLock<Option<Zeroizing<[u8; 32]>>>>,
     pub master_key: Option<Arc<MasterKey>>,
-    pub usage: Option<UsageEmitter>,
+    pub request_metadata: Option<RequestMetadataEmitter>,
     pub(crate) circuits: circuit::CircuitBreaker,
     media_reconciliation_gaps: Arc<AtomicU64>,
     pub media_spool: Arc<dyn MediaSpool>,
     multipart_admission: MultipartAdmissionState,
     pub transports: TransportRegistry,
-    catalog_openai_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
+    certification_probe_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
     pub public_origin: Arc<str>,
     pub console_dir: Arc<PathBuf>,
     pub session_ttl: chrono::Duration,
@@ -168,17 +164,17 @@ impl ApiState {
             store,
             runtime,
             limiter: LimiterManager::default(),
-            key_hasher: None,
+            auth_hmac_key: None,
             trusted_proxy_cidrs: Arc::from([]),
             bootstrap_token_digest: Arc::new(AsyncRwLock::new(None)),
             master_key: None,
-            usage: None,
+            request_metadata: None,
             circuits: circuit::CircuitBreaker::default(),
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
             media_spool,
             multipart_admission,
             transports: TransportRegistry::default(),
-            catalog_openai_connectors: Default::default(),
+            certification_probe_connectors: Default::default(),
             public_origin: Arc::from(public_origin.into().trim_end_matches('/')),
             console_dir: Arc::new(console_dir.into()),
             session_ttl: chrono::Duration::hours(12),
@@ -202,13 +198,12 @@ impl ApiState {
     pub(crate) async fn verify_bootstrap_token(&self, supplied: Option<&str>) -> Option<bool> {
         let digest = self.bootstrap_token_digest.read().await;
         let expected = digest.as_ref()?;
-        let Some(hasher) = self.key_hasher.as_ref() else {
+        let Some(auth_hmac_key) = self.auth_hmac_key.as_ref() else {
             return Some(false);
         };
-        Some(
-            supplied
-                .is_some_and(|supplied| hasher.verify_bootstrap_token_digest(supplied, expected)),
-        )
+        Some(supplied.is_some_and(|supplied| {
+            auth_hmac_key.verify_bootstrap_token_digest(supplied, expected)
+        }))
     }
 
     pub(crate) async fn clear_bootstrap_token(&self) {
@@ -232,28 +227,28 @@ impl ApiState {
         );
     }
 
-    /// Installs a prebuilt OpenAI connector for catalog connectivity checks.
+    /// Installs a prebuilt OpenAI connector for certification and connectivity probes.
     ///
     /// This is an internal dependency-injection seam used by integration tests
     /// to exercise real connector I/O against a local mock without weakening
     /// the production custom-endpoint SSRF policy. Production wiring never
     /// installs an override.
     #[doc(hidden)]
-    pub fn register_catalog_openai_connector_for_test(
+    pub fn register_certification_probe_connector_for_test(
         &self,
         provider_id: uuid::Uuid,
         connector: OpenAiConnector,
     ) {
-        self.catalog_openai_connectors
+        self.certification_probe_connectors
             .register(provider_id, connector);
     }
 
-    pub(crate) fn catalog_openai_connector(
+    pub(crate) fn certification_probe_connector(
         &self,
         provider_id: uuid::Uuid,
         kind: ProviderKind,
     ) -> Option<olp_providers::ProviderFacade> {
-        self.catalog_openai_connectors.get(provider_id, kind)
+        self.certification_probe_connectors.get(provider_id, kind)
     }
 
     fn media_reconciliation_gap_count(&self) -> u64 {

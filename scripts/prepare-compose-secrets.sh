@@ -5,6 +5,15 @@ set -euo pipefail
 # supplied material is preserved, including a versioned master-key keyring.
 secrets_dir=${OLP_COMPOSE_SECRETS_DIR:-deploy/secrets}
 bootstrap_retired_marker="$secrets_dir/.olp_bootstrap_retired"
+legacy_auth_hmac_key="$secrets_dir/olp_key_hash_key"
+auth_hmac_key="$secrets_dir/olp_auth_hmac_key"
+
+if [[ ! -e $auth_hmac_key && ! -L $auth_hmac_key ]] &&
+  [[ -e $legacy_auth_hmac_key || -L $legacy_auth_hmac_key ]]; then
+  echo "legacy Compose authentication HMAC key exists at $legacy_auth_hmac_key, but $auth_hmac_key is missing" >&2
+  echo "move or securely copy the existing bytes to $auth_hmac_key before rerunning; do not generate a replacement" >&2
+  exit 1
+fi
 
 command -v openssl >/dev/null || {
   echo "openssl is required to prepare Compose secrets" >&2
@@ -20,7 +29,7 @@ if [[ -L $bootstrap_retired_marker ]] ||
   exit 1
 fi
 
-secret_names=(olp_master_key olp_key_hash_key)
+secret_names=(olp_master_key olp_auth_hmac_key)
 if [[ ! -e $bootstrap_retired_marker ]]; then
   secret_names+=(olp_bootstrap_token)
 fi

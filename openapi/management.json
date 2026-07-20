@@ -22,7 +22,7 @@
         ],
         "type": "object"
       },
-      "ApiKeyCatalogResponse": {
+      "ApiKeyDetailResponse": {
         "properties": {
           "allowed_routes": {
             "items": {
@@ -35,7 +35,7 @@
             "type": "string"
           },
           "created_by": {
-            "description": "The operator who issued this team-scoped key.",
+            "description": "The operator who issued this installation-scoped key.",
             "format": "uuid",
             "type": "string"
           },
@@ -122,7 +122,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ApiKeyCatalogResponse"
+              "$ref": "#/components/schemas/ApiKeyDetailResponse"
             },
             "type": "array"
           },
@@ -145,7 +145,7 @@
             "type": "string"
           },
           "runtime_generation": {
-            "$ref": "#/components/schemas/RuntimeGenerationCatalogResponse"
+            "$ref": "#/components/schemas/RuntimeGenerationResponse"
           }
         },
         "required": [
@@ -622,7 +622,7 @@
             ]
           },
           "kind": {
-            "description": "`open_ai` uses the official endpoint; `open_ai_compatible` requires an\nexplicit HTTPS endpoint and live certification of reviewed capabilities.",
+            "description": "`openai` uses the official endpoint; `openai_compatible` requires an\nexplicit HTTPS endpoint and live certification of reviewed capabilities.",
             "type": "string"
           },
           "model": {
@@ -821,23 +821,20 @@
             "minimum": 0,
             "type": "integer"
           },
-          "status": {
-            "type": "string"
-          },
-          "usage_complete": {
+          "request_metadata_complete": {
             "type": "boolean"
           },
-          "usage_consumer": {
+          "request_metadata_consumer": {
             "type": "string"
           },
-          "usage_consumer_checked_at": {
+          "request_metadata_consumer_checked_at": {
             "format": "date-time",
             "type": [
               "string",
               "null"
             ]
           },
-          "usage_consumer_heartbeat_age_seconds": {
+          "request_metadata_consumer_heartbeat_age_seconds": {
             "format": "int64",
             "minimum": 0,
             "type": [
@@ -845,56 +842,59 @@
               "null"
             ]
           },
-          "usage_consumer_lag_events": {
+          "request_metadata_consumer_lag_events": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
-          "usage_consumer_oldest_pending_at": {
+          "request_metadata_consumer_oldest_pending_at": {
             "format": "date-time",
             "type": [
               "string",
               "null"
             ]
           },
-          "usage_consumer_pending_events": {
+          "request_metadata_consumer_pending_events": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
-          "usage_historical_uncertain_gaps": {
+          "request_metadata_gateway_open_epochs": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
-          "usage_open_epochs": {
+          "request_metadata_gateway_unresolved_epochs": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
-          "usage_unresolved_epochs": {
+          "request_metadata_gateway_unresolved_event_lower_bound": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
-          "usage_unresolved_event_lower_bound": {
+          "request_metadata_historical_uncertain_gaps": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "status": {
+            "type": "string"
           }
         },
         "required": [
           "status",
           "database",
           "limits",
-          "usage_complete",
-          "usage_consumer",
-          "usage_consumer_pending_events",
-          "usage_consumer_lag_events",
-          "usage_open_epochs",
-          "usage_unresolved_epochs",
-          "usage_historical_uncertain_gaps",
-          "usage_unresolved_event_lower_bound",
+          "request_metadata_complete",
+          "request_metadata_consumer",
+          "request_metadata_consumer_pending_events",
+          "request_metadata_consumer_lag_events",
+          "request_metadata_gateway_open_epochs",
+          "request_metadata_gateway_unresolved_epochs",
+          "request_metadata_historical_uncertain_gaps",
+          "request_metadata_gateway_unresolved_event_lower_bound",
           "media_reconciliation",
           "media_reconciliation_pending",
           "media_reconciliation_stale",
@@ -1659,13 +1659,13 @@
       },
       "PriceProviderKind": {
         "enum": [
-          "open_ai",
+          "openai",
           "anthropic",
           "gemini",
           "vertex_ai",
           "bedrock",
-          "azure_open_ai",
-          "open_ai_compatible"
+          "azure_openai",
+          "openai_compatible"
         ],
         "type": "string"
       },
@@ -1942,7 +1942,7 @@
       "ProviderCapabilityOptionsResponse": {
         "properties": {
           "capabilities": {
-            "description": "Capability tuples with a safe server-owned certification path for this\nprovider kind. Catalog validation may support additional future tuples.",
+            "description": "Capability tuples with a safe server-owned certification path for this\nprovider kind. Configuration validation may support additional future tuples.",
             "items": {
               "$ref": "#/components/schemas/CapabilityInput"
             },
@@ -1958,7 +1958,7 @@
         ],
         "type": "object"
       },
-      "ProviderCatalogResponse": {
+      "ProviderDetailResponse": {
         "properties": {
           "active_revision": {
             "format": "int32",
@@ -2388,7 +2388,7 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/RuntimeGenerationCatalogResponse"
+                "$ref": "#/components/schemas/RuntimeGenerationResponse"
               }
             ]
           }
@@ -2661,7 +2661,7 @@
             "type": "boolean"
           },
           "provider": {
-            "$ref": "#/components/schemas/ProviderCatalogResponse"
+            "$ref": "#/components/schemas/ProviderDetailResponse"
           }
         },
         "required": [
@@ -2941,6 +2941,195 @@
         ],
         "type": "object"
       },
+      "RequestMetadataConsumerStatusResponse": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heartbeat_age_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lag_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oldest_pending_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pending_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "pending_events",
+          "lag_events"
+        ],
+        "type": "object"
+      },
+      "RequestMetadataEpochAcknowledgementResponse": {
+        "properties": {
+          "acknowledged_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "acknowledged_by": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gateway_instance": {
+            "type": "string"
+          },
+          "process_epoch": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "process_epoch",
+          "gateway_instance",
+          "acknowledged_at"
+        ],
+        "type": "object"
+      },
+      "RequestMetadataGatewayEpochListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RequestMetadataGatewayEpochResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RequestMetadataGatewayEpochResponse": {
+        "properties": {
+          "abandoned": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "accepted": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "acknowledged_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acknowledged_by": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dropped": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "gateway_instance": {
+            "type": "string"
+          },
+          "gracefully_closed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "persisted": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "process_epoch": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "retrying": {
+            "type": "boolean"
+          },
+          "stale_detected_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "uncertain_event_lower_bound": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "writer_closed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "gateway_instance",
+          "process_epoch",
+          "state",
+          "started_at",
+          "updated_at",
+          "accepted",
+          "persisted",
+          "dropped",
+          "abandoned",
+          "uncertain_event_lower_bound",
+          "retrying",
+          "writer_closed"
+        ],
+        "type": "object"
+      },
       "RequestSummary": {
         "properties": {
           "api_key_id": {
@@ -3085,7 +3274,7 @@
             "type": "string"
           },
           "runtime_generation": {
-            "$ref": "#/components/schemas/RuntimeGenerationCatalogResponse"
+            "$ref": "#/components/schemas/RuntimeGenerationResponse"
           },
           "secret": {
             "type": "string",
@@ -3139,7 +3328,7 @@
         ],
         "type": "object"
       },
-      "RouteCatalogResponse": {
+      "RouteDetailResponse": {
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -3170,7 +3359,7 @@
         ],
         "type": "object"
       },
-      "RouteDraftCatalogResponse": {
+      "RouteDraftDetailResponse": {
         "properties": {
           "based_on_revision_id": {
             "format": "uuid",
@@ -3213,7 +3402,7 @@
           },
           "targets": {
             "items": {
-              "$ref": "#/components/schemas/RouteTargetCatalogResponse"
+              "$ref": "#/components/schemas/RouteTargetResponse"
             },
             "type": "array"
           },
@@ -3240,7 +3429,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/RouteDraftCatalogResponse"
+              "$ref": "#/components/schemas/RouteDraftDetailResponse"
             },
             "type": "array"
           },
@@ -3285,7 +3474,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/RouteCatalogResponse"
+              "$ref": "#/components/schemas/RouteDetailResponse"
             },
             "type": "array"
           },
@@ -3430,7 +3619,7 @@
           },
           "targets": {
             "items": {
-              "$ref": "#/components/schemas/RouteTargetCatalogResponse"
+              "$ref": "#/components/schemas/RouteTargetResponse"
             },
             "type": "array"
           }
@@ -3527,7 +3716,41 @@
         ],
         "type": "object"
       },
-      "RouteTargetCatalogResponse": {
+      "RouteTargetRequest": {
+        "properties": {
+          "priority": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_model": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "weight": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_id",
+          "provider_model",
+          "priority",
+          "weight",
+          "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "RouteTargetResponse": {
         "properties": {
           "id": {
             "format": "uuid",
@@ -3574,57 +3797,6 @@
           "weight",
           "timeout_ms",
           "position"
-        ],
-        "type": "object"
-      },
-      "RouteTargetRequest": {
-        "properties": {
-          "priority": {
-            "format": "int32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "provider_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "provider_model": {
-            "type": "string"
-          },
-          "timeout_ms": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "weight": {
-            "format": "int32",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "provider_id",
-          "provider_model",
-          "priority",
-          "weight",
-          "timeout_ms"
-        ],
-        "type": "object"
-      },
-      "RuntimeGenerationCatalogResponse": {
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "sequence": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "sequence"
         ],
         "type": "object"
       },
@@ -3842,7 +4014,7 @@
           "email": {
             "type": "string"
           },
-          "organization_name": {
+          "installation_name": {
             "type": "string"
           },
           "password": {
@@ -4110,9 +4282,6 @@
           "complete": {
             "type": "boolean"
           },
-          "consumer": {
-            "$ref": "#/components/schemas/UsageConsumerStatusResponse"
-          },
           "coverage": {
             "$ref": "#/components/schemas/UsageRangeCoverageResponse"
           },
@@ -4133,11 +4302,6 @@
             "minimum": 0,
             "type": "integer"
           },
-          "ingestion_gap_events": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
           "priced_count": {
             "format": "int64",
             "minimum": 0,
@@ -4148,7 +4312,15 @@
             "minimum": 0,
             "type": "integer"
           },
-          "uncertain_gap_count": {
+          "request_metadata_consumer": {
+            "$ref": "#/components/schemas/RequestMetadataConsumerStatusResponse"
+          },
+          "request_metadata_gap_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "uncertain_request_metadata_gap_count": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -4164,200 +4336,11 @@
           "priced_count",
           "unpriced_count",
           "incomplete_count",
-          "ingestion_gap_events",
-          "uncertain_gap_count",
+          "request_metadata_gap_events",
+          "uncertain_request_metadata_gap_count",
           "coverage",
-          "consumer",
+          "request_metadata_consumer",
           "complete"
-        ],
-        "type": "object"
-      },
-      "UsageConsumerStatusResponse": {
-        "properties": {
-          "checked_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "heartbeat_age_seconds": {
-            "format": "int64",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "lag_events": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "oldest_pending_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "pending_events": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "state": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "pending_events",
-          "lag_events"
-        ],
-        "type": "object"
-      },
-      "UsageEpochAcknowledgementResponse": {
-        "properties": {
-          "acknowledged_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "acknowledged_by": {
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "gateway_instance": {
-            "type": "string"
-          },
-          "process_epoch": {
-            "format": "uuid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "process_epoch",
-          "gateway_instance",
-          "acknowledged_at"
-        ],
-        "type": "object"
-      },
-      "UsageGatewayEpochListResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/UsageGatewayEpochResponse"
-            },
-            "type": "array"
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "type": "object"
-      },
-      "UsageGatewayEpochResponse": {
-        "properties": {
-          "abandoned": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "accepted": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "acknowledged_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "acknowledged_by": {
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "dropped": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "gateway_instance": {
-            "type": "string"
-          },
-          "gracefully_closed_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "persisted": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "process_epoch": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "retrying": {
-            "type": "boolean"
-          },
-          "stale_detected_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "started_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "uncertain_event_lower_bound": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "writer_closed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "gateway_instance",
-          "process_epoch",
-          "state",
-          "started_at",
-          "updated_at",
-          "accepted",
-          "persisted",
-          "dropped",
-          "abandoned",
-          "uncertain_event_lower_bound",
-          "retrying",
-          "writer_closed"
         ],
         "type": "object"
       },
@@ -4448,9 +4431,6 @@
           "complete": {
             "type": "boolean"
           },
-          "consumer": {
-            "$ref": "#/components/schemas/UsageConsumerStatusResponse"
-          },
           "coverage": {
             "$ref": "#/components/schemas/UsageRangeCoverageResponse"
           },
@@ -4471,12 +4451,6 @@
             "minimum": 0,
             "type": "integer"
           },
-          "ingestion_gap_events": {
-            "description": "Exact loss plus known in-flight lower bounds from unclean epochs.",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
           "input_tokens": {
             "type": "string"
           },
@@ -4491,7 +4465,16 @@
             "minimum": 0,
             "type": "integer"
           },
-          "uncertain_gap_count": {
+          "request_metadata_consumer": {
+            "$ref": "#/components/schemas/RequestMetadataConsumerStatusResponse"
+          },
+          "request_metadata_gap_events": {
+            "description": "Exact loss plus known in-flight lower bounds from unclean epochs.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "uncertain_request_metadata_gap_count": {
             "description": "Unclean gateway epochs make completeness unknown even when their last\ndurable in-flight lower bound was zero.",
             "format": "int64",
             "minimum": 0,
@@ -4511,10 +4494,10 @@
           "media_units",
           "unpriced_count",
           "incomplete_count",
-          "ingestion_gap_events",
-          "uncertain_gap_count",
+          "request_metadata_gap_events",
+          "uncertain_request_metadata_gap_count",
           "coverage",
-          "consumer",
+          "request_metadata_consumer",
           "complete"
         ],
         "type": "object"
@@ -4823,7 +4806,7 @@
                 }
               }
             },
-            "description": "Master key, key hasher, or database unavailable"
+            "description": "Master key, authentication HMAC key, or database unavailable"
           }
         },
         "security": [
@@ -4856,7 +4839,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiKeyCatalogResponse"
+                  "$ref": "#/components/schemas/ApiKeyDetailResponse"
                 }
               }
             },
@@ -5256,7 +5239,7 @@
                 }
               }
             },
-            "description": "Master key, key hasher, or database unavailable"
+            "description": "Master key, authentication HMAC key, or database unavailable"
           }
         },
         "security": [
@@ -7645,7 +7628,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
                 }
               }
             },
@@ -7737,7 +7720,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
                 }
               }
             },
@@ -8439,7 +8422,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
                 }
               }
             },
@@ -8656,7 +8639,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
                 }
               }
             },
@@ -8984,7 +8967,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
                 }
               }
             },
@@ -9570,6 +9553,178 @@
         ]
       }
     },
+    "/api/v1/request-metadata/gateway-epochs": {
+      "get": {
+        "operationId": "list_request_metadata_gateway_epochs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter by open, gracefully_closed, unresolved, or acknowledged.",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestMetadataGatewayEpochListResponse"
+                }
+              }
+            },
+            "description": "Request metadata gateway process epoch page"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid cursor or state filter"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "request-metadata"
+        ]
+      }
+    },
+    "/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge": {
+      "post": {
+        "operationId": "acknowledge_request_metadata_gateway_epoch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "process_epoch",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestMetadataEpochAcknowledgementResponse"
+                }
+              }
+            },
+            "description": "Unclean gateway epoch acknowledged; retained completeness evidence is unchanged"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unclean gateway epoch not found"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "request-metadata"
+        ]
+      }
+    },
     "/api/v1/requests": {
       "get": {
         "operationId": "list_requests",
@@ -10113,7 +10268,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RouteDraftCatalogResponse"
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
                 }
               }
             },
@@ -10205,7 +10360,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RouteDraftCatalogResponse"
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
                 }
               }
             },
@@ -10682,7 +10837,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RouteCatalogResponse"
+                  "$ref": "#/components/schemas/RouteDetailResponse"
                 }
               }
             },
@@ -11049,7 +11204,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RouteDraftCatalogResponse"
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
                 }
               }
             },
@@ -12126,178 +12281,6 @@
         ]
       }
     },
-    "/api/v1/usage/gateway-epochs": {
-      "get": {
-        "operationId": "list_usage_gateway_epochs",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "maximum": 200,
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Filter by open, gracefully_closed, unresolved, or acknowledged.",
-            "in": "query",
-            "name": "state",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageGatewayEpochListResponse"
-                }
-              }
-            },
-            "description": "Metadata-only gateway process epoch page"
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Invalid cursor or state filter"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Authentication required."
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The request could not be completed."
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "tags": [
-          "usage"
-        ]
-      }
-    },
-    "/api/v1/usage/gateway-epochs/{process_epoch}/acknowledge": {
-      "post": {
-        "operationId": "acknowledge_usage_gateway_epoch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "process_epoch",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageEpochAcknowledgementResponse"
-                }
-              }
-            },
-            "description": "Unclean gateway epoch acknowledged; retained completeness evidence is unchanged"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Authentication required."
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unclean gateway epoch not found"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The request could not be completed."
-          }
-        },
-        "security": [
-          {
-            "csrfToken": [],
-            "sessionCookie": []
-          }
-        ],
-        "tags": [
-          "usage"
-        ]
-      }
-    },
     "/api/v1/usage/summary": {
       "get": {
         "operationId": "usage_summary",
@@ -12595,7 +12578,7 @@
                 }
               }
             },
-            "description": "Role cannot view the team"
+            "description": "Role cannot view access"
           },
           "500": {
             "content": {
@@ -12833,15 +12816,6 @@
       "name": "invitations"
     },
     {
-      "name": "providers"
-    },
-    {
-      "name": "api-keys"
-    },
-    {
-      "name": "routes"
-    },
-    {
       "name": "oidc"
     },
     {
@@ -12852,6 +12826,9 @@
     },
     {
       "name": "usage"
+    },
+    {
+      "name": "request-metadata"
     },
     {
       "name": "audit"
@@ -12867,6 +12844,15 @@
     },
     {
       "name": "pricing"
+    },
+    {
+      "name": "providers"
+    },
+    {
+      "name": "routes"
+    },
+    {
+      "name": "api-keys"
     },
     {
       "name": "playground"

@@ -7,7 +7,7 @@ use crate::{Page, PgStore, TimestampCursor, split_page};
 
 use super::{
     MAX_PAGE_SIZE, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,
-    MediaJobRecord, MediaJobState, media_surface_storage_value, parse_media_surface_storage_value,
+    MediaJobRecord, MediaJobState,
 };
 
 impl PgStore {
@@ -107,7 +107,7 @@ impl PgStore {
             .bind(filters.api_key_id)
             .bind(&filters.route_slugs)
             .bind(filters.operation.map(OperationKind::as_str))
-            .bind(filters.surface.map(media_surface_storage_value))
+            .bind(filters.surface.map(olp_domain::Surface::as_str))
             .fetch_optional(self.pool())
             .await?
             .ok_or_else(|| MediaJobError::Invalid("video cursor is invalid".to_owned()))?;
@@ -185,9 +185,7 @@ fn push_filters(query: &mut QueryBuilder<Postgres>, filters: &MediaJobFilters) {
         query.push(" AND j.operation = ").push_bind(value.as_str());
     }
     if let Some(value) = filters.surface {
-        query
-            .push(" AND j.surface = ")
-            .push_bind(media_surface_storage_value(value));
+        query.push(" AND j.surface = ").push_bind(value.as_str());
     }
     if let Some(value) = filters.state {
         query
@@ -225,7 +223,9 @@ pub(super) fn media_job_from_row(
             .map_err(|_| {
                 MediaJobError::Invalid("database returned an unknown operation".to_owned())
             })?,
-        surface: parse_media_surface_storage_value(row.try_get("surface")?)?,
+        surface: row.try_get::<String, _>("surface")?.parse().map_err(|_| {
+            MediaJobError::Invalid("database returned an unknown surface".to_owned())
+        })?,
         state: MediaJobState::parse(row.try_get("state")?)?,
         lifecycle: MediaJobLifecycle::parse(row.try_get("lifecycle_state")?)?,
         progress_percent: row.try_get("progress_percent")?,

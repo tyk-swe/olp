@@ -5,7 +5,7 @@ use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;
 
-use crate::{FieldErrors, Problem, management::map_persistence};
+use crate::{FieldErrors, Problem, management_api::map_persistence};
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]

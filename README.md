@@ -26,7 +26,7 @@ and one audit trail.
   published atomically; in-flight streams never cross a generation boundary.
 - **Usage and cost accounting** — Requests, attempts, and usage facts store
   operational metadata only — never prompts, outputs, tool data, or uploads.
-- **Scoped access control** — Team-scoped proxy keys with route allowlists,
+- **Scoped access control** — Installation-scoped proxy keys with route allowlists,
   expiry, and distributed hard rate limits; full audit stream of every
   administrative change.
 - **Production operations** — Private health and metrics listener, Prometheus

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use olp_conformance_fixtures::read_json;
+use olp_conformance::read_json;
 use olp_domain::{ImageOperation, MediaHandle, Operation, OperationKind, Surface, VideoOperation};
 use olp_protocols::{anthropic, gemini, openai};
 use serde::Deserialize;

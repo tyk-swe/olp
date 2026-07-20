@@ -7,11 +7,13 @@ use olp_storage::UsageSummary;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use super::{UsageConsumerStatusResponse, UsageQuery, UsageRangeCoverageResponse};
+use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
     ApiState, Problem,
-    management::{Permission, require_permission, require_read_session, require_store},
-    operations::helpers::map_operations,
+    management_api::{Permission, require_permission, require_read_session, require_store},
+    operations::{
+        helpers::map_operations, request_metadata::RequestMetadataConsumerStatusResponse,
+    },
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -26,12 +28,12 @@ pub(in crate::operations) struct UsageSummaryResponse {
     unpriced_count: u64,
     incomplete_count: u64,
     /// Exact loss plus known in-flight lower bounds from unclean epochs.
-    ingestion_gap_events: u64,
+    request_metadata_gap_events: u64,
     /// Unclean gateway epochs make completeness unknown even when their last
     /// durable in-flight lower bound was zero.
-    uncertain_gap_count: u64,
+    uncertain_request_metadata_gap_count: u64,
     coverage: UsageRangeCoverageResponse,
-    consumer: UsageConsumerStatusResponse,
+    request_metadata_consumer: RequestMetadataConsumerStatusResponse,
     complete: bool,
 }
 
@@ -47,10 +49,10 @@ impl From<UsageSummary> for UsageSummaryResponse {
             currency: summary.currency,
             unpriced_count: summary.unpriced_count,
             incomplete_count: summary.incomplete_count,
-            ingestion_gap_events: summary.ingestion_gap_events,
-            uncertain_gap_count: summary.uncertain_gap_count,
+            request_metadata_gap_events: summary.request_metadata_gap_events,
+            uncertain_request_metadata_gap_count: summary.uncertain_request_metadata_gap_count,
             coverage: summary.coverage.into(),
-            consumer: summary.consumer.into(),
+            request_metadata_consumer: summary.request_metadata_consumer.into(),
             complete: summary.complete,
         }
     }

@@ -104,17 +104,17 @@ database_url="${OLP_HA_DATABASE_URL_PREFIX%/}/${database_name}"
 app_database_url="${database_app_url_prefix%/}/${database_name}"
 
 openssl rand -base64 32 >"$work/master-key"
-openssl rand -base64 32 >"$work/key-hash"
+openssl rand -base64 32 >"$work/auth-hmac-key"
 openssl rand -base64 32 >"$work/bootstrap-token"
-chmod 600 "$work/master-key" "$work/key-hash" "$work/bootstrap-token"
+chmod 600 "$work/master-key" "$work/auth-hmac-key" "$work/bootstrap-token"
 
-OLP_DATABASE_URL=$database_url "$olp_bin" migrate
 start_valkey
+OLP_DATABASE_URL=$database_url OLP_VALKEY_URL=$valkey_url "$olp_bin" migrate
 
 OLP_DATABASE_URL=$app_database_url OLP_VALKEY_URL=$valkey_url \
 OLP_LISTEN_ADDR=127.0.0.1:18090 OLP_PUBLIC_ORIGIN=$control_origin \
 OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:19090 \
-OLP_MASTER_KEY_FILE="$work/master-key" OLP_KEY_HASH_KEY_FILE="$work/key-hash" \
+OLP_MASTER_KEY_FILE="$work/master-key" OLP_AUTH_HMAC_KEY_FILE="$work/auth-hmac-key" \
 OLP_BOOTSTRAP_TOKEN_FILE="$work/bootstrap-token" \
 OLP_CONSOLE_DIR="$work/console" RUST_LOG=olp=debug \
   "$olp_bin" all >"$work/all.log" 2>&1 &
@@ -122,7 +122,7 @@ all_pid=$!
 OLP_DATABASE_URL=$app_database_url OLP_VALKEY_URL=$valkey_url \
 OLP_LISTEN_ADDR=127.0.0.1:18091 OLP_PUBLIC_ORIGIN=$gateway_two \
 OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:19091 \
-OLP_MASTER_KEY_FILE="$work/master-key" OLP_KEY_HASH_KEY_FILE="$work/key-hash" \
+OLP_MASTER_KEY_FILE="$work/master-key" OLP_AUTH_HMAC_KEY_FILE="$work/auth-hmac-key" \
 OLP_CONSOLE_DIR="$work/console" RUST_LOG=olp=debug \
   "$olp_bin" gateway >"$work/gateway.log" 2>&1 &
 gateway_pid=$!
@@ -146,7 +146,7 @@ setup_body="$work/setup.json"
 setup_status=$(curl -sS -D "$setup_headers" -o "$setup_body" -w '%{http_code}' \
   -X POST "$control_origin/api/v1/setup" \
   -H "Origin: $control_origin" -H "X-OLP-Setup-Token: $(<"$work/bootstrap-token")" -H 'Content-Type: application/json' \
-  --data '{"email":"owner@example.test","password":"correct horse battery staple","display_name":"Owner","organization_name":"HA integration"}')
+  --data '{"email":"owner@example.test","password":"correct horse battery staple","display_name":"Owner","installation_name":"HA integration"}')
 [[ $setup_status == 201 ]] || { cat "$setup_body" >&2; exit 1; }
 csrf=$(jq -er .csrf_token "$setup_body")
 owner_id=$(jq -er .user.id "$setup_body")
@@ -179,7 +179,7 @@ mutate() {
 # HA exercises runtime convergence, not connector liveness. Native OpenAI uses
 # its fixed official endpoint, and activation relies only on the declared model
 # capability evidence without sending a provider request.
-provider_payload=$(jq -cn '{name:"ha-provider",kind:"open_ai",credential:"dummy-upstream-key",model:"mock-model"}')
+provider_payload=$(jq -cn '{name:"ha-provider",kind:"openai",credential:"dummy-upstream-key",model:"mock-model"}')
 mutate POST /api/v1/providers "$provider_payload" 201 provider-ha-0001
 provider_id=$(jq -er .id <<<"$LAST_BODY")
 provider_etag=$LAST_ETAG
@@ -189,7 +189,7 @@ mutate GET "/api/v1/providers/$provider_id/models?limit=100" '' 200
 provider_model_id=$(
   jq -er '.items[] | select(.upstream_model == "mock-model") | .id' <<<"$LAST_BODY"
 )
-model_review_payload=$(jq -cn '{enabled:true,capabilities:[{operation:"generation",surface:"open_ai",mode:"unary"}]}')
+model_review_payload=$(jq -cn '{enabled:true,capabilities:[{operation:"generation",surface:"openai",mode:"unary"}]}')
 mutate PATCH "/api/v1/providers/$provider_id/models/$provider_model_id" "$model_review_payload" 200 '' "$provider_etag"
 provider_etag=$LAST_ETAG
 # Connector probes/certification have their own HTTP integration suite. This

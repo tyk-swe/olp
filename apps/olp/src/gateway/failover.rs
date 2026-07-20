@@ -8,7 +8,7 @@ use olp_domain::{
     ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation, OperationKind,
     ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
 };
-use olp_storage::UsageAttempt;
+use olp_storage::RequestAttemptMetadata;
 
 use crate::semantic_validation::operation_for_provider;
 
@@ -113,7 +113,7 @@ const fn canonical_error_circuit_class(class: ErrorClass) -> Option<AttemptFailu
 pub(super) struct ExecutionSuccess {
     pub(super) output: ExecutionOutput,
     pub(super) deadline: tokio::time::Instant,
-    pub(super) attempts: Vec<UsageAttempt>,
+    pub(super) attempts: Vec<RequestAttemptMetadata>,
     pub(super) attempt_started: tokio::time::Instant,
 }
 
@@ -127,7 +127,7 @@ pub(super) enum ExecutionOutput {
 
 pub(super) struct ExecutionFailure {
     pub(super) error: InferenceError,
-    pub(super) attempts: Vec<UsageAttempt>,
+    pub(super) attempts: Vec<RequestAttemptMetadata>,
 }
 
 pub(super) async fn execute_with_failover(
@@ -402,8 +402,8 @@ fn successful_attempt(
     ordinal: u16,
     started_at: chrono::DateTime<Utc>,
     started: tokio::time::Instant,
-) -> UsageAttempt {
-    UsageAttempt {
+) -> RequestAttemptMetadata {
+    RequestAttemptMetadata {
         id: uuid::Uuid::now_v7(),
         ordinal,
         provider_id: attempt.provider_id.as_uuid(),
@@ -424,9 +424,9 @@ fn failed_attempt(
     started_at: chrono::DateTime<Utc>,
     started: tokio::time::Instant,
     error: &TransportError,
-) -> UsageAttempt {
+) -> RequestAttemptMetadata {
     let mapped = InferenceError::from_transport(error.clone());
-    UsageAttempt {
+    RequestAttemptMetadata {
         id: uuid::Uuid::now_v7(),
         ordinal,
         provider_id: attempt.provider_id.as_uuid(),

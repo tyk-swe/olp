@@ -25,7 +25,7 @@ use super::error::{field_problem, map_discovery_network, map_oidc, oidc_not_conf
 use super::helpers::{network_policy, optional_if_match, require_master_key, valid_claim_name};
 use crate::{
     ApiState, Problem,
-    management::{
+    management_api::{
         Permission, json_payload, require_mutation_session, require_permission,
         require_read_session, require_store,
     },
@@ -166,7 +166,7 @@ pub(super) async fn get_configuration(
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
-    require_permission(&principal, Permission::ManageTeam)?;
+    require_permission(&principal, Permission::ManageAccess)?;
     let configuration = require_store(&state)?
         .oidc_configuration()
         .await
@@ -194,7 +194,7 @@ pub(super) async fn put_configuration(
     payload: Result<Json<OidcConfigurationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_permission(&principal, Permission::ManageTeam)?;
+    require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
     validate_configuration_request(&request)?;
     let store = require_store(&state)?;

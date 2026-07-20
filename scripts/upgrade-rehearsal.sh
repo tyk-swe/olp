@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: OLP_REHEARSAL_DATABASE_URL=postgres://... upgrade-rehearsal.sh BACKUP
+usage: OLP_REHEARSAL_DATABASE_URL=postgres://... OLP_VALKEY_URL=redis://... upgrade-rehearsal.sh BACKUP
 
 OLP_REHEARSAL_CONFIRM=destroy-target must be set. The script restores the
 backup into that isolated database, runs the current migrator twice, and proves
@@ -26,6 +26,7 @@ if [[ -v OLP_REHEARSAL_MIN_NEW_MIGRATIONS ]]; then
 fi
 
 : "${OLP_REHEARSAL_DATABASE_URL:?OLP_REHEARSAL_DATABASE_URL is required}"
+: "${OLP_VALKEY_URL:?OLP_VALKEY_URL is required for migration preflight}"
 expected_new_migrations=${OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS:-}
 if [[ -n $expected_new_migrations ]]; then
   [[ $expected_new_migrations =~ ^[0-9]+$ ]] || {
@@ -167,9 +168,8 @@ if [[ -n $expected_new_migrations ]]; then
 fi
 
 if [[ ${OLP_REHEARSAL_RUN_DOCTOR:-false} == true ]]; then
-  : "${OLP_VALKEY_URL:?OLP_VALKEY_URL is required for upgrade doctor smoke}"
   : "${OLP_MASTER_KEY_FILE:?OLP_MASTER_KEY_FILE is required for upgrade doctor smoke}"
-  : "${OLP_KEY_HASH_KEY_FILE:?OLP_KEY_HASH_KEY_FILE is required for upgrade doctor smoke}"
+  : "${OLP_AUTH_HMAC_KEY_FILE:?OLP_AUTH_HMAC_KEY_FILE is required for upgrade doctor smoke}"
   : "${OLP_CONSOLE_DIR:?OLP_CONSOLE_DIR is required for upgrade doctor smoke}"
   OLP_DATABASE_URL=$OLP_REHEARSAL_DATABASE_URL "$olp_bin" doctor >/dev/null
 fi

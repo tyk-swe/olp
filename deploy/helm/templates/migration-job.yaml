@@ -42,6 +42,11 @@ spec:
                 secretKeyRef:
                   name: {{ required "config.databaseSecretName is required" .Values.config.databaseSecretName | quote }}
                   key: {{ required "config.databaseSecretKey is required" .Values.config.databaseSecretKey | quote }}
+            - name: OLP_VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "config.valkeySecretName is required" .Values.config.valkeySecretName | quote }}
+                  key: {{ required "config.valkeySecretKey is required" .Values.config.valkeySecretKey | quote }}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
           securityContext:

@@ -12,10 +12,27 @@ impl PgStore {
         &self,
         limit: u16,
     ) -> Result<Vec<PublishedRelease>, PersistenceError> {
+        self.recent_valid_releases_after(limit, None).await
+    }
+
+    /// Returns verified releases newer than the supplied installed sequence.
+    /// Pollers use this to avoid decoding unchanged immutable snapshots.
+    pub async fn recent_valid_releases_after(
+        &self,
+        limit: u16,
+        installed_sequence: Option<u64>,
+    ) -> Result<Vec<PublishedRelease>, PersistenceError> {
+        let installed_sequence = installed_sequence
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| PersistenceError::CorruptRelease)?;
         let rows = sqlx::query(
             "SELECT id, sequence, compiled_release, release_sha256, created_at \
-             FROM runtime_generations ORDER BY sequence DESC LIMIT $1",
+             FROM runtime_generations \
+             WHERE ($1::bigint IS NULL OR sequence > $1) \
+             ORDER BY sequence DESC LIMIT $2",
         )
+        .bind(installed_sequence)
         .bind(i64::from(limit.clamp(1, 100)))
         .fetch_all(&self.pool)
         .await?;
@@ -57,8 +74,8 @@ pub(super) fn verify_release_envelope(
         return Err(PersistenceError::CorruptRelease);
     }
     let ordinal = u64::try_from(sequence).map_err(|_| PersistenceError::CorruptRelease)?;
-    let snapshot: RuntimeSnapshot =
-        serde_json::from_slice(payload).map_err(|_| PersistenceError::CorruptRelease)?;
+    let snapshot = RuntimeSnapshot::from_persisted_slice(payload)
+        .map_err(|_| PersistenceError::CorruptRelease)?;
     if snapshot.generation.id.as_uuid() != generation_id
         || snapshot.generation.ordinal != ordinal
         || snapshot.validate().is_err()

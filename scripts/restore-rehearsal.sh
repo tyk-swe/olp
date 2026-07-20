@@ -46,19 +46,29 @@ actual=$(sha256sum "$backup" | awk '{print $1}')
 }
 backup_name=$(basename "$backup")
 jq -e --arg checksum "$actual" --arg backup_name "$backup_name" '
-  .format == "olp-v2-postgresql-custom-v1" and
+  (.format == "olp-v2-postgresql-custom-v1" or
+   .format == "olp-v2-postgresql-custom-v2") and
   .backup_file == $backup_name and
   .sha256 == $checksum and
   .plaintext_secrets_included == false and
   .encrypted_sensitive_records_included == true and
   .mounted_key_files_included == false and
   (.traffic_quiesced | type == "boolean") and
-  (.usage_stream_drained | type == "boolean") and
-  (if .usage_stream_drained then
-     .traffic_quiesced == true and
-     (.usage_consumer_checked_at | type == "string" and
-       test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
-   else .usage_consumer_checked_at == null end) and
+  (if .format == "olp-v2-postgresql-custom-v1" then
+     (.usage_stream_drained | type == "boolean") and
+     (if .usage_stream_drained then
+        .traffic_quiesced == true and
+        (.usage_consumer_checked_at | type == "string" and
+          test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+      else .usage_consumer_checked_at == null end)
+   else
+     (.request_metadata_stream_drained | type == "boolean") and
+     (if .request_metadata_stream_drained then
+        .traffic_quiesced == true and
+        (.request_metadata_consumer_checked_at | type == "string" and
+          test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+      else .request_metadata_consumer_checked_at == null end)
+   end) and
   (.database_server_version | type == "string" and startswith("18.")) and
   (.successful_migrations | type == "number") and
   (.runtime_generation_ordinal | type == "number")

@@ -90,7 +90,7 @@
 
 <div class="toolbar" role="search">
   <label class="search"><span class="sr-only">Search models</span><input class="filter-control" type="search" bind:value={search} placeholder="Search models or providers" /></label>
-  <label class="surface"><span>Client surface</span><select class="filter-control" bind:value={surface}><option value="all">All surfaces</option><option value="open_ai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></select></label>
+  <label class="surface"><span>Client surface</span><select class="filter-control" bind:value={surface}><option value="all">All surfaces</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></select></label>
 </div>
 
 {#if models.isPending}

@@ -2,9 +2,10 @@ use chrono::{Duration, Timelike, Utc};
 use olp_domain::Surface;
 use olp_storage::{
     IdempotencyOutcome, IdempotencyResponse, MasterKey, NewOwner, OperationsError, PgStore,
-    PriceInput, ReplayableIdempotency, RequestFilters, UsageAttempt, UsageBufferSnapshot,
-    UsageConsumerState, UsageDimension, UsageEvent, UsageFilters, UsageGap, UsageGatewayEpochState,
-    UsageGranularity, UsagePersistenceOutcome, hash_password,
+    PriceInput, ReplayableIdempotency, RequestAttemptMetadata, RequestFilters,
+    RequestMetadataBufferSnapshot, RequestMetadataConsumerState, RequestMetadataEvent,
+    RequestMetadataGap, RequestMetadataGatewayEpochState, RequestMetadataPersistenceOutcome,
+    UsageDimension, UsageFilters, UsageGranularity, hash_password,
 };
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "Operations integration".to_owned(),
+            installation_name: "Operations integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),
@@ -33,7 +34,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         "INSERT INTO providers
          (id, name, kind, state, auth_mode, etag, created_by,
           last_probe_at, last_probe_status, last_probe_detail)
-         VALUES ($1, 'operations-provider', 'open_ai', 'active', 'api_key', $2, $3,
+         VALUES ($1, 'operations-provider', 'openai', 'active', 'api_key', $2, $3,
                  now(), 'succeeded', 'mock probe succeeded')",
     )
     .bind(provider_id)
@@ -145,7 +146,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let request_id = Uuid::now_v7();
     let request_started_at = observed_at - Duration::milliseconds(20);
     store
-        .persist_usage_event(&UsageEvent {
+        .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
             request_id,
             runtime_generation_id: generation_id,
@@ -169,7 +170,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             media_units: None,
             usage_complete: true,
             unpriced: true,
-            attempts: vec![UsageAttempt {
+            attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -187,8 +188,8 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         .unwrap();
     assert!(
         store
-            .report_usage_gap_once(
-                UsageGap {
+            .report_request_metadata_gap_once(
+                RequestMetadataGap {
                     gateway_instance: "integration-gateway".to_owned(),
                     event_count: 3,
                     reason: "injected_test_gap".to_owned(),
@@ -201,7 +202,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             .unwrap()
     );
     let loss_at = Utc::now();
-    let loss_snapshot = UsageBufferSnapshot {
+    let loss_snapshot = RequestMetadataBufferSnapshot {
         process_epoch: Uuid::now_v7(),
         started_at: loss_at - Duration::seconds(5),
         accepted: 10,
@@ -214,13 +215,13 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         last_loss_at: Some(loss_at),
     };
     let reported = store
-        .report_usage_buffer_loss("operations-gateway", &loss_snapshot)
+        .report_request_metadata_buffer_loss("operations-gateway", &loss_snapshot)
         .await
         .unwrap();
     assert_eq!(reported.reported_events, 3);
     assert_eq!(
         store
-            .report_usage_buffer_loss("operations-gateway", &loss_snapshot)
+            .report_request_metadata_buffer_loss("operations-gateway", &loss_snapshot)
             .await
             .unwrap()
             .reported_events,
@@ -228,9 +229,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     );
     assert!(
         store
-            .report_usage_buffer_loss(
+            .report_request_metadata_buffer_loss(
                 "operations-gateway",
-                &UsageBufferSnapshot {
+                &RequestMetadataBufferSnapshot {
                     accepted: 9,
                     ..loss_snapshot
                 },
@@ -238,7 +239,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             .await
             .is_err()
     );
-    let restarted_loss = UsageBufferSnapshot {
+    let restarted_loss = RequestMetadataBufferSnapshot {
         process_epoch: Uuid::now_v7(),
         started_at: loss_at,
         accepted: 1,
@@ -251,13 +252,13 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         last_loss_at: Some(loss_at),
     };
     let restarted_report = store
-        .report_usage_buffer_loss("operations-gateway", &restarted_loss)
+        .report_request_metadata_buffer_loss("operations-gateway", &restarted_loss)
         .await
         .unwrap();
     assert!(restarted_report.process_epoch_changed);
     assert_eq!(restarted_report.reported_events, 1);
     let superseded_gap: (i64, String) = sqlx::query_as(
-        "SELECT event_count, certainty::text FROM usage_ingestion_gaps \
+        "SELECT event_count, certainty::text FROM request_metadata_ingestion_gaps \
          WHERE gateway_instance = 'operations-gateway' \
            AND reason = 'gateway_epoch_unclean_shutdown'",
     )
@@ -267,7 +268,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     assert_eq!(superseded_gap, (2, "lower_bound".to_owned()));
 
     let clean_epoch = Uuid::now_v7();
-    let clean_open = UsageBufferSnapshot {
+    let clean_open = RequestMetadataBufferSnapshot {
         process_epoch: clean_epoch,
         started_at: loss_at,
         accepted: 5,
@@ -280,20 +281,20 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         last_loss_at: None,
     };
     store
-        .report_usage_buffer_loss("clean-shutdown-gateway", &clean_open)
+        .report_request_metadata_buffer_loss("clean-shutdown-gateway", &clean_open)
         .await
         .unwrap();
-    let clean_closed = UsageBufferSnapshot {
+    let clean_closed = RequestMetadataBufferSnapshot {
         closed: true,
         ..clean_open
     };
     store
-        .close_usage_buffer_epoch("clean-shutdown-gateway", &clean_closed)
+        .close_request_metadata_buffer_epoch("clean-shutdown-gateway", &clean_closed)
         .await
         .unwrap();
     assert_eq!(
         store
-            .close_usage_buffer_epoch("clean-shutdown-gateway", &clean_closed)
+            .close_request_metadata_buffer_epoch("clean-shutdown-gateway", &clean_closed)
             .await
             .unwrap()
             .reported_events,
@@ -301,14 +302,14 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     );
     assert!(
         store
-            .report_usage_buffer_loss("clean-shutdown-gateway", &clean_closed)
+            .report_request_metadata_buffer_loss("clean-shutdown-gateway", &clean_closed)
             .await
             .is_err()
     );
     let clean_uncertainty: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM usage_ingestion_gaps \
+        "SELECT count(*) FROM request_metadata_ingestion_gaps \
          WHERE gateway_instance = 'clean-shutdown-gateway' \
-           AND certainty = 'lower_bound'::usage_gap_certainty",
+           AND certainty = 'lower_bound'::request_metadata_gap_certainty",
     )
     .fetch_one(store.pool())
     .await
@@ -317,9 +318,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
 
     let stale_epoch = Uuid::now_v7();
     store
-        .report_usage_buffer_loss(
+        .report_request_metadata_buffer_loss(
             "stale-gateway",
-            &UsageBufferSnapshot {
+            &RequestMetadataBufferSnapshot {
                 process_epoch: stale_epoch,
                 started_at: loss_at,
                 accepted: 5,
@@ -335,7 +336,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         .await
         .unwrap();
     sqlx::query(
-        "UPDATE usage_gateway_epochs \
+        "UPDATE request_metadata_gateway_epochs \
          SET started_at = $1, updated_at = $1 \
          WHERE gateway_instance = 'stale-gateway' AND process_epoch = $2",
     )
@@ -345,39 +346,43 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .await
     .unwrap();
     let candidate = store
-        .detect_stale_usage_gateway_epochs(loss_at)
+        .detect_stale_request_metadata_gateway_epochs(loss_at)
         .await
         .unwrap();
     assert_eq!(candidate.candidate_epochs, 1);
     assert_eq!(candidate.detected_epochs, 0);
     let detected = store
-        .detect_stale_usage_gateway_epochs(loss_at + Duration::seconds(11))
+        .detect_stale_request_metadata_gateway_epochs(loss_at + Duration::seconds(11))
         .await
         .unwrap();
     assert_eq!(detected.detected_epochs, 1);
     assert_eq!(detected.uncertain_event_lower_bound, 3);
     assert_eq!(
         store
-            .detect_stale_usage_gateway_epochs(loss_at + Duration::seconds(20))
+            .detect_stale_request_metadata_gateway_epochs(loss_at + Duration::seconds(20))
             .await
             .unwrap()
             .detected_epochs,
         0
     );
-    let epoch_health = store.usage_gateway_epoch_health().await.unwrap();
+    let epoch_health = store.request_metadata_gateway_epoch_health().await.unwrap();
     assert_eq!(epoch_health.unresolved_epochs, 2);
     assert_eq!(epoch_health.historical_uncertain_gap_count, 2);
     assert_eq!(epoch_health.unresolved_event_lower_bound, 5);
     let unresolved_first_page = store
-        .usage_gateway_epochs(Some(UsageGatewayEpochState::Unresolved), None, 1)
+        .request_metadata_gateway_epochs(
+            Some(RequestMetadataGatewayEpochState::Unresolved),
+            None,
+            1,
+        )
         .await
         .unwrap();
     assert_eq!(unresolved_first_page.items.len(), 1);
     let unresolved_cursor = unresolved_first_page.next_cursor.as_deref().unwrap();
     let unresolved_cursor = olp_storage::TimestampCursor::parse(unresolved_cursor).unwrap();
     let unresolved_second_page = store
-        .usage_gateway_epochs(
-            Some(UsageGatewayEpochState::Unresolved),
+        .request_metadata_gateway_epochs(
+            Some(RequestMetadataGatewayEpochState::Unresolved),
             Some(&unresolved_cursor),
             1,
         )
@@ -389,7 +394,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         unresolved_second_page.items[0].process_epoch
     );
     let first_acknowledgement = store
-        .acknowledge_usage_gateway_epoch(loss_snapshot.process_epoch, owner.user_id)
+        .acknowledge_request_metadata_gateway_epoch(loss_snapshot.process_epoch, owner.user_id)
         .await
         .unwrap()
         .unwrap();
@@ -399,23 +404,27 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     );
     assert_eq!(
         store
-            .acknowledge_usage_gateway_epoch(loss_snapshot.process_epoch, owner.user_id)
+            .acknowledge_request_metadata_gateway_epoch(loss_snapshot.process_epoch, owner.user_id)
             .await
             .unwrap()
             .unwrap(),
         first_acknowledgement
     );
     store
-        .acknowledge_usage_gateway_epoch(stale_epoch, owner.user_id)
+        .acknowledge_request_metadata_gateway_epoch(stale_epoch, owner.user_id)
         .await
         .unwrap()
         .unwrap();
-    let acknowledged_health = store.usage_gateway_epoch_health().await.unwrap();
+    let acknowledged_health = store.request_metadata_gateway_epoch_health().await.unwrap();
     assert_eq!(acknowledged_health.unresolved_epochs, 0);
     assert_eq!(acknowledged_health.historical_uncertain_gap_count, 2);
     assert_eq!(acknowledged_health.unresolved_event_lower_bound, 0);
     let acknowledged_epochs = store
-        .usage_gateway_epochs(Some(UsageGatewayEpochState::Acknowledged), None, 10)
+        .request_metadata_gateway_epochs(
+            Some(RequestMetadataGatewayEpochState::Acknowledged),
+            None,
+            10,
+        )
         .await
         .unwrap();
     assert_eq!(acknowledged_epochs.items.len(), 2);
@@ -427,7 +436,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     );
     let acknowledgement_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_events \
-         WHERE action = 'usage.gateway_epoch_acknowledge' \
+         WHERE action = 'request_metadata.gateway_epoch_acknowledge' \
            AND resource_id = $1 AND outcome = 'success'",
     )
     .bind(loss_snapshot.process_epoch.to_string())
@@ -459,7 +468,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
 
     let pre_attempt_request_id = Uuid::now_v7();
     store
-        .persist_usage_event(&UsageEvent {
+        .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
             request_id: pre_attempt_request_id,
             runtime_generation_id: generation_id,
@@ -509,7 +518,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         operation: None,
     };
     store
-        .report_usage_consumer_health(0, 0, None)
+        .report_request_metadata_consumer_health(0, 0, None)
         .await
         .unwrap();
     let series_report = store
@@ -530,9 +539,12 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let completeness = store.usage_completeness(&filters).await.unwrap();
     assert_eq!(completeness.request_count, 1);
     assert_eq!(completeness.priced_count, 1);
-    assert_eq!(completeness.ingestion_gap_events, 3);
-    assert_eq!(completeness.uncertain_gap_count, 0);
-    assert_eq!(completeness.consumer.state, UsageConsumerState::Healthy);
+    assert_eq!(completeness.request_metadata_gap_events, 3);
+    assert_eq!(completeness.uncertain_request_metadata_gap_count, 0);
+    assert_eq!(
+        completeness.request_metadata_consumer.state,
+        RequestMetadataConsumerState::Healthy
+    );
     assert!(!completeness.complete);
     let summary = store.usage_summary(&filters).await.unwrap();
     assert_eq!(summary.request_count, 1);
@@ -544,7 +556,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
 
     let unpriced_observed_at = Utc::now() - Duration::hours(5);
     store
-        .persist_usage_event(&UsageEvent {
+        .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
             request_id: Uuid::now_v7(),
             runtime_generation_id: generation_id,
@@ -568,7 +580,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             media_units: None,
             usage_complete: true,
             unpriced: true,
-            attempts: vec![UsageAttempt {
+            attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -655,7 +667,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         .unwrap();
     let archived_request_id = Uuid::now_v7();
     store
-        .persist_usage_event(&UsageEvent {
+        .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
             request_id: archived_request_id,
             runtime_generation_id: generation_id,
@@ -679,7 +691,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             media_units: None,
             usage_complete: true,
             unpriced: true,
-            attempts: vec![UsageAttempt {
+            attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -708,7 +720,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO usage_ingestion_gaps \
+        "INSERT INTO request_metadata_ingestion_gaps \
          (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at, reported_at) \
          VALUES ($1, 'archived-gap-gateway', 4, 'archived_test_gap', $2, $3, $4)",
     )
@@ -720,11 +732,11 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO usage_ingestion_gaps \
+        "INSERT INTO request_metadata_ingestion_gaps \
          (id, gateway_instance, event_count, reason, certainty, \
           first_observed_at, last_observed_at, reported_at) \
          VALUES ($1, 'archived-uncertain-gateway', 0, 'archived_uncertain_epoch', \
-                 'lower_bound'::usage_gap_certainty, $2, $3, $4)",
+                 'lower_bound'::request_metadata_gap_certainty, $2, $3, $4)",
     )
     .bind(Uuid::now_v7())
     .bind(archived_observed_at)
@@ -734,7 +746,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE usage_gateway_epochs \
+        "UPDATE request_metadata_gateway_epochs \
          SET started_at = $1, updated_at = $1, stale_candidate_at = NULL, \
              stale_detected_at = $1 + interval '1 second', \
              acknowledged_at = $1 + interval '2 seconds' \
@@ -746,7 +758,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE usage_gateway_epochs \
+        "UPDATE request_metadata_gateway_epochs \
          SET started_at = $1, updated_at = $1, gracefully_closed_at = $1 \
          WHERE process_epoch = $2",
     )
@@ -771,7 +783,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO usage_event_receipts \
+        "INSERT INTO request_metadata_event_receipts \
          (event_id, request_id, event_sha256, status, observed_at) \
          VALUES ($1, $2, NULL, 'pending', $3)",
     )
@@ -783,7 +795,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .unwrap();
     let expired_receipt_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO usage_event_receipts \
+        "INSERT INTO request_metadata_event_receipts \
          (event_id, request_id, event_sha256, status, observed_at, recorded_at) \
          VALUES ($1, $2, NULL, 'pending', now() - interval '8 days', \
                  now() - interval '8 days')",
@@ -795,7 +807,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .unwrap();
     let future_skew_receipt_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO usage_event_receipts \
+        "INSERT INTO request_metadata_event_receipts \
          (event_id, request_id, event_sha256, status, observed_at, recorded_at) \
          VALUES ($1, $2, NULL, 'pending', now() + interval '100 years', \
                  now() - interval '8 days')",
@@ -848,13 +860,13 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         .unwrap();
 
     assert_eq!(maintenance.rollup_rows, 1);
-    assert_eq!(maintenance.gap_rollup_rows, 2);
-    assert_eq!(maintenance.gap_rows, 2);
-    assert_eq!(maintenance.usage_epoch_rows, 3);
-    assert_eq!(maintenance.usage_receipt_rows, 2);
+    assert_eq!(maintenance.request_metadata_gap_rollup_rows, 2);
+    assert_eq!(maintenance.request_metadata_gap_rows, 2);
+    assert_eq!(maintenance.request_metadata_epoch_rows, 3);
+    assert_eq!(maintenance.request_metadata_receipt_rows, 2);
     assert_eq!(maintenance.outbox_rows, 1);
     let future_skew_receipt_retained: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM usage_event_receipts WHERE event_id = $1)",
+        "SELECT EXISTS (SELECT 1 FROM request_metadata_event_receipts WHERE event_id = $1)",
     )
     .bind(future_skew_receipt_id)
     .fetch_one(store.pool())
@@ -909,13 +921,13 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     assert_eq!(archived_summary.input_tokens, "7");
     assert_eq!(archived_summary.cached_input_tokens, "2");
     assert_eq!(archived_summary.currency.as_deref(), Some("USD"));
-    assert_eq!(archived_summary.ingestion_gap_events, 4);
-    assert_eq!(archived_summary.uncertain_gap_count, 1);
+    assert_eq!(archived_summary.request_metadata_gap_events, 4);
+    assert_eq!(archived_summary.uncertain_request_metadata_gap_count, 1);
     assert!(archived_summary.coverage.range_complete);
     assert!(!archived_summary.complete);
     let archived_gap: (i64, chrono::DateTime<Utc>, chrono::DateTime<Utc>) = sqlx::query_as(
         "SELECT event_count, first_observed_at, last_observed_at \
-         FROM usage_gap_hourly \
+         FROM request_metadata_gap_hourly \
          WHERE gateway_instance = 'archived-gap-gateway' AND reason = 'archived_test_gap'",
     )
     .fetch_one(store.pool())
@@ -931,18 +943,18 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         (archived_observed_at + Duration::seconds(2)).timestamp_micros()
     );
     let retained_uncertainty: i64 = sqlx::query_scalar(
-        "SELECT sum(uncertain_gap_count)::bigint FROM usage_gap_hourly \
+        "SELECT sum(uncertain_gap_count)::bigint FROM request_metadata_gap_hourly \
          WHERE gateway_instance = 'archived-uncertain-gateway'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
     assert_eq!(retained_uncertainty, 1);
-    let retained_epoch_health = store.usage_gateway_epoch_health().await.unwrap();
+    let retained_epoch_health = store.request_metadata_gateway_epoch_health().await.unwrap();
     assert_eq!(retained_epoch_health.unresolved_epochs, 0);
     assert_eq!(retained_epoch_health.historical_uncertain_gap_count, 3);
     let retained_old_epochs: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM usage_gateway_epochs \
+        "SELECT count(*) FROM request_metadata_gateway_epochs \
          WHERE process_epoch = ANY($1)",
     )
     .bind(vec![loss_snapshot.process_epoch, stale_epoch, clean_epoch])
@@ -985,7 +997,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     // aggregate instead of replacing the hour with only the late row. An
     // exact redelivery after that rollup must remain a no-op.
     let late_request_id = Uuid::now_v7();
-    let late_event = UsageEvent {
+    let late_event = RequestMetadataEvent {
         event_id: Uuid::now_v7(),
         request_id: late_request_id,
         runtime_generation_id: generation_id,
@@ -1009,7 +1021,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         media_units: None,
         usage_complete: true,
         unpriced: true,
-        attempts: vec![UsageAttempt {
+        attempts: vec![RequestAttemptMetadata {
             id: Uuid::now_v7(),
             ordinal: 1,
             provider_id,
@@ -1023,9 +1035,12 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             first_byte_ms: Some(10),
         }],
     };
-    store.persist_usage_event(&late_event).await.unwrap();
+    store
+        .persist_request_metadata_event(&late_event)
+        .await
+        .unwrap();
     sqlx::query(
-        "INSERT INTO usage_ingestion_gaps \
+        "INSERT INTO request_metadata_ingestion_gaps \
          (id, gateway_instance, event_count, reason, first_observed_at, \
           last_observed_at, reported_at) \
          VALUES ($1, 'archived-gap-gateway', 2, 'archived_test_gap', $2, $3, $4)",
@@ -1040,8 +1055,8 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let late_maintenance = store.run_maintenance(Utc::now()).await.unwrap();
     assert_eq!(late_maintenance.rollup_rows, 1);
     assert_eq!(late_maintenance.usage_rows, 1);
-    assert_eq!(late_maintenance.gap_rollup_rows, 1);
-    assert_eq!(late_maintenance.gap_rows, 1);
+    assert_eq!(late_maintenance.request_metadata_gap_rollup_rows, 1);
+    assert_eq!(late_maintenance.request_metadata_gap_rows, 1);
     let additive_usage: (i64, String, String) = sqlx::query_as(
         "SELECT request_count, input_tokens::text, output_tokens::text \
          FROM usage_hourly \
@@ -1057,7 +1072,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .unwrap();
     assert_eq!(additive_usage, (2, "12".to_owned(), "4".to_owned()));
     let additive_gap: i64 = sqlx::query_scalar(
-        "SELECT event_count FROM usage_gap_hourly \
+        "SELECT event_count FROM request_metadata_gap_hourly \
          WHERE bucket = $1 AND gateway_instance = 'archived-gap-gateway' \
            AND reason = 'archived_test_gap'",
     )
@@ -1087,7 +1102,10 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .unwrap();
     assert_eq!(legacy_replay.rows_affected(), 0);
 
-    store.persist_usage_event(&late_event).await.unwrap();
+    store
+        .persist_request_metadata_event(&late_event)
+        .await
+        .unwrap();
     let replay_maintenance = store.run_maintenance(Utc::now()).await.unwrap();
     assert_eq!(replay_maintenance.usage_rows, 0);
     assert_eq!(replay_maintenance.rollup_rows, 0);
@@ -1109,14 +1127,16 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let mut conflicting_late_event = late_event.clone();
     conflicting_late_event.event_id = Uuid::now_v7();
     assert!(matches!(
-        store.persist_usage_event(&conflicting_late_event).await,
-        Err(olp_storage::PersistenceError::InvalidUsageEvent)
+        store
+            .persist_request_metadata_event(&conflicting_late_event)
+            .await,
+        Err(olp_storage::PersistenceError::InvalidRequestMetadataEvent)
     ));
 
     let media_request_id = Uuid::now_v7();
     let media_started_at = observed_at + Duration::minutes(1);
     store
-        .persist_usage_event(&UsageEvent {
+        .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
             request_id: media_request_id,
             runtime_generation_id: generation_id,
@@ -1140,7 +1160,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             media_units: Some(Decimal::new(3, 0)),
             usage_complete: true,
             unpriced: true,
-            attempts: vec![UsageAttempt {
+            attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -1184,23 +1204,23 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     outside_window_event.attempts[0].completed_at = outside_window_observed_at;
     assert_eq!(
         store
-            .persist_usage_event(&outside_window_event)
+            .persist_request_metadata_event(&outside_window_event)
             .await
             .unwrap(),
-        UsagePersistenceOutcome::RejectedOutsideReplayWindow
+        RequestMetadataPersistenceOutcome::RejectedOutsideReplayWindow
     );
     assert_eq!(
         store
-            .persist_usage_event(&outside_window_event)
+            .persist_request_metadata_event(&outside_window_event)
             .await
             .unwrap(),
-        UsagePersistenceOutcome::Duplicate
+        RequestMetadataPersistenceOutcome::Duplicate
     );
     let application_gap: (i64, i64, String) = sqlx::query_as(
         "SELECT count(*), sum(event_count)::bigint, min(certainty::text) \
-         FROM usage_ingestion_gaps \
-         WHERE gateway_instance = 'stream-consumer' \
-           AND reason = 'usage_event_outside_replay_window'",
+         FROM request_metadata_ingestion_gaps \
+         WHERE gateway_instance = 'request-metadata-consumer' \
+           AND reason = 'request_metadata_event_outside_replay_window'",
     )
     .fetch_one(store.pool())
     .await
@@ -1231,9 +1251,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         assert_eq!(legacy_outside_window.rows_affected(), 0);
     }
     let outside_window_gaps: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM usage_ingestion_gaps \
+        "SELECT count(*) FROM request_metadata_ingestion_gaps \
          WHERE gateway_instance = 'database-fence' \
-           AND reason = 'usage_event_outside_replay_window'",
+           AND reason = 'request_metadata_event_outside_replay_window'",
     )
     .fetch_one(store.pool())
     .await
@@ -1241,22 +1261,28 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     assert_eq!(outside_window_gaps, 1);
 
     let poison_detected_at = Utc::now();
-    let poison_gap = || UsageGap {
-        gateway_instance: "stream-consumer".to_owned(),
+    let poison_gap = || RequestMetadataGap {
+        gateway_instance: "request-metadata-consumer".to_owned(),
         event_count: 1,
-        reason: "invalid_usage_event".to_owned(),
+        reason: "invalid_request_metadata_event".to_owned(),
         first_observed_at: poison_detected_at,
         last_observed_at: poison_detected_at,
     };
     assert!(
         store
-            .report_usage_gap_once(poison_gap(), "usage-event:test-poison:invalid")
+            .report_request_metadata_gap_once(
+                poison_gap(),
+                "request-metadata-event:test-poison:invalid"
+            )
             .await
             .unwrap()
     );
     assert!(
         !store
-            .report_usage_gap_once(poison_gap(), "usage-event:test-poison:invalid")
+            .report_request_metadata_gap_once(
+                poison_gap(),
+                "request-metadata-event:test-poison:invalid"
+            )
             .await
             .unwrap()
     );
@@ -1266,7 +1292,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     // gap deduplication keys that the database still considers in-window.
     let skew_receipt_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO usage_event_receipts \
+        "INSERT INTO request_metadata_event_receipts \
          (event_id, request_id, status, observed_at, recorded_at) \
          VALUES ($1, $2, 'fact_persisted', now() - interval '7 days 2 minutes', \
                  now() - interval '7 days 2 minutes')",
@@ -1276,13 +1302,13 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .execute(store.pool())
     .await
     .unwrap();
-    let skew_gap_key = "usage-event:test-clock-skew:invalid";
+    let skew_gap_key = "request-metadata-event:test-clock-skew:invalid";
     sqlx::query(
-        "INSERT INTO usage_ingestion_gaps \
+        "INSERT INTO request_metadata_ingestion_gaps \
          (id, gateway_instance, event_count, reason, certainty, first_observed_at, \
           last_observed_at, reported_at, deduplication_key) \
-         VALUES ($1, 'stream-consumer', 1, 'invalid_usage_event', \
-                 'exact'::usage_gap_certainty, now() - interval '7 days 2 minutes', \
+         VALUES ($1, 'request-metadata-consumer', 1, 'invalid_request_metadata_event', \
+                 'exact'::request_metadata_gap_certainty, now() - interval '7 days 2 minutes', \
                  now() - interval '7 days 2 minutes', now() - interval '7 days 2 minutes', $2)",
     )
     .bind(Uuid::now_v7())
@@ -1296,8 +1322,8 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         .unwrap();
     let skew_evidence_retained: (bool, bool) = sqlx::query_as(
         "SELECT \
-           EXISTS (SELECT 1 FROM usage_event_receipts WHERE event_id = $1), \
-           EXISTS (SELECT 1 FROM usage_ingestion_gaps WHERE deduplication_key = $2)",
+           EXISTS (SELECT 1 FROM request_metadata_event_receipts WHERE event_id = $1), \
+           EXISTS (SELECT 1 FROM request_metadata_ingestion_gaps WHERE deduplication_key = $2)",
     )
     .bind(skew_receipt_id)
     .bind(skew_gap_key)

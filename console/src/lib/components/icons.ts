@@ -4,7 +4,7 @@ export type IconName =
   | 'model'
   | 'route'
   | 'key'
-  | 'team'
+  | 'access'
   | 'request'
   | 'usage'
   | 'health'

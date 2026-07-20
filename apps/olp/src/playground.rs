@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::{
     ApiState, FieldErrors, Problem,
     gateway::{InferenceError, execute_session_generation},
-    management::{Permission, json_payload, require_mutation_session, require_permission},
+    management_api::{Permission, json_payload, require_mutation_session, require_permission},
 };
 
 pub(crate) fn router() -> Router<ApiState> {
@@ -57,7 +57,7 @@ struct PlaygroundRequest {
 }
 
 fn default_surface() -> String {
-    "open_ai".to_owned()
+    "openai".to_owned()
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -332,7 +332,7 @@ fn playground_operation(request: PlaygroundRequest) -> Result<(Operation, Surfac
         Err(_) => {
             fields.insert(
                 "surface".to_owned(),
-                vec!["Surface must be open_ai, anthropic, or gemini.".to_owned()],
+                vec!["Surface must be openai, anthropic, or gemini.".to_owned()],
             );
             // A placeholder used only until the aggregated field error returns.
             Surface::OpenAi

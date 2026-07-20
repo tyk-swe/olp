@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
     ApiState, Problem,
-    management::{Permission, require_permission, require_read_session, require_store},
+    management_api::{Permission, require_permission, require_read_session, require_store},
     operations::helpers::{map_operations, page_limit},
 };
 

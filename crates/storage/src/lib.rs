@@ -4,22 +4,25 @@
 //! does not expose SQLx types through the core ports.
 
 mod access;
-mod catalog;
-mod catalog_validation;
 mod configuration;
+mod identity;
 mod limits;
 mod maintenance;
 mod media_jobs;
 mod oidc;
 mod operations;
 mod reencryption;
+mod request_metadata;
 mod runtime_compiler;
 mod security;
 mod store;
-mod team;
 mod usage;
 mod valkey;
 
+pub use identity::{
+    AcceptInvitation, AcceptedInvitation, IdentityError, InvitationCreated, InvitationRecord,
+    NewInvitation, SessionRecord, UserRecord,
+};
 pub use limits::{DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest};
 pub use maintenance::{MaintenanceError, MaintenanceReport};
 pub use media_jobs::{
@@ -43,31 +46,30 @@ pub use reencryption::{
     EncryptedTable, KeyVersionReference, MasterKeyEncryptionStatus, MasterKeyReencryptionBatch,
     MasterKeyVerification, ReencryptionError,
 };
+pub use request_metadata::{
+    REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS,
+    REQUEST_METADATA_GATEWAY_EPOCH_STALE_AFTER_SECONDS, RequestAttemptMetadata,
+    RequestMetadataBufferSnapshot, RequestMetadataConsumerHealth, RequestMetadataConsumerState,
+    RequestMetadataConsumerStatus, RequestMetadataEmitError, RequestMetadataEmitter,
+    RequestMetadataEpochAcknowledgement, RequestMetadataEpochDetection, RequestMetadataEpochHealth,
+    RequestMetadataEvent, RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState,
+    RequestMetadataLossReport, RequestMetadataPersistenceOutcome, RequestMetadataReceiver,
+};
 pub use runtime_compiler::RuntimeCompileError;
 pub use security::{
-    ApiKeyMaterial, EncryptedSecret, InvitationMaterial, KeyHasher, MasterKey, ParsedApiKey,
+    ApiKeyMaterial, AuthHmacKey, EncryptedSecret, InvitationMaterial, MasterKey, ParsedApiKey,
     SecurityError, SessionMaterial, constant_time_eq, credential_aad, hash_password,
     idempotency_replay_aad, idempotency_replay_scope, oidc_client_secret_aad,
     oidc_flow_payload_aad, verify_password,
 };
 pub use store::{
     IdempotencyOutcome, IdempotencyResponse, NewOwner, OutboxRecord, PasswordUser,
-    PersistenceError, PgStore, PublishedRelease, ReplayableIdempotency, SessionPrincipal,
-    SetupResult, UsageGap, idempotency_fingerprint, idempotency_secret_digest,
-};
-pub use team::{
-    AcceptInvitation, AcceptedInvitation, InvitationCreated, InvitationRecord, NewInvitation,
-    SessionRecord, TeamError, UserRecord,
-};
-pub use usage::{
-    USAGE_CONSUMER_STALE_AFTER_SECONDS, USAGE_GATEWAY_EPOCH_STALE_AFTER_SECONDS, UsageAttempt,
-    UsageBufferSnapshot, UsageConsumerHealth, UsageConsumerState, UsageConsumerStatus,
-    UsageEmitError, UsageEmitter, UsageEpochAcknowledgement, UsageEpochDetection, UsageEpochHealth,
-    UsageEvent, UsageGatewayEpochRecord, UsageGatewayEpochState, UsageLossReport,
-    UsagePersistenceOutcome, UsageReceiver,
+    PersistenceError, PgStore, PublishedRelease, ReplayableIdempotency, RequestMetadataGap,
+    SessionPrincipal, SetupResult, idempotency_fingerprint, idempotency_secret_digest,
 };
 pub use valkey::{
-    RuntimeHintPublisher, RuntimeHintSubscriber, ValkeyAdapterError, run_usage_consumer,
+    REQUEST_METADATA_STREAM, RuntimeHintPublisher, RuntimeHintSubscriber, ValkeyAdapterError,
+    preflight_request_metadata_stream_upgrade, run_request_metadata_consumer,
 };
 
 /// Truncates a query result fetched with `limit + 1` and derives the cursor
@@ -91,19 +93,16 @@ fn split_page<T, C>(
 /// only in `migrate`/`all` mode, never implicitly in a gateway process.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 pub use access::{AccessError, ApiKeyCreated, ApiKeyRevoked, NewApiKeyRecord};
-pub use catalog::{
-    ApiKeyCatalogRecord, ApiKeyMutationResult, ApiKeyRotationResult,
-    CapabilityCertificationApplied, CapabilityCertificationOutcome, CapabilityRecord, CatalogError,
-    CatalogPage, CredentialVersionRecord, DiscoveredModelInput, ProviderCatalogRecord,
-    ProviderModelInventoryRecord, ProviderModelRecord, ProviderMutationResult,
-    ProviderRevisionCatalogRecord, ProviderRevisionDiff, ReplaceRouteDraftCatalogInput,
-    RotateApiKeyCatalogInput, RotateCredentialInput, RouteCatalogRecord, RouteDraftCatalogRecord,
-    RouteRevisionCatalogRecord, RouteRevisionDiff, RouteSimulation, RouteSimulationTarget,
-    RouteTargetRecord, StoredCredentialSecret, UpdateApiKeyCatalogInput, UpdateProviderCatalog,
-};
 pub use configuration::{
-    ConfigurationError, NewProviderDraft, NewRouteDraft, NewRouteTarget, ProviderActivated,
-    ProviderDraftCreated, ProviderSecretRecord, RouteActivated, RouteDraftCreated,
+    ApiKeyMutationResult, ApiKeyRecord, ApiKeyRotationResult, CapabilityCertificationApplied,
+    CapabilityCertificationOutcome, CapabilityRecord, ConfigurationError, ConfigurationPage,
+    CredentialVersionRecord, DiscoveredModelInput, NewProviderDraft, NewRouteDraft, NewRouteTarget,
+    ProviderActivated, ProviderDraftCreated, ProviderModelInventoryRecord, ProviderModelRecord,
+    ProviderMutationResult, ProviderRecord, ProviderRevisionDiff, ProviderRevisionRecord,
+    ProviderSecretRecord, ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput,
+    RouteActivated, RouteDraftCreated, RouteDraftRecord, RouteRecord, RouteRevisionDiff,
+    RouteRevisionRecord, RouteSimulation, RouteSimulationTarget, RouteTargetRecord,
+    StoredCredentialSecret, UpdateApiKeyInput, UpdateProvider,
 };
 
 #[cfg(test)]

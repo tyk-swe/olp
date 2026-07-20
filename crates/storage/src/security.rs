@@ -277,11 +277,12 @@ impl fmt::Debug for EncryptedSecret {
     }
 }
 
-/// HMAC key used for proxy-key authentication. This is intentionally distinct
-/// from the provider-credential encryption key so the two can rotate separately.
-pub struct KeyHasher([u8; 32]);
+/// Authentication HMAC key used for proxy keys and public-auth identities. This
+/// is intentionally distinct from the provider-credential encryption key so the
+/// two can rotate separately.
+pub struct AuthHmacKey([u8; 32]);
 
-impl KeyHasher {
+impl AuthHmacKey {
     pub fn new(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
@@ -423,13 +424,13 @@ impl KeyHasher {
     }
 }
 
-impl fmt::Debug for KeyHasher {
+impl fmt::Debug for AuthHmacKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("KeyHasher([REDACTED])")
+        formatter.write_str("AuthHmacKey([REDACTED])")
     }
 }
 
-impl Drop for KeyHasher {
+impl Drop for AuthHmacKey {
     fn drop(&mut self) {
         self.0.zeroize();
     }
@@ -710,9 +711,9 @@ mod tests {
 
     #[test]
     fn proxy_keys_are_lookupable_and_hmac_verified() {
-        let hasher = KeyHasher::new([9; 32]);
-        let generated = hasher.generate_api_key();
-        let parsed = hasher
+        let auth_hmac_key = AuthHmacKey::new([9; 32]);
+        let generated = auth_hmac_key.generate_api_key();
+        let parsed = auth_hmac_key
             .parse_and_verify(generated.expose_once(), &generated.digest)
             .unwrap();
 
@@ -722,7 +723,7 @@ mod tests {
         let mut tampered = generated.expose_once().to_owned();
         tampered.push('a');
         assert!(
-            hasher
+            auth_hmac_key
                 .parse_and_verify(&tampered, &generated.digest)
                 .is_err()
         );
@@ -731,22 +732,26 @@ mod tests {
 
     #[test]
     fn public_auth_and_bootstrap_digests_are_domain_separated() {
-        let hasher = KeyHasher::new([9; 32]);
-        let source = hasher.public_auth_source_digest("203.0.113.10");
+        let auth_hmac_key = AuthHmacKey::new([9; 32]);
+        let source = auth_hmac_key.public_auth_source_digest("203.0.113.10");
         let source_target =
-            hasher.public_auth_source_target_digest("203.0.113.10", "owner@example.test");
+            auth_hmac_key.public_auth_source_target_digest("203.0.113.10", "owner@example.test");
         assert_ne!(source, source_target);
         assert_ne!(
             source_target,
-            hasher.public_auth_source_target_digest("203.0.113.11", "owner@example.test")
+            auth_hmac_key.public_auth_source_target_digest("203.0.113.11", "owner@example.test")
         );
 
         let token = STANDARD.encode([7_u8; 32]);
-        let digest = hasher.bootstrap_token_digest_from_base64(&token).unwrap();
-        assert!(hasher.verify_bootstrap_token_digest(&token, &digest));
-        assert!(!hasher.verify_bootstrap_token_digest(&STANDARD.encode([8_u8; 32]), &digest));
+        let digest = auth_hmac_key
+            .bootstrap_token_digest_from_base64(&token)
+            .unwrap();
+        assert!(auth_hmac_key.verify_bootstrap_token_digest(&token, &digest));
         assert!(
-            hasher
+            !auth_hmac_key.verify_bootstrap_token_digest(&STANDARD.encode([8_u8; 32]), &digest)
+        );
+        assert!(
+            auth_hmac_key
                 .bootstrap_token_digest_from_base64(&STANDARD.encode([1_u8; 31]))
                 .is_err()
         );

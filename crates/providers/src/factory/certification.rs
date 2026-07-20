@@ -34,7 +34,7 @@ impl From<NativeOpenAiCertificationEvidence> for CapabilityCertificationEvidence
 }
 
 /// Returns whether the installed connector has a safe certification path for
-/// a reviewed capability. This is narrower than catalog eligibility: the
+/// a reviewed capability. This is narrower than configuration eligibility: the
 /// management UI must not offer tuples that can never satisfy activation's
 /// certification requirement.
 pub const fn supports_capability_certification(

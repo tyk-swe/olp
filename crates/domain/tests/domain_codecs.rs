@@ -47,9 +47,21 @@ fn canonical_enum_text_and_serde_codecs_agree() {
 
 #[test]
 fn canonical_enum_codecs_reject_noncanonical_names() {
-    for value in ["", "OpenAi", "openai", "open-ai", " open_ai"] {
+    for value in ["", "OpenAi", "open_ai", "open-ai", " openai"] {
         assert!(value.parse::<Surface>().is_err());
+        assert!(serde_json::from_value::<Surface>(value.into()).is_err());
+    }
+    for value in [
+        "",
+        "OpenAi",
+        "open_ai",
+        "azure_open_ai",
+        "open_ai_compatible",
+        "open-ai",
+        " openai",
+    ] {
         assert!(value.parse::<ProviderKind>().is_err());
+        assert!(serde_json::from_value::<ProviderKind>(value.into()).is_err());
     }
     for value in ["", "Streaming", "stream", "streaming "] {
         assert!(value.parse::<TransportMode>().is_err());

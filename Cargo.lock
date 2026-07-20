@@ -2341,6 +2341,7 @@ dependencies = [
  "olp-protocols",
  "olp-providers",
  "olp-storage",
+ "redis",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -2360,7 +2361,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "olp-conformance-fixtures"
+name = "olp-conformance"
 version = "2.0.0"
 dependencies = [
  "olp-domain",

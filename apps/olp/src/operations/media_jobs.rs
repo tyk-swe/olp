@@ -18,7 +18,7 @@ use uuid::Uuid;
 use super::helpers::{map_operations, not_found, page_limit, validate_time_range};
 use crate::{
     ApiState, FieldErrors, Problem,
-    management::{Permission, require_permission, require_read_session, require_store},
+    management_api::{Permission, require_permission, require_read_session, require_store},
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -96,11 +96,7 @@ impl From<MediaJobRecord> for MediaJobItem {
 }
 
 pub(super) const fn media_job_surface_wire_value(surface: Surface) -> &'static str {
-    match surface {
-        Surface::OpenAi => "openai",
-        Surface::Anthropic => "anthropic",
-        Surface::Gemini => "gemini",
-    }
+    surface.as_str()
 }
 
 #[derive(Debug, Serialize, ToSchema)]

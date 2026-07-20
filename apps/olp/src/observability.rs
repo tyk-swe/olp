@@ -12,7 +12,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use olp_storage::{UsageConsumerStatus, UsageEmitter, UsageEpochHealth};
+use olp_storage::{
+    RequestMetadataConsumerStatus, RequestMetadataEmitter, RequestMetadataEpochHealth,
+};
 use serde::Serialize;
 use tower::ServiceBuilder;
 use utoipa::ToSchema;
@@ -77,17 +79,17 @@ pub(crate) struct HealthResponse {
     generation: Option<u64>,
     database: &'static str,
     limits: &'static str,
-    usage_complete: bool,
-    usage_consumer: &'static str,
-    usage_consumer_pending_events: u64,
-    usage_consumer_lag_events: u64,
-    usage_consumer_oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
-    usage_consumer_checked_at: Option<chrono::DateTime<chrono::Utc>>,
-    usage_consumer_heartbeat_age_seconds: Option<u64>,
-    usage_open_epochs: u64,
-    usage_unresolved_epochs: u64,
-    usage_historical_uncertain_gaps: u64,
-    usage_unresolved_event_lower_bound: u64,
+    request_metadata_complete: bool,
+    request_metadata_consumer: &'static str,
+    request_metadata_consumer_pending_events: u64,
+    request_metadata_consumer_lag_events: u64,
+    request_metadata_consumer_oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
+    request_metadata_consumer_checked_at: Option<chrono::DateTime<chrono::Utc>>,
+    request_metadata_consumer_heartbeat_age_seconds: Option<u64>,
+    request_metadata_gateway_open_epochs: u64,
+    request_metadata_gateway_unresolved_epochs: u64,
+    request_metadata_historical_uncertain_gaps: u64,
+    request_metadata_gateway_unresolved_event_lower_bound: u64,
     media_reconciliation: &'static str,
     media_reconciliation_pending: u64,
     media_reconciliation_stale: u64,
@@ -305,17 +307,17 @@ async fn live() -> axum::Json<HealthResponse> {
         generation: None,
         database: "not_checked",
         limits: "not_checked",
-        usage_complete: true,
-        usage_consumer: "not_checked",
-        usage_consumer_pending_events: 0,
-        usage_consumer_lag_events: 0,
-        usage_consumer_oldest_pending_at: None,
-        usage_consumer_checked_at: None,
-        usage_consumer_heartbeat_age_seconds: None,
-        usage_open_epochs: 0,
-        usage_unresolved_epochs: 0,
-        usage_historical_uncertain_gaps: 0,
-        usage_unresolved_event_lower_bound: 0,
+        request_metadata_complete: true,
+        request_metadata_consumer: "not_checked",
+        request_metadata_consumer_pending_events: 0,
+        request_metadata_consumer_lag_events: 0,
+        request_metadata_consumer_oldest_pending_at: None,
+        request_metadata_consumer_checked_at: None,
+        request_metadata_consumer_heartbeat_age_seconds: None,
+        request_metadata_gateway_open_epochs: 0,
+        request_metadata_gateway_unresolved_epochs: 0,
+        request_metadata_historical_uncertain_gaps: 0,
+        request_metadata_gateway_unresolved_event_lower_bound: 0,
         media_reconciliation: "not_checked",
         media_reconciliation_pending: 0,
         media_reconciliation_stale: 0,
@@ -344,15 +346,15 @@ async fn ready(axum::extract::State(state): axum::extract::State<ApiState>) -> R
 async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> {
     let generation = state.runtime.ordinal();
     let now = chrono::Utc::now();
-    let unknown_consumer = UsageConsumerStatus::from_health(None, now);
-    let (database, media_reconciliation, usage_consumer, usage_epochs) =
+    let unknown_consumer = RequestMetadataConsumerStatus::from_health(None, now);
+    let (database, media_reconciliation, request_metadata_consumer, request_metadata_epochs) =
         if let Some(store) = &state.store {
             match store.ping().await {
                 Ok(()) => {
                     let (media, consumer, epochs) = tokio::join!(
                         store.media_reconciliation_summary(now),
-                        store.usage_consumer_status(now),
-                        store.usage_gateway_epoch_health(),
+                        store.request_metadata_consumer_status(now),
+                        store.request_metadata_gateway_epoch_health(),
                     );
                     let media =
                         media.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
@@ -366,7 +368,7 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
                     "unavailable_lkg",
                     None,
                     unknown_consumer,
-                    UsageEpochHealth::default(),
+                    RequestMetadataEpochHealth::default(),
                 ),
                 Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
             }
@@ -377,7 +379,7 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
                 "not_configured",
                 None,
                 unknown_consumer,
-                UsageEpochHealth::default(),
+                RequestMetadataEpochHealth::default(),
             )
         };
 
@@ -388,7 +390,7 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
                 "runtime_generation_unavailable",
             ));
         }
-        if state.key_hasher.is_none() {
+        if state.auth_hmac_key.is_none() {
             return Err(Problem::service_unavailable(
                 "api_key_authentication_unavailable",
             ));
@@ -425,16 +427,17 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
         .as_ref()
         .is_some_and(|summary| summary.stale > 0 || summary.failed > 0 || summary.unbound > 0)
         || media_reconciliation_gaps > 0;
-    let local_usage_complete = state
-        .usage
+    let local_request_metadata_complete = state
+        .request_metadata
         .as_ref()
-        .map_or(!state.mode.serves_gateway(), |usage| {
-            usage.snapshot().complete()
+        .map_or(!state.mode.serves_gateway(), |request_metadata| {
+            request_metadata.snapshot().complete()
         });
-    let usage_complete =
-        local_usage_complete && usage_consumer.complete() && usage_epochs.unresolved_epochs == 0;
+    let request_metadata_complete = local_request_metadata_complete
+        && request_metadata_consumer.complete()
+        && request_metadata_epochs.unresolved_epochs == 0;
     Ok(HealthResponse {
-        status: if degraded_limits || degraded_media || !usage_complete {
+        status: if degraded_limits || degraded_media || !request_metadata_complete {
             "degraded"
         } else {
             "ok"
@@ -448,17 +451,20 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
         } else {
             "not_configured"
         },
-        usage_complete,
-        usage_consumer: usage_consumer.state.as_str(),
-        usage_consumer_pending_events: usage_consumer.pending_events,
-        usage_consumer_lag_events: usage_consumer.lag_events,
-        usage_consumer_oldest_pending_at: usage_consumer.oldest_pending_at,
-        usage_consumer_checked_at: usage_consumer.checked_at,
-        usage_consumer_heartbeat_age_seconds: usage_consumer.heartbeat_age_seconds,
-        usage_open_epochs: usage_epochs.open_epochs,
-        usage_unresolved_epochs: usage_epochs.unresolved_epochs,
-        usage_historical_uncertain_gaps: usage_epochs.historical_uncertain_gap_count,
-        usage_unresolved_event_lower_bound: usage_epochs.unresolved_event_lower_bound,
+        request_metadata_complete,
+        request_metadata_consumer: request_metadata_consumer.state.as_str(),
+        request_metadata_consumer_pending_events: request_metadata_consumer.pending_events,
+        request_metadata_consumer_lag_events: request_metadata_consumer.lag_events,
+        request_metadata_consumer_oldest_pending_at: request_metadata_consumer.oldest_pending_at,
+        request_metadata_consumer_checked_at: request_metadata_consumer.checked_at,
+        request_metadata_consumer_heartbeat_age_seconds: request_metadata_consumer
+            .heartbeat_age_seconds,
+        request_metadata_gateway_open_epochs: request_metadata_epochs.open_epochs,
+        request_metadata_gateway_unresolved_epochs: request_metadata_epochs.unresolved_epochs,
+        request_metadata_historical_uncertain_gaps: request_metadata_epochs
+            .historical_uncertain_gap_count,
+        request_metadata_gateway_unresolved_event_lower_bound: request_metadata_epochs
+            .unresolved_event_lower_bound,
         media_reconciliation: if media_reconciliation.is_some() {
             "ok"
         } else {
@@ -529,26 +535,29 @@ async fn metrics(axum::extract::State(state): axum::extract::State<ApiState>) ->
 }
 
 async fn collect_metrics(state: &ApiState) -> String {
-    let usage = state.usage.as_ref().map(UsageEmitter::snapshot);
+    let request_metadata = state
+        .request_metadata
+        .as_ref()
+        .map(RequestMetadataEmitter::snapshot);
     let limiter_available = state.limiter.get().is_some();
     let now = chrono::Utc::now();
-    let mut usage_consumer = UsageConsumerStatus::from_health(None, now);
-    let mut usage_epochs = UsageEpochHealth::default();
+    let mut request_metadata_consumer = RequestMetadataConsumerStatus::from_health(None, now);
+    let mut request_metadata_epochs = RequestMetadataEpochHealth::default();
     let mut operations_summary = None;
     let mut provider_health = Vec::new();
     let media_reconciliation = if let Some(store) = &state.store {
         let (consumer, epochs, operations, providers, media) = tokio::join!(
-            store.usage_consumer_status(now),
-            store.usage_gateway_epoch_health(),
+            store.request_metadata_consumer_status(now),
+            store.request_metadata_gateway_epoch_health(),
             store.prometheus_operations_summary(5),
             store.provider_health(15, None, 100),
             store.media_reconciliation_summary(now),
         );
         if let Ok(status) = consumer {
-            usage_consumer = status;
+            request_metadata_consumer = status;
         }
         if let Ok(health) = epochs {
-            usage_epochs = health;
+            request_metadata_epochs = health;
         }
         operations_summary = operations.ok();
         if let Ok(page) = providers {
@@ -562,48 +571,48 @@ async fn collect_metrics(state: &ApiState) -> String {
         "# HELP olp_runtime_generation Current immutable runtime generation.\n\
          # TYPE olp_runtime_generation gauge\n\
          olp_runtime_generation {}\n\
-         # HELP olp_usage_events_dropped_total Metadata events dropped from the bounded buffer.\n\
-         # TYPE olp_usage_events_dropped_total counter\n\
-         olp_usage_events_dropped_total {}\n\
-         # HELP olp_usage_events_abandoned_total Accepted metadata events abandoned during shutdown or worker failure.\n\
-         # TYPE olp_usage_events_abandoned_total counter\n\
-         olp_usage_events_abandoned_total {}\n\
-         # HELP olp_usage_events_pending Accepted metadata events not yet written to the stream.\n\
-         # TYPE olp_usage_events_pending gauge\n\
-         olp_usage_events_pending {}\n\
-         # HELP olp_usage_stream_retrying Whether the local writer is retrying Valkey.\n\
-         # TYPE olp_usage_stream_retrying gauge\n\
-         olp_usage_stream_retrying {}\n\
-         # HELP olp_usage_persistence_available Whether a metadata usage sink is active.\n\
-         # TYPE olp_usage_persistence_available gauge\n\
-         olp_usage_persistence_available {}\n\
-         # HELP olp_usage_consumer_pending_events Delivered usage events awaiting consumer acknowledgement.\n\
-         # TYPE olp_usage_consumer_pending_events gauge\n\
-         olp_usage_consumer_pending_events {}\n\
-         # HELP olp_usage_consumer_lag_events Usage stream events not yet delivered to the persistence consumer.\n\
-         # TYPE olp_usage_consumer_lag_events gauge\n\
-         olp_usage_consumer_lag_events {}\n\
-         # HELP olp_usage_consumer_heartbeat_age_seconds Age of the last durable worker checkpoint.\n\
-         # TYPE olp_usage_consumer_heartbeat_age_seconds gauge\n\
-         olp_usage_consumer_heartbeat_age_seconds {}\n\
-         # HELP olp_usage_consumer_healthy Whether the durable consumer is current and fully drained.\n\
-         # TYPE olp_usage_consumer_healthy gauge\n\
-         olp_usage_consumer_healthy {}\n\
-         # HELP olp_usage_consumer_stale Whether the durable consumer missed its heartbeat threshold.\n\
-         # TYPE olp_usage_consumer_stale gauge\n\
-         olp_usage_consumer_stale {}\n\
-         # HELP olp_usage_gateway_open_epochs Gateway process epochs still emitting checkpoints.\n\
-         # TYPE olp_usage_gateway_open_epochs gauge\n\
-         olp_usage_gateway_open_epochs {}\n\
-         # HELP olp_usage_gateway_unresolved_epochs Unclean gateway epochs awaiting operator acknowledgement.\n\
-         # TYPE olp_usage_gateway_unresolved_epochs gauge\n\
-         olp_usage_gateway_unresolved_epochs {}\n\
-         # HELP olp_usage_historical_uncertain_gaps Retained exactness gaps across raw and hourly evidence.\n\
-         # TYPE olp_usage_historical_uncertain_gaps gauge\n\
-         olp_usage_historical_uncertain_gaps {}\n\
-         # HELP olp_usage_gateway_unresolved_event_lower_bound Last durable in-flight event lower bound across unresolved epochs.\n\
-         # TYPE olp_usage_gateway_unresolved_event_lower_bound gauge\n\
-         olp_usage_gateway_unresolved_event_lower_bound {}\n\
+         # HELP olp_request_metadata_events_dropped_total Metadata events dropped from the bounded buffer.\n\
+         # TYPE olp_request_metadata_events_dropped_total counter\n\
+         olp_request_metadata_events_dropped_total {}\n\
+         # HELP olp_request_metadata_events_abandoned_total Accepted metadata events abandoned during shutdown or worker failure.\n\
+         # TYPE olp_request_metadata_events_abandoned_total counter\n\
+         olp_request_metadata_events_abandoned_total {}\n\
+         # HELP olp_request_metadata_events_pending Accepted metadata events not yet written to the stream.\n\
+         # TYPE olp_request_metadata_events_pending gauge\n\
+         olp_request_metadata_events_pending {}\n\
+         # HELP olp_request_metadata_stream_retrying Whether the local writer is retrying Valkey.\n\
+         # TYPE olp_request_metadata_stream_retrying gauge\n\
+         olp_request_metadata_stream_retrying {}\n\
+         # HELP olp_request_metadata_persistence_available Whether a request metadata sink is active.\n\
+         # TYPE olp_request_metadata_persistence_available gauge\n\
+         olp_request_metadata_persistence_available {}\n\
+         # HELP olp_request_metadata_consumer_pending_events Delivered request metadata events awaiting consumer acknowledgement.\n\
+         # TYPE olp_request_metadata_consumer_pending_events gauge\n\
+         olp_request_metadata_consumer_pending_events {}\n\
+         # HELP olp_request_metadata_consumer_lag_events Request metadata stream events not yet delivered to the persistence consumer.\n\
+         # TYPE olp_request_metadata_consumer_lag_events gauge\n\
+         olp_request_metadata_consumer_lag_events {}\n\
+         # HELP olp_request_metadata_consumer_heartbeat_age_seconds Age of the last durable worker checkpoint.\n\
+         # TYPE olp_request_metadata_consumer_heartbeat_age_seconds gauge\n\
+         olp_request_metadata_consumer_heartbeat_age_seconds {}\n\
+         # HELP olp_request_metadata_consumer_healthy Whether the durable consumer is current and fully drained.\n\
+         # TYPE olp_request_metadata_consumer_healthy gauge\n\
+         olp_request_metadata_consumer_healthy {}\n\
+         # HELP olp_request_metadata_consumer_stale Whether the durable consumer missed its heartbeat threshold.\n\
+         # TYPE olp_request_metadata_consumer_stale gauge\n\
+         olp_request_metadata_consumer_stale {}\n\
+         # HELP olp_request_metadata_gateway_open_epochs Gateway process epochs still emitting checkpoints.\n\
+         # TYPE olp_request_metadata_gateway_open_epochs gauge\n\
+         olp_request_metadata_gateway_open_epochs {}\n\
+         # HELP olp_request_metadata_gateway_unresolved_epochs Unclean gateway epochs awaiting operator acknowledgement.\n\
+         # TYPE olp_request_metadata_gateway_unresolved_epochs gauge\n\
+         olp_request_metadata_gateway_unresolved_epochs {}\n\
+         # HELP olp_request_metadata_historical_uncertain_gaps Retained exactness gaps across raw and hourly evidence.\n\
+         # TYPE olp_request_metadata_historical_uncertain_gaps gauge\n\
+         olp_request_metadata_historical_uncertain_gaps {}\n\
+         # HELP olp_request_metadata_gateway_unresolved_event_lower_bound Last durable in-flight event lower bound across unresolved epochs.\n\
+         # TYPE olp_request_metadata_gateway_unresolved_event_lower_bound gauge\n\
+         olp_request_metadata_gateway_unresolved_event_lower_bound {}\n\
          # HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n\
          # TYPE olp_distributed_limiter_available gauge\n\
          olp_distributed_limiter_available {}\n\
@@ -626,23 +635,23 @@ async fn collect_metrics(state: &ApiState) -> String {
          # TYPE olp_media_reconciliation_gaps_total counter\n\
          olp_media_reconciliation_gaps_total {}\n",
         state.runtime.ordinal().unwrap_or(0),
-        usage.map_or(0, |snapshot| snapshot.dropped),
-        usage.map_or(0, |snapshot| snapshot.abandoned),
-        usage.map_or(0, |snapshot| snapshot.pending()),
-        usage.map_or(0, |snapshot| u8::from(snapshot.retrying)),
-        usage.map_or(0, |snapshot| u8::from(!snapshot.closed)),
-        usage_consumer.pending_events,
-        usage_consumer.lag_events,
-        usage_consumer.heartbeat_age_seconds.unwrap_or(0),
-        u8::from(usage_consumer.complete()),
+        request_metadata.map_or(0, |snapshot| snapshot.dropped),
+        request_metadata.map_or(0, |snapshot| snapshot.abandoned),
+        request_metadata.map_or(0, |snapshot| snapshot.pending()),
+        request_metadata.map_or(0, |snapshot| u8::from(snapshot.retrying)),
+        request_metadata.map_or(0, |snapshot| u8::from(!snapshot.closed)),
+        request_metadata_consumer.pending_events,
+        request_metadata_consumer.lag_events,
+        request_metadata_consumer.heartbeat_age_seconds.unwrap_or(0),
+        u8::from(request_metadata_consumer.complete()),
         u8::from(matches!(
-            usage_consumer.state,
-            olp_storage::UsageConsumerState::Stale
+            request_metadata_consumer.state,
+            olp_storage::RequestMetadataConsumerState::Stale
         )),
-        usage_epochs.open_epochs,
-        usage_epochs.unresolved_epochs,
-        usage_epochs.historical_uncertain_gap_count,
-        usage_epochs.unresolved_event_lower_bound,
+        request_metadata_epochs.open_epochs,
+        request_metadata_epochs.unresolved_epochs,
+        request_metadata_epochs.historical_uncertain_gap_count,
+        request_metadata_epochs.unresolved_event_lower_bound,
         u8::from(limiter_available),
         state.circuits.open_count(),
         media_reconciliation

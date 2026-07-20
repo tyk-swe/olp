@@ -33,7 +33,7 @@
       label: 'Access',
       items: [
         { label: 'API Keys', href: '/api-keys', icon: 'key' },
-        { label: 'Team & Access', href: '/team', icon: 'team' }
+        { label: 'Access', href: '/access', icon: 'access' }
       ]
     },
     {

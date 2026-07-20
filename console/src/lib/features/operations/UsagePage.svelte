@@ -98,31 +98,31 @@
   <div class="inline-problem" role="alert">Usage could not be loaded. <button class="text-button" onclick={() => usage.refetch()}>Try again</button></div>
 {:else if usage.data}
   {#if !usage.data.completeness.complete || usage.data.completeness.unpriced_count > 0}
-    <section class="completeness" class:danger={usage.data.completeness.ingestion_gap_events > 0 || usage.data.completeness.uncertain_gap_count > 0 || usage.data.completeness.consumer.state === 'stale'} role="status" aria-labelledby="completeness-title">
+    <section class="completeness" class:danger={usage.data.completeness.request_metadata_gap_events > 0 || usage.data.completeness.uncertain_request_metadata_gap_count > 0 || usage.data.completeness.request_metadata_consumer.state === 'stale'} role="status" aria-labelledby="completeness-title">
       <div>
-        <strong id="completeness-title">{usage.data.completeness.consumer.state === 'stale' ? 'Usage worker heartbeat is stale' : usage.data.completeness.consumer.state === 'backlogged' ? 'Usage persistence backlog detected' : usage.data.completeness.consumer.state === 'unknown' ? 'Usage worker has not reported' : !usage.data.completeness.coverage.range_complete ? 'Retained boundary data was excluded' : usage.data.completeness.uncertain_gap_count > 0 ? 'Unclean gateway epochs make usage uncertain' : usage.data.completeness.ingestion_gap_events > 0 ? 'Persistence gaps detected' : usage.data.completeness.incomplete_count > 0 ? 'Usage is still reconciling' : 'Some traffic is unpriced'}</strong>
-        <p>{usage.data.completeness.ingestion_gap_events} gap-event lower bound · {usage.data.completeness.uncertain_gap_count} uncertain gateway epochs · {usage.data.completeness.incomplete_count} incomplete requests · {usage.data.completeness.unpriced_count} unpriced requests. Cost totals exclude anything unpriced and never treat uncertainty as zero.</p>
+        <strong id="completeness-title">{usage.data.completeness.request_metadata_consumer.state === 'stale' ? 'Request metadata worker heartbeat is stale' : usage.data.completeness.request_metadata_consumer.state === 'backlogged' ? 'Request metadata persistence backlog detected' : usage.data.completeness.request_metadata_consumer.state === 'unknown' ? 'Request metadata worker has not reported' : !usage.data.completeness.coverage.range_complete ? 'Retained boundary data was excluded' : usage.data.completeness.uncertain_request_metadata_gap_count > 0 ? 'Unclean request metadata gateway epochs make usage uncertain' : usage.data.completeness.request_metadata_gap_events > 0 ? 'Request metadata persistence gaps detected' : usage.data.completeness.incomplete_count > 0 ? 'Usage is still reconciling' : 'Some traffic is unpriced'}</strong>
+        <p>{usage.data.completeness.request_metadata_gap_events} request metadata gap-event lower bound · {usage.data.completeness.uncertain_request_metadata_gap_count} uncertain request metadata gateway epochs · {usage.data.completeness.incomplete_count} incomplete requests · {usage.data.completeness.unpriced_count} unpriced requests. Cost totals exclude anything unpriced and never treat uncertainty as zero.</p>
       </div>
       <a href="/health">Open health</a>
     </section>
   {:else}
-    <p class="complete-banner"><span aria-hidden="true">✓</span> Usage ingestion and pricing are complete for this range.</p>
+    <p class="complete-banner"><span aria-hidden="true">✓</span> Usage accounting and pricing are complete for this range.</p>
   {/if}
 
-  <section class="pipeline-grid" aria-label="Usage persistence and range coverage">
+  <section class="pipeline-grid" aria-label="Request metadata persistence and usage range coverage">
     <article class="card pipeline-card">
-      <p>Consumer state</p>
-      <strong class:danger-text={usage.data.completeness.consumer.state === 'stale'}>{titleCase(usage.data.completeness.consumer.state)}</strong>
-      <span>{usage.data.completeness.consumer.checked_at ? `Checkpoint ${usage.data.completeness.consumer.heartbeat_age_seconds ?? 0}s ago` : 'No worker checkpoint recorded'}</span>
+      <p>Request metadata consumer</p>
+      <strong class:danger-text={usage.data.completeness.request_metadata_consumer.state === 'stale'}>{titleCase(usage.data.completeness.request_metadata_consumer.state)}</strong>
+      <span>{usage.data.completeness.request_metadata_consumer.checked_at ? `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds ?? 0}s ago` : 'No worker checkpoint recorded'}</span>
     </article>
     <article class="card pipeline-card">
       <p>Pending acknowledgements</p>
-      <strong>{formatCompact(usage.data.completeness.consumer.pending_events)}</strong>
-      <span>{usage.data.completeness.consumer.oldest_pending_at ? 'Oldest pending event is tracked' : 'No delivered events waiting'}</span>
+      <strong>{formatCompact(usage.data.completeness.request_metadata_consumer.pending_events)}</strong>
+      <span>{usage.data.completeness.request_metadata_consumer.oldest_pending_at ? 'Oldest pending event is tracked' : 'No delivered events waiting'}</span>
     </article>
     <article class="card pipeline-card">
       <p>Stream lag</p>
-      <strong>{formatCompact(usage.data.completeness.consumer.lag_events)}</strong>
+      <strong>{formatCompact(usage.data.completeness.request_metadata_consumer.lag_events)}</strong>
       <span>Events not yet delivered to the worker</span>
     </article>
     <article class="card pipeline-card">
@@ -132,7 +132,7 @@
     </article>
     <article class="card pipeline-card">
       <p>Gateway epoch uncertainty</p>
-      <strong class:danger-text={usage.data.completeness.uncertain_gap_count > 0}>{formatCompact(usage.data.completeness.uncertain_gap_count)}</strong>
+      <strong class:danger-text={usage.data.completeness.uncertain_request_metadata_gap_count > 0}>{formatCompact(usage.data.completeness.uncertain_request_metadata_gap_count)}</strong>
       <span>Unclean process epochs with an unknown exact loss count</span>
     </article>
   </section>

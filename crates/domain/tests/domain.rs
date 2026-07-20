@@ -87,6 +87,69 @@ fn select(snapshot: &RuntimeSnapshot, affinity: &[u8]) -> Vec<AttemptPlan> {
 }
 
 #[test]
+fn persisted_snapshot_decoder_is_narrow_and_public_serde_stays_strict() {
+    let (mut provider, mut target) = provider(1, 2, 0, 1);
+    provider.name = "open_ai".to_owned();
+    provider.capabilities = BTreeSet::from([Capability::new(
+        "open_ai",
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    )]);
+    target.provider_model = "open_ai".to_owned();
+    let current = snapshot(vec![(provider, target)], 1);
+    let current_value = serde_json::to_value(&current).unwrap();
+    let current_provider = current_value["providers"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    assert_eq!(current_provider["kind"], "openai");
+    assert_eq!(current_provider["capabilities"][0]["surface"], "openai");
+
+    let mut legacy_value = current_value;
+    let legacy_provider = legacy_value["providers"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .next()
+        .unwrap();
+    legacy_provider["kind"] = json!("open_ai");
+    legacy_provider["capabilities"][0]["surface"] = json!("open_ai");
+    let legacy_payload = serde_json::to_vec(&legacy_value).unwrap();
+
+    assert!(serde_json::from_slice::<RuntimeSnapshot>(&legacy_payload).is_err());
+    let decoded = RuntimeSnapshot::from_persisted_slice(&legacy_payload).unwrap();
+    decoded.validate().unwrap();
+    let decoded_provider = decoded.providers.values().next().unwrap();
+    assert_eq!(decoded_provider.name, "open_ai");
+    assert_eq!(
+        decoded_provider.capabilities.iter().next().unwrap().model,
+        "open_ai"
+    );
+    assert_eq!(
+        decoded.routes.values().next().unwrap().targets[0].provider_model,
+        "open_ai"
+    );
+
+    let reserialized = serde_json::to_value(decoded).unwrap();
+    let reserialized_provider = reserialized["providers"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    assert_eq!(reserialized_provider["kind"], "openai");
+    assert_eq!(
+        reserialized_provider["capabilities"][0]["surface"],
+        "openai"
+    );
+    assert_eq!(reserialized_provider["name"], "open_ai");
+    assert_eq!(reserialized_provider["capabilities"][0]["model"], "open_ai");
+}
+
+#[test]
 fn priority_groups_are_exhausted_before_lower_priorities() {
     let runtime = snapshot(
         vec![

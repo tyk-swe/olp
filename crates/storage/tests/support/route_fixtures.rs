@@ -24,7 +24,7 @@ pub async fn insert_provider(pool: &PgPool, actor: Uuid, name: &str) -> Provider
     sqlx::query(
         "INSERT INTO providers \
          (id, name, kind, state, endpoint, auth_mode, etag, created_by) \
-         VALUES ($1, $2, 'open_ai', 'active', 'https://api.example.test/v1/', \
+         VALUES ($1, $2, 'openai', 'active', 'https://api.example.test/v1/', \
                  'api_key', $3, $4)",
     )
     .bind(provider.provider_id)
@@ -103,7 +103,7 @@ pub async fn insert_provider_revision(
         sqlx::query(
             "INSERT INTO provider_revision_capabilities \
              (provider_revision_model_id, operation, surface, mode, source, certified_at) \
-             VALUES ($1, $2, 'open_ai', $3, 'certified', now())",
+             VALUES ($1, $2, 'openai', $3, 'certified', now())",
         )
         .bind(revision_model_id)
         .bind(operation)

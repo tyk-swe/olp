@@ -1,9 +1,9 @@
 use olp_domain::{ApiKeyLimits, ApiKeyScope, OperationKind, RouteSlug, RuntimeSnapshot};
 use olp_storage::{
-    CatalogError, ConfigurationError, IdempotencyOutcome, IdempotencyResponse, KeyHasher,
-    MasterKey, MediaJobState, MediaJobUpdate, NewApiKeyRecord, NewMediaJobReservation, NewOwner,
+    AuthHmacKey, ConfigurationError, IdempotencyOutcome, IdempotencyResponse, MasterKey,
+    MediaJobState, MediaJobUpdate, NewApiKeyRecord, NewMediaJobReservation, NewOwner,
     NewProviderDraft, NewRouteDraft, NewRouteTarget, PgStore, ReplayableIdempotency,
-    RotateCredentialInput, SessionMaterial, UpdateProviderCatalog, credential_aad,
+    RotateCredentialInput, SessionMaterial, UpdateProvider, credential_aad,
     idempotency_fingerprint,
 };
 use uuid::Uuid;
@@ -18,7 +18,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let (owner, _) = store
         .setup_owner_with_session(
             NewOwner {
-                organization_name: "Provider revisions".to_owned(),
+                installation_name: "Provider revisions".to_owned(),
                 email: "owner@provider-revisions.test".to_owned(),
                 display_name: "Owner".to_owned(),
                 password_hash: "test-password-hash".to_owned(),
@@ -60,7 +60,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 model: Some("model-old".to_owned()),
                 display_name: Some("Model Old".to_owned()),
                 model_enabled: true,
-                surface: Some("open_ai".parse().unwrap()),
+                surface: Some("openai".parse().unwrap()),
                 actor,
                 idempotency_key: "provider-revision-create-01".to_owned(),
             },
@@ -75,7 +75,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     else {
         panic!("new provider creation must execute");
     };
-    let initial_draft = store.get_provider_catalog(provider_id).await.unwrap();
+    let initial_draft = store.get_provider(provider_id).await.unwrap();
     assert_eq!(initial_draft.active_revision, None);
     assert!(!initial_draft.pending_activation);
     sqlx::query(
@@ -91,7 +91,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     sqlx::query(
         "INSERT INTO model_capabilities \
          (provider_model_id, operation, surface, mode, source, certified_at) \
-         VALUES ($1, 'embeddings', 'open_ai', 'unary', 'certified', now())",
+         VALUES ($1, 'embeddings', 'openai', 'unary', 'certified', now())",
     )
     .bind(embedding_model_id)
     .execute(store.pool())
@@ -117,9 +117,9 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         )
         .await
         .unwrap();
-    let first_catalog = store.get_provider_catalog(provider_id).await.unwrap();
-    assert_eq!(first_catalog.active_revision, Some(1));
-    assert!(!first_catalog.pending_activation);
+    let first_configuration = store.get_provider(provider_id).await.unwrap();
+    assert_eq!(first_configuration.active_revision, Some(1));
+    assert!(!first_configuration.pending_activation);
 
     let media_api_key_id = Uuid::now_v7();
     sqlx::query(
@@ -143,7 +143,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             provider_model: "model-old".to_owned(),
             route_slug: "video-durable".to_owned(),
             operation: "video_create".parse().unwrap(),
-            surface: "open_ai".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
         })
         .await
         .unwrap();
@@ -214,10 +214,10 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         .unwrap();
 
     let staged_etag = store
-        .update_provider_catalog(
+        .update_provider(
             provider_id,
             first_activation.etag,
-            &UpdateProviderCatalog {
+            &UpdateProvider {
                 name: "revision-provider-next".to_owned(),
                 endpoint: Some("https://new.example.test/v1/".to_owned()),
                 cloud_region: None,
@@ -261,19 +261,19 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         panic!("new credential rotation must execute");
     };
     assert!(rotation.release.is_none());
-    let staged_catalog = store.get_provider_catalog(provider_id).await.unwrap();
-    assert_eq!(staged_catalog.active_revision, Some(1));
-    assert!(staged_catalog.pending_activation);
+    let staged_configuration = store.get_provider(provider_id).await.unwrap();
+    assert_eq!(staged_configuration.active_revision, Some(1));
+    assert!(staged_configuration.pending_activation);
     assert_eq!(
-        staged_catalog.runtime_credential_id,
+        staged_configuration.runtime_credential_id,
         Some(first_credential_id)
     );
-    assert_eq!(staged_catalog.runtime_credential_version, Some(1));
+    assert_eq!(staged_configuration.runtime_credential_version, Some(1));
     assert_eq!(
-        staged_catalog.draft_credential_id,
+        staged_configuration.draft_credential_id,
         Some(second_credential_id)
     );
-    assert_eq!(staged_catalog.draft_credential_version, Some(2));
+    assert_eq!(staged_configuration.draft_credential_version, Some(2));
     let credentials = store
         .list_provider_credentials(provider_id, None, 10)
         .await
@@ -305,14 +305,14 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                     idempotency_key,
                 )
                 .await,
-            Err(CatalogError::InUse)
+            Err(ConfigurationError::InUse)
         ));
     }
 
     // A key publication compiles the last activated provider revision, not the
     // endpoint and credential currently being tested in the mutable draft.
-    let key_hasher = KeyHasher::new([23; 32]);
-    let key_material = key_hasher.generate_api_key();
+    let auth_hmac_key = AuthHmacKey::new([23; 32]);
+    let key_material = auth_hmac_key.generate_api_key();
     let key_fingerprint = idempotency_fingerprint(&"provider-revision-key-create-01").unwrap();
     let key_creation = store
         .create_api_key_record(
@@ -408,9 +408,9 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         .unwrap();
     let activated: RuntimeSnapshot =
         serde_json::from_slice(&second_activation.release.payload).unwrap();
-    let activated_catalog = store.get_provider_catalog(provider_id).await.unwrap();
-    assert_eq!(activated_catalog.active_revision, Some(2));
-    assert!(!activated_catalog.pending_activation);
+    let activated_configuration = store.get_provider(provider_id).await.unwrap();
+    assert_eq!(activated_configuration.active_revision, Some(2));
+    assert!(!activated_configuration.pending_activation);
     let activated_provider = activated.providers.values().next().unwrap();
     assert_eq!(activated_provider.name, "revision-provider-next");
     assert_eq!(
@@ -446,7 +446,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     assert!(first_revoked);
 
     let history = store
-        .list_provider_revisions_catalog(provider_id, None, 10)
+        .list_provider_revisions(provider_id, None, 10)
         .await
         .unwrap();
     assert_eq!(history.items.len(), 2);
@@ -455,7 +455,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let second_revision_id = history.items[0].id;
     let first_revision_id = history.items[1].id;
     let first_revision = store
-        .get_provider_revision_catalog(provider_id, first_revision_id)
+        .get_provider_revision(provider_id, first_revision_id)
         .await
         .unwrap();
     assert_eq!(
@@ -464,7 +464,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     );
     assert_eq!(first_revision.credential_version, Some(1));
     let diff = store
-        .diff_provider_revisions_catalog(provider_id, first_revision_id, second_revision_id)
+        .diff_provider_revisions(provider_id, first_revision_id, second_revision_id)
         .await
         .unwrap();
     assert_eq!((diff.from_revision, diff.to_revision), (1, 2));
@@ -476,7 +476,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         .restore_provider_revision_as_draft(
             provider_id,
             first_revision_id,
-            activated_catalog.etag,
+            activated_configuration.etag,
             actor,
             "provider-revision-restore-01",
         )
@@ -494,7 +494,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     assert_eq!(restored.runtime_credential_id, Some(second_credential_id));
     assert!(restored.last_probe_at.is_none());
     let restored_models = store
-        .list_provider_models_catalog(provider_id, None, 100)
+        .list_provider_models(provider_id, None, 100)
         .await
         .unwrap();
     assert!(restored_models.next_cursor.is_none());
@@ -509,12 +509,12 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             .restore_provider_revision_as_draft(
                 provider_id,
                 first_revision_id,
-                activated_catalog.etag,
+                activated_configuration.etag,
                 actor,
                 "provider-revision-restore-01",
             )
             .await,
-        Err(CatalogError::IdempotencyConflict)
+        Err(ConfigurationError::IdempotencyConflict)
     ));
     let restore_audit: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_events \

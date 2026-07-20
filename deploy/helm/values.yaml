@@ -124,8 +124,8 @@ config:
   valkeySecretKey: url
   masterKeySecretName: olp-master-key
   masterKeySecretKey: key
-  keyHashSecretName: olp-key-hash-key
-  keyHashSecretKey: key
+  authHmacKeySecretName: olp-auth-hmac-key
+  authHmacKeySecretKey: key
   # Required only until the first installation owner is created. Leave empty
   # for an already initialized installation; new control pods fail closed
   # without this mounted secret.
@@ -152,4 +152,4 @@ monitoring:
     enabled: true
     # Zero implements the default runbook policy: any sustained backlog warns.
     # Raise this only with a documented installation-specific noise budget.
-    usagePendingThreshold: 0
+    requestMetadataPendingThreshold: 0

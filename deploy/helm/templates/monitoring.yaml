@@ -58,40 +58,40 @@ spec:
           annotations:
             summary: OpenLLMProxy readiness is absent
             description: A gateway or control target has been unready or unavailable for five minutes.
-        - alert: OLPUsageEventsDropped
-          expr: increase(olp_usage_events_dropped_total[5m]) > 0
+        - alert: OLPRequestMetadataEventsDropped
+          expr: increase(olp_request_metadata_events_dropped_total[5m]) > 0
           for: 0m
           labels: { severity: critical }
           annotations:
             summary: OpenLLMProxy dropped metadata events
             description: Usage and cost completeness is degraded; preserve stream state and reconcile the affected interval.
-        - alert: OLPUsageEventsAbandoned
-          expr: increase(olp_usage_events_abandoned_total[5m]) > 0
+        - alert: OLPRequestMetadataEventsAbandoned
+          expr: increase(olp_request_metadata_events_abandoned_total[5m]) > 0
           for: 0m
           labels: { severity: critical }
           annotations:
             summary: OpenLLMProxy abandoned accepted metadata events
             description: A shutdown or writer failure abandoned accepted events and requires reconciliation.
-        - alert: OLPUsagePersistenceUnavailable
-          expr: min_over_time(olp_usage_persistence_available[5m]) == 0
+        - alert: OLPRequestMetadataPersistenceUnavailable
+          expr: min_over_time(olp_request_metadata_persistence_available[5m]) == 0
           for: 5m
           labels: { severity: critical }
           annotations:
-            summary: OpenLLMProxy usage persistence is unavailable
+            summary: OpenLLMProxy request metadata persistence is unavailable
             description: Metadata delivery has remained unavailable for five minutes.
-        - alert: OLPUsageBacklogHigh
-          expr: olp_usage_events_pending > {{ .Values.monitoring.rules.usagePendingThreshold }}
+        - alert: OLPRequestMetadataBacklogHigh
+          expr: olp_request_metadata_events_pending > {{ .Values.monitoring.rules.requestMetadataPendingThreshold }}
           for: 10m
           labels: { severity: warning }
           annotations:
-            summary: OpenLLMProxy usage backlog is sustained
+            summary: OpenLLMProxy request metadata backlog is sustained
             description: The local metadata backlog has remained above the configured threshold.
-        - alert: OLPUsageConsumerBacklogHigh
-          expr: (olp_usage_consumer_pending_events + olp_usage_consumer_lag_events) > {{ .Values.monitoring.rules.usagePendingThreshold }}
+        - alert: OLPRequestMetadataConsumerBacklogHigh
+          expr: (olp_request_metadata_consumer_pending_events + olp_request_metadata_consumer_lag_events) > {{ .Values.monitoring.rules.requestMetadataPendingThreshold }}
           for: 10m
           labels: { severity: warning }
           annotations:
-            summary: OpenLLMProxy usage consumer backlog is sustained
+            summary: OpenLLMProxy request metadata consumer backlog is sustained
             description: Delivered or undelivered Stream events have remained above the configured threshold.
         - alert: OLPDistributedLimiterUnavailable
           expr: min_over_time(olp_distributed_limiter_available[5m]) == 0

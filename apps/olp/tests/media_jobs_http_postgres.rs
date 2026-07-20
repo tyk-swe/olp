@@ -20,7 +20,7 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode,
     VideoContentResult, VideoDeleteResult, VideoJobResult, VideoOperation, VideoStatus,
 };
-use olp_storage::{KeyHasher, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore};
+use olp_storage::{AuthHmacKey, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -159,7 +159,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
                 "email": "owner@example.test",
                 "password": "correct horse battery staple",
                 "display_name": "Owner",
-                "organization_name": "Media job HTTP test"
+                "installation_name": "Media job HTTP test"
             }))
             .unwrap(),
         ))
@@ -223,7 +223,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
             provider_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
-            surface: "open_ai".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
         })
         .await
         .unwrap();
@@ -279,8 +279,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         serde_json::from_slice(&detail.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert_eq!(detail_body["surface"], "openai");
 
-    let key_hasher = Arc::new(KeyHasher::new([19; 32]));
-    let material = key_hasher.generate_api_key();
+    let auth_hmac_key = Arc::new(AuthHmacKey::new([19; 32]));
+    let material = auth_hmac_key.generate_api_key();
     let plaintext_key = material.expose_once().to_owned();
     let lookup_id = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
     let core_provider_id = ProviderId::from_uuid(provider_id);
@@ -332,7 +332,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         ORIGIN,
         PathBuf::from("missing-console-for-video-inference-test"),
     );
-    gateway_state.key_hasher = Some(key_hasher);
+    gateway_state.auth_hmac_key = Some(auth_hmac_key);
     let delete_calls = Arc::new(AtomicUsize::new(0));
     let create_calls = Arc::new(AtomicUsize::new(0));
     let fail_cleanup = Arc::new(AtomicBool::new(false));

@@ -21,7 +21,7 @@ pub(super) enum Command {
     Control(ServerArgs),
     /// Publish outbox hints and perform asynchronous persistence work.
     Worker(BackendArgs),
-    /// Apply PostgreSQL migrations and exit.
+    /// Verify the legacy Valkey stream, apply PostgreSQL migrations, and exit.
     Migrate(MigrateArgs),
     /// Validate dependencies and mounted secrets, then exit.
     Doctor(DoctorArgs),
@@ -57,7 +57,7 @@ pub(super) struct BackendArgs {
 #[derive(Clone, Debug, Args)]
 pub(super) struct MigrateArgs {
     #[command(flatten)]
-    pub(super) database: DatabaseArgs,
+    pub(super) backend: BackendArgs,
     /// Test-only target used to construct an N-1 upgrade fixture.
     #[arg(long, hide = true)]
     pub(super) through_version: Option<i64>,
@@ -98,8 +98,8 @@ pub(super) struct ServerArgs {
         default_value_t = 1_073_741_824_u64
     )]
     pub(super) media_spool_capacity_bytes: u64,
-    #[arg(long, env = "OLP_KEY_HASH_KEY_FILE")]
-    pub(super) key_hash_key_file: Option<PathBuf>,
+    #[arg(long, env = "OLP_AUTH_HMAC_KEY_FILE")]
+    pub(super) auth_hmac_key_file: Option<PathBuf>,
     /// Base64-encoded one-time setup token, mounted only in control-plane pods.
     #[arg(long, env = "OLP_BOOTSTRAP_TOKEN_FILE")]
     pub(super) bootstrap_token_file: Option<PathBuf>,
@@ -131,8 +131,8 @@ pub(super) struct DoctorArgs {
     pub(super) media_spool_capacity_bytes: u64,
     #[arg(long, env = "OLP_MASTER_KEY_FILE")]
     pub(super) master_key_file: PathBuf,
-    #[arg(long, env = "OLP_KEY_HASH_KEY_FILE")]
-    pub(super) key_hash_key_file: PathBuf,
+    #[arg(long, env = "OLP_AUTH_HMAC_KEY_FILE")]
+    pub(super) auth_hmac_key_file: PathBuf,
     #[arg(long, env = "OLP_CONNECTOR_CONFIG_FILE")]
     pub(super) connector_config_file: Option<PathBuf>,
 }

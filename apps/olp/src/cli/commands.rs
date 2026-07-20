@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use olp_storage::{
     DistributedLimiter, MasterKey, MasterKeyEncryptionStatus, PgStore, RuntimeHintPublisher,
-    run_usage_consumer,
+    ValkeyAdapterError, preflight_request_metadata_stream_upgrade, run_request_metadata_consumer,
 };
 use serde_json::json;
 use tokio::{sync::watch, task::JoinSet};
@@ -17,8 +17,8 @@ use super::{
     },
     startup::shutdown_signal,
     validation::{
-        check_secret_permissions, connect_store, ensure_keyring_covers_references, load_key_hasher,
-        load_master_key,
+        check_secret_permissions, connect_store, ensure_keyring_covers_references,
+        load_auth_hmac_key, load_master_key,
     },
 };
 
@@ -28,7 +28,8 @@ pub(super) async fn internal_pre_stop(args: InternalPreStopArgs) -> AppResult<()
 }
 
 pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
-    let store = connect_store(&args.database).await?;
+    preflight_request_metadata_stream_upgrade(&args.backend.valkey_url).await?;
+    let store = connect_store(&args.backend.database).await?;
     if let Some(target) = args.through_version {
         if std::env::var("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS").as_deref() != Ok("test-only") {
             return Err(std::io::Error::other(
@@ -47,6 +48,7 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
 
 pub(super) async fn run_worker_command(args: BackendArgs) -> AppResult<()> {
     let store = connect_store(&args.database).await?;
+    preflight_request_metadata_stream_or_defer(&args.valkey_url).await?;
     let (sender, receiver) = watch::channel(false);
     let mut workers = JoinSet::new();
     spawn_worker_supervisors(&mut workers, store, args.valkey_url, receiver);
@@ -61,6 +63,20 @@ pub(super) async fn run_worker_command(args: BackendArgs) -> AppResult<()> {
         (None, Ok(())) => Ok(()),
         (Some(Some(Ok(()))) | Some(None), Ok(())) => {
             Err(std::io::Error::other("worker supervisor stopped unexpectedly").into())
+        }
+    }
+}
+
+pub(super) async fn preflight_request_metadata_stream_or_defer(valkey_url: &str) -> AppResult<()> {
+    match preflight_request_metadata_stream_upgrade(valkey_url).await {
+        Ok(()) => Ok(()),
+        Err(
+            error @ (ValkeyAdapterError::LegacyRequestMetadataStreamNotDrained { .. }
+            | ValkeyAdapterError::LegacyRequestMetadataStreamAcknowledgedEntries { .. }),
+        ) => Err(error.into()),
+        Err(error) => {
+            warn!(%error, "request metadata upgrade preflight deferred until Valkey reconnects");
+            Ok(())
         }
     }
 }
@@ -112,13 +128,13 @@ fn spawn_worker_supervisors(
         valkey_url.clone(),
         shutdown.clone(),
     ));
-    workers.spawn(usage_consumer_supervisor(
+    workers.spawn(request_metadata_consumer_supervisor(
         store.clone(),
         valkey_url,
         shutdown.clone(),
     ));
     workers.spawn(maintenance_supervisor(store.clone(), shutdown.clone()));
-    workers.spawn(usage_epoch_supervisor(store, shutdown));
+    workers.spawn(request_metadata_epoch_supervisor(store, shutdown));
 }
 
 pub(super) async fn maintenance_supervisor(store: PgStore, mut shutdown: watch::Receiver<bool>) {
@@ -143,24 +159,27 @@ pub(super) async fn maintenance_supervisor(store: PgStore, mut shutdown: watch::
     }
 }
 
-pub(super) async fn usage_epoch_supervisor(store: PgStore, mut shutdown: watch::Receiver<bool>) {
+pub(super) async fn request_metadata_epoch_supervisor(
+    store: PgStore,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                match store.detect_stale_usage_gateway_epochs(chrono::Utc::now()).await {
+                match store.detect_stale_request_metadata_gateway_epochs(chrono::Utc::now()).await {
                     Ok(report) if report.detected_epochs > 0 => warn!(
                         detected_epochs = report.detected_epochs,
                         uncertain_event_lower_bound = report.uncertain_event_lower_bound,
-                        "unclean gateway usage epochs recorded as completeness gaps"
+                        "unclean request metadata gateway epochs recorded as completeness gaps"
                     ),
                     Ok(report) if report.candidate_epochs > 0 => warn!(
                         candidate_epochs = report.candidate_epochs,
-                        "gateway usage epochs missed the stale threshold; awaiting confirmation"
+                        "request metadata gateway epochs missed the stale threshold; awaiting confirmation"
                     ),
                     Ok(_) => {}
-                    Err(error) => warn!(%error, "gateway usage-epoch detection failed; retrying"),
+                    Err(error) => warn!(%error, "request metadata gateway epoch detection failed; retrying"),
                 }
             }
             changed = shutdown.changed() => {
@@ -198,7 +217,7 @@ pub(super) async fn outbox_supervisor(
     }
 }
 
-pub(super) async fn usage_consumer_supervisor(
+pub(super) async fn request_metadata_consumer_supervisor(
     store: PgStore,
     valkey_url: String,
     mut shutdown: watch::Receiver<bool>,
@@ -208,9 +227,9 @@ pub(super) async fn usage_consumer_supervisor(
         if *shutdown.borrow() {
             return;
         }
-        match usage_consumer_loop(store.clone(), &valkey_url, shutdown.clone()).await {
+        match request_metadata_consumer_loop(store.clone(), &valkey_url, shutdown.clone()).await {
             Ok(()) => return,
-            Err(error) => error!(%error, "usage persistence worker failed; restarting"),
+            Err(error) => error!(%error, "request metadata persistence worker failed; restarting"),
         }
         tokio::select! {
             changed = shutdown.changed() => {
@@ -250,12 +269,12 @@ async fn outbox_loop(
     }
 }
 
-async fn usage_consumer_loop(
+async fn request_metadata_consumer_loop(
     store: PgStore,
     valkey_url: &str,
     shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
-    run_usage_consumer(&store, valkey_url, shutdown).await?;
+    run_request_metadata_consumer(&store, valkey_url, shutdown).await?;
     Ok(())
 }
 
@@ -400,10 +419,15 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
     let limiter = DistributedLimiter::connect(&args.backend.valkey_url, "olp:v2:doctor").await?;
     limiter.ping().await?;
     checks.insert("valkey".into(), json!({ "ok": true }));
+    preflight_request_metadata_stream_upgrade(&args.backend.valkey_url).await?;
+    checks.insert(
+        "request_metadata_stream_upgrade".into(),
+        json!({ "ok": true }),
+    );
 
-    load_key_hasher(&args.key_hash_key_file).await?;
+    load_auth_hmac_key(&args.auth_hmac_key_file).await?;
     load_master_key(&args.master_key_file).await?;
-    check_secret_permissions(&args.key_hash_key_file).await?;
+    check_secret_permissions(&args.auth_hmac_key_file).await?;
     check_secret_permissions(&args.master_key_file).await?;
     checks.insert("secret_files".into(), json!({ "ok": true }));
 

@@ -19,12 +19,15 @@ use crate::{
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
+    #[serde(rename = "openai")]
     OpenAi,
     Anthropic,
     Gemini,
     VertexAi,
     Bedrock,
+    #[serde(rename = "azure_openai")]
     AzureOpenAi,
+    #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
 }
 
@@ -42,19 +45,19 @@ impl ProviderKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::OpenAi => "open_ai",
+            Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
             Self::Gemini => "gemini",
             Self::VertexAi => "vertex_ai",
             Self::Bedrock => "bedrock",
-            Self::AzureOpenAi => "azure_open_ai",
-            Self::OpenAiCompatible => "open_ai_compatible",
+            Self::AzureOpenAi => "azure_openai",
+            Self::OpenAiCompatible => "openai_compatible",
         }
     }
 
     /// Returns whether this provider family can serve a reviewed capability
     /// tuple. Connector-specific request validation remains at the adapter
-    /// boundary; this is the canonical catalog eligibility policy.
+    /// boundary; this is the canonical configuration eligibility policy.
     #[must_use]
     pub const fn supports_capability(
         self,
@@ -108,7 +111,7 @@ impl ProviderKind {
 
     /// Iterates the reviewed capability tuples supported by this provider
     /// family. This is intentionally derived from [`Self::supports_capability`]
-    /// so API consumers cannot drift from catalog validation.
+    /// so API consumers cannot drift from configuration validation.
     pub fn supported_capabilities(
         self,
     ) -> impl Iterator<Item = (OperationKind, Surface, TransportMode)> {
@@ -128,13 +131,13 @@ impl FromStr for ProviderKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "open_ai" => Ok(Self::OpenAi),
+            "openai" => Ok(Self::OpenAi),
             "anthropic" => Ok(Self::Anthropic),
             "gemini" => Ok(Self::Gemini),
             "vertex_ai" => Ok(Self::VertexAi),
             "bedrock" => Ok(Self::Bedrock),
-            "azure_open_ai" => Ok(Self::AzureOpenAi),
-            "open_ai_compatible" => Ok(Self::OpenAiCompatible),
+            "azure_openai" => Ok(Self::AzureOpenAi),
+            "openai_compatible" => Ok(Self::OpenAiCompatible),
             _ => Err(InvalidProviderKind),
         }
     }
@@ -318,6 +321,45 @@ pub struct RuntimeSnapshot {
 }
 
 impl RuntimeSnapshot {
+    /// Decodes an immutable runtime release written before the external OpenAI
+    /// naming change. Compatibility is intentionally limited to enum-bearing
+    /// snapshot fields; user-controlled names, models, and route values are not
+    /// rewritten.
+    pub fn from_persisted_slice(payload: &[u8]) -> Result<Self, serde_json::Error> {
+        let mut value: serde_json::Value = serde_json::from_slice(payload)?;
+        if let Some(providers) = value
+            .get_mut("providers")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            for provider in providers.values_mut() {
+                if let Some(kind) = provider.get_mut("kind") {
+                    let replacement = match kind.as_str() {
+                        Some("open_ai") => Some("openai"),
+                        Some("azure_open_ai") => Some("azure_openai"),
+                        Some("open_ai_compatible") => Some("openai_compatible"),
+                        _ => None,
+                    };
+                    if let Some(replacement) = replacement {
+                        *kind = serde_json::Value::String(replacement.to_owned());
+                    }
+                }
+                if let Some(capabilities) = provider
+                    .get_mut("capabilities")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    for capability in capabilities {
+                        if let Some(surface) = capability.get_mut("surface")
+                            && surface.as_str() == Some("open_ai")
+                        {
+                            *surface = serde_json::Value::String("openai".to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        serde_json::from_value(value)
+    }
+
     pub fn validate(&self) -> Result<(), SnapshotValidationError> {
         for (provider_id, provider) in &self.providers {
             if *provider_id != provider.id {
@@ -556,7 +598,7 @@ struct RankedTarget<'a> {
 }
 
 /// Returns the deterministic weighted-rendezvous score used for route target
-/// ordering. Catalog simulations call this same primitive as live routing.
+/// ordering. Configuration simulations call this same primitive as live routing.
 #[must_use]
 pub fn weighted_rendezvous_score(
     route_routing_id: RouteId,

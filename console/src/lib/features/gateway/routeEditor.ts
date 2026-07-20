@@ -60,8 +60,8 @@ export function toRouteModelOptions(
 
 export function surfacesFor(operation: string): string[] {
   return ['generation', 'token_count'].includes(operation)
-    ? ['open_ai', 'anthropic', 'gemini']
-    : ['open_ai'];
+    ? ['openai', 'anthropic', 'gemini']
+    : ['openai'];
 }
 
 export function modesFor(operation: string): string[] {

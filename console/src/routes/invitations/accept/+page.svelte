@@ -109,7 +109,7 @@
     </div>
   {:else}
     <div class="heading">
-      <p class="eyebrow">Team invitation</p>
+      <p class="eyebrow">Member invitation</p>
       <h1>Finish creating your account.</h1>
       <p>Your email and fixed role were selected by the installation owner.</p>
     </div>

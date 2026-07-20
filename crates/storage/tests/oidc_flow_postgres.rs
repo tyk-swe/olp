@@ -17,7 +17,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "OIDC flow integration".to_owned(),
+            installation_name: "OIDC flow integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),

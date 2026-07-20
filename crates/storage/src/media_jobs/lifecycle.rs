@@ -4,7 +4,7 @@ use crate::PgStore;
 
 use super::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
-    NewMediaJobReservation, media_surface_storage_value, queries::media_job_from_row,
+    NewMediaJobReservation, queries::media_job_from_row,
 };
 
 impl PgStore {
@@ -40,7 +40,7 @@ impl PgStore {
         .bind(input.provider_model)
         .bind(input.route_slug)
         .bind(input.operation.as_str())
-        .bind(media_surface_storage_value(input.surface))
+        .bind(input.surface.as_str())
         .bind(input.runtime_generation_id)
         .execute(self.pool())
         .await?;

@@ -42,14 +42,14 @@ const modelOptions: RouteModelOption[] = [
     capabilities: [
       {
         operation: 'generation',
-        surface: 'open_ai',
+        surface: 'openai',
         mode: 'streaming',
         source: 'certified',
         certified_at: '2026-07-12T12:00:00Z'
       },
       {
         operation: 'embeddings',
-        surface: 'open_ai',
+        surface: 'openai',
         mode: 'unary',
         source: 'declared'
       },
@@ -70,7 +70,7 @@ const modelOptions: RouteModelOption[] = [
     capabilities: [
       {
         operation: 'embeddings',
-        surface: 'open_ai',
+        surface: 'openai',
         mode: 'unary',
         source: 'certified'
       }
@@ -88,10 +88,10 @@ describe('Route Studio operation policy', () => {
   });
 
   it.each([
-    ['generation', ['open_ai', 'anthropic', 'gemini']],
-    ['token_count', ['open_ai', 'anthropic', 'gemini']],
-    ['embeddings', ['open_ai']],
-    ['video_create', ['open_ai']]
+    ['generation', ['openai', 'anthropic', 'gemini']],
+    ['token_count', ['openai', 'anthropic', 'gemini']],
+    ['embeddings', ['openai']],
+    ['video_create', ['openai']]
   ])('selects the current surfaces for %s', (operation, expected) => {
     expect(surfacesFor(operation)).toEqual(expected);
   });
@@ -114,7 +114,7 @@ describe('Route Studio model eligibility', () => {
       {
         provider_id: 'provider-a',
         provider_name: 'Primary',
-        provider_kind: 'open_ai',
+        provider_kind: 'openai',
         model: {
           id: 'model-a',
           upstream_model: 'gpt-test',
@@ -144,7 +144,7 @@ describe('Route Studio model eligibility', () => {
       { operation: 'generation', source: 'certified' }
     ]);
     expect(eligibleTargetTuples(target, modelOptions, operations)).toEqual([
-      'generation · open_ai · streaming'
+      'generation · openai · streaming'
     ]);
     expect(missingTargetOperations(target, modelOptions, operations)).toEqual(['embeddings']);
   });

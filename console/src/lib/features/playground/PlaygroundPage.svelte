@@ -6,7 +6,7 @@
 
   type Mode = 'text' | 'tools' | 'structured';
   let mode = $state<Mode>('text');
-  let surface = $state<'open_ai' | 'anthropic' | 'gemini'>('open_ai');
+  let surface = $state<'openai' | 'anthropic' | 'gemini'>('openai');
   let model = $state('');
   let input = $state('');
   let toolsJson = $state('[\n  {\n    "name": "get_weather",\n    "description": "Get weather for a city",\n    "input_schema": {\n      "type": "object",\n      "properties": { "city": { "type": "string" } },\n      "required": ["city"]\n    }\n  }\n]');
@@ -55,7 +55,7 @@
 <div class="playground-grid">
   <form class="card composer" onsubmit={submit}>
     <SegmentedRadioGroup label="Test mode" name="playground-mode" value={mode} items={modes} onChange={(value) => { if (value === 'text' || value === 'tools' || value === 'structured') mode = value; }} />
-    <div class="route-grid"><div class="form-field"><label for="playground-model">Route slug</label><input id="playground-model" bind:value={model} autocomplete="off" placeholder="support-chat" aria-describedby="model-help" /><small id="model-help">The public model name clients use, not provider/model.</small></div><div class="form-field"><label for="playground-surface">Client surface</label><select id="playground-surface" bind:value={surface}><option value="open_ai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></select><small>Capability filtering uses this originating protocol.</small></div></div>
+    <div class="route-grid"><div class="form-field"><label for="playground-model">Route slug</label><input id="playground-model" bind:value={model} autocomplete="off" placeholder="support-chat" aria-describedby="model-help" /><small id="model-help">The public model name clients use, not provider/model.</small></div><div class="form-field"><label for="playground-surface">Client surface</label><select id="playground-surface" bind:value={surface}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></select><small>Capability filtering uses this originating protocol.</small></div></div>
     <div class="form-field"><label for="playground-input">Prompt</label><textarea id="playground-input" bind:value={input} rows="9" placeholder="Ask the model something…"></textarea></div>
     {#if mode === 'tools'}<div class="form-field"><label for="playground-tools">Tools JSON</label><textarea id="playground-tools" bind:value={toolsJson} rows="12" class="mono" spellcheck="false"></textarea></div>{/if}
     {#if mode === 'structured'}<div class="form-field"><label for="playground-schema">JSON Schema</label><textarea id="playground-schema" bind:value={schemaJson} rows="12" class="mono" spellcheck="false"></textarea></div>{/if}

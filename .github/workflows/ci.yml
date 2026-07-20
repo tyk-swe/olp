@@ -53,6 +53,14 @@ jobs:
           find scripts tests/ha tests/sdk-smoke
           -type f -name '*.sh' -print0
           | xargs -0 shellcheck
+      - name: Verify request metadata loss recorder contract
+        run: |
+          bash -n scripts/record-request-metadata-stream-loss.sh
+          scripts/record-request-metadata-stream-loss.sh --help 2>&1 \
+            | grep -F 'OLP_CONFIRM_REQUEST_METADATA_STREAM_LOSS=record-explicit-gap'
+          grep -Fq "'request_metadata.stream_loss_recorded'" \
+            scripts/record-request-metadata-stream-loss.sh
+          test ! -e scripts/checkpoint-lost-usage-stream.sh
       - name: Require consistent release metadata
         run: scripts/check-release-version.sh
       - name: Require immutable supply-chain references
@@ -237,7 +245,7 @@ jobs:
         env:
           OLP_CONSOLE_E2E_DATABASE_URL: postgres://olp:olp@localhost:5432/olp_console_e2e
           OLP_CONSOLE_E2E_MASTER_KEY_FILE: /tmp/olp-console-e2e-master-key
-          OLP_CONSOLE_E2E_KEY_HASH_KEY_FILE: /tmp/olp-console-e2e-key-hash-key
+          OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE: /tmp/olp-console-e2e-auth-hmac-key
           OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE: /tmp/olp-console-e2e-bootstrap-token
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/integration
           PLAYWRIGHT_OUTPUT_DIR: test-results/integration
@@ -246,7 +254,7 @@ jobs:
             -c 'CREATE DATABASE olp_console_e2e'
           umask 077
           openssl rand -base64 32 > "$OLP_CONSOLE_E2E_MASTER_KEY_FILE"
-          openssl rand -base64 32 > "$OLP_CONSOLE_E2E_KEY_HASH_KEY_FILE"
+          openssl rand -base64 32 > "$OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE"
           printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "$OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE"
           pnpm --dir console test:integration
       - name: Upload integration Playwright diagnostics
@@ -408,6 +416,7 @@ jobs:
         ports: ["6379:6379"]
     env:
       OLP_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+      OLP_VALKEY_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
@@ -441,11 +450,21 @@ jobs:
           pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 18([.]|$)'
           pg_restore --version | grep -Eq '^pg_restore \(PostgreSQL\) 18([.]|$)'
           psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
-            -c 'CREATE DATABASE olp_restore' \
+           -c 'CREATE DATABASE olp_restore' \
+            -c 'CREATE DATABASE olp_legacy_restore' \
             -c 'CREATE DATABASE olp_upgrade' \
             -c 'CREATE DATABASE olp_previous'
           backup=$(./scripts/backup.sh "$RUNNER_TEMP/olp-backups")
           OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_restore \
+            ./scripts/restore-rehearsal.sh "$backup"
+          jq '
+            .format = "olp-v2-postgresql-custom-v1"
+            | .usage_stream_drained = .request_metadata_stream_drained
+            | .usage_consumer_checked_at = .request_metadata_consumer_checked_at
+            | del(.request_metadata_stream_drained, .request_metadata_consumer_checked_at)
+          ' "${backup}.manifest.json" > "${backup}.manifest.json.legacy"
+          mv "${backup}.manifest.json.legacy" "${backup}.manifest.json"
+          OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_legacy_restore \
             ./scripts/restore-rehearsal.sh "$backup"
           metadata_file=release-metadata.env
           [[ -f $metadata_file ]] || {
@@ -472,14 +491,24 @@ jobs:
           OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
             OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS=test-only \
             target/debug/olp migrate --through-version "$previous_version"
+          psql postgres://olp:olp@localhost:5432/olp_previous -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO usage_consumer_health \
+                  (singleton, pending_events, lag_events, checked_at) \
+                VALUES (true, 0, 0, now()) \
+                ON CONFLICT (singleton) DO UPDATE SET \
+                  pending_events = 0, lag_events = 0, checked_at = now()"
           previous_backup=$(OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
+            OLP_BACKUP_TRAFFIC_QUIESCED=true \
             ./scripts/backup.sh "$RUNNER_TEMP/olp-previous-backups")
+          jq -e '.format == "olp-v2-postgresql-custom-v1" and \
+                 .usage_stream_drained == true' \
+            "${previous_backup}.manifest.json" >/dev/null
           doctor_root=$(mktemp -d)
           mkdir -p "$doctor_root/console" "$doctor_root/media"
           printf '<!doctype html><html></html>\n' > "$doctor_root/console/index.html"
           openssl rand -base64 32 > "$doctor_root/master-key"
-          openssl rand -base64 32 > "$doctor_root/key-hash"
-          chmod 600 "$doctor_root/master-key" "$doctor_root/key-hash"
+          openssl rand -base64 32 > "$doctor_root/auth-hmac-key"
+          chmod 600 "$doctor_root/master-key" "$doctor_root/auth-hmac-key"
           OLP_REHEARSAL_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_upgrade \
             OLP_REHEARSAL_CONFIRM=destroy-target \
             OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION="$previous_migration" \
@@ -487,7 +516,7 @@ jobs:
             OLP_BIN=target/debug/olp \
             OLP_VALKEY_URL=redis://localhost:6379 \
             OLP_MASTER_KEY_FILE="$doctor_root/master-key" \
-            OLP_KEY_HASH_KEY_FILE="$doctor_root/key-hash" \
+            OLP_AUTH_HMAC_KEY_FILE="$doctor_root/auth-hmac-key" \
             OLP_CONSOLE_DIR="$doctor_root/console" \
             OLP_MEDIA_SPOOL_DIR="$doctor_root/media" \
             ./scripts/upgrade-rehearsal.sh "$previous_backup"

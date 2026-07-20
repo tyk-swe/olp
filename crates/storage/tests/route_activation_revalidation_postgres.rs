@@ -18,7 +18,7 @@ async fn activation_revalidates_current_revisions_and_preserves_live_media_targe
     let (owner, _) = store
         .setup_owner_with_session(
             NewOwner {
-                organization_name: "Route revalidation".to_owned(),
+                installation_name: "Route revalidation".to_owned(),
                 email: "owner@route-revalidation.test".to_owned(),
                 display_name: "Owner".to_owned(),
                 password_hash: "test-password-hash".to_owned(),

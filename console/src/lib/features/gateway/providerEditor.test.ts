@@ -29,7 +29,7 @@ const apiKeyDraft = {
 
 describe('provider editor connector policy', () => {
   it('selects only connector-supported identity modes', () => {
-    expect(authOptionsFor('open_ai')).toEqual([['api_key', 'Stored API key']]);
+    expect(authOptionsFor('openai')).toEqual([['api_key', 'Stored API key']]);
     expect(authOptionsFor('vertex_ai')).toEqual([
       ['adc', 'Application Default Credentials'],
       ['service_account', 'Stored service account JSON']
@@ -46,23 +46,23 @@ describe('provider editor connector policy', () => {
 
   it('keeps connector context fields limited to their owning connectors', () => {
     expect(requiresSeedModel('vertex_ai')).toBe(true);
-    expect(requiresSeedModel('open_ai')).toBe(false);
-    expect(hasCustomEndpoint('open_ai_compatible')).toBe(true);
-    expect(hasCustomEndpoint('azure_open_ai')).toBe(true);
-    expect(hasCustomEndpoint('open_ai')).toBe(false);
+    expect(requiresSeedModel('openai')).toBe(false);
+    expect(hasCustomEndpoint('openai_compatible')).toBe(true);
+    expect(hasCustomEndpoint('azure_openai')).toBe(true);
+    expect(hasCustomEndpoint('openai')).toBe(false);
     expect(hasCloudRegion('vertex_ai')).toBe(true);
     expect(hasCloudRegion('bedrock')).toBe(true);
     expect(hasCloudRegion('gemini')).toBe(false);
     expect(hasCloudProject('vertex_ai')).toBe(true);
     expect(hasCloudProject('bedrock')).toBe(false);
-    expect(hasDeployment('azure_open_ai')).toBe(true);
-    expect(hasApiVersion('azure_open_ai')).toBe(true);
-    expect(hasDeployment('open_ai_compatible')).toBe(false);
-    expect(hasApiVersion('open_ai_compatible')).toBe(false);
+    expect(hasDeployment('azure_openai')).toBe(true);
+    expect(hasApiVersion('azure_openai')).toBe(true);
+    expect(hasDeployment('openai_compatible')).toBe(false);
+    expect(hasApiVersion('openai_compatible')).toBe(false);
   });
 
   it('enforces connector-specific creation requirements', () => {
-    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'open_ai_compatible' })).toBe(
+    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'openai_compatible' })).toBe(
       'An HTTPS endpoint is required for an OpenAI-compatible provider.'
     );
     expect(
@@ -82,7 +82,7 @@ describe('provider editor connector policy', () => {
         credential: ''
       })
     ).toBe('AWS Bedrock requires a cloud region.');
-    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'azure_open_ai' })).toBe(
+    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'azure_openai' })).toBe(
       'Azure OpenAI requires its resource endpoint, deployment, and API version.'
     );
   });
@@ -93,7 +93,7 @@ describe('provider editor API mappings', () => {
     expect(
       buildCreateProviderInput({
         ...apiKeyDraft,
-        kind: 'azure_open_ai',
+        kind: 'azure_openai',
         name: ' production-azure ',
         model: ' deployment-probe ',
         endpoint: ' https://resource.openai.azure.com ',
@@ -104,7 +104,7 @@ describe('provider editor API mappings', () => {
       })
     ).toEqual({
       name: 'production-azure',
-      kind: 'azure_open_ai',
+      kind: 'azure_openai',
       credential: 'write-only-secret',
       model: 'deployment-probe',
       endpoint: 'https://resource.openai.azure.com',
@@ -128,7 +128,7 @@ describe('provider editor API mappings', () => {
       authMode: 'api_key'
     };
 
-    expect(buildUpdateProviderInput({ kind: 'open_ai' }, values)).toEqual({
+    expect(buildUpdateProviderInput({ kind: 'openai' }, values)).toEqual({
       name: 'Primary OpenAI',
       endpoint: null,
       api_version: null,
@@ -140,7 +140,7 @@ describe('provider editor API mappings', () => {
     expect(
       providerEditValues({
         name: 'Primary OpenAI',
-        kind: 'open_ai',
+        kind: 'openai',
         endpoint: 'https://api.openai.com/v1/',
         api_version: 'ignored',
         cloud_region: 'ignored',

@@ -103,7 +103,7 @@
     {#each capabilities as capability, index (index)}
       <div class="capability-row">
         <label><span class="sr-only">Operation {index + 1}</span><select value={capability.operation} onchange={(event) => update(index, 'operation', event.currentTarget.value)} disabled={disabled || !options.length}>{#each operations as operation (operation)}<option value={operation}>{operation.replaceAll('_', ' ')}</option>{/each}</select></label>
-        <label><span class="sr-only">Client surface {index + 1}</span><select value={capability.surface} onchange={(event) => update(index, 'surface', event.currentTarget.value)} disabled={disabled || !options.length}>{#each surfacesFor(capability.operation) as surface (surface)}<option value={surface}>{surface === 'open_ai' ? 'OpenAI' : surface === 'anthropic' ? 'Anthropic' : 'Gemini'}</option>{/each}</select></label>
+        <label><span class="sr-only">Client surface {index + 1}</span><select value={capability.surface} onchange={(event) => update(index, 'surface', event.currentTarget.value)} disabled={disabled || !options.length}>{#each surfacesFor(capability.operation) as surface (surface)}<option value={surface}>{surface === 'openai' ? 'OpenAI' : surface === 'anthropic' ? 'Anthropic' : 'Gemini'}</option>{/each}</select></label>
         <label><span class="sr-only">Mode {index + 1}</span><select value={capability.mode} onchange={(event) => update(index, 'mode', event.currentTarget.value)} disabled={disabled || !options.length}>{#each modesFor(capability) as mode (mode)}<option value={mode}>{mode}</option>{/each}</select></label>
         <button class="remove" type="button" aria-label={`Remove capability ${index + 1}`} onclick={() => remove(index)} disabled={disabled}>×</button>
       </div>

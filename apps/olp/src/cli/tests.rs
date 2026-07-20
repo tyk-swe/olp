@@ -8,7 +8,7 @@ use std::{
 
 use clap::Parser;
 use olp_storage::{
-    EncryptedTable, KeyHasher, KeyVersionReference, MasterKey, MasterKeyEncryptionStatus,
+    AuthHmacKey, EncryptedTable, KeyVersionReference, MasterKey, MasterKeyEncryptionStatus,
 };
 use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
@@ -16,7 +16,10 @@ use tokio::{sync::watch, task::JoinSet};
 use super::{
     commands::stop_worker_tasks,
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
-    startup::{coordinate_shutdown, stop_background_tasks, wait_for_shutdown},
+    startup::{
+        coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
+        stop_background_tasks, wait_for_shutdown,
+    },
     validation::{
         check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
     },
@@ -127,12 +130,12 @@ async fn bootstrap_token_file_is_base64_decoded_to_a_digest() {
     let token = write_temp_file("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n");
     #[cfg(unix)]
     set_file_mode(token.path(), 0o600);
-    let hasher = KeyHasher::new([9; 32]);
-    let digest = load_bootstrap_token_digest(token.path(), &hasher)
+    let auth_hmac_key = AuthHmacKey::new([9; 32]);
+    let digest = load_bootstrap_token_digest(token.path(), &auth_hmac_key)
         .await
         .unwrap();
     assert!(
-        hasher
+        auth_hmac_key
             .verify_bootstrap_token_digest("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", &digest)
     );
 }
@@ -144,8 +147,8 @@ fn server_cli_parses_bootstrap_and_trusted_proxy_configuration() {
         "control",
         "--database-url",
         "postgres://example/olp",
-        "--key-hash-key-file",
-        "/run/secrets/key-hash",
+        "--auth-hmac-key-file",
+        "/run/secrets/auth-hmac-key",
         "--bootstrap-token-file",
         "/run/secrets/bootstrap",
         "--trusted-proxy-cidrs",
@@ -160,6 +163,23 @@ fn server_cli_parses_bootstrap_and_trusted_proxy_configuration() {
         PathBuf::from("/run/secrets/bootstrap")
     );
     assert_eq!(args.trusted_proxy_cidrs.len(), 2);
+}
+
+#[test]
+fn migration_cli_parses_valkey_preflight_dependency() {
+    let cli = Cli::try_parse_from([
+        "olp",
+        "migrate",
+        "--database-url",
+        "postgres://example/olp",
+        "--valkey-url",
+        "redis://valkey:6379",
+    ])
+    .unwrap();
+    let Command::Migrate(args) = cli.command else {
+        panic!("expected migrate command");
+    };
+    assert_eq!(args.backend.valkey_url, "redis://valkey:6379");
 }
 
 #[test]
@@ -258,6 +278,71 @@ async fn coordinated_shutdown_keeps_background_tasks_alive_while_http_drains() {
     release_drain.send(true).unwrap();
     coordinator.await.unwrap();
     assert!(*background_receiver.borrow());
+}
+
+#[tokio::test]
+async fn request_metadata_writer_failure_stops_listeners_and_surfaces_error() {
+    let (listener_shutdown, listener_receiver) = watch::channel(false);
+    let (background_shutdown, background_receiver) = watch::channel(false);
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
+    let (status_sender, status_receiver) = tokio::sync::oneshot::channel();
+    let (drain_started, drain_started_receiver) = tokio::sync::oneshot::channel();
+    let (release_drain, release_receiver) = watch::channel(false);
+
+    let public_listener = listener_receiver.clone();
+    let public_release = release_receiver.clone();
+    let public_server = async move {
+        wait_for_shutdown(public_listener).await;
+        let _ = drain_started.send(());
+        wait_for_shutdown(public_release).await;
+    };
+    let observability_server = async move {
+        wait_for_shutdown(listener_receiver).await;
+        wait_for_shutdown(release_receiver).await;
+    };
+    let reporter = tokio::spawn(async move {
+        shutdown_sender.send(()).unwrap();
+        drain_started_receiver.await.unwrap();
+        status_sender
+            .send(Err(
+                std::io::Error::other("legacy stream is not drained").into()
+            ))
+            .unwrap();
+        release_drain.send(true).unwrap();
+    });
+    let mut status_receiver = status_receiver;
+    let (_, _, terminal_error) = coordinate_shutdown(
+        public_server,
+        observability_server,
+        shutdown_reason(
+            async {
+                let _ = shutdown_receiver.await;
+            },
+            Some(&mut status_receiver),
+        ),
+        listener_shutdown,
+        background_shutdown,
+    )
+    .await;
+    reporter.await.unwrap();
+    let error = resolve_request_metadata_writer_error(Some(status_receiver), terminal_error).await;
+
+    assert_eq!(error.unwrap().to_string(), "legacy stream is not drained");
+    assert!(*background_receiver.borrow());
+}
+
+#[tokio::test]
+async fn request_metadata_writer_failure_wins_when_shutdown_is_also_ready() {
+    let (status_sender, mut status_receiver) = tokio::sync::oneshot::channel();
+    status_sender
+        .send(Err(std::io::Error::other("writer failed").into()))
+        .unwrap();
+
+    let error = shutdown_reason(async {}, Some(&mut status_receiver))
+        .await
+        .unwrap();
+
+    assert_eq!(error.to_string(), "writer failed");
 }
 
 #[tokio::test]

@@ -11,8 +11,10 @@ export type Setting = components['schemas']['SettingResponse'];
 export type PricingRevision = components['schemas']['PricingRevisionResponse'];
 export type UsagePoint = components['schemas']['UsagePointResponse'];
 export type UsageBreakdownItem = components['schemas']['UsageBreakdownItem'];
-export type UsageGatewayEpoch = components['schemas']['UsageGatewayEpochResponse'];
-export type UsageEpochAcknowledgement = components['schemas']['UsageEpochAcknowledgementResponse'];
+export type RequestMetadataGatewayEpoch =
+  components['schemas']['RequestMetadataGatewayEpochResponse'];
+export type RequestMetadataEpochAcknowledgement =
+  components['schemas']['RequestMetadataEpochAcknowledgementResponse'];
 export type Session = components['schemas']['SessionDetailResponse'];
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList = components['schemas']['OidcIdentityListResponse'];
@@ -56,45 +58,21 @@ export type UsageFilters = {
   operation?: string;
 };
 
-export type UsageGatewayEpochState =
+export type RequestMetadataGatewayEpochState =
   | 'open'
   | 'gracefully_closed'
   | 'unresolved'
   | 'acknowledged';
 
-type UsageRangeCoverage = {
-  range_complete: boolean;
-  approximate: boolean;
-  excluded_partial_aggregate_boundaries: number;
-};
-
-type UsageConsumerStatus = {
-  state: 'unknown' | 'healthy' | 'backlogged' | 'stale';
-  pending_events: number;
-  lag_events: number;
-  oldest_pending_at?: string | null;
-  checked_at?: string | null;
-  heartbeat_age_seconds?: number | null;
-};
-
-type UsageVisibility = {
-  coverage: UsageRangeCoverage;
-  consumer: UsageConsumerStatus;
-  complete: boolean;
-};
-
-type UsageSummary = components['schemas']['UsageSummaryResponse'] & UsageVisibility;
-type UsageCompleteness = components['schemas']['UsageCompletenessResponse'] & UsageVisibility;
-type UsageSeriesResult = { data: UsagePoint[]; coverage: UsageRangeCoverage };
-type UsageBreakdownResult = {
-  data: UsageBreakdownItem[];
-  coverage: UsageRangeCoverage;
-};
+type UsageSummary = components['schemas']['UsageSummaryResponse'];
+type UsageCompleteness = components['schemas']['UsageCompletenessResponse'];
+type UsageSeriesResult = components['schemas']['UsageTimeSeriesResponse'];
+type UsageBreakdownResult = components['schemas']['UsageBreakdownResponse'];
 
 export type ProviderHealth = components['schemas']['ProviderHealthItem'];
 
 export type PlaygroundRequest = Omit<components['schemas']['PlaygroundRequest'], 'surface'> & {
-  surface?: 'open_ai' | 'anthropic' | 'gemini';
+  surface?: 'openai' | 'anthropic' | 'gemini';
 };
 export type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
 
@@ -159,25 +137,26 @@ export async function usageSummary(filters: UsageFilters): Promise<UsageSummary>
     params: { query: compact(filters) }
   });
   if (!data) throw apiError(error, response.status);
-  return data as UsageSummary;
+  return data;
 }
 
-export async function listUsageGatewayEpochs(
-  state: UsageGatewayEpochState,
+export async function listRequestMetadataGatewayEpochs(
+  state: RequestMetadataGatewayEpochState,
   cursor?: string
-): Promise<CursorPage<UsageGatewayEpoch>> {
-  const { data, error, response } = await apiClient.GET('/api/v1/usage/gateway-epochs', {
+): Promise<CursorPage<RequestMetadataGatewayEpoch>> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/request-metadata/gateway-epochs', {
     params: { query: { state, cursor, limit: 25 } }
   });
   if (!data) throw apiError(error, response.status);
   return data;
 }
 
-export async function acknowledgeUsageGatewayEpoch(
+export async function acknowledgeRequestMetadataGatewayEpoch(
   processEpoch: string
-): Promise<UsageEpochAcknowledgement> {
+): Promise<RequestMetadataEpochAcknowledgement> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v1/usage/gateway-epochs/{process_epoch}/acknowledge',
+    '/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge',
     { params: { path: { process_epoch: processEpoch } } }
   );
   if (!data) throw apiError(error, response.status);
@@ -192,7 +171,7 @@ export async function usageSeries(
     params: { query: compact({ ...filters, granularity }) }
   });
   if (!data) throw apiError(error, response.status);
-  return data as UsageSeriesResult;
+  return data;
 }
 
 export async function usageBreakdown(
@@ -203,7 +182,7 @@ export async function usageBreakdown(
     params: { query: compact({ ...filters, dimension, limit: 50 }) }
   });
   if (!data) throw apiError(error, response.status);
-  return data as UsageBreakdownResult;
+  return data;
 }
 
 export async function usageCompleteness(filters: UsageFilters): Promise<UsageCompleteness> {
@@ -211,7 +190,7 @@ export async function usageCompleteness(filters: UsageFilters): Promise<UsageCom
     params: { query: compact(filters) }
   });
   if (!data) throw apiError(error, response.status);
-  return data as UsageCompleteness;
+  return data;
 }
 
 export async function listAudit(cursor?: string): Promise<CursorPage<AuditEvent>> {

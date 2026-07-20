@@ -5,7 +5,7 @@ import { collectCursorPages, getAbortSignal, result, type CursorPage, type ReadS
 
 type Schemas = components['schemas'];
 
-export type RouteDraft = Schemas['RouteDraftCatalogResponse'];
+export type RouteDraft = Schemas['RouteDraftDetailResponse'];
 export type CreateRouteDraftInput = Schemas['CreateRouteDraftRequest'];
 export type ReplaceRouteDraftInput = Schemas['ReplaceRouteDraftRequest'];
 export type RouteSimulation = Schemas['RouteSimulationResponse'];
@@ -13,7 +13,7 @@ export type RouteSimulationInput = Schemas['SimulateRouteRequest'];
 export type RouteRevision = Schemas['RouteRevisionResponse'];
 export type RouteRevisionDiff = Schemas['RouteRevisionDiffResponse'];
 export type RouteActivation = Schemas['RouteActivationResponse'];
-export type ActiveRoute = Schemas['RouteCatalogResponse'];
+export type ActiveRoute = Schemas['RouteDetailResponse'];
 
 export async function listRouteDraftPage(
   cursor?: string,

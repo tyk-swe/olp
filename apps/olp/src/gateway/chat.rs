@@ -14,14 +14,11 @@ use olp_domain::{
     Surface, TransportMode, authorize_api_key,
 };
 use olp_protocols::openai::{ChatCompletionRequest, decode_chat_completion};
-use olp_storage::{LimitLease, UsageAttempt};
+use olp_storage::{LimitLease, RequestAttemptMetadata};
 
 use crate::{
     ApiState,
     json_media::{admit_openai_chat, cleanup_admitted},
-    openai_response::{
-        OpenAiStreamEncoder, aggregate_openai_response, error_sse as openai_error_sse,
-    },
     semantic_validation::select_representable_attempts_filtered,
     streaming_response::{TerminalFrames, sse_stream},
 };
@@ -31,6 +28,8 @@ use super::{
     execution::{AuthenticatedProxyKey, authenticate_proxy_key, bearer_token},
     failover::{EventStream, ExecutionOutput, ExecutionSuccess, execute_with_failover},
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
+    openai_chat_response::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response},
+    openai_http::error_sse as openai_error_sse,
     telemetry::{UsageCapture, elapsed_ms, emit_request_event},
 };
 
@@ -303,12 +302,12 @@ fn streaming_response(
     request_started_at: chrono::DateTime<Utc>,
     request_started: tokio::time::Instant,
     first_byte_ms: u64,
-    attempts: Vec<UsageAttempt>,
+    attempts: Vec<RequestAttemptMetadata>,
     attempt_started: tokio::time::Instant,
 ) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
-        let mut encoder = OpenAiStreamEncoder::new(request_id, route_slug.as_str());
+        let mut encoder = OpenAiChatCompletionStreamEncoder::new(request_id, route_slug.as_str());
         let mut next = Some(Ok(first));
         let mut usage = UsageCapture::default();
         let mut failure = None;
@@ -420,7 +419,7 @@ async fn unary_response(
     request_started_at: chrono::DateTime<Utc>,
     request_started: tokio::time::Instant,
     first_byte_ms: u64,
-    attempts: &[UsageAttempt],
+    attempts: &[RequestAttemptMetadata],
     attempt_started: tokio::time::Instant,
 ) -> Result<Response, InferenceError> {
     let mut collected = vec![first];
@@ -517,30 +516,31 @@ async fn unary_response(
         );
         return Err(failure);
     }
-    let response = match aggregate_openai_response(request_id, route_slug.as_str(), &collected) {
-        Ok(response) => response,
-        Err(failure) => {
-            emit_request_event(
-                state,
-                generation_id,
-                api_key_id,
-                request_id,
-                route_slug,
-                attempts,
-                request_started_at,
-                request_started,
-                Some(attempt_started),
-                Some(first_byte_ms),
-                Some(failure.status.as_u16()),
-                Some(failure.code.to_owned()),
-                true,
-                &usage,
-                Surface::OpenAi,
-                "generation",
-            );
-            return Err(failure);
-        }
-    };
+    let response =
+        match aggregate_chat_completion_response(request_id, route_slug.as_str(), &collected) {
+            Ok(response) => response,
+            Err(failure) => {
+                emit_request_event(
+                    state,
+                    generation_id,
+                    api_key_id,
+                    request_id,
+                    route_slug,
+                    attempts,
+                    request_started_at,
+                    request_started,
+                    Some(attempt_started),
+                    Some(first_byte_ms),
+                    Some(failure.status.as_u16()),
+                    Some(failure.code.to_owned()),
+                    true,
+                    &usage,
+                    Surface::OpenAi,
+                    "generation",
+                );
+                return Err(failure);
+            }
+        };
     emit_request_event(
         state,
         generation_id,

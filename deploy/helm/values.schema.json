@@ -72,8 +72,8 @@
         "valkeySecretKey",
         "masterKeySecretName",
         "masterKeySecretKey",
-        "keyHashSecretName",
-        "keyHashSecretKey",
+        "authHmacKeySecretName",
+        "authHmacKeySecretKey",
         "bootstrapTokenSecretName",
         "bootstrapTokenSecretKey",
         "trustedProxyCidrs",
@@ -87,8 +87,8 @@
         "valkeySecretKey": { "type": "string", "minLength": 1 },
         "masterKeySecretName": { "type": "string", "minLength": 1 },
         "masterKeySecretKey": { "type": "string", "minLength": 1 },
-        "keyHashSecretName": { "type": "string", "minLength": 1 },
-        "keyHashSecretKey": { "type": "string", "minLength": 1 },
+        "authHmacKeySecretName": { "type": "string", "minLength": 1 },
+        "authHmacKeySecretKey": { "type": "string", "minLength": 1 },
         "bootstrapTokenSecretName": { "type": "string" },
         "bootstrapTokenSecretKey": { "type": "string", "minLength": 1 },
         "trustedProxyCidrs": { "type": "string" },
@@ -135,10 +135,10 @@
         "scrapeTimeout": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$" },
         "rules": {
           "type": "object",
-          "required": ["enabled", "usagePendingThreshold"],
+          "required": ["enabled", "requestMetadataPendingThreshold"],
           "properties": {
             "enabled": { "type": "boolean" },
-            "usagePendingThreshold": { "type": "integer", "minimum": 0 }
+            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 }
           }
         }
       }

@@ -14,23 +14,27 @@ keep durable records free of request content.
 
 ## Component boundaries
 
-Dependencies point toward `core`, which owns domain types, routing, and ports
-without infrastructure dependencies. `protocols` maps public wire formats to
-canonical operations; connector crates implement upstream transports;
-`persistence` owns PostgreSQL, the outbox, encryption, usage ingestion, and
-Valkey scripts. `http-api` composes these capabilities, while `apps/olp`
-contains process-mode and dependency wiring.
+Production dependencies point toward `olp-domain`, which owns domain types,
+routing, and ports without infrastructure dependencies. `olp-protocols` maps
+vendor wire formats to canonical operations. `olp-providers` implements
+upstream transports, discovery, authentication, and outbound network policy,
+while `olp-storage` owns PostgreSQL, the outbox, encryption, request metadata
+ingestion, usage accounting, and Valkey integration. The `olp` package in
+`apps/olp` owns the HTTP API, process modes, and dependency wiring.
 
 ```text
-apps/olp ──> http-api ──> protocols ──> core
-   │             │             └──────────┘
-   │             ├────> connectors/* ───> core
-   │             └────> persistence ────> core
-   └──────────────────> persistence
+apps/olp (olp) ─┬─> olp-domain
+                ├─> olp-protocols ──> olp-domain
+                ├─> olp-providers ──> olp-protocols
+                │       └───────────> olp-domain
+                └─> olp-storage ────> olp-domain
 ```
 
-The console is a client-only static asset with no server routes or production
-Node adapter.
+`olp-conformance` is a test-only workspace package that exercises
+`olp-domain`, `olp-protocols`, and `olp-providers` against the repository's
+conformance corpus; it is outside the production dependency graph. The console
+is a client-only static application with no server routes or production Node
+adapter.
 
 ## Runtime publication
 
@@ -47,8 +51,8 @@ capabilities. Edits and credential rotation affect only the draft; unrelated
 key or route publications continue using the active revision. A current
 ETag-bound connectivity probe and capability certification are required before
 activation atomically replaces that revision. Runtime and fallback credential
-lookup are validated against the release revision, preventing newer catalog
-credentials from entering an older generation.
+lookup are validated against the release revision, preventing newer
+configuration credentials from entering an older generation.
 
 ![Routes published as immutable runtime revisions](assets/screenshots/routes.png)
 

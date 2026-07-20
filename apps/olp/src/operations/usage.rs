@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use olp_storage::{UsageConsumerStatus, UsageFilters, UsageRangeCoverage};
+use olp_storage::{UsageFilters, UsageRangeCoverage};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -9,7 +9,6 @@ use crate::Problem;
 
 pub(super) mod breakdown;
 pub(super) mod completeness;
-pub(super) mod epochs;
 pub(super) mod series;
 pub(super) mod summary;
 
@@ -65,29 +64,6 @@ impl From<UsageRangeCoverage> for UsageRangeCoverageResponse {
             range_complete: coverage.range_complete,
             approximate: coverage.approximate,
             excluded_partial_aggregate_boundaries: coverage.excluded_partial_aggregate_boundaries,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(super) struct UsageConsumerStatusResponse {
-    state: String,
-    pending_events: u64,
-    lag_events: u64,
-    oldest_pending_at: Option<DateTime<Utc>>,
-    checked_at: Option<DateTime<Utc>>,
-    heartbeat_age_seconds: Option<u64>,
-}
-
-impl From<UsageConsumerStatus> for UsageConsumerStatusResponse {
-    fn from(consumer: UsageConsumerStatus) -> Self {
-        Self {
-            state: consumer.state.as_str().to_owned(),
-            pending_events: consumer.pending_events,
-            lag_events: consumer.lag_events,
-            oldest_pending_at: consumer.oldest_pending_at,
-            checked_at: consumer.checked_at,
-            heartbeat_age_seconds: consumer.heartbeat_age_seconds,
         }
     }
 }

@@ -22,9 +22,8 @@ use tower_http::{
 };
 
 use crate::{
-    ApiStartupError, ApiState, MAX_JSON_BODY_BYTES, Problem, catalog, gateway, management, oidc,
-    operations, playground, request_admission::enforce_request_limits, static_console,
-    vendor_gateway,
+    ApiStartupError, ApiState, MAX_JSON_BODY_BYTES, Problem, gateway, management_api,
+    request_admission::enforce_request_limits, static_console,
 };
 
 pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -49,11 +48,7 @@ pub fn public_router(state: ApiState) -> Router {
     if state.mode.serves_control() {
         let control = Router::new()
             .route("/openapi.json", any(api_not_found))
-            .merge(management::router())
-            .merge(oidc::router())
-            .merge(catalog::router())
-            .merge(operations::router())
-            .merge(playground::router())
+            .merge(management_api::router())
             .route("/api/{*path}", any(api_not_found))
             .layer(middleware::from_fn(normalize_management_rejection));
         router = router
@@ -67,7 +62,6 @@ pub fn public_router(state: ApiState) -> Router {
         // deployment from accidentally becoming an inference data plane.
         router = router
             .merge(gateway::router())
-            .merge(vendor_gateway::router())
             .route("/openai/{*path}", any(protocol_not_found))
             .route("/anthropic/{*path}", any(protocol_not_found))
             .route("/gemini/{*path}", any(protocol_not_found));
@@ -220,8 +214,8 @@ pub(super) fn sensitive_request_headers() -> [HeaderName; 6] {
     [
         axum::http::header::AUTHORIZATION,
         axum::http::header::COOKIE,
-        HeaderName::from_static(management::CSRF_HEADER),
-        HeaderName::from_static(management::SETUP_TOKEN_HEADER),
+        HeaderName::from_static(management_api::CSRF_HEADER),
+        HeaderName::from_static(management_api::SETUP_TOKEN_HEADER),
         HeaderName::from_static("x-api-key"),
         HeaderName::from_static("x-goog-api-key"),
     ]

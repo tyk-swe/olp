@@ -6,7 +6,7 @@
   import ModelsPage from '$lib/features/gateway/ModelsPage.svelte';
   import RoutesPage from '$lib/features/gateway/RoutesPage.svelte';
   import ApiKeysPage from '$lib/features/access/ApiKeysPage.svelte';
-  import TeamPage from '$lib/features/access/TeamPage.svelte';
+  import AccessPage from '$lib/features/access/AccessPage.svelte';
   import RequestsPage from '$lib/features/operations/RequestsPage.svelte';
   import MediaJobsPage from '$lib/features/operations/MediaJobsPage.svelte';
   import UsagePage from '$lib/features/operations/UsagePage.svelte';
@@ -29,8 +29,8 @@
     <RoutesPage {path} />
   {:else if segment === 'api-keys'}
     <ApiKeysPage {path} />
-  {:else if segment === 'team'}
-    <TeamPage />
+  {:else if segment === 'access'}
+    <AccessPage />
   {:else if segment === 'requests'}
     <RequestsPage {path} />
   {:else if segment === 'media-jobs'}

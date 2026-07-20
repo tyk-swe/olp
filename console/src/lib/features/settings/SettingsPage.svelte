@@ -24,7 +24,7 @@
     'image_variation', 'speech', 'transcription', 'video_create', 'video_list',
     'video_get', 'video_content', 'video_delete', 'moderation', 'model_list', 'model_get'
   ] as const;
-  let providerKind = $state<(typeof providerKindOptions)[number]>('open_ai');
+  let providerKind = $state<(typeof providerKindOptions)[number]>('openai');
   let providerId = $state('');
   let model = $state('');
   let operation = $state<(typeof operationOptions)[number]>('generation');

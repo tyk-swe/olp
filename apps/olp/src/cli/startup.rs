@@ -1,8 +1,15 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::future::select_all;
-use olp_storage::{DistributedLimiter, MasterKey, PgStore, RuntimeHintSubscriber, UsageEmitter};
-use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
+use olp_storage::{
+    DistributedLimiter, MasterKey, PgStore, REQUEST_METADATA_STREAM, RequestMetadataEmitter,
+    RuntimeHintSubscriber,
+};
+use tokio::{
+    net::TcpListener,
+    sync::{oneshot, watch},
+    task::JoinHandle,
+};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -15,14 +22,14 @@ use crate::{
 };
 
 use super::{
-    AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
+    AppError, AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
     commands::{
-        maintenance_supervisor, outbox_supervisor, usage_consumer_supervisor,
-        usage_epoch_supervisor,
+        maintenance_supervisor, outbox_supervisor, preflight_request_metadata_stream_or_defer,
+        request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
     },
     config::ServerArgs,
     validation::{
-        check_secret_permissions, connect_store, load_bootstrap_token_digest, load_key_hasher,
+        check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
         load_master_key,
     },
 };
@@ -37,9 +44,9 @@ pub(super) async fn serve(
             std::io::Error::other("OLP_HTTP_MAX_CONNECTIONS must be greater than zero").into(),
         );
     }
-    if mode.serves_control() && args.key_hash_key_file.is_none() {
+    if mode.serves_control() && args.auth_hmac_key_file.is_none() {
         return Err(std::io::Error::other(
-            "OLP_KEY_HASH_KEY_FILE is required when serving the control plane",
+            "OLP_AUTH_HMAC_KEY_FILE is required when serving the control plane",
         )
         .into());
     }
@@ -66,9 +73,9 @@ pub(super) async fn serve(
         state.oidc_allow_insecure_test_endpoints = true;
         warn!("test-only loopback OIDC endpoints are enabled");
     }
-    if let Some(path) = &args.key_hash_key_file {
+    if let Some(path) = &args.auth_hmac_key_file {
         check_secret_permissions(path).await?;
-        state.key_hasher = Some(Arc::new(load_key_hasher(path).await?));
+        state.auth_hmac_key = Some(Arc::new(load_auth_hmac_key(path).await?));
     }
     state.set_trusted_proxy_cidrs(args.trusted_proxy_cidrs.clone());
     let setup_required = if mode.serves_control() {
@@ -78,12 +85,12 @@ pub(super) async fn serve(
     };
     let bootstrap_token_digest = if let Some(path) = &args.bootstrap_token_file {
         check_secret_permissions(path).await?;
-        let hasher = state.key_hasher.as_deref().ok_or_else(|| {
+        let auth_hmac_key = state.auth_hmac_key.as_deref().ok_or_else(|| {
             std::io::Error::other(
-                "OLP_BOOTSTRAP_TOKEN_FILE requires OLP_KEY_HASH_KEY_FILE for digest verification",
+                "OLP_BOOTSTRAP_TOKEN_FILE requires OLP_AUTH_HMAC_KEY_FILE for digest verification",
             )
         })?;
-        Some(load_bootstrap_token_digest(path, hasher).await?)
+        Some(load_bootstrap_token_digest(path, auth_hmac_key).await?)
     } else {
         None
     };
@@ -118,6 +125,7 @@ pub(super) async fn serve(
     let observability_listener = TcpListener::bind(args.observability_listen_addr).await?;
     let (background_shutdown_sender, background_shutdown_receiver) = watch::channel(false);
     let (listener_shutdown_sender, listener_shutdown_receiver) = watch::channel(false);
+    let mut request_metadata_writer_status = None;
     let mut background_tasks: Vec<JoinHandle<()>> = Vec::new();
     background_tasks.push(spawn_runtime_poller(
         Arc::clone(&state.runtime),
@@ -133,6 +141,9 @@ pub(super) async fn serve(
         )));
     }
     if let Some(url) = &args.valkey_url {
+        if mode.serves_gateway() || run_worker_in_process {
+            preflight_request_metadata_stream_or_defer(url).await?;
+        }
         background_tasks.push(tokio::spawn(runtime_hint_supervisor(
             Arc::clone(&state.runtime),
             store.clone(),
@@ -152,28 +163,36 @@ pub(super) async fn serve(
             // Install the bounded local emitter even when Valkey is not up yet.
             // Its connection loop exposes retry/pending state and preserves events
             // until the configured bound is reached.
-            let (emitter, receiver) = UsageEmitter::bounded(8_192);
-            state.usage = Some(emitter.clone());
+            let (emitter, receiver) = RequestMetadataEmitter::bounded(8_192);
+            state.request_metadata = Some(emitter.clone());
             let gateway_instance = format!(
                 "{}:{}",
                 std::env::var("HOSTNAME").unwrap_or_else(|_| "olp".to_owned()),
                 args.listen_addr
             );
-            background_tasks.push(tokio::spawn(usage_loss_reporter(
+            background_tasks.push(tokio::spawn(request_metadata_loss_reporter(
                 store.clone(),
                 emitter,
                 gateway_instance,
                 background_shutdown_receiver.clone(),
             )));
-            let usage_writer_url = url.clone();
-            let usage_writer_shutdown = background_shutdown_receiver.clone();
+            let request_metadata_writer_url = url.clone();
+            let request_metadata_writer_shutdown = background_shutdown_receiver.clone();
+            let (status_sender, status_receiver) = oneshot::channel();
+            request_metadata_writer_status = Some(status_receiver);
             background_tasks.push(tokio::spawn(async move {
-                if let Err(error) = receiver
-                    .run_connecting(&usage_writer_url, "olp:v2:usage", usage_writer_shutdown)
+                let result: AppResult<()> = receiver
+                    .run_connecting(
+                        &request_metadata_writer_url,
+                        REQUEST_METADATA_STREAM,
+                        request_metadata_writer_shutdown,
+                    )
                     .await
-                {
-                    error!(%error, "usage stream writer stopped");
+                    .map_err(Into::into);
+                if let Err(error) = &result {
+                    error!(%error, "request metadata stream writer stopped");
                 }
+                let _ = status_sender.send(result);
             }));
         }
         if run_worker_in_process {
@@ -182,7 +201,7 @@ pub(super) async fn serve(
                 url.clone(),
                 background_shutdown_receiver.clone(),
             )));
-            background_tasks.push(tokio::spawn(usage_consumer_supervisor(
+            background_tasks.push(tokio::spawn(request_metadata_consumer_supervisor(
                 store.clone(),
                 url.clone(),
                 background_shutdown_receiver.clone(),
@@ -194,7 +213,7 @@ pub(super) async fn serve(
             store.clone(),
             background_shutdown_receiver.clone(),
         )));
-        background_tasks.push(tokio::spawn(usage_epoch_supervisor(
+        background_tasks.push(tokio::spawn(request_metadata_epoch_supervisor(
             store.clone(),
             background_shutdown_receiver.clone(),
         )));
@@ -209,7 +228,7 @@ pub(super) async fn serve(
     let public_server = listener::serve_http(
         listener,
         crate::try_public_router(state.clone())?,
-        listener::HttpServerConfig::public(args.http_max_connections),
+        listener::HttpServerConfig::standard(args.http_max_connections),
         listener_shutdown_receiver.clone(),
     );
     // This listener has its own router-level concurrency cap. Constrain its
@@ -218,21 +237,72 @@ pub(super) async fn serve(
     let observability_server = listener::serve_http(
         observability_listener,
         crate::observability_router(state),
-        listener::HttpServerConfig::public(args.http_max_connections.clamp(1, 32)),
+        listener::HttpServerConfig::standard(args.http_max_connections.clamp(1, 32)),
         listener_shutdown_receiver,
     );
-    let (public_result, observability_result) = coordinate_shutdown(
+    let (public_result, observability_result, terminal_error) = coordinate_shutdown(
         public_server,
         observability_server,
-        shutdown_signal(),
+        shutdown_reason(shutdown_signal(), request_metadata_writer_status.as_mut()),
         listener_shutdown_sender,
         background_shutdown_sender,
     )
     .await;
     stop_background_tasks(background_tasks, BACKGROUND_SHUTDOWN_TIMEOUT).await;
+    let terminal_error =
+        resolve_request_metadata_writer_error(request_metadata_writer_status, terminal_error).await;
     public_result?;
     observability_result?;
+    if let Some(error) = terminal_error {
+        return Err(error);
+    }
     Ok(())
+}
+
+pub(super) async fn shutdown_reason<Signal>(
+    signal: Signal,
+    request_metadata_writer_status: Option<&mut oneshot::Receiver<AppResult<()>>>,
+) -> Option<AppError>
+where
+    Signal: Future<Output = ()>,
+{
+    let Some(request_metadata_writer_status) = request_metadata_writer_status else {
+        signal.await;
+        return None;
+    };
+    tokio::select! {
+        biased;
+        status = request_metadata_writer_status => match status {
+            Ok(Err(error)) => Some(error),
+            Ok(Ok(())) => Some(std::io::Error::other(
+                "request metadata stream writer stopped unexpectedly",
+            ).into()),
+            Err(error) => Some(std::io::Error::other(format!(
+                "request metadata stream writer failed without reporting status: {error}",
+            )).into()),
+        },
+        () = signal => None,
+    }
+}
+
+pub(super) async fn resolve_request_metadata_writer_error(
+    request_metadata_writer_status: Option<oneshot::Receiver<AppResult<()>>>,
+    terminal_error: Option<AppError>,
+) -> Option<AppError> {
+    if terminal_error.is_some() {
+        return terminal_error;
+    }
+    let request_metadata_writer_status = request_metadata_writer_status?;
+    match request_metadata_writer_status.await {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error),
+        Err(error) => Some(
+            std::io::Error::other(format!(
+                "request metadata stream writer failed without reporting status: {error}",
+            ))
+            .into(),
+        ),
+    }
 }
 
 pub(super) async fn coordinate_shutdown<Public, Observability, Signal>(
@@ -241,20 +311,21 @@ pub(super) async fn coordinate_shutdown<Public, Observability, Signal>(
     signal: Signal,
     listener_shutdown: watch::Sender<bool>,
     background_shutdown: watch::Sender<bool>,
-) -> (Public::Output, Observability::Output)
+) -> (Public::Output, Observability::Output, Signal::Output)
 where
     Public: Future,
     Observability: Future,
-    Signal: Future<Output = ()>,
+    Signal: Future,
 {
     let stop_listeners = async move {
-        signal.await;
+        let output = signal.await;
         let _ = listener_shutdown.send(true);
+        output
     };
-    let (public_result, observability_result, ()) =
+    let (public_result, observability_result, signal_output) =
         tokio::join!(public_server, observability_server, stop_listeners);
     let _ = background_shutdown.send(true);
-    (public_result, observability_result)
+    (public_result, observability_result, signal_output)
 }
 
 #[cfg(test)]
@@ -297,9 +368,9 @@ async fn media_reconciliation_supervisor(state: ApiState, mut shutdown: watch::R
     }
 }
 
-async fn usage_loss_reporter(
+async fn request_metadata_loss_reporter(
     store: PgStore,
-    emitter: UsageEmitter,
+    emitter: RequestMetadataEmitter,
     gateway_instance: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -309,8 +380,8 @@ async fn usage_loss_reporter(
         tokio::select! {
             _ = interval.tick() => {
                 let snapshot = emitter.snapshot();
-                if let Err(error) = store.report_usage_buffer_loss(&gateway_instance, &snapshot).await {
-                    warn!(%error, %gateway_instance, "usage-loss checkpoint failed; retrying");
+                if let Err(error) = store.report_request_metadata_buffer_loss(&gateway_instance, &snapshot).await {
+                    warn!(%error, %gateway_instance, "request metadata loss checkpoint failed; retrying");
                 }
             }
             changed = shutdown.changed() => {
@@ -322,14 +393,14 @@ async fn usage_loss_reporter(
                     let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
                     loop {
                         let snapshot = emitter.snapshot();
-                        match store.close_usage_buffer_epoch(&gateway_instance, &snapshot).await {
+                        match store.close_request_metadata_buffer_epoch(&gateway_instance, &snapshot).await {
                             Ok(_) => return,
                             Err(error) if tokio::time::Instant::now() < deadline => {
-                                warn!(%error, %gateway_instance, "final usage-loss checkpoint failed; retrying");
+                                warn!(%error, %gateway_instance, "final request metadata loss checkpoint failed; retrying");
                                 tokio::time::sleep(Duration::from_millis(200)).await;
                             }
                             Err(error) => {
-                                error!(%error, %gateway_instance, lost = snapshot.lost(), "final usage-loss checkpoint could not be persisted");
+                                error!(%error, %gateway_instance, lost = snapshot.lost(), "final request metadata loss checkpoint could not be persisted");
                                 return;
                             }
                         }
@@ -527,19 +598,15 @@ async fn activate_latest_runtime(
     transports: &TransportRegistry,
     master_key: Option<&MasterKey>,
 ) -> AppResult<bool> {
-    let releases = store.recent_valid_releases(32).await?;
+    let releases = store
+        .recent_valid_releases_after(32, runtime.ordinal())
+        .await?;
     if releases.is_empty() {
         return Ok(false);
     }
     let current_api_keys = store.current_runtime_api_keys().await?;
     let mut rejected = Vec::new();
     for release in releases {
-        if runtime
-            .ordinal()
-            .is_some_and(|ordinal| ordinal >= u64::try_from(release.sequence).unwrap_or(u64::MAX))
-        {
-            continue;
-        }
         let snapshot = match runtime.decode_release_candidate(&release, current_api_keys.clone()) {
             Ok(snapshot) => snapshot,
             Err(error) => {

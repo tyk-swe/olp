@@ -116,7 +116,7 @@
         <div><dt>Operation</dt><dd>{detail.data.operation}</dd></div>
         <div><dt>Client surface</dt><dd>{detail.data.surface}</dd></div>
         <div><dt>Runtime generation</dt><dd class="mono">{detail.data.runtime_generation_id}</dd></div>
-        <div><dt>API key lookup</dt><dd class="mono">{detail.data.api_key_id}</dd></div>
+        <div><dt>API key ID</dt><dd class="mono">{detail.data.api_key_id}</dd></div>
         <div><dt>Input tokens</dt><dd>{formatCompact(detail.data.input_tokens)}</dd></div>
         <div><dt>Output tokens</dt><dd>{formatCompact(detail.data.output_tokens)}</dd></div>
         <div><dt>Usage completeness</dt><dd><span class="badge" class:success={detail.data.usage_complete} class:warning={!detail.data.usage_complete}>{detail.data.usage_complete ? 'Complete' : 'Incomplete'}</span></dd></div>

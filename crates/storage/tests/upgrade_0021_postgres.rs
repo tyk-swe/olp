@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use olp_storage::{MIGRATOR, NewOwner, PgStore, hash_password};
+use olp_storage::{MIGRATOR, PgStore};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -10,21 +10,29 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     let store = PgStore::connect(&database_url, 3).await.unwrap();
     MIGRATOR.run_to(21, store.pool()).await.unwrap();
 
-    let owner = store
-        .setup_owner(NewOwner {
-            organization_name: "0021 upgrade fixture".to_owned(),
-            email: "owner@example.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
-        })
+    let owner_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO installation (organization_name) VALUES ('0021 upgrade fixture')")
+        .execute(store.pool())
         .await
         .unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, email, display_name, role) \
+         VALUES ($1, 'owner@example.test', 'Owner', 'owner')",
+    )
+    .bind(owner_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
     let provider_id = Uuid::now_v7();
     let api_key_id = Uuid::now_v7();
     let generation_id = Uuid::now_v7();
     let request_id = Uuid::now_v7();
     let fact_id = Uuid::now_v7();
     let provider_model_id = Uuid::now_v7();
+    let provider_revision_id = Uuid::now_v7();
+    let provider_revision_model_id = Uuid::now_v7();
+    let pricing_revision_id = Uuid::now_v7();
+    let media_job_id = Uuid::now_v7();
     let draft_id = Uuid::now_v7();
     let draft_target_id = Uuid::now_v7();
     let route_id = Uuid::now_v7();
@@ -43,7 +51,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     )
     .bind(provider_id)
     .bind(Uuid::now_v7())
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -66,7 +74,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     )
     .bind(draft_id)
     .bind(Uuid::now_v7())
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -83,7 +91,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .unwrap();
     sqlx::query("INSERT INTO routes (id, slug, created_by) VALUES ($1, 'upgrade-route', $2)")
         .bind(route_id)
-        .bind(owner.user_id)
+        .bind(owner_id)
         .execute(store.pool())
         .await
         .unwrap();
@@ -95,7 +103,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .bind(route_revision_id)
     .bind(route_id)
     .bind(draft_id)
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -129,7 +137,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .bind(restored_draft_id)
     .bind(Uuid::now_v7())
     .bind(route_revision_id)
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -161,7 +169,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     )
     .bind(api_key_id)
     .bind([7_u8; 32].as_slice())
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -172,7 +180,92 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .bind(generation_id)
     .bind([1_u8].as_slice())
     .bind([2_u8; 32].as_slice())
-    .bind(owner.user_id)
+    .bind(owner_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO model_capabilities \
+         (provider_model_id, operation, surface, mode, source) \
+         VALUES ($1, 'generation', 'open_ai', 'unary', 'declared')",
+    )
+    .bind(provider_model_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO provider_revisions \
+         (id, provider_id, revision, name, kind, auth_mode, connector_ready, \
+          source_etag, activated_by) \
+         SELECT $1, id, 1, name, kind, auth_mode, true, etag, $2 \
+         FROM providers WHERE id = $3",
+    )
+    .bind(provider_revision_id)
+    .bind(owner_id)
+    .bind(provider_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO provider_revision_models \
+         (id, provider_revision_id, source_provider_model_id, upstream_model, \
+          display_name, enabled) \
+         VALUES ($1, $2, $3, 'upgrade-model', 'Upgrade model', true)",
+    )
+    .bind(provider_revision_model_id)
+    .bind(provider_revision_id)
+    .bind(provider_model_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO provider_revision_capabilities \
+         (provider_revision_model_id, operation, surface, mode, source) \
+         VALUES ($1, 'generation', 'open_ai', 'unary', 'declared')",
+    )
+    .bind(provider_revision_model_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO runtime_generation_provider_configs \
+         (runtime_generation_id, provider_id, kind, auth_mode, provider_revision_id) \
+         VALUES ($1, $2, 'open_ai', 'api_key', $3)",
+    )
+    .bind(generation_id)
+    .bind(provider_id)
+    .bind(provider_revision_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pricing_revisions (id, revision, effective_at, created_by) \
+         VALUES ($1, 1, now(), $2)",
+    )
+    .bind(pricing_revision_id)
+    .bind(owner_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO prices \
+         (pricing_revision_id, provider_kind, model, operation, input_per_million) \
+         VALUES ($1, 'open_ai', 'upgrade-model', 'generation', 1)",
+    )
+    .bind(pricing_revision_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO async_media_jobs \
+         (id, upstream_job_id, api_key_id, provider_id, route_slug, operation, state, \
+          provider_model, surface) \
+         VALUES ($1, 'legacy-job', $2, $3, 'upgrade', 'video_create', 'running', \
+                 'upgrade-model', 'openai')",
+    )
+    .bind(media_job_id)
+    .bind(api_key_id)
+    .bind(provider_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -229,6 +322,20 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .execute(store.pool())
     .await
     .unwrap();
+    sqlx::query(
+        "INSERT INTO usage_hourly \
+         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id, \
+          request_count, input_tokens, output_tokens, cached_input_tokens, media_units, \
+          unpriced_count, incomplete_count) \
+         VALUES (date_trunc('hour', $1::timestamptz), 'unknown-retained', $2, 'model', \
+                 'generation', 'unknown', $3, 1, 0, 0, 0, 0, 1, 1)",
+    )
+    .bind(observed_at - Duration::days(11))
+    .bind(provider_id)
+    .bind(api_key_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     let configuration_id = Uuid::now_v7();
     let configuration_etag = Uuid::now_v7();
@@ -240,7 +347,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     )
     .bind(configuration_id)
     .bind(configuration_etag)
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(store.pool())
     .await
     .unwrap();
@@ -252,7 +359,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     )
     .bind(flow_id)
     .bind(configuration_id)
-    .bind(owner.user_id)
+    .bind(owner_id)
     .bind([3_u8; 32].as_slice())
     .bind([4_u8; 32].as_slice())
     .bind([5_u8; 16].as_slice())
@@ -270,6 +377,58 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
             .await
             .unwrap();
     assert_eq!(migrated_etag, configuration_etag);
+
+    let renamed_dimensions: Vec<(String, String)> = sqlx::query_as(
+        "SELECT 'providers', kind FROM providers \
+         UNION ALL SELECT 'model_capabilities', surface FROM model_capabilities \
+         UNION ALL SELECT 'prices', provider_kind FROM prices \
+         UNION ALL SELECT 'requests', surface FROM requests \
+         UNION ALL SELECT 'usage_facts', surface FROM usage_facts \
+         UNION ALL SELECT 'usage_hourly', surface FROM usage_hourly WHERE surface <> 'unknown' \
+         UNION ALL SELECT 'async_media_jobs', surface FROM async_media_jobs \
+         UNION ALL SELECT 'provider_revisions', kind FROM provider_revisions \
+         UNION ALL SELECT 'provider_revision_capabilities', surface \
+           FROM provider_revision_capabilities \
+         UNION ALL SELECT 'runtime_generation_provider_configs', kind \
+           FROM runtime_generation_provider_configs",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(renamed_dimensions.len(), 10);
+    for (dimension, value) in renamed_dimensions {
+        assert_eq!(value, "openai", "{dimension} retained a legacy value");
+    }
+    let unknown_surfaces: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM usage_hourly WHERE surface = 'unknown'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(unknown_surfaces, 1);
+
+    let release_envelope: (Vec<u8>, Vec<u8>) = sqlx::query_as(
+        "SELECT compiled_release, release_sha256 FROM runtime_generations WHERE id = $1",
+    )
+    .bind(generation_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(release_envelope, (vec![1], vec![2; 32]));
+
+    let naming_constraints: Vec<String> = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN ( \
+           'prices_provider_kind_check', 'usage_facts_surface_check', \
+           'usage_hourly_surface_check', 'async_media_jobs_surface_check') \
+         ORDER BY conname",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(naming_constraints.len(), 4);
+    assert!(naming_constraints.iter().all(|definition| {
+        definition.contains("'openai'") && !definition.contains("'open_ai'")
+    }));
+
     let draft_routing_id: Uuid =
         sqlx::query_scalar("SELECT routing_id FROM route_drafts WHERE id = $1")
             .bind(draft_id)
@@ -319,10 +478,11 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     assert_eq!(restored_draft_routing_id, route_id);
     assert_eq!(restored_matching_target_routing_id, revision_target_id);
     assert_eq!(restored_edited_target_routing_id, restored_edited_target_id);
-    let eager_receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_event_receipts")
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
+    let eager_receipts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM request_metadata_event_receipts")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
     assert_eq!(eager_receipts, 0, "migration must not bulk-copy raw facts");
 
     sqlx::query("DELETE FROM usage_facts WHERE id = $1")
@@ -330,12 +490,13 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
         .execute(store.pool())
         .await
         .unwrap();
-    let preserved_status: String =
-        sqlx::query_scalar("SELECT status::text FROM usage_event_receipts WHERE event_id = $1")
-            .bind(fact_id)
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
+    let preserved_status: String = sqlx::query_scalar(
+        "SELECT status::text FROM request_metadata_event_receipts WHERE event_id = $1",
+    )
+    .bind(fact_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
     assert_eq!(preserved_status, "fact_persisted");
 
     let legacy_rollup_error =
@@ -363,7 +524,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
         Some("55000")
     );
     let empty_legacy_gap_rollup_error =
-        sqlx::query("UPDATE usage_gap_hourly SET event_count = event_count WHERE false")
+        sqlx::query("UPDATE request_metadata_gap_hourly SET event_count = event_count WHERE false")
             .execute(store.pool())
             .await
             .unwrap_err();
@@ -387,7 +548,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .bind(Uuid::now_v7())
     .bind([8_u8].as_slice())
     .bind([9_u8; 32].as_slice())
-    .bind(owner.user_id)
+    .bind(owner_id)
     .execute(&mut *legacy_runtime)
     .await
     .unwrap_err();

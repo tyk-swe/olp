@@ -63,7 +63,7 @@ fn accepts_unit_only_media_pricing() {
 
 #[test]
 fn rejects_noncanonical_pricing_dimensions() {
-    assert!("openai".parse::<ProviderKind>().is_err());
+    assert!("open_ai".parse::<ProviderKind>().is_err());
     assert!("chat".parse::<OperationKind>().is_err());
 }
 

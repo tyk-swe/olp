@@ -9,14 +9,21 @@ use crate::{
     VIDEO_CREATE_BODY_BYTES,
 };
 
+mod anthropic;
 mod chat;
 mod error;
 mod execution;
 mod failover;
+mod gemini;
 mod limits;
 mod media;
 mod media_jobs;
 mod multipart;
+mod native_models;
+mod openai_chat_response;
+mod openai_http;
+mod openai_models;
+mod protocol_error;
 mod responses;
 mod telemetry;
 mod videos;
@@ -29,6 +36,7 @@ pub(crate) use execution::{
 };
 pub(crate) use limits::release_limits;
 pub use media_jobs::reconcile_media_jobs_once;
+pub(crate) use protocol_error::{inference_error_response, problem_response};
 pub(crate) use telemetry::{UsageCapture, emit_event_execution};
 
 pub fn router() -> Router<ApiState> {
@@ -72,7 +80,9 @@ pub fn router() -> Router<ApiState> {
             "/openai/v1/videos/{video_id}/content",
             get(videos::video_content),
         )
-        .merge(crate::openai_models::router())
+        .merge(openai_models::router())
+        .merge(anthropic::router())
+        .merge(gemini::router())
 }
 
 #[cfg(test)]

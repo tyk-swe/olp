@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_domain::{OperationKind, ProviderKind};
 use olp_storage::{
-    CatalogError, ConfigurationError, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewOwner,
+    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewOwner,
     NewProviderDraft, NewRouteDraft, NewRouteTarget, OperationsError, PgStore, PriceInput,
     ReplayableIdempotency, RotateCredentialInput, credential_aad, hash_password,
     idempotency_fingerprint,
@@ -19,7 +19,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     store.migrate().await.unwrap();
     let owner = store
         .setup_owner(NewOwner {
-            organization_name: "Management replay integration".to_owned(),
+            installation_name: "Management replay integration".to_owned(),
             email: "owner@management-replay.test".to_owned(),
             display_name: "Owner".to_owned(),
             password_hash: hash_password("correct horse battery staple").unwrap(),
@@ -32,7 +32,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let provider_key = "provider-replay-001";
     let provider_fingerprint = idempotency_fingerprint(&json!({
         "name": "replay-provider",
-        "kind": "open_ai",
+        "kind": "openai",
         "credential_sha256": "stable-provider-secret",
         "model": "replay-model"
     }))
@@ -64,7 +64,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                     &json!({
                         "id": created.provider_id,
                         "name": "replay-provider",
-                        "kind": "open_ai",
+                        "kind": "openai",
                         "state": "draft",
                         "model": "replay-model",
                         "etag": created.etag
@@ -382,7 +382,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 |_| panic!("changed rotation precondition must not execute"),
             )
             .await,
-        Err(CatalogError::IdempotencyConflict)
+        Err(ConfigurationError::IdempotencyConflict)
     ));
 
     let effective_at = Utc::now() - Duration::hours(1);
@@ -400,7 +400,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let pricing_fingerprint = idempotency_fingerprint(&json!({
         "effective_at": effective_at,
         "prices": [{
-            "provider_kind": "open_ai",
+            "provider_kind": "openai",
             "model": "replay-model",
             "operation": "generation",
             "input_per_million": "1.250000000000",
@@ -532,7 +532,7 @@ fn provider_input(
         model: Some("replay-model".to_owned()),
         display_name: Some("Replay Model".to_owned()),
         model_enabled: true,
-        surface: Some("open_ai".parse().unwrap()),
+        surface: Some("openai".parse().unwrap()),
         actor,
         idempotency_key: idempotency_key.to_owned(),
     }

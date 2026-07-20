@@ -82,9 +82,9 @@
       "id": 10,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
       "targets": [
-        { "refId": "A", "expr": "min(olp_usage_persistence_available{namespace=~\"$namespace\"})", "legendFormat": "persistence available" },
-        { "refId": "B", "expr": "sum(olp_usage_events_pending{namespace=~\"$namespace\"})", "legendFormat": "gateway pending" },
-        { "refId": "C", "expr": "max(olp_usage_consumer_pending_events{namespace=~\"$namespace\"} + olp_usage_consumer_lag_events{namespace=~\"$namespace\"})", "legendFormat": "consumer backlog" }
+        { "refId": "A", "expr": "min(olp_request_metadata_persistence_available{namespace=~\"$namespace\"})", "legendFormat": "persistence available" },
+        { "refId": "B", "expr": "sum(olp_request_metadata_events_pending{namespace=~\"$namespace\"})", "legendFormat": "gateway pending" },
+        { "refId": "C", "expr": "max(olp_request_metadata_consumer_pending_events{namespace=~\"$namespace\"} + olp_request_metadata_consumer_lag_events{namespace=~\"$namespace\"})", "legendFormat": "consumer backlog" }
       ]
     },
     {
@@ -93,8 +93,8 @@
       "id": 11,
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(olp_usage_events_dropped_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "dropped/s" },
-        { "refId": "B", "expr": "sum(rate(olp_usage_events_abandoned_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "abandoned/s" },
+        { "refId": "A", "expr": "sum(rate(olp_request_metadata_events_dropped_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "dropped/s" },
+        { "refId": "B", "expr": "sum(rate(olp_request_metadata_events_abandoned_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "abandoned/s" },
         { "refId": "C", "expr": "sum(rate(olp_media_reconciliation_gaps_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "media gaps/s" }
       ]
     },

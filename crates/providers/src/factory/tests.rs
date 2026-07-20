@@ -189,7 +189,7 @@ fn certifiable_capability_options_are_closed_per_provider_kind() {
 }
 
 #[test]
-fn catalog_openai_test_override_is_available_for_native_and_compatible_providers() {
+fn certification_probe_override_is_available_for_native_and_compatible_providers() {
     let registry = OpenAiConnectorOverrideRegistry::default();
     let provider_id = Uuid::from_u128(1);
     registry.register(
