@@ -1,10 +1,9 @@
 use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
-    AcceptInvitation, IdempotencyOutcome, IdempotencyResponse, IdentityError, MasterKey,
-    InstallationSetupInput, NewInvitation, PgStore, ReplayableIdempotency, SessionMaterial,
-    hash_password,
-    idempotency_fingerprint,
+    AcceptInvitation, IdempotencyOutcome, IdempotencyResponse, IdentityError,
+    InstallationSetupInput, MasterKey, NewInvitation, PgStore, ReplayableIdempotency,
+    SessionMaterial, hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
 

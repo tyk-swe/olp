@@ -5,10 +5,9 @@ use olp_domain::{
 };
 use olp_storage::{
     AuthHmacKey, CapabilityCertificationOutcome, CapabilityRecord, ConfigurationError,
-    DiscoveredModelInput, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewApiKeyRecord,
-    InstallationSetupInput, NewProviderDraft, NewRouteDraft, NewRouteTarget, PersistenceError,
-    PgStore,
-    ProviderModelRecord, ReplaceRouteDraftInput, ReplayableIdempotency, RotateApiKeyInput,
+    DiscoveredModelInput, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput,
+    MasterKey, NewApiKeyRecord, NewProviderDraft, NewRouteDraft, NewRouteTarget, PersistenceError,
+    PgStore, ProviderModelRecord, ReplaceRouteDraftInput, ReplayableIdempotency, RotateApiKeyInput,
     RotateCredentialInput, SessionMaterial, UpdateApiKeyInput, UpdateProvider, credential_aad,
     hash_password, idempotency_fingerprint,
 };
@@ -362,7 +361,9 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     let rotation_release = rotation_activation.release.clone();
     assert_eq!(rotation_release.sequence, 2);
     assert!(matches!(
-        store.runtime_provider_configurations(&initial_runtime).await,
+        store
+            .runtime_provider_configurations(&initial_runtime)
+            .await,
         Err(ConfigurationError::InvalidCredential)
     ));
     let rotated_runtime: RuntimeSnapshot =

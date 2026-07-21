@@ -227,7 +227,9 @@ mod tests {
             Some(ModeDependencyError::MissingAuthHmacKey(ApiMode::All))
         );
         assert_eq!(
-            state(ApiMode::Control, true, false).mode_dependencies().err(),
+            state(ApiMode::Control, true, false)
+                .mode_dependencies()
+                .err(),
             Some(ModeDependencyError::MissingAuthHmacKey(ApiMode::Control))
         );
         assert!(matches!(

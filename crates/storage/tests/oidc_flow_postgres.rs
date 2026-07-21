@@ -2,8 +2,7 @@ use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
     CompleteOidcLogin, InstallationSetupInput, MasterKey, NewOidcFlow, OidcError, OidcFlowPurpose,
-    PgStore,
-    SessionMaterial, UpsertOidcConfiguration, hash_password, oidc_client_secret_aad,
+    PgStore, SessionMaterial, UpsertOidcConfiguration, hash_password, oidc_client_secret_aad,
     oidc_flow_payload_aad,
 };
 use sha2::{Digest, Sha256};

@@ -281,10 +281,10 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
   await page.getByRole('button', { name: 'Activate provider' }).click();
   await expect(page.getByRole('heading', { name: 'Now build a stable route slug.' })).toBeVisible();
   await expect(page.getByText('Provider activated in runtime generation 2.')).toBeVisible();
-  expect(certificationEtag).toBe('01980000-0000-7000-8000-000000000111');
+  expect(certificationEtag).toBe('"01980000-0000-7000-8000-000000000111"');
   expect(probeEtags).toEqual([
-    '01980000-0000-7000-8000-000000000109',
-    '01980000-0000-7000-8000-000000000112'
+    '"01980000-0000-7000-8000-000000000109"',
+    '"01980000-0000-7000-8000-000000000112"'
   ]);
 });
 
@@ -725,9 +725,9 @@ test('provider detail keeps the live revision and credential until a certified d
   await expect(page.getByText('runtime active', { exact: true })).toBeVisible();
   await expect(page.getByText('pending activation', { exact: true })).toHaveCount(0);
   await expect.poll(() => revisionRequests).toBeGreaterThanOrEqual(2);
-  expect(certificationEtag).toBe('01980000-0000-7000-8000-000000000201');
-  expect(probeEtag).toBe('01980000-0000-7000-8000-000000000202');
-  expect(activationEtag).toBe('01980000-0000-7000-8000-000000000202');
+  expect(certificationEtag).toBe('"01980000-0000-7000-8000-000000000201"');
+  expect(probeEtag).toBe('"01980000-0000-7000-8000-000000000202"');
+  expect(activationEtag).toBe('"01980000-0000-7000-8000-000000000202"');
 });
 
 test('provider inventory preserves its cursor through detail and wizard navigation', async ({ page }) => {
@@ -853,7 +853,7 @@ test('model inventory pages the global catalog and updates through provider ETag
   await page.getByRole('checkbox', { name: 'Enabled' }).uncheck();
   await expect(page.getByRole('checkbox', { name: 'Disabled' })).not.toBeChecked();
   expect(seenCursors).toContain('opaque-next-model');
-  expect(mutationEtag).toBe('01980000-0000-7000-8000-000000000109');
+  expect(mutationEtag).toBe('"01980000-0000-7000-8000-000000000109"');
 });
 
 test('Route Studio creates, simulates, validates, and activates deterministic routing', async ({ page }) => {

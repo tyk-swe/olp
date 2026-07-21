@@ -135,7 +135,7 @@ test('provider studio compares redacted history and restores non-secret configur
   page.once('dialog', (dialog) => dialog.accept());
   await page.locator('.revision-row').filter({ hasText: 'Revision 1' }).getByRole('button', { name: 'Restore as draft' }).click();
   await expect(page.getByText(/Current credential selection was preserved/)).toBeVisible();
-  expect(restoreHeaders['if-match']).toBe(current.etag);
+  expect(restoreHeaders['if-match']).toBe(`"${current.etag}"`);
   expect(restoreHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

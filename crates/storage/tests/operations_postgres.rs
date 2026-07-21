@@ -2,8 +2,7 @@ use chrono::{Duration, Timelike, Utc};
 use olp_domain::Surface;
 use olp_storage::{
     IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey, OperationsError,
-    PgStore,
-    PriceInput, ReplayableIdempotency, RequestAttemptMetadata, RequestFilters,
+    PgStore, PriceInput, ReplayableIdempotency, RequestAttemptMetadata, RequestFilters,
     RequestMetadataBufferSnapshot, RequestMetadataConsumerState, RequestMetadataEvent,
     RequestMetadataGap, RequestMetadataGatewayEpochState, RequestMetadataPersistenceOutcome,
     UsageDimension, UsageFilters, UsageGranularity, hash_password,

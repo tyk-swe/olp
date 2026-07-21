@@ -19,8 +19,9 @@ valkey_port=${OLP_HA_VALKEY_PORT:-56379}
 valkey_url="redis://127.0.0.1:${valkey_port}"
 psql_command=${OLP_PSQL:-psql}
 createdb_command=${OLP_CREATEDB:-createdb}
+dropdb_command=${OLP_DROPDB:-dropdb}
 
-for command in "$olp_bin" "$psql_command" "$createdb_command" curl jq openssl; do
+for command in "$olp_bin" "$psql_command" "$createdb_command" "$dropdb_command" curl jq openssl; do
   command -v "$command" >/dev/null || { echo "required command is unavailable: $command" >&2; exit 1; }
 done
 [[ $database_name =~ ^[a-z0-9_]+$ ]] || { echo "unsafe database name" >&2; exit 1; }
@@ -71,7 +72,7 @@ start_valkey() {
 
 cleanup() {
   local status=$?
-  trap - EXIT
+  trap - EXIT INT TERM
   set +e
   if (( status != 0 )); then
     echo 'two-gateway HA proof failed; retained process logs follow' >&2
@@ -91,10 +92,17 @@ cleanup() {
   [[ -z $gateway_pid ]] || wait "$gateway_pid" 2>/dev/null || true
   [[ -z $all_pid ]] || wait "$all_pid" 2>/dev/null || true
   stop_valkey
+  if ! "$dropdb_command" --maintenance-db="$OLP_HA_DATABASE_ADMIN_URL" \
+    --if-exists --force "$database_name"; then
+    echo "failed to remove HA test database: $database_name" >&2
+    (( status == 0 )) && status=1
+  fi
   rm -rf "$work"
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 "$psql_command" "$OLP_HA_DATABASE_ADMIN_URL" -X --no-psqlrc -v ON_ERROR_STOP=1 \
   --command="DROP DATABASE IF EXISTS ${database_name} WITH (FORCE)"

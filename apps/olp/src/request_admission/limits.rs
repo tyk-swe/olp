@@ -220,7 +220,7 @@ pub(super) async fn reserve_http_inference_limits(
     }
     let limiter = state
         .limiter
-        .get()
+        .current()
         .ok_or_else(|| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
     let tokens_per_minute = authenticated
         .key

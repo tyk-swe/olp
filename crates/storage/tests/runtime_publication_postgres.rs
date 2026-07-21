@@ -3,8 +3,7 @@ use std::time::Duration;
 use olp_domain::{ApiKeyLimits, ApiKeyScope, RuntimeSnapshot};
 use olp_storage::{
     AuthHmacKey, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
-    NewApiKeyRecord,
-    PgStore, ReplayableIdempotency, hash_password, idempotency_fingerprint,
+    NewApiKeyRecord, PgStore, ReplayableIdempotency, hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
 

@@ -1,6 +1,6 @@
 import type { components } from './schema';
 import { apiClient } from './client';
-import { ApiProblem, throwApiProblem } from './http';
+import { ApiProblem, result } from './http';
 
 type Schemas = components['schemas'];
 
@@ -13,8 +13,7 @@ export type CreateOwnerResponse = Omit<Schemas['SessionResponse'], 'user'> & { u
 
 export async function getSetupStatus(signal?: AbortSignal): Promise<SetupStatus> {
   const { data, error, response } = await apiClient.GET('/api/v1/setup/status', { signal });
-  if (!data) throwApiProblem(error, response);
-  const value = data;
+  const value = result(data, error, response);
   if (typeof value?.setup_required !== 'boolean') {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
@@ -38,8 +37,7 @@ export async function createOwner(
     body: input,
     signal
   });
-  if (!data) throwApiProblem(error, response);
-  const value = data;
+  const value = result(data, error, response);
 
   if (
     typeof value?.csrf_token !== 'string' ||

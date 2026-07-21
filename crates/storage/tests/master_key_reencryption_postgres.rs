@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use olp_storage::{
-    EncryptedSecret, MasterKey, InstallationSetupInput, PgStore, ReencryptionError, credential_aad,
+    EncryptedSecret, InstallationSetupInput, MasterKey, PgStore, ReencryptionError, credential_aad,
     hash_password, idempotency_replay_aad, oidc_client_secret_aad, oidc_flow_payload_aad,
 };
 use sqlx::Row;

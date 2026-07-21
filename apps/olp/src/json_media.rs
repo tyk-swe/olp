@@ -56,13 +56,17 @@ impl InlineMediaAdmission {
             || encoded.len() > maximum_encoded
             || encoded.bytes().any(|byte| byte.is_ascii_whitespace())
         {
-            return Err(invalid_inline_media("Inline media exceeds its encoded size limit."));
+            return Err(invalid_inline_media(
+                "Inline media exceeds its encoded size limit.",
+            ));
         }
         let decoded = STANDARD
             .decode(encoded)
             .map_err(|_| invalid_inline_media("Inline media is not valid canonical base64."))?;
         if decoded.is_empty() || decoded.len() > MAX_INLINE_MEDIA_BYTES {
-            return Err(invalid_inline_media("Inline media exceeds its decoded size limit."));
+            return Err(invalid_inline_media(
+                "Inline media exceeds its decoded size limit.",
+            ));
         }
         self.total_bytes = self.total_bytes.saturating_add(decoded.len());
         if self.total_bytes > MAX_INLINE_MEDIA_TOTAL_BYTES {
@@ -133,7 +137,9 @@ fn require_image_mime(value: &str) -> Result<&str, InferenceError> {
     ) {
         Ok(value)
     } else {
-        Err(invalid_inline_media("Inline image MIME type is not supported."))
+        Err(invalid_inline_media(
+            "Inline image MIME type is not supported.",
+        ))
     }
 }
 
@@ -141,7 +147,9 @@ fn require_audio_mime(value: &str) -> Result<&str, InferenceError> {
     if matches!(value, "audio/wav" | "audio/mpeg" | "audio/mp3") {
         Ok(value)
     } else {
-        Err(invalid_inline_media("Inline audio MIME type is not supported."))
+        Err(invalid_inline_media(
+            "Inline audio MIME type is not supported.",
+        ))
     }
 }
 
@@ -149,7 +157,9 @@ fn openai_audio_mime(format: &str) -> Result<&'static str, InferenceError> {
     match format {
         "wav" => Ok("audio/wav"),
         "mp3" => Ok("audio/mpeg"),
-        _ => Err(invalid_inline_media("OpenAI input_audio supports only wav or mp3.")),
+        _ => Err(invalid_inline_media(
+            "OpenAI input_audio supports only wav or mp3.",
+        )),
     }
 }
 
@@ -174,11 +184,9 @@ async fn admit_anthropic_block(
 ) -> Result<(), InferenceError> {
     match block {
         AnthropicContentBlock::Image(image) if image.source.kind == "base64" => {
-            let mime = image
-                .source
-                .media_type
-                .as_deref()
-                .ok_or_else(|| invalid_inline_media("Anthropic base64 image requires media_type"))?;
+            let mime = image.source.media_type.as_deref().ok_or_else(|| {
+                invalid_inline_media("Anthropic base64 image requires media_type")
+            })?;
             require_image_mime(mime)?;
             let data = image
                 .source

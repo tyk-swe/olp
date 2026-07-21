@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_domain::{OperationKind, ProviderKind};
 use olp_storage::{
-    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, MasterKey, InstallationSetupInput,
+    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
     NewProviderDraft, NewRouteDraft, NewRouteTarget, OperationsError, PgStore, PriceInput,
     ReplayableIdempotency, RotateCredentialInput, credential_aad, hash_password,
     idempotency_fingerprint,

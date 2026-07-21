@@ -1,6 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
-import { ApiProblem } from './http';
+import { ensureSuccess, result } from './http';
+import { collectCursorPages } from './pagination';
 
 export type RequestSummary = components['schemas']['RequestSummary'];
 export type RequestDetail = components['schemas']['RequestDetailResponse'];
@@ -88,56 +89,39 @@ function compact<T extends Record<string, unknown>>(value: T): T {
   ) as T;
 }
 
-function apiError(error: unknown, status = 500): ApiProblem {
-  if (error && typeof error === 'object') {
-    const value = error as Record<string, unknown>;
-    return new ApiProblem({
-      title: typeof value.title === 'string' ? value.title : 'Request failed',
-      detail: typeof value.detail === 'string' ? value.detail : undefined,
-      status: typeof value.status === 'number' ? value.status : status
-    });
-  }
-  return new ApiProblem({ title: 'Request failed', status });
-}
-
 export async function listRequests(filters: RequestFilters): Promise<CursorPage<RequestSummary>> {
   const { data, error, response } = await apiClient.GET('/api/v1/requests', {
     params: { query: compact(filters) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function getRequest(requestId: string): Promise<RequestDetail> {
   const { data, error, response } = await apiClient.GET('/api/v1/requests/{request_id}', {
     params: { path: { request_id: requestId } }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listMediaJobs(filters: MediaJobFilters): Promise<CursorPage<MediaJob>> {
   const { data, error, response } = await apiClient.GET('/api/v1/media-jobs', {
     params: { query: compact(filters) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function getMediaJob(jobId: string): Promise<MediaJob> {
   const { data, error, response } = await apiClient.GET('/api/v1/media-jobs/{job_id}', {
     params: { path: { job_id: jobId } }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function usageSummary(filters: UsageFilters): Promise<UsageSummary> {
   const { data, error, response } = await apiClient.GET('/api/v1/usage/summary', {
     params: { query: compact(filters) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listRequestMetadataGatewayEpochs(
@@ -145,11 +129,10 @@ export async function listRequestMetadataGatewayEpochs(
   cursor?: string
 ): Promise<CursorPage<RequestMetadataGatewayEpoch>> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v1/request-metadata/gateway-epochs', {
-    params: { query: { state, cursor, limit: 25 } }
-  });
-  if (!data) throw apiError(error, response.status);
-  return data;
+    '/api/v1/request-metadata/gateway-epochs',
+    { params: { query: { state, cursor, limit: 25 } } }
+  );
+  return result(data, error, response);
 }
 
 export async function acknowledgeRequestMetadataGatewayEpoch(
@@ -159,8 +142,7 @@ export async function acknowledgeRequestMetadataGatewayEpoch(
     '/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge',
     { params: { path: { process_epoch: processEpoch } } }
   );
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function usageSeries(
@@ -170,8 +152,7 @@ export async function usageSeries(
   const { data, error, response } = await apiClient.GET('/api/v1/usage/time-series', {
     params: { query: compact({ ...filters, granularity }) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function usageBreakdown(
@@ -181,89 +162,72 @@ export async function usageBreakdown(
   const { data, error, response } = await apiClient.GET('/api/v1/usage/breakdown', {
     params: { query: compact({ ...filters, dimension, limit: 50 }) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function usageCompleteness(filters: UsageFilters): Promise<UsageCompleteness> {
   const { data, error, response } = await apiClient.GET('/api/v1/usage/completeness', {
     params: { query: compact(filters) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listAudit(cursor?: string): Promise<CursorPage<AuditEvent>> {
   const { data, error, response } = await apiClient.GET('/api/v1/audit', {
     params: { query: compact({ cursor, limit: 50 }) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function getReadiness(): Promise<Readiness> {
   const { data, error, response } = await apiClient.GET('/api/v1/health/ready');
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listProviderHealth(windowMinutes = 15): Promise<{
   window_minutes: number;
   data: ProviderHealth[];
 }> {
-  const providers: ProviderHealth[] = [];
-  const seen = new Set<string>();
-  let cursor: string | undefined;
   let responseWindow = windowMinutes;
-  do {
-    const { data, error, response } = await apiClient.GET('/api/v1/provider-health', {
+  const data = await collectCursorPages(async (cursor) => {
+    const response = await apiClient.GET('/api/v1/provider-health', {
       params: { query: { window_minutes: windowMinutes, cursor, limit: 200 } }
     });
-    if (!data) throw apiError(error, response.status);
-    responseWindow = data.window_minutes;
-    providers.push(...data.data);
-    const next = data.next_cursor ?? undefined;
-    if (next && seen.has(next)) {
-      throw new ApiProblem({ title: 'Provider-health pagination repeated a cursor', status: 502 });
-    }
-    if (next) seen.add(next);
-    cursor = next;
-  } while (cursor);
-  return { window_minutes: responseWindow, data: providers };
+    const page = result(response.data, response.error, response.response);
+    responseWindow = page.window_minutes;
+    return { items: page.data, nextCursor: page.next_cursor ?? null };
+  });
+  return { window_minutes: responseWindow, data };
 }
 
 export async function listRuntimeGenerations(cursor?: string): Promise<CursorPage<RuntimeGeneration>> {
   const { data, error, response } = await apiClient.GET('/api/v1/runtime-generations', {
     params: { query: compact({ cursor, limit: 25 }) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listSettings(): Promise<Setting[]> {
   const { data, error, response } = await apiClient.GET('/api/v1/settings');
-  if (!data) throw apiError(error, response.status);
-  return data.data;
+  return result(data, error, response).data;
 }
 
 export async function updateSetting(setting: Setting, value: string): Promise<Setting> {
   const { data, error, response } = await apiClient.PUT('/api/v1/settings/{key}', {
     params: {
       path: { key: setting.key },
-      header: { 'If-Match': `"${setting.etag}"` }
+      header: { 'If-Match': setting.etag }
     },
     body: { value }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listPricing(cursor?: string): Promise<CursorPage<PricingRevision>> {
   const { data, error, response } = await apiClient.GET('/api/v1/pricing/revisions', {
     params: { query: compact({ cursor, limit: 25 }) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function createPricingRevision(
@@ -274,32 +238,28 @@ export async function createPricingRevision(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: { effective_at: effectiveAt, prices }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function getProfile(): Promise<UserProfile> {
   const { data, error, response } = await apiClient.GET('/api/v1/profile');
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function updateProfile(profile: UserProfile, input: ProfileUpdate): Promise<UserProfile> {
   const { data, error, response } = await apiClient.PATCH('/api/v1/profile', {
-    params: { header: { 'If-Match': `"${profile.etag}"` } },
+    params: { header: { 'If-Match': profile.etag } },
     body: input
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function changePassword(profile: UserProfile, input: PasswordChange): Promise<UserProfile> {
   const { data, error, response } = await apiClient.POST('/api/v1/profile/password', {
-    params: { header: { 'If-Match': `"${profile.etag}"` } },
+    params: { header: { 'If-Match': profile.etag } },
     body: input
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function enrollPassword(
@@ -307,45 +267,41 @@ export async function enrollPassword(
   input: PasswordEnrollment
 ): Promise<UserProfile> {
   const { data, error, response } = await apiClient.POST('/api/v1/profile/password/enroll', {
-    params: { header: { 'If-Match': `"${profile.etag}"` } },
+    params: { header: { 'If-Match': profile.etag } },
     body: input
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function listSessions(cursor?: string): Promise<CursorPage<Session>> {
   const { data, error, response } = await apiClient.GET('/api/v1/sessions', {
     params: { query: compact({ cursor, limit: 50 }) }
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function revokeSession(id: string): Promise<void> {
   const { error, response } = await apiClient.DELETE('/api/v1/sessions/{session_id}', {
     params: { path: { session_id: id } }
   });
-  if (!response.ok) throw apiError(error, response.status);
+  ensureSuccess(error, response);
 }
 
 export async function listOidcIdentities(): Promise<OidcIdentityList> {
   const { data, error, response } = await apiClient.GET('/api/v1/oidc/identities');
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export async function beginOidcLink(): Promise<string> {
   const { data, error, response } = await apiClient.POST('/api/v1/oidc/link');
-  if (!data) throw apiError(error, response.status);
-  return data.authorization_url;
+  return result(data, error, response).authorization_url;
 }
 
 export async function unlinkOidcIdentity(identityId: string): Promise<void> {
   const { error, response } = await apiClient.DELETE('/api/v1/oidc/identities/{identity_id}', {
     params: { path: { identity_id: identityId } }
   });
-  if (!response.ok) throw apiError(error, response.status);
+  ensureSuccess(error, response);
 }
 
 export async function runPlayground(input: PlaygroundRequest): Promise<PlaygroundResponse> {
@@ -354,8 +310,7 @@ export async function runPlayground(input: PlaygroundRequest): Promise<Playgroun
     headers: { 'cache-control': 'no-store' },
     body: input
   });
-  if (!data) throw apiError(error, response.status);
-  return data;
+  return result(data, error, response);
 }
 
 export const operationsTesting = { compact };

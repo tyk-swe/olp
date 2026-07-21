@@ -43,7 +43,7 @@ export default defineConfig({
       timeout: 10_000
     },
     {
-      command: 'cargo run --manifest-path ../Cargo.toml --locked -p olp -- migrate && cargo run --manifest-path ../Cargo.toml --locked -p olp -- control',
+      command: 'tests/integration/run-olp.sh',
       url: 'http://127.0.0.1:4177/health/live',
       reuseExistingServer: false,
       timeout: 180_000,

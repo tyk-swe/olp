@@ -1,8 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_storage::{
-    ConfigurationError, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,
-    InstallationSetupInput, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore,
-    hash_password,
+    ConfigurationError, InstallationSetupInput, MediaJobError, MediaJobFilters, MediaJobLifecycle,
+    MediaJobOrder, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore, hash_password,
 };
 use uuid::Uuid;
 

@@ -26,7 +26,7 @@ pub(super) async fn reserve_limits(
         }
         let limiter = state
             .limiter
-            .get()
+            .current()
             .ok_or_else(|| InferenceError::unavailable("distributed_limits_unavailable"))?;
         let tokens_per_minute = i64::try_from(tokens_per_minute.get())
             .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
@@ -62,7 +62,7 @@ pub(super) async fn reserve_limits(
     }
     let limiter = state
         .limiter
-        .get()
+        .current()
         .ok_or_else(|| InferenceError::unavailable("distributed_limits_unavailable"))?;
     let tokens_per_minute = key
         .limits

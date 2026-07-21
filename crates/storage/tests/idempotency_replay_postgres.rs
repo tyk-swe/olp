@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use olp_domain::{ApiKeyLimits, ApiKeyScope, Role};
 use olp_storage::{
     AccessError, AuthHmacKey, ConfigurationError, IdempotencyOutcome, IdempotencyResponse,
-    IdentityError, MasterKey, NewApiKeyRecord, NewInvitation, InstallationSetupInput, PgStore,
+    IdentityError, InstallationSetupInput, MasterKey, NewApiKeyRecord, NewInvitation, PgStore,
     ReplayableIdempotency, RotateApiKeyInput, hash_password, idempotency_fingerprint,
 };
 use serde_json::{Value, json};

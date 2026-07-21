@@ -1,6 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { throwApiProblem } from '../http';
+import { ensureSuccess } from '../http';
 import { requireResponseData, type CursorPage } from './shared';
 
 type Schemas = components['schemas'];
@@ -82,5 +82,5 @@ export async function revokeSession(id: string): Promise<void> {
   const response = await apiClient.DELETE('/api/v1/sessions/{session_id}', {
     params: { path: { session_id: id } }
   });
-  if (!response.response.ok) throwApiProblem(response.error, response.response);
+  ensureSuccess(response.error, response.response);
 }

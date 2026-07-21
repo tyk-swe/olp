@@ -253,8 +253,7 @@ pub(crate) async fn load_runtime_transports(
                 Some(decrypt_provider_credential(&provider, master_key)?)
             }
             CredentialKind::None => {
-                if provider.kind == ProviderKind::Bedrock
-                    && provider.encrypted_credential.is_some()
+                if provider.kind == ProviderKind::Bedrock && provider.encrypted_credential.is_some()
                 {
                     return Err(std::io::Error::other(
                         "Bedrock default-chain provider must not store static credentials",
@@ -653,7 +652,11 @@ mod tests {
         let mut altered_version = record.clone();
         altered_version.credential_version = Some(credential_version + 1);
         let mut altered_envelope = record.clone();
-        altered_envelope.encrypted_credential.as_mut().unwrap().key_version = 2;
+        altered_envelope
+            .encrypted_credential
+            .as_mut()
+            .unwrap()
+            .key_version = 2;
         let mut missing_id = record.clone();
         missing_id.credential_id = None;
         let mut missing_version = record.clone();

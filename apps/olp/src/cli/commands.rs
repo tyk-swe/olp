@@ -417,7 +417,8 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
     store.ping().await?;
     checks.insert("postgresql".into(), json!({ "ok": true }));
 
-    let limiter = DistributedLimiter::connect(&args.persistence.valkey_url, "olp:v2:doctor").await?;
+    let limiter =
+        DistributedLimiter::connect(&args.persistence.valkey_url, "olp:v2:doctor").await?;
     limiter.ping().await?;
     checks.insert("valkey".into(), json!({ "ok": true }));
     preflight_request_metadata_stream_upgrade(&args.persistence.valkey_url).await?;
