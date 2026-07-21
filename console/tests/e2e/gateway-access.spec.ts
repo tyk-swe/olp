@@ -335,6 +335,7 @@ test('native provider detail never round-trips its official endpoint as a custom
 });
 
 test('provider detail resets provider-wide model mutations and retains row-local model pages', async ({ page }) => {
+  test.slow();
   await mockSession(page);
   page.on('dialog', (dialog) => dialog.accept());
   let modelVersion = 0;

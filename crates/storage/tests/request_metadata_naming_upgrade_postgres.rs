@@ -22,6 +22,11 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .execute(store.pool())
     .await
     .unwrap();
+    let mut transaction = store.pool().begin().await.unwrap();
+    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO usage_gap_hourly \
          (bucket, gateway_instance, reason, event_count, first_observed_at, \
@@ -30,9 +35,10 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
                   'fresh_valkey_stream_loss_exact:incident-1', 1, \
                  date_trunc('hour', now()), now(), 0)",
     )
-    .execute(store.pool())
+    .execute(&mut *transaction)
     .await
     .unwrap();
+    transaction.commit().await.unwrap();
     sqlx::query(
         "INSERT INTO usage_event_receipts \
          (event_id, request_id, event_sha256, status, observed_at) \
