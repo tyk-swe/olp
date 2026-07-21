@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::SessionMaterial;
 
-use super::{PasswordUser, PersistenceError, PgStore, SessionPrincipal};
+use super::{LocalPasswordUser, PersistenceError, PgStore, SessionPrincipal};
 
 impl PgStore {
     pub async fn create_session(
@@ -77,10 +77,10 @@ impl PgStore {
         Ok(())
     }
 
-    pub async fn password_user(
+    pub async fn local_password_user(
         &self,
         email: &str,
-    ) -> Result<Option<PasswordUser>, PersistenceError> {
+    ) -> Result<Option<LocalPasswordUser>, PersistenceError> {
         let row = sqlx::query(
             "SELECT id, email, display_name, password_hash, role::text AS role \
              FROM users WHERE email = $1 AND active AND password_hash IS NOT NULL",
@@ -88,7 +88,7 @@ impl PgStore {
         .bind(email.trim().to_lowercase())
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|row| PasswordUser {
+        Ok(row.map(|row| LocalPasswordUser {
             id: row.get("id"),
             email: row.get("email"),
             display_name: row.get("display_name"),

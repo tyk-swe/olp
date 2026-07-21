@@ -1,7 +1,8 @@
 use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
-    CompleteOidcLogin, MasterKey, NewOidcFlow, NewOwner, OidcError, OidcFlowPurpose, PgStore,
+    CompleteOidcLogin, InstallationSetupInput, MasterKey, NewOidcFlow, OidcError, OidcFlowPurpose,
+    PgStore,
     SessionMaterial, UpsertOidcConfiguration, hash_password, oidc_client_secret_aad,
     oidc_flow_payload_aad,
 };
@@ -16,7 +17,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "OIDC flow integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),

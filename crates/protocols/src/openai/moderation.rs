@@ -81,7 +81,7 @@ fn decode_moderation_input(
 
 pub fn encode_moderation(
     request: &CanonicalModerationRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<OpenAiModerationRequest, ModerationCodecError> {
     request
         .extensions
@@ -109,7 +109,7 @@ pub fn encode_moderation(
         .collect::<Result<Vec<_>, _>>()?;
     apply_pointer_extensions(
         OpenAiModerationRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             input: Value::Array(input),
             extra: BTreeMap::new(),
         },

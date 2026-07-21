@@ -146,7 +146,7 @@ pub(super) async fn change_password(
         return Err(Problem::validation(errors));
     }
     let local = require_store(&state)?
-        .password_user(&principal.email)
+        .local_password_user(&principal.email)
         .await
         .map_err(map_persistence)?
         .ok_or_else(|| {

@@ -103,14 +103,14 @@ pub fn decode_speech(request: OpenAiSpeechRequest) -> Result<Operation, AudioCod
 
 pub fn encode_speech(
     request: &CanonicalSpeechRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<OpenAiSpeechRequest, AudioCodecError> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
     apply_pointer_extensions(
         OpenAiSpeechRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             input: request.input.clone(),
             voice: request.voice.clone(),
             response_format: request.format.clone(),
@@ -295,7 +295,7 @@ pub fn decode_transcription(
 
 pub fn encode_transcription(
     request: &CanonicalTranscriptionRequest,
-    provider_model: &str,
+    upstream_model: &str,
     mut resolve_part: impl FnMut(&olp_domain::MediaHandle) -> Result<BoundedMediaPart, AudioCodecError>,
 ) -> Result<OpenAiTranscriptionRequest, AudioCodecError> {
     request
@@ -305,7 +305,7 @@ pub fn encode_transcription(
     validate_audio_part(&file)?;
     let wire = apply_pointer_extensions(
         OpenAiTranscriptionRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             file,
             language: request.language.clone(),
             prompt: request.prompt.clone(),

@@ -15,7 +15,7 @@ use super::extensions::apply_extensions;
 
 pub fn encode_messages_request(
     request: &GenerationRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<MessagesRequest, EncodeError> {
     request
         .extensions
@@ -136,7 +136,7 @@ pub fn encode_messages_request(
         _ => Some(SystemPrompt::Blocks(system_blocks)),
     };
     let mut encoded = MessagesRequest {
-        model: provider_model.to_owned(),
+        model: upstream_model.to_owned(),
         messages,
         max_tokens,
         system,

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, Page, checked_u64},
+    cursor::{OperationsError, OperationsPage, checked_u64},
 };
 use crate::{PgStore, split_page};
 
@@ -23,7 +23,7 @@ impl PgStore {
         &self,
         before_sequence: Option<u64>,
         limit: u16,
-    ) -> Result<Page<RuntimeGenerationRecord>, OperationsError> {
+    ) -> Result<OperationsPage<RuntimeGenerationRecord>, OperationsError> {
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let before = before_sequence
             .map(i64::try_from)
@@ -56,6 +56,6 @@ impl PgStore {
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
             item.sequence.to_string()
         });
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 }

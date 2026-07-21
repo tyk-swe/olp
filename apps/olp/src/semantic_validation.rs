@@ -54,7 +54,7 @@ pub(crate) fn select_representable_attempts_filtered(
         |provider, target| {
             capability_matched = true;
             let operation = operation_for_provider(operation, provider.kind);
-            if validate_for_provider(&operation, provider.kind, &target.provider_model).is_err() {
+            if validate_for_provider(&operation, provider.kind, &target.upstream_model).is_err() {
                 return false;
             }
             representable_matched = true;
@@ -102,7 +102,7 @@ fn retain_representable_attempts(
     attempts: &mut Vec<AttemptPlan>,
 ) -> Result<(), InferenceError> {
     attempts.retain(|attempt| {
-        validate_for_provider(operation, attempt.provider_kind, &attempt.provider_model).is_ok()
+        validate_for_provider(operation, attempt.provider_kind, &attempt.upstream_model).is_ok()
     });
     if attempts.is_empty() {
         return Err(InferenceError::invalid_request(
@@ -115,21 +115,21 @@ fn retain_representable_attempts(
 fn validate_for_provider(
     operation: &Operation,
     provider_kind: ProviderKind,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<(), String> {
     match provider_kind {
         ProviderKind::OpenAi | ProviderKind::AzureOpenAi | ProviderKind::OpenAiCompatible => {
-            validate_openai(operation, provider_model)
+            validate_openai(operation, upstream_model)
         }
-        ProviderKind::Anthropic => validate_anthropic(operation, provider_model),
-        ProviderKind::Gemini | ProviderKind::VertexAi => validate_gemini(operation, provider_model),
+        ProviderKind::Anthropic => validate_anthropic(operation, upstream_model),
+        ProviderKind::Gemini | ProviderKind::VertexAi => validate_gemini(operation, upstream_model),
         ProviderKind::Bedrock => {
             olp_providers::validate_bedrock_operation(operation).map_err(|error| error.to_string())
         }
     }
 }
 
-fn validate_openai(operation: &Operation, provider_model: &str) -> Result<(), String> {
+fn validate_openai(operation: &Operation, upstream_model: &str) -> Result<(), String> {
     operation
         .extensions()
         .ok_or_else(|| "operation extensions are unavailable".to_owned())?
@@ -145,54 +145,54 @@ fn validate_openai(operation: &Operation, provider_model: &str) -> Result<(), St
                 .and_then(|value| value.as_str().map(str::to_owned))
                 .is_some_and(|endpoint| endpoint == "responses");
             if responses {
-                openai::encode_response_create(&request, provider_model)
+                openai::encode_response_create(&request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             } else {
-                openai::encode_chat_completion(&request, provider_model)
+                openai::encode_chat_completion(&request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             }
         }
-        Operation::Embeddings(request) => openai::encode_embedding_request(request, provider_model)
+        Operation::Embeddings(request) => openai::encode_embedding_request(request, upstream_model)
             .map(|_| ())
             .map_err(|error| error.to_string()),
         Operation::TokenCount(request) => {
-            openai::encode_response_input_tokens(request, provider_model)
+            openai::encode_response_input_tokens(request, upstream_model)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
         Operation::Images(ImageOperation::Generation(request)) => {
-            openai::encode_image_generation(request, provider_model)
+            openai::encode_image_generation(request, upstream_model)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
         Operation::Images(ImageOperation::Edit(request)) => {
-            openai::encode_image_edit(request, provider_model, |handle| {
+            openai::encode_image_edit(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
         Operation::Images(ImageOperation::Variation(request)) => {
-            openai::encode_image_variation(request, provider_model, |handle| {
+            openai::encode_image_variation(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
-        Operation::Speech(request) => openai::encode_speech(request, provider_model)
+        Operation::Speech(request) => openai::encode_speech(request, upstream_model)
             .map(|_| ())
             .map_err(|error| error.to_string()),
         Operation::Transcription(request) => {
-            openai::encode_transcription(request, provider_model, |handle| {
+            openai::encode_transcription(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
         Operation::Video(VideoOperation::Create(request)) => {
-            openai::encode_video_create(request, provider_model, |handle| {
+            openai::encode_video_create(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
@@ -205,16 +205,16 @@ fn validate_openai(operation: &Operation, provider_model: &str) -> Result<(), St
             VideoOperation::Get(_) | VideoOperation::Content(_) | VideoOperation::Delete(_),
         )
         | Operation::Models(_) => Ok(()),
-        Operation::Moderation(request) => openai::encode_moderation(request, provider_model)
+        Operation::Moderation(request) => openai::encode_moderation(request, upstream_model)
             .map(|_| ())
             .map_err(|error| error.to_string()),
     }
 }
 
-fn validate_anthropic(operation: &Operation, provider_model: &str) -> Result<(), String> {
+fn validate_anthropic(operation: &Operation, upstream_model: &str) -> Result<(), String> {
     match operation {
         Operation::Generation(_) | Operation::TokenCount(_) => {
-            olp_providers::validate_anthropic_operation(operation, provider_model)
+            olp_providers::validate_anthropic_operation(operation, upstream_model)
                 .map_err(|error| error.to_string())
         }
         Operation::Models(_) => Ok(()),
@@ -222,10 +222,10 @@ fn validate_anthropic(operation: &Operation, provider_model: &str) -> Result<(),
     }
 }
 
-fn validate_gemini(operation: &Operation, provider_model: &str) -> Result<(), String> {
+fn validate_gemini(operation: &Operation, upstream_model: &str) -> Result<(), String> {
     match operation {
         Operation::Generation(_) | Operation::TokenCount(_) => {
-            olp_providers::validate_gemini_operation(operation, provider_model)
+            olp_providers::validate_gemini_operation(operation, upstream_model)
                 .map_err(|error| error.to_string())
         }
         Operation::Models(_) => Ok(()),
@@ -286,7 +286,7 @@ mod tests {
             target_id: TargetId::new(),
             provider_id: olp_domain::ProviderId::new(),
             provider_kind: kind,
-            provider_model: "upstream-model".into(),
+            upstream_model: "upstream-model".into(),
             timeout: DurationMs::new(1_000),
             priority: 0,
         }
@@ -483,7 +483,7 @@ mod tests {
                     id: TargetId::new(),
                     routing_id: None,
                     provider_id: incompatible,
-                    provider_model: "claude".into(),
+                    upstream_model: "claude".into(),
                     priority: 0,
                     weight: NonZeroU32::new(1).unwrap(),
                     timeout: DurationMs::new(1_000),
@@ -492,7 +492,7 @@ mod tests {
                     id: TargetId::new(),
                     routing_id: None,
                     provider_id: compatible,
-                    provider_model: "gpt".into(),
+                    upstream_model: "gpt".into(),
                     priority: 1,
                     weight: NonZeroU32::new(1).unwrap(),
                     timeout: DurationMs::new(1_000),

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     ApiKeyMaterial, EncryptedSecret, IdempotencyOutcome, IdempotencyResponse, PersistenceError,
-    PgStore, PublishedRelease, ReplayableIdempotency,
+    PgStore, PublishedRuntimeRelease, ReplayableIdempotency,
     runtime_compiler::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
     split_page,
     store::{
@@ -214,7 +214,7 @@ pub struct RotateCredentialInput {
 #[derive(Clone, Debug)]
 pub struct ProviderMutationResult {
     pub etag: Uuid,
-    pub release: Option<PublishedRelease>,
+    pub release: Option<PublishedRuntimeRelease>,
 }
 
 #[derive(Clone, Debug)]
@@ -232,7 +232,7 @@ pub struct RouteTargetRecord {
     pub provider_model_id: Uuid,
     pub provider_id: Uuid,
     pub provider_name: String,
-    pub provider_model: String,
+    pub upstream_model: String,
     pub priority: i32,
     pub weight: i32,
     pub timeout_ms: i32,
@@ -294,7 +294,7 @@ pub struct RouteSimulationTarget {
     pub target_id: Uuid,
     pub provider_id: Uuid,
     pub provider_name: String,
-    pub provider_model: String,
+    pub upstream_model: String,
     pub priority: i32,
     pub eligible: bool,
     pub reason: Option<String>,
@@ -350,13 +350,13 @@ pub struct ApiKeyRotationResult {
     pub id: Uuid,
     pub lookup_id: String,
     pub etag: Uuid,
-    pub release: PublishedRelease,
+    pub release: PublishedRuntimeRelease,
 }
 
 #[derive(Clone, Debug)]
 pub struct ApiKeyMutationResult {
     pub etag: Uuid,
-    pub release: PublishedRelease,
+    pub release: PublishedRuntimeRelease,
 }
 
 #[derive(Clone, Debug)]

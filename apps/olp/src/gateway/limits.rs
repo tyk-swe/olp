@@ -197,7 +197,7 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
 }
 
 pub(crate) async fn release_limits(state: &ApiState, lease: Option<&LimitLease>) {
-    if let (Some(limiter), Some(lease)) = (state.limiter.get(), lease) {
+    if let (Some(limiter), Some(lease)) = (state.limiter.current(), lease) {
         match tokio::time::timeout(Duration::from_millis(250), limiter.release(lease)).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => warn!(%error, "failed to release concurrency lease"),

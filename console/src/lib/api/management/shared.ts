@@ -8,7 +8,7 @@ export function getAbortSignal(input?: ReadSignal): AbortSignal | undefined {
   return input;
 }
 
-export function result<T>(data: T | undefined, error: unknown, response: Response): T {
+export function requireResponseData<T>(data: T | undefined, error: unknown, response: Response): T {
   if (data === undefined) throwApiProblem(error, response);
   return data;
 }

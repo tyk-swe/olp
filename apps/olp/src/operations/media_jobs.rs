@@ -74,7 +74,7 @@ impl From<MediaJobRecord> for MediaJobItem {
             api_key_id: record.api_key_id,
             provider_id: record.provider_id,
             provider_name: record.provider_name,
-            provider_model: record.provider_model,
+            provider_model: record.upstream_model,
             route: record.route_slug,
             operation: record.operation.to_string(),
             surface: media_job_surface_wire_value(record.surface).to_owned(),

@@ -3,25 +3,25 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::{PersistenceError, PgStore, PublishedRelease};
+use super::{PersistenceError, PgStore, PublishedRuntimeRelease};
 
 impl PgStore {
     /// Returns newest verified releases, skipping and visibly logging corrupt
     /// envelopes so a replacement gateway can try its previous durable LKG.
-    pub async fn recent_valid_releases(
+    pub async fn recent_valid_runtime_releases(
         &self,
         limit: u16,
-    ) -> Result<Vec<PublishedRelease>, PersistenceError> {
-        self.recent_valid_releases_after(limit, None).await
+    ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
+        self.recent_valid_runtime_releases_after(limit, None).await
     }
 
     /// Returns verified releases newer than the supplied installed sequence.
     /// Pollers use this to avoid decoding unchanged immutable snapshots.
-    pub async fn recent_valid_releases_after(
+    pub async fn recent_valid_runtime_releases_after(
         &self,
         limit: u16,
         installed_sequence: Option<u64>,
-    ) -> Result<Vec<PublishedRelease>, PersistenceError> {
+    ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
         let installed_sequence = installed_sequence
             .map(i64::try_from)
             .transpose()
@@ -53,11 +53,11 @@ impl PgStore {
                 );
                 continue;
             }
-            releases.push(PublishedRelease {
+            releases.push(PublishedRuntimeRelease {
                 generation_id,
                 sequence,
                 payload,
-                sha256: actual_sha,
+                payload_sha256: actual_sha,
                 created_at: row.get("created_at"),
             });
         }

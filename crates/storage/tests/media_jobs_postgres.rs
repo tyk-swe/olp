@@ -1,7 +1,8 @@
 use chrono::{Duration, Utc};
 use olp_storage::{
     ConfigurationError, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,
-    MediaJobState, MediaJobUpdate, NewMediaJobReservation, NewOwner, PgStore, hash_password,
+    InstallationSetupInput, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore,
+    hash_password,
 };
 use uuid::Uuid;
 
@@ -13,7 +14,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "Media jobs integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
@@ -97,7 +98,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             runtime_generation_id,
             api_key_id,
             provider_id,
-            provider_model: "video-model".to_owned(),
+            upstream_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
             surface: "openai".parse().unwrap(),
@@ -133,7 +134,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             runtime_generation_id,
             api_key_id,
             provider_id,
-            provider_model: "video-model".to_owned(),
+            upstream_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
             surface: "openai".parse().unwrap(),
@@ -299,7 +300,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             runtime_generation_id,
             api_key_id,
             provider_id,
-            provider_model: "video-model".to_owned(),
+            upstream_model: "video-model".to_owned(),
             route_slug: "video-default".to_owned(),
             operation: "video_create".parse().unwrap(),
             surface: "openai".parse().unwrap(),

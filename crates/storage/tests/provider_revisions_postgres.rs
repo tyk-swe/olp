@@ -1,7 +1,7 @@
 use olp_domain::{ApiKeyLimits, ApiKeyScope, OperationKind, RouteSlug, RuntimeSnapshot};
 use olp_storage::{
     AuthHmacKey, ConfigurationError, IdempotencyOutcome, IdempotencyResponse, MasterKey,
-    MediaJobState, MediaJobUpdate, NewApiKeyRecord, NewMediaJobReservation, NewOwner,
+    MediaJobState, MediaJobUpdate, NewApiKeyRecord, NewMediaJobReservation, InstallationSetupInput,
     NewProviderDraft, NewRouteDraft, NewRouteTarget, PgStore, ReplayableIdempotency,
     RotateCredentialInput, SessionMaterial, UpdateProvider, credential_aad,
     idempotency_fingerprint,
@@ -16,8 +16,8 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let (owner, _) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: "Provider revisions".to_owned(),
                 email: "owner@provider-revisions.test".to_owned(),
                 display_name: "Owner".to_owned(),
@@ -140,7 +140,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             runtime_generation_id: first_activation.release.generation_id,
             api_key_id: media_api_key_id,
             provider_id,
-            provider_model: "model-old".to_owned(),
+            upstream_model: "model-old".to_owned(),
             route_slug: "video-durable".to_owned(),
             operation: "video_create".parse().unwrap(),
             surface: "openai".parse().unwrap(),
@@ -175,14 +175,14 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 targets: vec![
                     NewRouteTarget {
                         provider_id,
-                        provider_model: "model-old".to_owned(),
+                        upstream_model: "model-old".to_owned(),
                         priority: 0,
                         weight: 1,
                         timeout_ms: 20_000,
                     },
                     NewRouteTarget {
                         provider_id,
-                        provider_model: "embed-old".to_owned(),
+                        upstream_model: "embed-old".to_owned(),
                         priority: 0,
                         weight: 1,
                         timeout_ms: 20_000,
@@ -352,11 +352,11 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             .get(&RouteSlug::parse("default").unwrap())
             .unwrap()
             .targets[0]
-            .provider_model,
+            .upstream_model,
         "model-old"
     );
     let staged_secret = store
-        .provider_secrets_for_runtime(&staged_publication)
+        .runtime_provider_configurations(&staged_publication)
         .await
         .unwrap();
     assert_eq!(
@@ -418,7 +418,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         second_credential_id
     );
     let activated_secret = store
-        .provider_secrets_for_runtime(&activated)
+        .runtime_provider_configurations(&activated)
         .await
         .unwrap();
     assert_eq!(

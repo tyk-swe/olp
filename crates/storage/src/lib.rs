@@ -36,7 +36,7 @@ pub use oidc::{
     OidcRoleMapping, UpsertOidcConfiguration,
 };
 pub use operations::{
-    AttemptRecord, AuditRecord, OperationsError, Page, PriceInput, PricingRevisionRecord,
+    AttemptRecord, AuditRecord, OperationsError, OperationsPage, PriceInput, PricingRevisionRecord,
     PrometheusOperationsSummary, ProviderHealthRecord, RequestDetail, RequestFilters,
     RequestRecord, RuntimeGenerationRecord, SettingRecord, TimestampCursor, UsageBreakdown,
     UsageBreakdownReport, UsageCompleteness, UsageDimension, UsageFilters, UsageGranularity,
@@ -63,9 +63,10 @@ pub use security::{
     oidc_flow_payload_aad, verify_password,
 };
 pub use store::{
-    IdempotencyOutcome, IdempotencyResponse, NewOwner, OutboxRecord, PasswordUser,
-    PersistenceError, PgStore, PublishedRelease, ReplayableIdempotency, RequestMetadataGap,
-    SessionPrincipal, SetupResult, idempotency_fingerprint, idempotency_secret_digest,
+    IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, InstallationSetupResult,
+    LocalPasswordUser, OutboxRecord, PersistenceError, PgStore, PublishedRuntimeRelease,
+    ReplayableIdempotency, RequestMetadataGap, SessionPrincipal, idempotency_fingerprint,
+    idempotency_secret_digest,
 };
 pub use valkey::{
     REQUEST_METADATA_STREAM, RuntimeHintPublisher, RuntimeHintSubscriber, ValkeyAdapterError,
@@ -99,7 +100,7 @@ pub use configuration::{
     CredentialVersionRecord, DiscoveredModelInput, NewProviderDraft, NewRouteDraft, NewRouteTarget,
     ProviderActivated, ProviderDraftCreated, ProviderModelInventoryRecord, ProviderModelRecord,
     ProviderMutationResult, ProviderRecord, ProviderRevisionDiff, ProviderRevisionRecord,
-    ProviderSecretRecord, ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput,
+    RuntimeProviderConfiguration, ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput,
     RouteActivated, RouteDraftCreated, RouteDraftRecord, RouteRecord, RouteRevisionDiff,
     RouteRevisionRecord, RouteSimulation, RouteSimulationTarget, RouteTargetRecord,
     StoredCredentialSecret, UpdateApiKeyInput, UpdateProvider,

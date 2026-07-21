@@ -31,7 +31,7 @@ use super::{
     },
     limits::release_limits,
     openai_http::unix_seconds,
-    telemetry::{UsageCapture, emit_event_execution},
+    telemetry::{UsageCapture, emit_event_execution_metadata},
 };
 
 pub(super) async fn responses(
@@ -85,7 +85,7 @@ async fn responses_unary_response(
         Err(failure) => (Vec::new(), Some(failure)),
     };
     if let Some(failure) = failure {
-        emit_event_execution(state, &execution, &UsageCapture::default(), Some(&failure));
+        emit_event_execution_metadata(state, &execution, &UsageCapture::default(), Some(&failure));
         release_limits(state, execution.lease.as_ref()).await;
         return Err(failure);
     }
@@ -101,12 +101,12 @@ async fn responses_unary_response(
     .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
     match response {
         Ok(response) => {
-            emit_event_execution(state, &execution, &usage, None);
+            emit_event_execution_metadata(state, &execution, &usage, None);
             release_limits(state, execution.lease.as_ref()).await;
             Ok((StatusCode::OK, Json(response)).into_response())
         }
         Err(failure) => {
-            emit_event_execution(state, &execution, &usage, Some(&failure));
+            emit_event_execution_metadata(state, &execution, &usage, Some(&failure));
             release_limits(state, execution.lease.as_ref()).await;
             Err(failure)
         }

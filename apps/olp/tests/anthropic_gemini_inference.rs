@@ -65,7 +65,7 @@ impl ProviderTransport for MockTransport {
         self.calls.lock().unwrap().push(call);
         let surface = self.native_surface;
         let text = self.text;
-        let provider_model = request.attempt.provider_model.clone();
+        let upstream_model = request.attempt.upstream_model.clone();
         Box::pin(async move {
             if request.metadata.operation == OperationKind::TokenCount {
                 return Ok(ProviderOutput::Result(Box::new(
@@ -75,7 +75,7 @@ impl ProviderTransport for MockTransport {
                     }),
                 )));
             }
-            let events = generation_events(text, &provider_model);
+            let events = generation_events(text, &upstream_model);
             Ok(ProviderOutput::Events(Box::pin(stream::iter(
                 events.into_iter().map(Ok),
             ))))
@@ -83,13 +83,13 @@ impl ProviderTransport for MockTransport {
     }
 }
 
-fn generation_events(text: &str, provider_model: &str) -> Vec<CanonicalEvent> {
+fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
     vec![
         CanonicalEvent::new(
             0,
             CanonicalEventKind::ResponseStart {
                 response_id: Some("provider-response".into()),
-                provider_model: Some(provider_model.into()),
+                provider_model: Some(upstream_model.into()),
             },
         ),
         CanonicalEvent::new(
@@ -182,7 +182,7 @@ fn test_gateway() -> TestGateway {
                 id: TargetId::new(),
                 routing_id: None,
                 provider_id: anthropic_provider,
-                provider_model: anthropic_model.into(),
+                upstream_model: anthropic_model.into(),
                 priority: 0,
                 weight: NonZeroU32::new(1).unwrap(),
                 timeout: DurationMs::new(4_000),
@@ -191,7 +191,7 @@ fn test_gateway() -> TestGateway {
                 id: TargetId::new(),
                 routing_id: None,
                 provider_id: gemini_provider,
-                provider_model: gemini_model.into(),
+                upstream_model: gemini_model.into(),
                 priority: 0,
                 weight: NonZeroU32::new(1).unwrap(),
                 timeout: DurationMs::new(4_000),
@@ -943,7 +943,7 @@ async fn client_disconnect_drops_the_upstream_stream() {
         .get_mut(&provider_id)
         .unwrap()
         .capabilities = BTreeSet::from([Capability::new(
-        route.targets[0].provider_model.clone(),
+        route.targets[0].upstream_model.clone(),
         OperationKind::Generation,
         Surface::Anthropic,
         TransportMode::Streaming,

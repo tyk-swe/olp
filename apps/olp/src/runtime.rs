@@ -13,7 +13,7 @@ use olp_domain::{
     ApiKey, ApiKeyLookupId, ProviderId, ProviderTransport, RuntimeGeneration, RuntimeGenerationId,
     RuntimeSnapshot,
 };
-use olp_storage::PublishedRelease;
+use olp_storage::PublishedRuntimeRelease;
 use thiserror::Error;
 
 pub struct RuntimeManager {
@@ -79,7 +79,7 @@ impl RuntimeManager {
         self.bundle.load_full()
     }
 
-    pub fn ordinal(&self) -> Option<u64> {
+    pub fn active_generation_ordinal(&self) -> Option<u64> {
         self.loaded
             .load(Ordering::Acquire)
             .then(|| self.bundle.load().generation.ordinal)
@@ -117,7 +117,7 @@ impl RuntimeManager {
 
     fn decode_release(
         &self,
-        release: &PublishedRelease,
+        release: &PublishedRuntimeRelease,
     ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
         let mut snapshot = RuntimeSnapshot::from_persisted_slice(&release.payload)?;
         if snapshot.generation.id.as_uuid() != release.generation_id {
@@ -135,7 +135,7 @@ impl RuntimeManager {
     /// expiry, limits, or digest material than an LKG release contains.
     pub fn decode_release_candidate(
         &self,
-        release: &PublishedRelease,
+        release: &PublishedRuntimeRelease,
         current_api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
     ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
         let mut snapshot = self.decode_release(release)?;
@@ -276,11 +276,11 @@ mod tests {
             routes: BTreeMap::new(),
             api_keys: BTreeMap::from([(lookup_id.clone(), historical_key)]),
         };
-        let release = PublishedRelease {
+        let release = PublishedRuntimeRelease {
             generation_id: generation_id.as_uuid(),
             sequence: 9,
             payload: serde_json::to_vec(&historical).unwrap(),
-            sha256: [0; 32],
+            payload_sha256: [0; 32],
             created_at: historical.generation.activated_at,
         };
         let expires_at = Utc::now() + Duration::minutes(10);

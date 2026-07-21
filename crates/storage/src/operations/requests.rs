@@ -6,8 +6,8 @@ use uuid::Uuid;
 use super::{
     MAX_PAGE_SIZE,
     cursor::{
-        OperationsError, Page, TimestampCursor, checked_u16, optional_i32_u64, optional_u16,
-        optional_u64, trimmed_optional,
+        OperationsError, OperationsPage, TimestampCursor, checked_u16, optional_i32_u64,
+        optional_u16, optional_u64, trimmed_optional,
     },
 };
 use crate::{PersistenceError, PgStore, split_page};
@@ -77,7 +77,7 @@ impl PgStore {
         filters: &RequestFilters,
         cursor: Option<&TimestampCursor>,
         limit: u16,
-    ) -> Result<Page<RequestRecord>, OperationsError> {
+    ) -> Result<OperationsPage<RequestRecord>, OperationsError> {
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(
             "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
@@ -110,7 +110,7 @@ impl PgStore {
             }
             .encode()
         });
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 
     pub async fn request_detail(&self, id: Uuid) -> Result<RequestDetail, OperationsError> {

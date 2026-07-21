@@ -38,7 +38,7 @@ fn provider(
         id: TargetId::from_uuid(id(target_number)),
         routing_id: None,
         provider_id,
-        provider_model: model,
+        upstream_model: model,
         priority,
         weight: NonZeroU32::new(weight).expect("fixture weight is non-zero"),
         timeout: DurationMs::new(2_000),
@@ -96,7 +96,7 @@ fn persisted_snapshot_decoder_is_narrow_and_public_serde_stays_strict() {
         Surface::OpenAi,
         TransportMode::Streaming,
     )]);
-    target.provider_model = "open_ai".to_owned();
+    target.upstream_model = "open_ai".to_owned();
     let current = snapshot(vec![(provider, target)], 1);
     let current_value = serde_json::to_value(&current).unwrap();
     let current_provider = current_value["providers"]
@@ -129,7 +129,7 @@ fn persisted_snapshot_decoder_is_narrow_and_public_serde_stays_strict() {
         "open_ai"
     );
     assert_eq!(
-        decoded.routes.values().next().unwrap().targets[0].provider_model,
+        decoded.routes.values().next().unwrap().targets[0].upstream_model,
         "open_ai"
     );
 

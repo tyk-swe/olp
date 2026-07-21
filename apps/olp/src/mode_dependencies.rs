@@ -1,8 +1,8 @@
-//! Mode-owned orchestration services.
+//! Mode-owned dependency bundles.
 //!
 //! These types establish startup-time dependency contracts. HTTP handlers can
 //! share the same `ApiState` extraction type while process composition proves
-//! that every service exposed by a mode has its required dependencies.
+//! that every surface exposed by a mode has its required dependencies.
 
 use std::sync::Arc;
 
@@ -12,12 +12,12 @@ use thiserror::Error;
 use crate::{ApiMode, ApiState, RuntimeManager, TransportRegistry};
 
 #[derive(Clone)]
-pub struct ConfigurationService {
+pub struct ConfigurationDependencies {
     pub(crate) store: PgStore,
     pub(crate) master_key: Option<Arc<MasterKey>>,
 }
 
-impl ConfigurationService {
+impl ConfigurationDependencies {
     #[must_use]
     pub fn store(&self) -> &PgStore {
         &self.store
@@ -30,12 +30,12 @@ impl ConfigurationService {
 }
 
 #[derive(Clone)]
-pub struct IdentityService {
+pub struct IdentityDependencies {
     pub(crate) store: PgStore,
     pub(crate) auth_hmac_key: Arc<AuthHmacKey>,
 }
 
-impl IdentityService {
+impl IdentityDependencies {
     #[must_use]
     pub fn store(&self) -> &PgStore {
         &self.store
@@ -48,13 +48,13 @@ impl IdentityService {
 }
 
 #[derive(Clone)]
-pub struct InferenceService {
+pub struct InferenceDependencies {
     pub(crate) store: PgStore,
     pub(crate) runtime: Arc<RuntimeManager>,
     pub(crate) transports: TransportRegistry,
 }
 
-impl InferenceService {
+impl InferenceDependencies {
     #[must_use]
     pub fn store(&self) -> &PgStore {
         &self.store
@@ -72,11 +72,11 @@ impl InferenceService {
 }
 
 #[derive(Clone)]
-pub struct OperationsService {
+pub struct OperationsDependencies {
     pub(crate) store: PgStore,
 }
 
-impl OperationsService {
+impl OperationsDependencies {
     #[must_use]
     pub fn store(&self) -> &PgStore {
         &self.store
@@ -84,11 +84,11 @@ impl OperationsService {
 }
 
 #[derive(Clone)]
-pub struct WorkerService {
+pub struct WorkerDependencies {
     pub(crate) store: PgStore,
 }
 
-impl WorkerService {
+impl WorkerDependencies {
     #[must_use]
     pub fn new(store: PgStore) -> Self {
         Self { store }
@@ -101,29 +101,29 @@ impl WorkerService {
 }
 
 #[derive(Clone)]
-pub enum ModeServices {
+pub enum ModeDependencies {
     All {
-        configuration: ConfigurationService,
-        identity: IdentityService,
-        inference: InferenceService,
-        operations: OperationsService,
+        configuration: ConfigurationDependencies,
+        identity: IdentityDependencies,
+        inference: InferenceDependencies,
+        operations: OperationsDependencies,
     },
     Gateway {
-        inference: InferenceService,
+        inference: InferenceDependencies,
     },
     Control {
-        configuration: ConfigurationService,
-        identity: IdentityService,
-        operations: OperationsService,
+        configuration: ConfigurationDependencies,
+        identity: IdentityDependencies,
+        operations: OperationsDependencies,
     },
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum ApiStartupError {
+pub enum ModeDependencyError {
     #[error("{0} mode requires PostgreSQL storage")]
-    Storage(ApiMode),
+    MissingStorage(ApiMode),
     #[error("{0} mode requires the authentication HMAC key")]
-    AuthHmacKey(ApiMode),
+    MissingAuthHmacKey(ApiMode),
 }
 
 impl std::fmt::Display for ApiMode {
@@ -137,43 +137,43 @@ impl std::fmt::Display for ApiMode {
 }
 
 impl ApiState {
-    pub fn mode_services(&self) -> Result<ModeServices, ApiStartupError> {
+    pub fn mode_dependencies(&self) -> Result<ModeDependencies, ModeDependencyError> {
         let store = self
             .store
             .clone()
-            .ok_or(ApiStartupError::Storage(self.mode))?;
-        let inference = || InferenceService {
+            .ok_or(ModeDependencyError::MissingStorage(self.mode))?;
+        let inference = || InferenceDependencies {
             store: store.clone(),
             runtime: Arc::clone(&self.runtime),
             transports: self.transports.clone(),
         };
-        let configuration = || ConfigurationService {
+        let configuration = || ConfigurationDependencies {
             store: store.clone(),
             master_key: self.master_key.clone(),
         };
         let identity = || {
             self.auth_hmac_key
                 .clone()
-                .map(|auth_hmac_key| IdentityService {
+                .map(|auth_hmac_key| IdentityDependencies {
                     store: store.clone(),
                     auth_hmac_key,
                 })
-                .ok_or(ApiStartupError::AuthHmacKey(self.mode))
+                .ok_or(ModeDependencyError::MissingAuthHmacKey(self.mode))
         };
-        let operations = || OperationsService {
+        let operations = || OperationsDependencies {
             store: store.clone(),
         };
         match self.mode {
-            ApiMode::All => Ok(ModeServices::All {
+            ApiMode::All => Ok(ModeDependencies::All {
                 configuration: configuration(),
                 identity: identity()?,
                 inference: inference(),
                 operations: operations(),
             }),
-            ApiMode::Gateway => Ok(ModeServices::Gateway {
+            ApiMode::Gateway => Ok(ModeDependencies::Gateway {
                 inference: inference(),
             }),
-            ApiMode::Control => Ok(ModeServices::Control {
+            ApiMode::Control => Ok(ModeDependencies::Control {
                 configuration: configuration(),
                 identity: identity()?,
                 operations: operations(),
@@ -214,8 +214,8 @@ mod tests {
     fn every_http_mode_rejects_missing_storage_at_startup() {
         for mode in [ApiMode::All, ApiMode::Gateway, ApiMode::Control] {
             assert_eq!(
-                state(mode, false, false).mode_services().err(),
-                Some(ApiStartupError::Storage(mode))
+                state(mode, false, false).mode_dependencies().err(),
+                Some(ModeDependencyError::MissingStorage(mode))
             );
         }
     }
@@ -223,32 +223,32 @@ mod tests {
     #[tokio::test]
     async fn control_surfaces_require_identity_dependencies_but_gateway_does_not() {
         assert_eq!(
-            state(ApiMode::All, true, false).mode_services().err(),
-            Some(ApiStartupError::AuthHmacKey(ApiMode::All))
+            state(ApiMode::All, true, false).mode_dependencies().err(),
+            Some(ModeDependencyError::MissingAuthHmacKey(ApiMode::All))
         );
         assert_eq!(
-            state(ApiMode::Control, true, false).mode_services().err(),
-            Some(ApiStartupError::AuthHmacKey(ApiMode::Control))
+            state(ApiMode::Control, true, false).mode_dependencies().err(),
+            Some(ModeDependencyError::MissingAuthHmacKey(ApiMode::Control))
         );
         assert!(matches!(
-            state(ApiMode::Gateway, true, false).mode_services(),
-            Ok(ModeServices::Gateway { .. })
+            state(ApiMode::Gateway, true, false).mode_dependencies(),
+            Ok(ModeDependencies::Gateway { .. })
         ));
     }
 
     #[tokio::test]
-    async fn fully_composed_modes_produce_only_their_owned_services() {
+    async fn fully_composed_modes_produce_only_their_owned_dependencies() {
         assert!(matches!(
-            state(ApiMode::All, true, true).mode_services(),
-            Ok(ModeServices::All { .. })
+            state(ApiMode::All, true, true).mode_dependencies(),
+            Ok(ModeDependencies::All { .. })
         ));
         assert!(matches!(
-            state(ApiMode::Control, true, true).mode_services(),
-            Ok(ModeServices::Control { .. })
+            state(ApiMode::Control, true, true).mode_dependencies(),
+            Ok(ModeDependencies::Control { .. })
         ));
         assert!(matches!(
-            state(ApiMode::Gateway, true, true).mode_services(),
-            Ok(ModeServices::Gateway { .. })
+            state(ApiMode::Gateway, true, true).mode_dependencies(),
+            Ok(ModeDependencies::Gateway { .. })
         ));
     }
 }

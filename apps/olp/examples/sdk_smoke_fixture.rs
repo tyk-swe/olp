@@ -48,7 +48,7 @@ impl ProviderTransport for StaticCanonicalTransport {
                 Surface::Gemini => "gemini",
             };
             let text = format!("official {surface} sdk reached {ROUTE_SLUG}");
-            let events = generation_events(&text, &request.attempt.provider_model);
+            let events = generation_events(&text, &request.attempt.upstream_model);
             Ok(ProviderOutput::Events(Box::pin(stream::iter(
                 events.into_iter().map(Ok),
             ))))
@@ -56,13 +56,13 @@ impl ProviderTransport for StaticCanonicalTransport {
     }
 }
 
-fn generation_events(text: &str, provider_model: &str) -> Vec<CanonicalEvent> {
+fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
     vec![
         CanonicalEvent::new(
             0,
             CanonicalEventKind::ResponseStart {
                 response_id: Some("sdk-smoke-response".to_owned()),
-                provider_model: Some(provider_model.to_owned()),
+                provider_model: Some(upstream_model.to_owned()),
             },
         ),
         CanonicalEvent::new(
@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             id: TargetId::new(),
             routing_id: None,
             provider_id,
-            provider_model: UPSTREAM_MODEL.to_owned(),
+            upstream_model: UPSTREAM_MODEL.to_owned(),
             priority: 0,
             weight: NonZeroU32::new(1).expect("one is nonzero"),
             timeout: DurationMs::new(4_000),

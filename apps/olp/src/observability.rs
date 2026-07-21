@@ -344,7 +344,7 @@ async fn ready(axum::extract::State(state): axum::extract::State<ApiState>) -> R
 }
 
 async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> {
-    let generation = state.runtime.ordinal();
+    let generation = state.runtime.active_generation_ordinal();
     let now = chrono::Utc::now();
     let unknown_consumer = RequestMetadataConsumerStatus::from_health(None, now);
     let (database, media_reconciliation, request_metadata_consumer, request_metadata_epochs) =
@@ -401,7 +401,7 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
             ));
         }
     }
-    let limiter = state.limiter.get();
+    let limiter = state.limiter.current();
     let limits_healthy = if let Some(limiter) = &limiter {
         matches!(
             tokio::time::timeout(Duration::from_millis(500), limiter.ping()).await,
@@ -539,7 +539,7 @@ async fn collect_metrics(state: &ApiState) -> String {
         .request_metadata
         .as_ref()
         .map(RequestMetadataEmitter::snapshot);
-    let limiter_available = state.limiter.get().is_some();
+    let limiter_available = state.limiter.current().is_some();
     let now = chrono::Utc::now();
     let mut request_metadata_consumer = RequestMetadataConsumerStatus::from_health(None, now);
     let mut request_metadata_epochs = RequestMetadataEpochHealth::default();
@@ -634,7 +634,7 @@ async fn collect_metrics(state: &ApiState) -> String {
          # HELP olp_media_reconciliation_gaps_total Upstream media side effects that could not be durably recorded.\n\
          # TYPE olp_media_reconciliation_gaps_total counter\n\
          olp_media_reconciliation_gaps_total {}\n",
-        state.runtime.ordinal().unwrap_or(0),
+        state.runtime.active_generation_ordinal().unwrap_or(0),
         request_metadata.map_or(0, |snapshot| snapshot.dropped),
         request_metadata.map_or(0, |snapshot| snapshot.abandoned),
         request_metadata.map_or(0, |snapshot| snapshot.pending()),

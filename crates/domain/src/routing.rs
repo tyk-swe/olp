@@ -232,7 +232,8 @@ pub struct Target {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_id: Option<TargetId>,
     pub provider_id: ProviderId,
-    pub provider_model: String,
+    #[serde(rename = "provider_model")]
+    pub upstream_model: String,
     pub priority: u16,
     pub weight: NonZeroU32,
     pub timeout: DurationMs,
@@ -407,7 +408,7 @@ impl RuntimeSnapshot {
                         .is_some_and(|provider| {
                             provider.enabled
                                 && provider.capabilities.iter().any(|capability| {
-                                    capability.model == target.provider_model
+                                    capability.model == target.upstream_model
                                         && capability.operation == *operation
                                 })
                         })
@@ -467,7 +468,7 @@ pub struct AttemptPlan {
     pub target_id: TargetId,
     pub provider_id: ProviderId,
     pub provider_kind: ProviderKind,
-    pub provider_model: String,
+    pub upstream_model: String,
     pub timeout: DurationMs,
     pub priority: u16,
 }
@@ -521,7 +522,7 @@ pub fn select_attempts_filtered(
         let Some(provider) = snapshot.providers.get(&target.provider_id) else {
             continue;
         };
-        if !provider.supports(&target.provider_model, operation, surface, mode) {
+        if !provider.supports(&target.upstream_model, operation, surface, mode) {
             continue;
         }
         if !eligible(provider, target) {
@@ -569,7 +570,7 @@ pub fn select_attempts_filtered(
                 target_id: ranked.target.id,
                 provider_id: ranked.provider.id,
                 provider_kind: ranked.provider.kind,
-                provider_model: ranked.target.provider_model.clone(),
+                upstream_model: ranked.target.upstream_model.clone(),
                 timeout: ranked.target.timeout,
                 priority,
             });

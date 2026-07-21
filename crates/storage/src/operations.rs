@@ -11,7 +11,7 @@ pub use crate::usage::{
     UsageGranularity, UsagePoint, UsageRangeCoverage, UsageSeries, UsageSummary,
 };
 pub use audit::AuditRecord;
-pub use cursor::{OperationsError, Page, TimestampCursor};
+pub use cursor::{OperationsError, OperationsPage, TimestampCursor};
 pub use health::{PrometheusOperationsSummary, ProviderHealthRecord};
 pub use pricing::{PriceInput, PricingRevisionRecord};
 pub use requests::{AttemptRecord, RequestDetail, RequestFilters, RequestRecord};

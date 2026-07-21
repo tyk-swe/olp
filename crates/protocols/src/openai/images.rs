@@ -85,14 +85,14 @@ pub fn decode_image_generation(
 
 pub fn encode_image_generation(
     request: &CanonicalImageGenerationRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<OpenAiImageGenerationRequest, ImageCodecError> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
     apply_pointer_extensions(
         OpenAiImageGenerationRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             prompt: request.prompt.clone(),
             n: request.count,
             size: request.size.clone(),
@@ -184,7 +184,7 @@ pub fn decode_image_edit(request: OpenAiImageEditRequest) -> Result<Operation, I
 
 pub fn encode_image_edit(
     request: &CanonicalImageEditRequest,
-    provider_model: &str,
+    upstream_model: &str,
     mut resolve_part: impl FnMut(&MediaHandle) -> Result<BoundedMediaPart, ImageCodecError>,
 ) -> Result<OpenAiImageEditRequest, ImageCodecError> {
     request
@@ -199,7 +199,7 @@ pub fn encode_image_edit(
     validate_media_parts(images.iter().chain(mask.iter()))?;
     apply_pointer_extensions(
         OpenAiImageEditRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             images,
             mask,
             prompt: request.prompt.clone(),
@@ -260,7 +260,7 @@ pub fn decode_image_variation(
 
 pub fn encode_image_variation(
     request: &CanonicalImageVariationRequest,
-    provider_model: &str,
+    upstream_model: &str,
     mut resolve_part: impl FnMut(&MediaHandle) -> Result<BoundedMediaPart, ImageCodecError>,
 ) -> Result<OpenAiImageVariationRequest, ImageCodecError> {
     request
@@ -270,7 +270,7 @@ pub fn encode_image_variation(
     validate_media_parts(std::iter::once(&image))?;
     apply_pointer_extensions(
         OpenAiImageVariationRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             image,
             n: request.count,
             size: request.size.clone(),

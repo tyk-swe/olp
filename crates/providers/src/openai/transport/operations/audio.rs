@@ -20,7 +20,7 @@ pub(super) async fn execute_speech(
     let Operation::Speech(operation) = &request.operation else {
         unreachable!("checked by caller")
     };
-    let wire = encode_speech(operation, &request.attempt.provider_model)
+    let wire = encode_speech(operation, &request.attempt.upstream_model)
         .map_err(|error| protocol_encode_error("speech", error))?;
     let response = connector
         .post_raw_json(&request, "audio/speech", serialize_wire("speech", &wire)?)
@@ -69,7 +69,7 @@ pub(super) async fn execute_transcription(
         protocol_body_error("OpenAI transcription requires a bounded media spool")
     })?;
     let metadata = bounded_part(spool.as_ref(), &operation.audio, 25 * 1024 * 1024).await?;
-    let wire = encode_transcription(operation, &request.attempt.provider_model, |_| {
+    let wire = encode_transcription(operation, &request.attempt.upstream_model, |_| {
         Ok(metadata.clone())
     })
     .map_err(|error| protocol_encode_error("transcription", error))?;

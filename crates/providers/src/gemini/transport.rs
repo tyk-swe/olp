@@ -53,13 +53,13 @@ impl CanonicalEventDecoder for GeminiGenerateContentStreamDecoder {
 /// to another vendor protocol.
 pub fn validate_operation(
     operation: &Operation,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<(), TransportError> {
     match operation {
         Operation::Generation(generation) => encode_generate_content_request(generation)
             .map(|_| ())
             .map_err(|error| protocol_error(error.to_string())),
-        Operation::TokenCount(count) => encode_count_tokens(count, provider_model).map(|_| ()),
+        Operation::TokenCount(count) => encode_count_tokens(count, upstream_model).map(|_| ()),
         operation => Err(protocol_error(format!(
             "Gemini connector does not support {:?}",
             operation.kind()
@@ -198,7 +198,7 @@ impl GeminiConnector {
     /// Performs a minimal credentialed token-count call for providers (such as
     /// Vertex publisher models) that do not expose a list endpoint in the same
     /// resource collection.
-    pub async fn probe_model(&self, provider_model: &str) -> Result<(), TransportError> {
+    pub async fn probe_model(&self, upstream_model: &str) -> Result<(), TransportError> {
         let attempt_deadline = Instant::now()
             + self.config.timeouts.connect
             + self.config.timeouts.first_byte
@@ -212,7 +212,7 @@ impl GeminiConnector {
         let url = self
             .config
             .endpoint
-            .count_tokens_url(provider_model)
+            .count_tokens_url(upstream_model)
             .map_err(map_endpoint_error)?;
         let body = br#"{"contents":[{"role":"user","parts":[{"text":"health"}]}]}"#;
         let mut headers = sanitize_forward_headers(&HeaderMap::new());
@@ -366,7 +366,7 @@ impl GeminiConnector {
                 Ok((
                     self.config
                         .endpoint
-                        .generate_url(&request.attempt.provider_model, streaming)
+                        .generate_url(&request.attempt.upstream_model, streaming)
                         .map_err(map_endpoint_error)?,
                     body,
                     ResponseKind::Generation,
@@ -379,7 +379,7 @@ impl GeminiConnector {
                         "Gemini token counting supports unary mode only",
                     ));
                 }
-                let mut wire = encode_count_tokens(count, &request.attempt.provider_model)?;
+                let mut wire = encode_count_tokens(count, &request.attempt.upstream_model)?;
                 hydrate_gemini_contents(&mut wire.contents, request.media.as_ref()).await?;
                 if let Some(generation) = &mut wire.generate_content_request {
                     hydrate_gemini_contents(&mut generation.contents, request.media.as_ref())
@@ -394,7 +394,7 @@ impl GeminiConnector {
                 Ok((
                     self.config
                         .endpoint
-                        .count_tokens_url(&request.attempt.provider_model)
+                        .count_tokens_url(&request.attempt.upstream_model)
                         .map_err(map_endpoint_error)?,
                     body,
                     ResponseKind::TokenCount,
@@ -666,7 +666,7 @@ fn validate_request_envelope(
 
 fn encode_count_tokens(
     request: &olp_domain::TokenCountRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<CountTokensRequest, TransportError> {
     request
         .extensions
@@ -685,7 +685,7 @@ fn encode_count_tokens(
             ))
         })?;
         if let Some(generation) = &mut wire.generate_content_request {
-            generation.model = Some(format!("models/{provider_model}"));
+            generation.model = Some(format!("models/{upstream_model}"));
         }
         validate_count_tokens_request(&wire).map_err(|error| {
             protocol_error(format!(

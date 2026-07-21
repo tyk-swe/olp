@@ -42,7 +42,7 @@ impl CircuitBreaker {
     }
 
     /// Cheap selection-time check. The actual half-open lease is claimed by
-    /// [`Self::acquire`] immediately before transport execution.
+    /// [`Self::try_acquire`] immediately before transport execution.
     pub(crate) fn is_selectable(&self, target: TargetId) -> bool {
         let now = Instant::now();
         let states = self.inner.lock().expect("circuit state lock poisoned");
@@ -57,7 +57,7 @@ impl CircuitBreaker {
 
     /// Claims permission to execute this target. An expired open circuit moves
     /// to half-open and admits one caller; concurrent callers skip it.
-    pub(crate) fn acquire(&self, target: TargetId) -> bool {
+    pub(crate) fn try_acquire(&self, target: TargetId) -> bool {
         let now = Instant::now();
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
         match states.get(&target).copied() {
@@ -157,18 +157,18 @@ mod tests {
     fn opens_half_opens_and_recovers() {
         let breaker = CircuitBreaker::new(2, Duration::from_millis(5));
         let target = TargetId::new();
-        assert!(breaker.acquire(target));
+        assert!(breaker.try_acquire(target));
         breaker.record_failure(target, AttemptFailureClass::Connect);
-        assert!(breaker.acquire(target));
+        assert!(breaker.try_acquire(target));
         breaker.record_failure(target, AttemptFailureClass::UpstreamServer);
         assert!(!breaker.is_selectable(target));
-        assert!(!breaker.acquire(target));
+        assert!(!breaker.try_acquire(target));
         std::thread::sleep(Duration::from_millis(8));
         assert!(breaker.is_selectable(target));
-        assert!(breaker.acquire(target));
-        assert!(!breaker.acquire(target));
+        assert!(breaker.try_acquire(target));
+        assert!(!breaker.try_acquire(target));
         breaker.record_success(target);
-        assert!(breaker.acquire(target));
+        assert!(breaker.try_acquire(target));
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
             AttemptFailureClass::Ambiguous,
         ] {
             breaker.record_failure(target, class);
-            assert!(breaker.acquire(target));
+            assert!(breaker.try_acquire(target));
         }
     }
 }

@@ -53,7 +53,7 @@ impl TimestampCursor {
 }
 
 #[derive(Clone, Debug)]
-pub struct Page<T> {
+pub struct OperationsPage<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<String>,
 }

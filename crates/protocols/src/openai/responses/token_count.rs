@@ -77,7 +77,7 @@ pub fn decode_response_input_tokens(
 
 pub fn encode_response_input_tokens(
     request: &TokenCountRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<ResponseInputTokensRequest, ResponsesCodecError> {
     request
         .extensions
@@ -93,7 +93,7 @@ pub fn encode_response_input_tokens(
             ));
         }
         let mut wire: ResponseInputTokensRequest = serde_json::from_value(preserved.clone())?;
-        wire.model = provider_model.to_owned();
+        wire.model = upstream_model.to_owned();
         return Ok(wire);
     }
     let parts = request
@@ -103,7 +103,7 @@ pub fn encode_response_input_tokens(
         .collect::<Result<Vec<_>, _>>()?;
     apply_pointer_extensions(
         ResponseInputTokensRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             input: ResponseInput::Items(vec![serde_json::json!({
                 "type": "message",
                 "role": "user",

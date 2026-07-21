@@ -3,7 +3,10 @@ use uuid::Uuid;
 
 use crate::SessionMaterial;
 
-use super::{NewOwner, PersistenceError, PgStore, SetupResult, sessions::checked_session_expiry};
+use super::{
+    InstallationSetupInput, InstallationSetupResult, PersistenceError, PgStore,
+    sessions::checked_session_expiry,
+};
 
 const SETUP_LOCK_ID: i64 = 0x4f4c_505f_5632; // "OLP_V2"
 
@@ -11,33 +14,38 @@ impl PgStore {
     /// Creates the one installation and its first owner as a serialized,
     /// all-or-nothing operation. The advisory lock closes the two-request setup
     /// race even when control-plane replicas receive setup concurrently.
-    pub async fn setup_owner(&self, owner: NewOwner) -> Result<SetupResult, PersistenceError> {
-        self.setup_owner_inner(owner, None)
+    pub async fn setup_installation(
+        &self,
+        input: InstallationSetupInput,
+    ) -> Result<InstallationSetupResult, PersistenceError> {
+        self.setup_installation_inner(input, None)
             .await
             .map(|(result, _)| result)
     }
 
     /// Creates the installation, owner, defaults, audit event, and initial
     /// session in one transaction. Only session digests enter PostgreSQL.
-    pub async fn setup_owner_with_session(
+    pub async fn setup_installation_with_session(
         &self,
-        owner: NewOwner,
+        input: InstallationSetupInput,
         material: &SessionMaterial,
         ttl: chrono::Duration,
-    ) -> Result<(SetupResult, Uuid), PersistenceError> {
+    ) -> Result<(InstallationSetupResult, Uuid), PersistenceError> {
         checked_session_expiry(Utc::now(), ttl)?;
-        let (result, session_id) = self.setup_owner_inner(owner, Some((material, ttl))).await?;
+        let (result, session_id) = self
+            .setup_installation_inner(input, Some((material, ttl)))
+            .await?;
         Ok((
             result,
             session_id.expect("session was requested from setup transaction"),
         ))
     }
 
-    async fn setup_owner_inner(
+    async fn setup_installation_inner(
         &self,
-        owner: NewOwner,
+        input: InstallationSetupInput,
         session: Option<(&SessionMaterial, chrono::Duration)>,
-    ) -> Result<(SetupResult, Option<Uuid>), PersistenceError> {
+    ) -> Result<(InstallationSetupResult, Option<Uuid>), PersistenceError> {
         let mut transaction = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SETUP_LOCK_ID)
@@ -53,12 +61,12 @@ impl PgStore {
 
         let user_id = Uuid::now_v7();
         let now = Utc::now();
-        let normalized_email = owner.email.trim().to_lowercase();
+        let normalized_email = input.email.trim().to_lowercase();
         sqlx::query(
             "INSERT INTO installation (singleton, installation_name, created_at, updated_at) \
              VALUES (true, $1, $2, $2)",
         )
-        .bind(owner.installation_name.trim())
+        .bind(input.installation_name.trim())
         .bind(now)
         .execute(&mut *transaction)
         .await?;
@@ -69,8 +77,8 @@ impl PgStore {
         )
         .bind(user_id)
         .bind(&normalized_email)
-        .bind(owner.display_name.trim())
-        .bind(&owner.password_hash)
+        .bind(input.display_name.trim())
+        .bind(&input.password_hash)
         .bind(now)
         .execute(&mut *transaction)
         .await?;
@@ -138,10 +146,10 @@ impl PgStore {
         transaction.commit().await?;
 
         Ok((
-            SetupResult {
+            InstallationSetupResult {
                 user_id,
                 email: normalized_email,
-                display_name: owner.display_name.trim().to_owned(),
+                display_name: input.display_name.trim().to_owned(),
                 created_at: now,
             },
             session_id,

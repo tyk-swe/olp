@@ -143,7 +143,7 @@ pub(super) async fn execute_with_failover(
     let mut last_error = None;
     let mut traces = Vec::with_capacity(attempts.len());
     for attempt in attempts {
-        if !circuits.acquire(attempt.target_id) {
+        if !circuits.try_acquire(attempt.target_id) {
             continue;
         }
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
@@ -407,7 +407,7 @@ fn successful_attempt(
         id: uuid::Uuid::now_v7(),
         ordinal,
         provider_id: attempt.provider_id.as_uuid(),
-        upstream_model: attempt.provider_model.clone(),
+        upstream_model: attempt.upstream_model.clone(),
         started_at,
         completed_at: Utc::now(),
         status_code: Some(StatusCode::OK.as_u16()),
@@ -430,7 +430,7 @@ fn failed_attempt(
         id: uuid::Uuid::now_v7(),
         ordinal,
         provider_id: attempt.provider_id.as_uuid(),
-        upstream_model: attempt.provider_model.clone(),
+        upstream_model: attempt.upstream_model.clone(),
         started_at,
         completed_at: Utc::now(),
         status_code: Some(mapped.status.as_u16()),

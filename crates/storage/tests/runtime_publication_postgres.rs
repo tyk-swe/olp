@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use olp_domain::{ApiKeyLimits, ApiKeyScope, RuntimeSnapshot};
 use olp_storage::{
-    AuthHmacKey, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewApiKeyRecord, NewOwner,
+    AuthHmacKey, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
+    NewApiKeyRecord,
     PgStore, ReplayableIdempotency, hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
@@ -17,7 +18,7 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "Runtime publication integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),

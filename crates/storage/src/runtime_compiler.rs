@@ -16,7 +16,7 @@ use sqlx::{Postgres, Row, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{PersistenceError, PgStore, PublishedRelease};
+use crate::{PersistenceError, PgStore, PublishedRuntimeRelease};
 
 const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254; // "OLP_RT"
 
@@ -48,7 +48,7 @@ impl PgStore {
     pub async fn compile_and_publish_runtime(
         &self,
         actor: Uuid,
-    ) -> Result<PublishedRelease, RuntimeCompileError> {
+    ) -> Result<PublishedRuntimeRelease, RuntimeCompileError> {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -102,7 +102,7 @@ pub(crate) async fn lock_runtime_publication(
 pub(crate) async fn compile_and_publish_runtime_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     actor: Uuid,
-) -> Result<PublishedRelease, RuntimeCompileError> {
+) -> Result<PublishedRuntimeRelease, RuntimeCompileError> {
     let mut snapshot = compile_snapshot(transaction).await?;
     snapshot
         .validate()
@@ -167,11 +167,11 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
     .bind(now)
     .execute(&mut **transaction)
     .await?;
-    Ok(PublishedRelease {
+    Ok(PublishedRuntimeRelease {
         generation_id,
         sequence,
         payload,
-        sha256,
+        payload_sha256: sha256,
         created_at: now,
     })
 }
@@ -273,7 +273,7 @@ async fn compile_snapshot(
                 id: TargetId::from_uuid(target.get("id")),
                 routing_id: Some(TargetId::from_uuid(target.get("routing_id"))),
                 provider_id: ProviderId::from_uuid(target.get("provider_id")),
-                provider_model: target.get("upstream_model"),
+                upstream_model: target.get("upstream_model"),
                 priority: u16::try_from(target.get::<i32, _>("priority")).map_err(|_| {
                     RuntimeCompileError::InvalidConfiguration("target priority is invalid".into())
                 })?,

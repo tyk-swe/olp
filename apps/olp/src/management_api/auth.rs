@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_domain::Permission;
-use olp_storage::{NewOwner, SessionMaterial, hash_password, verify_password};
+use olp_storage::{InstallationSetupInput, SessionMaterial, hash_password, verify_password};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, SemaphorePermit};
 use tracing::error;
@@ -136,8 +136,8 @@ pub(super) async fn setup(
 
     let material = SessionMaterial::generate();
     let (owner, _) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: request.installation_name,
                 email: request.email,
                 display_name: request.display_name,
@@ -233,7 +233,7 @@ pub(super) async fn login(
         return Err(Problem::unauthorized("The email or password is incorrect."));
     }
     let user = store
-        .password_user(&request.email)
+        .local_password_user(&request.email)
         .await
         .map_err(map_persistence)?;
     let failure_actor = user.as_ref().map(|user| user.id);

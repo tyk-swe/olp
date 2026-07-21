@@ -11,6 +11,7 @@ mod json_media;
 mod listener;
 mod management_api;
 mod media_spool;
+mod mode_dependencies;
 mod observability;
 mod oidc;
 mod operations;
@@ -21,7 +22,6 @@ mod request_admission;
 mod router;
 mod runtime;
 mod semantic_validation;
-mod services;
 mod static_console;
 mod streaming_response;
 
@@ -51,6 +51,10 @@ pub use management_api::management_openapi;
 #[cfg(any(test, feature = "test-util"))]
 pub use media_spool::create_bounded_media_spool_for_test;
 pub use media_spool::create_media_spool;
+pub use mode_dependencies::{
+    ConfigurationDependencies, IdentityDependencies, InferenceDependencies, ModeDependencies,
+    ModeDependencyError, OperationsDependencies, WorkerDependencies,
+};
 pub use observability::{
     observability_router, refresh_observability_cache, spawn_observability_cache,
 };
@@ -62,10 +66,6 @@ pub use problem::{FieldErrors, Problem};
 pub use proxy::{TrustedProxyCidr, TrustedProxyCidrParseError, public_auth_source};
 pub use router::{public_router, try_public_router};
 pub use runtime::{RuntimeBundle, RuntimeInstallError, RuntimeManager};
-pub use services::{
-    ApiStartupError, ConfigurationService, IdentityService, InferenceService, ModeServices,
-    OperationsService, WorkerService,
-};
 
 pub(crate) use observability::HealthResponse;
 pub(crate) use proxy::{public_auth_source_digest, public_auth_source_target_digests};
@@ -105,7 +105,7 @@ pub struct ApiState {
     pub mode: ApiMode,
     pub store: Option<PgStore>,
     pub runtime: Arc<RuntimeManager>,
-    pub limiter: LimiterManager,
+    pub limiter: ReloadableLimiter,
     pub auth_hmac_key: Option<Arc<AuthHmacKey>>,
     trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     bootstrap_token_digest: Arc<AsyncRwLock<Option<Zeroizing<[u8; 32]>>>>,
@@ -163,7 +163,7 @@ impl ApiState {
             mode,
             store,
             runtime,
-            limiter: LimiterManager::default(),
+            limiter: ReloadableLimiter::default(),
             auth_hmac_key: None,
             trusted_proxy_cidrs: Arc::from([]),
             bootstrap_token_digest: Arc::new(AsyncRwLock::new(None)),
@@ -269,12 +269,12 @@ impl ApiState {
 /// background supervisor can install a healthy connection without restarting
 /// the process.
 #[derive(Clone, Default)]
-pub struct LimiterManager {
+pub struct ReloadableLimiter {
     inner: Arc<ArcSwapOption<DistributedLimiter>>,
     configured: Arc<AtomicBool>,
 }
 
-impl LimiterManager {
+impl ReloadableLimiter {
     pub fn mark_configured(&self) {
         self.configured.store(true, Ordering::Release);
     }
@@ -293,7 +293,7 @@ impl LimiterManager {
     }
 
     #[must_use]
-    pub fn get(&self) -> Option<Arc<DistributedLimiter>> {
+    pub fn current(&self) -> Option<Arc<DistributedLimiter>> {
         self.inner.load_full()
     }
 }

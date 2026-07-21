@@ -4,7 +4,7 @@ mod route_fixtures;
 use olp_domain::{
     OperationKind, RouteSlug, RuntimeSnapshot, Surface, TransportMode, select_attempts,
 };
-use olp_storage::{NewOwner, PgStore, ReplaceRouteDraftInput, SessionMaterial};
+use olp_storage::{InstallationSetupInput, PgStore, ReplaceRouteDraftInput, SessionMaterial};
 use route_fixtures::{DraftFixture, insert_provider};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -17,8 +17,8 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let (owner, _) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: "Route simulation".to_owned(),
                 email: "owner@route-simulation.test".to_owned(),
                 display_name: "Owner".to_owned(),

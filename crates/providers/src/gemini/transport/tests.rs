@@ -155,7 +155,7 @@ fn attempt(
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::Gemini,
-            provider_model: "gemini-2.5-flash".into(),
+            upstream_model: "gemini-2.5-flash".into(),
             timeout: DurationMs::new(2_000),
             priority: 0,
         },

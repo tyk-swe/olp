@@ -208,7 +208,7 @@ pub fn decode_response_create(
 
 pub fn encode_response_create(
     request: &GenerationRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<ResponseCreateRequest, ResponsesCodecError> {
     request
         .extensions
@@ -314,7 +314,7 @@ pub fn encode_response_create(
     restore_raw_response_tools(&mut tools, &mut tool_choice, &mut extension_values)?;
     apply_pointer_extensions(
         ResponseCreateRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             input: ResponseInput::Items(items),
             instructions,
             max_output_tokens: request.parameters.max_output_tokens,

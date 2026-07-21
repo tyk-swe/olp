@@ -14,13 +14,13 @@ pub(super) struct Cli {
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
     /// Run gateway, control plane, and background outbox worker together.
-    All(ServerArgs),
+    All(ServeArgs),
     /// Run only inference, probes, and metrics.
-    Gateway(ServerArgs),
+    Gateway(ServeArgs),
     /// Run only management API, probes, metrics, and static console.
-    Control(ServerArgs),
+    Control(ServeArgs),
     /// Publish outbox hints and perform asynchronous persistence work.
-    Worker(BackendArgs),
+    Worker(PersistenceArgs),
     /// Verify the legacy Valkey stream, apply PostgreSQL migrations, and exit.
     Migrate(MigrateArgs),
     /// Validate dependencies and mounted secrets, then exit.
@@ -47,7 +47,7 @@ pub(super) struct DatabaseArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub(super) struct BackendArgs {
+pub(super) struct PersistenceArgs {
     #[command(flatten)]
     pub(super) database: DatabaseArgs,
     #[arg(long, env = "OLP_VALKEY_URL")]
@@ -57,14 +57,14 @@ pub(super) struct BackendArgs {
 #[derive(Clone, Debug, Args)]
 pub(super) struct MigrateArgs {
     #[command(flatten)]
-    pub(super) backend: BackendArgs,
+    pub(super) persistence: PersistenceArgs,
     /// Test-only target used to construct an N-1 upgrade fixture.
     #[arg(long, hide = true)]
     pub(super) through_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Args)]
-pub(super) struct ServerArgs {
+pub(super) struct ServeArgs {
     #[command(flatten)]
     pub(super) database: DatabaseArgs,
     #[arg(long, env = "OLP_VALKEY_URL")]
@@ -118,7 +118,7 @@ pub(super) struct ServerArgs {
 #[derive(Clone, Debug, Args)]
 pub(super) struct DoctorArgs {
     #[command(flatten)]
-    pub(super) backend: BackendArgs,
+    pub(super) persistence: PersistenceArgs,
     #[arg(long, env = "OLP_CONSOLE_DIR", default_value = "console/build")]
     pub(super) console_dir: PathBuf,
     #[arg(long, env = "OLP_MEDIA_SPOOL_DIR")]

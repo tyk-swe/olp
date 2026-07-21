@@ -54,13 +54,13 @@ impl CanonicalEventDecoder for AnthropicMessagesStreamDecoder {
 /// would be lost.
 pub fn validate_operation(
     operation: &Operation,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<(), TransportError> {
     match operation {
-        Operation::Generation(generation) => encode_messages_request(generation, provider_model)
+        Operation::Generation(generation) => encode_messages_request(generation, upstream_model)
             .map(|_| ())
             .map_err(|error| protocol_error(error.to_string())),
-        Operation::TokenCount(count) => encode_count_tokens(count, provider_model).map(|_| ()),
+        Operation::TokenCount(count) => encode_count_tokens(count, upstream_model).map(|_| ()),
         operation => Err(protocol_error(format!(
             "Anthropic connector does not support {:?}",
             operation.kind()
@@ -286,7 +286,7 @@ impl AnthropicConnector {
                         "canonical stream flag does not match the selected transport mode",
                     ));
                 }
-                let mut wire = encode_messages_request(generation, &request.attempt.provider_model)
+                let mut wire = encode_messages_request(generation, &request.attempt.upstream_model)
                     .map_err(|error| {
                         protocol_error(format!("cannot encode Anthropic messages request: {error}"))
                     })?;
@@ -310,7 +310,7 @@ impl AnthropicConnector {
                         "Anthropic token counting supports unary mode only",
                     ));
                 }
-                let mut wire = encode_count_tokens(count, &request.attempt.provider_model)?;
+                let mut wire = encode_count_tokens(count, &request.attempt.upstream_model)?;
                 hydrate_anthropic_messages(&mut wire.messages, request.media.as_ref()).await?;
                 let body = serde_json::to_vec(&wire).map_err(|error| {
                     protocol_error(format!("cannot serialize Anthropic count request: {error}"))
@@ -575,7 +575,7 @@ fn validate_request_envelope(request: &ProviderRequest) -> Result<(), TransportE
 
 fn encode_count_tokens(
     request: &olp_domain::TokenCountRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<CountTokensRequest, TransportError> {
     request
         .extensions
@@ -593,7 +593,7 @@ fn encode_count_tokens(
                 "preserved Anthropic countTokens request is invalid: {error}"
             ))
         })?;
-        wire.model = provider_model.to_owned();
+        wire.model = upstream_model.to_owned();
         return Ok(wire);
     }
     if !extensions.is_empty() {
@@ -645,7 +645,7 @@ fn encode_count_tokens(
         }
     }
     Ok(CountTokensRequest {
-        model: provider_model.to_owned(),
+        model: upstream_model.to_owned(),
         messages: vec![Message {
             role: Role::User,
             content: MessageContent::Blocks(blocks),

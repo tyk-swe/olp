@@ -1,7 +1,13 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { throwApiProblem } from '../http';
-import { collectCursorPages, getAbortSignal, result, type CursorPage, type ReadSignal } from './shared';
+import {
+  collectCursorPages,
+  getAbortSignal,
+  requireResponseData,
+  type CursorPage,
+  type ReadSignal
+} from './shared';
 
 type Schemas = components['schemas'];
 
@@ -23,7 +29,7 @@ export async function listRouteDraftPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -39,7 +45,7 @@ export async function listRoutePage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -48,7 +54,7 @@ export async function getRouteDraft(id: string, signal?: AbortSignal): Promise<R
     params: { path: { draft_id: id } },
     signal
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function createRouteDraft(input: CreateRouteDraftInput): Promise<string> {
@@ -56,7 +62,7 @@ export async function createRouteDraft(input: CreateRouteDraftInput): Promise<st
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response).id;
+  return requireResponseData(response.data, response.error, response.response).id;
 }
 
 export async function replaceRouteDraft(id: string, etag: string, input: ReplaceRouteDraftInput): Promise<RouteDraft> {
@@ -64,7 +70,7 @@ export async function replaceRouteDraft(id: string, etag: string, input: Replace
     params: { path: { draft_id: id }, header: { 'If-Match': etag } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function deleteRouteDraft(id: string, etag: string): Promise<void> {
@@ -79,7 +85,7 @@ export async function simulateRoute(id: string, input: RouteSimulationInput): Pr
     params: { path: { draft_id: id } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function validateRoute(draft: RouteDraft): Promise<void> {
@@ -89,7 +95,7 @@ export async function validateRoute(draft: RouteDraft): Promise<void> {
       header: { 'If-Match': draft.etag }
     }
   });
-  result(response.data, response.error, response.response);
+  requireResponseData(response.data, response.error, response.response);
 }
 
 export async function activateRoute(draft: RouteDraft): Promise<RouteActivation> {
@@ -99,7 +105,7 @@ export async function activateRoute(draft: RouteDraft): Promise<RouteActivation>
       header: { 'If-Match': draft.etag, 'Idempotency-Key': crypto.randomUUID() }
     }
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function listRouteRevisions(
@@ -118,7 +124,7 @@ async function listRouteRevisionPage(
     params: { path: { route_id: routeId }, query: { cursor, limit: 100 } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -132,7 +138,7 @@ export async function diffRouteRevisions(
     params: { path: { route_id: routeId }, query: { from, to } },
     signal
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function restoreRouteRevision(routeId: string, revisionId: string): Promise<RouteDraft> {
@@ -142,5 +148,5 @@ export async function restoreRouteRevision(routeId: string, revisionId: string):
       header: { 'Idempotency-Key': crypto.randomUUID() }
     }
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }

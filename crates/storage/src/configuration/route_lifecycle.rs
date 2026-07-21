@@ -120,13 +120,13 @@ impl PgStore {
                    AND p.state <> 'disabled'::provider_state",
             )
             .bind(target.provider_id)
-            .bind(target.provider_model.trim())
+            .bind(target.upstream_model.trim())
             .fetch_optional(&mut *transaction)
             .await?;
             let provider_model_id = provider_model_id.ok_or_else(|| {
                 ConfigurationError::InvalidRoute(format!(
                     "target provider/model {}/{} is not active",
-                    target.provider_id, target.provider_model
+                    target.provider_id, target.upstream_model
                 ))
             })?;
             sqlx::query(

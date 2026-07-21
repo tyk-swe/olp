@@ -28,7 +28,7 @@ pub(crate) const DEFAULT_CAPACITY_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MIN_MEDIA_SPOOL_CAPACITY_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
-struct Entry {
+struct SpoolEntry {
     path: PathBuf,
     filename: String,
     content_type: Option<String>,
@@ -39,7 +39,7 @@ struct Entry {
 /// media. Handles are random identifiers and never expose filesystem paths.
 pub(crate) struct FileMediaSpool {
     root: PathBuf,
-    entries: Arc<RwLock<BTreeMap<String, Entry>>>,
+    entries: Arc<RwLock<BTreeMap<String, SpoolEntry>>>,
     used_bytes: Arc<AtomicU64>,
     capacity_bytes: u64,
 }
@@ -81,7 +81,7 @@ impl FileMediaSpool {
         }))
     }
 
-    fn reserve(&self, bytes: u64) -> bool {
+    fn try_reserve_capacity(&self, bytes: u64) -> bool {
         self.used_bytes
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes)
@@ -90,11 +90,11 @@ impl FileMediaSpool {
             .is_ok()
     }
 
-    fn release(&self, bytes: u64) {
+    fn release_capacity(&self, bytes: u64) {
         release_used_bytes(&self.used_bytes, bytes);
     }
 
-    fn entry(&self, handle: &MediaHandle) -> Result<Entry, MediaSpoolError> {
+    fn lookup_entry(&self, handle: &MediaHandle) -> Result<SpoolEntry, MediaSpoolError> {
         validate_handle(handle.as_str())?;
         self.entries
             .read()
@@ -105,16 +105,16 @@ impl FileMediaSpool {
     }
 }
 
-struct PendingWrite<'a> {
+struct PendingSpoolWrite<'a> {
     spool: &'a FileMediaSpool,
     path: PathBuf,
     reserved: u64,
     committed: bool,
 }
 
-impl PendingWrite<'_> {
+impl PendingSpoolWrite<'_> {
     fn reserve(&mut self, bytes: u64) -> Result<(), MediaSpoolError> {
-        if !self.spool.reserve(bytes) {
+        if !self.spool.try_reserve_capacity(bytes) {
             return Err(MediaSpoolError::Unavailable);
         }
         self.reserved += bytes;
@@ -126,10 +126,10 @@ impl PendingWrite<'_> {
     }
 }
 
-impl Drop for PendingWrite<'_> {
+impl Drop for PendingSpoolWrite<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.spool.release(self.reserved);
+            self.spool.release_capacity(self.reserved);
             let _ = std::fs::remove_file(&self.path);
         }
     }
@@ -137,15 +137,15 @@ impl Drop for PendingWrite<'_> {
 
 /// Owns removed bookkeeping in the unlink task, which continues after the
 /// request awaiting removal is canceled.
-struct PendingRemoval {
-    entries: Arc<RwLock<BTreeMap<String, Entry>>>,
+struct PendingSpoolRemoval {
+    entries: Arc<RwLock<BTreeMap<String, SpoolEntry>>>,
     used_bytes: Arc<AtomicU64>,
     handle: String,
-    entry: Option<Entry>,
+    entry: Option<SpoolEntry>,
 }
 
-impl PendingRemoval {
-    fn release(mut self) {
+impl PendingSpoolRemoval {
+    fn commit_removal(mut self) {
         let entry = self
             .entry
             .take()
@@ -153,7 +153,7 @@ impl PendingRemoval {
         release_used_bytes(&self.used_bytes, entry.content_length);
     }
 
-    fn restore(&mut self) -> Result<(), MediaSpoolError> {
+    fn restore_entry(&mut self) -> Result<(), MediaSpoolError> {
         let mut entries = self
             .entries
             .write()
@@ -167,7 +167,7 @@ impl PendingRemoval {
     }
 }
 
-impl Drop for PendingRemoval {
+impl Drop for PendingSpoolRemoval {
     fn drop(&mut self) {
         let Some(entry) = self.entry.take() else {
             return;
@@ -221,7 +221,7 @@ impl MediaSpool for FileMediaSpool {
             let path = self.root.join(&token);
             // Declare the cleanup guard before the file so cancellation drops
             // the open handle first (required for removal on Windows too).
-            let mut pending = PendingWrite {
+            let mut pending_write = PendingSpoolWrite {
                 spool: self,
                 path: path.clone(),
                 reserved: 0,
@@ -247,7 +247,7 @@ impl MediaSpool for FileMediaSpool {
                         maximum: upload.maximum_length,
                     });
                 }
-                pending.reserve(length)?;
+                pending_write.reserve(length)?;
                 if file.write_all(&chunk).await.is_err() {
                     return Err(MediaSpoolError::Unavailable);
                 }
@@ -263,14 +263,14 @@ impl MediaSpool for FileMediaSpool {
             };
             entries.insert(
                 token,
-                Entry {
+                SpoolEntry {
                     path,
                     filename,
                     content_type: upload.content_type.clone(),
                     content_length: written,
                 },
             );
-            pending.commit();
+            pending_write.commit();
             Ok(MediaArtifact {
                 handle,
                 content_type: upload.content_type,
@@ -284,7 +284,7 @@ impl MediaSpool for FileMediaSpool {
         handle: &'a MediaHandle,
     ) -> BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         Box::pin(async move {
-            let entry = self.entry(handle)?;
+            let entry = self.lookup_entry(handle)?;
             let file = File::open(&entry.path)
                 .await
                 .map_err(|error| match error.kind() {
@@ -338,7 +338,7 @@ impl FileMediaSpool {
             .remove(handle.as_str())
             .ok_or(MediaSpoolError::NotFound)?;
         let path = entry.path.clone();
-        let pending = PendingRemoval {
+        let pending_removal = PendingSpoolRemoval {
             entries: Arc::clone(&self.entries),
             used_bytes: Arc::clone(&self.used_bytes),
             handle: handle.as_str().to_owned(),
@@ -348,21 +348,21 @@ impl FileMediaSpool {
         // awaiting request is canceled. Keep the entry guard in this detached
         // task so successful unlink and capacity release stay coupled.
         tokio::spawn(async move {
-            let mut pending = pending;
+            let mut pending_removal = pending_removal;
             match unlink(path).await {
                 Ok(()) => {
-                    pending.release();
+                    pending_removal.commit_removal();
                     Ok(())
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    pending.release();
+                    pending_removal.commit_removal();
                     Err(MediaSpoolError::NotFound)
                 }
                 Err(_) => {
                     // Preserve both the handle and its capacity reservation so
                     // a transient filesystem error cannot silently overbook
                     // the configured spool budget.
-                    pending.restore()?;
+                    pending_removal.restore_entry()?;
                     Err(MediaSpoolError::Unavailable)
                 }
             }
@@ -570,7 +570,7 @@ mod tests {
         let token = "a".repeat(32);
         spool.entries.write().unwrap().insert(
             token.clone(),
-            Entry {
+            SpoolEntry {
                 path: spool.root.clone(),
                 filename: "directory.bin".to_owned(),
                 content_type: None,

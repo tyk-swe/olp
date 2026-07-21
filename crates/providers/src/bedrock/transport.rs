@@ -88,7 +88,7 @@ impl BedrockConnector {
         request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
         validate_request(&request)?;
-        validate_model_id(&request.attempt.provider_model)?;
+        validate_model_id(&request.attempt.upstream_model)?;
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
         match &request.operation {
             Operation::Generation(generation) => {
@@ -99,7 +99,7 @@ impl BedrockConnector {
                         send_wait,
                         self.runtime
                             .converse_stream()
-                            .model_id(&request.attempt.provider_model)
+                            .model_id(&request.attempt.upstream_model)
                             .set_messages(Some(encoded.messages))
                             .set_system((!encoded.system.is_empty()).then_some(encoded.system))
                             .inference_config(encoded.inference_config)
@@ -111,7 +111,7 @@ impl BedrockConnector {
                     .map_err(|error| map_sdk_error(&error, TransportPhase::FirstByte, false))?;
                     Ok(ProviderOutput::Events(stream_events(
                         response,
-                        request.attempt.provider_model.clone(),
+                        request.attempt.upstream_model.clone(),
                         attempt_deadline,
                         self.timeouts.idle,
                     )))
@@ -125,7 +125,7 @@ impl BedrockConnector {
                         wait,
                         self.runtime
                             .converse()
-                            .model_id(&request.attempt.provider_model)
+                            .model_id(&request.attempt.upstream_model)
                             .set_messages(Some(encoded.messages))
                             .set_system((!encoded.system.is_empty()).then_some(encoded.system))
                             .inference_config(encoded.inference_config)
@@ -135,7 +135,7 @@ impl BedrockConnector {
                     .await
                     .map_err(|_| deadline_error(TransportPhase::Body, false))?
                     .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
-                    let events = decode_converse(response, &request.attempt.provider_model)?;
+                    let events = decode_converse(response, &request.attempt.upstream_model)?;
                     Ok(ProviderOutput::Events(Box::pin(stream::iter(
                         events.into_iter().map(Ok),
                     ))))
@@ -153,7 +153,7 @@ impl BedrockConnector {
                     wait,
                     self.runtime
                         .count_tokens()
-                        .model_id(&request.attempt.provider_model)
+                        .model_id(&request.attempt.upstream_model)
                         .input(CountTokensInput::Converse(input))
                         .send(),
                 )
@@ -203,7 +203,7 @@ struct StreamState {
 
 fn stream_events(
     response: ConverseStreamResponse,
-    provider_model: String,
+    upstream_model: String,
     attempt_deadline: Instant,
     idle_timeout: Duration,
 ) -> ProviderEventStream {
@@ -211,7 +211,7 @@ fn stream_events(
         0,
         CanonicalEventKind::ResponseStart {
             response_id: None,
-            provider_model: Some(provider_model),
+            provider_model: Some(upstream_model),
         },
     ))]);
     Box::pin(stream::unfold(
@@ -596,7 +596,7 @@ mod tests {
                 target_id: TargetId::new(),
                 provider_id: ProviderId::new(),
                 provider_kind: ProviderKind::Bedrock,
-                provider_model: "anthropic.claude-test-v1:0".to_owned(),
+                upstream_model: "anthropic.claude-test-v1:0".to_owned(),
                 timeout: DurationMs::new(2_000),
                 priority: 0,
             },
@@ -976,7 +976,7 @@ mod tests {
         )
         .await;
         let mut request = provider_request();
-        request.attempt.provider_model = model;
+        request.attempt.upstream_model = model;
         let ProviderOutput::Events(events) = connector.execute(request).await.unwrap() else {
             panic!("expected generation events");
         };

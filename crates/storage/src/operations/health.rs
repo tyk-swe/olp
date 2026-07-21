@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, Page, checked_u64},
+    cursor::{OperationsError, OperationsPage, checked_u64},
 };
 use crate::{PgStore, split_page};
 
@@ -88,7 +88,7 @@ impl PgStore {
         window_minutes: u16,
         cursor: Option<Uuid>,
         limit: u16,
-    ) -> Result<Page<ProviderHealthRecord>, OperationsError> {
+    ) -> Result<OperationsPage<ProviderHealthRecord>, OperationsError> {
         let window_minutes = window_minutes.clamp(1, 1_440);
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query(
@@ -171,7 +171,7 @@ impl PgStore {
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
             item.provider_id.to_string()
         });
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 }
 

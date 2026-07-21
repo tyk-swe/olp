@@ -8,12 +8,13 @@ use serde_json::json;
 use tokio::{sync::watch, task::JoinSet};
 use tracing::{error, info, warn};
 
-use crate::{TransportRegistry, connectors::load_connector_config, create_media_spool};
+use crate::{TransportRegistry, connectors::register_mounted_connectors, create_media_spool};
 
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
     config::{
-        BackendArgs, DoctorArgs, InternalPreStopArgs, MasterKeyAction, MasterKeyArgs, MigrateArgs,
+        DoctorArgs, InternalPreStopArgs, MasterKeyAction, MasterKeyArgs, MigrateArgs,
+        PersistenceArgs,
     },
     startup::shutdown_signal,
     validation::{
@@ -28,8 +29,8 @@ pub(super) async fn internal_pre_stop(args: InternalPreStopArgs) -> AppResult<()
 }
 
 pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
-    preflight_request_metadata_stream_upgrade(&args.backend.valkey_url).await?;
-    let store = connect_store(&args.backend.database).await?;
+    preflight_request_metadata_stream_upgrade(&args.persistence.valkey_url).await?;
+    let store = connect_store(&args.persistence.database).await?;
     if let Some(target) = args.through_version {
         if std::env::var("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS").as_deref() != Ok("test-only") {
             return Err(std::io::Error::other(
@@ -46,7 +47,7 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) async fn run_worker_command(args: BackendArgs) -> AppResult<()> {
+pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
     let store = connect_store(&args.database).await?;
     preflight_request_metadata_stream_or_defer(&args.valkey_url).await?;
     let (sender, receiver) = watch::channel(false);
@@ -412,14 +413,14 @@ fn report_master_key_status(master_key: &MasterKey, status: &MasterKeyEncryption
 
 pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
     let mut checks = serde_json::Map::new();
-    let store = connect_store(&args.backend.database).await?;
+    let store = connect_store(&args.persistence.database).await?;
     store.ping().await?;
     checks.insert("postgresql".into(), json!({ "ok": true }));
 
-    let limiter = DistributedLimiter::connect(&args.backend.valkey_url, "olp:v2:doctor").await?;
+    let limiter = DistributedLimiter::connect(&args.persistence.valkey_url, "olp:v2:doctor").await?;
     limiter.ping().await?;
     checks.insert("valkey".into(), json!({ "ok": true }));
-    preflight_request_metadata_stream_upgrade(&args.backend.valkey_url).await?;
+    preflight_request_metadata_stream_upgrade(&args.persistence.valkey_url).await?;
     checks.insert(
         "request_metadata_stream_upgrade".into(),
         json!({ "ok": true }),
@@ -433,7 +434,7 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
 
     if let Some(path) = &args.connector_config_file {
         let registry = TransportRegistry::default();
-        load_connector_config(path, &registry).await?;
+        register_mounted_connectors(path, &registry).await?;
         checks.insert(
             "connector_config".into(),
             json!({ "ok": true, "configured": registry.snapshot().len() }),

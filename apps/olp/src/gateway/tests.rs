@@ -140,7 +140,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     );
 
     for _ in 0..5 {
-        assert!(circuits.acquire(target));
+        assert!(circuits.try_acquire(target));
         let mut validator = EventSequenceValidator::new();
         validator.push(&first).unwrap();
         let provider: EventStream = Box::pin(stream::iter([Err(TransportError {
@@ -626,7 +626,7 @@ fn test_state(streaming: bool) -> (ApiState, String) {
             id: TargetId::new(),
             routing_id: None,
             provider_id,
-            provider_model: "upstream-model".to_owned(),
+            upstream_model: "upstream-model".to_owned(),
             priority: 0,
             weight: NonZeroU32::new(1).unwrap(),
             timeout: DurationMs::new(4_000),
@@ -1013,7 +1013,7 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
         TransportMode::Unary,
         Some(RequiredTarget {
             provider_id: uuid::Uuid::now_v7(),
-            provider_model: "unavailable-model".to_owned(),
+            upstream_model: "unavailable-model".to_owned(),
         }),
     )
     .await

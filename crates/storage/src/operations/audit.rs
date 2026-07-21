@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, Page, TimestampCursor},
+    cursor::{OperationsError, OperationsPage, TimestampCursor},
 };
 use crate::{PgStore, split_page};
 
@@ -27,7 +27,7 @@ impl PgStore {
         &self,
         cursor: Option<&TimestampCursor>,
         limit: u16,
-    ) -> Result<Page<AuditRecord>, OperationsError> {
+    ) -> Result<OperationsPage<AuditRecord>, OperationsError> {
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(
             "SELECT a.id, a.actor_user_id, u.email AS actor_email, a.action, a.resource_type, \
@@ -67,6 +67,6 @@ impl PgStore {
             }
             .encode()
         });
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 }

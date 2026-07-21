@@ -20,7 +20,8 @@ use super::{
     failover::{ExecutionOutput, ExecutionSuccess, execute_with_failover},
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     telemetry::{
-        UnaryExecutionCompletion, UsageCapture, elapsed_ms, emit_request_event, usage_from_result,
+        UnaryRequestMetadataFinalizer, UsageCapture, elapsed_ms, emit_request_metadata_event,
+        usage_from_result,
     },
 };
 
@@ -45,7 +46,7 @@ pub(crate) struct RoutedEventExecution {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RequiredTarget {
     pub provider_id: uuid::Uuid,
-    pub provider_model: String,
+    pub upstream_model: String,
 }
 
 pub(super) struct AuthenticatedProxyKey {
@@ -198,7 +199,7 @@ async fn execute_operation(
             state.circuits.is_selectable(target.id)
                 && required_target.as_ref().is_none_or(|required| {
                     target.provider_id.as_uuid() == required.provider_id
-                        && target.provider_model == required.provider_model
+                        && target.upstream_model == required.upstream_model
                 })
         },
     ) {
@@ -250,7 +251,7 @@ fn emit_early_failure(
     attempts: &[RequestAttemptMetadata],
     failure: &InferenceError,
 ) {
-    emit_request_event(
+    emit_request_metadata_event(
         state,
         context.generation_id,
         context.api_key_id,
@@ -345,20 +346,20 @@ pub(crate) struct RoutedUnaryResult {
     pub api_key_id: uuid::Uuid,
     pub route_slug: RouteSlug,
     pub provider_id: uuid::Uuid,
-    pub provider_model: String,
-    completion: Option<UnaryExecutionCompletion>,
+    pub upstream_model: String,
+    request_metadata_finalizer: Option<UnaryRequestMetadataFinalizer>,
 }
 
 impl RoutedUnaryResult {
     pub(crate) fn mark_success(&mut self) {
-        if let Some(completion) = self.completion.take() {
-            completion.emit(None);
+        if let Some(finalizer) = self.request_metadata_finalizer.take() {
+            finalizer.finalize(None);
         }
     }
 
     pub(crate) fn mark_failure(&mut self, failure: &InferenceError) {
-        if let Some(completion) = self.completion.take() {
-            completion.emit(Some(failure));
+        if let Some(finalizer) = self.request_metadata_finalizer.take() {
+            finalizer.finalize(Some(failure));
         }
     }
 
@@ -372,14 +373,14 @@ impl RoutedUnaryResult {
 
 impl Drop for RoutedUnaryResult {
     fn drop(&mut self) {
-        let Some(completion) = self.completion.take() else {
+        let Some(finalizer) = self.request_metadata_finalizer.take() else {
             return;
         };
         let failure = InferenceError::bad_gateway(
             "provider_protocol_error",
             "The provider result was not representable on the client protocol.",
         );
-        completion.emit(Some(&failure));
+        finalizer.finalize(Some(&failure));
     }
 }
 
@@ -463,7 +464,7 @@ pub(super) async fn execute_routed_result_for_surface_inner(
             "provider_protocol_error",
             "The provider returned an event stream for a unary result operation.",
         );
-        emit_request_event(
+        emit_request_metadata_event(
             state,
             context.generation_id,
             context.api_key_id,
@@ -497,8 +498,8 @@ pub(super) async fn execute_routed_result_for_surface_inner(
         api_key_id: context.api_key_id,
         route_slug: context.route_slug.clone(),
         provider_id: final_attempt.provider_id,
-        provider_model: final_attempt.upstream_model.clone(),
-        completion: Some(UnaryExecutionCompletion {
+        upstream_model: final_attempt.upstream_model.clone(),
+        request_metadata_finalizer: Some(UnaryRequestMetadataFinalizer {
             state: state.clone(),
             generation_id: context.generation_id,
             api_key_id: context.api_key_id,

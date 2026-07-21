@@ -35,7 +35,7 @@ pub fn content_security_policy(console_dir: &Path) -> HeaderValue {
     HeaderValue::from_str(&policy).expect("generated console CSP must be a valid header")
 }
 
-pub fn service(console_dir: &Path) -> ServeDir<ServeFile> {
+pub fn spa_service(console_dir: &Path) -> ServeDir<ServeFile> {
     ServeDir::new(console_dir)
         .precompressed_br()
         .precompressed_gzip()
@@ -61,7 +61,7 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("index.html"), "<!doctype html><title>OLP</title>").unwrap();
 
-        let response = service(&root)
+        let response = spa_service(&root)
             .oneshot(
                 Request::get("/providers/example")
                     .body(Body::empty())

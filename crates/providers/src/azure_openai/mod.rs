@@ -157,10 +157,10 @@ impl AzureOpenAiConnector {
     /// certified until a safe content-minimal probe exists.
     pub async fn certify_deployment_capability(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
-        if provider_model != self.deployment {
+        if upstream_model != self.deployment {
             return Err(CompatibleCapabilityCertificationError::InvalidResult);
         }
         if capability.operation == OperationKind::Generation
@@ -168,12 +168,12 @@ impl AzureOpenAiConnector {
         {
             return self
                 .inner
-                .certify_chat_completions_capability(provider_model, capability.mode)
+                .certify_chat_completions_capability(upstream_model, capability.mode)
                 .await;
         }
         self.inner
             .certify_compatible_capability(
-                provider_model,
+                upstream_model,
                 CompatibleCapability {
                     surface: Surface::OpenAi,
                     ..capability

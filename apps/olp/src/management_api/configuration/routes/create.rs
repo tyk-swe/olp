@@ -111,7 +111,7 @@ pub(crate) async fn create_route_draft(
         .into_iter()
         .map(|target| NewRouteTarget {
             provider_id: target.provider_id,
-            provider_model: target.provider_model,
+            upstream_model: target.provider_model,
             priority: target.priority,
             weight: target.weight,
             timeout_ms: target.timeout_ms,

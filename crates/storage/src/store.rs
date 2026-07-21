@@ -169,17 +169,17 @@ impl PgStore {
     }
 }
 
-pub struct NewOwner {
+pub struct InstallationSetupInput {
     pub installation_name: String,
     pub email: String,
     pub display_name: String,
     pub password_hash: String,
 }
 
-impl fmt::Debug for NewOwner {
+impl fmt::Debug for InstallationSetupInput {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("NewOwner")
+            .debug_struct("InstallationSetupInput")
             .field("installation_name", &self.installation_name)
             .field("email", &self.email)
             .field("display_name", &self.display_name)
@@ -189,7 +189,7 @@ impl fmt::Debug for NewOwner {
 }
 
 #[derive(Debug, Clone)]
-pub struct SetupResult {
+pub struct InstallationSetupResult {
     pub user_id: Uuid,
     pub email: String,
     pub display_name: String,
@@ -223,7 +223,7 @@ impl fmt::Debug for SessionPrincipal {
 }
 
 #[derive(Clone)]
-pub struct PasswordUser {
+pub struct LocalPasswordUser {
     pub id: Uuid,
     pub email: String,
     pub display_name: String,
@@ -231,10 +231,10 @@ pub struct PasswordUser {
     pub role: String,
 }
 
-impl fmt::Debug for PasswordUser {
+impl fmt::Debug for LocalPasswordUser {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("PasswordUser")
+            .debug_struct("LocalPasswordUser")
             .field("id", &self.id)
             .field("email", &self.email)
             .field("display_name", &self.display_name)
@@ -245,22 +245,22 @@ impl fmt::Debug for PasswordUser {
 }
 
 #[derive(Clone)]
-pub struct PublishedRelease {
+pub struct PublishedRuntimeRelease {
     pub generation_id: Uuid,
     pub sequence: i64,
     pub payload: Vec<u8>,
-    pub sha256: [u8; 32],
+    pub payload_sha256: [u8; 32],
     pub created_at: DateTime<Utc>,
 }
 
-impl fmt::Debug for PublishedRelease {
+impl fmt::Debug for PublishedRuntimeRelease {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("PublishedRelease")
+            .debug_struct("PublishedRuntimeRelease")
             .field("generation_id", &self.generation_id)
             .field("sequence", &self.sequence)
             .field("payload", &"[REDACTED]")
-            .field("sha256", &self.sha256)
+            .field("payload_sha256", &self.payload_sha256)
             .field("created_at", &self.created_at)
             .finish()
     }

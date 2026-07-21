@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use chrono::{Duration, Utc};
 use olp_domain::{ApiKeyScope, RuntimeSnapshot};
-use olp_storage::{NewOwner, PgStore, SessionMaterial};
+use olp_storage::{InstallationSetupInput, PgStore, SessionMaterial};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -13,8 +13,8 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let (owner, _) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: "Fallback integrity".to_owned(),
                 email: "owner@fallback.test".to_owned(),
                 display_name: "Owner".to_owned(),
@@ -110,7 +110,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     assert!(historical_key.limits.requests_per_minute.is_none());
     assert_eq!(
         store
-            .provider_secrets_for_runtime(&historical)
+            .runtime_provider_configurations(&historical)
             .await
             .unwrap()
             .len(),
@@ -128,7 +128,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     .await
     .unwrap();
     let historical_secret = store
-        .provider_secrets_for_runtime(&historical)
+        .runtime_provider_configurations(&historical)
         .await
         .unwrap();
     assert_eq!(
@@ -145,7 +145,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     .unwrap();
     assert_eq!(
         store
-            .provider_secrets_for_runtime(&historical)
+            .runtime_provider_configurations(&historical)
             .await
             .unwrap()
             .len(),
