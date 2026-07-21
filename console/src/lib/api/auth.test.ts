@@ -48,6 +48,29 @@ describe('session API', () => {
     expect(getCsrfToken()).toBe('known-good-token');
   });
 
+  it('fails closed on a malformed session without replacing CSRF state', async () => {
+    setCsrfToken('known-good-token');
+    captureRequests(() => jsonResponse({ csrf_token: 'untrusted-token' }));
+
+    const error = await currentSession().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(ApiProblem);
+    expect((error as ApiProblem).problem).toMatchObject({
+      title: 'The session response is invalid',
+      status: 502
+    });
+    expect(getCsrfToken()).toBe('known-good-token');
+  });
+
+  it('clears stale CSRF state when the current session has no valid CSRF cookie', async () => {
+    setCsrfToken('stale-token');
+    captureRequests(() => jsonResponse(sessionResponse('operator', '')));
+
+    await currentSession();
+
+    expect(getCsrfToken()).toBeNull();
+  });
+
   it('sends only login credentials and installs the returned CSRF token', async () => {
     const requests = captureRequests(() =>
       jsonResponse(sessionResponse('operator', 'csrf-from-login'))

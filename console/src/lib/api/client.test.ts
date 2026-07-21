@@ -25,6 +25,25 @@ describe('generated API request boundary', () => {
     expect(request.headers.has('x-csrf-token')).toBe(false);
   });
 
+  it('serializes bare UUID If-Match values and preserves strong ETags', async () => {
+    const etag = '019b036f-fcad-72a0-9a35-734fa53adf5f';
+    const requests = captureRequests(() => jsonResponse({}));
+
+    await apiClient.PATCH('/api/v1/profile', {
+      params: { header: { 'If-Match': etag } },
+      body: { display_name: 'Operator' }
+    });
+    await apiClient.PUT('/api/v1/settings/{key}', {
+      params: { path: { key: 'retention_days' }, header: { 'If-Match': `"${etag}"` } },
+      body: { value: '30' }
+    });
+
+    expect(requests.map((request) => request.headers.get('if-match'))).toEqual([
+      `"${etag}"`,
+      `"${etag}"`
+    ]);
+  });
+
   it('adds CSRF only to mutating methods and stops after token clearing', async () => {
     const requests = captureRequests(() => jsonResponse({}));
     setCsrfToken('csrf-boundary-token');
