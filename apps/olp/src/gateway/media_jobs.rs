@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, time::Duration};
 
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
@@ -14,18 +14,20 @@ use olp_storage::{
 use serde_json::Value;
 use tracing::{error, warn};
 
-use crate::{ApiState, semantic_validation::select_representable_attempts_filtered};
+use crate::{
+    ApiState, InferencePrincipal, semantic_validation::select_representable_attempts_filtered,
+};
 
 use super::{
     error::InferenceError,
-    execution::{RequiredTarget, authenticate_key, execute_routed_result},
+    execution::{RequiredTarget, authorize_principal, execute_routed_result},
     failover::{ExecutionOutput, execute_with_failover},
     telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event, usage_from_result},
 };
 
 pub(super) fn select_video_create_target(
     state: &ApiState,
-    headers: &HeaderMap,
+    principal: &InferencePrincipal,
     operation: &Operation,
     local_job_id: uuid::Uuid,
 ) -> Result<(ApiKey, RouteSlug, RequiredTarget), InferenceError> {
@@ -33,15 +35,10 @@ pub(super) fn select_video_create_target(
         .route()
         .cloned()
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    let key = authenticate_key(
-        state,
-        headers,
-        OperationKind::VideoCreate,
-        Some(&route_slug),
-    )?;
-    let snapshot = crate::pin_inference_runtime(state);
+    let key = authorize_principal(principal, OperationKind::VideoCreate, Some(&route_slug))?;
+    let snapshot = principal.runtime();
     let attempt = select_representable_attempts_filtered(
-        &snapshot,
+        snapshot,
         &route_slug,
         operation,
         Surface::OpenAi,
@@ -53,7 +50,7 @@ pub(super) fn select_video_create_target(
     .next()
     .ok_or_else(|| InferenceError::unavailable("no_eligible_provider"))?;
     Ok((
-        key,
+        key.clone(),
         route_slug,
         RequiredTarget {
             provider_id: attempt.provider_id.as_uuid(),
@@ -436,7 +433,7 @@ async fn execute_media_reconciliation_result(
 
 pub(super) async fn refresh_video_list_record(
     state: &ApiState,
-    headers: &HeaderMap,
+    principal: &InferencePrincipal,
     record: MediaJobRecord,
 ) -> MediaJobRecord {
     if !matches!(record.state, MediaJobState::Queued | MediaJobState::Running) {
@@ -451,7 +448,7 @@ pub(super) async fn refresh_video_list_record(
     }
     let Ok(mut executed) = execute_routed_result(
         state,
-        headers,
+        principal,
         operation,
         TransportMode::Unary,
         Some(RequiredTarget {
@@ -494,11 +491,11 @@ pub(super) async fn refresh_video_list_record(
 
 pub(super) async fn owned_media_job(
     state: &ApiState,
-    headers: &HeaderMap,
+    principal: &InferencePrincipal,
     video_id: &str,
     operation: OperationKind,
 ) -> Result<(ApiKey, MediaJobRecord), InferenceError> {
-    let key = authenticate_key(state, headers, operation, None)?;
+    let key = authorize_principal(principal, operation, None)?;
     let id = uuid::Uuid::parse_str(video_id)
         .map_err(|_| InferenceError::resource_not_found("video_not_found"))?;
     let record = require_inference_store(state)?
@@ -521,9 +518,9 @@ pub(super) async fn owned_media_job(
     }
     let route = RouteSlug::parse(&record.route_slug)
         .map_err(|_| InferenceError::unavailable("media_job_route_invalid"))?;
-    authorize_api_key(&key, Some(&route), operation, Utc::now())
+    authorize_api_key(key, Some(&route), operation, Utc::now())
         .map_err(|error| InferenceError::forbidden(error.to_string()))?;
-    Ok((key, record))
+    Ok((key.clone(), record))
 }
 
 pub(super) fn set_video_route(

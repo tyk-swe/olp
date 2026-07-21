@@ -172,7 +172,7 @@
 
 <svelte:head><title>Personal profile · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header"><div><p class="eyebrow">Account</p><h1 class="page-title">Personal profile</h1><p class="page-description">Manage your display name, local password, and signed-in browser sessions.</p></div><a class="button button-secondary" href="/settings">Installation settings</a></div>
+<div class="page-header"><div><p class="eyebrow">Account</p><h1 class="page-title">Personal profile</h1><p class="page-description">Manage your display name, local password, and signed-in browser sessions.</p></div><a class="button button-secondary" href={resolve('/settings')}>Installation settings</a></div>
 
 {#if message}<p class="success-message" role="status">{message}</p>{/if}
 

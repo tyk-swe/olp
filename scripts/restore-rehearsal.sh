@@ -27,52 +27,21 @@ replace=${2:-}
 
 pg_restore_command=${OLP_PG_RESTORE:-pg_restore}
 psql_command=${OLP_PSQL:-psql}
-for command in "$pg_restore_command" "$psql_command" sha256sum jq; do
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+manifest_tool="$script_dir/backup-manifest.sh"
+[[ -x $manifest_tool ]] || {
+  echo "required executable is unavailable: $manifest_tool" >&2
+  exit 1
+}
+for command in "$pg_restore_command" "$psql_command"; do
   command -v "$command" >/dev/null || {
     echo "required command is unavailable: $command" >&2
     exit 1
   }
 done
 
-checksum_file="${backup}.sha256"
-manifest_file="${backup}.manifest.json"
-[[ -f $checksum_file ]] || { echo "backup checksum sidecar is required: $checksum_file" >&2; exit 1; }
-[[ -f $manifest_file ]] || { echo "backup manifest is required: $manifest_file" >&2; exit 1; }
-expected=$(awk 'NR == 1 {print $1}' "$checksum_file")
-actual=$(sha256sum "$backup" | awk '{print $1}')
-[[ $expected =~ ^[a-f0-9]{64}$ && $actual == "$expected" ]] || {
-  echo "backup checksum mismatch" >&2
-  exit 1
-}
-backup_name=$(basename "$backup")
-jq -e --arg checksum "$actual" --arg backup_name "$backup_name" '
-  (.format == "olp-v2-postgresql-custom-v1" or
-   .format == "olp-v2-postgresql-custom-v2") and
-  .backup_file == $backup_name and
-  .sha256 == $checksum and
-  .plaintext_secrets_included == false and
-  .encrypted_sensitive_records_included == true and
-  .mounted_key_files_included == false and
-  (.traffic_quiesced | type == "boolean") and
-  (if .format == "olp-v2-postgresql-custom-v1" then
-     (.usage_stream_drained | type == "boolean") and
-     (if .usage_stream_drained then
-        .traffic_quiesced == true and
-        (.usage_consumer_checked_at | type == "string" and
-          test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
-      else .usage_consumer_checked_at == null end)
-   else
-     (.request_metadata_stream_drained | type == "boolean") and
-     (if .request_metadata_stream_drained then
-        .traffic_quiesced == true and
-        (.request_metadata_consumer_checked_at | type == "string" and
-          test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
-      else .request_metadata_consumer_checked_at == null end)
-   end) and
-  (.database_server_version | type == "string" and startswith("18.")) and
-  (.successful_migrations | type == "number") and
-  (.runtime_generation_ordinal | type == "number")
-' "$manifest_file" >/dev/null || { echo "backup manifest is invalid or inconsistent" >&2; exit 1; }
+restore_expectations=$("$manifest_tool" validate "$backup")
+IFS=$'\t' read -r expected_migrations expected_generation <<< "$restore_expectations"
 "$pg_restore_command" --list "$backup" >/dev/null
 
 user_objects=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
@@ -109,8 +78,6 @@ installation_count=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc 
   --command='SELECT count(*) FROM installation' | tr -d '[:space:]')
 latest_generation=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
   --command='SELECT COALESCE(max(sequence), 0) FROM runtime_generations' | tr -d '[:space:]')
-expected_migrations=$(jq -r '.successful_migrations' "$manifest_file")
-expected_generation=$(jq -r '.runtime_generation_ordinal' "$manifest_file")
 [[ $failed_migrations == 0 ]] || { echo "restored database contains failed migrations" >&2; exit 1; }
 [[ $migration_count == "$expected_migrations" ]] || {
   echo "restored migration count differs from backup manifest" >&2

@@ -15,18 +15,6 @@ pub(super) fn is_json_content_type(value: &str) -> bool {
             .is_some_and(|subtype| subtype.ends_with("+json"))
 }
 
-pub(super) fn is_media_request(path: &str, content_type: &str) -> bool {
-    let media_path = path.starts_with("/openai/v1/images/")
-        || path.starts_with("/openai/v1/audio/")
-        || path == "/openai/v1/videos";
-    media_path
-        && (content_type
-            .split(';')
-            .next()
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case("multipart/form-data"))
-            || content_type.eq_ignore_ascii_case("application/octet-stream"))
-}
-
 pub(crate) fn validate_json_depth(bytes: &[u8]) -> Result<(), Problem> {
     let mut depth = 0_usize;
     let mut in_string = false;

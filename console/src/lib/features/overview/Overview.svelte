@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -42,7 +43,7 @@
       Connect an upstream, certify its models, then publish one stable slug for your clients.
     </p>
   </div>
-  <a class="button button-primary" href="/providers/new">Continue setup <NavIcon name="arrow" /></a>
+  <a class="button button-primary" href={resolve('/providers/new')}>Continue setup <NavIcon name="arrow" /></a>
 </div>
 
 <section class="status-grid" aria-label="Gateway readiness">
@@ -74,7 +75,7 @@
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <a href="/playground">Open the playground <NavIcon name="arrow" size={17} /></a>
+      <a href={resolve('/playground')}>Open the playground <NavIcon name="arrow" size={17} /></a>
     </section>
 
     <section class="card privacy-card" aria-labelledby="privacy-title">
@@ -93,7 +94,7 @@
       <p class="eyebrow">Operations</p>
       <h2 id="activity-title">Recent requests</h2>
     </div>
-    <a href="/requests">Explore requests <NavIcon name="arrow" size={17} /></a>
+    <a href={resolve('/requests')}>Explore requests <NavIcon name="arrow" size={17} /></a>
   </div>
   {#if recentRequests.isPending}
     <div class="loading-state" role="status">Loading recent request metadata…</div>
@@ -118,7 +119,7 @@
               <td>{request.operation} · {request.surface}</td>
               <td><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></td>
               <td>{request.total_latency_ms ?? '—'} ms</td>
-              <td><a class="row-link" href={`/requests/${request.id}`}>View timeline</a></td>
+              <td><a class="row-link" href={resolve(`/requests/${request.id}`)}>View timeline</a></td>
             </tr>
           {/each}
         </tbody>

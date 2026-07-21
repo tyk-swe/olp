@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
@@ -153,7 +154,7 @@
     if (!confirm(current ? 'Sign out this current session?' : 'Revoke this session?')) return;
     await run(`session-${id}`, async () => {
       await revokeSession(id);
-      if (current) window.location.assign('/login');
+      if (current) window.location.assign(resolve('/login'));
       else { await sessions.refetch(); notice = 'Session revoked.'; }
     });
   }
@@ -257,7 +258,7 @@
   </SecretDialog>
 {/if}
 
-<div class="page-header"><div><p class="eyebrow">Identity</p><h1 class="page-title">Access</h1><p class="page-description">Manage installation members, fixed roles, invitations, sessions, and the linked OIDC provider.</p></div><a class="button button-primary" href="/access" onclick={(event) => { event.preventDefault(); tab = 'invitations'; }}>Invite member</a></div>
+<div class="page-header"><div><p class="eyebrow">Identity</p><h1 class="page-title">Access</h1><p class="page-description">Manage installation members, fixed roles, invitations, sessions, and the linked OIDC provider.</p></div><a class="button button-primary" href={resolve('/access')} onclick={(event) => { event.preventDefault(); tab = 'invitations'; }}>Invite member</a></div>
 
 <nav class="tabs" aria-label="Access settings">{#each [['members', 'Members'], ['invitations', 'Invitations'], ['sessions', 'Sessions'], ['oidc', 'OIDC']] as item (item[0])}<button class:active={tab === item[0]} type="button" aria-current={tab === item[0] ? 'page' : undefined} onclick={() => tab = item[0] as Tab}>{item[1]}</button>{/each}</nav>
 

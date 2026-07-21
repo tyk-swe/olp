@@ -149,6 +149,14 @@ pub enum ApiKeyScope {
 
 impl ApiKeyScope {
     #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inference => "inference",
+            Self::ModelsRead => "models_read",
+        }
+    }
+
+    #[must_use]
     pub const fn permits(self, operation: OperationKind) -> bool {
         match self {
             Self::Inference => !matches!(

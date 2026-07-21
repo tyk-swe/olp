@@ -181,7 +181,7 @@ impl PgStore {
         for scope in &key.scopes {
             sqlx::query("INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)")
                 .bind(id)
-                .bind(scope_name(*scope))
+                .bind(scope.as_str())
                 .execute(&mut *transaction)
                 .await?;
         }
@@ -298,12 +298,5 @@ impl PgStore {
             etag: sqlx::Row::get(&result, "etag"),
             release,
         })
-    }
-}
-
-fn scope_name(scope: ApiKeyScope) -> &'static str {
-    match scope {
-        ApiKeyScope::Inference => "inference",
-        ApiKeyScope::ModelsRead => "models_read",
     }
 }

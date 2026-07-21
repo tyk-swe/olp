@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
@@ -125,7 +126,7 @@
 
 <svelte:head><title>Settings · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header"><div><p class="eyebrow">Installation</p><h1 class="page-title">Settings</h1><p class="page-description">Retention, installation defaults, and versioned pricing. Personal details live in your profile.</p></div><a class="button button-secondary" href="/settings/profile">Personal profile</a></div>
+<div class="page-header"><div><p class="eyebrow">Installation</p><h1 class="page-title">Settings</h1><p class="page-description">Retention, installation defaults, and versioned pricing. Personal details live in your profile.</p></div><a class="button button-secondary" href={resolve('/settings/profile')}>Personal profile</a></div>
 
 {#if status}<p class="success-message" role="status">{status}</p>{/if}
 {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}

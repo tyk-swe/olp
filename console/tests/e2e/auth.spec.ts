@@ -48,15 +48,15 @@ test('protected routes never render before authentication and return after login
     await route.fulfill({ json: { items: [], next_cursor: null } });
   });
 
-  await page.goto('/providers');
-  await expect(page).toHaveURL(/\/login\?return_to=%2Fproviders$/);
+  await page.goto('/providers?view=all');
+  await expect(page).toHaveURL(/\/login\?return_to=%2Fproviders%3Fview%3Dall$/);
   await expect(page.getByRole('heading', { name: 'Providers' })).toHaveCount(0);
 
   await page.getByLabel('Email').fill('owner@example.com');
   await page.getByLabel('Password').fill('correct horse battery staple');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
-  await expect(page).toHaveURL(/\/providers$/);
+  await expect(page).toHaveURL(/\/providers\?view=all$/);
   await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toBeVisible();
   expect(loginBody).toEqual({
     email: 'owner@example.com',

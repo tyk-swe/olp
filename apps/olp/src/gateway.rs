@@ -4,13 +4,11 @@ use axum::{
     routing::{get, post},
 };
 
-use crate::{
-    ApiState, IMAGE_VARIATION_BODY_BYTES, MAX_MEDIA_BODY_BYTES, TRANSCRIPTION_BODY_BYTES,
-    VIDEO_CREATE_BODY_BYTES,
-};
+use crate::{ApiState, MAX_MEDIA_BODY_BYTES};
 
 mod anthropic;
 mod chat;
+mod endpoint_policy;
 mod error;
 mod execution;
 mod failover;
@@ -28,9 +26,13 @@ mod responses;
 mod telemetry;
 mod videos;
 
+pub(crate) use endpoint_policy::{
+    IMAGE_VARIATION_BODY_BYTES, InferenceEndpoint, TRANSCRIPTION_BODY_BYTES, TokenEstimate,
+    VIDEO_CREATE_BODY_BYTES,
+};
 pub(crate) use error::InferenceError;
 pub(crate) use execution::{
-    RoutedEventExecution, RoutedUnaryResult, authenticate_model_access,
+    RoutedEventExecution, RoutedUnaryResult, authorize_model_access,
     execute_event_operation_for_surface, execute_routed_result_for_surface,
     execute_session_generation, release_model_limits, reserve_model_limits,
 };

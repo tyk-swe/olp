@@ -4,7 +4,7 @@ use axum::{
     Json,
     body::Body,
     extract::{Extension, Multipart, Path, Query, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
@@ -21,11 +21,11 @@ use olp_storage::{
 };
 use tracing::error;
 
-use crate::{ApiState, MultipartRequestAdmission};
+use crate::{ApiState, InferencePrincipal, MultipartRequestAdmission};
 
 use super::{
     error::InferenceError,
-    execution::{RequiredTarget, authenticate_key, execute_routed_result, incompatible_result},
+    execution::{RequiredTarget, authorize_principal, execute_routed_result, incompatible_result},
     limits::CleanupMediaStream,
     media::open_response_media,
     media_jobs::{
@@ -39,7 +39,7 @@ use super::{
 
 pub(super) async fn video_create(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -63,11 +63,11 @@ pub(super) async fn video_create(
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     let local_job_id = uuid::Uuid::now_v7();
     let (key, route_slug, required_target) =
-        select_video_create_target(&state, &headers, &operation, local_job_id)?;
+        select_video_create_target(&state, &principal, &operation, local_job_id)?;
     let reserved = require_inference_store(&state)?
         .reserve_media_job(NewMediaJobReservation {
             id: local_job_id,
-            runtime_generation_id: crate::pin_inference_runtime(&state).generation.id.as_uuid(),
+            runtime_generation_id: principal.runtime().generation.id.as_uuid(),
             api_key_id: key.id.as_uuid(),
             provider_id: required_target.provider_id,
             upstream_model: required_target.upstream_model.clone(),
@@ -86,7 +86,13 @@ pub(super) async fn video_create(
     // runtime generation, limits reservation, and metadata ownership.
     let task = crate::spawn_http_inference_task(
         &state,
-        complete_video_create(state.clone(), headers, operation, reserved, required_target),
+        complete_video_create(
+            state.clone(),
+            principal,
+            operation,
+            reserved,
+            required_target,
+        ),
     );
     match task.await {
         Ok(result) => result,
@@ -101,14 +107,14 @@ pub(super) async fn video_create(
 
 async fn complete_video_create(
     state: ApiState,
-    headers: HeaderMap,
+    principal: InferencePrincipal,
     operation: Operation,
     reserved: MediaJobRecord,
     required_target: RequiredTarget,
 ) -> Result<Response, InferenceError> {
     let mut executed = match execute_routed_result(
         &state,
-        &headers,
+        &principal,
         operation,
         TransportMode::Async,
         Some(required_target.clone()),
@@ -261,7 +267,7 @@ async fn complete_video_create(
                 mark_missing_delete_as_success(&mut cleanup)?;
                 let mut compensation = execute_routed_result(
                     &state,
-                    &headers,
+                    &principal,
                     cleanup,
                     TransportMode::Unary,
                     Some(required_target),
@@ -327,10 +333,10 @@ async fn complete_video_create(
 
 pub(super) async fn video_list(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
-    let key = authenticate_key(&state, &headers, OperationKind::VideoList, None)?;
+    let key = authorize_principal(&principal, OperationKind::VideoList, None)?;
     if !query.extra.is_empty() {
         return Err(InferenceError::invalid_request(
             "Video list contains unsupported query parameters.",
@@ -382,7 +388,7 @@ pub(super) async fn video_list(
         .await
         .map_err(media_job_error)?;
     let refreshed = stream::iter(page.items)
-        .map(|record| refresh_video_list_record(&state, &headers, record))
+        .map(|record| refresh_video_list_record(&state, &principal, record))
         .buffered(4)
         .collect::<Vec<_>>()
         .await;
@@ -402,11 +408,11 @@ pub(super) async fn video_list(
 
 pub(super) async fn video_get(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (key, record) =
-        owned_media_job(&state, &headers, &video_id, OperationKind::VideoGet).await?;
+        owned_media_job(&state, &principal, &video_id, OperationKind::VideoGet).await?;
     let upstream_id = record
         .upstream_job_id
         .clone()
@@ -415,7 +421,7 @@ pub(super) async fn video_get(
     set_video_route(&mut operation, &record.route_slug)?;
     let mut executed = execute_routed_result(
         &state,
-        &headers,
+        &principal,
         operation,
         TransportMode::Unary,
         Some(RequiredTarget {
@@ -457,12 +463,12 @@ pub(super) async fn video_get(
 
 pub(super) async fn video_content(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(video_id): Path<String>,
     Query(query): Query<OpenAiVideoContentQuery>,
 ) -> Result<Response, InferenceError> {
     let (_, record) =
-        owned_media_job(&state, &headers, &video_id, OperationKind::VideoContent).await?;
+        owned_media_job(&state, &principal, &video_id, OperationKind::VideoContent).await?;
     let upstream_id = record
         .upstream_job_id
         .clone()
@@ -472,7 +478,7 @@ pub(super) async fn video_content(
     set_video_route(&mut operation, &record.route_slug)?;
     let mut executed = execute_routed_result(
         &state,
-        &headers,
+        &principal,
         operation,
         TransportMode::Unary,
         Some(RequiredTarget {
@@ -520,11 +526,11 @@ pub(super) async fn video_content(
 
 pub(super) async fn video_delete(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (_, loaded) =
-        owned_media_job(&state, &headers, &video_id, OperationKind::VideoDelete).await?;
+        owned_media_job(&state, &principal, &video_id, OperationKind::VideoDelete).await?;
     let record = require_inference_store(&state)?
         .begin_media_job_deletion(loaded.id)
         .await
@@ -549,7 +555,7 @@ pub(super) async fn video_delete(
     mark_missing_delete_as_success(&mut operation)?;
     let mut executed = execute_routed_result(
         &state,
-        &headers,
+        &principal,
         operation,
         TransportMode::Unary,
         Some(RequiredTarget {

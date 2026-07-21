@@ -22,6 +22,7 @@ pub(crate) use common::{
     if_match, json_payload, map_persistence, require_idempotency_key, require_mutation_session,
     require_permission, require_read_session, require_store,
 };
+pub(crate) use configuration::common::{map_configuration_resource, validation};
 pub(crate) use olp_domain::Permission;
 use utoipa::OpenApi;
 

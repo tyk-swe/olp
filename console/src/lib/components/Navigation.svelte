@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { resolve } from '$app/paths';
   import NavIcon from './NavIcon.svelte';
   import type { IconName } from './icons';
 
@@ -20,42 +21,43 @@
   }: { label?: string; onNavigate?: () => void } = $props();
 
   const groups: NavigationGroup[] = [
-    { items: [{ label: 'Overview', href: '/', icon: 'overview' }] },
+    { items: [{ label: 'Overview', href: resolve('/'), icon: 'overview' }] },
     {
       label: 'Gateway',
       items: [
-        { label: 'Providers', href: '/providers', icon: 'provider' },
-        { label: 'Models', href: '/models', icon: 'model' },
-        { label: 'Routes', href: '/routes', icon: 'route' }
+        { label: 'Providers', href: resolve('/providers'), icon: 'provider' },
+        { label: 'Models', href: resolve('/models'), icon: 'model' },
+        { label: 'Routes', href: resolve('/routes'), icon: 'route' }
       ]
     },
     {
       label: 'Access',
       items: [
-        { label: 'API Keys', href: '/api-keys', icon: 'key' },
-        { label: 'Access', href: '/access', icon: 'access' }
+        { label: 'API Keys', href: resolve('/api-keys'), icon: 'key' },
+        { label: 'Access', href: resolve('/access'), icon: 'access' }
       ]
     },
     {
       label: 'Operations',
       items: [
-        { label: 'Requests', href: '/requests', icon: 'request' },
-        { label: 'Media Jobs', href: '/media-jobs', icon: 'request' },
-        { label: 'Usage', href: '/usage', icon: 'usage' },
-        { label: 'Health', href: '/health', icon: 'health' },
-        { label: 'Audit', href: '/audit', icon: 'audit' }
+        { label: 'Requests', href: resolve('/requests'), icon: 'request' },
+        { label: 'Media Jobs', href: resolve('/media-jobs'), icon: 'request' },
+        { label: 'Usage', href: resolve('/usage'), icon: 'usage' },
+        { label: 'Health', href: resolve('/health'), icon: 'health' },
+        { label: 'Audit', href: resolve('/audit'), icon: 'audit' }
       ]
     },
     {
       items: [
-        { label: 'Playground', href: '/playground', icon: 'playground' },
-        { label: 'Settings', href: '/settings', icon: 'settings' }
+        { label: 'Playground', href: resolve('/playground'), icon: 'playground' },
+        { label: 'Settings', href: resolve('/settings'), icon: 'settings' }
       ]
     }
   ];
 
   function isActive(href: string) {
-    return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
+    const overview = resolve('/');
+    return href === overview ? page.url.pathname === overview : page.url.pathname.startsWith(href);
   }
 </script>
 

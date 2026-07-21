@@ -1,10 +1,8 @@
-//! Shared public-IP classification for outbound network clients.
-//!
-//! This crate deliberately classifies already-parsed IP addresses only. URL
-//! parsing, DNS resolution, connection pinning, and request policy remain the
-//! responsibility of each caller.
+//! Shared outbound-network security policy for provider HTTP clients.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+pub(crate) mod pinned;
 
 /// Returns whether an IP address is safe to use as a public egress target.
 #[must_use]

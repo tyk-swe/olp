@@ -1,10 +1,10 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     Json,
     body::Bytes,
-    extract::{State, rejection::JsonRejection},
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, State, rejection::JsonRejection},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
@@ -17,7 +17,7 @@ use olp_protocols::openai::{ChatCompletionRequest, decode_chat_completion};
 use olp_storage::{LimitLease, RequestAttemptMetadata};
 
 use crate::{
-    ApiState,
+    ApiState, InferencePrincipal,
     json_media::{admit_openai_chat, cleanup_admitted},
     semantic_validation::select_representable_attempts_filtered,
     streaming_response::{TerminalFrames, sse_stream},
@@ -25,7 +25,6 @@ use crate::{
 
 use super::{
     error::InferenceError,
-    execution::{AuthenticatedProxyKey, authenticate_proxy_key, bearer_token},
     failover::{EventStream, ExecutionOutput, ExecutionSuccess, execute_with_failover},
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     openai_chat_response::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response},
@@ -35,15 +34,11 @@ use super::{
 
 pub(super) async fn chat_completions(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ChatCompletionRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let plaintext_key = bearer_token(&headers)?;
-    let AuthenticatedProxyKey {
-        runtime: snapshot,
-        key,
-        lookup_id,
-    } = authenticate_proxy_key(&state, plaintext_key)?;
+    let snapshot = Arc::clone(principal.runtime());
+    let key = principal.key();
     let request_id = RequestId::new();
     let request_started_at = Utc::now();
     let request_started = tokio::time::Instant::now();
@@ -112,7 +107,7 @@ pub(super) async fn chat_completions(
         .route()
         .cloned()
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    if let Err(error) = authorize_api_key(&key, Some(&route_slug), operation.kind(), Utc::now()) {
+    if let Err(error) = authorize_api_key(key, Some(&route_slug), operation.kind(), Utc::now()) {
         let failure = InferenceError::forbidden(error.to_string());
         emit_request_metadata_event(
             &state,
@@ -141,9 +136,9 @@ pub(super) async fn chat_completions(
     };
     let lease = reserve_limits(
         &state,
-        &key,
+        key,
         &operation,
-        lookup_id.as_str(),
+        principal.lookup_id().as_str(),
         snapshot
             .routes
             .get(&route_slug)

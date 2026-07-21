@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, State, rejection::JsonRejection},
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, Path, Query, State, rejection::JsonRejection},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -15,7 +15,7 @@ use olp_protocols::gemini::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ApiState, RuntimeBundle,
+    ApiState, InferencePrincipal, RuntimeBundle,
     event_completion::{CompletedEventExecution, collect_event_execution},
     json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
     streaming_response::{
@@ -25,10 +25,10 @@ use crate::{
 };
 
 use super::{
-    InferenceError, RoutedUnaryResult, authenticate_model_access,
-    execute_event_operation_for_surface, execute_routed_result_for_surface,
+    InferenceError, RoutedUnaryResult, authorize_model_access, execute_event_operation_for_surface,
+    execute_routed_result_for_surface,
     native_models::{after_cursor_start, supported_operations, visible_route, visible_routes},
-    protocol_error::{ProtocolError, api_key, gemini_error_body, valid_json},
+    protocol_error::{ProtocolError, gemini_error_body, valid_json},
     release_model_limits, reserve_model_limits,
 };
 
@@ -42,13 +42,12 @@ pub(super) fn router() -> Router<ApiState> {
 
 async fn action(
     State(state): State<ApiState>,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(resource): Path<String>,
     Query(query): Query<ActionQuery>,
-    headers: HeaderMap,
     payload: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(value) = valid_json(payload, Surface::Gemini)?;
-    let token = gemini_key(&headers).map_err(ProtocolError::gemini)?;
     if let Some(model) = resource.strip_suffix(":generateContent") {
         let mut request: GenerateContentRequest =
             serde_json::from_value(value).map_err(|error| {
@@ -69,9 +68,8 @@ async fn action(
         };
         let execution = execute_event_operation_for_surface(
             &state,
-            token,
+            &principal,
             operation,
-            Surface::Gemini,
             TransportMode::Unary,
         )
         .await
@@ -107,9 +105,8 @@ async fn action(
         };
         let execution = execute_event_operation_for_surface(
             &state,
-            token,
+            &principal,
             operation,
-            Surface::Gemini,
             TransportMode::Streaming,
         )
         .await
@@ -139,9 +136,8 @@ async fn action(
         };
         let executed = execute_routed_result_for_surface(
             &state,
-            token,
+            &principal,
             operation,
-            Surface::Gemini,
             TransportMode::Unary,
             None,
         )
@@ -222,16 +218,15 @@ struct Model {
 
 async fn models(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
-    let token = gemini_key(&headers).map_err(ProtocolError::gemini)?;
-    let (runtime, key) = authenticate_model_access(&state, token, OperationKind::ModelList)
+    let (runtime, key) = authorize_model_access(&principal, OperationKind::ModelList)
         .map_err(ProtocolError::gemini)?;
-    let lease = reserve_model_limits(&state, &key, token, Surface::Gemini)
+    let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::gemini)?;
-    let result = models_response(&runtime, &key, query);
+    let result = models_response(runtime, key, query);
     release_model_limits(&state, lease.as_ref()).await;
     result
 }
@@ -286,13 +281,12 @@ fn models_response(
 
 async fn model(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(resource): Path<String>,
 ) -> Result<Response, ProtocolError> {
-    let token = gemini_key(&headers).map_err(ProtocolError::gemini)?;
-    let (runtime, key) = authenticate_model_access(&state, token, OperationKind::ModelGet)
+    let (runtime, key) = authorize_model_access(&principal, OperationKind::ModelGet)
         .map_err(ProtocolError::gemini)?;
-    let lease = reserve_model_limits(&state, &key, token, Surface::Gemini)
+    let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::gemini)?;
     let result = if resource.contains(':') {
@@ -301,8 +295,8 @@ async fn model(
             "The requested Gemini model does not exist.",
         ))
     } else {
-        visible_route(&runtime, &key, &resource, Surface::Gemini)
-            .map(|slug| (StatusCode::OK, Json(model_object(&runtime, &slug))).into_response())
+        visible_route(runtime, key, &resource, Surface::Gemini)
+            .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response())
     };
     release_model_limits(&state, lease.as_ref()).await;
     result
@@ -341,10 +335,6 @@ fn decode_page_token(token: &str) -> Result<String, ProtocolError> {
         .filter(|slug| !slug.is_empty())
         .map(str::to_owned)
         .ok_or_else(|| ProtocolError::invalid(Surface::Gemini, "The pageToken is invalid."))
-}
-
-fn gemini_key(headers: &HeaderMap) -> Result<&str, InferenceError> {
-    api_key(headers, "x-goog-api-key")
 }
 
 struct GeminiHttpStreamEncoder(GeminiGenerateContentClientStreamEncoder);

@@ -11,7 +11,7 @@ use std::{
 use axum::{
     Router,
     body::Body,
-    extract::State,
+    extract::{Extension, State},
     http::{HeaderMap, HeaderName, HeaderValue, Request, Response, Uri},
     middleware,
     routing::get,
@@ -31,13 +31,14 @@ use uuid::Uuid;
 
 use super::*;
 use super::{
+    gateway::{InferenceEndpoint, TokenEstimate},
     observability::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label},
     request_admission::{
-        HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED,
+        HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,
         HTTP_INFERENCE_RESERVATION_HOLD, HTTP_INFERENCE_RUNTIME, InferenceReservation,
         JsonBodyReadError, LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody,
-        enforce_request_limits, estimate_http_json_request_tokens, inference_metadata_operation,
-        multipart_endpoint, read_json_body, validate_json_depth, validate_multipart_boundary,
+        enforce_request_limits, estimate_http_json_request_tokens, http_inference_principal,
+        read_json_body, validate_json_depth, validate_multipart_boundary,
     },
     router::{
         http_request_span, request_trace_path, sensitive_request_headers,
@@ -105,8 +106,18 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
 
 #[test]
 fn multipart_admission_is_post_only_and_recovers_after_a_parser_drops() {
-    assert!(multipart_endpoint(&axum::http::Method::GET, "/openai/v1/videos").is_none());
-    assert!(multipart_endpoint(&axum::http::Method::POST, "/openai/v1/videos").is_some());
+    assert!(
+        InferenceEndpoint::classify(&axum::http::Method::GET, "/openai/v1/videos")
+            .unwrap()
+            .multipart()
+            .is_none()
+    );
+    assert!(
+        InferenceEndpoint::classify(&axum::http::Method::POST, "/openai/v1/videos")
+            .unwrap()
+            .multipart()
+            .is_some()
+    );
 
     // With a 256-byte spool, untrusted multipart parsers may reserve at
     // most its 128-byte half-budget. A key gets at most one live parser,
@@ -176,17 +187,34 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
 }
 
 #[tokio::test]
-async fn public_router_explicitly_hides_observability_paths() {
+async fn public_router_serves_console_health_and_hides_observability_paths() {
+    let console_dir =
+        std::env::temp_dir().join(format!("olp-public-router-test-{}", Uuid::now_v7()));
+    std::fs::create_dir(&console_dir).unwrap();
+    std::fs::write(
+        console_dir.join("index.html"),
+        "<!doctype html><title>OLP console</title>",
+    )
+    .unwrap();
     let app = public_router(ApiState::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
         "https://olp.example.test",
-        PathBuf::from("missing-console"),
+        console_dir.clone(),
     ));
 
+    let health = app
+        .clone()
+        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(health.status(), axum::http::StatusCode::OK);
+    let health = health.into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&health).contains("OLP console"));
+
     for path in [
-        "/health",
+        "/health/",
         "/health/live",
         "/health/ready",
         "/metrics",
@@ -203,6 +231,7 @@ async fn public_router_explicitly_hides_observability_paths() {
             "{path}"
         );
     }
+    std::fs::remove_dir_all(console_dir).unwrap();
 }
 
 #[tokio::test]
@@ -350,19 +379,31 @@ fn inference_state(limited: bool) -> (ApiState, String) {
 #[test]
 fn local_metadata_detection_is_method_and_surface_exact() {
     assert_eq!(
-        inference_metadata_operation(&axum::http::Method::GET, "/openai/v1/models"),
+        InferenceEndpoint::classify(&axum::http::Method::GET, "/openai/v1/models")
+            .unwrap()
+            .metadata()
+            .map(|policy| (policy.operation, policy.fallback_route)),
         Some(("model_list", "models"))
     );
     assert_eq!(
-        inference_metadata_operation(&axum::http::Method::GET, "/gemini/v1beta/models/team-route"),
+        InferenceEndpoint::classify(&axum::http::Method::GET, "/gemini/v1beta/models/team-route")
+            .unwrap()
+            .metadata()
+            .map(|policy| (policy.operation, policy.fallback_route)),
         Some(("model_get", "models"))
     );
     assert_eq!(
-        inference_metadata_operation(&axum::http::Method::GET, "/openai/v1/videos"),
+        InferenceEndpoint::classify(&axum::http::Method::GET, "/openai/v1/videos")
+            .unwrap()
+            .metadata()
+            .map(|policy| (policy.operation, policy.fallback_route)),
         Some(("video_list", "videos"))
     );
     assert_eq!(
-        inference_metadata_operation(&axum::http::Method::POST, "/openai/v1/videos"),
+        InferenceEndpoint::classify(&axum::http::Method::POST, "/openai/v1/videos")
+            .unwrap()
+            .metadata()
+            .map(|policy| (policy.operation, policy.fallback_route)),
         Some(("video_create", "invalid-request"))
     );
 }
@@ -480,14 +521,14 @@ fn multipart_boundary_is_required_and_bounded() {
 #[test]
 fn raw_json_tpm_estimate_includes_requested_output_and_candidates() {
     let body = br#"{"max_completion_tokens":8192,"n":3,"messages":[]}"#;
-    let estimate = estimate_http_json_request_tokens("/openai/v1/chat/completions", body);
+    let estimate = estimate_http_json_request_tokens(TokenEstimate::Generation, body);
     assert!(estimate >= 8_192 * 3);
     assert!(
-        estimate_http_json_request_tokens("/anthropic/v1/messages", b"{") >= 4_096,
+        estimate_http_json_request_tokens(TokenEstimate::Generation, b"{") >= 4_096,
         "malformed generation requests retain a fail-safe output estimate"
     );
     assert!(
-        estimate_http_json_request_tokens("/openai/v1/embeddings", body) < 4_096,
+        estimate_http_json_request_tokens(TokenEstimate::Embeddings, body) < 4_096,
         "non-generation operations do not inherit generation output tokens"
     );
 }
@@ -505,7 +546,7 @@ fn raw_json_tpm_estimate_counts_compact_embedding_token_arrays() {
     for body in [flat, nested] {
         let body = serde_json::to_vec(&body).unwrap();
         assert_eq!(
-            estimate_http_json_request_tokens("/openai/v1/embeddings", &body),
+            estimate_http_json_request_tokens(TokenEstimate::Embeddings, &body),
             100
         );
     }
@@ -738,6 +779,261 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
 }
 
 #[tokio::test]
+async fn every_inference_surface_and_models_endpoint_requires_its_own_well_formed_header() {
+    let (state, key) = inference_state(false);
+    let app = public_router(state);
+    let cases = [
+        (
+            axum::http::Method::POST,
+            "/openai/v1/chat/completions",
+            axum::http::header::AUTHORIZATION,
+            "Bearer malformed key",
+            "/error/code",
+            "invalid_api_key",
+        ),
+        (
+            axum::http::Method::GET,
+            "/openai/v1/models",
+            axum::http::header::AUTHORIZATION,
+            "Bearer malformed key",
+            "/error/code",
+            "invalid_api_key",
+        ),
+        (
+            axum::http::Method::GET,
+            "/openai/v1/models/default",
+            axum::http::header::AUTHORIZATION,
+            "Bearer malformed key",
+            "/error/code",
+            "invalid_api_key",
+        ),
+        (
+            axum::http::Method::POST,
+            "/anthropic/v1/messages",
+            HeaderName::from_static("x-api-key"),
+            "malformed key",
+            "/error/type",
+            "authentication_error",
+        ),
+        (
+            axum::http::Method::GET,
+            "/anthropic/v1/models",
+            HeaderName::from_static("x-api-key"),
+            "malformed key",
+            "/error/type",
+            "authentication_error",
+        ),
+        (
+            axum::http::Method::GET,
+            "/anthropic/v1/models/default",
+            HeaderName::from_static("x-api-key"),
+            "malformed key",
+            "/error/type",
+            "authentication_error",
+        ),
+        (
+            axum::http::Method::POST,
+            "/gemini/v1/models/default:generateContent",
+            HeaderName::from_static("x-goog-api-key"),
+            "malformed key",
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+        (
+            axum::http::Method::GET,
+            "/gemini/v1/models",
+            HeaderName::from_static("x-goog-api-key"),
+            "malformed key",
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+        (
+            axum::http::Method::GET,
+            "/gemini/v1/models/default",
+            HeaderName::from_static("x-goog-api-key"),
+            "malformed key",
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+        (
+            axum::http::Method::GET,
+            "/gemini/v1beta/models",
+            HeaderName::from_static("x-goog-api-key"),
+            "malformed key",
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+        (
+            axum::http::Method::GET,
+            "/gemini/v1beta/models/default",
+            HeaderName::from_static("x-goog-api-key"),
+            "malformed key",
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+    ];
+
+    for (method, path, required_header, malformed, pointer, expected) in cases {
+        for supplied in [None, Some(malformed)] {
+            let mut request = Request::builder()
+                .method(method.clone())
+                .uri(path)
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap();
+            request.headers_mut().insert(
+                axum::http::header::AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {key}")).unwrap(),
+            );
+            request.headers_mut().insert(
+                HeaderName::from_static("x-api-key"),
+                HeaderValue::from_str(&key).unwrap(),
+            );
+            request.headers_mut().insert(
+                HeaderName::from_static("x-goog-api-key"),
+                HeaderValue::from_str(&key).unwrap(),
+            );
+            match supplied {
+                Some(value) => {
+                    request
+                        .headers_mut()
+                        .insert(required_header.clone(), HeaderValue::from_static(value));
+                }
+                None => {
+                    request.headers_mut().remove(&required_header);
+                }
+            }
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "{method} {path}"
+            );
+            if required_header == axum::http::header::AUTHORIZATION {
+                assert_eq!(
+                    response.headers()[axum::http::header::WWW_AUTHENTICATE],
+                    "Bearer"
+                );
+            }
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                body.pointer(pointer).and_then(serde_json::Value::as_str),
+                Some(expected),
+                "{method} {path}: {body}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn revoked_and_expired_keys_are_rejected_by_admission() {
+    for (status, expires_at) in [
+        (ApiKeyStatus::Revoked, None),
+        (
+            ApiKeyStatus::Active,
+            Some(chrono::Utc::now() - chrono::Duration::seconds(1)),
+        ),
+    ] {
+        let (state, key) = inference_state(false);
+        let pinned = state.runtime.pin();
+        let mut api_keys = pinned.api_keys.clone();
+        let api_key = api_keys.values_mut().next().unwrap();
+        api_key.status = status;
+        api_key.expires_at = expires_at;
+        state
+            .runtime
+            .install(
+                RuntimeSnapshot {
+                    generation: RuntimeGeneration {
+                        id: RuntimeGenerationId::new(),
+                        ordinal: pinned.generation.ordinal + 1,
+                        activated_at: chrono::Utc::now(),
+                    },
+                    providers: pinned.providers.clone(),
+                    routes: pinned.routes.clone(),
+                    api_keys,
+                },
+                BTreeMap::new(),
+            )
+            .unwrap();
+        let response = public_router(state)
+            .oneshot(
+                Request::get("/openai/v1/models")
+                    .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior() {
+    let (state, key) = inference_state(false);
+    let app = public_router(state);
+    for (path, header_name, header_value) in [
+        (
+            "/openai/v1/not-enabled",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {key}"),
+        ),
+        (
+            "/anthropic/v2/not-enabled",
+            HeaderName::from_static("x-api-key"),
+            key.clone(),
+        ),
+        (
+            "/gemini/v2/not-enabled",
+            HeaderName::from_static("x-goog-api-key"),
+            key.clone(),
+        ),
+        (
+            "/openai/v1/videos/video-id/extra",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {key}"),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header(header_name, header_value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "{path}"
+        );
+        assert_eq!(
+            response.headers()[axum::http::header::CONTENT_TYPE],
+            "application/problem+json",
+            "{path}"
+        );
+    }
+
+    let response = app
+        .oneshot(
+            Request::get("/openai/v1/chat/completions")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::METHOD_NOT_ALLOWED
+    );
+}
+
+#[tokio::test]
 async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode() {
     let (state, key) = inference_state(true);
     let app = public_router(state);
@@ -833,9 +1129,13 @@ async fn malformed_inference_json_without_hard_limits_reaches_native_decoder() {
     assert!(!event.committed);
 }
 
-async fn activate_runtime_inside_handler(State(state): State<ApiState>) -> String {
+async fn activate_runtime_inside_handler(
+    State(state): State<ApiState>,
+    Extension(principal): Extension<InferencePrincipal>,
+) -> String {
     let pinned_before_activation = pin_inference_runtime(&state);
     let pinned_generation = pinned_before_activation.generation.id;
+    assert_eq!(principal.runtime().generation.id, pinned_generation);
     state
         .runtime
         .install(
@@ -858,6 +1158,21 @@ async fn activate_runtime_inside_handler(State(state): State<ApiState>) -> Strin
         pinned_generation,
         "a request must not mix authentication and route generations"
     );
+    let detached_state = state.clone();
+    let (detached_runtime, detached_principal) = spawn_http_inference_task(&state, async move {
+        (
+            pin_inference_runtime(&detached_state).generation.id,
+            http_inference_principal()
+                .expect("admitted principal must cross the detached task boundary")
+                .runtime()
+                .generation
+                .id,
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(detached_runtime, pinned_generation);
+    assert_eq!(detached_principal, pinned_generation);
     pinned_generation.to_string()
 }
 
@@ -1007,41 +1322,70 @@ async fn detached_inference_task_holds_the_http_reservation_after_request_cancel
 
 #[tokio::test]
 async fn spawned_inference_task_inherits_the_http_execution_context() {
-    let runtime = Arc::new(RuntimeManager::empty());
-    let state = ApiState::new(
-        ApiMode::Gateway,
-        None,
-        Arc::clone(&runtime),
-        "https://olp.example.test",
-        PathBuf::from("missing-console"),
-    );
-    let pinned = runtime.pin();
+    let (state, _) = inference_state(false);
+    let pinned = state.runtime.pin();
+    let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
+    let principal =
+        InferencePrincipal::for_test(Arc::clone(&pinned), lookup_id.clone(), Surface::OpenAi);
+    state
+        .runtime
+        .install(
+            RuntimeSnapshot {
+                generation: RuntimeGeneration {
+                    id: RuntimeGenerationId::new(),
+                    ordinal: pinned.generation.ordinal + 1,
+                    activated_at: chrono::Utc::now(),
+                },
+                providers: pinned.providers.clone(),
+                routes: pinned.routes.clone(),
+                api_keys: pinned.api_keys.clone(),
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
     let metadata_claimed = Arc::new(AtomicBool::new(false));
     let reservation = InferenceReservation::for_test(async {});
     let child_state = state.clone();
-    let (generation, reserved_tokens, has_reservation_hold) = HTTP_INFERENCE_RUNTIME
+    let spawn_state = state.clone();
+    let (
+        generation,
+        principal_generation,
+        principal_surface,
+        reserved_tokens,
+        has_reservation_hold,
+    ) = HTTP_INFERENCE_PRINCIPAL
         .scope(
-            Arc::clone(&pinned),
-            HTTP_INFERENCE_METADATA_CLAIMED.scope(
-                Arc::clone(&metadata_claimed),
-                HTTP_INFERENCE_LIMITS_RESERVED.scope(
-                    2_000,
-                    HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
-                        let task = spawn_http_inference_task(&state, async move {
-                            claim_http_inference_metadata();
-                            (
-                                pin_inference_runtime(&child_state).generation.id,
-                                http_inference_reserved_tokens(),
-                                HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
-                            )
-                        });
-                        task.await.unwrap()
-                    }),
+            principal,
+            HTTP_INFERENCE_RUNTIME.scope(
+                Arc::clone(&pinned),
+                HTTP_INFERENCE_METADATA_CLAIMED.scope(
+                    Arc::clone(&metadata_claimed),
+                    HTTP_INFERENCE_LIMITS_RESERVED.scope(
+                        2_000,
+                        HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
+                            let task = spawn_http_inference_task(&spawn_state, async move {
+                                claim_http_inference_metadata();
+                                let principal = http_inference_principal()
+                                    .expect("the detached task inherits the admitted principal");
+                                (
+                                    pin_inference_runtime(&child_state).generation.id,
+                                    principal.runtime().generation.id,
+                                    principal.surface(),
+                                    http_inference_reserved_tokens(),
+                                    HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
+                                )
+                            });
+                            task.await.unwrap()
+                        }),
+                    ),
                 ),
             ),
         )
         .await;
     assert_eq!(generation, pinned.generation.id);
+    assert_eq!(principal_generation, pinned.generation.id);
+    assert_eq!(principal_surface, Surface::OpenAi);
+    assert_ne!(state.runtime.pin().generation.id, pinned.generation.id);
     assert_eq!(reserved_tokens, Some(2_000));
     assert!(has_reservation_hold);
     assert!(metadata_claimed.load(Ordering::Acquire));

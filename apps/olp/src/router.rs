@@ -37,12 +37,14 @@ pub fn public_router(state: ApiState) -> Router {
     let request_id = HeaderName::from_static("x-request-id");
     let request_limit_state = state.clone();
     let content_security_policy = static_console::content_security_policy(&state.console_dir);
-    // Keep these exact paths ahead of the console fallback. A static console
-    // file must never accidentally republish a probe or metrics endpoint.
+    // Keep observability descendants and metrics ahead of the console fallback.
+    // The exact `/health` path belongs to the console; probes live below it on
+    // the separate observability listener.
     let mut router = Router::new()
-        .route("/health", any(public_observability_not_found))
+        .route("/health/", any(public_observability_not_found))
         .route("/health/{*path}", any(public_observability_not_found))
         .route("/metrics", any(public_observability_not_found))
+        .route("/metrics/", any(public_observability_not_found))
         .route("/metrics/{*path}", any(public_observability_not_found));
 
     if state.mode.serves_control() {

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy, onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -16,16 +18,20 @@
     type ApiKeySecret
   } from '$lib/api/management/api-keys';
   import { listRoutes } from '$lib/api/management/routes';
+  import type { ApiKeyListState } from './apiKeyListState';
   import { validateApiKey } from './keyValidation';
 
-  let { path }: { path: string } = $props();
-  const isNew = $derived(path.split('/')[1] === 'new');
+  let {
+    isNew = false,
+    listState
+  }: {
+    isNew?: boolean;
+    listState: ApiKeyListState;
+  } = $props();
   let editing = $state<ApiKey | null>(null);
   const isForm = $derived(isNew || editing !== null);
   const queryClient = useQueryClient();
-  let keyCursor = $state<string | undefined>();
-  let keyHistory = $state<Array<string | undefined>>([]);
-  const keys = createQuery(() => ({ queryKey: ['api-key-page', keyCursor ?? 'first'], queryFn: () => listApiKeyPage(keyCursor), enabled: !isNew }));
+  const keys = createQuery(() => ({ queryKey: ['api-key-page', listState.cursor ?? 'first'], queryFn: () => listApiKeyPage(listState.cursor), enabled: !isNew }));
 
   let name = $state('');
   let scopes = $state<string[]>(['inference']);
@@ -235,19 +241,19 @@
     copied = '';
     testState = 'idle';
     testMessage = '';
-    if (isNew) window.location.assign('/api-keys');
+    if (isNew) void goto(resolve('/api-keys'));
   }
 
   function nextKeyPage() {
     const next = keys.data?.nextCursor;
     if (!next) return;
-    keyHistory = [...keyHistory, keyCursor];
-    keyCursor = next;
+    listState.history = [...listState.history, listState.cursor];
+    listState.cursor = next;
   }
 
   function previousKeyPage() {
-    keyCursor = keyHistory.at(-1);
-    keyHistory = keyHistory.slice(0, -1);
+    listState.cursor = listState.history.at(-1);
+    listState.history = listState.history.slice(0, -1);
   }
 </script>
 
@@ -270,7 +276,7 @@
 {/if}
 
 {#if isForm}
-  <div class="page-header"><div><p class="eyebrow">Access · API Keys</p><h1 class="page-title">{editing ? 'Edit key policy.' : 'Create a proxy key.'}</h1><p class="page-description">{editing ? 'Update scopes, route access, expiry, and shared hard limits. The key secret does not change.' : 'Scope access, restrict route slugs, and apply shared hard limits. The secret is displayed once.'}</p></div>{#if editing}<button class="button button-secondary" type="button" onclick={cancelEdit}>Cancel</button>{:else}<a class="button button-secondary" href="/api-keys">Cancel</a>{/if}</div>
+  <div class="page-header"><div><p class="eyebrow">Access · API Keys</p><h1 class="page-title">{editing ? 'Edit key policy.' : 'Create a proxy key.'}</h1><p class="page-description">{editing ? 'Update scopes, route access, expiry, and shared hard limits. The key secret does not change.' : 'Scope access, restrict route slugs, and apply shared hard limits. The secret is displayed once.'}</p></div>{#if editing}<button class="button button-secondary" type="button" onclick={cancelEdit}>Cancel</button>{:else}<a class="button button-secondary" href={resolve('/api-keys')}>Cancel</a>{/if}</div>
   {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
   <form class="card key-form" onsubmit={submit} novalidate>
     <section aria-labelledby="identity-heading"><p class="eyebrow">Identity</p><h2 id="identity-heading">Name and expiration</h2><div class="form-grid"><div class="form-field"><label for="key-name">Key name</label><input id="key-name" bind:value={name} aria-invalid={errors.name ? 'true' : undefined} aria-describedby={errors.name ? 'key-name-error' : undefined} />{#if errors.name}<small class="field-error" id="key-name-error">{errors.name}</small>{/if}</div><div class="form-field"><label for="key-expiry">Expires at (optional)</label><input id="key-expiry" type="datetime-local" bind:value={expiresAt} /></div></div></section>
@@ -279,13 +285,13 @@
     <div class="form-actions"><button class="button button-primary" type="submit" disabled={Boolean(busy)}>{busy === 'create' ? 'Creating securely…' : busy === 'update' ? 'Publishing policy…' : editing ? 'Save and publish' : 'Create and show key'} <NavIcon name="arrow" /></button></div>
   </form>
 {:else}
-  <div class="page-header"><div><p class="eyebrow">Access</p><h1 class="page-title">API Keys</h1><p class="page-description">Issue independent 32-byte proxy keys with scopes, route allowlists, and distributed hard limits.</p></div><a class="button button-primary" href="/api-keys/new">Create key <NavIcon name="arrow" /></a></div>
+  <div class="page-header"><div><p class="eyebrow">Access</p><h1 class="page-title">API Keys</h1><p class="page-description">Issue independent 32-byte proxy keys with scopes, route allowlists, and distributed hard limits.</p></div><a class="button button-primary" href={resolve('/api-keys/new')}>Create key <NavIcon name="arrow" /></a></div>
   {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
   {#if notice}<div class="success-message" role="status">{notice}</div>{/if}
   {#if keys.isPending}<div class="loading-state" role="status">Loading API keys…</div>
   {:else if keys.isError}<div class="inline-problem" role="alert">{message(keys.error)} <button class="button button-secondary" type="button" onclick={() => keys.refetch()}>Retry</button></div>
-  {:else if !keys.data?.items.length && keyHistory.length === 0}<section class="card empty-state"><div><h2>No API keys</h2><p>Create a scoped key after activating your first route.</p><a class="button button-primary" href="/api-keys/new">Create first key</a></div></section>
-  {:else}<div class="table-shell key-table"><table class="data-table"><thead><tr><th>Name / lookup ID</th><th>Status</th><th>Scope</th><th>Limits</th><th>Creator / created</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each keys.data?.items ?? [] as key (key.id)}<tr><td><strong>{key.name}</strong><br /><code>{key.lookup_id}</code></td><td><span class:danger={Boolean(key.revoked_at)} class:warning={Boolean(key.expires_at && new Date(key.expires_at) < new Date())} class:success={!key.revoked_at && (!key.expires_at || new Date(key.expires_at) >= new Date())} class="badge">{key.revoked_at ? 'revoked' : key.expires_at && new Date(key.expires_at) < new Date() ? 'expired' : 'active'}</span></td><td>{key.scopes.join(', ') || 'none'}<br /><small>{key.allowed_routes.length ? key.allowed_routes.join(', ') : 'all routes'}</small></td><td><small>{key.requests_per_minute ? `${key.requests_per_minute} RPM` : 'unlimited RPM'}<br />{key.tokens_per_minute ? `${key.tokens_per_minute} TPM` : 'unlimited TPM'} · {key.max_concurrency ? `${key.max_concurrency} concurrent` : 'unlimited concurrency'}</small></td><td><strong>{key.created_by_email}</strong><br /><small>{new Date(key.created_at).toLocaleDateString()}</small></td><td><div class="row-actions">{#if !key.revoked_at && (!key.expires_at || new Date(key.expires_at) >= new Date())}<button class="button button-secondary" type="button" onclick={() => edit(key)} disabled={Boolean(busy)}>Edit</button><button class="button button-secondary" type="button" onclick={() => rotate(key)} disabled={Boolean(busy)}>{busy === `rotate-${key.id}` ? 'Rotating…' : 'Rotate'}</button><button class="button button-secondary danger-button" type="button" onclick={() => revoke(key)} disabled={Boolean(busy)}>{busy === `revoke-${key.id}` ? 'Revoking…' : 'Revoke'}</button>{/if}</div></td></tr>{/each}</tbody></table></div><CursorPagination page={keyHistory.length + 1} hasPrevious={keyHistory.length > 0} hasNext={Boolean(keys.data?.nextCursor)} onPrevious={previousKeyPage} onNext={nextKeyPage} label="API key pages" />{/if}
+  {:else if !keys.data?.items.length && listState.history.length === 0}<section class="card empty-state"><div><h2>No API keys</h2><p>Create a scoped key after activating your first route.</p><a class="button button-primary" href={resolve('/api-keys/new')}>Create first key</a></div></section>
+  {:else}<div class="table-shell key-table"><table class="data-table"><thead><tr><th>Name / lookup ID</th><th>Status</th><th>Scope</th><th>Limits</th><th>Creator / created</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each keys.data?.items ?? [] as key (key.id)}<tr><td><strong>{key.name}</strong><br /><code>{key.lookup_id}</code></td><td><span class:danger={Boolean(key.revoked_at)} class:warning={Boolean(key.expires_at && new Date(key.expires_at) < new Date())} class:success={!key.revoked_at && (!key.expires_at || new Date(key.expires_at) >= new Date())} class="badge">{key.revoked_at ? 'revoked' : key.expires_at && new Date(key.expires_at) < new Date() ? 'expired' : 'active'}</span></td><td>{key.scopes.join(', ') || 'none'}<br /><small>{key.allowed_routes.length ? key.allowed_routes.join(', ') : 'all routes'}</small></td><td><small>{key.requests_per_minute ? `${key.requests_per_minute} RPM` : 'unlimited RPM'}<br />{key.tokens_per_minute ? `${key.tokens_per_minute} TPM` : 'unlimited TPM'} · {key.max_concurrency ? `${key.max_concurrency} concurrent` : 'unlimited concurrency'}</small></td><td><strong>{key.created_by_email}</strong><br /><small>{new Date(key.created_at).toLocaleDateString()}</small></td><td><div class="row-actions">{#if !key.revoked_at && (!key.expires_at || new Date(key.expires_at) >= new Date())}<button class="button button-secondary" type="button" onclick={() => edit(key)} disabled={Boolean(busy)}>Edit</button><button class="button button-secondary" type="button" onclick={() => rotate(key)} disabled={Boolean(busy)}>{busy === `rotate-${key.id}` ? 'Rotating…' : 'Rotate'}</button><button class="button button-secondary danger-button" type="button" onclick={() => revoke(key)} disabled={Boolean(busy)}>{busy === `revoke-${key.id}` ? 'Revoking…' : 'Revoke'}</button>{/if}</div></td></tr>{/each}</tbody></table></div><CursorPagination page={listState.history.length + 1} hasPrevious={listState.history.length > 0} hasNext={Boolean(keys.data?.nextCursor)} onPrevious={previousKeyPage} onNext={nextKeyPage} label="API key pages" />{/if}
 {/if}
 
 <style>

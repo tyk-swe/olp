@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -342,7 +343,7 @@
 
 <div class="page-header">
   <div><p class="eyebrow">Gateway · Provider</p><h1 class="page-title">{provider.data?.name ?? 'Provider detail'}</h1><p class="page-description">Test identity, review models and capability evidence, and rotate write-only credentials.</p></div>
-  <a class="button button-secondary" href="/providers">All providers</a>
+  <a class="button button-secondary" href={resolve('/providers')}>All providers</a>
 </div>
 
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
@@ -377,7 +378,7 @@
     </section>
   </div>
   <section class="card editor models" aria-labelledby="models-heading">
-    <div class="section-heading"><div><p class="eyebrow">Discovery</p><h2 id="models-heading">Models and capabilities</h2></div><a class="button button-secondary" href="/models">Inventory view</a></div>
+    <div class="section-heading"><div><p class="eyebrow">Discovery</p><h2 id="models-heading">Models and capabilities</h2></div><a class="button button-secondary" href={resolve('/models')}>Inventory view</a></div>
     <div class="discovery-row"><p class="muted">Refresh the inventory from the upstream model-list API. Existing capability certification is reconciled server-side.</p><button class="button button-secondary" type="button" onclick={() => discoverDetail(current)} disabled={Boolean(busy)}>{busy === 'detail-discover' ? 'Discovering…' : 'Run upstream discovery'}</button></div>
     {#if current.kind === 'openai_compatible'}<details class="manual-fallback"><summary>Manual model identifiers</summary><p>Use only if this compatible endpoint has no list API. Models remain disabled until capability review.</p><div class="form-field"><label for="manual-models-detail">Upstream model identifiers</label><textarea id="manual-models-detail" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={() => declareDetailModels(current)} disabled={Boolean(busy)}>{busy === 'detail-declare' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
     {#if current.model_count === 0}<div class="empty-state"><p>No models have been discovered.</p></div>{:else if detailModels.isPending}<div class="loading-state" role="status">Loading models…</div>{:else if detailModels.isError}<div class="inline-problem" role="alert">{message(detailModels.error)} <button class="button button-secondary" type="button" onclick={() => detailModels.refetch()}>Retry</button></div>{:else}<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead><tbody>{#each detailModels.data?.items ?? [] as model (model.id)}<tr><td><strong>{model.display_name}</strong><br /><code>{model.upstream_model}</code></td><td><CapabilityReview {model} options={capabilityOptions.data?.capabilities ?? []} optionsPending={capabilityOptions.isPending} optionsError={capabilityOptions.isError} disabled={Boolean(busy)} onSave={(enabled, capabilities) => reviewDetailModel(current, model.id, enabled, capabilities)} /><div class="certification-action"><button class="button button-secondary" type="button" onclick={() => certifyDetailModel(current, model.id)} disabled={Boolean(busy) || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>{#if certificationResults[model.id]}{@const result = certificationResults[model.id]}<span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span><ul class="certification-results">{#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li><code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}</li>{/each}</ul>{/if}</div></td></tr>{/each}</tbody></table></div><CursorPagination page={detailModelHistory.length + 1} hasPrevious={detailModelHistory.length > 0} hasNext={Boolean(detailModels.data?.nextCursor)} onPrevious={previousDetailModelPage} onNext={nextDetailModelPage} label="Provider model pages" />{/if}

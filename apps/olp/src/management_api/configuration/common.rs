@@ -57,7 +57,7 @@ pub(super) fn json<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, Prob
     })
 }
 
-pub(super) fn validation(field: &str, detail: &str) -> Problem {
+pub(crate) fn validation(field: &str, detail: &str) -> Problem {
     let mut errors = FieldErrors::new();
     errors.insert(field.to_owned(), vec![detail.to_owned()]);
     Problem::validation(errors)

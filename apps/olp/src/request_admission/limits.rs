@@ -136,19 +136,52 @@ impl Drop for ReleaseReservationBody {
     }
 }
 
-pub(super) struct AuthenticatedInferenceKey {
-    pub(super) key: ApiKey,
-    pub(super) lookup_id: String,
-    lease_ttl: Duration,
-    pub(super) runtime_generation_id: uuid::Uuid,
-    pub(super) runtime: Arc<RuntimeBundle>,
+#[derive(Clone)]
+pub(crate) struct InferencePrincipal {
+    runtime: Arc<RuntimeBundle>,
+    lookup_id: ApiKeyLookupId,
+    surface: Surface,
+}
+
+impl InferencePrincipal {
+    pub(crate) fn runtime(&self) -> &Arc<RuntimeBundle> {
+        &self.runtime
+    }
+
+    pub(crate) fn key(&self) -> &ApiKey {
+        self.runtime
+            .api_keys
+            .get(&self.lookup_id)
+            .expect("authenticated API key must remain in its pinned runtime")
+    }
+
+    pub(crate) fn lookup_id(&self) -> &ApiKeyLookupId {
+        &self.lookup_id
+    }
+
+    pub(crate) const fn surface(&self) -> Surface {
+        self.surface
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        runtime: Arc<RuntimeBundle>,
+        lookup_id: ApiKeyLookupId,
+        surface: Surface,
+    ) -> Self {
+        Self {
+            runtime,
+            lookup_id,
+            surface,
+        }
+    }
 }
 
 pub(super) fn authenticate_inference_headers(
     state: &ApiState,
     headers: &HeaderMap,
     surface: Surface,
-) -> Result<AuthenticatedInferenceKey, crate::Problem> {
+) -> Result<InferencePrincipal, crate::Problem> {
     let token = match surface {
         Surface::OpenAi => headers
             .get(axum::http::header::AUTHORIZATION)
@@ -191,61 +224,62 @@ pub(super) fn authenticate_inference_headers(
             "The API key is invalid or unavailable.",
         ));
     }
-    let route_timeout = snapshot
-        .routes
-        .iter()
-        .filter(|(slug, _)| key.allowed_routes.is_empty() || key.allowed_routes.contains(*slug))
-        .map(|(_, route)| route.overall_timeout.as_duration())
-        .max()
-        .unwrap_or(Duration::from_secs(30));
-    Ok(AuthenticatedInferenceKey {
-        key: key.clone(),
-        lookup_id: lookup,
-        // Account for the bounded body-read phase in addition to the route's
-        // own deadline. Expiry remains a crash-recovery backstop; normal
-        // completion releases the lease immediately.
-        lease_ttl: route_timeout.saturating_add(Duration::from_secs(60)),
-        runtime_generation_id: snapshot.generation.id.as_uuid(),
+    Ok(InferencePrincipal {
+        lookup_id,
         runtime: snapshot,
+        surface,
     })
 }
 
 pub(super) async fn reserve_http_inference_limits(
     state: &ApiState,
-    authenticated: &AuthenticatedInferenceKey,
+    principal: &InferencePrincipal,
     requested_tokens: i64,
 ) -> Result<Option<InferenceReservation>, gateway::InferenceError> {
-    if !authenticated.key.limits.has_hard_limits() {
+    if !principal.key().limits.has_hard_limits() {
         return Ok(None);
     }
     let limiter = state
         .limiter
         .current()
         .ok_or_else(|| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
-    let tokens_per_minute = authenticated
-        .key
+    let tokens_per_minute = principal
+        .key()
         .limits
         .tokens_per_minute
         .map(|value| i64::try_from(value.get()))
         .transpose()
         .map_err(|_| gateway::InferenceError::unavailable("limit_configuration_invalid"))?;
+    let route_timeout = principal
+        .runtime
+        .routes
+        .iter()
+        .filter(|(slug, _)| {
+            principal.key().allowed_routes.is_empty()
+                || principal.key().allowed_routes.contains(*slug)
+        })
+        .map(|(_, route)| route.overall_timeout.as_duration())
+        .max()
+        .unwrap_or(Duration::from_secs(30));
     let result = tokio::time::timeout(
         Duration::from_secs(1),
         limiter.reserve(LimitRequest {
-            lookup_id: &authenticated.lookup_id,
-            requests_per_minute: authenticated
-                .key
+            lookup_id: principal.lookup_id().as_str(),
+            requests_per_minute: principal
+                .key()
                 .limits
                 .requests_per_minute
                 .map(|value| i64::from(value.get())),
             tokens_per_minute,
-            max_concurrency: authenticated
-                .key
+            max_concurrency: principal
+                .key()
                 .limits
                 .concurrency
                 .map(|value| i64::from(value.get())),
             requested_tokens,
-            lease_ttl: authenticated.lease_ttl,
+            // Account for the bounded body-read phase in addition to the
+            // route deadline. This is only a crash-recovery backstop.
+            lease_ttl: route_timeout.saturating_add(Duration::from_secs(60)),
         }),
     )
     .await
@@ -268,9 +302,12 @@ pub(super) async fn reserve_http_inference_limits(
     }
 }
 
-pub(crate) fn estimate_http_json_request_tokens(path: &str, body: &[u8]) -> i64 {
+pub(crate) fn estimate_http_json_request_tokens(
+    category: gateway::TokenEstimate,
+    body: &[u8],
+) -> i64 {
     let encoded_body = body.len().saturating_add(3) / 4;
-    let baseline = if is_generation_path(path) {
+    let baseline = if category == gateway::TokenEstimate::Generation {
         let value = serde_json::from_slice::<serde_json::Value>(body).ok();
         let output = value
             .as_ref()
@@ -305,7 +342,7 @@ pub(crate) fn estimate_http_json_request_tokens(path: &str, body: &[u8]) -> i64 
     let byte_estimate = encoded_body.saturating_add(baseline).max(1);
     // Generation paths and embeddings are mutually exclusive, so the body is
     // parsed at most once per request, and only for paths that consume it.
-    let embedding_token_floor = if path.ends_with("/embeddings") {
+    let embedding_token_floor = if category == gateway::TokenEstimate::Embeddings {
         serde_json::from_slice::<EmbeddingTokenProbe>(body)
             .ok()
             .map(|probe| embedding_token_count(probe.input))
@@ -332,28 +369,13 @@ fn embedding_token_count(input: EmbeddingWireInput) -> usize {
     }
 }
 
-pub(super) fn estimate_http_non_json_request_tokens(path: &str) -> i64 {
-    let baseline: i64 = if is_generation_path(path) {
-        4_096
-    } else if path.ends_with("/audio/transcriptions") {
-        1_500
-    } else if path.ends_with("/images/edits")
-        || path.ends_with("/images/variations")
-        || path.ends_with("/videos")
-    {
-        2_000
-    } else {
-        1
-    };
-    baseline
-}
-
-fn is_generation_path(path: &str) -> bool {
-    path.ends_with("/chat/completions")
-        || path.ends_with("/responses")
-        || path.ends_with("/messages")
-        || path.ends_with(":generateContent")
-        || path.ends_with(":streamGenerateContent")
+pub(super) const fn estimate_http_non_json_request_tokens(category: gateway::TokenEstimate) -> i64 {
+    match category {
+        gateway::TokenEstimate::Generation => 4_096,
+        gateway::TokenEstimate::Transcription => 1_500,
+        gateway::TokenEstimate::Media => 2_000,
+        gateway::TokenEstimate::Default | gateway::TokenEstimate::Embeddings => 1,
+    }
 }
 
 fn inference_header_token<'a>(headers: &'a HeaderMap, name: &'static str) -> Option<&'a str> {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { ApiProblem } from '$lib/api/http';
@@ -76,7 +77,7 @@
 
 <div class="page-header">
   <div><p class="eyebrow">Gateway</p><h1 class="page-title">Model inventory</h1><p class="page-description">Route eligibility comes from certified provider, model, operation, surface, and mode tuples.</p></div>
-  <a class="button button-primary" href="/providers/new">Discover models</a>
+  <a class="button button-primary" href={resolve('/providers/new')}>Discover models</a>
 </div>
 
 <div class="metric-grid">
@@ -98,7 +99,7 @@
 {:else if models.isError}
   <div class="inline-problem" role="alert">{message(models.error)} <button class="button button-secondary" type="button" onclick={() => models.refetch()}>Retry</button></div>
 {:else if inventory.length === 0}
-  <section class="card empty-state"><div><h2>No models discovered</h2><p>Run a provider probe and capability review first.</p><a class="button button-primary" href="/providers">Open providers</a></div></section>
+  <section class="card empty-state"><div><h2>No models discovered</h2><p>Run a provider probe and capability review first.</p><a class="button button-primary" href={resolve('/providers')}>Open providers</a></div></section>
 {:else if filtered.length === 0}
   <section class="card empty-state"><div><h2>No matching models</h2><p>Clear the search or select another client surface.</p><button class="button button-secondary" type="button" onclick={() => { search = ''; surface = 'all'; }}>Clear filters</button></div></section>
 {:else}
@@ -106,7 +107,7 @@
     {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}
       <tr>
         <td><strong>{entry.model.display_name}</strong><br /><code>{entry.model.upstream_model}</code></td>
-        <td><a href={`/providers/${entry.provider_id}`}>{entry.provider_name}</a><br /><span class="badge">{entry.provider_kind.replaceAll('_', ' ')}</span></td>
+        <td><a href={resolve(`/providers/${entry.provider_id}`)}>{entry.provider_name}</a><br /><span class="badge">{entry.provider_kind.replaceAll('_', ' ')}</span></td>
         <td><div class="capabilities">{#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span class:success={capability.source === 'certified'} class:accent={capability.source !== 'certified'} class="badge"><strong>{capability.operation}</strong> {capability.surface} · {capability.mode} · {capability.source}</span>{/each}</div></td>
         <td><label class="eligibility"><input type="checkbox" checked={entry.model.enabled} disabled={busyModel === entry.model.id} onchange={(event) => toggle(entry, event.currentTarget.checked)} /><span>{entry.model.enabled ? 'Enabled' : 'Disabled'}</span></label></td>
       </tr>

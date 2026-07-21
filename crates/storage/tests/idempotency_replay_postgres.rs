@@ -260,6 +260,80 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
     };
     assert_eq!(replayed_key_response.into_parts(), first_key_parts);
 
+    let expiring_key = "api-key-expiration-replay-test-001";
+    let expires_at = Utc::now() + Duration::seconds(1);
+    let expiring_fingerprint = idempotency_fingerprint(&json!({
+        "name": "Expiring replay key",
+        "scopes": ["inference"],
+        "allowed_routes": [],
+        "expires_at": expires_at
+    }))
+    .unwrap();
+    let expiring_material = auth_hmac_key.generate_api_key();
+    let expiring_secret = expiring_material.expose_once().to_owned();
+    let first_expiring_key = store
+        .create_api_key_record(
+            &NewApiKeyRecord {
+                name: "Expiring replay key".to_owned(),
+                material: expiring_material,
+                scopes: vec![ApiKeyScope::Inference],
+                allowed_routes: vec![],
+                limits: ApiKeyLimits::default(),
+                expires_at: Some(expires_at),
+                actor,
+                idempotency_key: expiring_key.to_owned(),
+            },
+            ReplayableIdempotency::new(expiring_fingerprint, &master_key),
+            |created| {
+                IdempotencyResponse::json(
+                    201,
+                    &json!({
+                        "id": created.id,
+                        "lookup_id": created.lookup_id,
+                        "secret": expiring_secret
+                    }),
+                    Some(format!("\"{}\"", created.etag)),
+                )
+            },
+        )
+        .await
+        .unwrap();
+    let IdempotencyOutcome::Executed {
+        response: first_expiring_response,
+        ..
+    } = first_expiring_key
+    else {
+        panic!("the first expiring API-key request must execute");
+    };
+    let first_expiring_parts = first_expiring_response.into_parts();
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    assert!(expires_at <= Utc::now());
+    let replayed_expiring_key = store
+        .create_api_key_record(
+            &NewApiKeyRecord {
+                name: "Expiring replay key".to_owned(),
+                material: auth_hmac_key.generate_api_key(),
+                scopes: vec![ApiKeyScope::Inference],
+                allowed_routes: vec![],
+                limits: ApiKeyLimits::default(),
+                expires_at: Some(expires_at),
+                actor,
+                idempotency_key: expiring_key.to_owned(),
+            },
+            ReplayableIdempotency::new(expiring_fingerprint, &master_key),
+            |_| panic!("expired API-key replay must not validate or execute again"),
+        )
+        .await
+        .unwrap();
+    let IdempotencyOutcome::Replayed(replayed_expiring_response) = replayed_expiring_key else {
+        panic!("the expired duplicate API-key request must replay");
+    };
+    assert_eq!(
+        replayed_expiring_response.into_parts(),
+        first_expiring_parts
+    );
+
     let rotation_key = "api-key-rotation-replay-test-001";
     let rotation_fingerprint = idempotency_fingerprint(&json!({
         "api_key_id": created_key.id,

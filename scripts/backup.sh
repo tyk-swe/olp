@@ -19,7 +19,13 @@ fi
 : "${OLP_DATABASE_URL:?OLP_DATABASE_URL must identify the PostgreSQL authority to back up}"
 pg_dump_command=${OLP_PG_DUMP:-pg_dump}
 psql_command=${OLP_PSQL:-psql}
-for command in "$pg_dump_command" "$psql_command" sha256sum; do
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+manifest_tool="$script_dir/backup-manifest.sh"
+[[ -x $manifest_tool ]] || {
+  echo "required executable is unavailable: $manifest_tool" >&2
+  exit 1
+}
+for command in "$pg_dump_command" "$psql_command" jq sha256sum; do
   command -v "$command" >/dev/null || {
     echo "required command is unavailable: $command" >&2
     exit 1
@@ -28,7 +34,6 @@ done
 
 output_dir=${1:-./backups}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
-created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 backup_name="olp-${timestamp}.dump"
 backup_path="${output_dir}/${backup_name}"
 temporary_path="${backup_path}.partial"
@@ -66,7 +71,7 @@ case "$traffic_quiesced" in
   *) echo "OLP_BACKUP_TRAFFIC_QUIESCED must be true or false" >&2; exit 2 ;;
 esac
 request_metadata_stream_drained=false
-request_metadata_consumer_checked_at_json=null
+request_metadata_consumer_checked_at=null
 if [[ $traffic_quiesced == true ]]; then
   max_age=${OLP_BACKUP_REQUEST_METADATA_CHECKPOINT_MAX_AGE_SECONDS:-30}
   [[ $max_age =~ ^[1-9][0-9]*$ ]] || {
@@ -109,7 +114,7 @@ if [[ $traffic_quiesced == true ]]; then
     exit 1
   }
   request_metadata_stream_drained=true
-  request_metadata_consumer_checked_at_json="\"$checked_at\""
+  request_metadata_consumer_checked_at=$checked_at
 else
   echo "warning: backup was not declared traffic-quiesced; manifest will mark request_metadata_stream_drained=false" >&2
 fi
@@ -123,18 +128,12 @@ fi
   --file="$temporary_path"
 
 mv "$temporary_path" "$backup_path"
-checksum=$(sha256sum "$backup_path" | awk '{print $1}')
-printf '%s  %s\n' "$checksum" "$backup_name" > "${backup_path}.sha256"
-if [[ $request_metadata_schema == current ]]; then
-  printf '{\n  "format": "olp-v2-postgresql-custom-v2",\n  "created_at": "%s",\n  "database_server_version": "%s",\n  "successful_migrations": %s,\n  "runtime_generation_ordinal": %s,\n  "backup_file": "%s",\n  "sha256": "%s",\n  "traffic_quiesced": %s,\n  "request_metadata_stream_drained": %s,\n  "request_metadata_consumer_checked_at": %s,\n  "plaintext_secrets_included": false,\n  "encrypted_sensitive_records_included": true,\n  "mounted_key_files_included": false\n}\n' \
-    "$created_at" "$server_version" "$migration_count" "$latest_generation" \
-    "$backup_name" "$checksum" "$traffic_quiesced" "$request_metadata_stream_drained" \
-    "$request_metadata_consumer_checked_at_json" > "${backup_path}.manifest.json"
-else
-  printf '{\n  "format": "olp-v2-postgresql-custom-v1",\n  "created_at": "%s",\n  "database_server_version": "%s",\n  "successful_migrations": %s,\n  "runtime_generation_ordinal": %s,\n  "backup_file": "%s",\n  "sha256": "%s",\n  "traffic_quiesced": %s,\n  "usage_stream_drained": %s,\n  "usage_consumer_checked_at": %s,\n  "plaintext_secrets_included": false,\n  "encrypted_sensitive_records_included": true,\n  "mounted_key_files_included": false\n}\n' \
-    "$created_at" "$server_version" "$migration_count" "$latest_generation" \
-    "$backup_name" "$checksum" "$traffic_quiesced" "$request_metadata_stream_drained" \
-    "$request_metadata_consumer_checked_at_json" > "${backup_path}.manifest.json"
+created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+"$manifest_tool" create-v2 "$backup_path" "$created_at" "$server_version" \
+  "$migration_count" "$latest_generation" "$traffic_quiesced" \
+  "$request_metadata_stream_drained" "$request_metadata_consumer_checked_at"
+if [[ $request_metadata_schema == legacy ]]; then
+  "$manifest_tool" convert-v2-to-v1 "$backup_path"
 fi
 
 echo "$backup_path"

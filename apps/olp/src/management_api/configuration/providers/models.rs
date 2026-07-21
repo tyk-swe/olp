@@ -27,10 +27,11 @@ use crate::{
     },
 };
 
-use super::{ProviderDetailResponse, provider_connector};
+use super::ProviderDetailResponse;
 use crate::management_api::configuration::common::{
     PageQuery, json, map_configuration_resource, page, validation, with_etag,
 };
+use crate::provider_adapter::provider_connector;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderCapabilityOptionsResponse {

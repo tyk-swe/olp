@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
   import BrandMark from '$lib/components/BrandMark.svelte';
 
@@ -8,7 +9,7 @@
 <a class="skip-link" href="#setup-content">Skip to setup</a>
 <main class="setup-shell" id="setup-content" tabindex="-1">
   <section class="setup-context" aria-labelledby="setup-introduction">
-    <a class="brand" href="/" aria-label="OpenLLMProxy home">
+    <a class="brand" href={resolve('/')} aria-label="OpenLLMProxy home">
       <BrandMark size={36} />
       <span>OpenLLMProxy</span>
     </a>

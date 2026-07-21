@@ -1,17 +1,16 @@
 //! Shared authentication and execution setup for inference surfaces.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
-use axum::http::HeaderMap;
 use chrono::Utc;
 use olp_domain::{
-    ApiKey, ApiKeyLookupId, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId,
-    RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
+    ApiKey, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId, RequestMetadata,
+    RouteSlug, Surface, TransportMode, authorize_api_key,
 };
 use olp_storage::{LimitLease, RequestAttemptMetadata};
 
 use crate::{
-    ApiState, event_completion::collect_provider_events,
+    ApiState, InferencePrincipal, event_completion::collect_provider_events,
     semantic_validation::select_representable_attempts_filtered,
 };
 
@@ -49,68 +48,14 @@ pub(crate) struct RequiredTarget {
     pub upstream_model: String,
 }
 
-pub(super) struct AuthenticatedProxyKey {
-    pub(super) runtime: Arc<crate::RuntimeBundle>,
-    pub(super) key: ApiKey,
-    pub(super) lookup_id: ApiKeyLookupId,
-}
-
-pub(super) fn authenticate_proxy_key(
-    state: &ApiState,
-    plaintext_key: &str,
-) -> Result<AuthenticatedProxyKey, InferenceError> {
-    let runtime = crate::pin_inference_runtime(state);
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(|| InferenceError::unavailable("api_key_authentication_unavailable"))?;
-    let lookup = auth_hmac_key
-        .lookup_id(plaintext_key)
-        .map_err(|_| InferenceError::unauthorized())?;
-    let lookup_id = ApiKeyLookupId::parse(lookup).map_err(|_| InferenceError::unauthorized())?;
-    let key = runtime
-        .api_keys
-        .get(&lookup_id)
-        .ok_or_else(InferenceError::unauthorized)?;
-    auth_hmac_key
-        .parse_and_verify(plaintext_key, key.digest.as_bytes())
-        .map_err(|_| InferenceError::unauthorized())?;
-    let key = key.clone();
-    Ok(AuthenticatedProxyKey {
-        runtime,
-        key,
-        lookup_id,
-    })
-}
-
-pub(super) fn authenticate_key(
-    state: &ApiState,
-    headers: &HeaderMap,
+pub(super) fn authorize_principal<'a>(
+    principal: &'a InferencePrincipal,
     operation: OperationKind,
     route: Option<&RouteSlug>,
-) -> Result<ApiKey, InferenceError> {
-    let plaintext = bearer_token(headers)?;
-    let authenticated = authenticate_proxy_key(state, plaintext)?;
-    authorize_api_key(&authenticated.key, route, operation, Utc::now())
+) -> Result<&'a ApiKey, InferenceError> {
+    authorize_api_key(principal.key(), route, operation, Utc::now())
         .map_err(|error| InferenceError::forbidden(error.to_string()))?;
-    Ok(authenticated.key)
-}
-
-pub(super) fn bearer_token(headers: &HeaderMap) -> Result<&str, InferenceError> {
-    let authorization = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(InferenceError::unauthorized)?;
-    let (scheme, token) = authorization
-        .split_once(' ')
-        .ok_or_else(InferenceError::unauthorized)?;
-    if !scheme.eq_ignore_ascii_case("bearer")
-        || token.is_empty()
-        || token.contains(char::is_whitespace)
-    {
-        return Err(InferenceError::unauthorized());
-    }
-    Ok(token)
+    Ok(principal.key())
 }
 
 pub(super) fn incompatible_result(operation: &'static str) -> InferenceError {
@@ -139,20 +84,18 @@ struct CompletedExecution {
 
 async fn execute_operation(
     state: &ApiState,
-    plaintext_key: &str,
+    principal: &InferencePrincipal,
     operation: Operation,
-    surface: Surface,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<CompletedExecution, InferenceError> {
-    let authenticated = authenticate_proxy_key(state, plaintext_key)?;
     let route_slug = operation
         .route()
         .cloned()
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
     let operation_kind = operation.kind();
     authorize_api_key(
-        &authenticated.key,
+        principal.key(),
         Some(&route_slug),
         operation_kind,
         Utc::now(),
@@ -164,11 +107,11 @@ async fn execute_operation(
     let request_started = tokio::time::Instant::now();
     let lease = reserve_limits(
         state,
-        &authenticated.key,
+        principal.key(),
         &operation,
-        authenticated.lookup_id.as_str(),
-        authenticated
-            .runtime
+        principal.lookup_id().as_str(),
+        principal
+            .runtime()
             .routes
             .get(&route_slug)
             .map(|route| route.overall_timeout.as_duration())
@@ -177,22 +120,22 @@ async fn execute_operation(
     )
     .await?;
     let context = ExecutionContext {
-        generation_id: authenticated.runtime.generation.id.as_uuid(),
-        api_key_id: authenticated.key.id.as_uuid(),
+        generation_id: principal.runtime().generation.id.as_uuid(),
+        api_key_id: principal.key().id.as_uuid(),
         request_id,
         route_slug,
         operation_kind,
         request_started_at,
         request_started,
         lease,
-        surface,
+        surface: principal.surface(),
     };
 
     let attempts = match select_representable_attempts_filtered(
-        &authenticated.runtime,
+        principal.runtime(),
         &context.route_slug,
         &operation,
-        surface,
+        principal.surface(),
         mode,
         context.request_id.as_uuid().as_bytes(),
         |_, target| {
@@ -215,18 +158,18 @@ async fn execute_operation(
             return Err(failure);
         }
     };
-    let route = authenticated
-        .runtime
+    let route = principal
+        .runtime()
         .routes
         .get(&context.route_slug)
         .expect("attempt selection returned a known route");
     let execution = execute_with_failover(
-        &authenticated.runtime,
+        principal.runtime(),
         attempts,
         RequestMetadata {
             request_id: context.request_id,
             operation: context.operation_kind,
-            surface,
+            surface: principal.surface(),
             mode,
         },
         operation,
@@ -273,42 +216,36 @@ fn emit_early_failure(
 
 pub(super) async fn execute_event_operation(
     state: &ApiState,
-    headers: &HeaderMap,
+    principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
 ) -> Result<RoutedEventExecution, InferenceError> {
-    let plaintext_key = bearer_token(headers)?;
-    execute_event_operation_for_surface(state, plaintext_key, operation, Surface::OpenAi, mode)
-        .await
+    execute_event_operation_for_surface(state, principal, operation, mode).await
 }
 
 pub(crate) async fn execute_event_operation_for_surface(
     state: &ApiState,
-    plaintext_key: &str,
+    principal: &InferencePrincipal,
     operation: Operation,
-    surface: Surface,
     mode: TransportMode,
 ) -> Result<RoutedEventExecution, InferenceError> {
     let request_media = RequestMediaGuard::new(
         state.media_spool.clone(),
         operation_media_handles(&operation),
     );
-    let result =
-        execute_event_operation_for_surface_inner(state, plaintext_key, operation, surface, mode)
-            .await;
+    let result = execute_event_operation_for_surface_inner(state, principal, operation, mode).await;
     request_media.cleanup().await;
     result
 }
 
 pub(super) async fn execute_event_operation_for_surface_inner(
     state: &ApiState,
-    plaintext_key: &str,
+    principal: &InferencePrincipal,
     operation: Operation,
-    surface: Surface,
     mode: TransportMode,
 ) -> Result<RoutedEventExecution, InferenceError> {
     let CompletedExecution { context, success } =
-        execute_operation(state, plaintext_key, operation, surface, mode, None).await?;
+        execute_operation(state, principal, operation, mode, None).await?;
     let ExecutionSuccess {
         output,
         deadline,
@@ -386,36 +323,26 @@ impl Drop for RoutedUnaryResult {
 
 pub(super) async fn execute_unary_result(
     state: &ApiState,
-    headers: &HeaderMap,
+    principal: &InferencePrincipal,
     operation: Operation,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    execute_routed_result(state, headers, operation, TransportMode::Unary, None).await
+    execute_routed_result(state, principal, operation, TransportMode::Unary, None).await
 }
 
 pub(super) async fn execute_routed_result(
     state: &ApiState,
-    headers: &HeaderMap,
+    principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    let plaintext_key = bearer_token(headers)?;
-    execute_routed_result_for_surface(
-        state,
-        plaintext_key,
-        operation,
-        Surface::OpenAi,
-        mode,
-        required_target,
-    )
-    .await
+    execute_routed_result_for_surface(state, principal, operation, mode, required_target).await
 }
 
 pub(crate) async fn execute_routed_result_for_surface(
     state: &ApiState,
-    plaintext_key: &str,
+    principal: &InferencePrincipal,
     operation: Operation,
-    surface: Surface,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
@@ -423,36 +350,22 @@ pub(crate) async fn execute_routed_result_for_surface(
         state.media_spool.clone(),
         operation_media_handles(&operation),
     );
-    let result = execute_routed_result_for_surface_inner(
-        state,
-        plaintext_key,
-        operation,
-        surface,
-        mode,
-        required_target,
-    )
-    .await;
+    let result =
+        execute_routed_result_for_surface_inner(state, principal, operation, mode, required_target)
+            .await;
     request_media.cleanup().await;
     result
 }
 
 pub(super) async fn execute_routed_result_for_surface_inner(
     state: &ApiState,
-    plaintext_key: &str,
+    principal: &InferencePrincipal,
     operation: Operation,
-    surface: Surface,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    let CompletedExecution { context, success } = execute_operation(
-        state,
-        plaintext_key,
-        operation,
-        surface,
-        mode,
-        required_target,
-    )
-    .await?;
+    let CompletedExecution { context, success } =
+        execute_operation(state, principal, operation, mode, required_target).await?;
     let ExecutionSuccess {
         output,
         attempts,
@@ -517,34 +430,29 @@ pub(super) async fn execute_routed_result_for_surface_inner(
     })
 }
 
-pub(crate) fn authenticate_model_access(
-    state: &ApiState,
-    plaintext_key: &str,
+pub(crate) fn authorize_model_access(
+    principal: &InferencePrincipal,
     operation: OperationKind,
-) -> Result<(Arc<crate::RuntimeBundle>, ApiKey), InferenceError> {
-    let authenticated = authenticate_proxy_key(state, plaintext_key)?;
-    authorize_api_key(&authenticated.key, None, operation, Utc::now())
-        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
-    Ok((authenticated.runtime, authenticated.key))
+) -> Result<(&crate::RuntimeBundle, &ApiKey), InferenceError> {
+    let key = authorize_principal(principal, operation, None)?;
+    Ok((principal.runtime(), key))
 }
 
 pub(crate) async fn reserve_model_limits(
     state: &ApiState,
-    key: &ApiKey,
-    plaintext_key: &str,
-    surface: Surface,
+    principal: &InferencePrincipal,
 ) -> Result<Option<LimitLease>, InferenceError> {
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(|| InferenceError::unavailable("api_key_authentication_unavailable"))?;
-    let lookup = auth_hmac_key
-        .lookup_id(plaintext_key)
-        .map_err(|_| InferenceError::unauthorized())?;
     let operation = Operation::Models(olp_domain::ModelOperation::List {
-        extensions: olp_domain::SourceExtensions::new(surface, BTreeMap::new()),
+        extensions: olp_domain::SourceExtensions::new(principal.surface(), BTreeMap::new()),
     });
-    reserve_limits(state, key, &operation, lookup, Duration::from_secs(30)).await
+    reserve_limits(
+        state,
+        principal.key(),
+        &operation,
+        principal.lookup_id().as_str(),
+        Duration::from_secs(30),
+    )
+    .await
 }
 
 pub(crate) async fn release_model_limits(state: &ApiState, lease: Option<&LimitLease>) {

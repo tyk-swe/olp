@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -244,7 +245,7 @@
     <h1 class="page-title">Connect an upstream provider.</h1>
     <p class="page-description">Credentials are write-only. Test reachability, review model capabilities, then activate.</p>
   </div>
-  <a class="button button-secondary" href="/providers">Cancel</a>
+  <a class="button button-secondary" href={resolve('/providers')}>Cancel</a>
 </div>
 
 <ol class="steps" aria-label="Provider setup progress">
@@ -317,7 +318,7 @@
   <section class="card stage complete-panel" aria-labelledby="activated-heading">
     <span class="complete-mark" aria-hidden="true">✓</span><p class="eyebrow">Provider active</p><h2 id="activated-heading">Now build a stable route slug.</h2>
     <p>{wizardProvider?.name} is eligible for new route drafts. Activation published an immutable runtime generation.</p>
-    <div class="form-actions"><a class="button button-primary" href="/routes/new">Build default route <NavIcon name="arrow" /></a><a class="button button-secondary" href={`/providers/${wizardProvider?.id}`}>View provider</a></div>
+    <div class="form-actions"><a class="button button-primary" href={resolve('/routes/new')}>Build default route <NavIcon name="arrow" /></a><a class="button button-secondary" href={resolve(`/providers/${wizardProvider?.id}`)}>View provider</a></div>
   </section>
 {/if}
 

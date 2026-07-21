@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     usageBreakdown,
@@ -103,7 +104,7 @@
         <strong id="completeness-title">{usage.data.completeness.request_metadata_consumer.state === 'stale' ? 'Request metadata worker heartbeat is stale' : usage.data.completeness.request_metadata_consumer.state === 'backlogged' ? 'Request metadata persistence backlog detected' : usage.data.completeness.request_metadata_consumer.state === 'unknown' ? 'Request metadata worker has not reported' : !usage.data.completeness.coverage.range_complete ? 'Retained boundary data was excluded' : usage.data.completeness.uncertain_request_metadata_gap_count > 0 ? 'Unclean request metadata gateway epochs make usage uncertain' : usage.data.completeness.request_metadata_gap_events > 0 ? 'Request metadata persistence gaps detected' : usage.data.completeness.incomplete_count > 0 ? 'Usage is still reconciling' : 'Some traffic is unpriced'}</strong>
         <p>{usage.data.completeness.request_metadata_gap_events} request metadata gap-event lower bound · {usage.data.completeness.uncertain_request_metadata_gap_count} uncertain request metadata gateway epochs · {usage.data.completeness.incomplete_count} incomplete requests · {usage.data.completeness.unpriced_count} unpriced requests. Cost totals exclude anything unpriced and never treat uncertainty as zero.</p>
       </div>
-      <a href="/health">Open health</a>
+      <a href={resolve('/health')}>Open health</a>
     </section>
   {:else}
     <p class="complete-banner"><span aria-hidden="true">✓</span> Usage accounting and pricing are complete for this range.</p>

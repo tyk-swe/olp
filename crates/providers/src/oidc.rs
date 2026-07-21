@@ -1,16 +1,15 @@
-use std::{
-    collections::BTreeSet,
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::time::Duration;
 
-use crate::http_egress::is_public_ip;
+use crate::http_egress::{
+    is_public_ip,
+    pinned::{PinnedClientConfig, PinnedClientError, literal_ip, one_shot_client},
+};
 use bytes::Bytes;
 use futures::{Stream, StreamExt as _};
-use reqwest::{Client, Response, Url, redirect::Policy};
+use reqwest::{Client, Response, Url};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
-use tokio::{net::lookup_host, time::timeout};
+use tokio::time::timeout;
 use zeroize::Zeroizing;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -91,50 +90,32 @@ impl OidcNetworkPolicy {
     }
 
     async fn client_for(&self, url: &Url) -> Result<Client, OidcNetworkError> {
-        let host = url
-            .host_str()
-            .ok_or(OidcNetworkError::InvalidUrl)?
-            .to_owned();
-        let port = url
-            .port_or_known_default()
-            .ok_or(OidcNetworkError::InvalidUrl)?;
-        let addresses = if let Some(ip) = literal_ip(url) {
-            vec![SocketAddr::new(ip, port)]
-        } else {
-            let resolved = timeout(CONNECT_TIMEOUT, lookup_host((host.as_str(), port)))
-                .await
-                .map_err(|_| OidcNetworkError::Resolution)?
-                .map_err(|_| OidcNetworkError::Resolution)?;
-            resolved
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-        if addresses.is_empty() {
-            return Err(OidcNetworkError::Resolution);
+        one_shot_client(
+            url,
+            CONNECT_TIMEOUT,
+            PinnedClientConfig {
+                connect_timeout: CONNECT_TIMEOUT,
+                pool_idle_timeout: None,
+                pool_max_idle_per_host: None,
+                allow_unsafe_target: self.allow_insecure_test_endpoints,
+                user_agent: "openllmproxy-oidc",
+            },
+        )
+        .await
+        .map_err(map_pinned_client_error)
+    }
+}
+
+fn map_pinned_client_error(error: PinnedClientError) -> OidcNetworkError {
+    match error {
+        PinnedClientError::MissingHost | PinnedClientError::MissingPort => {
+            OidcNetworkError::InvalidUrl
         }
-        if !self.allow_insecure_test_endpoints
-            && addresses.iter().any(|address| !is_public_ip(address.ip()))
-        {
-            return Err(OidcNetworkError::ForbiddenAddress);
-        }
-        let mut builder = Client::builder()
-            .redirect(Policy::none())
-            .retry(reqwest::retry::never())
-            .no_proxy()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .tcp_nodelay(true)
-            .referer(false)
-            .user_agent("openllmproxy-oidc");
-        if !self.allow_insecure_test_endpoints {
-            builder = builder.https_only(true);
-        }
-        if literal_ip(url).is_none() {
-            // Pin every validated answer for this one request. A resolver
-            // cannot substitute a private address between validation and use.
-            builder = builder.resolve_to_addrs(&host, &addresses);
-        }
-        builder.build().map_err(|_| OidcNetworkError::Request)
+        PinnedClientError::DnsTimeout
+        | PinnedClientError::DnsResolution(_)
+        | PinnedClientError::NoAddresses => OidcNetworkError::Resolution,
+        PinnedClientError::ForbiddenAddress(_) => OidcNetworkError::ForbiddenAddress,
+        PinnedClientError::ClientBuild(_) => OidcNetworkError::Request,
     }
 }
 
@@ -229,14 +210,6 @@ where
     })
     .await
     .map_err(|_| OidcNetworkError::ResponseTimeout)?
-}
-
-fn literal_ip(url: &Url) -> Option<IpAddr> {
-    url.host_str()?
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .ok()
 }
 
 #[cfg(test)]

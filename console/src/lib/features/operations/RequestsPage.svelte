@@ -1,30 +1,24 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     getRequest,
-    listRequests,
-    type RequestFilters
+    listRequests
   } from '$lib/api/operations';
   import { formatCompact, formatCost, formatDate, statusLabel, statusTone } from './format';
+  import type { RequestListState } from './requestListState';
 
-  let { path = 'requests' }: { path?: string } = $props();
-  const requestId = $derived(path.split('/')[1]);
-
-  let route = $state('');
-  let providerId = $state('');
-  let model = $state('');
-  let apiKeyId = $state('');
-  let operation = $state('');
-  let statusCode = $state('');
-  let errorClass = $state('');
-  let startedAfter = $state('');
-  let startedBefore = $state('');
-  let applied = $state<RequestFilters>({ limit: 25 });
-  let cursors = $state<string[]>([]);
+  let {
+    requestId = '',
+    listState
+  }: {
+    requestId?: string;
+    listState: RequestListState;
+  } = $props();
 
   const requests = createQuery(() => ({
-    queryKey: ['requests', JSON.stringify(applied)],
-    queryFn: () => listRequests(applied),
+    queryKey: ['requests', listState.applied],
+    queryFn: () => listRequests(listState.applied),
     enabled: !requestId
   }));
 
@@ -42,40 +36,50 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    cursors = [];
-    applied = {
+    listState.cursors = [];
+    listState.applied = {
       limit: 25,
-      route: route || undefined,
-      provider_id: providerId || undefined,
-      model: model || undefined,
-      api_key_id: apiKeyId || undefined,
-      operation: operation || undefined,
-      status_code: statusCode ? Number(statusCode) : undefined,
-      error_class: errorClass || undefined,
-      started_after: iso(startedAfter),
-      started_before: iso(startedBefore)
+      route: listState.route || undefined,
+      provider_id: listState.providerId || undefined,
+      model: listState.model || undefined,
+      api_key_id: listState.apiKeyId || undefined,
+      operation: listState.operation || undefined,
+      status_code: listState.statusCode ? Number(listState.statusCode) : undefined,
+      error_class: listState.errorClass || undefined,
+      started_after: iso(listState.startedAfter),
+      started_before: iso(listState.startedBefore)
     };
   }
 
   function resetFilters() {
-    route = providerId = model = apiKeyId = operation = statusCode = errorClass = startedAfter = startedBefore = '';
-    cursors = [];
-    applied = { limit: 25 };
+    Object.assign(listState, {
+      route: '',
+      providerId: '',
+      model: '',
+      apiKeyId: '',
+      operation: '',
+      statusCode: '',
+      errorClass: '',
+      startedAfter: '',
+      startedBefore: '',
+      applied: { limit: 25 },
+      cursors: []
+    });
   }
 
   function nextPage() {
     const cursor = requests.data?.next_cursor;
     if (!cursor) return;
-    cursors = [...cursors, cursor];
-    applied = { ...applied, cursor };
+    listState.cursors = [...listState.cursors, cursor];
+    listState.applied = { ...listState.applied, cursor };
   }
 
   function previousPage() {
-    const history = [...cursors];
+    const history = [...listState.cursors];
     history.pop();
     const cursor = history.at(-1);
-    cursors = history;
-    applied = { ...applied, cursor };
+    listState.cursors = history;
+    listState.applied = { ...listState.applied, cursor };
   }
 </script>
 
@@ -91,7 +95,7 @@
         : 'Filter operational metadata by route, target, key, outcome, or time range—never prompt or output content.'}
     </p>
   </div>
-  {#if requestId}<a class="button button-secondary" href="/requests">Back to requests</a>{/if}
+  {#if requestId}<a class="button button-secondary" href={resolve('/requests')}>Back to requests</a>{/if}
 </div>
 
 {#if requestId}
@@ -155,15 +159,15 @@
 {:else}
   <form class="card filters" aria-label="Request filters" onsubmit={applyFilters}>
     <div class="filter-grid">
-      <label>Route <input bind:value={route} name="route" placeholder="support-chat" /></label>
-      <label>Operation <input bind:value={operation} name="operation" placeholder="generation" /></label>
-      <label>Provider ID <input bind:value={providerId} name="provider" class="mono" /></label>
-      <label>Model <input bind:value={model} name="model" /></label>
-      <label>API key ID <input bind:value={apiKeyId} name="key" class="mono" /></label>
-      <label>Status code <input bind:value={statusCode} name="status" inputmode="numeric" pattern="[0-9]{3}" /></label>
-      <label>Error class <input bind:value={errorClass} name="error" /></label>
-      <label>Started after <input bind:value={startedAfter} name="after" type="datetime-local" /></label>
-      <label>Started before <input bind:value={startedBefore} name="before" type="datetime-local" /></label>
+      <label>Route <input bind:value={listState.route} name="route" placeholder="support-chat" /></label>
+      <label>Operation <input bind:value={listState.operation} name="operation" placeholder="generation" /></label>
+      <label>Provider ID <input bind:value={listState.providerId} name="provider" class="mono" /></label>
+      <label>Model <input bind:value={listState.model} name="model" /></label>
+      <label>API key ID <input bind:value={listState.apiKeyId} name="key" class="mono" /></label>
+      <label>Status code <input bind:value={listState.statusCode} name="status" inputmode="numeric" pattern="[0-9][0-9][0-9]" /></label>
+      <label>Error class <input bind:value={listState.errorClass} name="error" /></label>
+      <label>Started after <input bind:value={listState.startedAfter} name="after" type="datetime-local" /></label>
+      <label>Started before <input bind:value={listState.startedBefore} name="before" type="datetime-local" /></label>
     </div>
     <div class="filter-actions">
       <button class="button button-primary" type="submit">Apply filters</button>
@@ -198,7 +202,7 @@
               <td>{request.first_byte_ms ?? '—'} / {request.total_latency_ms ?? '—'} ms</td>
               <td>{formatCompact(request.input_tokens)} in<br />{formatCompact(request.output_tokens)} out</td>
               <td><span class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency ?? 'USD')}</span>{#if request.usage_complete === false}<small class="warning-text">Incomplete usage</small>{/if}</td>
-              <td><a class="row-link" href={`/requests/${request.id}`} aria-label={`View request ${request.id}`}>View</a></td>
+              <td><a class="row-link" href={resolve(`/requests/${request.id}`)} aria-label={`View request ${request.id}`}>View</a></td>
             </tr>
           {/each}
         </tbody>
@@ -209,13 +213,13 @@
         <li class="card">
           <div class="mobile-result-heading"><div><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></div><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></div>
           <dl><div><dt>Started</dt><dd>{formatDate(request.started_at)}</dd></div><div><dt>TTFT / latency</dt><dd>{request.first_byte_ms ?? '—'} / {request.total_latency_ms ?? '—'} ms</dd></div><div><dt>Tokens</dt><dd>{formatCompact(request.input_tokens)} in · {formatCompact(request.output_tokens)} out</dd></div><div><dt>Cost</dt><dd class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency ?? 'USD')}</dd></div></dl>
-          <a class="button button-secondary" href={`/requests/${request.id}`} aria-label={`View request ${request.id}`}>View timeline</a>
+          <a class="button button-secondary" href={resolve(`/requests/${request.id}`)} aria-label={`View request ${request.id}`}>View timeline</a>
         </li>
       {/each}
     </ul>
     <nav class="pagination" aria-label="Request pages">
-      <button class="button button-secondary" type="button" onclick={previousPage} disabled={cursors.length === 0}>Previous</button>
-      <span>Page {cursors.length + 1}</span>
+      <button class="button button-secondary" type="button" onclick={previousPage} disabled={listState.cursors.length === 0}>Previous</button>
+      <span>Page {listState.cursors.length + 1}</span>
       <button class="button button-secondary" type="button" onclick={nextPage} disabled={!requests.data?.next_cursor}>Next</button>
     </nav>
   {/if}

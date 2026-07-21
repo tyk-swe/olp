@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fmt};
+use std::fmt;
 
 use axum::{
     Json,
@@ -8,15 +8,14 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_storage::{
-    ApiKeyRecord, ReplayableIdempotency, RotateApiKeyInput, UpdateApiKeyInput,
-    idempotency_fingerprint,
+    ApiKeyRecord, ReplayableIdempotency, RotateApiKeyInput, idempotency_fingerprint,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, FieldErrors, Problem,
+    ApiState, Problem,
     management_api::{
         Permission, WriteOnlySecret, common::RuntimeGenerationResponse, idempotency_http_response,
         if_match, require_idempotency_key, require_mutation_session, require_permission,
@@ -27,6 +26,8 @@ use crate::{
 use crate::management_api::configuration::common::{
     PageQuery, json, map_configuration_resource, page, with_etag,
 };
+
+use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ApiKeyDetailResponse {
@@ -167,89 +168,13 @@ pub(crate) async fn update_api_key(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageApiKeys)?;
     let request = json(payload)?;
-    let mut errors = FieldErrors::new();
-    if request.name.trim().is_empty() || request.name.trim().chars().count() > 100 {
-        errors.insert(
-            "name".to_owned(),
-            vec!["Use between 1 and 100 characters.".to_owned()],
-        );
-    }
-    let scopes = request.scopes.iter().collect::<BTreeSet<_>>();
-    if scopes.is_empty() {
-        errors.insert(
-            "scopes".to_owned(),
-            vec!["Select at least one scope.".to_owned()],
-        );
-    } else if scopes.len() != request.scopes.len()
-        || !scopes
-            .iter()
-            .all(|scope| matches!(scope.as_str(), "inference" | "models_read"))
-    {
-        errors.insert(
-            "scopes".to_owned(),
-            vec!["Use unique inference or models_read scopes.".to_owned()],
-        );
-    }
-    let mut routes = BTreeSet::new();
-    for route in &request.allowed_routes {
-        match olp_domain::RouteSlug::parse(route.clone()) {
-            Ok(route) => {
-                if !routes.insert(route) {
-                    errors.insert(
-                        "allowed_routes".to_owned(),
-                        vec!["Route allowlist entries must be unique.".to_owned()],
-                    );
-                    break;
-                }
-            }
-            Err(error) => {
-                errors.insert("allowed_routes".to_owned(), vec![error.to_string()]);
-                break;
-            }
-        }
-    }
-    for (field, invalid) in [
-        (
-            "requests_per_minute",
-            request.requests_per_minute == Some(0),
-        ),
-        ("tokens_per_minute", request.tokens_per_minute == Some(0)),
-        ("max_concurrency", request.max_concurrency == Some(0)),
-    ] {
-        if invalid {
-            errors.insert(
-                field.to_owned(),
-                vec!["Use a positive limit or null.".to_owned()],
-            );
-        }
-    }
-    if request
-        .expires_at
-        .is_some_and(|expiration| expiration <= Utc::now())
-    {
-        errors.insert(
-            "expires_at".to_owned(),
-            vec!["Expiration must be in the future or null.".to_owned()],
-        );
-    }
-    if !errors.is_empty() {
-        return Err(Problem::validation(errors));
-    }
+    let input = normalize_api_key_policy(
+        RawApiKeyPolicy::from(&request),
+        ExpirationValidation::RequireFuture(Utc::now()),
+    )?
+    .into_update_input();
     let result = require_store(&state)?
-        .update_api_key(
-            api_key_id,
-            if_match(&headers)?,
-            &UpdateApiKeyInput {
-                name: request.name,
-                scopes: request.scopes,
-                allowed_routes: request.allowed_routes,
-                requests_per_minute: request.requests_per_minute,
-                tokens_per_minute: request.tokens_per_minute,
-                max_concurrency: request.max_concurrency,
-                expires_at: request.expires_at,
-            },
-            principal.user_id,
-        )
+        .update_api_key(api_key_id, if_match(&headers)?, &input, principal.user_id)
         .await
         .map_err(map_configuration_resource)?;
     with_etag(

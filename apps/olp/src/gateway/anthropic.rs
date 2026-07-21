@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, State, rejection::JsonRejection},
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, Path, Query, State, rejection::JsonRejection},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
-    ApiState, RuntimeBundle,
+    ApiState, InferencePrincipal, RuntimeBundle,
     event_completion::{CompletedEventExecution, collect_event_execution},
     json_media::{admit_anthropic_count, admit_anthropic_messages, cleanup_admitted},
     streaming_response::{
@@ -25,10 +25,10 @@ use crate::{
 };
 
 use super::{
-    InferenceError, authenticate_model_access, execute_event_operation_for_surface,
+    InferenceError, authorize_model_access, execute_event_operation_for_surface,
     execute_routed_result_for_surface,
     native_models::{after_cursor_start, before_cursor_end, visible_route, visible_routes},
-    protocol_error::{ProtocolError, anthropic_error_kind, api_key, valid_json},
+    protocol_error::{ProtocolError, anthropic_error_kind, valid_json},
     release_model_limits, reserve_model_limits,
 };
 
@@ -42,10 +42,9 @@ pub(super) fn router() -> Router<ApiState> {
 
 async fn messages(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<MessagesRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
-    let token = anthropic_key(&headers).map_err(ProtocolError::anthropic)?;
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
     let streaming = request.stream;
     let admitted = admit_anthropic_messages(&state, &mut request)
@@ -66,10 +65,9 @@ async fn messages(
     } else {
         TransportMode::Unary
     };
-    let execution =
-        execute_event_operation_for_surface(&state, token, operation, Surface::Anthropic, mode)
-            .await
-            .map_err(ProtocolError::anthropic)?;
+    let execution = execute_event_operation_for_surface(&state, &principal, operation, mode)
+        .await
+        .map_err(ProtocolError::anthropic)?;
     if streaming {
         let encoder = AnthropicHttpStreamEncoder(AnthropicMessagesClientStreamEncoder::new(
             execution.route_slug.as_str(),
@@ -101,10 +99,9 @@ fn unary_response(mut completed: CompletedEventExecution) -> Result<Response, Pr
 
 async fn count_tokens(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<CountTokensRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
-    let token = anthropic_key(&headers).map_err(ProtocolError::anthropic)?;
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
     let admitted = admit_anthropic_count(&state, &mut request)
         .await
@@ -121,9 +118,8 @@ async fn count_tokens(
     };
     let mut executed = execute_routed_result_for_surface(
         &state,
-        token,
+        &principal,
         operation,
-        Surface::Anthropic,
         TransportMode::Unary,
         None,
     )
@@ -171,16 +167,15 @@ struct Model {
 
 async fn models(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
-    let token = anthropic_key(&headers).map_err(ProtocolError::anthropic)?;
-    let (runtime, key) = authenticate_model_access(&state, token, OperationKind::ModelList)
+    let (runtime, key) = authorize_model_access(&principal, OperationKind::ModelList)
         .map_err(ProtocolError::anthropic)?;
-    let lease = reserve_model_limits(&state, &key, token, Surface::Anthropic)
+    let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::anthropic)?;
-    let result = models_response(&runtime, &key, query);
+    let result = models_response(runtime, key, query);
     release_model_limits(&state, lease.as_ref()).await;
     result
 }
@@ -229,17 +224,16 @@ fn models_response(
 
 async fn model(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(id): Path<String>,
 ) -> Result<Response, ProtocolError> {
-    let token = anthropic_key(&headers).map_err(ProtocolError::anthropic)?;
-    let (runtime, key) = authenticate_model_access(&state, token, OperationKind::ModelGet)
+    let (runtime, key) = authorize_model_access(&principal, OperationKind::ModelGet)
         .map_err(ProtocolError::anthropic)?;
-    let lease = reserve_model_limits(&state, &key, token, Surface::Anthropic)
+    let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::anthropic)?;
-    let result = visible_route(&runtime, &key, &id, Surface::Anthropic)
-        .map(|slug| (StatusCode::OK, Json(model_object(&runtime, &slug))).into_response());
+    let result = visible_route(runtime, key, &id, Surface::Anthropic)
+        .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response());
     release_model_limits(&state, lease.as_ref()).await;
     result
 }
@@ -251,10 +245,6 @@ fn model_object(runtime: &RuntimeBundle, slug: &RouteSlug) -> Model {
         display_name: slug.to_string(),
         kind: "model",
     }
-}
-
-fn anthropic_key(headers: &HeaderMap) -> Result<&str, InferenceError> {
-    api_key(headers, "x-api-key")
 }
 
 struct AnthropicHttpStreamEncoder(AnthropicMessagesClientStreamEncoder);

@@ -9,11 +9,7 @@ use std::{
 use axum::http::{HeaderMap, HeaderName};
 use olp_domain::{ApiKey, OperationKind, RouteSlug, authorize_api_key};
 
-use crate::{MAX_MEDIA_BODY_BYTES, Problem, gateway};
-
-pub(crate) const IMAGE_VARIATION_BODY_BYTES: usize = 55 * 1024 * 1024;
-pub(crate) const TRANSCRIPTION_BODY_BYTES: usize = 30 * 1024 * 1024;
-pub(crate) const VIDEO_CREATE_BODY_BYTES: usize = 25 * 1024 * 1024;
+use crate::{Problem, gateway};
 
 /// The route information authenticated before a multipart body is read. A
 /// route-restricted key must either supply the header it was pre-authorized
@@ -180,40 +176,12 @@ pub(crate) fn validate_multipart_boundary(content_type: &str) -> Result<(), Prob
     Ok(())
 }
 
-pub(crate) fn multipart_endpoint(
-    method: &axum::http::Method,
-    path: &str,
-) -> Option<(OperationKind, u64)> {
-    if *method != axum::http::Method::POST {
-        return None;
-    }
-    match path {
-        // Reserve against the route's fixed body ceiling, never against an
-        // attacker-controlled Content-Length. Individual file limits are
-        // still enforced by the spool while streaming.
-        "/openai/v1/images/edits" => Some((OperationKind::ImageEdit, MAX_MEDIA_BODY_BYTES as u64)),
-        "/openai/v1/images/variations" => Some((
-            OperationKind::ImageVariation,
-            IMAGE_VARIATION_BODY_BYTES as u64,
-        )),
-        "/openai/v1/audio/transcriptions" => Some((
-            OperationKind::Transcription,
-            TRANSCRIPTION_BODY_BYTES as u64,
-        )),
-        "/openai/v1/videos" => Some((OperationKind::VideoCreate, VIDEO_CREATE_BODY_BYTES as u64)),
-        _ => None,
-    }
-}
-
 pub(super) fn preauthorize_multipart(
     headers: &HeaderMap,
     key: &ApiKey,
-    method: &axum::http::Method,
-    path: &str,
+    operation: OperationKind,
+    reservation_bytes: u64,
 ) -> Result<(MultipartRouteAdmission, u64), gateway::InferenceError> {
-    let Some((operation, reservation_bytes)) = multipart_endpoint(method, path) else {
-        return Ok((MultipartRouteAdmission::Unrestricted, 0));
-    };
     authorize_api_key(key, None, operation, chrono::Utc::now())
         .map_err(|error| gateway::InferenceError::forbidden(error.to_string()))?;
 

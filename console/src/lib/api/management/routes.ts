@@ -12,6 +12,7 @@ import {
 type Schemas = components['schemas'];
 
 export type RouteDraft = Schemas['RouteDraftDetailResponse'];
+export type RouteDraftValidation = Schemas['RouteDraftResponse'];
 export type CreateRouteDraftInput = Schemas['CreateRouteDraftRequest'];
 export type ReplaceRouteDraftInput = Schemas['ReplaceRouteDraftRequest'];
 export type RouteSimulation = Schemas['RouteSimulationResponse'];
@@ -88,14 +89,14 @@ export async function simulateRoute(id: string, input: RouteSimulationInput): Pr
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function validateRoute(draft: RouteDraft): Promise<void> {
+export async function validateRoute(draft: RouteDraft): Promise<RouteDraftValidation> {
   const response = await apiClient.POST('/api/v1/route-drafts/{draft_id}/validate', {
     params: {
       path: { draft_id: draft.id },
       header: { 'If-Match': draft.etag }
     }
   });
-  requireResponseData(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function activateRoute(draft: RouteDraft): Promise<RouteActivation> {

@@ -1,25 +1,25 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
     getMediaJob,
-    listMediaJobs,
-    type MediaJobFilters
+    listMediaJobs
   } from '$lib/api/operations';
   import { formatDate } from './format';
+  import type { MediaJobListState } from './mediaJobListState';
 
-  let { path }: { path: string } = $props();
-  const jobId = $derived(path.split('/').filter(Boolean)[1] ?? '');
-  let route = $state('');
-  let jobState = $state('');
-  let lifecycle = $state('');
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
-  let applied = $state<MediaJobFilters>({ limit: 25 });
+  let {
+    jobId = '',
+    listState
+  }: {
+    jobId?: string;
+    listState: MediaJobListState;
+  } = $props();
 
   const jobs = createQuery(() => ({
-    queryKey: ['media-jobs', applied, cursor ?? 'first'],
-    queryFn: () => listMediaJobs({ ...applied, cursor }),
+    queryKey: ['media-jobs', listState.applied, listState.cursor ?? 'first'],
+    queryFn: () => listMediaJobs({ ...listState.applied, cursor: listState.cursor }),
     enabled: !jobId
   }));
   const detail = createQuery(() => ({
@@ -30,33 +30,37 @@
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    cursor = undefined;
-    history = [];
-    applied = {
+    listState.cursor = undefined;
+    listState.history = [];
+    listState.applied = {
       limit: 25,
-      route: route.trim() || undefined,
-      state: jobState || undefined,
-      lifecycle: lifecycle || undefined
+      route: listState.route.trim() || undefined,
+      state: listState.jobState || undefined,
+      lifecycle: listState.lifecycle || undefined
     };
   }
 
   function clear() {
-    route = jobState = lifecycle = '';
-    cursor = undefined;
-    history = [];
-    applied = { limit: 25 };
+    Object.assign(listState, {
+      route: '',
+      jobState: '',
+      lifecycle: '',
+      cursor: undefined,
+      history: [],
+      applied: { limit: 25 }
+    });
   }
 
   function next() {
     const value = jobs.data?.next_cursor ?? undefined;
     if (!value) return;
-    history = [...history, cursor];
-    cursor = value;
+    listState.history = [...listState.history, listState.cursor];
+    listState.cursor = value;
   }
 
   function previous() {
-    cursor = history.at(-1);
-    history = history.slice(0, -1);
+    listState.cursor = listState.history.at(-1);
+    listState.history = listState.history.slice(0, -1);
   }
 
   function tone(value: string) {
@@ -69,7 +73,7 @@
 <svelte:head><title>Media Jobs · OpenLLMProxy</title></svelte:head>
 
 {#if jobId}
-  <div class="page-header"><div><p class="eyebrow">Operations · Media job</p><h1 class="page-title">Media job detail</h1><p class="page-description">Lifecycle and reconciliation metadata only. Uploaded and generated media never appears in the console.</p></div><a class="button button-secondary" href="/media-jobs">All media jobs</a></div>
+  <div class="page-header"><div><p class="eyebrow">Operations · Media job</p><h1 class="page-title">Media job detail</h1><p class="page-description">Lifecycle and reconciliation metadata only. Uploaded and generated media never appears in the console.</p></div><a class="button button-secondary" href={resolve('/media-jobs')}>All media jobs</a></div>
   {#if detail.isPending}<div class="loading-state" role="status">Loading media job…</div>
   {:else if detail.isError}<div class="inline-problem" role="alert">The media job could not be loaded. <button class="text-button" type="button" onclick={() => detail.refetch()}>Retry</button></div>
   {:else if detail.data}
@@ -83,15 +87,15 @@
 {:else}
   <div class="page-header"><div><p class="eyebrow">Operations</p><h1 class="page-title">Media Jobs</h1><p class="page-description">Track asynchronous video and media lifecycles without exposing uploaded or generated content.</p></div><button class="button button-secondary" type="button" onclick={() => jobs.refetch()} disabled={jobs.isFetching}>Refresh</button></div>
   <form class="card filters" aria-label="Media job filters" onsubmit={apply}>
-    <label>Route <input bind:value={route} placeholder="All routes" /></label>
-    <label>State <select bind:value={jobState}><option value="">All states</option>{#each ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as value (value)}<option value={value}>{value}</option>{/each}</select></label>
-    <label>Lifecycle <select bind:value={lifecycle}><option value="">All lifecycles</option>{#each ['creating', 'active', 'create_ambiguous', 'create_cleanup_pending', 'delete_pending', 'deleted'] as value (value)}<option value={value}>{value.replaceAll('_', ' ')}</option>{/each}</select></label>
+    <label>Route <input bind:value={listState.route} placeholder="All routes" /></label>
+    <label>State <select bind:value={listState.jobState}><option value="">All states</option>{#each ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as value (value)}<option value={value}>{value}</option>{/each}</select></label>
+    <label>Lifecycle <select bind:value={listState.lifecycle}><option value="">All lifecycles</option>{#each ['creating', 'active', 'create_ambiguous', 'create_cleanup_pending', 'delete_pending', 'deleted'] as value (value)}<option value={value}>{value.replaceAll('_', ' ')}</option>{/each}</select></label>
     <div class="filter-actions"><button class="button button-primary" type="submit">Apply filters</button><button class="button button-secondary" type="button" onclick={clear}>Clear</button></div>
   </form>
   {#if jobs.isPending}<div class="loading-state" role="status">Loading media jobs…</div>
   {:else if jobs.isError}<div class="inline-problem" role="alert">Media jobs are unavailable. <button class="text-button" type="button" onclick={() => jobs.refetch()}>Retry</button></div>
-  {:else if jobs.data?.data.length === 0 && history.length === 0}<section class="card empty-state"><p>No media jobs match these filters.</p></section>
-  {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.data ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={`/media-jobs/${job.id}`}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination page={history.length + 1} hasPrevious={history.length > 0} hasNext={Boolean(jobs.data?.next_cursor)} onPrevious={previous} onNext={next} label="Media job pages" />{/if}
+  {:else if jobs.data?.data.length === 0 && listState.history.length === 0}<section class="card empty-state"><p>No media jobs match these filters.</p></section>
+  {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.data ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/media-jobs/${job.id}`)}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination page={listState.history.length + 1} hasPrevious={listState.history.length > 0} hasNext={Boolean(jobs.data?.next_cursor)} onPrevious={previous} onNext={next} label="Media job pages" />{/if}
 {/if}
 
 <style>

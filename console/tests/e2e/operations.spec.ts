@@ -55,6 +55,8 @@ test('request explorer filters metadata and opens an accessible attempt timeline
 
   await page.getByRole('link', { name: `View request ${requestId}` }).click();
   await expect(page.getByRole('heading', { name: 'Request timeline' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Request timeline' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Attempt timeline' })).toBeVisible();
   await expect(page.getByText('Response committed')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

@@ -337,6 +337,37 @@ async fn invalid_keys_cannot_spool_responses_media_before_authentication() {
 }
 
 #[tokio::test]
+async fn responses_scope_authorization_precedes_json_errors_and_media_staging() {
+    let (mut state, key) = test_state(false);
+    let spool = Arc::new(CountingAdmissionSpool::default());
+    state.media_spool = spool.clone();
+    replace_api_key_scopes(&state, BTreeSet::from([ApiKeyScope::ModelsRead]));
+
+    for path in ["/openai/v1/responses", "/openai/v1/responses/input_tokens"] {
+        let response = post_json(&state, &key, path, "{").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "operation authorization must precede malformed JSON for {path}"
+        );
+
+        let response = post_json(
+            &state,
+            &key,
+            path,
+            r#"{"model":"default","input":[{"type":"message","role":"user","content":[{"type":"input_audio","input_audio":{"data":"YXVkaW8=","format":"wav"}}]}]}"#,
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "operation authorization must precede inline-media admission for {path}"
+        );
+        assert_eq!(spool.puts.load(Ordering::SeqCst), 0, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn restricted_multipart_key_rejects_file_before_model_without_spooling() {
     let (mut state, key) = test_state(false);
     let spool = Arc::new(CountingAdmissionSpool::default());
@@ -448,7 +479,7 @@ async fn cancelling_response_input_tokens_handler_cleans_admitted_media() {
 
 #[tokio::test]
 async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
-    let (state, key) = test_state(false);
+    let (state, _) = test_state(false);
     let artifact = state
         .media_spool
         .put(olp_domain::MediaUpload {
@@ -473,13 +504,13 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
         format: "wav".into(),
     }];
 
+    let principal = test_principal(&state, Surface::OpenAi);
     let state_for_task = state.clone();
     let task = tokio::spawn(async move {
         execute_event_operation_for_surface(
             &state_for_task,
-            &key,
+            &principal,
             operation,
-            Surface::OpenAi,
             TransportMode::Unary,
         )
         .await
@@ -702,6 +733,12 @@ fn test_state(streaming: bool) -> (ApiState, String) {
     (state, plaintext)
 }
 
+fn test_principal(state: &ApiState, surface: Surface) -> crate::InferencePrincipal {
+    let runtime = state.runtime.pin();
+    let (lookup_id, _) = runtime.api_keys.iter().next().unwrap();
+    crate::InferencePrincipal::for_test(Arc::clone(&runtime), lookup_id.clone(), surface)
+}
+
 fn reinstall_api_keys(state: &ApiState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
     let pinned = state.runtime.pin();
     let snapshot = RuntimeSnapshot {
@@ -739,6 +776,13 @@ fn restrict_api_key_to_route(state: &ApiState, route: RouteSlug) {
     let pinned = state.runtime.pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys.values_mut().next().unwrap().allowed_routes = BTreeSet::from([route]);
+    reinstall_api_keys(state, api_keys);
+}
+
+fn replace_api_key_scopes(state: &ApiState, scopes: BTreeSet<ApiKeyScope>) {
+    let pinned = state.runtime.pin();
+    let mut api_keys = pinned.api_keys.clone();
+    api_keys.values_mut().next().unwrap().scopes = scopes;
     reinstall_api_keys(state, api_keys);
 }
 
@@ -963,7 +1007,7 @@ async fn openai_json_audio_and_responses_pdf_reach_same_protocol_transport() {
 
 #[tokio::test]
 async fn direct_executor_reserves_hard_limits_before_route_selection() {
-    let (state, key) = test_state(false);
+    let (state, _) = test_state(false);
     install_hard_limits(&state);
     let request: ChatCompletionRequest = serde_json::from_value(json!({
         "model": "route-does-not-exist",
@@ -971,11 +1015,11 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
     }))
     .unwrap();
     let operation = decode_chat_completion(request).unwrap();
+    let principal = test_principal(&state, Surface::OpenAi);
     let error = match execute_event_operation_for_surface_inner(
         &state,
-        &key,
+        &principal,
         operation,
-        Surface::OpenAi,
         TransportMode::Unary,
     )
     .await
@@ -989,7 +1033,7 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
 
 #[tokio::test]
 async fn required_target_unavailability_is_normalized_by_shared_execution_kernel() {
-    let (state, key) = test_state(false);
+    let (state, _) = test_state(false);
     install_result(
         &state,
         OperationKind::TokenCount,
@@ -1004,12 +1048,12 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
     }))
     .unwrap();
     let operation = decode_response_input_tokens(request).unwrap();
+    let principal = test_principal(&state, Surface::OpenAi);
 
     let error = match execute_routed_result_for_surface_inner(
         &state,
-        &key,
+        &principal,
         operation,
-        Surface::OpenAi,
         TransportMode::Unary,
         Some(RequiredTarget {
             provider_id: uuid::Uuid::now_v7(),

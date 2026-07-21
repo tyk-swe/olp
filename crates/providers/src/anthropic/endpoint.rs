@@ -1,27 +1,21 @@
-use std::{
-    collections::BTreeSet,
-    fmt,
-    future::Future,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
+use std::{fmt, net::IpAddr, time::Duration};
 
-use crate::http_egress::is_public_ip;
-use reqwest::{Client, Url, redirect::Policy};
+use crate::http_egress::{
+    is_public_ip,
+    pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool, literal_ip},
+};
+use reqwest::{Client, Url};
 use thiserror::Error;
-use tokio::{net::lookup_host, sync::Mutex, time::Instant, time::timeout};
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1/";
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const DNS_REVALIDATION_INTERVAL: Duration = Duration::from_secs(30);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 256;
 
 pub(crate) struct Endpoint {
     base_url: Url,
     client_connect_timeout: Duration,
-    client_pool: Arc<ClientPool>,
+    client_pool: PinnedClientPool,
     #[cfg(test)]
     allow_unsafe_test_target: bool,
 }
@@ -31,34 +25,11 @@ impl Clone for Endpoint {
         Self {
             base_url: self.base_url.clone(),
             client_connect_timeout: self.client_connect_timeout,
-            client_pool: Arc::new(ClientPool::default()),
+            client_pool: self.client_pool.clone(),
             #[cfg(test)]
             allow_unsafe_test_target: self.allow_unsafe_test_target,
         }
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct ClientIdentity {
-    scheme: String,
-    host: String,
-    port: u16,
-    addresses: Vec<SocketAddr>,
-    connect_timeout: Duration,
-    allow_unsafe_target: bool,
-}
-
-struct CachedClient {
-    identity: ClientIdentity,
-    client: Client,
-    validated_until: Instant,
-}
-
-#[derive(Default)]
-struct ClientPool {
-    state: Mutex<Option<CachedClient>>,
-    #[cfg(test)]
-    builds: std::sync::atomic::AtomicUsize,
 }
 
 impl fmt::Debug for Endpoint {
@@ -111,13 +82,14 @@ impl Endpoint {
         }
         if let Some(ip) = literal_ip(&base_url)
             && !allow_unsafe_target
+            && !is_public_ip(ip)
         {
-            validate_public_ip(ip)?;
+            return Err(EndpointError::ForbiddenAddress(ip));
         }
         Ok(Self {
             base_url,
             client_connect_timeout: DEFAULT_CONNECT_TIMEOUT,
-            client_pool: Arc::new(ClientPool::default()),
+            client_pool: PinnedClientPool::default(),
             #[cfg(test)]
             allow_unsafe_test_target: allow_unsafe_target,
         })
@@ -154,150 +126,39 @@ impl Endpoint {
         &self,
         connect_timeout: Duration,
     ) -> Result<Client, EndpointError> {
-        self.pinned_client_with_resolver(connect_timeout, |host, port| async move {
-            let resolved = lookup_host((host.as_str(), port)).await?;
-            Ok(resolved.collect::<BTreeSet<_>>().into_iter().collect())
-        })
-        .await
-    }
-
-    async fn pinned_client_with_resolver<Resolve, ResolveFuture>(
-        &self,
-        connect_timeout: Duration,
-        resolve: Resolve,
-    ) -> Result<Client, EndpointError>
-    where
-        Resolve: FnOnce(String, u16) -> ResolveFuture,
-        ResolveFuture: Future<Output = Result<Vec<SocketAddr>, std::io::Error>>,
-    {
-        timeout(connect_timeout, self.pinned_client_inner(resolve))
-            .await
-            .map_err(|_| EndpointError::DnsTimeout)?
-    }
-
-    async fn pinned_client_inner<Resolve, ResolveFuture>(
-        &self,
-        resolve: Resolve,
-    ) -> Result<Client, EndpointError>
-    where
-        Resolve: FnOnce(String, u16) -> ResolveFuture,
-        ResolveFuture: Future<Output = Result<Vec<SocketAddr>, std::io::Error>>,
-    {
-        let mut cached = self.client_pool.state.lock().await;
-        let now = Instant::now();
-        if let Some(entry) = cached.as_ref()
-            && entry.validated_until > now
-            && entry.identity.connect_timeout == self.client_connect_timeout
-        {
-            return Ok(entry.client.clone());
-        }
-
-        let host = self
-            .base_url
-            .host_str()
-            .ok_or(EndpointError::MissingHost)?
-            .to_owned();
-        let port = self
-            .base_url
-            .port_or_known_default()
-            .ok_or(EndpointError::MissingPort)?;
-        let addresses = if let Some(ip) = literal_ip(&self.base_url) {
-            vec![SocketAddr::new(ip, port)]
-        } else {
-            resolve(host.clone(), port)
-                .await
-                .map_err(EndpointError::DnsResolution)?
-                .into_iter()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-        if addresses.is_empty() {
-            return Err(EndpointError::NoAddresses);
-        }
         #[cfg(test)]
         let allow_unsafe_target = self.allow_unsafe_test_target;
         #[cfg(not(test))]
         let allow_unsafe_target = false;
-        if !allow_unsafe_target {
-            for address in &addresses {
-                validate_public_ip(address.ip())?;
-            }
-        }
-
-        let identity = ClientIdentity {
-            scheme: self.base_url.scheme().to_owned(),
-            host: host.clone(),
-            port,
-            addresses: addresses.clone(),
-            connect_timeout: self.client_connect_timeout,
-            allow_unsafe_target,
-        };
-        let validated_until = Instant::now() + DNS_REVALIDATION_INTERVAL;
-        if let Some(entry) = cached.as_mut()
-            && entry.identity == identity
-        {
-            entry.validated_until = validated_until;
-            return Ok(entry.client.clone());
-        }
-
-        let mut builder = Client::builder()
-            .redirect(Policy::none())
-            .retry(reqwest::retry::never())
-            .no_proxy()
-            .connect_timeout(self.client_connect_timeout)
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .pool_max_idle_per_host(MAX_IDLE_CONNECTIONS_PER_HOST)
-            .tcp_nodelay(true)
-            .referer(false)
-            .user_agent("openllmproxy");
-        if !allow_unsafe_target {
-            builder = builder.https_only(true);
-        }
-        if literal_ip(&self.base_url).is_none() {
-            builder = builder.resolve_to_addrs(&host, &addresses);
-        }
-        let client = builder.build().map_err(EndpointError::ClientBuild)?;
-        #[cfg(test)]
         self.client_pool
-            .builds
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        *cached = Some(CachedClient {
-            identity,
-            client: client.clone(),
-            validated_until,
-        });
-        Ok(client)
-    }
-
-    #[cfg(test)]
-    async fn expire_cached_dns_for_test(&self) {
-        if let Some(cached) = self.client_pool.state.lock().await.as_mut() {
-            cached.validated_until = Instant::now();
-        }
-    }
-
-    #[cfg(test)]
-    fn client_builds_for_test(&self) -> usize {
-        self.client_pool
-            .builds
-            .load(std::sync::atomic::Ordering::Relaxed)
+            .client(
+                &self.base_url,
+                connect_timeout,
+                PinnedClientConfig {
+                    connect_timeout: self.client_connect_timeout,
+                    pool_idle_timeout: Some(POOL_IDLE_TIMEOUT),
+                    pool_max_idle_per_host: Some(MAX_IDLE_CONNECTIONS_PER_HOST),
+                    allow_unsafe_target,
+                    user_agent: "openllmproxy",
+                },
+            )
+            .await
+            .map_err(EndpointError::from)
     }
 }
 
-fn literal_ip(url: &Url) -> Option<IpAddr> {
-    url.host_str()?
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .ok()
-}
-
-pub(crate) fn validate_public_ip(address: IpAddr) -> Result<(), EndpointError> {
-    if !is_public_ip(address) {
-        return Err(EndpointError::ForbiddenAddress(address));
+impl From<PinnedClientError> for EndpointError {
+    fn from(error: PinnedClientError) -> Self {
+        match error {
+            PinnedClientError::MissingHost => Self::MissingHost,
+            PinnedClientError::MissingPort => Self::MissingPort,
+            PinnedClientError::DnsTimeout => Self::DnsTimeout,
+            PinnedClientError::DnsResolution(error) => Self::DnsResolution(error),
+            PinnedClientError::NoAddresses => Self::NoAddresses,
+            PinnedClientError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
+            PinnedClientError::ClientBuild(error) => Self::ClientBuild(error),
+        }
     }
-    Ok(())
 }
 
 #[derive(Debug, Error)]
@@ -364,69 +225,11 @@ mod tests {
     }
 
     #[test]
-    fn blocks_internal_and_transition_addresses() {
-        for address in [
-            "0.0.0.0",
-            "10.0.0.1",
-            "100.64.0.1",
-            "127.0.0.1",
-            "169.254.169.254",
-            "192.168.0.1",
-            "224.0.0.1",
-            "::1",
-            "::ffff:127.0.0.1",
-            "fc00::1",
-            "fe80::1",
-            "64:ff9b::7f00:1",
-            "2001:db8::1",
-            "2002:7f00:1::1",
-        ] {
-            let address = address.parse().unwrap();
-            assert!(matches!(
-                validate_public_ip(address),
-                Err(EndpointError::ForbiddenAddress(blocked)) if blocked == address
-            ));
-        }
-        validate_public_ip("1.1.1.1".parse().unwrap()).unwrap();
-    }
-
-    #[tokio::test]
-    async fn pool_reuses_unchanged_dns_but_isolates_clones_and_rejects_rebinding() {
-        let endpoint = Endpoint::parse("https://pool.example/v1").unwrap();
-        let public = SocketAddr::new("8.8.8.8".parse().unwrap(), 443);
-        for preparation_budget in [Duration::from_secs(1), Duration::from_millis(500)] {
-            endpoint
-                .pinned_client_with_resolver(preparation_budget, move |_, _| async move {
-                    Ok(vec![public])
-                })
-                .await
-                .unwrap();
-        }
-        assert_eq!(endpoint.client_builds_for_test(), 1);
-
-        let other_provider = endpoint.clone();
-        other_provider
-            .pinned_client_with_resolver(Duration::from_secs(1), move |_, _| async move {
-                Ok(vec![public])
-            })
-            .await
-            .unwrap();
-        assert_eq!(other_provider.client_builds_for_test(), 1);
-        assert!(!Arc::ptr_eq(
-            &endpoint.client_pool,
-            &other_provider.client_pool
-        ));
-
-        endpoint.expire_cached_dns_for_test().await;
-        let rebound = endpoint
-            .pinned_client_with_resolver(Duration::from_secs(1), |_, _| async move {
-                Ok(vec![SocketAddr::new("127.0.0.1".parse().unwrap(), 443)])
-            })
-            .await;
+    fn literal_private_target_preserves_anthropic_error_mapping() {
+        let address: IpAddr = "169.254.169.254".parse().unwrap();
         assert!(matches!(
-            rebound,
-            Err(EndpointError::ForbiddenAddress(address)) if address.is_loopback()
+            Endpoint::parse("https://169.254.169.254/v1"),
+            Err(EndpointError::ForbiddenAddress(blocked)) if blocked == address
         ));
-        assert_eq!(endpoint.client_builds_for_test(), 1);
     }
 }

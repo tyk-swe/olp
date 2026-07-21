@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::rejection::JsonRejection,
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use olp_domain::Surface;
@@ -153,20 +153,6 @@ pub(crate) fn problem_response(surface: Surface, problem: Problem) -> Response {
 
 pub(crate) fn inference_error_response(surface: Surface, error: InferenceError) -> Response {
     ProtocolError { surface, error }.into_response()
-}
-
-pub(super) fn api_key<'a>(
-    headers: &'a HeaderMap,
-    name: &'static str,
-) -> Result<&'a str, InferenceError> {
-    let token = headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(InferenceError::unauthorized)?;
-    if token.is_empty() || token.contains(char::is_whitespace) {
-        return Err(InferenceError::unauthorized());
-    }
-    Ok(token)
 }
 
 pub(super) fn valid_json<T>(

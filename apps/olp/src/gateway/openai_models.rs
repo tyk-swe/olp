@@ -2,20 +2,17 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    extract::{Extension, Path, State},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
 use chrono::Utc;
-use olp_domain::{
-    ApiKey, ApiKeyAuthorizationError, ApiKeyLookupId, OperationKind, RouteSlug, Surface,
-    authorize_api_key,
-};
+use olp_domain::{ApiKeyAuthorizationError, OperationKind, RouteSlug, Surface, authorize_api_key};
 use serde::Serialize;
 
 use crate::{
-    ApiState, RuntimeBundle,
+    ApiState, InferencePrincipal, RuntimeBundle,
     gateway::{InferenceError, release_model_limits, reserve_model_limits},
 };
 
@@ -27,16 +24,13 @@ pub(crate) fn router() -> Router<ApiState> {
 
 async fn list_models(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
 ) -> Result<Json<ModelList>, OpenAiModelError> {
-    // Pin before authentication: key state and the returned route set must
-    // always come from exactly one immutable runtime generation.
-    let runtime = crate::pin_inference_runtime(&state);
-    let key = authenticate(&state, &runtime, &headers)?;
+    let runtime = Arc::clone(principal.runtime());
+    let key = principal.key();
     authorize_api_key(key, None, OperationKind::ModelList, Utc::now())
         .map_err(map_authorization_error)?;
-    let plaintext = bearer_token(&headers)?;
-    let lease = reserve_model_limits(&state, key, plaintext, Surface::OpenAi)
+    let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(OpenAiModelError::from_inference)?;
 
@@ -59,15 +53,14 @@ async fn list_models(
 
 async fn get_model(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Path(model_id): Path<String>,
 ) -> Result<Json<ModelObject>, OpenAiModelError> {
-    let runtime = crate::pin_inference_runtime(&state);
-    let key = authenticate(&state, &runtime, &headers)?;
+    let runtime = Arc::clone(principal.runtime());
+    let key = principal.key();
     authorize_api_key(key, None, OperationKind::ModelGet, Utc::now())
         .map_err(map_authorization_error)?;
-    let plaintext = bearer_token(&headers)?;
-    let lease = reserve_model_limits(&state, key, plaintext, Surface::OpenAi)
+    let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(OpenAiModelError::from_inference)?;
 
@@ -111,47 +104,6 @@ fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug) -> bool {
                     })
             })
     })
-}
-
-fn authenticate<'a>(
-    state: &ApiState,
-    runtime: &'a Arc<RuntimeBundle>,
-    headers: &HeaderMap,
-) -> Result<&'a ApiKey, OpenAiModelError> {
-    let plaintext = bearer_token(headers)?;
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(OpenAiModelError::authentication_unavailable)?;
-    let lookup = auth_hmac_key
-        .lookup_id(plaintext)
-        .map_err(|_| OpenAiModelError::unauthorized())?;
-    let lookup_id = ApiKeyLookupId::parse(lookup).map_err(|_| OpenAiModelError::unauthorized())?;
-    let key = runtime
-        .api_keys
-        .get(&lookup_id)
-        .ok_or_else(OpenAiModelError::unauthorized)?;
-    auth_hmac_key
-        .parse_and_verify(plaintext, key.digest.as_bytes())
-        .map_err(|_| OpenAiModelError::unauthorized())?;
-    Ok(key)
-}
-
-fn bearer_token(headers: &HeaderMap) -> Result<&str, OpenAiModelError> {
-    let value = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(OpenAiModelError::unauthorized)?;
-    let (scheme, token) = value
-        .split_once(' ')
-        .ok_or_else(OpenAiModelError::unauthorized)?;
-    if !scheme.eq_ignore_ascii_case("bearer")
-        || token.is_empty()
-        || token.contains(char::is_whitespace)
-    {
-        return Err(OpenAiModelError::unauthorized());
-    }
-    Ok(token)
 }
 
 fn map_authorization_error(error: ApiKeyAuthorizationError) -> OpenAiModelError {
@@ -229,16 +181,6 @@ impl OpenAiModelError {
         }
     }
 
-    fn authentication_unavailable() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            code: "api_key_authentication_unavailable",
-            kind: "service_unavailable_error",
-            message: "The gateway is temporarily unavailable.".to_owned(),
-            retry_after: None,
-        }
-    }
-
     fn from_inference(error: InferenceError) -> Self {
         let status = error.status();
         let (code, kind) = if status == StatusCode::TOO_MANY_REQUESTS {
@@ -312,10 +254,10 @@ mod tests {
     use futures::stream;
     use http_body_util::BodyExt;
     use olp_domain::{
-        ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyScope, ApiKeyStatus, BoxFuture, Capability,
-        DurationMs, Provider, ProviderEventStream, ProviderId, ProviderKind, ProviderOutput,
-        ProviderRequest, ProviderTransport, Route, RouteId, RuntimeGeneration, RuntimeGenerationId,
-        RuntimeSnapshot, Target, TargetId, TransportError, TransportMode,
+        ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
+        BoxFuture, Capability, DurationMs, Provider, ProviderEventStream, ProviderId, ProviderKind,
+        ProviderOutput, ProviderRequest, ProviderTransport, Route, RouteId, RuntimeGeneration,
+        RuntimeGenerationId, RuntimeSnapshot, Target, TargetId, TransportError, TransportMode,
     };
     use olp_storage::AuthHmacKey;
     use serde_json::Value;

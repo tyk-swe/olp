@@ -21,9 +21,9 @@ use olp_domain::Surface;
 use olp_storage::{RequestMetadataEmitter, RequestMetadataEvent};
 
 use crate::{
-    ApiState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES,
-    MAX_MEDIA_BODY_BYTES, Problem, RuntimeBundle, gateway, management_api,
-    proxy::public_auth_source, router::REQUEST_BODY_TIMEOUT,
+    ApiState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem,
+    RuntimeBundle, gateway, management_api, proxy::public_auth_source,
+    router::REQUEST_BODY_TIMEOUT,
 };
 
 mod limits;
@@ -35,18 +35,14 @@ use limits::{
     reserve_http_inference_limits,
 };
 use multipart::preauthorize_multipart;
-use validation::{is_json_content_type, is_media_request, payload_too_large, request_body_timeout};
+use validation::{is_json_content_type, payload_too_large, request_body_timeout};
 
+pub(crate) use limits::InferencePrincipal;
 pub(super) use limits::{
     InferenceReservation, ReleaseReservationBody, estimate_http_json_request_tokens,
 };
-pub(crate) use multipart::{
-    IMAGE_VARIATION_BODY_BYTES, MultipartRequestAdmission, MultipartRouteAdmission,
-    TRANSCRIPTION_BODY_BYTES, VIDEO_CREATE_BODY_BYTES,
-};
-pub(super) use multipart::{
-    MultipartAdmissionState, multipart_endpoint, validate_multipart_boundary,
-};
+pub(super) use multipart::{MultipartAdmissionState, validate_multipart_boundary};
+pub(crate) use multipart::{MultipartRequestAdmission, MultipartRouteAdmission};
 pub(super) use validation::{JsonBodyReadError, read_json_body, validate_json_depth};
 
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
@@ -60,6 +56,11 @@ tokio::task_local! {
     /// downstream authentication, route, capability, and transport decision
     /// must use this same bundle for the lifetime of the request.
     pub(super) static HTTP_INFERENCE_RUNTIME: Arc<RuntimeBundle>;
+
+    /// The sole verified API-key identity for an admitted inference request.
+    /// It contains no plaintext credential and is propagated into detached
+    /// request work together with the pinned runtime generation.
+    pub(super) static HTTP_INFERENCE_PRINCIPAL: InferencePrincipal;
 
     /// Set by the canonical pipeline once it owns metadata completion for an
     /// authenticated request. The HTTP boundary emits a content-free fallback
@@ -77,9 +78,15 @@ tokio::task_local! {
 }
 
 pub(crate) fn pin_inference_runtime(state: &ApiState) -> Arc<RuntimeBundle> {
-    HTTP_INFERENCE_RUNTIME
-        .try_with(Arc::clone)
+    HTTP_INFERENCE_PRINCIPAL
+        .try_with(|principal| Arc::clone(principal.runtime()))
+        .or_else(|_| HTTP_INFERENCE_RUNTIME.try_with(Arc::clone))
         .unwrap_or_else(|_| state.runtime.pin())
+}
+
+#[cfg(test)]
+pub(crate) fn http_inference_principal() -> Option<InferencePrincipal> {
+    HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok()
 }
 
 pub(crate) fn http_inference_reserved_tokens() -> Option<i64> {
@@ -97,6 +104,7 @@ pub(crate) fn claim_http_inference_metadata() {
 #[derive(Clone)]
 struct HttpInferenceTaskContext {
     runtime: Arc<RuntimeBundle>,
+    principal: Option<InferencePrincipal>,
     metadata_claimed: Option<Arc<AtomicBool>>,
     reserved_tokens: Option<i64>,
     reservation_hold: Option<InferenceReservation>,
@@ -106,6 +114,7 @@ impl HttpInferenceTaskContext {
     fn capture(state: &ApiState) -> Self {
         Self {
             runtime: pin_inference_runtime(state),
+            principal: HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok(),
             metadata_claimed: HTTP_INFERENCE_METADATA_CLAIMED.try_with(Arc::clone).ok(),
             reserved_tokens: http_inference_reserved_tokens(),
             reservation_hold: HTTP_INFERENCE_RESERVATION_HOLD
@@ -129,6 +138,9 @@ impl HttpInferenceTaskContext {
         if let Some(metadata_claimed) = self.metadata_claimed {
             future = Box::pin(HTTP_INFERENCE_METADATA_CLAIMED.scope(metadata_claimed, future));
         }
+        if let Some(principal) = self.principal {
+            future = Box::pin(HTTP_INFERENCE_PRINCIPAL.scope(principal, future));
+        }
         HTTP_INFERENCE_RUNTIME.scope(self.runtime, future).await
     }
 }
@@ -150,8 +162,9 @@ pub(super) async fn enforce_request_limits(
     request: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> Response {
-    let surface = inference_surface(request.uri().path());
-    match enforce_request_limits_inner(&state, request, next, surface).await {
+    let endpoint = gateway::InferenceEndpoint::classify(request.method(), request.uri().path());
+    let surface = endpoint.map(gateway::InferenceEndpoint::surface);
+    match enforce_request_limits_inner(&state, request, next, endpoint).await {
         Ok(response) => response,
         Err(RequestLimitRejection::Problem(problem)) => match surface {
             Some(surface) => gateway::problem_response(surface, problem),
@@ -243,87 +256,14 @@ impl LocalRequestMetadata {
     }
 }
 
-pub(super) fn inference_metadata_operation(
-    method: &axum::http::Method,
-    path: &str,
-) -> Option<(&'static str, &'static str)> {
-    if *method == axum::http::Method::GET
-        && (path == "/openai/v1/models"
-            || path == "/anthropic/v1/models"
-            || path == "/gemini/v1/models"
-            || path == "/gemini/v1beta/models")
-    {
-        Some(("model_list", "models"))
-    } else if *method == axum::http::Method::GET
-        && (path.starts_with("/openai/v1/models/")
-            || path.starts_with("/anthropic/v1/models/")
-            || path.starts_with("/gemini/v1/models/")
-            || path.starts_with("/gemini/v1beta/models/"))
-    {
-        Some(("model_get", "models"))
-    } else if path == "/openai/v1/videos" && *method == axum::http::Method::GET {
-        Some(("video_list", "videos"))
-    } else if path == "/openai/v1/videos" && *method == axum::http::Method::POST {
-        Some(("video_create", "invalid-request"))
-    } else if path.starts_with("/openai/v1/videos/") && path.ends_with("/content") {
-        Some(("video_content", "invalid-request"))
-    } else if path.starts_with("/openai/v1/videos/") && *method == axum::http::Method::DELETE {
-        Some(("video_delete", "invalid-request"))
-    } else if path.starts_with("/openai/v1/videos/") && *method == axum::http::Method::GET {
-        Some(("video_get", "invalid-request"))
-    } else if path == "/openai/v1/responses/input_tokens"
-        || path == "/anthropic/v1/messages/count_tokens"
-        || path.ends_with(":countTokens")
-    {
-        Some(("token_count", "invalid-request"))
-    } else if path == "/openai/v1/embeddings" {
-        Some(("embeddings", "invalid-request"))
-    } else if path == "/openai/v1/images/generations" {
-        Some(("image_generation", "invalid-request"))
-    } else if path == "/openai/v1/images/edits" {
-        Some(("image_edit", "invalid-request"))
-    } else if path == "/openai/v1/images/variations" {
-        Some(("image_variation", "invalid-request"))
-    } else if path == "/openai/v1/audio/speech" {
-        Some(("speech", "invalid-request"))
-    } else if path == "/openai/v1/audio/transcriptions" {
-        Some(("transcription", "invalid-request"))
-    } else if path == "/openai/v1/moderations" {
-        Some(("moderation", "invalid-request"))
-    } else if path == "/openai/v1/chat/completions"
-        || path == "/openai/v1/responses"
-        || path == "/anthropic/v1/messages"
-        || path.ends_with(":generateContent")
-        || path.ends_with(":streamGenerateContent")
-    {
-        Some(("generation", "invalid-request"))
-    } else {
-        None
-    }
-}
-
-fn inference_route_from_json(path: &str, body: &[u8]) -> Option<String> {
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
-        && let Some(model) = value.get("model").and_then(serde_json::Value::as_str)
-        && olp_domain::RouteSlug::parse(model).is_ok()
-    {
-        return Some(model.to_owned());
-    }
-    let resource = path.split("/models/").nth(1)?;
-    let model = resource.split(':').next()?;
-    olp_domain::RouteSlug::parse(model)
-        .is_ok()
-        .then(|| model.to_owned())
-}
-
 async fn enforce_request_limits_inner(
     state: &ApiState,
     request: Request<axum::body::Body>,
     next: middleware::Next,
-    surface: Option<Surface>,
+    endpoint: Option<gateway::InferenceEndpoint>,
 ) -> Result<Response, RequestLimitRejection> {
     let request_started_at = chrono::Utc::now();
-    let metadata_operation = inference_metadata_operation(request.method(), request.uri().path());
+    let metadata_policy = endpoint.and_then(gateway::InferenceEndpoint::metadata);
     if request.uri().to_string().len() > MAX_URI_BYTES {
         return Err(Problem::new(
             axum::http::StatusCode::URI_TOO_LONG,
@@ -421,16 +361,23 @@ async fn enforce_request_limits_inner(
         .into());
     }
 
-    let content_type = request
-        .headers()
-        .get(axum::http::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    let media_request = is_media_request(request.uri().path(), content_type);
-    let maximum = if media_request {
-        MAX_MEDIA_BODY_BYTES
-    } else {
-        MAX_JSON_BODY_BYTES
+    let (maximum, multipart_content_type, is_json) = {
+        let content_type = request
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        (
+            endpoint
+                .map(|endpoint| endpoint.body_limit(content_type))
+                .unwrap_or(MAX_JSON_BODY_BYTES),
+            content_type
+                .split(';')
+                .next()
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("multipart/form-data"))
+                .then(|| content_type.to_owned()),
+            is_json_content_type(content_type),
+        )
     };
     if request
         .headers()
@@ -442,27 +389,28 @@ async fn enforce_request_limits_inner(
         return Err(payload_too_large(maximum).into());
     }
 
-    let authenticated = surface
-        .map(|surface| authenticate_inference_headers(state, request.headers(), surface))
+    let principal = endpoint
+        .map(|endpoint| {
+            authenticate_inference_headers(state, request.headers(), endpoint.surface())
+        })
         .transpose()?;
-    let local_metadata = authenticated.as_ref().and_then(|authenticated| {
-        metadata_operation.map(|(operation, route_slug)| LocalRequestMetadata {
+    if let Some(principal) = principal.clone() {
+        request.extensions_mut().insert(principal);
+    }
+    let local_metadata = principal.as_ref().and_then(|principal| {
+        metadata_policy.map(|metadata| LocalRequestMetadata {
             request_metadata: state.request_metadata.clone(),
             request_started_at,
-            runtime_generation_id: authenticated.runtime_generation_id,
-            api_key_id: authenticated.key.id.as_uuid(),
-            route_slug: route_slug.to_owned(),
-            operation,
-            surface: surface.expect("local inference metadata has a protocol surface"),
-            always_emit: matches!(operation, "model_list" | "model_get" | "video_list"),
+            runtime_generation_id: principal.runtime().generation.id.as_uuid(),
+            api_key_id: principal.key().id.as_uuid(),
+            route_slug: metadata.fallback_route.to_owned(),
+            operation: metadata.operation,
+            surface: principal.surface(),
+            always_emit: metadata.always_emit,
         })
     });
-    let is_multipart = content_type
-        .split(';')
-        .next()
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("multipart/form-data"));
-    let multipart_policy = multipart_endpoint(request.method(), request.uri().path());
-    if multipart_policy.is_some() && !is_multipart {
+    let multipart_policy = endpoint.and_then(gateway::InferenceEndpoint::multipart);
+    if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
             metadata.emit(axum::http::StatusCode::BAD_REQUEST);
         }
@@ -472,7 +420,7 @@ async fn enforce_request_limits_inner(
         .into());
     }
 
-    if is_json_content_type(content_type) {
+    if is_json {
         let (parts, body) = request.into_parts();
         let bytes = match read_json_body(body, MAX_JSON_BODY_BYTES, REQUEST_BODY_TIMEOUT).await {
             Ok(bytes) => bytes,
@@ -490,14 +438,21 @@ async fn enforce_request_limits_inner(
             }
         };
         let local_metadata = local_metadata.map(|mut metadata| {
-            if let Some(route) = inference_route_from_json(parts.uri.path(), &bytes) {
+            if let Some(route) =
+                endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes))
+            {
                 metadata.route_slug = route;
             }
             metadata
         });
-        let requested_tokens = estimate_http_json_request_tokens(parts.uri.path(), &bytes);
-        let reservation = if let Some(authenticated) = &authenticated {
-            match reserve_http_inference_limits(state, authenticated, requested_tokens).await {
+        let requested_tokens = estimate_http_json_request_tokens(
+            endpoint
+                .map(gateway::InferenceEndpoint::token_estimate)
+                .unwrap_or(gateway::TokenEstimate::Default),
+            &bytes,
+        );
+        let reservation = if let Some(principal) = &principal {
+            match reserve_http_inference_limits(state, principal, requested_tokens).await {
                 Ok(reservation) => reservation,
                 Err(error) => {
                     if let Some(metadata) = local_metadata.clone() {
@@ -517,24 +472,25 @@ async fn enforce_request_limits_inner(
             return Err(problem.into());
         }
         let request = Request::from_parts(parts, Body::from(bytes));
-        let runtime = authenticated
-            .as_ref()
-            .map(|authenticated| Arc::clone(&authenticated.runtime));
         let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
         return Ok(run_request_with_reservation(
             request,
             next,
             reservation,
             local_metadata,
-            runtime,
+            principal,
             reserved_tokens,
         )
         .await);
     }
 
-    let requested_tokens = estimate_http_non_json_request_tokens(request.uri().path());
-    let reservation = if let Some(authenticated) = &authenticated {
-        match reserve_http_inference_limits(state, authenticated, requested_tokens).await {
+    let requested_tokens = estimate_http_non_json_request_tokens(
+        endpoint
+            .map(gateway::InferenceEndpoint::token_estimate)
+            .unwrap_or(gateway::TokenEstimate::Default),
+    );
+    let reservation = if let Some(principal) = &principal {
+        match reserve_http_inference_limits(state, principal, requested_tokens).await {
             Ok(reservation) => reservation,
             Err(error) => {
                 if let Some(metadata) = local_metadata.clone() {
@@ -546,21 +502,21 @@ async fn enforce_request_limits_inner(
     } else {
         None
     };
-    let multipart_preauthorization = if is_multipart {
-        if let Err(problem) = validate_multipart_boundary(content_type) {
+    let multipart_preauthorization = if let Some(content_type) = multipart_content_type {
+        if let Err(problem) = validate_multipart_boundary(&content_type) {
             release_reservation(reservation).await;
             if let Some(metadata) = local_metadata.clone() {
                 metadata.emit(axum::http::StatusCode::BAD_REQUEST);
             }
             return Err(problem.into());
         }
-        match (multipart_policy, authenticated.as_ref()) {
-            (Some(_), Some(authenticated)) => {
+        match (multipart_policy, principal.as_ref()) {
+            (Some((operation, reservation_bytes)), Some(principal)) => {
                 match preauthorize_multipart(
                     request.headers(),
-                    &authenticated.key,
-                    request.method(),
-                    request.uri().path(),
+                    principal.key(),
+                    operation,
+                    reservation_bytes,
                 ) {
                     Ok(admission) => Some(admission),
                     Err(error) => {
@@ -580,13 +536,13 @@ async fn enforce_request_limits_inner(
         None
     };
     let multipart_admission = if let Some((route, reservation_bytes)) = multipart_preauthorization {
-        let Some(authenticated) = authenticated.as_ref() else {
+        let Some(principal) = principal.as_ref() else {
             release_reservation(reservation).await;
             return Err(gateway::InferenceError::unauthorized().into());
         };
         let Some(lease) = state
             .multipart_admission
-            .try_admit(authenticated.key.id.as_uuid(), reservation_bytes)
+            .try_admit(principal.key().id.as_uuid(), reservation_bytes)
         else {
             release_reservation(reservation).await;
             if let Some(metadata) = local_metadata.clone() {
@@ -606,16 +562,13 @@ async fn enforce_request_limits_inner(
     if let Some(admission) = multipart_admission {
         request.extensions_mut().insert(admission);
     }
-    let runtime = authenticated
-        .as_ref()
-        .map(|authenticated| Arc::clone(&authenticated.runtime));
     let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
     Ok(run_request_with_reservation(
         request,
         next,
         reservation,
         local_metadata,
-        runtime,
+        principal,
         reserved_tokens,
     )
     .await)
@@ -678,10 +631,10 @@ async fn run_request_with_reservation(
     next: middleware::Next,
     reservation: Option<InferenceReservation>,
     local_metadata: Option<LocalRequestMetadata>,
-    runtime: Option<Arc<RuntimeBundle>>,
+    principal: Option<InferencePrincipal>,
     reserved_tokens: Option<i64>,
 ) -> Response {
-    let metadata_claimed = runtime.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
+    let metadata_claimed = principal.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
     let run = async move {
         // Only suppress the canonical fallback when this exact HTTP request
         // actually acquired a hard-limit reservation. Unlimited keys retain
@@ -701,12 +654,14 @@ async fn run_request_with_reservation(
         } else {
             Box::pin(run)
         };
-    let response = match (runtime, metadata_claimed.as_ref()) {
-        (Some(runtime), Some(claimed)) => {
+    let response = match (principal, metadata_claimed.as_ref()) {
+        (Some(principal), Some(claimed)) => {
+            let runtime = Arc::clone(principal.runtime());
             HTTP_INFERENCE_METADATA_CLAIMED
                 .scope(
                     Arc::clone(claimed),
-                    HTTP_INFERENCE_RUNTIME.scope(runtime, run),
+                    HTTP_INFERENCE_PRINCIPAL
+                        .scope(principal, HTTP_INFERENCE_RUNTIME.scope(runtime, run)),
                 )
                 .await
         }
@@ -737,17 +692,5 @@ async fn run_request_with_reservation(
 async fn release_reservation(reservation: Option<InferenceReservation>) {
     if let Some(reservation) = reservation {
         reservation.release().await;
-    }
-}
-
-fn inference_surface(path: &str) -> Option<Surface> {
-    if path.starts_with("/openai/") {
-        Some(Surface::OpenAi)
-    } else if path.starts_with("/anthropic/") {
-        Some(Surface::Anthropic)
-    } else if path.starts_with("/gemini/") {
-        Some(Surface::Gemini)
-    } else {
-        None
     }
 }

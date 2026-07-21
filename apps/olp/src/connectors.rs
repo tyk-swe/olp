@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use crate::{
-    CredentialKind, ProviderConfig, ProviderCredential, ProviderFactory, TransportRegistry,
+    ProviderConfig, ProviderCredential, ProviderFactory, TransportRegistry,
+    provider_adapter::{runtime_provider_config, runtime_provider_credential},
 };
-use olp_domain::{ProviderId, ProviderKind, ProviderTransport, RuntimeSnapshot};
-use olp_storage::{MasterKey, PgStore, RuntimeProviderConfiguration, credential_aad};
+use olp_domain::{ProviderId, ProviderTransport, RuntimeSnapshot};
+use olp_storage::{MasterKey, PgStore};
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
@@ -196,204 +197,12 @@ pub(crate) async fn load_runtime_transports(
     transports: &mut BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
 ) -> AppResult<()> {
     for provider in store.runtime_provider_configurations(snapshot).await? {
-        let probe_model =
-            match provider.kind {
-                ProviderKind::VertexAi => {
-                    provider.cloud_project.as_deref().ok_or_else(|| {
-                        std::io::Error::other("Vertex provider cloud project is missing")
-                    })?;
-                    provider.cloud_region.as_deref().ok_or_else(|| {
-                        std::io::Error::other("Vertex provider cloud location is missing")
-                    })?;
-                    Some(runtime_provider_model(snapshot, provider.provider_id)?)
-                }
-                ProviderKind::Bedrock => {
-                    provider.cloud_region.as_deref().ok_or_else(|| {
-                        std::io::Error::other("Bedrock provider AWS region is missing")
-                    })?;
-                    None
-                }
-                ProviderKind::AzureOpenAi => {
-                    provider.endpoint.as_deref().ok_or_else(|| {
-                        std::io::Error::other("Azure OpenAI resource endpoint is missing")
-                    })?;
-                    provider.deployment.as_deref().ok_or_else(|| {
-                        std::io::Error::other("Azure OpenAI deployment is missing")
-                    })?;
-                    provider.api_version.as_deref().ok_or_else(|| {
-                        std::io::Error::other("Azure OpenAI API version is missing")
-                    })?;
-                    None
-                }
-                _ => None,
-            };
-        let config = provider_config(&provider, probe_model)?;
-        let credential_kind = match ProviderFactory::credential_kind(&config) {
-            Ok(kind) => kind,
-            Err(error) => match provider.kind {
-                ProviderKind::VertexAi => {
-                    return Err(std::io::Error::other(
-                        "Vertex provider authentication mode is invalid",
-                    )
-                    .into());
-                }
-                ProviderKind::Bedrock => {
-                    return Err(std::io::Error::other(
-                        "Bedrock provider authentication mode is invalid",
-                    )
-                    .into());
-                }
-                _ => return Err(error.into()),
-            },
-        };
-        let decrypted = match credential_kind {
-            CredentialKind::ApiKey
-            | CredentialKind::ServiceAccountJson
-            | CredentialKind::AwsStatic => {
-                Some(decrypt_provider_credential(&provider, master_key)?)
-            }
-            CredentialKind::None => {
-                if provider.kind == ProviderKind::Bedrock && provider.encrypted_credential.is_some()
-                {
-                    return Err(std::io::Error::other(
-                        "Bedrock default-chain provider must not store static credentials",
-                    )
-                    .into());
-                }
-                None
-            }
-        };
-        let credential = match credential_kind {
-            CredentialKind::ApiKey => ProviderCredential::ApiKey(Zeroizing::new(
-                secret_text(decrypted.as_ref().expect("API key is decrypted").as_slice())?
-                    .to_owned(),
-            )),
-            CredentialKind::ServiceAccountJson => {
-                ProviderCredential::ServiceAccountJson(Zeroizing::new(
-                    secret_text(
-                        decrypted
-                            .as_ref()
-                            .expect("service account is decrypted")
-                            .as_slice(),
-                    )?
-                    .to_owned(),
-                ))
-            }
-            CredentialKind::AwsStatic => ProviderCredential::AwsStatic(Zeroizing::new(
-                decrypted
-                    .as_ref()
-                    .expect("AWS credential is decrypted")
-                    .as_slice()
-                    .to_vec(),
-            )),
-            CredentialKind::None => ProviderCredential::None,
-        };
+        let config = runtime_provider_config(&provider, snapshot)?;
+        let credential = runtime_provider_credential(&provider, &config, master_key)?;
         let transport = ProviderFactory::transport(config, credential).await?;
         transports.insert(provider.provider_id, transport);
     }
     Ok(())
-}
-
-fn provider_config(
-    provider: &RuntimeProviderConfiguration,
-    probe_model: Option<String>,
-) -> AppResult<ProviderConfig> {
-    let required = |value: Option<&String>, message: &'static str| -> AppResult<String> {
-        value.cloned().ok_or_else(|| {
-            Box::new(std::io::Error::other(message)) as Box<dyn std::error::Error + Send + Sync>
-        })
-    };
-    Ok(match provider.kind {
-        ProviderKind::OpenAi => ProviderConfig::OpenAi {
-            endpoint: provider.endpoint.clone(),
-        },
-        ProviderKind::OpenAiCompatible => ProviderConfig::OpenAiCompatible {
-            endpoint: required(
-                provider.endpoint.as_ref(),
-                "OpenAI-compatible endpoint is missing",
-            )?,
-        },
-        ProviderKind::Anthropic => ProviderConfig::Anthropic {
-            endpoint: provider.endpoint.clone(),
-            api_version: provider.api_version.clone(),
-        },
-        ProviderKind::Gemini => ProviderConfig::Gemini {
-            endpoint: provider.endpoint.clone(),
-        },
-        ProviderKind::VertexAi => ProviderConfig::VertexAi {
-            project: required(
-                provider.cloud_project.as_ref(),
-                "Vertex AI project is missing",
-            )?,
-            location: required(
-                provider.cloud_region.as_ref(),
-                "Vertex AI location is missing",
-            )?,
-            probe_model: probe_model
-                .ok_or_else(|| std::io::Error::other("Vertex AI model is missing"))?,
-            auth_mode: provider.auth_mode,
-        },
-        ProviderKind::Bedrock => ProviderConfig::Bedrock {
-            region: required(
-                provider.cloud_region.as_ref(),
-                "Bedrock AWS region is missing",
-            )?,
-            auth_mode: provider.auth_mode,
-        },
-        ProviderKind::AzureOpenAi => ProviderConfig::AzureOpenAi {
-            endpoint: required(
-                provider.endpoint.as_ref(),
-                "Azure OpenAI endpoint is missing",
-            )?,
-            deployment: required(
-                provider.deployment.as_ref(),
-                "Azure OpenAI deployment is missing",
-            )?,
-            api_version: required(
-                provider.api_version.as_ref(),
-                "Azure OpenAI API version is missing",
-            )?,
-        },
-    })
-}
-
-fn decrypt_provider_credential(
-    provider: &RuntimeProviderConfiguration,
-    master_key: &MasterKey,
-) -> AppResult<Zeroizing<Vec<u8>>> {
-    let (Some(credential_id), Some(credential_version), Some(encrypted)) = (
-        provider.credential_id,
-        provider.credential_version,
-        provider.encrypted_credential.as_ref(),
-    ) else {
-        return Err(std::io::Error::other("provider credential is missing").into());
-    };
-    let aad = credential_aad(
-        provider.provider_id.as_uuid(),
-        credential_id,
-        credential_version,
-    );
-    Ok(master_key.open(encrypted, &aad)?)
-}
-
-fn secret_text(secret: &[u8]) -> AppResult<&str> {
-    std::str::from_utf8(secret)
-        .map_err(|_| std::io::Error::other("provider credential is not valid UTF-8").into())
-}
-
-fn runtime_provider_model(
-    snapshot: &RuntimeSnapshot,
-    provider_id: ProviderId,
-) -> AppResult<String> {
-    snapshot
-        .providers
-        .get(&provider_id)
-        .ok_or_else(|| std::io::Error::other("runtime provider is missing"))?
-        .capabilities
-        .iter()
-        .map(|capability| capability.model.clone())
-        .next()
-        .ok_or_else(|| std::io::Error::other("provider has no configured model").into())
 }
 
 #[cfg(test)]
@@ -401,15 +210,11 @@ mod tests {
     use std::{io::Write as _, path::Path};
 
     use crate::TransportRegistry;
-    use olp_domain::{ProviderId, ProviderKind};
-    use olp_storage::{MasterKey, RuntimeProviderConfiguration, credential_aad};
+    use olp_domain::ProviderId;
     use serde_json::json;
     use tempfile::NamedTempFile;
 
-    use super::{
-        MountedConnectorConfig, decrypt_provider_credential, register_mounted_connectors,
-        secret_text,
-    };
+    use super::{MountedConnectorConfig, register_mounted_connectors};
 
     fn write_temp_file(contents: impl AsRef<[u8]>) -> NamedTempFile {
         let mut file = NamedTempFile::new().unwrap();
@@ -426,27 +231,6 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
-    }
-
-    fn runtime_provider_configuration(
-        provider_id: ProviderId,
-        credential_id: Option<uuid::Uuid>,
-        credential_version: Option<u32>,
-        encrypted: Option<olp_storage::EncryptedSecret>,
-    ) -> RuntimeProviderConfiguration {
-        RuntimeProviderConfiguration {
-            provider_id,
-            kind: ProviderKind::OpenAi,
-            endpoint: None,
-            cloud_region: None,
-            cloud_project: None,
-            deployment: None,
-            api_version: None,
-            auth_mode: olp_domain::ProviderAuthMode::ApiKey,
-            credential_id,
-            credential_version,
-            encrypted_credential: encrypted,
-        }
     }
 
     #[tokio::test]
@@ -618,86 +402,5 @@ mod tests {
                 .to_string();
         assert!(!bedrock_error.contains(bedrock_access_key));
         assert!(!bedrock_error.contains(bedrock_secret));
-    }
-
-    #[test]
-    fn provider_credentials_bind_every_identity_field_and_require_metadata() {
-        let master_key = MasterKey::new(1, [7; 32]);
-        let provider_id = ProviderId::from_uuid(uuid::Uuid::from_u128(10));
-        let credential_id = uuid::Uuid::from_u128(11);
-        let credential_version = 7;
-        let plaintext = b"provider-api-key";
-        let encrypted = master_key
-            .seal(
-                plaintext,
-                &credential_aad(provider_id.as_uuid(), credential_id, credential_version),
-            )
-            .unwrap();
-        let record = runtime_provider_configuration(
-            provider_id,
-            Some(credential_id),
-            Some(credential_version),
-            Some(encrypted),
-        );
-
-        assert_eq!(
-            &*decrypt_provider_credential(&record, &master_key).unwrap(),
-            plaintext
-        );
-
-        let mut altered_provider = record.clone();
-        altered_provider.provider_id = ProviderId::from_uuid(uuid::Uuid::from_u128(12));
-        let mut altered_credential = record.clone();
-        altered_credential.credential_id = Some(uuid::Uuid::from_u128(13));
-        let mut altered_version = record.clone();
-        altered_version.credential_version = Some(credential_version + 1);
-        let mut altered_envelope = record.clone();
-        altered_envelope
-            .encrypted_credential
-            .as_mut()
-            .unwrap()
-            .key_version = 2;
-        let mut missing_id = record.clone();
-        missing_id.credential_id = None;
-        let mut missing_version = record.clone();
-        missing_version.credential_version = None;
-        let mut missing_envelope = record;
-        missing_envelope.encrypted_credential = None;
-
-        for invalid in [
-            altered_provider,
-            altered_credential,
-            altered_version,
-            altered_envelope,
-            missing_id,
-            missing_version,
-            missing_envelope,
-        ] {
-            assert!(decrypt_provider_credential(&invalid, &master_key).is_err());
-        }
-    }
-
-    #[test]
-    fn decrypted_provider_credentials_must_be_utf8() {
-        let master_key = MasterKey::new(1, [9; 32]);
-        let provider_id = ProviderId::from_uuid(uuid::Uuid::from_u128(20));
-        let credential_id = uuid::Uuid::from_u128(21);
-        let credential_version = 1;
-        let encrypted = master_key
-            .seal(
-                &[0xff, 0xfe],
-                &credential_aad(provider_id.as_uuid(), credential_id, credential_version),
-            )
-            .unwrap();
-        let record = runtime_provider_configuration(
-            provider_id,
-            Some(credential_id),
-            Some(credential_version),
-            Some(encrypted),
-        );
-
-        let plaintext = decrypt_provider_credential(&record, &master_key).unwrap();
-        let error = secret_text(&plaintext).unwrap_err();
-        assert_eq!(error.to_string(), "provider credential is not valid UTF-8");
     }
 }

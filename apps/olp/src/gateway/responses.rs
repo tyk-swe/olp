@@ -1,8 +1,8 @@
 use axum::{
     Json,
     body::Bytes,
-    extract::{State, rejection::JsonRejection},
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, State, rejection::JsonRejection},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use olp_domain::{CanonicalEvent, CanonicalResult, Operation, OperationKind, TransportMode};
@@ -14,7 +14,7 @@ use olp_protocols::openai::{
 use serde_json::{Value, json};
 
 use crate::{
-    ApiState,
+    ApiState, InferencePrincipal,
     event_completion::collect_provider_events,
     json_media::{admit_openai_response_input_tokens, admit_openai_responses, cleanup_admitted},
     streaming_response::{
@@ -26,7 +26,7 @@ use crate::{
 use super::{
     error::{InferenceError, valid_json},
     execution::{
-        RoutedEventExecution, authenticate_key, execute_event_operation, execute_unary_result,
+        RoutedEventExecution, authorize_principal, execute_event_operation, execute_unary_result,
         incompatible_result,
     },
     limits::release_limits,
@@ -36,10 +36,10 @@ use super::{
 
 pub(super) async fn responses(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ResponseCreateRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let _ = authenticate_key(&state, &headers, OperationKind::Generation, None)?;
+    let _ = authorize_principal(&principal, OperationKind::Generation, None)?;
     let Json(mut request) = valid_json(payload)?;
     let streaming = request.stream;
     let admitted = admit_openai_responses(&state, &mut request).await?;
@@ -62,7 +62,7 @@ pub(super) async fn responses(
     } else {
         TransportMode::Unary
     };
-    let execution = execute_event_operation(&state, &headers, operation, mode).await?;
+    let execution = execute_event_operation(&state, &principal, operation, mode).await?;
     if streaming {
         Ok(responses_streaming_response(state, execution))
     } else {
@@ -160,10 +160,10 @@ fn responses_error_sse(error: &InferenceError) -> Bytes {
 
 pub(super) async fn response_input_tokens(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ResponseInputTokensRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let _ = authenticate_key(&state, &headers, OperationKind::TokenCount, None)?;
+    let _ = authorize_principal(&principal, OperationKind::TokenCount, None)?;
     let Json(mut request) = valid_json(payload)?;
     let admitted = admit_openai_response_input_tokens(&state, &mut request).await?;
     let operation = match decode_response_input_tokens(request) {
@@ -176,7 +176,7 @@ pub(super) async fn response_input_tokens(
     // Once decoded, the canonical token-count operation owns every admitted
     // handle. execute_unary_result installs a cancellation-safe guard before
     // its first suspension and removes the handles after transport completes.
-    let mut executed = execute_unary_result(&state, &headers, operation).await?;
+    let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::TokenCount(result) = executed.result.as_ref() else {
         return Err(incompatible_result("token count"));
     };

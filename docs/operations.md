@@ -75,13 +75,26 @@ For a production recovery point:
 
 1. Stop admission of new inference requests, leave the worker running, and
    wait for zero pending acknowledgements and zero Stream lag.
-2. On an encrypted volume with a PostgreSQL 18 client, run
-   `scripts/backup.sh` with `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
+2. On an encrypted volume with a PostgreSQL 18 client, `jq`, and GNU
+   `sha256sum`, run `scripts/backup.sh` with
+   `OLP_BACKUP_TRAFFIC_QUIESCED=true`. The script checks all four commands
+   (`pg_dump`, `psql`, `jq`, and `sha256sum`) before starting.
 
 The script independently requires a zero and no-more-than-30-second-old durable
 worker checkpoint. Without the quiescence assertion, the manifest records
 `request_metadata_stream_drained: false` and the dump is not a production recovery point.
-The output is a mode-`0600` custom-format dump, checksum, and manifest.
+The output is a mode-`0600` custom-format dump, checksum, and manifest. Current
+schemas produce v2; the supported legacy schema produces v1.
+`scripts/backup-manifest.sh` is the executable contract for those files. Its
+`validate BACKUP [v1|v2]` operation requires the exact versioned field set,
+checks the sidecar filename and both recorded checksums against the actual dump,
+and enforces that drained and quiesced agree and an undrained checkpoint has a
+null timestamp. A drained checkpoint must have a valid timestamp; v2 also
+requires that it be no later than manifest creation. Historical v1 producers
+read the checkpoint after recording manifest creation, so v1 validation does
+not impose that ordering. Legacy v1 manifests remain accepted for restores;
+`convert-v2-to-v1` performs the narrow compatibility conversion used by the
+legacy producer path and CI fixture.
 
 Treat the dump as sensitive: it contains password hashes, session and proxy-key
 digests, and encrypted provider/OIDC credentials. Mounted master-key and
@@ -91,8 +104,10 @@ Losing any historical master key makes records encrypted with that version
 unrecoverable.
 
 At least weekly, use `scripts/restore-rehearsal.sh` to restore the newest dump
-to an isolated database. The script requires its checksum and manifest, refuses
-the production URL, and requires `--replace` for a nonempty destination. Record
+to an isolated database. The script requires its checksum and a contract-valid
+v1 or v2 manifest, refuses the production URL, and requires `--replace` for a
+nonempty destination. It verifies the restored successful-migration count and
+runtime-generation ordinal against the validated manifest values. Record
 duration, migration and runtime-generation counts, and the checksum. Start
 control and gateway processes with a fresh Valkey, then verify setup, session
 login, runtime loading, and a mock-provider request. Do not reuse production

@@ -4,7 +4,7 @@ use axum::{
     Json,
     body::{Body, Bytes},
     extract::{Extension, Multipart, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, stream};
@@ -22,7 +22,7 @@ use olp_protocols::openai::{
 use tracing::warn;
 
 use crate::{
-    ApiState, MultipartRequestAdmission,
+    ApiState, InferencePrincipal, MultipartRequestAdmission,
     image_response::streaming_image_json_response,
     streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
 };
@@ -41,14 +41,14 @@ use super::{
 
 pub(super) async fn embeddings(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<EmbeddingRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
     let encoding_format = request.encoding_format.clone();
     let operation = decode_embedding_request(request)
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
-    let mut executed = execute_unary_result(&state, &headers, operation).await?;
+    let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Embeddings(result) = executed.result.as_ref() else {
         return Err(incompatible_result("embeddings"));
     };
@@ -64,13 +64,13 @@ pub(super) async fn embeddings(
 
 pub(super) async fn moderations(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<OpenAiModerationRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
     let operation = decode_moderation(request)
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
-    let mut executed = execute_unary_result(&state, &headers, operation).await?;
+    let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Moderation(result) = executed.result.as_ref() else {
         return Err(incompatible_result("moderation"));
     };
@@ -86,7 +86,7 @@ pub(super) async fn moderations(
 
 pub(super) async fn image_generations(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<OpenAiImageGenerationRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -95,10 +95,11 @@ pub(super) async fn image_generations(
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     if streaming {
         let execution =
-            execute_event_operation(&state, &headers, operation, TransportMode::Streaming).await?;
+            execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
+                .await?;
         return Ok(raw_media_streaming_response(state, execution));
     }
-    let mut executed = execute_unary_result(&state, &headers, operation).await?;
+    let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Images(result) = executed.result.as_ref() else {
         return Err(incompatible_result("image generation"));
     };
@@ -109,7 +110,7 @@ pub(super) async fn image_generations(
 
 pub(super) async fn image_edits(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -140,19 +141,20 @@ pub(super) async fn image_edits(
     form.disarm_cleanup();
     if streaming {
         let execution =
-            execute_event_operation(&state, &headers, operation, TransportMode::Streaming).await?;
+            execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
+                .await?;
         return Ok(raw_media_streaming_response(state, execution));
     }
     encode_executed_images(
         &state,
-        execute_unary_result(&state, &headers, operation).await?,
+        execute_unary_result(&state, &principal, operation).await?,
     )
     .await
 }
 
 pub(super) async fn image_variations(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -174,7 +176,7 @@ pub(super) async fn image_variations(
     form.disarm_cleanup();
     encode_executed_images(
         &state,
-        execute_unary_result(&state, &headers, operation).await?,
+        execute_unary_result(&state, &principal, operation).await?,
     )
     .await
 }
@@ -193,7 +195,7 @@ async fn encode_executed_images(
 
 pub(super) async fn speech(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<OpenAiSpeechRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -202,10 +204,11 @@ pub(super) async fn speech(
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     if streaming {
         let execution =
-            execute_event_operation(&state, &headers, operation, TransportMode::Streaming).await?;
+            execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
+                .await?;
         return Ok(raw_media_streaming_response(state, execution));
     }
-    let mut executed = execute_unary_result(&state, &headers, operation).await?;
+    let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Speech(result) = executed.result.as_ref() else {
         return Err(incompatible_result("speech"));
     };
@@ -251,7 +254,7 @@ pub(super) async fn speech(
 
 pub(super) async fn transcriptions(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -309,10 +312,11 @@ pub(super) async fn transcriptions(
     form.disarm_cleanup();
     if streaming {
         let execution =
-            execute_event_operation(&state, &headers, operation, TransportMode::Streaming).await?;
+            execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
+                .await?;
         return Ok(raw_media_streaming_response(state, execution));
     }
-    let mut executed = execute_unary_result(&state, &headers, operation).await?;
+    let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Transcription(result) = executed.result.as_ref() else {
         return Err(incompatible_result("transcription"));
     };

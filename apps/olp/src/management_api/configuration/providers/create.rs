@@ -4,8 +4,8 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use olp_domain::{ProviderAuthMode, ProviderKind};
-use olp_providers::{ProviderConfig, ProviderCredential, ProviderError, ProviderFactory};
+use olp_domain::ProviderKind;
+use olp_providers::{ProviderError, ProviderFactory};
 use olp_storage::{
     IdempotencyOutcome, IdempotencyResponse, NewProviderDraft, ReplayableIdempotency,
     credential_aad, idempotency_fingerprint, idempotency_secret_digest,
@@ -14,9 +14,12 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
 use uuid::Uuid;
-use zeroize::Zeroizing;
 
-use crate::{ApiState, FieldErrors, Problem, management_api::common::*};
+use crate::{
+    ApiState, FieldErrors, Problem,
+    management_api::common::*,
+    provider_adapter::{ProviderConfigFields, provider_config, provider_credential},
+};
 
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct CreateProviderRequest {
@@ -240,10 +243,7 @@ pub(crate) async fn create_provider(
     let (kind, base_url, surface) = match request.kind.as_str() {
         "openai" => (
             ProviderKind::OpenAi,
-            request
-                .endpoint
-                .clone()
-                .unwrap_or_else(|| "https://api.openai.com/v1/".to_owned()),
+            request.endpoint.clone().unwrap_or_default(),
             Some("openai"),
         ),
         "openai_compatible" => {
@@ -263,18 +263,12 @@ pub(crate) async fn create_provider(
         }
         "anthropic" => (
             ProviderKind::Anthropic,
-            request
-                .endpoint
-                .clone()
-                .unwrap_or_else(|| "https://api.anthropic.com/v1/".to_owned()),
+            request.endpoint.clone().unwrap_or_default(),
             Some("anthropic"),
         ),
         "gemini" => (
             ProviderKind::Gemini,
-            request
-                .endpoint
-                .clone()
-                .unwrap_or_else(|| "https://generativelanguage.googleapis.com/v1beta/".to_owned()),
+            request.endpoint.clone().unwrap_or_default(),
             Some("gemini"),
         ),
         "vertex_ai" => (
@@ -502,49 +496,29 @@ pub(crate) async fn create_provider(
         return Err(Problem::validation(errors));
     }
     let parsed_auth_mode = auth_mode.parse().map_err(|_| Problem::internal())?;
-    let required = |value: Option<String>| value.ok_or_else(Problem::internal);
-    let config = match kind {
-        ProviderKind::OpenAi => ProviderConfig::OpenAi {
-            endpoint: Some(base_url.clone()),
-        },
-        ProviderKind::OpenAiCompatible => ProviderConfig::OpenAiCompatible {
-            endpoint: base_url.clone(),
-        },
-        ProviderKind::Anthropic => ProviderConfig::Anthropic {
-            endpoint: Some(base_url.clone()),
-            api_version: request.api_version.clone(),
-        },
-        ProviderKind::Gemini => ProviderConfig::Gemini {
-            endpoint: Some(base_url.clone()),
-        },
-        ProviderKind::VertexAi => ProviderConfig::VertexAi {
-            project: required(request.cloud_project.clone())?,
-            location: required(request.cloud_region.clone())?,
-            probe_model: required(request.model.clone())?,
-            auth_mode: parsed_auth_mode,
-        },
-        ProviderKind::Bedrock => ProviderConfig::Bedrock {
-            region: required(request.cloud_region.clone())?,
-            auth_mode: parsed_auth_mode,
-        },
-        ProviderKind::AzureOpenAi => ProviderConfig::AzureOpenAi {
-            endpoint: base_url.clone(),
-            deployment: required(request.deployment.clone())?,
-            api_version: required(request.api_version.clone())?,
-        },
-    };
-    let credential = match (kind, parsed_auth_mode, request.credential.as_ref()) {
-        (_, _, None) => ProviderCredential::None,
-        (ProviderKind::Bedrock, ProviderAuthMode::Static, Some(credential)) => {
-            ProviderCredential::AwsStatic(Zeroizing::new(credential.expose().as_bytes().to_vec()))
-        }
-        (ProviderKind::VertexAi, ProviderAuthMode::ServiceAccount, Some(credential)) => {
-            ProviderCredential::ServiceAccountJson(Zeroizing::new(credential.expose().to_owned()))
-        }
-        (_, _, Some(credential)) => {
-            ProviderCredential::ApiKey(Zeroizing::new(credential.expose().to_owned()))
-        }
-    };
+    let config = provider_config(ProviderConfigFields {
+        kind,
+        endpoint: matches!(
+            kind,
+            ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi
+        )
+        .then_some(base_url.as_str()),
+        cloud_region: request.cloud_region.as_deref(),
+        cloud_project: request.cloud_project.as_deref(),
+        deployment: request.deployment.as_deref(),
+        api_version: request.api_version.as_deref(),
+        auth_mode: parsed_auth_mode,
+        probe_model: request.model.as_deref(),
+    })
+    .map_err(|_| Problem::internal())?;
+    let credential = provider_credential(
+        &config,
+        request
+            .credential
+            .as_ref()
+            .map(|credential| credential.expose().as_bytes()),
+    )
+    .map_err(|error| provider_connector_validation(kind, error))?;
     let transport = ProviderFactory::transport(config, credential)
         .await
         .map_err(|error| provider_connector_validation(kind, error))?;

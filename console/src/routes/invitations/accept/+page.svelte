@@ -98,14 +98,14 @@
       <p class="eyebrow">Invitation unavailable</p>
       <h1>This invitation link is incomplete.</h1>
       <p>Ask an installation owner for a fresh one-time invitation link.</p>
-      <a class="button button-secondary" href="/login">Go to sign in</a>
+      <a class="button button-secondary" href={resolve('/login')}>Go to sign in</a>
     </div>
   {:else if view === 'expired'}
     <div class="state" role="alert">
       <p class="eyebrow">Invitation unavailable</p>
       <h1>This invitation can no longer be used.</h1>
       <p>It may be expired, revoked, or already accepted. Ask an installation owner for a new link.</p>
-      <a class="button button-secondary" href="/login">Go to sign in</a>
+      <a class="button button-secondary" href={resolve('/login')}>Go to sign in</a>
     </div>
   {:else}
     <div class="heading">

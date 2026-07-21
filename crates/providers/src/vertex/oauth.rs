@@ -1,27 +1,23 @@
 use std::{
-    collections::BTreeSet,
     fmt,
-    future::Future,
-    net::{IpAddr, SocketAddr},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken};
-use crate::http_egress::is_public_ip;
+use crate::http_egress::pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool};
 use futures::StreamExt;
 use google_cloud_auth::credentials::AccessTokenCredentials;
 use http::{HeaderValue, StatusCode, header};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use reqwest::{Client, Url, redirect::Policy};
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use tokio::{net::lookup_host, sync::Mutex, time::Instant, time::timeout};
+use tokio::{sync::Mutex, time::Instant, time::timeout};
 use zeroize::{Zeroize, Zeroizing};
 
 const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 const MAX_TOKEN_RESPONSE_BYTES: usize = 64 * 1024;
-const DNS_REVALIDATION_INTERVAL: Duration = Duration::from_secs(30);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 32;
 
@@ -250,7 +246,7 @@ where
 struct OAuthEndpoint {
     url: Url,
     allow_unsafe_test_endpoint: bool,
-    client_pool: Arc<OAuthClientPool>,
+    client_pool: PinnedClientPool,
 }
 
 impl Clone for OAuthEndpoint {
@@ -258,32 +254,9 @@ impl Clone for OAuthEndpoint {
         Self {
             url: self.url.clone(),
             allow_unsafe_test_endpoint: self.allow_unsafe_test_endpoint,
-            client_pool: Arc::new(OAuthClientPool::default()),
+            client_pool: self.client_pool.clone(),
         }
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct OAuthClientIdentity {
-    scheme: String,
-    host: String,
-    port: u16,
-    addresses: Vec<SocketAddr>,
-    connect_timeout: Duration,
-    allow_unsafe_test_endpoint: bool,
-}
-
-struct CachedOAuthClient {
-    identity: OAuthClientIdentity,
-    client: Client,
-    validated_until: Instant,
-}
-
-#[derive(Default)]
-struct OAuthClientPool {
-    state: Mutex<Option<CachedOAuthClient>>,
-    #[cfg(test)]
-    builds: std::sync::atomic::AtomicUsize,
 }
 
 impl OAuthEndpoint {
@@ -306,7 +279,7 @@ impl OAuthEndpoint {
         Ok(Self {
             url,
             allow_unsafe_test_endpoint,
-            client_pool: Arc::new(OAuthClientPool::default()),
+            client_pool: PinnedClientPool::default(),
         })
     }
 
@@ -314,124 +287,33 @@ impl OAuthEndpoint {
         &self,
         connect_timeout: Duration,
     ) -> Result<Client, ServiceAccountError> {
-        timeout(
-            connect_timeout,
-            self.pinned_client_with_resolver(connect_timeout, |host, port| async move {
-                let resolved = lookup_host((host.as_str(), port)).await?;
-                Ok(resolved.collect::<BTreeSet<_>>().into_iter().collect())
-            }),
-        )
-        .await
-        .map_err(|_| ServiceAccountError::TokenEndpointUnavailable)?
-    }
-
-    async fn pinned_client_with_resolver<Resolve, ResolveFuture>(
-        &self,
-        connect_timeout: Duration,
-        resolve: Resolve,
-    ) -> Result<Client, ServiceAccountError>
-    where
-        Resolve: FnOnce(String, u16) -> ResolveFuture,
-        ResolveFuture: Future<Output = Result<Vec<SocketAddr>, std::io::Error>>,
-    {
-        let mut cached = self.client_pool.state.lock().await;
-        let now = Instant::now();
-        if let Some(entry) = cached.as_ref()
-            && entry.validated_until > now
-            && entry.identity.connect_timeout == connect_timeout
-        {
-            return Ok(entry.client.clone());
-        }
-
-        let host = self
-            .url
-            .host_str()
-            .ok_or(ServiceAccountError::InvalidTokenEndpoint)?
-            .to_owned();
-        let port = self
-            .url
-            .port_or_known_default()
-            .ok_or(ServiceAccountError::InvalidTokenEndpoint)?;
-        let literal_ip = host.trim_matches(['[', ']']).parse::<IpAddr>().ok();
-        let addresses = if let Some(ip) = literal_ip {
-            vec![SocketAddr::new(ip, port)]
-        } else {
-            resolve(host.clone(), port)
-                .await
-                .map_err(|_| ServiceAccountError::TokenEndpointUnavailable)?
-                .into_iter()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-        if addresses.is_empty() {
-            return Err(ServiceAccountError::TokenEndpointUnavailable);
-        }
-        if !self.allow_unsafe_test_endpoint {
-            for address in &addresses {
-                if !is_public_ip(address.ip()) {
-                    return Err(ServiceAccountError::TokenEndpointUnavailable);
-                }
-            }
-        }
-        let identity = OAuthClientIdentity {
-            scheme: self.url.scheme().to_owned(),
-            host: host.clone(),
-            port,
-            addresses: addresses.clone(),
-            connect_timeout,
-            allow_unsafe_test_endpoint: self.allow_unsafe_test_endpoint,
-        };
-        let validated_until = Instant::now() + DNS_REVALIDATION_INTERVAL;
-        if let Some(entry) = cached.as_mut()
-            && entry.identity == identity
-        {
-            entry.validated_until = validated_until;
-            return Ok(entry.client.clone());
-        }
-        let mut builder = Client::builder()
-            .redirect(Policy::none())
-            .retry(reqwest::retry::never())
-            .no_proxy()
-            .connect_timeout(connect_timeout)
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .pool_max_idle_per_host(MAX_IDLE_CONNECTIONS_PER_HOST)
-            .tcp_nodelay(true)
-            .referer(false)
-            .user_agent("openllmproxy");
-        if !self.allow_unsafe_test_endpoint {
-            builder = builder.https_only(true);
-        }
-        if literal_ip.is_none() {
-            builder = builder.resolve_to_addrs(&host, &addresses);
-        }
-        let client = builder
-            .build()
-            .map_err(|_| ServiceAccountError::TokenEndpointUnavailable)?;
-        #[cfg(test)]
         self.client_pool
-            .builds
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        *cached = Some(CachedOAuthClient {
-            identity,
-            client: client.clone(),
-            validated_until,
-        });
-        Ok(client)
+            .client(
+                &self.url,
+                connect_timeout,
+                PinnedClientConfig {
+                    connect_timeout,
+                    pool_idle_timeout: Some(POOL_IDLE_TIMEOUT),
+                    pool_max_idle_per_host: Some(MAX_IDLE_CONNECTIONS_PER_HOST),
+                    allow_unsafe_target: self.allow_unsafe_test_endpoint,
+                    user_agent: "openllmproxy",
+                },
+            )
+            .await
+            .map_err(map_pinned_client_error)
     }
+}
 
-    #[cfg(test)]
-    async fn expire_cached_dns_for_test(&self) {
-        if let Some(cached) = self.client_pool.state.lock().await.as_mut() {
-            cached.validated_until = Instant::now();
+fn map_pinned_client_error(error: PinnedClientError) -> ServiceAccountError {
+    match error {
+        PinnedClientError::MissingHost | PinnedClientError::MissingPort => {
+            ServiceAccountError::InvalidTokenEndpoint
         }
-    }
-
-    #[cfg(test)]
-    fn client_builds_for_test(&self) -> usize {
-        self.client_pool
-            .builds
-            .load(std::sync::atomic::Ordering::Relaxed)
+        PinnedClientError::DnsTimeout
+        | PinnedClientError::DnsResolution(_)
+        | PinnedClientError::NoAddresses
+        | PinnedClientError::ForbiddenAddress(_)
+        | PinnedClientError::ClientBuild(_) => ServiceAccountError::TokenEndpointUnavailable,
     }
 }
 
@@ -488,7 +370,7 @@ pub enum ServiceAccountError {
 }
 
 #[cfg(test)]
-mod endpoint_pool_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -497,43 +379,12 @@ mod endpoint_pool_tests {
         assert!(token_refresh_deadline(u64::MAX).is_err());
     }
 
-    #[tokio::test]
-    async fn oauth_pool_reuses_dns_but_isolates_clones_and_rejects_rebinding() {
-        let endpoint = OAuthEndpoint::parse(GOOGLE_TOKEN_ENDPOINT, false).unwrap();
-        let public = SocketAddr::new("8.8.8.8".parse().unwrap(), 443);
-        for _ in 0..2 {
-            endpoint
-                .pinned_client_with_resolver(Duration::from_secs(1), move |_, _| async move {
-                    Ok(vec![public])
-                })
-                .await
-                .unwrap();
-        }
-        assert_eq!(endpoint.client_builds_for_test(), 1);
-
-        let other_provider = endpoint.clone();
-        other_provider
-            .pinned_client_with_resolver(Duration::from_secs(1), move |_, _| async move {
-                Ok(vec![public])
-            })
-            .await
-            .unwrap();
-        assert_eq!(other_provider.client_builds_for_test(), 1);
-        assert!(!Arc::ptr_eq(
-            &endpoint.client_pool,
-            &other_provider.client_pool
-        ));
-
-        endpoint.expire_cached_dns_for_test().await;
-        let rebound = endpoint
-            .pinned_client_with_resolver(Duration::from_secs(1), |_, _| async move {
-                Ok(vec![SocketAddr::new("127.0.0.1".parse().unwrap(), 443)])
-            })
-            .await;
+    #[test]
+    fn production_oauth_endpoint_remains_exactly_allowlisted() {
         assert!(matches!(
-            rebound,
-            Err(ServiceAccountError::TokenEndpointUnavailable)
+            OAuthEndpoint::parse("https://oauth2.googleapis.com/other", false),
+            Err(ServiceAccountError::InvalidTokenEndpoint)
         ));
-        assert_eq!(endpoint.client_builds_for_test(), 1);
+        OAuthEndpoint::parse(GOOGLE_TOKEN_ENDPOINT, false).unwrap();
     }
 }

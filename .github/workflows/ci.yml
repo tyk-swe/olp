@@ -37,7 +37,7 @@ jobs:
       - name: Install lint dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ripgrep shellcheck
+          sudo apt-get install --yes --no-install-recommends jq ripgrep shellcheck
       - name: Lint GitHub Actions workflows
         env:
           ACTIONLINT_VERSION: 1.7.12
@@ -65,6 +65,8 @@ jobs:
           mapfile -d '' scripts < <(git ls-files -z -- '*.sh')
           (( ${#scripts[@]} > 0 ))
           shellcheck "${scripts[@]}"
+      - name: Verify backup manifest contract
+        run: scripts/test-backup-manifest.sh
       - name: Verify request metadata loss recorder contract
         run: |
           scripts/record-request-metadata-stream-loss.sh --help 2>&1 \
@@ -538,15 +540,11 @@ jobs:
             -c 'CREATE DATABASE olp_upgrade' \
             -c 'CREATE DATABASE olp_previous'
           backup=$(./scripts/backup.sh "$RUNNER_TEMP/olp-backups")
+          ./scripts/backup-manifest.sh validate "$backup" v2 >/dev/null
           OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_restore \
             ./scripts/restore-rehearsal.sh "$backup"
-          jq '
-            .format = "olp-v2-postgresql-custom-v1"
-            | .usage_stream_drained = .request_metadata_stream_drained
-            | .usage_consumer_checked_at = .request_metadata_consumer_checked_at
-            | del(.request_metadata_stream_drained, .request_metadata_consumer_checked_at)
-          ' "${backup}.manifest.json" > "${backup}.manifest.json.legacy"
-          mv "${backup}.manifest.json.legacy" "${backup}.manifest.json"
+          ./scripts/backup-manifest.sh convert-v2-to-v1 "$backup"
+          ./scripts/backup-manifest.sh validate "$backup" v1 >/dev/null
           OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_legacy_restore \
             ./scripts/restore-rehearsal.sh "$backup"
           metadata_file=release-metadata.env
@@ -583,11 +581,7 @@ jobs:
           previous_backup=$(OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
             OLP_BACKUP_TRAFFIC_QUIESCED=true \
             ./scripts/backup.sh "$RUNNER_TEMP/olp-previous-backups")
-          jq -e '
-            .format == "olp-v2-postgresql-custom-v1" and
-            .usage_stream_drained == true
-          ' \
-            "${previous_backup}.manifest.json" >/dev/null
+          ./scripts/backup-manifest.sh validate "$previous_backup" v1 >/dev/null
           doctor_root=$(mktemp -d)
           mkdir -p "$doctor_root/console" "$doctor_root/media"
           printf '<!doctype html><html></html>\n' > "$doctor_root/console/index.html"
