@@ -36,8 +36,11 @@ changing `../openapi/management.json`, run `pnpm api:generate`;
 ## Integration tests
 
 `pnpm test:integration` exercises the production build through the Rust
-server. It requires `OLP_CONSOLE_E2E_DATABASE_URL` and
-`OLP_CONSOLE_E2E_MASTER_KEY_FILE`.
+server. It requires a disposable PostgreSQL database in
+`OLP_CONSOLE_E2E_DATABASE_URL`, a reachable Valkey in `OLP_VALKEY_URL`, and
+`OLP_CONSOLE_E2E_MASTER_KEY_FILE`, `OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE`, and
+`OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE`. Set `OLP_CONSOLE_E2E_BIN` to a
+prebuilt `olp` executable to skip the harness build.
 
 ## Documentation screenshots
 
