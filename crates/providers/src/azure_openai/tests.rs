@@ -111,7 +111,7 @@ fn envelope(operation: Operation, mode: TransportMode) -> ProviderRequest {
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::AzureOpenAi,
-            provider_model: "gpt-4o".to_owned(),
+            upstream_model: "gpt-4o".to_owned(),
             timeout: DurationMs::new(2_000),
             priority: 0,
         },

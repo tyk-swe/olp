@@ -94,7 +94,7 @@ fn streaming_request() -> ProviderRequest {
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::VertexAi,
-            provider_model: "gemini-2.5-flash".to_owned(),
+            upstream_model: "gemini-2.5-flash".to_owned(),
             timeout: DurationMs::new(2_000),
             priority: 0,
         },

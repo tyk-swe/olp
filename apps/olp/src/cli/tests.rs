@@ -179,7 +179,7 @@ fn migration_cli_parses_valkey_preflight_dependency() {
     let Command::Migrate(args) = cli.command else {
         panic!("expected migrate command");
     };
-    assert_eq!(args.backend.valkey_url, "redis://valkey:6379");
+    assert_eq!(args.persistence.valkey_url, "redis://valkey:6379");
 }
 
 #[test]

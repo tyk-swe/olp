@@ -55,10 +55,10 @@ impl OpenAiConnector {
     /// costly asynchronous jobs intentionally fail closed.
     pub async fn certify_compatible_capability(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
-        self.execute_probe_operations(provider_model, capability, probe_operations(capability)?)
+        self.execute_probe_operations(upstream_model, capability, probe_operations(capability)?)
             .await
     }
 
@@ -74,11 +74,11 @@ impl OpenAiConnector {
     /// [`Self::certify_compatible_capability`].
     pub async fn certify_native_openai_capability(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<NativeOpenAiCertificationEvidence, CompatibleCapabilityCertificationError> {
         if probe_operations(capability).is_ok() {
-            self.certify_compatible_capability(provider_model, capability)
+            self.certify_compatible_capability(upstream_model, capability)
                 .await?;
             return Ok(NativeOpenAiCertificationEvidence::LiveProbe);
         }
@@ -91,7 +91,7 @@ impl OpenAiConnector {
                 class: error.class,
             }
         })?;
-        if !discovered.iter().any(|model| model.id == provider_model) {
+        if !discovered.iter().any(|model| model.id == upstream_model) {
             return Err(CompatibleCapabilityCertificationError::ModelNotDiscovered);
         }
         Ok(NativeOpenAiCertificationEvidence::ModelDiscoveryAndConnectorContract)
@@ -104,7 +104,7 @@ impl OpenAiConnector {
     /// which proves both Chat Completions and Responses.
     pub async fn certify_chat_completions_capability(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         mode: TransportMode,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
         let capability = CompatibleCapability {
@@ -113,13 +113,13 @@ impl OpenAiConnector {
             mode,
         };
         let operation = generation_probe_operation(mode, false)?;
-        self.execute_probe_operations(provider_model, capability, vec![operation])
+        self.execute_probe_operations(upstream_model, capability, vec![operation])
             .await
     }
 
     async fn execute_probe_operations(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         capability: CompatibleCapability,
         operations: Vec<Operation>,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
@@ -137,7 +137,7 @@ impl OpenAiConnector {
                     target_id: TargetId::new(),
                     provider_id: ProviderId::new(),
                     provider_kind: ProviderKind::OpenAiCompatible,
-                    provider_model: provider_model.to_owned(),
+                    upstream_model: upstream_model.to_owned(),
                     timeout: DurationMs::new(PROBE_TIMEOUT_MS),
                     priority: 0,
                 },

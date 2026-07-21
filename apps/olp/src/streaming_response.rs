@@ -12,7 +12,8 @@ use olp_protocols::sse::{SseEncodeError, SseFrame, encode_frame};
 use crate::{
     ApiState,
     gateway::{
-        InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution, release_limits,
+        InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata,
+        release_limits,
     },
 };
 
@@ -291,7 +292,7 @@ where
             TerminalFrames::one(encoder.encode_error(error))
         });
         drop(events);
-        emit_event_execution(&state, &execution, &usage, failure.as_ref());
+        emit_event_execution_metadata(&state, &execution, &usage, failure.as_ref());
         release_limits(&state, execution.lease.as_ref()).await;
     });
     response

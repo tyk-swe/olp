@@ -40,7 +40,7 @@ pub(super) async fn execute(
                 None
             };
             let mut reference_metadata = reference.clone();
-            let wire = encode_video_create(operation, &request.attempt.provider_model, |_| {
+            let wire = encode_video_create(operation, &request.attempt.upstream_model, |_| {
                 reference_metadata.take().ok_or_else(|| {
                     olp_protocols::openai::VideoCodecError::Staging(
                         "video input spool metadata was unavailable".into(),

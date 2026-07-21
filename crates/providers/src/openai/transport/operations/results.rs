@@ -16,7 +16,7 @@ pub(super) async fn execute(
 ) -> Result<ProviderOutput, TransportError> {
     let (path, body, result_kind) = match &request.operation {
         Operation::Embeddings(operation) => {
-            let wire = encode_embedding_request(operation, &request.attempt.provider_model)
+            let wire = encode_embedding_request(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("embeddings", error))?;
             (
                 "embeddings",
@@ -25,7 +25,7 @@ pub(super) async fn execute(
             )
         }
         Operation::TokenCount(operation) => {
-            let mut wire = encode_response_input_tokens(operation, &request.attempt.provider_model)
+            let mut wire = encode_response_input_tokens(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("input-token count", error))?;
             hydrate_responses_media(&mut wire.input, request.media.as_ref()).await?;
             (
@@ -35,7 +35,7 @@ pub(super) async fn execute(
             )
         }
         Operation::Moderation(operation) => {
-            let wire = encode_moderation(operation, &request.attempt.provider_model)
+            let wire = encode_moderation(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("moderation", error))?;
             (
                 "moderations",

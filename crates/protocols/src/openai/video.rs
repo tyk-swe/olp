@@ -73,7 +73,7 @@ pub fn decode_video_create(
 
 pub fn encode_video_create(
     request: &CanonicalVideoCreateRequest,
-    provider_model: &str,
+    upstream_model: &str,
     mut publish_reference: impl FnMut(&MediaHandle) -> Result<BoundedMediaPart, VideoCodecError>,
 ) -> Result<OpenAiVideoCreateRequest, VideoCodecError> {
     request
@@ -86,7 +86,7 @@ pub fn encode_video_create(
         .transpose()?;
     apply_pointer_extensions(
         OpenAiVideoCreateRequest {
-            model: provider_model.into(),
+            model: upstream_model.into(),
             prompt: request.prompt.clone(),
             input_reference,
             seconds: None,

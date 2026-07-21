@@ -37,7 +37,7 @@ pub(crate) use execution::{
 pub(crate) use limits::release_limits;
 pub use media_jobs::reconcile_media_jobs_once;
 pub(crate) use protocol_error::{inference_error_response, problem_response};
-pub(crate) use telemetry::{UsageCapture, emit_event_execution};
+pub(crate) use telemetry::{UsageCapture, emit_event_execution_metadata};
 
 pub fn router() -> Router<ApiState> {
     Router::new()

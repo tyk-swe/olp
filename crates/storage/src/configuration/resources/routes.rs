@@ -287,7 +287,7 @@ impl PgStore {
                     target_id: target.id,
                     provider_id: target.provider_id,
                     provider_name: target.provider_name,
-                    provider_model: target.provider_model,
+                    upstream_model: target.upstream_model,
                     priority: target.priority,
                     eligible: false,
                     reason: Some(
@@ -311,7 +311,7 @@ impl PgStore {
                     target_id: target.id,
                     provider_id: target.provider_id,
                     provider_name: target.provider_name,
-                    provider_model: target.provider_model,
+                    upstream_model: target.upstream_model,
                     priority: target.priority,
                     eligible: true,
                     reason: attempt
@@ -671,7 +671,7 @@ fn target_rows(
             provider_model_id: row.get("provider_model_id"),
             provider_id: row.get("provider_id"),
             provider_name: row.get("provider_name"),
-            provider_model: row.get("provider_model"),
+            upstream_model: row.get("provider_model"),
             priority: row.get("priority"),
             weight: row.get("weight"),
             timeout_ms: row.get("timeout_ms"),
@@ -685,7 +685,7 @@ fn revision_target_map(targets: &[RouteTargetRecord]) -> BTreeMap<String, (i32, 
         .iter()
         .map(|target| {
             (
-                format!("{}/{}", target.provider_id, target.provider_model),
+                format!("{}/{}", target.provider_id, target.upstream_model),
                 (
                     target.priority,
                     target.weight,

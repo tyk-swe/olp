@@ -37,7 +37,7 @@ impl PgStore {
         .bind(input.id)
         .bind(input.api_key_id)
         .bind(input.provider_id)
-        .bind(input.provider_model)
+        .bind(input.upstream_model)
         .bind(input.route_slug)
         .bind(input.operation.as_str())
         .bind(input.surface.as_str())
@@ -303,7 +303,7 @@ impl PgStore {
 
 fn validate_reservation(input: &NewMediaJobReservation) -> Result<(), MediaJobError> {
     if input.id.get_version_num() != 7
-        || input.provider_model.trim().is_empty()
+        || input.upstream_model.trim().is_empty()
         || input.route_slug.trim().is_empty()
     {
         return Err(MediaJobError::Invalid(

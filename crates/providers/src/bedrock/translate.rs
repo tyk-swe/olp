@@ -293,7 +293,7 @@ fn encode_tools(request: &GenerationRequest) -> Result<Option<ToolConfiguration>
 
 pub(crate) fn decode_converse(
     response: ConverseOutput,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<Vec<CanonicalEvent>, TransportError> {
     if response.trace.is_some() || response.additional_model_response_fields.is_some() {
         return Err(protocol_body_error(
@@ -303,7 +303,7 @@ pub(crate) fn decode_converse(
     let mut kinds = vec![
         CanonicalEventKind::ResponseStart {
             response_id: None,
-            provider_model: Some(provider_model.to_owned()),
+            provider_model: Some(upstream_model.to_owned()),
         },
         CanonicalEventKind::MessageStart {
             output_index: 0,

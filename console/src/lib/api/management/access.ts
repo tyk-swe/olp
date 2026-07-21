@@ -1,7 +1,7 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { ensureSuccess } from '../http';
-import { result, type CursorPage } from './shared';
+import { requireResponseData, type CursorPage } from './shared';
 
 type Schemas = components['schemas'];
 
@@ -18,7 +18,7 @@ export async function listUserPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
@@ -27,7 +27,7 @@ export async function updateUserRole(user: User, role: string): Promise<User> {
     params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
     body: { role }
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function updateUserActive(user: User, active: boolean): Promise<User> {
@@ -35,7 +35,7 @@ export async function updateUserActive(user: User, active: boolean): Promise<Use
     params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
     body: { active }
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function listInvitationPage(
@@ -46,7 +46,7 @@ export async function listInvitationPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
@@ -55,14 +55,14 @@ export async function createInvitation(email: string, role: string): Promise<Inv
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: { email, role }
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function revokeInvitation(id: string): Promise<void> {
   const response = await apiClient.DELETE('/api/v1/invitations/{invitation_id}', {
     params: { path: { invitation_id: id }, header: { 'Idempotency-Key': crypto.randomUUID() } }
   });
-  result(response.data, response.error, response.response);
+  requireResponseData(response.data, response.error, response.response);
 }
 
 export async function listSessionPage(
@@ -74,7 +74,7 @@ export async function listSessionPage(
     params: { query: { limit: 50, user_id: userId, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 

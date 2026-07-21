@@ -22,7 +22,7 @@ pub(super) async fn execute(
     };
     let (path, body) = match operation {
         olp_domain::ImageOperation::Generation(operation) => {
-            let wire = encode_image_generation(operation, &request.attempt.provider_model)
+            let wire = encode_image_generation(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("image generation", error))?;
             (
                 "images/generations",
@@ -73,7 +73,7 @@ async fn execute_multipart(
             for handle in operation.images.iter().chain(operation.mask.iter()) {
                 parts.push_back(bounded_part(spool.as_ref(), handle, 50 * 1024 * 1024).await?);
             }
-            let wire = encode_image_edit(operation, &request.attempt.provider_model, |_| {
+            let wire = encode_image_edit(operation, &request.attempt.upstream_model, |_| {
                 parts.pop_front().ok_or_else(|| {
                     olp_protocols::openai::ImageCodecError::InvalidMediaPart(
                         "media spool metadata was unavailable".into(),
@@ -104,7 +104,7 @@ async fn execute_multipart(
         }
         olp_domain::ImageOperation::Variation(operation) => {
             let metadata = bounded_part(spool.as_ref(), &operation.image, 50 * 1024 * 1024).await?;
-            let wire = encode_image_variation(operation, &request.attempt.provider_model, |_| {
+            let wire = encode_image_variation(operation, &request.attempt.upstream_model, |_| {
                 Ok(metadata.clone())
             })
             .map_err(|error| protocol_encode_error("image variation", error))?;

@@ -70,7 +70,7 @@ pub(super) async fn video_create(
             runtime_generation_id: crate::pin_inference_runtime(&state).generation.id.as_uuid(),
             api_key_id: key.id.as_uuid(),
             provider_id: required_target.provider_id,
-            provider_model: required_target.provider_model.clone(),
+            upstream_model: required_target.upstream_model.clone(),
             route_slug: route_slug.to_string(),
             operation: OperationKind::VideoCreate,
             surface: Surface::OpenAi,
@@ -183,7 +183,7 @@ async fn complete_video_create(
         return Err(failure);
     }
     debug_assert_eq!(executed.provider_id, required_target.provider_id);
-    debug_assert_eq!(executed.provider_model, required_target.provider_model);
+    debug_assert_eq!(executed.upstream_model, required_target.upstream_model);
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
@@ -420,7 +420,7 @@ pub(super) async fn video_get(
         TransportMode::Unary,
         Some(RequiredTarget {
             provider_id: record.provider_id,
-            provider_model: record.provider_model.clone(),
+            upstream_model: record.upstream_model.clone(),
         }),
     )
     .await?;
@@ -477,7 +477,7 @@ pub(super) async fn video_content(
         TransportMode::Unary,
         Some(RequiredTarget {
             provider_id: record.provider_id,
-            provider_model: record.provider_model.clone(),
+            upstream_model: record.upstream_model.clone(),
         }),
     )
     .await?;
@@ -554,7 +554,7 @@ pub(super) async fn video_delete(
         TransportMode::Unary,
         Some(RequiredTarget {
             provider_id: record.provider_id,
-            provider_model: record.provider_model.clone(),
+            upstream_model: record.upstream_model.clone(),
         }),
     )
     .await?;

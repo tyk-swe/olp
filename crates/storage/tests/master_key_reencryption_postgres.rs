@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use olp_storage::{
-    EncryptedSecret, MasterKey, NewOwner, PgStore, ReencryptionError, credential_aad,
+    EncryptedSecret, InstallationSetupInput, MasterKey, PgStore, ReencryptionError, credential_aad,
     hash_password, idempotency_replay_aad, oidc_client_secret_aad, oidc_flow_payload_aad,
 };
 use sqlx::Row;
@@ -14,7 +14,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "Master-key integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),

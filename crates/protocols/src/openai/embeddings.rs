@@ -78,7 +78,7 @@ pub fn decode_embedding_request(
 
 pub fn encode_embedding_request(
     request: &EmbeddingsRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<EmbeddingRequest, EmbeddingCodecError> {
     request
         .extensions
@@ -119,7 +119,7 @@ pub fn encode_embedding_request(
         _ => return Err(EmbeddingCodecError::MixedInputKinds),
     };
     let mut wire = EmbeddingRequest {
-        model: provider_model.into(),
+        model: upstream_model.into(),
         input,
         dimensions: request.dimensions,
         encoding_format: None,

@@ -1,9 +1,9 @@
 use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
-    AcceptInvitation, IdempotencyOutcome, IdempotencyResponse, IdentityError, MasterKey,
-    NewInvitation, NewOwner, PgStore, ReplayableIdempotency, SessionMaterial, hash_password,
-    idempotency_fingerprint,
+    AcceptInvitation, IdempotencyOutcome, IdempotencyResponse, IdentityError,
+    InstallationSetupInput, MasterKey, NewInvitation, PgStore, ReplayableIdempotency,
+    SessionMaterial, hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
 
@@ -17,8 +17,8 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
 
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: "Identity integration".to_owned(),
                 email: "owner@example.test".to_owned(),
                 display_name: "Owner".to_owned(),

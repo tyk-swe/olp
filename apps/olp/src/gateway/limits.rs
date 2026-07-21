@@ -26,7 +26,7 @@ pub(super) async fn reserve_limits(
         }
         let limiter = state
             .limiter
-            .get()
+            .current()
             .ok_or_else(|| InferenceError::unavailable("distributed_limits_unavailable"))?;
         let tokens_per_minute = i64::try_from(tokens_per_minute.get())
             .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
@@ -62,7 +62,7 @@ pub(super) async fn reserve_limits(
     }
     let limiter = state
         .limiter
-        .get()
+        .current()
         .ok_or_else(|| InferenceError::unavailable("distributed_limits_unavailable"))?;
     let tokens_per_minute = key
         .limits
@@ -197,7 +197,7 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
 }
 
 pub(crate) async fn release_limits(state: &ApiState, lease: Option<&LimitLease>) {
-    if let (Some(limiter), Some(lease)) = (state.limiter.get(), lease) {
+    if let (Some(limiter), Some(lease)) = (state.limiter.current(), lease) {
         match tokio::time::timeout(Duration::from_millis(250), limiter.release(lease)).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => warn!(%error, "failed to release concurrency lease"),

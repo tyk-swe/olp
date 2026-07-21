@@ -3,7 +3,7 @@ use olp_domain::OperationKind;
 use sqlx::{Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
-use crate::{Page, PgStore, TimestampCursor, split_page};
+use crate::{OperationsPage, PgStore, TimestampCursor, split_page};
 
 use super::{
     MAX_PAGE_SIZE, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,
@@ -39,7 +39,7 @@ impl PgStore {
         filters: &MediaJobFilters,
         cursor: Option<&TimestampCursor>,
         limit: u16,
-    ) -> Result<Page<MediaJobRecord>, MediaJobError> {
+    ) -> Result<OperationsPage<MediaJobRecord>, MediaJobError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(
             "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
@@ -80,7 +80,7 @@ impl PgStore {
             }
             .encode()
         });
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 
     /// Client-facing video pagination uses the last public OLP video ID as its
@@ -91,7 +91,7 @@ impl PgStore {
         after: Option<Uuid>,
         order: MediaJobOrder,
         limit: u16,
-    ) -> Result<Page<MediaJobRecord>, MediaJobError> {
+    ) -> Result<OperationsPage<MediaJobRecord>, MediaJobError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let position = if let Some(after) = after {
             let row = sqlx::query(
@@ -161,7 +161,7 @@ impl PgStore {
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) =
             split_page(items, usize::from(limit), |last| last.id.to_string());
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 }
 
@@ -215,7 +215,7 @@ pub(super) fn media_job_from_row(
         api_key_id: row.try_get("api_key_id")?,
         provider_id: row.try_get("provider_id")?,
         provider_name: row.try_get("provider_name")?,
-        provider_model: row.try_get("provider_model")?,
+        upstream_model: row.try_get("provider_model")?,
         route_slug: row.try_get("route_slug")?,
         operation: row
             .try_get::<String, _>("operation")?

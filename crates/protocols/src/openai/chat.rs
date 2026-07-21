@@ -533,7 +533,7 @@ fn unescape_json_pointer(value: &str) -> String {
 
 pub fn encode_chat_completion(
     request: &GenerationRequest,
-    provider_model: &str,
+    upstream_model: &str,
 ) -> Result<ChatCompletionRequest, OpenAiEncodeError> {
     request
         .extensions
@@ -609,7 +609,7 @@ pub fn encode_chat_completion(
     });
 
     let mut encoded = ChatCompletionRequest {
-        model: provider_model.to_owned(),
+        model: upstream_model.to_owned(),
         messages,
         max_completion_tokens: request.parameters.max_output_tokens,
         max_tokens: None,

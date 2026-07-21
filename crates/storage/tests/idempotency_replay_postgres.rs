@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use olp_domain::{ApiKeyLimits, ApiKeyScope, Role};
 use olp_storage::{
     AccessError, AuthHmacKey, ConfigurationError, IdempotencyOutcome, IdempotencyResponse,
-    IdentityError, MasterKey, NewApiKeyRecord, NewInvitation, NewOwner, PgStore,
+    IdentityError, InstallationSetupInput, MasterKey, NewApiKeyRecord, NewInvitation, PgStore,
     ReplayableIdempotency, RotateApiKeyInput, hash_password, idempotency_fingerprint,
 };
 use serde_json::{Value, json};
@@ -16,7 +16,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
     let store = PgStore::connect(&database_url, 8).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "Idempotency replay integration".to_owned(),
             email: "owner@idempotency.test".to_owned(),
             display_name: "Owner".to_owned(),

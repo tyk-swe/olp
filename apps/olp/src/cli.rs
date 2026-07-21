@@ -10,7 +10,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use self::{
-    commands::{doctor, internal_pre_stop, master_key_command, migrate, run_worker_command},
+    commands::{doctor, internal_pre_stop, master_key_command, migrate, run_worker},
     config::{Cli, Command},
     startup::serve,
 };
@@ -40,7 +40,7 @@ async fn run() -> AppResult<()> {
         Command::All(args) => serve(ApiMode::All, args, true).await,
         Command::Gateway(args) => serve(ApiMode::Gateway, args, false).await,
         Command::Control(args) => serve(ApiMode::Control, args, false).await,
-        Command::Worker(args) => run_worker_command(args).await,
+        Command::Worker(args) => run_worker(args).await,
         Command::Migrate(args) => migrate(args).await,
         Command::Doctor(args) => doctor(args).await,
         Command::MasterKey(args) => master_key_command(args).await,

@@ -4,7 +4,7 @@ use crate::{
     CredentialKind, ProviderConfig, ProviderCredential, ProviderFactory, TransportRegistry,
 };
 use olp_domain::{ProviderId, ProviderKind, ProviderTransport, RuntimeSnapshot};
-use olp_storage::{MasterKey, PgStore, ProviderSecretRecord, credential_aad};
+use olp_storage::{MasterKey, PgStore, RuntimeProviderConfiguration, credential_aad};
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
@@ -12,20 +12,20 @@ use crate::cli::{AppResult, check_secret_permissions};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ConnectorConfigFile {
+struct MountedConnectorConfig {
     #[serde(default)]
-    openai: Vec<OpenAiConnectorFile>,
+    openai: Vec<MountedOpenAiConnector>,
     #[serde(default)]
-    azure_openai: Vec<AzureOpenAiConnectorFile>,
+    azure_openai: Vec<MountedAzureOpenAiConnector>,
     #[serde(default)]
-    vertex: Vec<VertexConnectorFile>,
+    vertex: Vec<MountedVertexConnector>,
     #[serde(default)]
-    bedrock: Vec<BedrockConnectorFile>,
+    bedrock: Vec<MountedBedrockConnector>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OpenAiConnectorFile {
+struct MountedOpenAiConnector {
     provider_id: uuid::Uuid,
     #[serde(default = "default_openai_base_url")]
     base_url: String,
@@ -34,7 +34,7 @@ struct OpenAiConnectorFile {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AzureOpenAiConnectorFile {
+struct MountedAzureOpenAiConnector {
     provider_id: uuid::Uuid,
     endpoint: String,
     deployment: String,
@@ -44,7 +44,7 @@ struct AzureOpenAiConnectorFile {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct VertexConnectorFile {
+struct MountedVertexConnector {
     provider_id: uuid::Uuid,
     project: String,
     location: String,
@@ -56,7 +56,7 @@ struct VertexConnectorFile {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BedrockConnectorFile {
+struct MountedBedrockConnector {
     provider_id: uuid::Uuid,
     region: String,
     #[serde(default = "default_bedrock_auth_mode")]
@@ -76,12 +76,12 @@ fn default_openai_base_url() -> String {
     "https://api.openai.com/v1/".to_owned()
 }
 
-pub(crate) async fn load_connector_config(
+pub(crate) async fn register_mounted_connectors(
     path: &Path,
     registry: &TransportRegistry,
 ) -> AppResult<()> {
     let bytes = tokio::fs::read(path).await?;
-    let config: ConnectorConfigFile = serde_json::from_slice(&bytes)?;
+    let config: MountedConnectorConfig = serde_json::from_slice(&bytes)?;
     for provider in config.openai {
         check_secret_permissions(&provider.credential_file).await?;
         let secret = Zeroizing::new(tokio::fs::read_to_string(&provider.credential_file).await?);
@@ -189,13 +189,13 @@ pub(crate) async fn load_connector_config(
     Ok(())
 }
 
-pub(crate) async fn reload_persisted_connectors(
+pub(crate) async fn load_runtime_transports(
     store: &PgStore,
     master_key: &MasterKey,
     snapshot: &RuntimeSnapshot,
     transports: &mut BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
 ) -> AppResult<()> {
-    for provider in store.provider_secrets_for_runtime(snapshot).await? {
+    for provider in store.runtime_provider_configurations(snapshot).await? {
         let probe_model =
             match provider.kind {
                 ProviderKind::VertexAi => {
@@ -253,7 +253,8 @@ pub(crate) async fn reload_persisted_connectors(
                 Some(decrypt_provider_credential(&provider, master_key)?)
             }
             CredentialKind::None => {
-                if provider.kind == ProviderKind::Bedrock && provider.encrypted.is_some() {
+                if provider.kind == ProviderKind::Bedrock && provider.encrypted_credential.is_some()
+                {
                     return Err(std::io::Error::other(
                         "Bedrock default-chain provider must not store static credentials",
                     )
@@ -294,7 +295,7 @@ pub(crate) async fn reload_persisted_connectors(
 }
 
 fn provider_config(
-    provider: &ProviderSecretRecord,
+    provider: &RuntimeProviderConfiguration,
     probe_model: Option<String>,
 ) -> AppResult<ProviderConfig> {
     let required = |value: Option<&String>, message: &'static str| -> AppResult<String> {
@@ -357,13 +358,13 @@ fn provider_config(
 }
 
 fn decrypt_provider_credential(
-    provider: &ProviderSecretRecord,
+    provider: &RuntimeProviderConfiguration,
     master_key: &MasterKey,
 ) -> AppResult<Zeroizing<Vec<u8>>> {
     let (Some(credential_id), Some(credential_version), Some(encrypted)) = (
         provider.credential_id,
         provider.credential_version,
-        provider.encrypted.as_ref(),
+        provider.encrypted_credential.as_ref(),
     ) else {
         return Err(std::io::Error::other("provider credential is missing").into());
     };
@@ -401,12 +402,13 @@ mod tests {
 
     use crate::TransportRegistry;
     use olp_domain::{ProviderId, ProviderKind};
-    use olp_storage::{MasterKey, ProviderSecretRecord, credential_aad};
+    use olp_storage::{MasterKey, RuntimeProviderConfiguration, credential_aad};
     use serde_json::json;
     use tempfile::NamedTempFile;
 
     use super::{
-        ConnectorConfigFile, decrypt_provider_credential, load_connector_config, secret_text,
+        MountedConnectorConfig, decrypt_provider_credential, register_mounted_connectors,
+        secret_text,
     };
 
     fn write_temp_file(contents: impl AsRef<[u8]>) -> NamedTempFile {
@@ -426,13 +428,13 @@ mod tests {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
     }
 
-    fn provider_secret_record(
+    fn runtime_provider_configuration(
         provider_id: ProviderId,
         credential_id: Option<uuid::Uuid>,
         credential_version: Option<u32>,
         encrypted: Option<olp_storage::EncryptedSecret>,
-    ) -> ProviderSecretRecord {
-        ProviderSecretRecord {
+    ) -> RuntimeProviderConfiguration {
+        RuntimeProviderConfiguration {
             provider_id,
             kind: ProviderKind::OpenAi,
             endpoint: None,
@@ -443,7 +445,7 @@ mod tests {
             auth_mode: olp_domain::ProviderAuthMode::ApiKey,
             credential_id,
             credential_version,
-            encrypted,
+            encrypted_credential: encrypted,
         }
     }
 
@@ -473,7 +475,7 @@ mod tests {
         }));
         let registry = TransportRegistry::default();
 
-        load_connector_config(config.path(), &registry)
+        register_mounted_connectors(config.path(), &registry)
             .await
             .unwrap();
 
@@ -485,7 +487,7 @@ mod tests {
 
     #[test]
     fn connector_config_json_is_strict() {
-        assert!(serde_json::from_str::<ConnectorConfigFile>("{}").is_ok());
+        assert!(serde_json::from_str::<MountedConnectorConfig>("{}").is_ok());
 
         let invalid_documents = [
             r#"{"unexpected":[]}"#,
@@ -497,7 +499,7 @@ mod tests {
 
         for document in invalid_documents {
             assert!(
-                serde_json::from_str::<ConnectorConfigFile>(document).is_err(),
+                serde_json::from_str::<MountedConnectorConfig>(document).is_err(),
                 "unexpectedly accepted {document}"
             );
         }
@@ -568,7 +570,7 @@ mod tests {
 
         for (document, expected_error) in cases {
             let config = write_connector_config(document);
-            let error = load_connector_config(config.path(), &TransportRegistry::default())
+            let error = register_mounted_connectors(config.path(), &TransportRegistry::default())
                 .await
                 .unwrap_err();
             assert_eq!(error.to_string(), expected_error);
@@ -588,7 +590,7 @@ mod tests {
             }]
         }));
         let openai_error =
-            load_connector_config(openai_config.path(), &TransportRegistry::default())
+            register_mounted_connectors(openai_config.path(), &TransportRegistry::default())
                 .await
                 .unwrap_err()
                 .to_string();
@@ -610,7 +612,7 @@ mod tests {
             }]
         }));
         let bedrock_error =
-            load_connector_config(bedrock_config.path(), &TransportRegistry::default())
+            register_mounted_connectors(bedrock_config.path(), &TransportRegistry::default())
                 .await
                 .unwrap_err()
                 .to_string();
@@ -631,7 +633,7 @@ mod tests {
                 &credential_aad(provider_id.as_uuid(), credential_id, credential_version),
             )
             .unwrap();
-        let record = provider_secret_record(
+        let record = runtime_provider_configuration(
             provider_id,
             Some(credential_id),
             Some(credential_version),
@@ -650,13 +652,17 @@ mod tests {
         let mut altered_version = record.clone();
         altered_version.credential_version = Some(credential_version + 1);
         let mut altered_envelope = record.clone();
-        altered_envelope.encrypted.as_mut().unwrap().key_version = 2;
+        altered_envelope
+            .encrypted_credential
+            .as_mut()
+            .unwrap()
+            .key_version = 2;
         let mut missing_id = record.clone();
         missing_id.credential_id = None;
         let mut missing_version = record.clone();
         missing_version.credential_version = None;
         let mut missing_envelope = record;
-        missing_envelope.encrypted = None;
+        missing_envelope.encrypted_credential = None;
 
         for invalid in [
             altered_provider,
@@ -683,7 +689,7 @@ mod tests {
                 &credential_aad(provider_id.as_uuid(), credential_id, credential_version),
             )
             .unwrap();
-        let record = provider_secret_record(
+        let record = runtime_provider_configuration(
             provider_id,
             Some(credential_id),
             Some(credential_version),

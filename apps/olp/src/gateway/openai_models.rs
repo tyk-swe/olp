@@ -101,7 +101,7 @@ fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug) -> bool {
             .is_some_and(|provider| {
                 provider.enabled
                     && provider.capabilities.iter().any(|capability| {
-                        capability.model == target.provider_model
+                        capability.model == target.upstream_model
                             && capability.surface == Surface::OpenAi
                             && route.operations.contains(&capability.operation)
                             && !matches!(
@@ -362,7 +362,7 @@ mod tests {
                         id: TargetId::new(),
                         routing_id: None,
                         provider_id,
-                        provider_model: "private-upstream-model".to_owned(),
+                        upstream_model: "private-upstream-model".to_owned(),
                         priority: 0,
                         weight: NonZeroU32::new(1).unwrap(),
                         timeout: DurationMs::new(1_000),

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, Page},
+    cursor::{OperationsError, OperationsPage},
 };
 use crate::{
     IdempotencyOutcome, IdempotencyResponse, PersistenceError, PgStore, ReplayableIdempotency,
@@ -197,7 +197,7 @@ impl PgStore {
         &self,
         before_revision: Option<u32>,
         limit: u16,
-    ) -> Result<Page<PricingRevisionRecord>, OperationsError> {
+    ) -> Result<OperationsPage<PricingRevisionRecord>, OperationsError> {
         let before_revision = before_revision
             .map(i32::try_from)
             .transpose()
@@ -264,7 +264,7 @@ impl PgStore {
         let (revisions, next_cursor) = split_page(revisions, usize::from(page_size), |revision| {
             revision.revision.to_string()
         });
-        Ok(Page {
+        Ok(OperationsPage {
             items: revisions,
             next_cursor,
         })

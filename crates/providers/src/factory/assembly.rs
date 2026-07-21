@@ -95,11 +95,11 @@ impl ProviderFacade {
 
     pub async fn certify_capability(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<CapabilityCertificationEvidence, CompatibleCapabilityCertificationError> {
         self.inner
-            .certify_capability(provider_model, capability)
+            .certify_capability(upstream_model, capability)
             .await
     }
 }

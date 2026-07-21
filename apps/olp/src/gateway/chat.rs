@@ -30,7 +30,7 @@ use super::{
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     openai_chat_response::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response},
     openai_http::error_sse as openai_error_sse,
-    telemetry::{UsageCapture, elapsed_ms, emit_request_event},
+    telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event},
 };
 
 pub(super) async fn chat_completions(
@@ -55,7 +55,7 @@ pub(super) async fn chat_completions(
         Err(error) => {
             let failure =
                 InferenceError::invalid_request(format!("The JSON request is invalid: {error}"));
-            emit_request_event(
+            emit_request_metadata_event(
                 &state,
                 snapshot.generation.id.as_uuid(),
                 key.id.as_uuid(),
@@ -83,7 +83,7 @@ pub(super) async fn chat_completions(
         Err(error) => {
             cleanup_admitted(&state, admitted).await;
             let failure = InferenceError::invalid_request(error.to_string());
-            emit_request_event(
+            emit_request_metadata_event(
                 &state,
                 snapshot.generation.id.as_uuid(),
                 key.id.as_uuid(),
@@ -114,7 +114,7 @@ pub(super) async fn chat_completions(
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
     if let Err(error) = authorize_api_key(&key, Some(&route_slug), operation.kind(), Utc::now()) {
         let failure = InferenceError::forbidden(error.to_string());
-        emit_request_event(
+        emit_request_metadata_event(
             &state,
             snapshot.generation.id.as_uuid(),
             key.id.as_uuid(),
@@ -163,7 +163,7 @@ pub(super) async fn chat_completions(
     ) {
         Ok(attempts) => attempts,
         Err(failure) => {
-            emit_request_event(
+            emit_request_metadata_event(
                 &state,
                 snapshot.generation.id.as_uuid(),
                 key.id.as_uuid(),
@@ -217,7 +217,7 @@ pub(super) async fn chat_completions(
         Err(failure) => {
             let status = failure.error.status.as_u16();
             let code = failure.error.code.to_owned();
-            emit_request_event(
+            emit_request_metadata_event(
                 &state,
                 snapshot.generation.id.as_uuid(),
                 key.id.as_uuid(),
@@ -383,7 +383,7 @@ fn streaming_response(
                 (error.code != "client_cancelled").then_some(error.status.as_u16())
             });
         let error_class = failure.as_ref().map(|error| error.code.to_owned());
-        emit_request_event(
+        emit_request_metadata_event(
             &state,
             generation_id,
             api_key_id,
@@ -431,7 +431,7 @@ async fn unary_response(
                 Ok(item) => item,
                 Err(_) => {
                     let failure = InferenceError::timeout();
-                    emit_request_event(
+                    emit_request_metadata_event(
                         state,
                         generation_id,
                         api_key_id,
@@ -459,7 +459,7 @@ async fn unary_response(
                 Ok(event) => event,
                 Err(error) => {
                     let failure = InferenceError::from_transport(error);
-                    emit_request_event(
+                    emit_request_metadata_event(
                         state,
                         generation_id,
                         api_key_id,
@@ -496,7 +496,7 @@ async fn unary_response(
             "provider_protocol_error",
             "The provider response ended without a terminal event.",
         );
-        emit_request_event(
+        emit_request_metadata_event(
             state,
             generation_id,
             api_key_id,
@@ -520,7 +520,7 @@ async fn unary_response(
         match aggregate_chat_completion_response(request_id, route_slug.as_str(), &collected) {
             Ok(response) => response,
             Err(failure) => {
-                emit_request_event(
+                emit_request_metadata_event(
                     state,
                     generation_id,
                     api_key_id,
@@ -541,7 +541,7 @@ async fn unary_response(
                 return Err(failure);
             }
         };
-    emit_request_event(
+    emit_request_metadata_event(
         state,
         generation_id,
         api_key_id,

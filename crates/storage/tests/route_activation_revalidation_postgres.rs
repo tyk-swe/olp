@@ -1,7 +1,9 @@
 #[path = "support/route_fixtures.rs"]
 mod route_fixtures;
 
-use olp_storage::{ConfigurationError, NewOwner, PgStore, RuntimeCompileError, SessionMaterial};
+use olp_storage::{
+    ConfigurationError, InstallationSetupInput, PgStore, RuntimeCompileError, SessionMaterial,
+};
 use route_fixtures::{
     DraftFixture, LIFECYCLE_OPERATIONS, ProviderFixture, insert_provider, insert_provider_revision,
 };
@@ -16,8 +18,8 @@ async fn activation_revalidates_current_revisions_and_preserves_live_media_targe
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let (owner, _) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: "Route revalidation".to_owned(),
                 email: "owner@route-revalidation.test".to_owned(),
                 display_name: "Owner".to_owned(),
@@ -316,7 +318,7 @@ async fn insert_media_job(
     .execute(pool)
     .await
     .unwrap();
-    let provider_model: String =
+    let upstream_model: String =
         sqlx::query("SELECT upstream_model FROM provider_models WHERE id = $1")
             .bind(provider.model_id)
             .fetch_one(pool)
@@ -334,7 +336,7 @@ async fn insert_media_job(
     .bind(job_id)
     .bind(api_key_id)
     .bind(provider.provider_id)
-    .bind(provider_model)
+    .bind(upstream_model)
     .bind(route_id)
     .execute(pool)
     .await

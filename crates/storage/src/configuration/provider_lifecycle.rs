@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     ConfigurationError, NewProviderDraft, ProviderActivated, ProviderDraftCreated,
-    ProviderSecretRecord,
+    RuntimeProviderConfiguration,
 };
 
 impl PgStore {
@@ -22,10 +22,10 @@ impl PgStore {
     /// a verified runtime sidecar. Mutable configuration drafts are deliberately not
     /// consulted, so testing a replacement endpoint or credential cannot alter
     /// the transport used by the last activated provider revision.
-    pub async fn provider_secrets_for_runtime(
+    pub async fn runtime_provider_configurations(
         &self,
         snapshot: &RuntimeSnapshot,
-    ) -> Result<Vec<ProviderSecretRecord>, ConfigurationError> {
+    ) -> Result<Vec<RuntimeProviderConfiguration>, ConfigurationError> {
         let mut records = Vec::with_capacity(snapshot.providers.len());
         for runtime_provider in snapshot.providers.values() {
             let expected_credential = runtime_provider
@@ -56,7 +56,7 @@ impl PgStore {
             if stored_kind != runtime_provider.kind {
                 return Err(ConfigurationError::InvalidCredential);
             }
-            records.push(provider_secret_from_row(row)?);
+            records.push(runtime_provider_configuration_from_row(row)?);
         }
         Ok(records)
     }
@@ -469,9 +469,9 @@ impl PgStore {
     }
 }
 
-fn provider_secret_from_row(
+fn runtime_provider_configuration_from_row(
     row: sqlx::postgres::PgRow,
-) -> Result<ProviderSecretRecord, ConfigurationError> {
+) -> Result<RuntimeProviderConfiguration, ConfigurationError> {
     let credential_id: Option<Uuid> = row.get("credential_id");
     let credential_version = row
         .get::<Option<i32>, _>("credential_version")
@@ -499,7 +499,7 @@ fn provider_secret_from_row(
     {
         return Err(ConfigurationError::InvalidCredential);
     }
-    Ok(ProviderSecretRecord {
+    Ok(RuntimeProviderConfiguration {
         provider_id: ProviderId::from_uuid(row.get("id")),
         kind: parse_provider_kind(row.get::<String, _>("kind").as_str())?,
         endpoint: row.get("endpoint"),
@@ -512,7 +512,7 @@ fn provider_secret_from_row(
         })?,
         credential_id,
         credential_version,
-        encrypted,
+        encrypted_credential: encrypted,
     })
 }
 

@@ -36,7 +36,7 @@ use super::{
     limits::{CleanupMediaStream, release_limits},
     multipart::{media_spool_error, parse_multipart},
     openai_http::error_sse as openai_error_sse,
-    telemetry::{UsageCapture, emit_event_execution},
+    telemetry::{UsageCapture, emit_event_execution_metadata},
 };
 
 pub(super) async fn embeddings(
@@ -394,7 +394,7 @@ fn raw_media_streaming_response(state: ApiState, mut execution: RoutedEventExecu
         writer.finish_stream(terminal, &mut failure, |error| {
             TerminalFrames::one(openai_error_sse(error))
         });
-        emit_event_execution(&state, &execution, &usage, failure.as_ref());
+        emit_event_execution_metadata(&state, &execution, &usage, failure.as_ref());
         release_limits(&state, execution.lease.as_ref()).await;
     });
     response

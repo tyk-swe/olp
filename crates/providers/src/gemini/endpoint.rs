@@ -130,7 +130,7 @@ impl Endpoint {
 
     pub(crate) fn generate_url(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         streaming: bool,
     ) -> Result<Url, EndpointError> {
         let action = if streaming {
@@ -138,15 +138,15 @@ impl Endpoint {
         } else {
             "generateContent"
         };
-        let mut url = self.model_action_url(provider_model, action)?;
+        let mut url = self.model_action_url(upstream_model, action)?;
         if streaming {
             url.query_pairs_mut().append_pair("alt", "sse");
         }
         Ok(url)
     }
 
-    pub(crate) fn count_tokens_url(&self, provider_model: &str) -> Result<Url, EndpointError> {
-        self.model_action_url(provider_model, "countTokens")
+    pub(crate) fn count_tokens_url(&self, upstream_model: &str) -> Result<Url, EndpointError> {
+        self.model_action_url(upstream_model, "countTokens")
     }
 
     pub(crate) fn models_url(&self) -> Result<Url, EndpointError> {
@@ -159,16 +159,16 @@ impl Endpoint {
         self.client_connect_timeout = value;
     }
 
-    fn model_action_url(&self, provider_model: &str, action: &str) -> Result<Url, EndpointError> {
-        let model = provider_model
+    fn model_action_url(&self, upstream_model: &str, action: &str) -> Result<Url, EndpointError> {
+        let model = upstream_model
             .strip_prefix("models/")
-            .unwrap_or(provider_model);
+            .unwrap_or(upstream_model);
         let segments = model.split('/').collect::<Vec<_>>();
         if segments.is_empty()
             || segments
                 .iter()
                 .any(|segment| segment.is_empty() || matches!(*segment, "." | ".."))
-            || provider_model.chars().any(char::is_control)
+            || upstream_model.chars().any(char::is_control)
         {
             return Err(EndpointError::InvalidModelName);
         }

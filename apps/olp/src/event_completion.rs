@@ -4,7 +4,8 @@ use olp_domain::{CanonicalEvent, CanonicalEventKind, ProviderEventStream, RouteS
 use crate::{
     ApiState,
     gateway::{
-        InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution, release_limits,
+        InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata,
+        release_limits,
     },
 };
 
@@ -83,10 +84,10 @@ pub(crate) struct CompletedEventExecution {
     pub events: Vec<CanonicalEvent>,
     pub route_slug: RouteSlug,
     pub request_id: uuid::Uuid,
-    completion: Option<EventExecutionCompletion>,
+    request_metadata_finalizer: Option<EventRequestMetadataFinalizer>,
 }
 
-struct EventExecutionCompletion {
+struct EventRequestMetadataFinalizer {
     state: ApiState,
     execution: RoutedEventExecution,
     usage: UsageCapture,
@@ -94,11 +95,11 @@ struct EventExecutionCompletion {
 
 impl CompletedEventExecution {
     pub(crate) fn mark_success(&mut self) {
-        if let Some(completion) = self.completion.take() {
-            emit_event_execution(
-                &completion.state,
-                &completion.execution,
-                &completion.usage,
+        if let Some(finalizer) = self.request_metadata_finalizer.take() {
+            emit_event_execution_metadata(
+                &finalizer.state,
+                &finalizer.execution,
+                &finalizer.usage,
                 None,
             );
         }
@@ -107,17 +108,17 @@ impl CompletedEventExecution {
 
 impl Drop for CompletedEventExecution {
     fn drop(&mut self) {
-        let Some(completion) = self.completion.take() else {
+        let Some(finalizer) = self.request_metadata_finalizer.take() else {
             return;
         };
         let failure = InferenceError::bad_gateway(
             "provider_protocol_error",
             "The provider events were not representable on the client protocol.",
         );
-        emit_event_execution(
-            &completion.state,
-            &completion.execution,
-            &completion.usage,
+        emit_event_execution_metadata(
+            &finalizer.state,
+            &finalizer.execution,
+            &finalizer.usage,
             Some(&failure),
         );
     }
@@ -136,7 +137,12 @@ pub(crate) async fn collect_event_execution(
     let events = match result {
         Ok(events) => events,
         Err(failure) => {
-            emit_event_execution(state, &execution, &UsageCapture::default(), Some(&failure));
+            emit_event_execution_metadata(
+                state,
+                &execution,
+                &UsageCapture::default(),
+                Some(&failure),
+            );
             release_limits(state, execution.lease.as_ref()).await;
             return Err(failure);
         }
@@ -150,7 +156,7 @@ pub(crate) async fn collect_event_execution(
         events,
         route_slug: execution.route_slug.clone(),
         request_id: execution.request_id,
-        completion: Some(EventExecutionCompletion {
+        request_metadata_finalizer: Some(EventRequestMetadataFinalizer {
             state: state.clone(),
             execution,
             usage,

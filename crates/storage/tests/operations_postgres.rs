@@ -1,8 +1,8 @@
 use chrono::{Duration, Timelike, Utc};
 use olp_domain::Surface;
 use olp_storage::{
-    IdempotencyOutcome, IdempotencyResponse, MasterKey, NewOwner, OperationsError, PgStore,
-    PriceInput, ReplayableIdempotency, RequestAttemptMetadata, RequestFilters,
+    IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey, OperationsError,
+    PgStore, PriceInput, ReplayableIdempotency, RequestAttemptMetadata, RequestFilters,
     RequestMetadataBufferSnapshot, RequestMetadataConsumerState, RequestMetadataEvent,
     RequestMetadataGap, RequestMetadataGatewayEpochState, RequestMetadataPersistenceOutcome,
     UsageDimension, UsageFilters, UsageGranularity, hash_password,
@@ -18,7 +18,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "Operations integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),

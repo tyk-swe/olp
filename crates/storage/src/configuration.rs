@@ -3,7 +3,7 @@ use olp_domain::{OperationKind, ProviderAuthMode, ProviderId, ProviderKind, Rout
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{EncryptedSecret, PersistenceError, PublishedRelease, RuntimeCompileError};
+use crate::{EncryptedSecret, PersistenceError, PublishedRuntimeRelease, RuntimeCompileError};
 
 mod provider_lifecycle;
 mod resources;
@@ -98,11 +98,11 @@ pub struct ProviderDraftCreated {
 #[derive(Debug, Clone)]
 pub struct ProviderActivated {
     pub etag: Uuid,
-    pub release: PublishedRelease,
+    pub release: PublishedRuntimeRelease,
 }
 
 #[derive(Debug, Clone)]
-pub struct ProviderSecretRecord {
+pub struct RuntimeProviderConfiguration {
     pub provider_id: ProviderId,
     pub kind: ProviderKind,
     pub endpoint: Option<String>,
@@ -113,13 +113,13 @@ pub struct ProviderSecretRecord {
     pub auth_mode: ProviderAuthMode,
     pub credential_id: Option<Uuid>,
     pub credential_version: Option<u32>,
-    pub encrypted: Option<EncryptedSecret>,
+    pub encrypted_credential: Option<EncryptedSecret>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NewRouteTarget {
     pub provider_id: Uuid,
-    pub provider_model: String,
+    pub upstream_model: String,
     pub priority: u16,
     pub weight: u32,
     pub timeout_ms: u64,
@@ -149,7 +149,7 @@ pub struct RouteActivated {
     pub route_id: Uuid,
     pub revision_id: Uuid,
     pub revision: i32,
-    pub release: PublishedRelease,
+    pub release: PublishedRuntimeRelease,
 }
 
 #[cfg(test)]

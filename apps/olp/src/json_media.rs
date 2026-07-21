@@ -27,13 +27,13 @@ pub(crate) const MAX_INLINE_MEDIA_ITEMS: usize = 4;
 pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_INLINE_MEDIA_TOTAL_BYTES: usize = 2 * 1024 * 1024;
 
-struct Admission {
+struct InlineMediaAdmission {
     spool: Arc<dyn MediaSpool>,
     handles: Vec<MediaHandle>,
     total_bytes: usize,
 }
 
-impl Admission {
+impl InlineMediaAdmission {
     fn new(state: &ApiState) -> Self {
         Self {
             spool: state.media_spool.clone(),
@@ -42,31 +42,35 @@ impl Admission {
         }
     }
 
-    async fn stage(
+    async fn stage_base64(
         &mut self,
         encoded: &str,
         mime_type: &str,
         filename: String,
     ) -> Result<String, InferenceError> {
         if self.handles.len() >= MAX_INLINE_MEDIA_ITEMS {
-            return Err(invalid("Too many inline media items."));
+            return Err(invalid_inline_media("Too many inline media items."));
         }
         let maximum_encoded = MAX_INLINE_MEDIA_BYTES.div_ceil(3).saturating_mul(4);
         if encoded.is_empty()
             || encoded.len() > maximum_encoded
             || encoded.bytes().any(|byte| byte.is_ascii_whitespace())
         {
-            return Err(invalid("Inline media exceeds its encoded size limit."));
+            return Err(invalid_inline_media(
+                "Inline media exceeds its encoded size limit.",
+            ));
         }
         let decoded = STANDARD
             .decode(encoded)
-            .map_err(|_| invalid("Inline media is not valid canonical base64."))?;
+            .map_err(|_| invalid_inline_media("Inline media is not valid canonical base64."))?;
         if decoded.is_empty() || decoded.len() > MAX_INLINE_MEDIA_BYTES {
-            return Err(invalid("Inline media exceeds its decoded size limit."));
+            return Err(invalid_inline_media(
+                "Inline media exceeds its decoded size limit.",
+            ));
         }
         self.total_bytes = self.total_bytes.saturating_add(decoded.len());
         if self.total_bytes > MAX_INLINE_MEDIA_TOTAL_BYTES {
-            return Err(invalid(
+            return Err(invalid_inline_media(
                 "Inline media exceeds the aggregate decoded size limit.",
             ));
         }
@@ -84,7 +88,7 @@ impl Admission {
             .await
             .map_err(|error| match error {
                 olp_domain::MediaSpoolError::TooLarge { .. } => {
-                    invalid("Inline media exceeds its decoded size limit.")
+                    invalid_inline_media("Inline media exceeds its decoded size limit.")
                 }
                 _ => InferenceError::unavailable("media_spool_unavailable"),
             })?;
@@ -96,18 +100,18 @@ impl Admission {
         Ok(inline_media_marker(&artifact.handle))
     }
 
-    fn finish(mut self) -> Vec<MediaHandle> {
+    fn into_handles(mut self) -> Vec<MediaHandle> {
         std::mem::take(&mut self.handles)
     }
 
-    async fn fail<T>(mut self, error: InferenceError) -> Result<T, InferenceError> {
+    async fn cleanup_and_fail<T>(mut self, error: InferenceError) -> Result<T, InferenceError> {
         let handles = std::mem::take(&mut self.handles);
         cleanup_handles_owned(self.spool.clone(), handles).await;
         Err(error)
     }
 }
 
-impl Drop for Admission {
+impl Drop for InlineMediaAdmission {
     fn drop(&mut self) {
         if self.handles.is_empty() {
             return;
@@ -122,7 +126,7 @@ impl Drop for Admission {
     }
 }
 
-fn invalid(message: impl Into<String>) -> InferenceError {
+fn invalid_inline_media(message: impl Into<String>) -> InferenceError {
     InferenceError::invalid_request(message.into())
 }
 
@@ -133,7 +137,9 @@ fn require_image_mime(value: &str) -> Result<&str, InferenceError> {
     ) {
         Ok(value)
     } else {
-        Err(invalid("Inline image MIME type is not supported."))
+        Err(invalid_inline_media(
+            "Inline image MIME type is not supported.",
+        ))
     }
 }
 
@@ -141,7 +147,9 @@ fn require_audio_mime(value: &str) -> Result<&str, InferenceError> {
     if matches!(value, "audio/wav" | "audio/mpeg" | "audio/mp3") {
         Ok(value)
     } else {
-        Err(invalid("Inline audio MIME type is not supported."))
+        Err(invalid_inline_media(
+            "Inline audio MIME type is not supported.",
+        ))
     }
 }
 
@@ -149,12 +157,14 @@ fn openai_audio_mime(format: &str) -> Result<&'static str, InferenceError> {
     match format {
         "wav" => Ok("audio/wav"),
         "mp3" => Ok("audio/mpeg"),
-        _ => Err(invalid("OpenAI input_audio supports only wav or mp3.")),
+        _ => Err(invalid_inline_media(
+            "OpenAI input_audio supports only wav or mp3.",
+        )),
     }
 }
 
 async fn admit_anthropic_messages_inner(
-    admission: &mut Admission,
+    admission: &mut InlineMediaAdmission,
     messages: &mut [AnthropicMessage],
 ) -> Result<(), InferenceError> {
     for message in messages {
@@ -169,25 +179,23 @@ async fn admit_anthropic_messages_inner(
 }
 
 async fn admit_anthropic_block(
-    admission: &mut Admission,
+    admission: &mut InlineMediaAdmission,
     block: &mut AnthropicContentBlock,
 ) -> Result<(), InferenceError> {
     match block {
         AnthropicContentBlock::Image(image) if image.source.kind == "base64" => {
-            let mime = image
-                .source
-                .media_type
-                .as_deref()
-                .ok_or_else(|| invalid("Anthropic base64 image requires media_type"))?;
+            let mime = image.source.media_type.as_deref().ok_or_else(|| {
+                invalid_inline_media("Anthropic base64 image requires media_type")
+            })?;
             require_image_mime(mime)?;
             let data = image
                 .source
                 .data
                 .as_deref()
-                .ok_or_else(|| invalid("Anthropic base64 image requires data"))?;
+                .ok_or_else(|| invalid_inline_media("Anthropic base64 image requires data"))?;
             image.source.data = Some(
                 admission
-                    .stage(
+                    .stage_base64(
                         data,
                         mime,
                         format!("anthropic-image-{}.bin", admission.handles.len()),
@@ -211,28 +219,28 @@ pub(crate) async fn admit_anthropic_messages(
     state: &ApiState,
     request: &mut AnthropicMessagesRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = Admission::new(state);
+    let mut admission = InlineMediaAdmission::new(state);
     if let Err(error) = admit_anthropic_messages_inner(&mut admission, &mut request.messages).await
     {
-        return admission.fail(error).await;
+        return admission.cleanup_and_fail(error).await;
     }
-    Ok(admission.finish())
+    Ok(admission.into_handles())
 }
 
 pub(crate) async fn admit_anthropic_count(
     state: &ApiState,
     request: &mut AnthropicCountTokensRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = Admission::new(state);
+    let mut admission = InlineMediaAdmission::new(state);
     if let Err(error) = admit_anthropic_messages_inner(&mut admission, &mut request.messages).await
     {
-        return admission.fail(error).await;
+        return admission.cleanup_and_fail(error).await;
     }
-    Ok(admission.finish())
+    Ok(admission.into_handles())
 }
 
 async fn admit_gemini_content(
-    admission: &mut Admission,
+    admission: &mut InlineMediaAdmission,
     contents: &mut [GeminiContent],
 ) -> Result<(), InferenceError> {
     for content in contents {
@@ -246,12 +254,12 @@ async fn admit_gemini_content(
             } else if mime.starts_with("audio/") {
                 require_audio_mime(mime)?;
             } else {
-                return Err(invalid(
+                return Err(invalid_inline_media(
                     "Gemini inlineData supports bounded launch image/audio MIME types only.",
                 ));
             }
             part.inline_data.data = admission
-                .stage(
+                .stage_base64(
                     &part.inline_data.data,
                     mime,
                     format!("gemini-inline-{}.bin", admission.handles.len()),
@@ -266,18 +274,18 @@ pub(crate) async fn admit_gemini_generate(
     state: &ApiState,
     request: &mut GeminiGenerateContentRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = Admission::new(state);
+    let mut admission = InlineMediaAdmission::new(state);
     if let Err(error) = admit_gemini_content(&mut admission, &mut request.contents).await {
-        return admission.fail(error).await;
+        return admission.cleanup_and_fail(error).await;
     }
-    Ok(admission.finish())
+    Ok(admission.into_handles())
 }
 
 pub(crate) async fn admit_gemini_count(
     state: &ApiState,
     request: &mut GeminiCountTokensRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = Admission::new(state);
+    let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         admit_gemini_content(&mut admission, &mut request.contents).await?;
         if let Some(generation) = &mut request.generate_content_request {
@@ -287,16 +295,16 @@ pub(crate) async fn admit_gemini_count(
     }
     .await;
     if let Err(error) = result {
-        return admission.fail(error).await;
+        return admission.cleanup_and_fail(error).await;
     }
-    Ok(admission.finish())
+    Ok(admission.into_handles())
 }
 
 pub(crate) async fn admit_openai_chat(
     state: &ApiState,
     request: &mut ChatCompletionRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = Admission::new(state);
+    let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         for message in &mut request.messages {
             let Some(ChatMessageContent::Parts(parts)) = &mut message.content else {
@@ -308,7 +316,7 @@ pub(crate) async fn admit_openai_chat(
                 };
                 let mime = openai_audio_mime(&input_audio.format)?;
                 input_audio.data = admission
-                    .stage(
+                    .stage_base64(
                         &input_audio.data,
                         mime,
                         format!("openai-audio-{}.bin", admission.handles.len()),
@@ -320,9 +328,9 @@ pub(crate) async fn admit_openai_chat(
     }
     .await;
     if let Err(error) = result {
-        return admission.fail(error).await;
+        return admission.cleanup_and_fail(error).await;
     }
-    Ok(admission.finish())
+    Ok(admission.into_handles())
 }
 
 pub(crate) async fn admit_openai_responses(
@@ -343,7 +351,7 @@ async fn admit_openai_response_input(
     state: &ApiState,
     input: &mut ResponseInput,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = Admission::new(state);
+    let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         let ResponseInput::Items(items) = input else {
             return Ok::<(), InferenceError>(());
@@ -361,18 +369,26 @@ async fn admit_openai_response_input(
                         let audio = object
                             .get_mut("input_audio")
                             .and_then(Value::as_object_mut)
-                            .ok_or_else(|| invalid("Responses input_audio must be an object."))?;
+                            .ok_or_else(|| {
+                                invalid_inline_media(
+                                    "Responses input_audio must be an object.",
+                                )
+                            })?;
                         let format = audio
                             .get("format")
                             .and_then(Value::as_str)
-                            .ok_or_else(|| invalid("Responses input_audio requires format."))?;
+                            .ok_or_else(|| {
+                                invalid_inline_media("Responses input_audio requires format.")
+                            })?;
                         let mime = openai_audio_mime(format)?;
                         let data = audio
                             .get("data")
                             .and_then(Value::as_str)
-                            .ok_or_else(|| invalid("Responses input_audio requires data."))?;
+                            .ok_or_else(|| {
+                                invalid_inline_media("Responses input_audio requires data.")
+                            })?;
                         let marker = admission
-                            .stage(
+                            .stage_base64(
                                 data,
                                 mime,
                                 format!("responses-audio-{}.bin", admission.handles.len()),
@@ -382,7 +398,7 @@ async fn admit_openai_response_input(
                     }
                     Some("input_file") => {
                         if object.contains_key("file_id") || object.contains_key("file_url") {
-                            return Err(invalid(
+                            return Err(invalid_inline_media(
                                 "Responses file_id/file_url resolution is outside the launch contract; use inline PDF file_data.",
                             ));
                         }
@@ -390,17 +406,27 @@ async fn admit_openai_response_input(
                             .get("filename")
                             .and_then(Value::as_str)
                             .filter(|value| value.to_ascii_lowercase().ends_with(".pdf"))
-                            .ok_or_else(|| invalid("Responses input_file requires a PDF filename."))?
+                            .ok_or_else(|| {
+                                invalid_inline_media(
+                                    "Responses input_file requires a PDF filename.",
+                                )
+                            })?
                             .to_owned();
                         let file_data = object
                             .get("file_data")
                             .and_then(Value::as_str)
-                            .ok_or_else(|| invalid("Responses input_file requires file_data."))?;
+                            .ok_or_else(|| {
+                                invalid_inline_media("Responses input_file requires file_data.")
+                            })?;
                         let encoded = file_data
                             .strip_prefix("data:application/pdf;base64,")
-                            .ok_or_else(|| invalid("Responses input_file requires an application/pdf data URL."))?;
+                            .ok_or_else(|| {
+                                invalid_inline_media(
+                                    "Responses input_file requires an application/pdf data URL.",
+                                )
+                            })?;
                         let marker = admission
-                            .stage(encoded, "application/pdf", filename)
+                            .stage_base64(encoded, "application/pdf", filename)
                             .await?;
                         object.insert("file_data".to_owned(), Value::String(marker));
                     }
@@ -412,9 +438,9 @@ async fn admit_openai_response_input(
     }
     .await;
     if let Err(error) = result {
-        return admission.fail(error).await;
+        return admission.cleanup_and_fail(error).await;
     }
-    Ok(admission.finish())
+    Ok(admission.into_handles())
 }
 
 pub(crate) async fn cleanup_admitted(state: &ApiState, handles: Vec<MediaHandle>) {

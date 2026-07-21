@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     ApiKeyMaterial, IdempotencyOutcome, IdempotencyResponse, PersistenceError, PgStore,
-    PublishedRelease, ReplayableIdempotency, RuntimeCompileError,
+    PublishedRuntimeRelease, ReplayableIdempotency, RuntimeCompileError,
     runtime_compiler::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
     store::{
         ReplayableIdempotencyClaim, claim_idempotency, claim_replayable_idempotency,
@@ -56,13 +56,13 @@ pub struct ApiKeyCreated {
     pub id: Uuid,
     pub lookup_id: String,
     pub etag: Uuid,
-    pub release: PublishedRelease,
+    pub release: PublishedRuntimeRelease,
 }
 
 #[derive(Debug, Clone)]
 pub struct ApiKeyRevoked {
     pub etag: Uuid,
-    pub release: PublishedRelease,
+    pub release: PublishedRuntimeRelease,
 }
 
 impl PgStore {

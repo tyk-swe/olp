@@ -5,9 +5,9 @@ use olp_domain::{
 };
 use olp_storage::{
     AuthHmacKey, CapabilityCertificationOutcome, CapabilityRecord, ConfigurationError,
-    DiscoveredModelInput, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewApiKeyRecord,
-    NewOwner, NewProviderDraft, NewRouteDraft, NewRouteTarget, PersistenceError, PgStore,
-    ProviderModelRecord, ReplaceRouteDraftInput, ReplayableIdempotency, RotateApiKeyInput,
+    DiscoveredModelInput, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput,
+    MasterKey, NewApiKeyRecord, NewProviderDraft, NewRouteDraft, NewRouteTarget, PersistenceError,
+    PgStore, ProviderModelRecord, ReplaceRouteDraftInput, ReplayableIdempotency, RotateApiKeyInput,
     RotateCredentialInput, SessionMaterial, UpdateApiKeyInput, UpdateProvider, credential_aad,
     hash_password, idempotency_fingerprint,
 };
@@ -52,8 +52,8 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     store.migrate().await.unwrap();
     let session = SessionMaterial::generate();
     let (owner, _) = store
-        .setup_owner_with_session(
-            NewOwner {
+        .setup_installation_with_session(
+            InstallationSetupInput {
                 installation_name: "Configuration integration".to_owned(),
                 email: "owner@configuration.test".to_owned(),
                 display_name: "Owner".to_owned(),
@@ -298,7 +298,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     let initial_runtime: RuntimeSnapshot =
         serde_json::from_slice(&activated.release.payload).unwrap();
     let initial_secrets = store
-        .provider_secrets_for_runtime(&initial_runtime)
+        .runtime_provider_configurations(&initial_runtime)
         .await
         .unwrap();
     assert_eq!(initial_secrets.len(), 1);
@@ -334,7 +334,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
         .expect_executed();
     assert!(rotation.release.is_none());
     let staged_secrets = store
-        .provider_secrets_for_runtime(&initial_runtime)
+        .runtime_provider_configurations(&initial_runtime)
         .await
         .unwrap();
     assert_eq!(staged_secrets[0].credential_id, Some(credential_id));
@@ -361,13 +361,15 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     let rotation_release = rotation_activation.release.clone();
     assert_eq!(rotation_release.sequence, 2);
     assert!(matches!(
-        store.provider_secrets_for_runtime(&initial_runtime).await,
+        store
+            .runtime_provider_configurations(&initial_runtime)
+            .await,
         Err(ConfigurationError::InvalidCredential)
     ));
     let rotated_runtime: RuntimeSnapshot =
         serde_json::from_slice(&rotation_release.payload).unwrap();
     let rotated_secrets = store
-        .provider_secrets_for_runtime(&rotated_runtime)
+        .runtime_provider_configurations(&rotated_runtime)
         .await
         .unwrap();
     assert_eq!(
@@ -382,7 +384,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
         .active_credential = Some(CredentialVersionId::from_uuid(Uuid::now_v7()));
     assert!(matches!(
         store
-            .provider_secrets_for_runtime(&impossible_future_runtime)
+            .runtime_provider_configurations(&impossible_future_runtime)
             .await,
         Err(ConfigurationError::InvalidCredential)
     ));
@@ -418,7 +420,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
                 max_attempts: 1,
                 targets: vec![NewRouteTarget {
                     provider_id,
-                    provider_model: "gpt-test".to_owned(),
+                    upstream_model: "gpt-test".to_owned(),
                     priority: 0,
                     weight: 1,
                     timeout_ms: 20_000,
@@ -719,7 +721,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     .await
     .unwrap();
     assert!(corrupt_sequence > key_revocation.release.sequence);
-    let recent_valid = store.recent_valid_releases(16).await.unwrap();
+    let recent_valid = store.recent_valid_runtime_releases(16).await.unwrap();
     assert_eq!(recent_valid[0].sequence, key_revocation.release.sequence);
     assert!(
         recent_valid
@@ -826,7 +828,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     let adc_runtime: RuntimeSnapshot =
         serde_json::from_slice(&adc_activated.release.payload).unwrap();
     let active = store
-        .provider_secrets_for_runtime(&adc_runtime)
+        .runtime_provider_configurations(&adc_runtime)
         .await
         .unwrap();
     let adc = active
@@ -840,7 +842,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     assert_eq!(adc.cloud_project.as_deref(), Some("project-workload"));
     assert!(adc.credential_id.is_none());
     assert!(adc.credential_version.is_none());
-    assert!(adc.encrypted.is_none());
+    assert!(adc.encrypted_credential.is_none());
 
     assert!(matches!(
         store
@@ -863,7 +865,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
                 max_attempts: 1,
                 targets: vec![NewRouteTarget {
                     provider_id: adc_provider_id,
-                    provider_model: "gemini-2.5-flash".to_owned(),
+                    upstream_model: "gemini-2.5-flash".to_owned(),
                     priority: 0,
                     weight: 1,
                     timeout_ms: 20_000,

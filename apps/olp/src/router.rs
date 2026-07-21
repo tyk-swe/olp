@@ -22,7 +22,7 @@ use tower_http::{
 };
 
 use crate::{
-    ApiStartupError, ApiState, MAX_JSON_BODY_BYTES, Problem, gateway, management_api,
+    ApiState, MAX_JSON_BODY_BYTES, ModeDependencyError, Problem, gateway, management_api,
     request_admission::enforce_request_limits, static_console,
 };
 
@@ -53,7 +53,7 @@ pub fn public_router(state: ApiState) -> Router {
             .layer(middleware::from_fn(normalize_management_rejection));
         router = router
             .merge(control)
-            .fallback_service(static_console::service(&state.console_dir));
+            .fallback_service(static_console::spa_service(&state.console_dir));
     }
 
     if state.mode.serves_gateway() {
@@ -116,8 +116,8 @@ pub fn public_router(state: ApiState) -> Router {
 /// Builds the public router only after proving the selected mode's dependency
 /// contract. Process composition uses this entrypoint so missing dependencies
 /// fail before either listener is advertised.
-pub fn try_public_router(state: ApiState) -> Result<Router, ApiStartupError> {
-    let _services = state.mode_services()?;
+pub fn try_public_router(state: ApiState) -> Result<Router, ModeDependencyError> {
+    let _dependencies = state.mode_dependencies()?;
     Ok(public_router(state))
 }
 

@@ -20,7 +20,7 @@ use super::{
     error::InferenceError,
     execution::{RequiredTarget, authenticate_key, execute_routed_result},
     failover::{ExecutionOutput, execute_with_failover},
-    telemetry::{UsageCapture, elapsed_ms, emit_request_event, usage_from_result},
+    telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event, usage_from_result},
 };
 
 pub(super) fn select_video_create_target(
@@ -57,7 +57,7 @@ pub(super) fn select_video_create_target(
         route_slug,
         RequiredTarget {
             provider_id: attempt.provider_id.as_uuid(),
-            provider_model: attempt.provider_model,
+            upstream_model: attempt.upstream_model,
         },
     ))
 }
@@ -321,13 +321,13 @@ async fn execute_media_reconciliation_result(
         request_id.as_uuid().as_bytes(),
         |_, target| {
             target.provider_id.as_uuid() == record.provider_id
-                && target.provider_model == record.provider_model
+                && target.upstream_model == record.upstream_model
                 && state.circuits.is_selectable(target.id)
         },
     ) {
         Ok(attempts) => attempts,
         Err(failure) => {
-            emit_request_event(
+            emit_request_metadata_event(
                 state,
                 snapshot.generation.id.as_uuid(),
                 record.api_key_id,
@@ -370,7 +370,7 @@ async fn execute_media_reconciliation_result(
     let success = match execution {
         Ok(success) => success,
         Err(failure) => {
-            emit_request_event(
+            emit_request_metadata_event(
                 state,
                 snapshot.generation.id.as_uuid(),
                 record.api_key_id,
@@ -392,7 +392,7 @@ async fn execute_media_reconciliation_result(
         }
     };
     let ExecutionOutput::Result(result) = success.output else {
-        emit_request_event(
+        emit_request_metadata_event(
             state,
             snapshot.generation.id.as_uuid(),
             record.api_key_id,
@@ -413,7 +413,7 @@ async fn execute_media_reconciliation_result(
         return Err("provider_protocol_error");
     };
     let first_byte_ms = elapsed_ms(request_started.elapsed());
-    emit_request_event(
+    emit_request_metadata_event(
         state,
         snapshot.generation.id.as_uuid(),
         record.api_key_id,
@@ -456,7 +456,7 @@ pub(super) async fn refresh_video_list_record(
         TransportMode::Unary,
         Some(RequiredTarget {
             provider_id: record.provider_id,
-            provider_model: record.provider_model.clone(),
+            upstream_model: record.upstream_model.clone(),
         }),
     )
     .await

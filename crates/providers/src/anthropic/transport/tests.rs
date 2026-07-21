@@ -161,7 +161,7 @@ fn attempt(
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::Anthropic,
-            provider_model: "claude-sonnet-4-5".into(),
+            upstream_model: "claude-sonnet-4-5".into(),
             timeout: DurationMs::new(2_000),
             priority: 0,
         },

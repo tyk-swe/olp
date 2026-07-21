@@ -13,11 +13,11 @@ use tokio::{
 use tracing::{error, info, warn};
 
 use crate::{
-    ApiMode, ApiState, LimiterManager, RuntimeManager, TransportRegistry, create_media_spool,
+    ApiMode, ApiState, ReloadableLimiter, RuntimeManager, TransportRegistry, create_media_spool,
     reconcile_media_jobs_once,
 };
 use crate::{
-    connectors::{load_connector_config, reload_persisted_connectors},
+    connectors::{load_runtime_transports, register_mounted_connectors},
     listener,
 };
 
@@ -27,7 +27,7 @@ use super::{
         maintenance_supervisor, outbox_supervisor, preflight_request_metadata_stream_or_defer,
         request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
     },
-    config::ServerArgs,
+    config::ServeArgs,
     validation::{
         check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
         load_master_key,
@@ -36,7 +36,7 @@ use super::{
 
 pub(super) async fn serve(
     mode: ApiMode,
-    args: ServerArgs,
+    args: ServeArgs,
     run_worker_in_process: bool,
 ) -> AppResult<()> {
     if args.http_max_connections == 0 {
@@ -107,7 +107,7 @@ pub(super) async fn serve(
         state.master_key = Some(Arc::new(load_master_key(path).await?));
     }
     if let Some(path) = &args.connector_config_file {
-        load_connector_config(path, &state.transports).await?;
+        register_mounted_connectors(path, &state.transports).await?;
     }
     match activate_latest_runtime(
         &state.runtime,
@@ -117,7 +117,10 @@ pub(super) async fn serve(
     )
     .await
     {
-        Ok(true) => info!(generation = ?state.runtime.ordinal(), "loaded runtime generation"),
+        Ok(true) => info!(
+            generation = ?state.runtime.active_generation_ordinal(),
+            "loaded runtime generation"
+        ),
         Ok(false) => warn!("no active runtime generation; gateway will remain unready"),
         Err(error) => error!(%error, "initial runtime release was rejected"),
     }
@@ -444,7 +447,10 @@ async fn runtime_hint_supervisor(
                         )
                         .await
                         {
-                            Ok(true) => info!(generation = ?runtime.ordinal(), "runtime hint activated generation"),
+                            Ok(true) => info!(
+                                generation = ?runtime.active_generation_ordinal(),
+                                "runtime hint activated generation"
+                            ),
                             Ok(false) => {}
                             Err(error) => error!(%error, "runtime hint rejected; retaining last-known-good"),
                         }
@@ -488,7 +494,10 @@ fn spawn_runtime_poller(
                         .await
                     {
                         Ok(true) => {
-                            info!(generation = ?runtime.ordinal(), "runtime generation activated");
+                            info!(
+                                generation = ?runtime.active_generation_ordinal(),
+                                "runtime generation activated"
+                            );
                         }
                         Ok(false) => {}
                         Err(error) => {
@@ -537,7 +546,7 @@ pub(super) async fn stop_background_tasks(mut tasks: Vec<JoinHandle<()>>, timeou
 }
 
 async fn limiter_supervisor(
-    manager: LimiterManager,
+    reloadable_limiter: ReloadableLimiter,
     valkey_url: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -546,7 +555,7 @@ async fn limiter_supervisor(
         if *shutdown.borrow() {
             return;
         }
-        if let Some(limiter) = manager.get() {
+        if let Some(limiter) = reloadable_limiter.current() {
             let healthy = matches!(
                 tokio::time::timeout(Duration::from_secs(1), limiter.ping()).await,
                 Ok(Ok(()))
@@ -562,7 +571,7 @@ async fn limiter_supervisor(
                 }
                 continue;
             }
-            manager.clear();
+            reloadable_limiter.clear();
             warn!("Valkey limiter health check failed; hard limits remain fail-closed");
         }
 
@@ -573,7 +582,7 @@ async fn limiter_supervisor(
         .await
         {
             Ok(Ok(limiter)) => {
-                manager.install(limiter);
+                reloadable_limiter.install(limiter);
                 backoff = Duration::from_millis(100);
                 info!("Valkey limiter connection is available");
             }
@@ -599,7 +608,7 @@ async fn activate_latest_runtime(
     master_key: Option<&MasterKey>,
 ) -> AppResult<bool> {
     let releases = store
-        .recent_valid_releases_after(32, runtime.ordinal())
+        .recent_valid_runtime_releases_after(32, runtime.active_generation_ordinal())
         .await?;
     if releases.is_empty() {
         return Ok(false);
@@ -617,14 +626,14 @@ async fn activate_latest_runtime(
         // Provider transports are assembled from normalized secret storage, not
         // the public runtime payload. Require the release-time sidecar to match
         // every current transport-affecting field before accepting an LKG.
-        if let Err(error) = store.provider_secrets_for_runtime(&snapshot).await {
+        if let Err(error) = store.runtime_provider_configurations(&snapshot).await {
             rejected.push(format!("{}: {error}", release.sequence));
             continue;
         }
         let mut candidate_transports = transports.snapshot();
         if let Some(master_key) = master_key
             && let Err(error) =
-                reload_persisted_connectors(store, master_key, &snapshot, &mut candidate_transports)
+                load_runtime_transports(store, master_key, &snapshot, &mut candidate_transports)
                     .await
         {
             rejected.push(format!("{}: {error}", release.sequence));

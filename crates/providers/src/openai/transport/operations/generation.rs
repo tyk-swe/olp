@@ -40,12 +40,12 @@ pub(super) async fn execute(
 
     let streaming = request.metadata.mode == TransportMode::Streaming;
     let body = if responses_endpoint {
-        let mut wire = encode_response_create(&generation, &request.attempt.provider_model)
+        let mut wire = encode_response_create(&generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("Responses", error))?;
         hydrate_responses_media(&mut wire.input, request.media.as_ref()).await?;
         serialize_wire("Responses", &wire)?
     } else {
-        let mut wire = encode_chat_completion(&generation, &request.attempt.provider_model)
+        let mut wire = encode_chat_completion(&generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("chat", error))?;
         if streaming {
             require_stream_usage(&mut wire)?;

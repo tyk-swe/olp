@@ -306,7 +306,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::OpenAi,
-            provider_model: "gpt-4o-mini".into(),
+            upstream_model: "gpt-4o-mini".into(),
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
@@ -337,7 +337,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
 fn embeddings_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::Embeddings;
-    request.attempt.provider_model = "text-embedding-3-small".into();
+    request.attempt.upstream_model = "text-embedding-3-small".into();
     request.operation = Operation::Embeddings(EmbeddingsRequest {
         route: RouteSlug::parse("embeddings").unwrap(),
         input: vec![EmbeddingInput::Text("hello".into())],
@@ -375,7 +375,7 @@ fn responses_input_tokens_request() -> ProviderRequest {
     let operation = olp_protocols::openai::decode_response_input_tokens(wire).unwrap();
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::TokenCount;
-    request.attempt.provider_model = "gpt-count-upstream".into();
+    request.attempt.upstream_model = "gpt-count-upstream".into();
     request.operation = operation;
     request
 }
@@ -383,7 +383,7 @@ fn responses_input_tokens_request() -> ProviderRequest {
 fn image_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
     request.metadata.operation = OperationKind::ImageGeneration;
-    request.attempt.provider_model = "gpt-image-1".into();
+    request.attempt.upstream_model = "gpt-image-1".into();
     request.operation = Operation::Images(ImageOperation::Generation(ImageGenerationRequest {
         route: RouteSlug::parse("images").unwrap(),
         prompt: "a blue square".into(),
@@ -399,7 +399,7 @@ fn video_create_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::VideoCreate;
     request.metadata.mode = TransportMode::Async;
-    request.attempt.provider_model = "sora-2".into();
+    request.attempt.upstream_model = "sora-2".into();
     request.operation = Operation::Video(VideoOperation::Create(VideoCreateRequest {
         route: RouteSlug::parse("video").unwrap(),
         prompt: "a calm ocean".into(),
@@ -413,7 +413,7 @@ fn video_create_request() -> ProviderRequest {
 fn image_edit_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::ImageEdit;
-    request.attempt.provider_model = "gpt-image-1".into();
+    request.attempt.upstream_model = "gpt-image-1".into();
     request.operation = Operation::Images(ImageOperation::Edit(ImageEditRequest {
         route: RouteSlug::parse("image-edit").unwrap(),
         images: vec![MediaHandle::new("edit-source")],
@@ -433,7 +433,7 @@ fn image_edit_request() -> ProviderRequest {
 fn image_variation_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::ImageVariation;
-    request.attempt.provider_model = "dall-e-2".into();
+    request.attempt.upstream_model = "dall-e-2".into();
     request.operation = Operation::Images(ImageOperation::Variation(ImageVariationRequest {
         route: RouteSlug::parse("image-variation").unwrap(),
         image: MediaHandle::new("variation-source"),
@@ -452,7 +452,7 @@ fn image_variation_request() -> ProviderRequest {
 fn speech_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
     request.metadata.operation = OperationKind::Speech;
-    request.attempt.provider_model = "gpt-4o-mini-tts".into();
+    request.attempt.upstream_model = "gpt-4o-mini-tts".into();
     request.operation = Operation::Speech(SpeechRequest {
         route: RouteSlug::parse("speech").unwrap(),
         input: "hello from the gateway".into(),
@@ -467,7 +467,7 @@ fn speech_request(streaming: bool) -> ProviderRequest {
 fn transcription_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
     request.metadata.operation = OperationKind::Transcription;
-    request.attempt.provider_model = "gpt-4o-transcribe".into();
+    request.attempt.upstream_model = "gpt-4o-transcribe".into();
     request.operation = Operation::Transcription(TranscriptionRequest {
         route: RouteSlug::parse("transcription").unwrap(),
         audio: MediaHandle::new("audio-source"),
@@ -487,7 +487,7 @@ fn transcription_request(streaming: bool) -> ProviderRequest {
 fn moderation_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::Moderation;
-    request.attempt.provider_model = "omni-moderation-latest".into();
+    request.attempt.upstream_model = "omni-moderation-latest".into();
     request.operation = Operation::Moderation(ModerationRequest {
         route: RouteSlug::parse("moderation").unwrap(),
         input: vec![
@@ -507,7 +507,7 @@ fn moderation_request() -> ProviderRequest {
 fn video_job_request(operation: OperationKind) -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = operation;
-    request.attempt.provider_model = "sora-2".into();
+    request.attempt.upstream_model = "sora-2".into();
     let job = VideoJobRequest {
         route: None,
         job_id: "video_123".into(),
@@ -819,7 +819,7 @@ async fn responses_input_tokens_rehydrates_bounded_media_before_transport() {
     let operation = olp_protocols::openai::decode_response_input_tokens(wire).unwrap();
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::TokenCount;
-    request.attempt.provider_model = "gpt-count-upstream".into();
+    request.attempt.upstream_model = "gpt-count-upstream".into();
     request.operation = operation;
     request.media = Some(Arc::new(FixtureMediaSpool::new(
         "inline.bin",
@@ -1169,7 +1169,7 @@ async fn transcription_text_formats_and_known_speakers_use_current_multipart_con
     .await;
     let connector = test_connector(&base_url, ConnectorTimeouts::default());
     let mut request = transcription_request(false);
-    request.attempt.provider_model = "gpt-4o-transcribe-diarize".into();
+    request.attempt.upstream_model = "gpt-4o-transcribe-diarize".into();
     let Operation::Transcription(operation) = &mut request.operation else {
         unreachable!()
     };

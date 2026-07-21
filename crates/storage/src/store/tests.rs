@@ -28,7 +28,7 @@ fn release_envelope_binds_payload_id_and_sequence() {
 
 #[test]
 fn sensitive_repository_records_redact_debug_output() {
-    let password = PasswordUser {
+    let password = LocalPasswordUser {
         id: Uuid::now_v7(),
         email: "owner@example.test".into(),
         display_name: "Owner".into(),

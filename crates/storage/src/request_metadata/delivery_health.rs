@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, QueryBuilder, Row};
 
 use super::reconciliation::{RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState};
-use crate::{OperationsError, Page, PersistenceError, PgStore, TimestampCursor, split_page};
+use crate::{
+    OperationsError, OperationsPage, PersistenceError, PgStore, TimestampCursor, split_page,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestMetadataConsumerHealth {
@@ -180,7 +182,7 @@ impl PgStore {
         state: Option<RequestMetadataGatewayEpochState>,
         cursor: Option<&TimestampCursor>,
         limit: u16,
-    ) -> Result<Page<RequestMetadataGatewayEpochRecord>, OperationsError> {
+    ) -> Result<OperationsPage<RequestMetadataGatewayEpochRecord>, OperationsError> {
         let page_size = limit.clamp(1, 200);
         let mut query = QueryBuilder::<Postgres>::new(
             "SELECT gateway_instance, process_epoch, started_at, updated_at, accepted, persisted, \
@@ -227,7 +229,7 @@ impl PgStore {
             }
             .encode()
         });
-        Ok(Page { items, next_cursor })
+        Ok(OperationsPage { items, next_cursor })
     }
 }
 

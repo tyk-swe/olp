@@ -1,4 +1,4 @@
-export { result } from '../http';
+export { result as requireResponseData } from '../http';
 export { collectCursorPages, type CursorPage } from '../pagination';
 
 export type ReadSignal = AbortSignal | { readonly signal: AbortSignal };

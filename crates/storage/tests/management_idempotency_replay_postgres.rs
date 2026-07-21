@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_domain::{OperationKind, ProviderKind};
 use olp_storage::{
-    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, MasterKey, NewOwner,
+    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
     NewProviderDraft, NewRouteDraft, NewRouteTarget, OperationsError, PgStore, PriceInput,
     ReplayableIdempotency, RotateCredentialInput, credential_aad, hash_password,
     idempotency_fingerprint,
@@ -18,7 +18,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let store = PgStore::connect(&database_url, 8).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store
-        .setup_owner(NewOwner {
+        .setup_installation(InstallationSetupInput {
             installation_name: "Management replay integration".to_owned(),
             email: "owner@management-replay.test".to_owned(),
             display_name: "Owner".to_owned(),
@@ -546,7 +546,7 @@ fn route_input(actor: Uuid, provider_id: Uuid, idempotency_key: &str, slug: &str
         max_attempts: 1,
         targets: vec![NewRouteTarget {
             provider_id,
-            provider_model: "replay-model".to_owned(),
+            upstream_model: "replay-model".to_owned(),
             priority: 0,
             weight: 1,
             timeout_ms: 20_000,

@@ -239,7 +239,7 @@ impl ProviderTransport for ExactNativeProbeTransport {
         &'a self,
         request: ProviderRequest,
     ) -> olp_domain::BoxFuture<'a, Result<ProviderOutput, olp_domain::TransportError>> {
-        assert_eq!(request.attempt.provider_model, self.expected_model);
+        assert_eq!(request.attempt.upstream_model, self.expected_model);
         assert_eq!(request.attempt.provider_kind, self.expected_kind);
         assert_eq!(request.metadata.surface, Surface::Gemini);
         assert_eq!(request.metadata.operation, OperationKind::TokenCount);

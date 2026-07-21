@@ -1,6 +1,12 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { collectCursorPages, getAbortSignal, result, type CursorPage, type ReadSignal } from './shared';
+import {
+  collectCursorPages,
+  getAbortSignal,
+  requireResponseData,
+  type CursorPage,
+  type ReadSignal
+} from './shared';
 
 type Schemas = components['schemas'];
 
@@ -22,7 +28,7 @@ export async function listApiKeyPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
+  const page = requireResponseData(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -31,7 +37,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeySecr
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
@@ -41,7 +47,7 @@ export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
       header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
     }
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function updateApiKey(key: ApiKey, input: UpdateApiKeyInput): Promise<ApiKeyMutation> {
@@ -52,7 +58,7 @@ export async function updateApiKey(key: ApiKey, input: UpdateApiKeyInput): Promi
     },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function revokeApiKey(key: ApiKey): Promise<void> {
@@ -62,5 +68,5 @@ export async function revokeApiKey(key: ApiKey): Promise<void> {
       header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
     }
   });
-  result(response.data, response.error, response.response);
+  requireResponseData(response.data, response.error, response.response);
 }

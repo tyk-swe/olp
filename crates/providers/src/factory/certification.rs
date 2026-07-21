@@ -86,23 +86,23 @@ pub fn certifiable_capabilities(
 impl ConcreteProvider {
     pub(super) async fn certify_capability(
         &self,
-        provider_model: &str,
+        upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<CapabilityCertificationEvidence, CompatibleCapabilityCertificationError> {
         match (&self.connector, self.kind) {
             (ConcreteConnector::OpenAi(connector), ProviderKind::OpenAiCompatible) => connector
-                .certify_compatible_capability(provider_model, capability)
+                .certify_compatible_capability(upstream_model, capability)
                 .await
                 .map(|()| CapabilityCertificationEvidence::LiveProbe),
             (ConcreteConnector::AzureOpenAi(connector), ProviderKind::AzureOpenAi) => connector
-                .certify_deployment_capability(provider_model, capability)
+                .certify_deployment_capability(upstream_model, capability)
                 .await
                 .map(|()| CapabilityCertificationEvidence::LiveProbe),
             (ConcreteConnector::OpenAi(connector), ProviderKind::OpenAi)
                 if capability.surface == Surface::OpenAi =>
             {
                 connector
-                    .certify_native_openai_capability(provider_model, capability)
+                    .certify_native_openai_capability(upstream_model, capability)
                     .await
                     .map(Into::into)
             }
@@ -110,7 +110,7 @@ impl ConcreteProvider {
                 execute_native_capability_probe(
                     connector.as_ref(),
                     ProviderKind::OpenAi,
-                    provider_model,
+                    upstream_model,
                     capability,
                 )
                 .await
@@ -120,7 +120,7 @@ impl ConcreteProvider {
                 execute_native_capability_probe(
                     connector.as_ref(),
                     ProviderKind::Anthropic,
-                    provider_model,
+                    upstream_model,
                     capability,
                 )
                 .await
@@ -130,7 +130,7 @@ impl ConcreteProvider {
                 execute_native_capability_probe(
                     connector.as_ref(),
                     ProviderKind::Gemini,
-                    provider_model,
+                    upstream_model,
                     capability,
                 )
                 .await
@@ -140,7 +140,7 @@ impl ConcreteProvider {
                 execute_native_capability_probe(
                     connector.as_ref(),
                     ProviderKind::VertexAi,
-                    provider_model,
+                    upstream_model,
                     capability,
                 )
                 .await
@@ -150,7 +150,7 @@ impl ConcreteProvider {
                 execute_native_capability_probe(
                     connector.as_ref(),
                     ProviderKind::Bedrock,
-                    provider_model,
+                    upstream_model,
                     capability,
                 )
                 .await
@@ -167,7 +167,7 @@ const MAX_NATIVE_PROBE_EVENTS: usize = 4_096;
 pub(super) async fn execute_native_capability_probe(
     transport: &dyn ProviderTransport,
     provider_kind: ProviderKind,
-    provider_model: &str,
+    upstream_model: &str,
     capability: CompatibleCapability,
 ) -> Result<(), CompatibleCapabilityCertificationError> {
     let operation = native_probe_operation(provider_kind, capability)?;
@@ -184,7 +184,7 @@ pub(super) async fn execute_native_capability_probe(
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind,
-            provider_model: provider_model.to_owned(),
+            upstream_model: upstream_model.to_owned(),
             timeout: olp_domain::DurationMs::new(NATIVE_PROBE_TIMEOUT_MS),
             priority: 0,
         },

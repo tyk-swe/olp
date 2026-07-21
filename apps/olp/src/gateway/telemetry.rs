@@ -12,13 +12,13 @@ use crate::ApiState;
 
 use super::{error::InferenceError, execution::RoutedEventExecution};
 
-pub(crate) fn emit_event_execution(
+pub(crate) fn emit_event_execution_metadata(
     state: &ApiState,
     execution: &RoutedEventExecution,
     usage: &UsageCapture,
     failure: Option<&InferenceError>,
 ) {
-    emit_request_event(
+    emit_request_metadata_event(
         state,
         execution.generation_id,
         execution.api_key_id,
@@ -42,7 +42,7 @@ pub(crate) fn emit_event_execution(
     );
 }
 
-pub(super) struct UnaryExecutionCompletion {
+pub(super) struct UnaryRequestMetadataFinalizer {
     pub(super) state: ApiState,
     pub(super) generation_id: uuid::Uuid,
     pub(super) api_key_id: uuid::Uuid,
@@ -58,9 +58,9 @@ pub(super) struct UnaryExecutionCompletion {
     pub(super) operation: &'static str,
 }
 
-impl UnaryExecutionCompletion {
-    pub(super) fn emit(self, failure: Option<&InferenceError>) {
-        emit_request_event(
+impl UnaryRequestMetadataFinalizer {
+    pub(super) fn finalize(self, failure: Option<&InferenceError>) {
+        emit_request_metadata_event(
             &self.state,
             self.generation_id,
             self.api_key_id,
@@ -205,7 +205,7 @@ impl UsageCapture {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn emit_request_event(
+pub(super) fn emit_request_metadata_event(
     state: &ApiState,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
