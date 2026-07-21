@@ -1,6 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { throwApiProblem } from '../http';
+import { ensureSuccess } from '../http';
 import { collectCursorPages, getAbortSignal, result, type CursorPage, type ReadSignal } from './shared';
 
 type Schemas = components['schemas'];
@@ -71,7 +71,7 @@ export async function deleteRouteDraft(id: string, etag: string): Promise<void> 
   const response = await apiClient.DELETE('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id }, header: { 'If-Match': etag } }
   });
-  if (!response.response.ok) throwApiProblem(response.error, response.response);
+  ensureSuccess(response.error, response.response);
 }
 
 export async function simulateRoute(id: string, input: RouteSimulationInput): Promise<RouteSimulation> {

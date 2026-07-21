@@ -69,10 +69,33 @@ describe('provider-health pagination', () => {
 
     expect(error).toBeInstanceOf(ApiProblem);
     expect((error as ApiProblem).problem).toEqual({
-      title: 'Provider-health pagination repeated a cursor',
+      type: 'urn:olp:problem:invalid-cursor-cycle',
+      title: 'The control API returned a repeated pagination cursor',
       status: 502
     });
     expect(requests).toHaveLength(2);
+  });
+
+  it('enforces the shared collection safety limit', async () => {
+    const requests = captureRequests((_request, page) =>
+      jsonResponse({
+        window_minutes: 15,
+        data: Array.from({ length: 200 }, (_, item) =>
+          providerHealth(`provider-${page + 1}-${item + 1}`)
+        ),
+        next_cursor: `page-${page + 2}`
+      })
+    );
+
+    const error = await listProviderHealth().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(ApiProblem);
+    expect((error as ApiProblem).problem).toEqual({
+      type: 'urn:olp:problem:pagination-limit-exceeded',
+      title: 'The control API collection exceeds the console safety limit',
+      status: 502
+    });
+    expect(requests).toHaveLength(51);
   });
 });
 
@@ -80,7 +103,14 @@ describe('operations API errors', () => {
   it('preserves structured problem details', async () => {
     captureRequests(() =>
       jsonResponse(
-        { title: 'Rate limited', detail: 'Retry after the window', status: 429 },
+        {
+          type: 'urn:olp:problem:rate-limited',
+          title: 'Rate limited',
+          detail: 'Retry after the window',
+          status: 429,
+          instance: '/api/v1/requests',
+          errors: { request: ['Retry after the advertised window.'] }
+        },
         { status: 503, headers: { 'content-type': 'application/problem+json' } }
       )
     );
@@ -89,9 +119,40 @@ describe('operations API errors', () => {
 
     expect(error).toBeInstanceOf(ApiProblem);
     expect((error as ApiProblem).problem).toEqual({
+      type: 'urn:olp:problem:rate-limited',
       title: 'Rate limited',
       detail: 'Retry after the window',
-      status: 429
+      status: 429,
+      instance: '/api/v1/requests',
+      errors: { request: ['Retry after the advertised window.'] }
+    });
+  });
+
+  it('fails closed when a successful response omits its required JSON body', async () => {
+    captureRequests(() =>
+      new Response(null, { status: 200, headers: { 'content-length': '0' } })
+    );
+
+    const error = await listRequests({}).catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(ApiProblem);
+    expect((error as ApiProblem).problem).toEqual({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The API response did not include the expected JSON body',
+      status: 502
+    });
+  });
+
+  it('fails closed when a successful response returns null instead of its required object', async () => {
+    captureRequests(() => jsonResponse(null));
+
+    const error = await listRequests({}).catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(ApiProblem);
+    expect((error as ApiProblem).problem).toEqual({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The API response did not include the expected JSON body',
+      status: 502
     });
   });
 
@@ -102,7 +163,8 @@ describe('operations API errors', () => {
 
     expect(error).toBeInstanceOf(ApiProblem);
     expect((error as ApiProblem).problem).toEqual({
-      title: 'Request failed',
+      type: 'about:blank',
+      title: 'Request failed (503)',
       status: 503
     });
   });
