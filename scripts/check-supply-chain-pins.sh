@@ -5,14 +5,27 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 failed=false
 
 while IFS= read -r entry; do
-  reference=${entry#*uses: }
-  reference=${reference%%[[:space:]#]*}
+  reference=${entry##*uses:}
+  reference=${reference%%#*}
+  read -r reference _ <<< "$reference"
+  reference=${reference#\"}
+  reference=${reference%\"}
+  reference=${reference#\'}
+  reference=${reference%\'}
   [[ $reference == ./* ]] && continue
-  if [[ ! $reference =~ @([0-9a-f]{40})$ ]]; then
+  if [[ $reference == docker://* ]]; then
+    if [[ ! $reference =~ @sha256:[0-9a-f]{64}$ ]]; then
+      echo "Docker-based GitHub Action is not pinned to a full digest: $entry" >&2
+      failed=true
+    fi
+  elif [[ ! $reference =~ @([0-9a-f]{40})$ ]]; then
     echo "GitHub Action is not pinned to a full commit SHA: $entry" >&2
     failed=true
   fi
-done < <(rg -n '^[[:space:]]*-[[:space:]]+uses:' "$root/.github/workflows" || true)
+done < <(
+  rg --hidden -n --glob '*.yml' --glob '*.yaml' \
+    '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+' "$root/.github" || true
+)
 
 dockerfile="$root/deploy/Dockerfile"
 if ! head -n 1 "$dockerfile" | grep -Eq '^# syntax=[^[:space:]]+@sha256:[0-9a-f]{64}$'; then
@@ -78,9 +91,10 @@ while IFS= read -r entry; do
     failed=true
   fi
 done < <(
-  rg -n --glob '*.yml' --glob '*.yaml' --glob '*.sh' \
+  rg --hidden -n --glob '*.yml' --glob '*.yaml' --glob '*.sh' \
+    --glob '!.git/**' \
     '(image:[[:space:]]*(postgres|valkey/valkey|node|nginx|grafana/k6|alpine|ghcr\.io/shopify/toxiproxy):|(?:docker[[:space:]]+(?:pull|run)[^\n]*|image=)(grafana/k6|alpine):|^[[:space:]]+(postgres|valkey/valkey|node|nginx|grafana/k6|alpine|ghcr\.io/shopify/toxiproxy):[0-9])' \
-    "$root/.github" "$root" || true
+    "$root" || true
 )
 
 if [[ $failed == true ]]; then
