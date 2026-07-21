@@ -27,16 +27,10 @@ export async function getSetupStatus(signal?: AbortSignal): Promise<SetupStatus>
 
 export async function createOwner(
   input: CreateOwnerInput,
-  idempotencyKey: string,
   setupToken: string,
   signal?: AbortSignal
 ): Promise<CreateOwnerResponse> {
   const { data, error, response } = await apiClient.POST('/api/v1/setup', {
-    // Setup predates the general idempotency OpenAPI parameter. Preserve the
-    // existing client header until that endpoint's schema is versioned.
-    headers: {
-      'Idempotency-Key': idempotencyKey
-    },
     // The one-time setup token is intentionally sent only as a sensitive
     // request header; it is never included in the JSON owner contract or
     // persisted by the console.

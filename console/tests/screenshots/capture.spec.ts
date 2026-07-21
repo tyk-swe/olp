@@ -6,12 +6,22 @@ import {
   mockRecentRequests,
   mockRoutes,
   mockShell,
-  mockUsage
+  mockUsage,
+  SCREENSHOT_NOW
 } from './fixtures';
 
 // Playwright resolves screenshot paths against the process CWD, which is the
 // console directory for `pnpm screenshots`.
 const outputDir = '../docs/assets/screenshots';
+
+async function waitForStableLayout(page: import('@playwright/test').Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  });
+}
 
 async function capture(page: import('@playwright/test').Page, name: string) {
   // Collapse the shell's min-height so the capture is exactly the content
@@ -23,18 +33,23 @@ async function capture(page: import('@playwright/test').Page, name: string) {
       '.desktop-sidebar { height: auto !important; }'
     ].join('\n')
   });
+  await waitForStableLayout(page);
   const height = await page.evaluate(() =>
     Math.ceil(document.querySelector('.shell')?.getBoundingClientRect().height ?? 900)
   );
   await page.setViewportSize({ width: 1440, height: Math.max(480, height) });
-  await page.waitForTimeout(120);
-  await page.screenshot({
+  await waitForStableLayout(page);
+  const first = await page.screenshot({ animations: 'disabled' });
+  await waitForStableLayout(page);
+  const repeated = await page.screenshot({
     path: `${outputDir}/${name}.png`,
     animations: 'disabled'
   });
+  expect(repeated).toEqual(first);
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(SCREENSHOT_NOW);
   await mockShell(page);
 });
 

@@ -36,9 +36,11 @@ const ids = {
 };
 
 const created = '2026-06-30T09:14:00Z';
+export const SCREENSHOT_NOW = '2026-07-01T12:00:00.000Z';
+const screenshotNowMs = Date.parse(SCREENSHOT_NOW);
 
 function minutesAgo(minutes: number): string {
-  return new Date(Date.now() - minutes * 60_000).toISOString();
+  return new Date(screenshotNowMs - minutes * 60_000).toISOString();
 }
 
 /** Session + setup mocks required by the application shell on every page. */
@@ -482,7 +484,7 @@ export async function mockUsage(page: Page) {
     620, 544, 486, 420, 366
   ];
   const points = shape.map((requests, index) => {
-    const bucketDate = new Date(Date.now() - (shape.length - 1 - index) * 3_600_000);
+    const bucketDate = new Date(screenshotNowMs - (shape.length - 1 - index) * 3_600_000);
     bucketDate.setMinutes(0, 0, 0);
     const inputTokens = requests * 1_430;
     const outputTokens = requests * 328;
@@ -512,7 +514,7 @@ export async function mockUsage(page: Page) {
     pending_events: 0,
     lag_events: 0,
     oldest_pending_at: null,
-    checked_at: new Date().toISOString(),
+    checked_at: SCREENSHOT_NOW,
     heartbeat_age_seconds: 4
   };
   await page.route('**/api/v1/usage/**', async (route) => {
