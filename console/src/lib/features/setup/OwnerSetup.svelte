@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { ApiProblem } from '$lib/api/http';
   import { createOwner } from '$lib/api/setup';
-  import { setCsrfToken } from '$lib/api/session';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import {
     type OwnerFormErrors,
@@ -53,15 +54,17 @@
 
     submitting = true;
     try {
-      const result = await createOwner(
-        {
-          display_name: values.displayName.trim(),
-          email: values.email.trim(),
-          password: values.password
-        },
-        values.setupToken
+      await authLifecycle.authenticate((signal) =>
+        createOwner(
+          {
+            display_name: values.displayName.trim(),
+            email: values.email.trim(),
+            password: values.password
+          },
+          values.setupToken,
+          signal
+        )
       );
-      setCsrfToken(result.csrf_token);
       onComplete();
     } catch (error) {
       if (error instanceof ApiProblem) {
@@ -73,6 +76,8 @@
       submitting = false;
     }
   }
+
+  onDestroy(() => authLifecycle.abortAuthenticationWork());
 </script>
 
 <div class="step-count" aria-label="Setup step 1 of 6">

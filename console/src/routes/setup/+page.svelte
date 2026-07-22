@@ -30,7 +30,7 @@
   }
 
   function finishSetup() {
-    void goto(resolve('/'), { replaceState: true, invalidateAll: true });
+    void goto(resolve('/'), { replaceState: true });
   }
 
   onMount(() => {

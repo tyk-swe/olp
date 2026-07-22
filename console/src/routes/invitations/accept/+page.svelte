@@ -1,9 +1,10 @@
 <script lang="ts">
   import { goto, replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { acceptInvitation } from '$lib/api/auth';
   import { ApiProblem } from '$lib/api/http';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import SetupFrame from '$lib/features/setup/SetupFrame.svelte';
   import {
     type InvitationAcceptanceErrors,
@@ -42,6 +43,8 @@
     };
   });
 
+  onDestroy(() => authLifecycle.abortAuthenticationWork());
+
   function applyFieldErrors(problem: ApiProblem) {
     const next: InvitationAcceptanceErrors = {};
     for (const [field, fieldMessages] of Object.entries(problem.problem.errors ?? {})) {
@@ -59,15 +62,20 @@
     if (Object.keys(errors).length || !token) return;
     busy = true;
     try {
-      await acceptInvitation({
-        token,
-        display_name: values.displayName.trim(),
-        password: values.password
-      });
+      await authLifecycle.authenticate((signal) =>
+        acceptInvitation(
+          {
+            token,
+            display_name: values.displayName.trim(),
+            password: values.password
+          },
+          signal
+        )
+      );
       token = '';
       values.password = '';
       values.confirmPassword = '';
-      await goto(resolve('/'), { replaceState: true, invalidateAll: true });
+      await goto(resolve('/'), { replaceState: true });
     } catch (error) {
       if (error instanceof ApiProblem) {
         if (error.problem.status === 410) {

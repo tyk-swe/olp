@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { onDestroy, onMount } from 'svelte';
   import {
     authenticationCapabilities,
     beginOidcLogin,
@@ -8,9 +9,9 @@
     type AuthenticationCapabilities
   } from '$lib/api/auth';
   import { ApiProblem } from '$lib/api/http';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import { relativeReturnTo } from '$lib/auth/relativeReturnTo';
   import SetupFrame from '$lib/features/setup/SetupFrame.svelte';
-  import { onMount } from 'svelte';
 
   let email = $state('');
   let password = $state('');
@@ -22,6 +23,7 @@
     oidc_login_enabled: false
   });
   let message = $state('');
+  const publicAuthController = new AbortController();
 
   function destination() {
     return relativeReturnTo(page.url.searchParams.get('return_to'), page.url.origin);
@@ -53,7 +55,7 @@
     }
     busy = true;
     try {
-      await login(email.trim(), password);
+      await authLifecycle.authenticate((signal) => login(email.trim(), password, signal));
       // destination() rejects external, ambiguous, malformed, and login-loop values.
       // eslint-disable-next-line svelte/no-navigation-without-resolve
       await goto(destination(), { replaceState: true, invalidateAll: true });
@@ -70,7 +72,7 @@
     message = '';
     oidcBusy = true;
     try {
-      const authorizationUrl = await beginOidcLogin(destination());
+      const authorizationUrl = await beginOidcLogin(destination(), publicAuthController.signal);
       window.location.assign(authorizationUrl);
     } catch (error) {
       message = problemMessage(error, 'Single sign-on could not be started.');
@@ -80,19 +82,22 @@
   }
 
   onMount(() => {
-    const controller = new AbortController();
-    void authenticationCapabilities(controller.signal)
+    void authenticationCapabilities(publicAuthController.signal)
       .then((value) => {
         capabilities = value;
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (publicAuthController.signal.aborted) return;
         message = problemMessage(error, 'Sign-in options could not be loaded.');
       })
       .finally(() => {
-        if (!controller.signal.aborted) capabilitiesLoading = false;
+        if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
       });
-    return () => controller.abort();
+  });
+
+  onDestroy(() => {
+    publicAuthController.abort();
+    authLifecycle.abortAuthenticationWork();
   });
 </script>
 

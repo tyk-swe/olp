@@ -23,14 +23,15 @@ afterEach(() => {
 
 describe('session API', () => {
   it.each<FixedRole>(['owner', 'operator', 'developer', 'viewer'])(
-    'accepts the supported %s role and records its CSRF token',
+    'accepts the supported %s role without mutating lifecycle state',
     async (role) => {
       captureRequests(() => jsonResponse(sessionResponse(role)));
 
       const session = await currentSession();
 
       expect(session.user.role).toBe(role);
-      expect(getCsrfToken()).toBe(`csrf-${role}`);
+      expect(session.csrf_token).toBe(`csrf-${role}`);
+      expect(getCsrfToken()).toBeNull();
     }
   );
 
@@ -42,7 +43,7 @@ describe('session API', () => {
 
     expect(error).toBeInstanceOf(ApiProblem);
     expect((error as ApiProblem).problem).toMatchObject({
-      title: 'The session response contains an invalid role',
+      title: 'The session response is invalid',
       status: 502
     });
     expect(getCsrfToken()).toBe('known-good-token');
@@ -62,46 +63,22 @@ describe('session API', () => {
     expect(getCsrfToken()).toBe('known-good-token');
   });
 
-  it('fails closed on an empty CSRF token without replacing CSRF state', async () => {
+  it('accepts an empty CSRF recovery response without mutating lifecycle state', async () => {
     setCsrfToken('stale-token');
     captureRequests(() => jsonResponse(sessionResponse('operator', '')));
 
-    const error = await currentSession().catch((value: unknown) => value);
+    const session = await currentSession();
 
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toMatchObject({
-      title: 'The session response is invalid',
-      status: 502
-    });
+    expect(session.csrf_token).toBe('');
     expect(getCsrfToken()).toBe('stale-token');
   });
 
-  it('does not let a delayed current-session recovery replace newer CSRF state', async () => {
-    let resolveResponse: ((response: Response) => void) | undefined;
-    captureRequests(
-      () =>
-        new Promise<Response>((resolve) => {
-          resolveResponse = resolve;
-        })
-    );
-    setCsrfToken('csrf-for-session-s1');
-
-    const recovery = currentSession();
-    await vi.waitFor(() => expect(resolveResponse).toBeTypeOf('function'));
-    setCsrfToken('csrf-for-newer-session-s2');
-    resolveResponse!(jsonResponse(sessionResponse('owner', 'csrf-recovered-for-s1')));
-
-    await recovery;
-
-    expect(getCsrfToken()).toBe('csrf-for-newer-session-s2');
-  });
-
-  it('sends only login credentials and installs the returned CSRF token', async () => {
+  it('sends only login credentials and returns the session to the lifecycle', async () => {
     const requests = captureRequests(() =>
       jsonResponse(sessionResponse('operator', 'csrf-from-login'))
     );
 
-    await login('operator@example.com', 'correct horse battery staple');
+    const session = await login('operator@example.com', 'correct horse battery staple');
 
     expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/sessions');
     expect(requests[0]!.method).toBe('POST');
@@ -109,10 +86,11 @@ describe('session API', () => {
       email: 'operator@example.com',
       password: 'correct horse battery staple'
     });
-    expect(getCsrfToken()).toBe('csrf-from-login');
+    expect(session.csrf_token).toBe('csrf-from-login');
+    expect(getCsrfToken()).toBeNull();
   });
 
-  it('preserves the invitation contract and replaces CSRF state', async () => {
+  it('preserves the invitation contract and returns the session to the lifecycle', async () => {
     setCsrfToken('pre-invitation-token');
     const requests = captureRequests(() =>
       jsonResponse(sessionResponse('developer', 'csrf-from-invitation'))
@@ -123,25 +101,27 @@ describe('session API', () => {
       password: 'another correct horse battery staple'
     };
 
-    await acceptInvitation(input);
+    const session = await acceptInvitation(input);
 
     expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/invitations/accept');
     expect(requests[0]!.method).toBe('POST');
     expect(JSON.parse(await requests[0]!.clone().text())).toEqual(input);
-    expect(requests[0]!.headers.get('x-csrf-token')).toBe('pre-invitation-token');
-    expect(getCsrfToken()).toBe('csrf-from-invitation');
+    expect(requests[0]!.headers.has('x-csrf-token')).toBe(false);
+    expect(session.csrf_token).toBe('csrf-from-invitation');
+    expect(getCsrfToken()).toBe('pre-invitation-token');
   });
 
-  it.each([204, 401])('clears local state when logout returns %s', async (status) => {
+  it.each([204, 401])('accepts logout status %s without owning local state', async (status) => {
     setCsrfToken('csrf-before-logout');
-    captureRequests(() =>
+    const requests = captureRequests(() =>
       status === 204
         ? new Response(null, { status })
         : jsonResponse({ title: 'No active session', status }, { status })
     );
 
     await expect(logout()).resolves.toBeUndefined();
-    expect(getCsrfToken()).toBeNull();
+    expect(requests[0]!.headers.get('x-csrf-token')).toBe('csrf-before-logout');
+    expect(getCsrfToken()).toBe('csrf-before-logout');
   });
 
   it('preserves local state when the server cannot complete logout', async () => {
