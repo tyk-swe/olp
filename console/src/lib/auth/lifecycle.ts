@@ -173,14 +173,18 @@ export class AuthenticationLifecycle {
     this.sessionController?.abort();
     this.transitionController?.abort();
     this.principalExitController?.abort();
-    this.authenticationController = new AbortController();
+    const controller = new AbortController();
+    this.authenticationController = controller;
     this.gateProtectedContent('transitioning');
     this.rotateAuthenticatedRequests();
     await this.cancelAndClearQueries();
+    if (generation !== this.authenticationGeneration || controller.signal.aborted) {
+      throw new DOMException('Authentication was superseded.', 'AbortError');
+    }
     clearCsrfToken();
     this.rotatePartition();
-    const session = await request(this.authenticationController.signal);
-    if (generation !== this.authenticationGeneration || this.authenticationController.signal.aborted) {
+    const session = await request(controller.signal);
+    if (generation !== this.authenticationGeneration || controller.signal.aborted) {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     this.establishSession(session);
@@ -288,7 +292,7 @@ export class AuthenticationLifecycle {
     }
     const age = Date.now() - (this.snapshotValue.lastValidatedAt ?? 0);
     if (getCsrfToken() && age <= SESSION_FRESHNESS_MS) return;
-    const session = await this.validateSession();
+    const session = await (this.activeValidation ?? this.validateSession());
     if (!session) throw new DOMException('Session validation did not complete.', 'AbortError');
     if (!getCsrfToken()) {
       throw new DOMException(
