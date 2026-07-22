@@ -20,6 +20,10 @@
   import { formatDate } from '$lib/features/operations/format';
   import { validateDisplayName, validateNewPassword, validatePassword } from './validation';
 
+  const ENROLLMENT_GRANT_TTL_MS = 5 * 60 * 1000;
+  const ENROLLMENT_GRANT_READY_MESSAGE =
+    'Identity verified. Add your local password within five minutes.';
+
   let displayName = $state('');
   let displayNameError = $state('');
   let currentPassword = $state('');
@@ -34,6 +38,7 @@
   let identityBusy = $state('');
   let identityError = $state('');
   let enrollmentGrantReady = $state(false);
+  let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
   let sessionCursor = $state<string | undefined>();
   let sessionHistory = $state<string[]>([]);
 
@@ -56,10 +61,34 @@
     const parameters = new URLSearchParams(window.location.search);
     const purpose = parameters.get('reauthenticated');
     const resourceId = parameters.get('resource_id') ?? undefined;
-    if (!['password_enrollment', 'oidc_link', 'oidc_unlink'].includes(purpose ?? '')) return;
-    window.history.replaceState(window.history.state, '', window.location.pathname);
-    void resumeSecurityOperation(purpose as 'password_enrollment' | 'oidc_link' | 'oidc_unlink', resourceId);
+    if (['password_enrollment', 'oidc_link', 'oidc_unlink'].includes(purpose ?? '')) {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      void resumeSecurityOperation(purpose as 'password_enrollment' | 'oidc_link' | 'oidc_unlink', resourceId);
+    }
+    return cancelEnrollmentGrantExpiry;
   });
+
+  function cancelEnrollmentGrantExpiry() {
+    if (enrollmentGrantExpiry === undefined) return;
+    clearTimeout(enrollmentGrantExpiry);
+    enrollmentGrantExpiry = undefined;
+  }
+
+  function clearEnrollmentGrant() {
+    cancelEnrollmentGrantExpiry();
+    enrollmentGrantReady = false;
+  }
+
+  function markEnrollmentGrantReady() {
+    clearEnrollmentGrant();
+    enrollmentGrantReady = true;
+    enrollmentGrantExpiry = setTimeout(() => {
+      enrollmentGrantExpiry = undefined;
+      enrollmentGrantReady = false;
+      if (message === ENROLLMENT_GRANT_READY_MESSAGE) message = '';
+      passwordError = 'Identity verification expired. Verify your identity with OIDC again.';
+    }, ENROLLMENT_GRANT_TTL_MS);
+  }
 
   async function resumeSecurityOperation(
     purpose: 'password_enrollment' | 'oidc_link' | 'oidc_unlink',
@@ -68,8 +97,8 @@
     identityError = passwordError = message = '';
     try {
       if (purpose === 'password_enrollment') {
-        enrollmentGrantReady = true;
-        message = 'Identity verified. Add your local password within five minutes.';
+        markEnrollmentGrantReady();
+        message = ENROLLMENT_GRANT_READY_MESSAGE;
         return;
       }
       if (purpose === 'oidc_link') {
@@ -158,22 +187,25 @@
       savingPassword = false;
       return;
     }
+    let enrollmentSubmitted = false;
     try {
       const next = passwordEnrollmentNeeded
         ? validateNewPassword(newPassword, confirmPassword)
         : validatePassword(currentPassword, newPassword, confirmPassword);
       if (passwordEnrollmentNeeded) {
+        enrollmentSubmitted = true;
         await enrollPassword(profile.data, { new_password: next });
       } else {
         await changePassword(profile.data, { current_password: currentPassword, new_password: next });
       }
       currentPassword = newPassword = confirmPassword = '';
-      enrollmentGrantReady = false;
+      clearEnrollmentGrant();
       message = passwordEnrollmentNeeded
         ? 'Local password added. All previous sessions were revoked and this browser was rotated.'
         : 'Password changed. All previous sessions were revoked and this browser was rotated.';
       await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
+      if (enrollmentSubmitted) clearEnrollmentGrant();
       passwordError =
         cause instanceof Error
           ? cause.message
@@ -212,6 +244,7 @@
       window.location.assign(await beginOidcLink());
     } catch (cause) {
       identityError = cause instanceof Error ? cause.message : 'The OIDC link flow could not start.';
+    } finally {
       identityBusy = '';
     }
   }
