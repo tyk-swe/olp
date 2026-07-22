@@ -11828,6 +11828,16 @@
             },
             "description": "The session lacks permission or mutation CSRF/origin checks failed."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Another request recovered the session CSRF credential"
+          },
           "500": {
             "content": {
               "application/problem+json": {

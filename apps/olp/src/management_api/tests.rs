@@ -19,8 +19,8 @@ use super::{
     },
     auth::{
         INVALID_LOGIN_RATE_LIMIT_TARGET, LoginRequest, PASSWORD_WORK_CONCURRENCY, SetupRequest,
-        acquire_password_work, local_login_rate_limit_target, logout, spawn_password_work,
-        validate_setup,
+        acquire_password_work, csrf_recovery_cas_failure_response, local_login_rate_limit_target,
+        logout, spawn_password_work, validate_setup,
     },
     common::{
         RuntimeGenerationResponse, WriteOnlySecret, append_session_cookies, enforce_origin,
@@ -245,6 +245,25 @@ async fn logout_without_a_server_side_session_still_expires_every_browser_creden
         cookies
             .iter()
             .any(|cookie| cookie.starts_with("__Host-olp_recent_auth="))
+    );
+}
+
+#[test]
+fn concurrent_csrf_recovery_does_not_expire_a_still_valid_session() {
+    let response = csrf_recovery_cas_failure_response(true);
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .next()
+            .is_none()
+    );
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
     );
 }
 

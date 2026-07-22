@@ -290,7 +290,8 @@ pub(super) async fn login(
     tag = "sessions",
     responses(
         (status = 200, description = "Current session", body = SessionResponse),
-        (status = 401, description = "No active session", body = Problem)
+        (status = 401, description = "No active session", body = Problem),
+        (status = 409, description = "Another request recovered the session CSRF credential", body = Problem)
     )
 )]
 pub(super) async fn current_session(
@@ -321,13 +322,12 @@ pub(super) async fn current_session(
             .await
             .map_err(map_persistence)?;
         if !rotated {
-            let mut response = Problem::unauthorized(
-                "The session changed while its CSRF credential was being recovered.",
-            )
-            .into_response();
-            expire_session_cookies(&mut response);
-            prevent_sensitive_response_caching(&mut response);
-            return Ok(response);
+            let session_is_current = match require_read_session(&state, &headers).await {
+                Ok(_) => true,
+                Err(problem) if problem.status == StatusCode::UNAUTHORIZED.as_u16() => false,
+                Err(problem) => return Err(problem),
+            };
+            return Ok(csrf_recovery_cas_failure_response(session_is_current));
         }
     }
     let csrf_token = supplied_csrf
@@ -353,6 +353,25 @@ pub(super) async fn current_session(
     }
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
+}
+
+pub(super) fn csrf_recovery_cas_failure_response(session_is_current: bool) -> Response {
+    let mut response = if session_is_current {
+        Problem::conflict(
+            "csrf_recovery_in_progress",
+            "Another request recovered this session's CSRF credential. Retry with the current browser credentials.",
+        )
+        .into_response()
+    } else {
+        let mut response = Problem::unauthorized(
+            "The session changed while its CSRF credential was being recovered.",
+        )
+        .into_response();
+        expire_session_cookies(&mut response);
+        response
+    };
+    prevent_sensitive_response_caching(&mut response);
+    response
 }
 
 #[utoipa::path(
