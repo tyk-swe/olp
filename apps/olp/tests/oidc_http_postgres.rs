@@ -833,6 +833,7 @@ async fn mock_token(
             "aud": CLIENT_ID,
             "iat": now,
             "exp": now + 300,
+            "auth_time": now,
             "nonce": nonce,
             "email": identity.email,
             "email_verified": true,

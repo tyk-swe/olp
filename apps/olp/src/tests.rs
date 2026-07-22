@@ -454,6 +454,10 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
                 axum::http::header::SET_COOKIE,
                 HeaderValue::from_static("session=secret"),
             );
+            response.headers_mut().insert(
+                HeaderName::from_static(management_api::CSRF_HEADER),
+                HeaderValue::from_static("csrf-secret"),
+            );
             Ok::<_, Infallible>(response)
         }));
 
@@ -486,6 +490,14 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
     assert!(
         response.headers()[axum::http::header::SET_COOKIE].is_sensitive(),
         "TraceLayer must observe Set-Cookie only after it is marked sensitive"
+    );
+    assert!(
+        response
+            .headers()
+            .get(HeaderName::from_static(management_api::CSRF_HEADER))
+            .unwrap()
+            .is_sensitive(),
+        "TraceLayer must observe rotated CSRF credentials only after they are marked sensitive"
     );
 }
 
