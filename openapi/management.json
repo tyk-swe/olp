@@ -299,6 +299,21 @@
         ],
         "type": "object"
       },
+      "AuthenticationCapabilities": {
+        "properties": {
+          "local_login_enabled": {
+            "type": "boolean"
+          },
+          "oidc_login_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "local_login_enabled",
+          "oidc_login_enabled"
+        ],
+        "type": "object"
+      },
       "BTreeMap": {
         "additionalProperties": {
           "items": {
@@ -1331,6 +1346,18 @@
           "created_at",
           "can_unlink"
         ],
+        "type": "object"
+      },
+      "OidcLoginRequest": {
+        "properties": {
+          "return_to": {
+            "description": "Same-origin absolute-path destination used only after a successful callback.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "OidcRoleMappingRequest": {
@@ -5328,6 +5355,47 @@
         ]
       }
     },
+    "/api/v1/auth/capabilities": {
+      "get": {
+        "operationId": "authentication_capabilities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationCapabilities"
+                }
+              }
+            },
+            "description": "Public authentication capabilities"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "PostgreSQL unavailable"
+          }
+        },
+        "security": [],
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/v1/health/ready": {
       "get": {
         "operationId": "management_readiness",
@@ -5979,7 +6047,7 @@
             }
           },
           {
-            "description": "One-time state",
+            "description": "One-time flow identifier and state",
             "in": "query",
             "name": "state",
             "required": false,
@@ -5999,7 +6067,7 @@
         ],
         "responses": {
           "303": {
-            "description": "OIDC identity authenticated and local session issued"
+            "description": "OIDC login or identity link completed"
           },
           "400": {
             "content": {
@@ -6019,7 +6087,17 @@
                 }
               }
             },
-            "description": "ID token validation failed"
+            "description": "Session or ID token validation failed"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The link callback belongs to another authenticated session"
           },
           "409": {
             "content": {
@@ -6442,6 +6520,17 @@
     "/api/v1/oidc/login": {
       "get": {
         "operationId": "begin_login",
+        "parameters": [
+          {
+            "description": "Validated same-origin relative destination after login",
+            "in": "query",
+            "name": "return_to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "303": {
             "description": "Redirect to the configured identity provider"
@@ -6488,6 +6577,86 @@
           }
         },
         "security": [],
+        "tags": [
+          "oidc"
+        ]
+      },
+      "post": {
+        "operationId": "begin_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Authorization URL for OIDC login"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Origin check failed"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC is not configured or enabled"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC login flow creation is rate limited"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC dependency unavailable"
+          }
+        },
+        "security": [],
+        "summary": "Same-origin initiation used by the console so failures remain styled API\nproblems instead of becoming raw navigation responses. The GET endpoint is\nretained for ordinary OAuth top-level navigation compatibility.",
         "tags": [
           "oidc"
         ]
@@ -11455,6 +11624,16 @@
               }
             },
             "description": "Invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Local password sign-in is disabled"
           },
           "422": {
             "content": {

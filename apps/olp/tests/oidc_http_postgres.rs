@@ -105,6 +105,14 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     let owner_csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
     let owner_id = setup_body["user"]["id"].as_str().unwrap().to_owned();
 
+    let initial_capabilities =
+        send_empty(&app, Method::GET, "/api/v1/auth/capabilities", None, None).await;
+    assert_eq!(initial_capabilities.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(initial_capabilities).await,
+        json!({"local_login_enabled": true, "oidc_login_enabled": false})
+    );
+
     let configured = send_json(
         &app,
         Method::PUT,
@@ -124,6 +132,55 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     )
     .await;
     assert_eq!(configured.status(), StatusCode::CREATED);
+
+    let enabled_capabilities =
+        send_empty(&app, Method::GET, "/api/v1/auth/capabilities", None, None).await;
+    assert_eq!(enabled_capabilities.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(enabled_capabilities).await,
+        json!({"local_login_enabled": true, "oidc_login_enabled": true})
+    );
+
+    let mut oidc_only_state = ApiState::new(
+        ApiMode::Control,
+        Some(store.clone()),
+        Arc::new(RuntimeManager::empty()),
+        ORIGIN,
+        PathBuf::from("missing-console-for-oidc-only-test"),
+    );
+    oidc_only_state.local_login_enabled = false;
+    let oidc_only_app = public_router(oidc_only_state);
+    let oidc_only_capabilities = send_empty(
+        &oidc_only_app,
+        Method::GET,
+        "/api/v1/auth/capabilities",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(oidc_only_capabilities.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(oidc_only_capabilities).await,
+        json!({"local_login_enabled": false, "oidc_login_enabled": true})
+    );
+    let disabled_local_login = send_json(
+        &oidc_only_app,
+        Method::POST,
+        "/api/v1/sessions",
+        json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(disabled_local_login.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response_json(disabled_local_login).await["type"],
+        "https://openllmproxy.dev/problems/local_login_disabled"
+    );
 
     let redacted = send_empty(
         &app,
@@ -195,6 +252,49 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
         .execute(store.pool())
         .await
         .unwrap();
+
+    // Two browser tabs retain independent flow cookies and can complete in
+    // reverse order while restoring each tab's complete return destination.
+    let tab_a = begin_login_with_request(
+        &app,
+        "/api/v1/oidc/login?return_to=%2Fsettings%3Ftab%3Dsecurity%23sessions",
+        None,
+    )
+    .await;
+    let tab_a_cookie = format!("{}={}", tab_a.cookie_name, tab_a.flow_cookie);
+    let tab_b = begin_login_with_request(
+        &app,
+        "/api/v1/oidc/login?return_to=%2Fproviders%3Fview%3Dall%23page-2",
+        Some(&tab_a_cookie),
+    )
+    .await;
+    assert_ne!(tab_a.cookie_name, tab_b.cookie_name);
+
+    arm_idp(&idp, &tab_b.authorization_url, false).await;
+    let tab_b_callback =
+        callback_request(&app, &tab_b.state, &tab_b.flow_cookie, Some(&tab_a_cookie)).await;
+    assert_eq!(tab_b_callback.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        tab_b_callback.headers()[header::LOCATION].to_str().unwrap(),
+        "/providers?view=all#page-2"
+    );
+    assert_host_cookie_contract(&tab_b_callback, &tab_b.cookie_name);
+    assert!(
+        tab_b_callback
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .all(|value| !value.starts_with(&format!("{}=", tab_a.cookie_name)))
+    );
+
+    arm_idp(&idp, &tab_a.authorization_url, false).await;
+    let tab_a_callback = callback_request(&app, &tab_a.state, &tab_a.flow_cookie, None).await;
+    assert_eq!(tab_a_callback.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        tab_a_callback.headers()[header::LOCATION].to_str().unwrap(),
+        "/settings?tab=security#sessions"
+    );
 
     // Browser state binding rejects the wrong cookie without consuming the
     // legitimate one-time state.
@@ -422,6 +522,32 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     )
     .await;
     assert_eq!(missing_csrf.status(), StatusCode::FORBIDDEN);
+
+    // A second session for the same user cannot complete a link started by the
+    // original setup session, and the failed attempt must not consume it.
+    let owner_second_login = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/sessions",
+        json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(owner_second_login.status(), StatusCode::CREATED);
+    let owner_second_cookies = cookie_header(&owner_second_login);
+    let owner_uuid = Uuid::parse_str(&owner_id).unwrap();
+    let sessions_before_link: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sessions WHERE user_id = $1")
+            .bind(owner_uuid)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+
     let abandoned_login = begin_login(&app).await;
     let link = send_empty_with_origin(
         &app,
@@ -432,15 +558,46 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     )
     .await;
     assert_eq!(link.status(), StatusCode::OK);
-    assert_host_cookie_contract(&link, "__Host-olp_oidc_flow");
-    let link_cookie = named_cookie(&link, "__Host-olp_oidc_flow");
+    let link_cookie_pair = first_scoped_cookie(&link, "__Host-olp_oidc_link_");
+    assert_host_cookie_contract(&link, &link_cookie_pair.0);
     let link_body = response_json(link).await;
     let link_url = link_body["authorization_url"].as_str().unwrap().to_owned();
     let link_state = query_value(&link_url, "state");
+    let link_cookie_name = scoped_cookie_name("__Host-olp_oidc_link_", &link_state);
+    assert_eq!(link_cookie_pair.0, link_cookie_name);
+    let link_cookie = link_cookie_pair.1;
     arm_idp(&idp, &link_url, false).await;
+    let wrong_session =
+        callback_request(&app, &link_state, &link_cookie, Some(&owner_second_cookies)).await;
+    assert_eq!(wrong_session.status(), StatusCode::FORBIDDEN);
+    assert!(
+        wrong_session
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .all(|value| !value.starts_with(&format!("{link_cookie_name}="))),
+        "a different session must not clear the initiating flow cookie"
+    );
+    assert_eq!(
+        response_json(wrong_session).await["type"],
+        "https://openllmproxy.dev/problems/oidc_link_session_changed"
+    );
+    assert!(
+        idp.inner.lock().await.expected.is_some(),
+        "a different session must be rejected before token exchange"
+    );
+    let surviving_flow: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM oidc_authorization_flows WHERE id = $1")
+            .bind(Uuid::parse_str(link_state.split_once('.').unwrap().0).unwrap())
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(surviving_flow, 1);
+
     let cookies_with_abandoned_login = format!(
-        "{owner_cookies}; __Host-olp_oidc_login_flow={}",
-        abandoned_login.flow_cookie
+        "{owner_cookies}; {}={}",
+        abandoned_login.cookie_name, abandoned_login.flow_cookie
     );
     let linked = callback_request(
         &app,
@@ -450,8 +607,34 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     )
     .await;
     assert_eq!(linked.status(), StatusCode::SEE_OTHER);
-    assert_host_cookie_contract(&linked, "__Host-olp_oidc_flow");
-    assert_host_cookie_contract(&linked, "__Host-olp_oidc_login_flow");
+    assert_host_cookie_contract(&linked, &link_cookie_name);
+    assert!(
+        linked
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .all(|value| !value.starts_with(&format!("{}=", abandoned_login.cookie_name))),
+        "completing one tab must not expire another tab's flow cookie"
+    );
+    assert!(
+        linked
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .all(|value| {
+                !value.starts_with("__Host-olp_session=") && !value.starts_with("__Host-olp_csrf=")
+            }),
+        "link completion must preserve the initiating browser session"
+    );
+    let sessions_after_link: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sessions WHERE user_id = $1")
+            .bind(owner_uuid)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(sessions_after_link, sessions_before_link);
 
     let linked_user: String = sqlx::query_scalar(
         "SELECT user_id::text FROM oidc_identities WHERE issuer = $1 AND subject = 'idp-owner-subject'",
@@ -484,7 +667,6 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     )
     .await;
     assert_eq!(unlinked.status(), StatusCode::NO_CONTENT);
-    let owner_uuid = Uuid::parse_str(&owner_id).unwrap();
     let remaining: i64 =
         sqlx::query_scalar("SELECT count(*) FROM oidc_identities WHERE user_id = $1")
             .bind(owner_uuid)
@@ -523,13 +705,17 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
 struct BrowserFlow {
     authorization_url: String,
     state: String,
+    cookie_name: String,
     flow_cookie: String,
 }
 
 async fn begin_login(app: &Router) -> BrowserFlow {
-    let response = send_empty(app, Method::GET, "/api/v1/oidc/login", None, None).await;
+    begin_login_with_request(app, "/api/v1/oidc/login", None).await
+}
+
+async fn begin_login_with_request(app: &Router, uri: &str, cookies: Option<&str>) -> BrowserFlow {
+    let response = send_empty(app, Method::GET, uri, cookies, None).await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_host_cookie_contract(&response, "__Host-olp_oidc_login_flow");
     let authorization_url = response
         .headers()
         .get(header::LOCATION)
@@ -537,8 +723,10 @@ async fn begin_login(app: &Router) -> BrowserFlow {
         .to_str()
         .unwrap()
         .to_owned();
-    let flow_cookie = named_cookie(&response, "__Host-olp_oidc_login_flow");
     let state = query_value(&authorization_url, "state");
+    let cookie_name = scoped_cookie_name("__Host-olp_oidc_login_", &state);
+    assert_host_cookie_contract(&response, &cookie_name);
+    let flow_cookie = named_cookie(&response, &cookie_name);
     assert_eq!(
         query_value(&authorization_url, "code_challenge_method"),
         "S256"
@@ -546,6 +734,7 @@ async fn begin_login(app: &Router) -> BrowserFlow {
     BrowserFlow {
         authorization_url,
         state,
+        cookie_name,
         flow_cookie,
     }
 }
@@ -675,9 +864,9 @@ async fn callback_request(
     session_cookies: Option<&str>,
 ) -> Response<Body> {
     let cookie_name = if flow_cookie.starts_with("v2.") {
-        "__Host-olp_oidc_login_flow"
+        scoped_cookie_name("__Host-olp_oidc_login_", state)
     } else {
-        "__Host-olp_oidc_flow"
+        scoped_cookie_name("__Host-olp_oidc_link_", state)
     };
     let cookies = session_cookies.map_or_else(
         || format!("{cookie_name}={flow_cookie}"),
@@ -774,9 +963,33 @@ fn cookie_header(response: &Response<Body>) -> String {
         .filter(|cookie| {
             !cookie.starts_with("__Host-olp_oidc_flow=")
                 && !cookie.starts_with("__Host-olp_oidc_login_flow=")
+                && !cookie.starts_with("__Host-olp_oidc_login_")
+                && !cookie.starts_with("__Host-olp_oidc_link_")
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+fn scoped_cookie_name(prefix: &str, state: &str) -> String {
+    let flow_id = state
+        .split_once('.')
+        .map(|(flow_id, _)| flow_id)
+        .expect("scoped OIDC state must contain a flow ID");
+    format!("{prefix}{flow_id}")
+}
+
+fn first_scoped_cookie(response: &Response<Body>, prefix: &str) -> (String, String) {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .find_map(|cookie| {
+            let first = cookie.to_str().ok()?.split(';').next()?;
+            let (name, value) = first.split_once('=')?;
+            name.starts_with(prefix)
+                .then(|| (name.to_owned(), value.to_owned()))
+        })
+        .unwrap_or_else(|| panic!("missing cookie with prefix {prefix}"))
 }
 
 fn named_cookie(response: &Response<Body>, name: &str) -> String {

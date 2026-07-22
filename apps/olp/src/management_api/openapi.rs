@@ -1,4 +1,5 @@
-use super::common::{CSRF_HEADER, SESSION_COOKIE};
+use super::common::CSRF_HEADER;
+use crate::request_cookies::SESSION_COOKIE;
 
 pub(super) fn complete_openapi_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
     let mut value = serde_json::to_value(document).expect("generated OpenAPI is serializable");
@@ -31,11 +32,13 @@ pub(super) fn complete_openapi_contract(document: utoipa::openapi::OpenApi) -> s
     );
 
     let public_operations = [
+        ("/api/v1/auth/capabilities", "get"),
         ("/api/v1/setup/status", "get"),
         ("/api/v1/setup", "post"),
         ("/api/v1/sessions", "post"),
         ("/api/v1/invitations/accept", "post"),
         ("/api/v1/oidc/login", "get"),
+        ("/api/v1/oidc/login", "post"),
         ("/api/v1/oidc/callback", "get"),
     ];
     let paths = value

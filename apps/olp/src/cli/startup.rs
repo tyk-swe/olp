@@ -61,10 +61,11 @@ pub(super) async fn serve(
         mode,
         Some(store.clone()),
         runtime,
-        args.public_origin,
+        args.public_origin.as_str(),
         args.console_dir,
         media_spool,
     );
+    state.local_login_enabled = args.local_login_enabled;
     // The browser integration fixture uses a loopback mock identity
     // provider. This branch is compiled out of release binaries, so no
     // deployment setting can weaken the production HTTPS/SSRF policy.

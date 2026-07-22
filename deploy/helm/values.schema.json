@@ -78,6 +78,7 @@
         "bootstrapTokenSecretKey",
         "trustedProxyCidrs",
         "publicOrigin",
+        "localLoginEnabled",
         "databaseMaxConnections"
       ],
       "properties": {
@@ -93,6 +94,7 @@
         "bootstrapTokenSecretKey": { "type": "string", "minLength": 1 },
         "trustedProxyCidrs": { "type": "string" },
         "publicOrigin": { "type": "string", "format": "uri", "minLength": 1 },
+        "localLoginEnabled": { "type": "boolean" },
         "databaseMaxConnections": { "type": "integer", "minimum": 1 }
       }
     },

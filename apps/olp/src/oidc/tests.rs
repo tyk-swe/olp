@@ -14,8 +14,9 @@ use super::claims::{bounded_claim, validate_id_token};
 use super::configuration::{OidcSecret, default_email_claim, default_groups_claim, default_scopes};
 use super::helpers::optional_if_match;
 use super::session::{
-    FLOW_COOKIE, FLOW_TTL, LOGIN_FLOW_COOKIE, LOGIN_FLOW_COOKIE_VERSION, LoginFlowCookiePayload,
-    consume_login_flow_cookie, seal_login_flow_cookie,
+    FLOW_TTL, LOGIN_FLOW_COOKIE, LOGIN_FLOW_COOKIE_VERSION, LoginFlowCookiePayload,
+    OidcCallbackState, OidcFlowId, consume_login_flow_cookie, flow_cookie_name,
+    seal_login_flow_cookie,
 };
 
 // Public test fixture used only to exercise the verifier.
@@ -106,18 +107,30 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
         configuration_id,
         configuration_etag,
         expires_at_unix: (Utc::now() + FLOW_TTL).timestamp(),
+        return_to: crate::RelativeReturnTo::parse("/settings?tab=security#sessions").unwrap(),
     };
     let encoded = seal_login_flow_cookie(&state, &master_key, &payload).unwrap();
     assert!(encoded.starts_with("v2."));
     assert!(!encoded.contains(&payload.nonce));
 
-    let flow = consume_login_flow_cookie(&state, &encoded, &state_token).unwrap();
+    let callback_state = OidcCallbackState::parse(OidcCallbackState::encode(
+        OidcFlowId::from_uuid(payload.flow_id),
+        &state_token,
+    ))
+    .unwrap();
+    let flow = consume_login_flow_cookie(&state, &encoded, &callback_state).unwrap();
     assert_eq!(flow.purpose, OidcFlowPurpose::Login);
     assert_eq!(flow.configuration_id, configuration_id);
     assert_eq!(flow.configuration_etag, configuration_etag);
+    assert_eq!(flow.return_to.as_str(), "/settings?tab=security#sessions");
     assert_eq!(flow.login_consumption.unwrap().flow_id, payload.flow_id);
     assert_eq!(flow.secret.nonce, payload.nonce);
-    assert!(consume_login_flow_cookie(&state, &encoded, &"d".repeat(43)).is_err());
+    let wrong_state = OidcCallbackState::parse(OidcCallbackState::encode(
+        OidcFlowId::from_uuid(payload.flow_id),
+        &"d".repeat(43),
+    ))
+    .unwrap();
+    assert!(consume_login_flow_cookie(&state, &encoded, &wrong_state).is_err());
 
     let mut other_origin = ApiState::new(
         crate::ApiMode::Control,
@@ -127,11 +140,11 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
         std::path::PathBuf::from("missing-console"),
     );
     other_origin.master_key = Some(std::sync::Arc::new(master_key));
-    assert!(consume_login_flow_cookie(&other_origin, &encoded, &state_token).is_err());
+    assert!(consume_login_flow_cookie(&other_origin, &encoded, &callback_state).is_err());
 }
 
 #[test]
-fn callback_prefers_the_flow_cookie_matching_its_state() {
+fn callback_prefers_the_flow_specific_cookie_matching_its_state() {
     let mut state = ApiState::new(
         crate::ApiMode::Control,
         None,
@@ -141,28 +154,42 @@ fn callback_prefers_the_flow_cookie_matching_its_state() {
     );
     let master_key = MasterKey::new(1, [8; 32]);
     state.master_key = Some(std::sync::Arc::new(MasterKey::new(1, [8; 32])));
-    let login_state = "a".repeat(43);
-    let link_state = "d".repeat(43);
+    let login_secret = "a".repeat(43);
+    let link_secret = "d".repeat(43);
+    let login_id = OidcFlowId::generate();
+    let link_id = OidcFlowId::generate();
     let encoded = seal_login_flow_cookie(
         &state,
         &master_key,
         &LoginFlowCookiePayload {
             version: LOGIN_FLOW_COOKIE_VERSION,
-            flow_id: Uuid::now_v7(),
-            state: login_state.clone(),
+            flow_id: login_id.as_uuid(),
+            state: login_secret.clone(),
             nonce: "b".repeat(43),
             pkce_verifier: "c".repeat(43),
             configuration_id: Uuid::now_v7(),
             configuration_etag: Uuid::now_v7(),
             expires_at_unix: (Utc::now() + FLOW_TTL).timestamp(),
+            return_to: Default::default(),
         },
     )
     .unwrap();
+    let login_state = OidcCallbackState::encode(login_id, &login_secret);
+    let link_state = OidcCallbackState::encode(link_id, &link_secret);
     let mut headers = HeaderMap::new();
-    headers.insert(
+    headers.append(
         header::COOKIE,
         HeaderValue::from_str(&format!(
-            "{LOGIN_FLOW_COOKIE}={encoded}; {FLOW_COOKIE}={}",
+            "{}={encoded}",
+            flow_cookie_name(OidcFlowPurpose::Login, login_id)
+        ))
+        .unwrap(),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_str(&format!(
+            "{}={}",
+            flow_cookie_name(OidcFlowPurpose::Link, link_id),
             "e".repeat(43)
         ))
         .unwrap(),
@@ -179,11 +206,11 @@ fn callback_prefers_the_flow_cookie_matching_its_state() {
             .is_none()
     );
 
-    headers.insert(
-        header::COOKIE,
-        HeaderValue::from_str(&format!("{LOGIN_FLOW_COOKIE}={encoded}")).unwrap(),
-    );
-    assert!(matching_login_callback_flow(&state, &headers, &link_state).is_err());
+    // A state for the same flow ID but a different secret selects the exact
+    // login cookie and fails its authenticated binding rather than falling
+    // through to another tab's flow.
+    let wrong_login_state = OidcCallbackState::encode(login_id, &link_secret);
+    assert!(matching_login_callback_flow(&state, &headers, &wrong_login_state).is_err());
 }
 
 #[test]
@@ -206,17 +233,23 @@ fn expired_or_tampered_stateless_login_cookie_is_rejected() {
         configuration_id: Uuid::now_v7(),
         configuration_etag: Uuid::now_v7(),
         expires_at_unix: Utc::now().timestamp() - 1,
+        return_to: Default::default(),
     };
+    let callback_state = OidcCallbackState::parse(OidcCallbackState::encode(
+        OidcFlowId::from_uuid(payload.flow_id),
+        &payload.state,
+    ))
+    .unwrap();
     let encoded = seal_login_flow_cookie(&state, &master_key, &payload).unwrap();
-    assert!(consume_login_flow_cookie(&state, &encoded, &payload.state).is_err());
+    assert!(consume_login_flow_cookie(&state, &encoded, &callback_state).is_err());
     let mut tampered = encoded;
     tampered.push('x');
-    assert!(consume_login_flow_cookie(&state, &tampered, &payload.state).is_err());
+    assert!(consume_login_flow_cookie(&state, &tampered, &callback_state).is_err());
 
     let encoded = seal_login_flow_cookie(&state, &master_key, &payload).unwrap();
     for alias in ["v02.", "v+2."] {
         let aliased = encoded.replacen("v2.", alias, 1);
-        assert!(consume_login_flow_cookie(&state, &aliased, &payload.state).is_err());
+        assert!(consume_login_flow_cookie(&state, &aliased, &callback_state).is_err());
     }
 }
 

@@ -19,6 +19,17 @@ pub(super) fn invalid_callback() -> Problem {
     )
 }
 
+pub(super) fn link_session_changed() -> Problem {
+    Problem::forbidden(
+        "oidc_link_session_changed",
+        "Sign in with the exact local session that started this link operation.",
+    )
+}
+
+pub(super) fn is_link_session_changed(problem: &Problem) -> bool {
+    problem.problem_type.as_ref() == "https://openllmproxy.dev/problems/oidc_link_session_changed"
+}
+
 pub(super) fn invalid_id_token() -> Problem {
     Problem::unauthorized("The ID token is invalid.")
 }
@@ -38,7 +49,7 @@ pub(super) fn oidc_not_configured() -> Problem {
     )
 }
 
-pub(super) fn map_oidc(error: OidcError) -> Problem {
+pub(crate) fn map_oidc(error: OidcError) -> Problem {
     match error {
         OidcError::Persistence(error) => {
             error!(%error, "OIDC persistence operation failed");
@@ -62,6 +73,7 @@ pub(super) fn map_oidc(error: OidcError) -> Problem {
             "oidc_flow_unavailable",
             "The authorization flow is invalid, expired, or already consumed.",
         ),
+        OidcError::FlowSessionMismatch => link_session_changed(),
         OidcError::FlowCapacity => Problem::service_unavailable("oidc_flow_capacity_exhausted"),
         OidcError::FlowRateLimited => Problem::new(
             StatusCode::TOO_MANY_REQUESTS,

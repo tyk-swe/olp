@@ -12,17 +12,18 @@ const MAX_AUTHORIZATION_FLOWS_PER_MINUTE: i64 = 300;
 const OIDC_LOGIN_CONSUMPTION_DELETE_BATCH: i64 = 1_000;
 
 impl PgStore {
-    /// Persists an authenticated identity-link flow. New anonymous login
-    /// flows are encrypted browser cookies and must never create a database
-    /// row; persisted login rows are accepted only by the legacy callback
-    /// consumer until they expire.
+    /// Persists an authenticated identity-link flow. Anonymous login flows
+    /// are encrypted browser cookies and must never create a database row.
     pub async fn create_oidc_flow(&self, flow: NewOidcFlow) -> Result<(), OidcError> {
         if flow.purpose == OidcFlowPurpose::Login {
             return Err(OidcError::Invalid(
                 "new OIDC login flows are stateless and cannot be persisted".to_owned(),
             ));
         }
-        if flow.expires_at <= Utc::now() || flow.actor_user_id.is_none() {
+        if flow.expires_at <= Utc::now()
+            || flow.actor_user_id.is_none()
+            || flow.actor_session_id.is_none()
+        {
             return Err(OidcError::Invalid(
                 "authorization flow metadata is invalid".to_owned(),
             ));
@@ -62,16 +63,17 @@ impl PgStore {
         }
         sqlx::query(
             "INSERT INTO oidc_authorization_flows \
-             (id, configuration_id, configuration_etag, purpose, actor_user_id, state_digest, \
-              browser_binding_digest, client_digest, encrypted_payload, payload_nonce, \
+             (id, configuration_id, configuration_etag, purpose, actor_user_id, actor_session_id, \
+              state_digest, browser_binding_digest, client_digest, encrypted_payload, payload_nonce, \
               payload_key_version, expires_at, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10, $11, now())",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11, $12, now())",
         )
         .bind(flow.id)
         .bind(flow.configuration_id)
         .bind(flow.configuration_etag)
         .bind(flow.purpose.as_str())
         .bind(flow.actor_user_id)
+        .bind(flow.actor_session_id)
         .bind(flow.state_digest.to_vec())
         .bind(flow.browser_binding_digest.to_vec())
         .bind(flow.encrypted_payload.ciphertext)
@@ -120,38 +122,59 @@ impl PgStore {
         Ok(())
     }
 
-    /// Atomically consumes state only when both the callback state and the
-    /// browser-binding cookie match. A mismatch cannot burn another browser's
-    /// legitimate flow.
+    /// Atomically consumes state only when the protected flow identifier,
+    /// callback state, browser binding, and exact initiating session all
+    /// match. A different live session receives a distinct non-consuming
+    /// result so its callback cannot invalidate the initiating browser flow.
     pub async fn consume_oidc_flow(
         &self,
+        flow_id: Uuid,
         state: &str,
         browser_binding: &str,
+        actor_session_id: Uuid,
     ) -> Result<OidcFlowRecord, OidcError> {
         if state.len() != 43 || browser_binding.len() != 43 {
             return Err(OidcError::FlowUnavailable);
         }
+        let mut transaction = self.pool().begin().await?;
         let row = sqlx::query(
-            "DELETE FROM oidc_authorization_flows \
-             WHERE state_digest = $1 AND browser_binding_digest = $2 AND expires_at > now() \
-             RETURNING id, configuration_id, purpose, actor_user_id, encrypted_payload, \
-                       payload_nonce, payload_key_version",
+            "SELECT id, configuration_id, purpose, actor_user_id, actor_session_id, \
+                    encrypted_payload, payload_nonce, payload_key_version \
+             FROM oidc_authorization_flows \
+             WHERE id = $1 AND state_digest = $2 AND browser_binding_digest = $3 \
+               AND expires_at > now() \
+             FOR UPDATE",
         )
+        .bind(flow_id)
         .bind(token_digest(state).to_vec())
         .bind(token_digest(browser_binding).to_vec())
-        .fetch_optional(self.pool())
+        .fetch_optional(&mut *transaction)
         .await?
         .ok_or(OidcError::FlowUnavailable)?;
-        Ok(OidcFlowRecord {
+        if row.get::<Option<Uuid>, _>("actor_session_id") != Some(actor_session_id) {
+            transaction.rollback().await?;
+            return Err(OidcError::FlowSessionMismatch);
+        }
+        let deleted = sqlx::query("DELETE FROM oidc_authorization_flows WHERE id = $1")
+            .bind(flow_id)
+            .execute(&mut *transaction)
+            .await?;
+        if deleted.rows_affected() != 1 {
+            return Err(OidcError::Corrupt);
+        }
+        let flow = OidcFlowRecord {
             id: row.get("id"),
             configuration_id: row.get("configuration_id"),
             purpose: OidcFlowPurpose::parse(row.get("purpose"))?,
             actor_user_id: row.get("actor_user_id"),
+            actor_session_id: row.get("actor_session_id"),
             encrypted_payload: encrypted_from_row(
                 row.get("payload_key_version"),
                 row.get("payload_nonce"),
                 row.get("encrypted_payload"),
             )?,
-        })
+        };
+        transaction.commit().await?;
+        Ok(flow)
     }
 }

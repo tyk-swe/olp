@@ -69,7 +69,7 @@ pub fn public_router(state: ApiState) -> Router {
             .route("/gemini/{*path}", any(protocol_not_found));
     }
 
-    router
+    let router = router
         .layer(
             ServiceBuilder::new()
                 .layer(SetSensitiveRequestHeadersLayer::new(
@@ -111,8 +111,16 @@ pub fn public_router(state: ApiState) -> Router {
             request_limit_state,
             enforce_request_limits,
         ))
-        .layer(middleware::from_fn(normalize_management_rejection))
-        .with_state(state)
+        .layer(middleware::from_fn(normalize_management_rejection));
+    let router = if state.public_origin.is_https() {
+        router.layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("strict-transport-security"),
+            axum::http::HeaderValue::from_static("max-age=31536000"),
+        ))
+    } else {
+        router
+    };
+    router.with_state(state)
 }
 
 /// Builds the public router only after proving the selected mode's dependency
@@ -263,4 +271,42 @@ async fn protocol_not_found(uri: Uri) -> Problem {
         "The requested inference endpoint is not enabled in this release.",
     )
     .with_instance(&uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt as _;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn hsts_follows_the_canonical_public_origin_scheme() {
+        for (origin, expected) in [
+            ("https://console.example.test", true),
+            ("http://127.0.0.1:8080", false),
+        ] {
+            let state = ApiState::new(
+                crate::ApiMode::Control,
+                None,
+                std::sync::Arc::new(crate::RuntimeManager::empty()),
+                origin,
+                std::path::PathBuf::from("missing-console"),
+            );
+            let response = public_router(state)
+                .oneshot(
+                    Request::builder()
+                        .uri("/metrics")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.headers().contains_key("strict-transport-security"),
+                expected,
+                "{origin}",
+            );
+        }
+    }
 }

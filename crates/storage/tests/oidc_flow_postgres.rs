@@ -24,6 +24,11 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
         })
         .await
         .unwrap();
+    let actor_session_material = SessionMaterial::generate();
+    let actor_session_id = store
+        .create_session(owner.user_id, &actor_session_material, Duration::hours(1))
+        .await
+        .unwrap();
     let key = MasterKey::new(1, [53; 32]);
     let configuration_id = Uuid::now_v7();
 
@@ -98,17 +103,64 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
         Err(OidcError::Invalid(_))
     ));
 
-    let stale_flow = link_flow(&key, configuration_id, first.etag, owner.user_id);
+    let stale_flow = link_flow(
+        &key,
+        configuration_id,
+        first.etag,
+        owner.user_id,
+        actor_session_id,
+    );
     assert!(matches!(
         store.create_oidc_flow(stale_flow).await,
         Err(OidcError::PreconditionFailed)
     ));
+    let state = "s".repeat(43);
+    let browser_binding = "b".repeat(43);
+    let consumable = link_flow_with_tokens(
+        &key,
+        configuration_id,
+        current.etag,
+        owner.user_id,
+        actor_session_id,
+        &state,
+        &browser_binding,
+    );
+    let flow_id = consumable.id;
+    store.create_oidc_flow(consumable).await.unwrap();
+    assert!(matches!(
+        store
+            .consume_oidc_flow(Uuid::now_v7(), &state, &browser_binding, actor_session_id,)
+            .await,
+        Err(OidcError::FlowUnavailable)
+    ));
+    assert!(matches!(
+        store
+            .consume_oidc_flow(flow_id, &state, &browser_binding, Uuid::now_v7())
+            .await,
+        Err(OidcError::FlowSessionMismatch)
+    ));
+    let consumed = store
+        .consume_oidc_flow(flow_id, &state, &browser_binding, actor_session_id)
+        .await
+        .unwrap();
+    assert_eq!(consumed.id, flow_id);
+    assert_eq!(consumed.actor_session_id, Some(actor_session_id));
+    assert!(matches!(
+        store
+            .consume_oidc_flow(flow_id, &state, &browser_binding, actor_session_id)
+            .await,
+        Err(OidcError::FlowUnavailable)
+    ));
+
+    // Configuration changes still invalidate any independently outstanding
+    // link redirect.
     store
         .create_oidc_flow(link_flow(
             &key,
             configuration_id,
             current.etag,
             owner.user_id,
+            actor_session_id,
         ))
         .await
         .unwrap();
@@ -135,6 +187,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
                 configuration_id,
                 disabled.etag,
                 owner.user_id,
+                actor_session_id,
             ))
             .await,
         Err(OidcError::Disabled)
@@ -230,6 +283,7 @@ fn link_flow(
     configuration_id: Uuid,
     configuration_etag: Uuid,
     actor_user_id: Uuid,
+    actor_session_id: Uuid,
 ) -> NewOidcFlow {
     let id = Uuid::now_v7();
     NewOidcFlow {
@@ -238,8 +292,35 @@ fn link_flow(
         configuration_etag,
         purpose: OidcFlowPurpose::Link,
         actor_user_id: Some(actor_user_id),
+        actor_session_id: Some(actor_session_id),
         state_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         browser_binding_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
+        encrypted_payload: key
+            .seal(b"flow-secret", &oidc_flow_payload_aad(id))
+            .unwrap(),
+        expires_at: Utc::now() + Duration::minutes(5),
+    }
+}
+
+fn link_flow_with_tokens(
+    key: &MasterKey,
+    configuration_id: Uuid,
+    configuration_etag: Uuid,
+    actor_user_id: Uuid,
+    actor_session_id: Uuid,
+    state: &str,
+    browser_binding: &str,
+) -> NewOidcFlow {
+    let id = Uuid::now_v7();
+    NewOidcFlow {
+        id,
+        configuration_id,
+        configuration_etag,
+        purpose: OidcFlowPurpose::Link,
+        actor_user_id: Some(actor_user_id),
+        actor_session_id: Some(actor_session_id),
+        state_digest: Sha256::digest(state.as_bytes()).into(),
+        browser_binding_digest: Sha256::digest(browser_binding.as_bytes()).into(),
         encrypted_payload: key
             .seal(b"flow-secret", &oidc_flow_payload_aad(id))
             .unwrap(),
@@ -255,6 +336,7 @@ fn login_flow(key: &MasterKey, configuration_id: Uuid, configuration_etag: Uuid)
         configuration_etag,
         purpose: OidcFlowPurpose::Login,
         actor_user_id: None,
+        actor_session_id: None,
         state_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         browser_binding_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         encrypted_payload: key

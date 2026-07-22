@@ -7,8 +7,8 @@ mod helpers;
 mod identities;
 mod session;
 
-pub use authorization::OidcAuthorizationResponse;
-use authorization::{begin_link, begin_login};
+pub use authorization::{OidcAuthorizationResponse, OidcLoginRequest};
+use authorization::{begin_link, begin_login, begin_login_post};
 use axum::{Router, routing::get, routing::post};
 use callback::callback;
 pub use configuration::{
@@ -22,13 +22,18 @@ use utoipa::OpenApi;
 
 use crate::{ApiState, Problem};
 
+pub(crate) use error::map_oidc;
+
 pub(crate) fn router() -> Router<ApiState> {
     Router::new()
         .route(
             "/api/v1/oidc/configuration",
             get(get_configuration).put(put_configuration),
         )
-        .route("/api/v1/oidc/login", get(begin_login))
+        .route(
+            "/api/v1/oidc/login",
+            get(begin_login).post(begin_login_post),
+        )
         .route("/api/v1/oidc/link", post(begin_link))
         .route("/api/v1/oidc/identities", get(list_identities))
         .route(
@@ -44,6 +49,7 @@ pub(crate) fn router() -> Router<ApiState> {
         configuration::get_configuration,
         configuration::put_configuration,
         authorization::begin_login,
+        authorization::begin_login_post,
         authorization::begin_link,
         identities::list_identities,
         identities::unlink_identity,
@@ -55,6 +61,7 @@ pub(crate) fn router() -> Router<ApiState> {
         OidcRoleMappingRequest,
         OidcRoleMappingResponse,
         OidcAuthorizationResponse,
+        OidcLoginRequest,
         OidcIdentityResponse,
         OidcIdentityListResponse,
         Problem

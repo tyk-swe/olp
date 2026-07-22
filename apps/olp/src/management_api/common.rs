@@ -18,10 +18,11 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-use crate::{ApiState, FieldErrors, Problem};
+use crate::{
+    ApiState, FieldErrors, Problem,
+    request_cookies::{RequestCookies, SESSION_COOKIE},
+};
 
-pub(super) const SESSION_COOKIE: &str = "__Host-olp_session";
-pub(super) const CSRF_COOKIE: &str = "__Host-olp_csrf";
 pub(crate) const CSRF_HEADER: &str = "x-csrf-token";
 pub(crate) const SETUP_TOKEN_HEADER: &str = "x-olp-setup-token";
 
@@ -132,7 +133,7 @@ pub(crate) fn enforce_origin(state: &ApiState, headers: &HeaderMap) -> Result<()
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| Problem::forbidden("origin_required", "An Origin header is required."))?;
-    if origin.trim_end_matches('/') != state.public_origin.as_ref() {
+    if !state.public_origin.matches_header(origin) {
         warn!(%origin, "rejected cross-origin management mutation");
         return Err(Problem::forbidden(
             "origin_not_allowed",
@@ -143,20 +144,16 @@ pub(crate) fn enforce_origin(state: &ApiState, headers: &HeaderMap) -> Result<()
 }
 
 pub(super) fn session_cookie(headers: &HeaderMap) -> Result<&str, Problem> {
-    cookie(headers, SESSION_COOKIE)
+    RequestCookies::parse(headers)?
+        .get(SESSION_COOKIE)
         .ok_or_else(|| Problem::unauthorized("The session cookie is missing."))
 }
 
-pub(super) fn cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
-    headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies.split(';').find_map(|cookie| {
-                let (name, value) = cookie.trim().split_once('=')?;
-                (name == expected_name).then_some(value)
-            })
-        })
+pub(super) fn cookie<'a>(
+    headers: &'a HeaderMap,
+    expected_name: &str,
+) -> Result<Option<&'a str>, Problem> {
+    Ok(RequestCookies::parse(headers)?.get(expected_name))
 }
 
 pub(crate) fn require_store(state: &ApiState) -> Result<&PgStore, Problem> {

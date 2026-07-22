@@ -189,6 +189,26 @@ fn cookie_parser_uses_only_host_session_cookie() {
 }
 
 #[test]
+fn cookie_parser_combines_repeated_fields_and_rejects_conflicts() {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("other=x; malformed pair"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=secret"),
+    );
+    assert_eq!(session_cookie(&headers).unwrap(), "secret");
+
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=different"),
+    );
+    assert_eq!(session_cookie(&headers).unwrap_err().status, 400);
+}
+
+#[test]
 fn idempotency_key_requires_url_safe_header_value() {
     let mut headers = HeaderMap::new();
     assert_eq!(require_idempotency_key(&headers).unwrap_err().status, 400);

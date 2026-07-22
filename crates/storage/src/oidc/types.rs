@@ -25,6 +25,8 @@ pub enum OidcError {
     PreconditionFailed,
     #[error("the OIDC authorization flow is invalid, expired, or already consumed")]
     FlowUnavailable,
+    #[error("the OIDC link flow belongs to a different authenticated session")]
+    FlowSessionMismatch,
     #[error("the OIDC authorization flow capacity is exhausted")]
     FlowCapacity,
     #[error("OIDC authorization is rate limited")]
@@ -246,6 +248,8 @@ pub struct NewOidcFlow {
     pub configuration_etag: Uuid,
     pub purpose: OidcFlowPurpose,
     pub actor_user_id: Option<Uuid>,
+    /// Exact authenticated session that initiated a link flow.
+    pub actor_session_id: Option<Uuid>,
     pub state_digest: [u8; 32],
     pub browser_binding_digest: [u8; 32],
     pub encrypted_payload: EncryptedSecret,
@@ -261,6 +265,7 @@ impl fmt::Debug for NewOidcFlow {
             .field("configuration_etag", &self.configuration_etag)
             .field("purpose", &self.purpose)
             .field("actor_user_id", &self.actor_user_id)
+            .field("actor_session_id", &self.actor_session_id)
             .field("state_digest", &"[REDACTED]")
             .field("browser_binding_digest", &"[REDACTED]")
             .field("encrypted_payload", &"[REDACTED]")
@@ -275,6 +280,7 @@ pub struct OidcFlowRecord {
     pub configuration_id: Uuid,
     pub purpose: OidcFlowPurpose,
     pub actor_user_id: Option<Uuid>,
+    pub actor_session_id: Option<Uuid>,
     pub encrypted_payload: EncryptedSecret,
 }
 
@@ -286,6 +292,7 @@ impl fmt::Debug for OidcFlowRecord {
             .field("configuration_id", &self.configuration_id)
             .field("purpose", &self.purpose)
             .field("actor_user_id", &self.actor_user_id)
+            .field("actor_session_id", &self.actor_session_id)
             .field("encrypted_payload", &"[REDACTED]")
             .finish()
     }
@@ -340,13 +347,12 @@ impl fmt::Debug for CompleteOidcLogin<'_> {
 
 pub struct CompleteOidcLink<'a> {
     pub user_id: Uuid,
+    pub session_id: Uuid,
     pub configuration_id: Uuid,
     pub configuration_etag: Uuid,
     pub issuer: &'a str,
     pub subject: &'a str,
     pub email: Option<&'a str>,
-    pub session: &'a SessionMaterial,
-    pub session_ttl: Duration,
 }
 
 impl fmt::Debug for CompleteOidcLink<'_> {
@@ -354,13 +360,12 @@ impl fmt::Debug for CompleteOidcLink<'_> {
         formatter
             .debug_struct("CompleteOidcLink")
             .field("user_id", &self.user_id)
+            .field("session_id", &self.session_id)
             .field("configuration_id", &self.configuration_id)
             .field("configuration_etag", &self.configuration_etag)
             .field("issuer", &self.issuer)
             .field("subject", &self.subject)
             .field("email", &self.email)
-            .field("session", &"[REDACTED]")
-            .field("session_ttl", &self.session_ttl)
             .finish()
     }
 }

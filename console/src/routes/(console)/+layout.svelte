@@ -18,7 +18,7 @@
   let activeController: AbortController | undefined;
 
   function loginDestination() {
-    const returnTo = `${page.url.pathname}${page.url.search}`;
+    const returnTo = `${page.url.pathname}${page.url.search}${page.url.hash}`;
     return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}`;
   }
 

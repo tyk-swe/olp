@@ -18,11 +18,44 @@ use zeroize::Zeroizing;
 use super::common::*;
 use crate::{
     ApiState, FieldErrors, FirstOwnerSetupAuthorized, Problem, public_auth_source_target_digests,
+    request_cookies::{CSRF_COOKIE, SESSION_COOKIE},
 };
 
 pub(super) const PASSWORD_WORK_CONCURRENCY: usize = 4;
 pub(super) const INVALID_LOGIN_RATE_LIMIT_TARGET: &str = "<invalid-local-login-target>";
 static PASSWORD_WORK: Semaphore = Semaphore::const_new(PASSWORD_WORK_CONCURRENCY);
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct AuthenticationCapabilities {
+    pub local_login_enabled: bool,
+    pub oidc_login_enabled: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/capabilities",
+    tag = "sessions",
+    responses(
+        (status = 200, description = "Public authentication capabilities", body = AuthenticationCapabilities),
+        (status = 503, description = "PostgreSQL unavailable", body = Problem)
+    )
+)]
+pub(super) async fn authentication_capabilities(
+    State(state): State<ApiState>,
+) -> Result<Response, Problem> {
+    let oidc_login_enabled = require_store(&state)?
+        .oidc_configuration()
+        .await
+        .map_err(crate::oidc::map_oidc)?
+        .is_some_and(|configuration| configuration.enabled);
+    let mut response = Json(AuthenticationCapabilities {
+        local_login_enabled: state.local_login_enabled,
+        oidc_login_enabled,
+    })
+    .into_response();
+    prevent_sensitive_response_caching(&mut response);
+    Ok(response)
+}
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct SetupStatus {
@@ -192,6 +225,7 @@ impl fmt::Debug for LoginRequest {
     responses(
         (status = 201, description = "Session created", body = SessionResponse),
         (status = 401, description = "Invalid credentials", body = Problem),
+        (status = 404, description = "Local password sign-in is disabled", body = Problem),
         (status = 429, description = "Authentication work is rate limited", body = Problem),
         (status = 422, description = "Validation failed", body = Problem)
     )
@@ -202,6 +236,14 @@ pub(super) async fn login(
     headers: HeaderMap,
     payload: Result<Json<LoginRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
+    if !state.local_login_enabled {
+        return Err(Problem::new(
+            StatusCode::NOT_FOUND,
+            "local_login_disabled",
+            "Local sign-in disabled",
+            "Password-based local sign-in is disabled for this installation.",
+        ));
+    }
     enforce_origin(&state, &headers)?;
     let request = json_payload(payload)?;
     let store = require_store(&state)?;
@@ -292,7 +334,7 @@ pub(super) async fn current_session(
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
-    let csrf_token = cookie(&headers, CSRF_COOKIE)
+    let csrf_token = cookie(&headers, CSRF_COOKIE)?
         .filter(|csrf| SessionMaterial::verify_csrf(csrf, &principal.csrf_digest))
         .unwrap_or_default()
         .to_owned();

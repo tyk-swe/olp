@@ -159,7 +159,6 @@ impl PgStore {
     ) -> Result<OidcAuthenticatedUser, OidcError> {
         validate_subject(input.subject)?;
         let now = Utc::now();
-        let expires_at = checked_session_expiry(now, input.session_ttl)?;
         let mut transaction = self.pool().begin().await?;
         require_current_enabled_configuration(
             &mut transaction,
@@ -167,6 +166,22 @@ impl PgStore {
             input.configuration_etag,
         )
         .await?;
+        // Hold a lock on the exact initiating session until the identity link
+        // commits. This closes the gap between HTTP authentication and the
+        // storage transaction: a concurrently revoked or expired session
+        // cannot authorize the link, and revocation cannot complete midway.
+        let initiating_session = sqlx::query(
+            "SELECT id FROM sessions \
+             WHERE id = $1 AND user_id = $2 AND expires_at > $3 FOR KEY SHARE",
+        )
+        .bind(input.session_id)
+        .bind(input.user_id)
+        .bind(now)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if initiating_session.is_none() {
+            return Err(OidcError::FlowUnavailable);
+        }
         lock_subject(&mut transaction, input.issuer, input.subject).await?;
         let user_row = sqlx::query(
             "SELECT id, email, display_name, role::text AS role, active \
@@ -214,14 +229,6 @@ impl PgStore {
         .bind(normalized_claim_email)
         .bind(now)
         .execute(&mut *transaction)
-        .await?;
-        insert_session(
-            &mut transaction,
-            input.user_id,
-            input.session,
-            expires_at,
-            now,
-        )
         .await?;
         insert_audit(
             &mut transaction,
