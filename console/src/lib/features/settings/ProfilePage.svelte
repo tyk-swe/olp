@@ -23,6 +23,9 @@
   const ENROLLMENT_GRANT_TTL_MS = 5 * 60 * 1000;
   const ENROLLMENT_GRANT_READY_MESSAGE =
     'Identity verified. Add your local password within five minutes.';
+  type PendingIdentityAction =
+    | { purpose: 'oidc_link' }
+    | { purpose: 'oidc_unlink'; resourceId: string };
 
   let displayName = $state('');
   let displayNameError = $state('');
@@ -37,6 +40,7 @@
   let revoking = $state('');
   let identityBusy = $state('');
   let identityError = $state('');
+  let pendingIdentityAction = $state<PendingIdentityAction | undefined>();
   let enrollmentGrantReady = $state(false);
   let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
   let sessionCursor = $state<string | undefined>();
@@ -63,6 +67,9 @@
     const resourceId = parameters.get('resource_id') ?? undefined;
     if (['password_enrollment', 'oidc_link', 'oidc_unlink'].includes(purpose ?? '')) {
       window.history.replaceState(window.history.state, '', window.location.pathname);
+      // Callback query parameters are only a display hint. They must never
+      // directly begin a link or unlink request, because another site can
+      // navigate a signed-in browser to this URL.
       void resumeSecurityOperation(purpose as 'password_enrollment' | 'oidc_link' | 'oidc_unlink', resourceId);
     }
     return cancelEnrollmentGrantExpiry;
@@ -97,18 +104,38 @@
     identityError = passwordError = message = '';
     try {
       if (purpose === 'password_enrollment') {
+        pendingIdentityAction = undefined;
         markEnrollmentGrantReady();
         message = ENROLLMENT_GRANT_READY_MESSAGE;
         return;
       }
       if (purpose === 'oidc_link') {
-        identityBusy = 'link';
-        window.location.assign(await beginOidcLink());
+        pendingIdentityAction = { purpose };
+        message = 'Identity verified. Confirm before linking your OIDC identity.';
         return;
       }
       if (!resourceId) throw new Error('The identity selected for unlinking is missing.');
-      identityBusy = resourceId;
-      await unlinkOidcIdentity(resourceId);
+      pendingIdentityAction = { purpose, resourceId };
+      message = 'Identity verified. Confirm before unlinking this OIDC identity.';
+    } catch (cause) {
+      identityError = cause instanceof Error ? cause.message : 'The security operation could not be completed.';
+    } finally {
+      identityBusy = '';
+    }
+  }
+
+  async function completePendingIdentityAction() {
+    const action = pendingIdentityAction;
+    if (!action) return;
+    identityBusy = action.purpose === 'oidc_link' ? 'link' : action.resourceId;
+    identityError = message = '';
+    try {
+      if (action.purpose === 'oidc_link') {
+        window.location.assign(await beginOidcLink());
+        return;
+      }
+      await unlinkOidcIdentity(action.resourceId);
+      pendingIdentityAction = undefined;
       message = 'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
       await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
@@ -237,6 +264,7 @@
   }
 
   async function linkIdentity() {
+    pendingIdentityAction = undefined;
     identityBusy = 'link';
     identityError = '';
     try {
@@ -251,6 +279,7 @@
 
   async function unlinkIdentity(id: string, issuer: string) {
     if (!confirm(`Unlink the identity from ${issuer}?`)) return;
+    pendingIdentityAction = undefined;
     identityBusy = id;
     identityError = '';
     try {
@@ -325,6 +354,8 @@
         {#if identities.data?.data.length}
           <div class="identity-list">{#each identities.data.data as identity (identity.id)}<article class="identity-row"><div><strong>{identity.email_at_link ?? 'OIDC identity'}</strong><small>{identity.issuer}</small><small>{identity.last_login_at ? `Last used ${formatDate(identity.last_login_at)}` : `Linked ${formatDate(identity.created_at)}`}</small></div><button class="button button-secondary" type="button" onclick={() => unlinkIdentity(identity.id, identity.issuer)} disabled={!identity.can_unlink || Boolean(identityBusy)} title={identity.can_unlink ? 'Unlink this identity' : 'Add another authentication method before unlinking'}>{identityBusy === identity.id ? 'Unlinking…' : 'Unlink'}</button></article>{/each}</div>
         {:else}<p class="security-note">No OIDC identity is linked to this account.</p>{/if}
+        {#if pendingIdentityAction?.purpose === 'oidc_link'}<p class="security-note">Your fresh identity verification is ready. Confirm to continue to your identity provider.</p><button class="button button-primary" type="button" onclick={completePendingIdentityAction} disabled={Boolean(identityBusy)}>{identityBusy === 'link' ? 'Redirecting…' : 'Confirm OIDC identity link'}</button>{/if}
+        {#if pendingIdentityAction?.purpose === 'oidc_unlink'}<p class="security-note">Your fresh identity verification is ready. Confirm the selected OIDC identity unlink.</p><button class="button button-secondary danger-button" type="button" onclick={completePendingIdentityAction} disabled={Boolean(identityBusy)}>{identityBusy === pendingIdentityAction.resourceId ? 'Unlinking…' : 'Confirm OIDC identity unlink'}</button>{/if}
         {#if identities.data?.linking_available}<button class="button button-secondary" type="button" onclick={linkIdentity} disabled={Boolean(identityBusy)}>{identityBusy === 'link' ? 'Redirecting…' : 'Link an OIDC identity'}</button>{/if}
       {/if}
       {#if identityError}<p class="field-error" role="alert">{identityError}</p>{/if}
@@ -355,6 +386,7 @@
   dd { margin: 0.1rem 0 0; }
   .field-error { margin: 0; color: var(--danger); font-weight: 700; }
   .security-note { margin: 0; color: var(--foreground-muted); font-size: 0.75rem; }
+  .danger-button { color: var(--danger); }
   .sessions { margin-top: 2rem; }
   .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; }
   .section-heading p:last-child { margin: 0.3rem 0 0; color: var(--foreground-muted); }

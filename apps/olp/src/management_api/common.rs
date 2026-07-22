@@ -9,8 +9,8 @@ use axum::{
 };
 use olp_domain::{Permission, Role};
 use olp_storage::{
-    AccessError, ConfigurationError, CsrfMaterial, IdempotencyOutcome, IdentityError,
-    PersistenceError, PgStore, RecentAuthMaterial, SessionMaterial, SessionPrincipal,
+    AccessError, ConfigurationError, IdempotencyOutcome, IdentityError, PersistenceError, PgStore,
+    RecentAuthMaterial, SessionMaterial, SessionPrincipal,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use tracing::{error, warn};
@@ -151,21 +151,6 @@ pub(crate) fn append_security_transition_cookies(
     clear_recent_auth_cookie(response);
     prevent_sensitive_response_caching(response);
     Ok(())
-}
-
-pub(crate) fn append_csrf_cookie(
-    response: &mut Response,
-    material: &CsrfMaterial,
-    ttl: chrono::Duration,
-) -> Result<(), Problem> {
-    let max_age = cookie_max_age(ttl)?;
-    append_set_cookie(
-        response,
-        format!(
-            "{CSRF_COOKIE}={}; Path=/; Max-Age={max_age}; Secure; SameSite=Lax",
-            material.token()
-        ),
-    )
 }
 
 pub(crate) fn append_recent_auth_cookie(

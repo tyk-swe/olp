@@ -76,6 +76,26 @@ describe('session API', () => {
     expect(getCsrfToken()).toBe('stale-token');
   });
 
+  it('does not let a delayed current-session recovery replace newer CSRF state', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    captureRequests(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+    setCsrfToken('csrf-for-session-s1');
+
+    const recovery = currentSession();
+    await vi.waitFor(() => expect(resolveResponse).toBeTypeOf('function'));
+    setCsrfToken('csrf-for-newer-session-s2');
+    resolveResponse!(jsonResponse(sessionResponse('owner', 'csrf-recovered-for-s1')));
+
+    await recovery;
+
+    expect(getCsrfToken()).toBe('csrf-for-newer-session-s2');
+  });
+
   it('sends only login credentials and installs the returned CSRF token', async () => {
     const requests = captureRequests(() =>
       jsonResponse(sessionResponse('operator', 'csrf-from-login'))

@@ -249,22 +249,27 @@ async fn logout_without_a_server_side_session_still_expires_every_browser_creden
 }
 
 #[test]
-fn concurrent_csrf_recovery_does_not_expire_a_still_valid_session() {
-    let response = csrf_recovery_cas_failure_response(true);
+fn csrf_recovery_failures_never_expire_browser_wide_credentials() {
+    for (session_is_current, status) in [
+        (true, StatusCode::CONFLICT),
+        (false, StatusCode::UNAUTHORIZED),
+    ] {
+        let response = csrf_recovery_cas_failure_response(session_is_current);
 
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    assert!(
-        response
-            .headers()
-            .get_all(header::SET_COOKIE)
-            .iter()
-            .next()
-            .is_none()
-    );
-    assert_eq!(
-        response.headers().get(header::CACHE_CONTROL).unwrap(),
-        "no-store"
-    );
+        assert_eq!(response.status(), status);
+        assert!(
+            response
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .next()
+                .is_none()
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+    }
 }
 
 #[test]

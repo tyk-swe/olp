@@ -74,6 +74,51 @@ test('profile updates identity, changes password, and revokes another session', 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
+test('OIDC callback markers require explicit confirmation before beginning an identity link', async ({ page }) => {
+  const userId = '01980000-0000-7000-8000-000000000201';
+  let linkStarts = 0;
+  await page.route('**/api/v1/sessions/current', async (route) =>
+    route.fulfill({
+      json: {
+        user: { id: userId, email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner' },
+        csrf_token: 'csrf-test-token'
+      }
+    })
+  );
+  await page.route('**/api/v1/profile', async (route) =>
+    route.fulfill({
+      json: {
+        id: userId,
+        email: 'owner@example.com',
+        display_name: 'Ada Owner',
+        role: 'owner',
+        active: true,
+        created_at: '2026-07-01T12:00:00Z',
+        updated_at: '2026-07-12T12:00:00Z',
+        etag: '01980000-0000-7000-8000-000000000220'
+      }
+    })
+  );
+  await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
+    route.fulfill({ json: { data: [], next_cursor: null } })
+  );
+  await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
+    route.fulfill({ json: { data: [], linking_available: true, has_local_password: true } })
+  );
+  await page.route('**/api/v1/oidc/link', async (route) => {
+    linkStarts += 1;
+    await route.fulfill({ json: { authorization_url: '/oidc-test-redirect' } });
+  });
+
+  await page.goto('/settings/profile?reauthenticated=oidc_link');
+
+  await expect(page.getByText('Identity verified. Confirm before linking your OIDC identity.')).toBeVisible();
+  expect(linkStarts).toBe(0);
+  await page.getByRole('button', { name: 'Confirm OIDC identity link' }).click();
+  await expect(page).toHaveURL(/\/oidc-test-redirect$/);
+  expect(linkStarts).toBe(1);
+});
+
 test('OIDC-only profile enrolls a local password before unlinking', async ({ page }) => {
   const userId = '01980000-0000-7000-8000-000000000101';
   let canUnlink = false;

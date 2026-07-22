@@ -304,9 +304,13 @@ pub(super) async fn current_session(
     let replacement = supplied_csrf.is_none().then(CsrfMaterial::generate);
     let remaining = principal.expires_at - chrono::Utc::now();
     if replacement.is_some() && validate_session_cookie_ttl(remaining).is_err() {
+        // This request was authenticated with the session that arrived in its
+        // Cookie header, but a concurrent login or security transition can
+        // replace the browser's credentials before this response arrives.
+        // Never expire browser-wide cookie names from this recovery path: a
+        // delayed S1 response must not erase a newer S2 session.
         let mut response =
             Problem::unauthorized("The session is too close to expiry to recover.").into_response();
-        expire_session_cookies(&mut response);
         prevent_sensitive_response_caching(&mut response);
         return Ok(response);
     }
@@ -348,9 +352,12 @@ pub(super) async fn current_session(
         csrf_token: WriteOnlySecret(csrf_token),
     })
     .into_response();
-    if let Some(replacement) = replacement.as_ref() {
-        append_csrf_cookie(&mut response, replacement, remaining)?;
-    }
+    // Do not write a browser-wide CSRF cookie while recovering an older
+    // request. A later security transition can install a new session between
+    // the CAS above and response delivery, and a delayed recovery response
+    // would otherwise overwrite that new session's CSRF cookie. The returned
+    // token is used by the currently running console; a fresh page load can
+    // recover again if the browser has no matching CSRF cookie.
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
 }
@@ -363,12 +370,8 @@ pub(super) fn csrf_recovery_cas_failure_response(session_is_current: bool) -> Re
         )
         .into_response()
     } else {
-        let mut response = Problem::unauthorized(
-            "The session changed while its CSRF credential was being recovered.",
-        )
-        .into_response();
-        expire_session_cookies(&mut response);
-        response
+        Problem::unauthorized("The session changed while its CSRF credential was being recovered.")
+            .into_response()
     };
     prevent_sensitive_response_caching(&mut response);
     response
