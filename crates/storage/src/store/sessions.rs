@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::SessionMaterial;
+use crate::{CsrfMaterial, SessionMaterial, authentication::insert_versioned_session};
 
 use super::{LocalPasswordUser, PersistenceError, PgStore, SessionPrincipal};
 
@@ -13,22 +13,24 @@ impl PgStore {
         material: &SessionMaterial,
         ttl: chrono::Duration,
     ) -> Result<Uuid, PersistenceError> {
-        let id = Uuid::now_v7();
         let now = Utc::now();
         let expires_at = checked_session_expiry(now, ttl)?;
         let mut transaction = self.pool.begin().await?;
-        sqlx::query(
-            "INSERT INTO sessions \
-             (id, user_id, token_digest, csrf_digest, expires_at, last_seen_at, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $6)",
+        let security_version: Option<i64> = sqlx::query_scalar(
+            "SELECT security_version FROM users WHERE id = $1 AND active FOR SHARE",
         )
-        .bind(id)
         .bind(user_id)
-        .bind(material.token_digest().to_vec())
-        .bind(material.csrf_digest().to_vec())
-        .bind(expires_at)
-        .bind(now)
-        .execute(&mut *transaction)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let security_version = security_version.ok_or(PersistenceError::SessionUnavailable)?;
+        let id = insert_versioned_session(
+            &mut transaction,
+            user_id,
+            security_version,
+            material,
+            expires_at,
+            now,
+        )
         .await?;
         sqlx::query(
             "INSERT INTO audit_events \
@@ -104,20 +106,23 @@ impl PgStore {
         let digest = SessionMaterial::digest_token(plaintext_token);
         let row = sqlx::query(
             "WITH authenticated AS MATERIALIZED ( \
-                 SELECT s.id AS session_id, s.csrf_digest, s.expires_at, \
+                 SELECT s.id AS session_id, s.security_version, s.csrf_digest, s.expires_at, \
                         u.id AS user_id, u.email, u.display_name, u.role::text AS role \
                  FROM sessions s JOIN users u ON u.id = s.user_id \
                  WHERE s.token_digest = $1 AND s.expires_at > now() AND u.active \
+                   AND s.security_version = u.security_version \
              ), touched AS ( \
                  UPDATE sessions s SET last_seen_at = now() \
                  FROM authenticated authenticated_session \
                  WHERE s.id = authenticated_session.session_id \
+                   AND s.security_version = authenticated_session.security_version \
                    AND s.expires_at > now() \
                    AND s.last_seen_at <= now() - interval '5 minutes' \
                  RETURNING s.id \
              ) \
-             SELECT authenticated.session_id, authenticated.csrf_digest, \
-                    authenticated.expires_at, authenticated.user_id, authenticated.email, \
+             SELECT authenticated.session_id, authenticated.security_version, \
+                    authenticated.csrf_digest, authenticated.expires_at, \
+                    authenticated.user_id, authenticated.email, \
                     authenticated.display_name, authenticated.role \
              FROM authenticated \
              CROSS JOIN (SELECT count(*) FROM touched) activity",
@@ -132,9 +137,95 @@ impl PgStore {
             email: row.get("email"),
             display_name: row.get("display_name"),
             role: row.get("role"),
+            security_version: row.get("security_version"),
             csrf_digest: row.get("csrf_digest"),
             expires_at: row.get("expires_at"),
         }))
+    }
+
+    /// Replaces only the CSRF bearer for an exact still-current session. The
+    /// expected digest makes concurrent recovery requests a compare-and-swap.
+    pub async fn rotate_session_csrf(
+        &self,
+        session_id: Uuid,
+        user_id: Uuid,
+        security_version: i64,
+        expected_digest: &[u8],
+        replacement: &CsrfMaterial,
+    ) -> Result<bool, PersistenceError> {
+        let now = Utc::now();
+        let mut transaction = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE sessions session SET csrf_digest = $5 \
+             WHERE session.id = $1 AND session.user_id = $2 \
+               AND session.security_version = $3 AND session.csrf_digest = $4 \
+               AND session.expires_at > $6 \
+               AND EXISTS ( \
+                   SELECT 1 FROM users \
+                   WHERE users.id = session.user_id AND users.active \
+                     AND users.security_version = session.security_version \
+               )",
+        )
+        .bind(session_id)
+        .bind(user_id)
+        .bind(security_version)
+        .bind(expected_digest)
+        .bind(replacement.token_digest().to_vec())
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if updated == 1 {
+            sqlx::query(
+                "INSERT INTO audit_events \
+                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
+                 VALUES ($1, $2, 'session.csrf_rotate', 'session', $3, 'success', $4)",
+            )
+            .bind(Uuid::now_v7())
+            .bind(user_id)
+            .bind(session_id.to_string())
+            .bind(now)
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            Ok(true)
+        } else {
+            transaction.rollback().await?;
+            Ok(false)
+        }
+    }
+
+    /// Best-effort, token-addressed revocation for idempotent logout. Expired
+    /// and security-version-stale rows are deliberately eligible for deletion.
+    pub async fn revoke_session_by_token(
+        &self,
+        plaintext_token: &str,
+    ) -> Result<(), PersistenceError> {
+        let digest = SessionMaterial::digest_token(plaintext_token);
+        let now = Utc::now();
+        let mut transaction = self.pool.begin().await?;
+        let deleted =
+            sqlx::query("DELETE FROM sessions WHERE token_digest = $1 RETURNING id, user_id")
+                .bind(digest.to_vec())
+                .fetch_optional(&mut *transaction)
+                .await?;
+        if let Some(row) = deleted {
+            let session_id: Uuid = row.get("id");
+            let user_id: Uuid = row.get("user_id");
+            sqlx::query(
+                "INSERT INTO audit_events \
+                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
+                 VALUES ($1, $2, 'session.logout', 'session', $3, 'success', $4)",
+            )
+            .bind(Uuid::now_v7())
+            .bind(user_id)
+            .bind(session_id.to_string())
+            .bind(now)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 }
 

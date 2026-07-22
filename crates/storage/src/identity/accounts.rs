@@ -1,10 +1,19 @@
+use chrono::Utc;
 use olp_domain::Role;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{PgStore, split_page};
+use crate::{
+    PgStore, RecentAuthPurpose, SessionMaterial, SessionSecurityContext,
+    authentication::{
+        consume_recent_authentication, insert_versioned_session, revoke_user_sessions,
+    },
+    split_page,
+};
 
-use super::{IdentityError, SessionRecord, UserRecord, insert_audit, parse_role};
+use super::{
+    IdentityError, PasswordSessionRotation, SessionRecord, UserRecord, insert_audit, parse_role,
+};
 
 const MAX_PAGE_SIZE: i64 = 100;
 
@@ -61,7 +70,8 @@ impl PgStore {
 
         let etag = Uuid::now_v7();
         let row = match sqlx::query(
-            "UPDATE users SET role = CAST($2 AS user_role), etag = $3, updated_at = now() \
+            "UPDATE users SET role = CAST($2 AS user_role), security_version = security_version + 1, \
+                 etag = $3, updated_at = now() \
              WHERE id = $1 \
              RETURNING id, email, display_name, role::text AS role, active, etag, created_at, updated_at",
         )
@@ -129,7 +139,8 @@ impl PgStore {
         let row = match sqlx::query(
             "UPDATE users SET \
                  role = COALESCE(CAST($2 AS user_role), role), \
-                 active = COALESCE($3, active), etag = $4, updated_at = now() \
+                 active = COALESCE($3, active), security_version = security_version + 1, \
+                 etag = $4, updated_at = now() \
              WHERE id = $1 \
              RETURNING id, email, display_name, role::text AS role, active, etag, created_at, updated_at",
         )
@@ -222,42 +233,64 @@ impl PgStore {
 
     pub async fn update_local_password(
         &self,
-        id: Uuid,
         password_hash: &str,
         expected_etag: Uuid,
-        keep_session_id: Uuid,
-    ) -> Result<UserRecord, IdentityError> {
+        context: SessionSecurityContext,
+        replacement: &SessionMaterial,
+        session_ttl: chrono::Duration,
+    ) -> Result<PasswordSessionRotation, IdentityError> {
+        let id = context.user_id;
+        let now = Utc::now();
+        let expires_at = now
+            .checked_add_signed(session_ttl)
+            .filter(|expires_at| *expires_at > now)
+            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
+        let current = sqlx::query(
+            "SELECT etag, password_hash IS NOT NULL AS local, active, security_version \
+             FROM users WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(IdentityError::NotFound)?;
+        if !current.get::<bool, _>("local") {
+            return Err(IdentityError::LocalPasswordUnavailable);
+        }
+        if !current.get::<bool, _>("active")
+            || current.get::<i64, _>("security_version") != context.security_version
+            || !session_is_current(&mut transaction, context).await?
+        {
+            return Err(IdentityError::SessionUnavailable);
+        }
+        if current.get::<Uuid, _>("etag") != expected_etag {
+            return Err(IdentityError::PreconditionFailed);
+        }
+        let etag = Uuid::now_v7();
         let row = sqlx::query(
-            "UPDATE users SET password_hash = $2, etag = $3, updated_at = now()
-             WHERE id = $1 AND etag = $4 AND password_hash IS NOT NULL
-             RETURNING id, email, display_name, role::text AS role, active, etag,
-                       created_at, updated_at",
+            "UPDATE users SET password_hash = $2, security_version = security_version + 1, \
+                 etag = $3, updated_at = $4 \
+             WHERE id = $1 \
+             RETURNING id, email, display_name, role::text AS role, active, etag, \
+                       security_version, created_at, updated_at",
         )
         .bind(id)
         .bind(password_hash)
-        .bind(Uuid::now_v7())
-        .bind(expected_etag)
-        .fetch_optional(&mut *transaction)
+        .bind(etag)
+        .bind(now)
+        .fetch_one(&mut *transaction)
         .await?;
-        let Some(row) = row else {
-            let current = sqlx::query(
-                "SELECT etag, password_hash IS NOT NULL AS local FROM users WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(IdentityError::NotFound)?;
-            if !current.get::<bool, _>("local") {
-                return Err(IdentityError::LocalPasswordUnavailable);
-            }
-            return Err(IdentityError::PreconditionFailed);
-        };
-        sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2")
-            .bind(id)
-            .bind(keep_session_id)
-            .execute(&mut *transaction)
-            .await?;
+        let security_version: i64 = row.get("security_version");
+        let _revoked = revoke_user_sessions(&mut transaction, id).await?;
+        let session_id = insert_versioned_session(
+            &mut transaction,
+            id,
+            security_version,
+            replacement,
+            expires_at,
+            now,
+        )
+        .await?;
         insert_audit(
             &mut transaction,
             id,
@@ -266,52 +299,105 @@ impl PgStore {
             &id.to_string(),
         )
         .await?;
+        insert_audit(
+            &mut transaction,
+            id,
+            "session.revoke_for_password_change",
+            "user",
+            &id.to_string(),
+        )
+        .await?;
+        insert_audit(
+            &mut transaction,
+            id,
+            "session.rotate_for_password_change",
+            "session",
+            &session_id.to_string(),
+        )
+        .await?;
         transaction.commit().await?;
-        user_from_row(row)
+        Ok(PasswordSessionRotation {
+            user: user_from_row(row)?,
+            session_id,
+        })
     }
 
-    /// Adds the first local password to an OIDC-only account. The `IS NULL`
-    /// predicate makes enrollment race-safe and keeps ordinary password
-    /// changes on the separate current-password-verified path.
+    /// Adds the first local password to an OIDC-only account. The recent-auth
+    /// grant, password enrollment, security-version advance, complete session
+    /// revocation, and replacement session are one transaction.
     pub async fn enroll_local_password(
         &self,
-        id: Uuid,
         password_hash: &str,
         expected_etag: Uuid,
-        keep_session_id: Uuid,
-    ) -> Result<UserRecord, IdentityError> {
+        context: SessionSecurityContext,
+        recent_auth_token_digest: [u8; 32],
+        replacement: &SessionMaterial,
+        session_ttl: chrono::Duration,
+    ) -> Result<PasswordSessionRotation, IdentityError> {
+        let id = context.user_id;
+        let now = Utc::now();
+        let expires_at = now
+            .checked_add_signed(session_ttl)
+            .filter(|expires_at| *expires_at > now)
+            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
+        let current = sqlx::query(
+            "SELECT etag, password_hash IS NOT NULL AS local, active, security_version \
+             FROM users WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(IdentityError::NotFound)?;
+        if current.get::<bool, _>("local") {
+            return Err(IdentityError::LocalPasswordAlreadyConfigured);
+        }
+        if !current.get::<bool, _>("active")
+            || current.get::<i64, _>("security_version") != context.security_version
+        {
+            return Err(IdentityError::SessionUnavailable);
+        }
+        if current.get::<Uuid, _>("etag") != expected_etag {
+            return Err(IdentityError::PreconditionFailed);
+        }
+        if !consume_recent_authentication(
+            &mut transaction,
+            context.session_id,
+            id,
+            context.security_version,
+            RecentAuthPurpose::PasswordEnrollment,
+            None,
+            recent_auth_token_digest,
+        )
+        .await?
+        {
+            return Err(IdentityError::RecentAuthenticationRequired);
+        }
+        let etag = Uuid::now_v7();
         let row = sqlx::query(
-            "UPDATE users SET password_hash = $2, etag = $3, updated_at = now() \
-             WHERE id = $1 AND etag = $4 AND password_hash IS NULL AND active \
+            "UPDATE users SET password_hash = $2, security_version = security_version + 1, \
+                 etag = $3, updated_at = $4 \
+             WHERE id = $1 \
              RETURNING id, email, display_name, role::text AS role, active, etag, \
-                       created_at, updated_at",
+                       security_version, created_at, updated_at",
         )
         .bind(id)
         .bind(password_hash)
-        .bind(Uuid::now_v7())
-        .bind(expected_etag)
-        .fetch_optional(&mut *transaction)
+        .bind(etag)
+        .bind(now)
+        .fetch_one(&mut *transaction)
         .await?;
-        let Some(row) = row else {
-            let current = sqlx::query(
-                "SELECT etag, password_hash IS NOT NULL AS local \
-                 FROM users WHERE id = $1 AND active",
-            )
-            .bind(id)
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(IdentityError::NotFound)?;
-            if current.get::<bool, _>("local") {
-                return Err(IdentityError::LocalPasswordAlreadyConfigured);
-            }
-            return Err(IdentityError::PreconditionFailed);
-        };
-        sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2")
-            .bind(id)
-            .bind(keep_session_id)
-            .execute(&mut *transaction)
-            .await?;
+        let security_version: i64 = row.get("security_version");
+        let _revoked = revoke_user_sessions(&mut transaction, id).await?;
+        let session_id = insert_versioned_session(
+            &mut transaction,
+            id,
+            security_version,
+            replacement,
+            expires_at,
+            now,
+        )
+        .await?;
         insert_audit(
             &mut transaction,
             id,
@@ -320,8 +406,35 @@ impl PgStore {
             &id.to_string(),
         )
         .await?;
+        insert_audit(
+            &mut transaction,
+            id,
+            "user.authentication_method_change",
+            "user",
+            &id.to_string(),
+        )
+        .await?;
+        insert_audit(
+            &mut transaction,
+            id,
+            "session.revoke_for_password_enrollment",
+            "user",
+            &id.to_string(),
+        )
+        .await?;
+        insert_audit(
+            &mut transaction,
+            id,
+            "session.rotate_for_password_enrollment",
+            "session",
+            &session_id.to_string(),
+        )
+        .await?;
         transaction.commit().await?;
-        user_from_row(row)
+        Ok(PasswordSessionRotation {
+            user: user_from_row(row)?,
+            session_id,
+        })
     }
 
     pub async fn list_sessions(
@@ -332,9 +445,13 @@ impl PgStore {
     ) -> Result<(Vec<SessionRecord>, Option<Uuid>), IdentityError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query(
-            "SELECT id, user_id, expires_at, last_seen_at, created_at FROM sessions \
-             WHERE user_id = $1 AND expires_at > now() AND ($2::uuid IS NULL OR id < $2) \
-             ORDER BY id DESC LIMIT $3",
+            "SELECT session.id, session.user_id, session.expires_at, session.last_seen_at, \
+                    session.created_at \
+             FROM sessions session JOIN users ON users.id = session.user_id \
+             WHERE session.user_id = $1 AND session.expires_at > now() \
+               AND users.active AND session.security_version = users.security_version \
+               AND ($2::uuid IS NULL OR session.id < $2) \
+             ORDER BY session.id DESC LIMIT $3",
         )
         .bind(user_id)
         .bind(cursor)
@@ -386,6 +503,24 @@ impl PgStore {
         transaction.commit().await?;
         Ok(())
     }
+}
+
+async fn session_is_current(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: SessionSecurityContext,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM sessions \
+             WHERE id = $1 AND user_id = $2 AND security_version = $3 \
+               AND expires_at > now() \
+         )",
+    )
+    .bind(context.session_id)
+    .bind(context.user_id)
+    .bind(context.security_version)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 pub(super) fn user_from_row(row: sqlx::postgres::PgRow) -> Result<UserRecord, IdentityError> {

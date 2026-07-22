@@ -43,6 +43,7 @@ fn sensitive_repository_records_redact_debug_output() {
         email: "owner@example.test".into(),
         display_name: "Owner".into(),
         role: "owner".into(),
+        security_version: 1,
         csrf_digest: vec![1, 2, 3, 4],
         expires_at: Utc::now(),
     };

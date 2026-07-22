@@ -3,14 +3,16 @@ use std::{collections::BTreeMap, fmt, net::SocketAddr};
 use axum::{
     Json,
     extract::{ConnectInfo, Extension, Path, Query, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use olp_domain::Permission;
-use olp_storage::{InstallationSetupInput, SessionMaterial, hash_password, verify_password};
+use olp_storage::{
+    CsrfMaterial, InstallationSetupInput, SessionMaterial, hash_password, verify_password,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, SemaphorePermit};
-use tracing::error;
+use tracing::{error, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -120,6 +122,7 @@ pub(super) async fn setup(
     payload: Result<Json<SetupRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let store = require_store(&state)?;
+    validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
     validate_setup(&request)?;
     let password = Zeroizing::new(request.password.expose().to_owned());
@@ -164,6 +167,7 @@ pub(super) async fn setup(
             display_name: owner.display_name,
             role: "owner".to_owned(),
         },
+        state.session_ttl,
     )
 }
 
@@ -204,6 +208,7 @@ pub(super) async fn login(
 ) -> Result<Response, Problem> {
     enforce_origin(&state, &headers)?;
     let request = json_payload(payload)?;
+    validate_session_cookie_ttl(state.session_ttl)?;
     let store = require_store(&state)?;
     // Admit every syntactically decoded login attempt before the inexpensive
     // validation branch below. Otherwise an attacker can rotate oversized
@@ -275,6 +280,7 @@ pub(super) async fn login(
             display_name: user.display_name,
             role: user.role,
         },
+        state.session_ttl,
     )
 }
 
@@ -284,7 +290,8 @@ pub(super) async fn login(
     tag = "sessions",
     responses(
         (status = 200, description = "Current session", body = SessionResponse),
-        (status = 401, description = "No active session", body = Problem)
+        (status = 401, description = "No active session", body = Problem),
+        (status = 409, description = "Another request recovered the session CSRF credential", body = Problem)
     )
 )]
 pub(super) async fn current_session(
@@ -292,10 +299,49 @@ pub(super) async fn current_session(
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
-    let csrf_token = cookie(&headers, CSRF_COOKIE)
-        .filter(|csrf| SessionMaterial::verify_csrf(csrf, &principal.csrf_digest))
-        .unwrap_or_default()
-        .to_owned();
+    let supplied_csrf = cookie(&headers, CSRF_COOKIE)
+        .filter(|csrf| SessionMaterial::verify_csrf(csrf, &principal.csrf_digest));
+    let replacement = supplied_csrf.is_none().then(CsrfMaterial::generate);
+    let remaining = principal.expires_at - chrono::Utc::now();
+    if replacement.is_some() && validate_session_cookie_ttl(remaining).is_err() {
+        // This request was authenticated with the session that arrived in its
+        // Cookie header, but a concurrent login or security transition can
+        // replace the browser's credentials before this response arrives.
+        // Never expire browser-wide cookie names from this recovery path: a
+        // delayed S1 response must not erase a newer S2 session.
+        let mut response =
+            Problem::unauthorized("The session is too close to expiry to recover.").into_response();
+        prevent_sensitive_response_caching(&mut response);
+        return Ok(response);
+    }
+    if let Some(replacement) = replacement.as_ref() {
+        let rotated = require_store(&state)?
+            .rotate_session_csrf(
+                principal.session_id,
+                principal.user_id,
+                principal.security_version,
+                &principal.csrf_digest,
+                replacement,
+            )
+            .await
+            .map_err(map_persistence)?;
+        if !rotated {
+            let session_is_current = match require_read_session(&state, &headers).await {
+                Ok(_) => true,
+                Err(problem) if problem.status == StatusCode::UNAUTHORIZED.as_u16() => false,
+                Err(problem) => return Err(problem),
+            };
+            return Ok(csrf_recovery_cas_failure_response(session_is_current));
+        }
+    }
+    let csrf_token = supplied_csrf
+        .map(str::to_owned)
+        .or_else(|| {
+            replacement
+                .as_ref()
+                .map(|material| material.token().to_owned())
+        })
+        .ok_or_else(Problem::internal)?;
     let mut response = Json(SessionResponse {
         user: UserResponse {
             id: principal.user_id,
@@ -306,8 +352,29 @@ pub(super) async fn current_session(
         csrf_token: WriteOnlySecret(csrf_token),
     })
     .into_response();
+    // Do not write a browser-wide CSRF cookie while recovering an older
+    // request. A later security transition can install a new session between
+    // the CAS above and response delivery, and a delayed recovery response
+    // would otherwise overwrite that new session's CSRF cookie. The returned
+    // token is used by the currently running console; a fresh page load can
+    // recover again if the browser has no matching CSRF cookie.
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
+}
+
+pub(super) fn csrf_recovery_cas_failure_response(session_is_current: bool) -> Response {
+    let mut response = if session_is_current {
+        Problem::conflict(
+            "csrf_recovery_in_progress",
+            "Another request recovered this session's CSRF credential. Retry with the current browser credentials.",
+        )
+        .into_response()
+    } else {
+        Problem::unauthorized("The session changed while its CSRF credential was being recovered.")
+            .into_response()
+    };
+    prevent_sensitive_response_caching(&mut response);
+    response
 }
 
 #[utoipa::path(
@@ -315,23 +382,25 @@ pub(super) async fn current_session(
     path = "/api/v1/sessions/current",
     tag = "sessions",
     responses(
-        (status = 204, description = "Session ended"),
-        (status = 401, description = "No active session", body = Problem),
-        (status = 403, description = "CSRF or origin check failed", body = Problem)
+        (status = 204, description = "Session ended and browser credentials expired"),
+        (status = 403, description = "Origin check failed", body = Problem)
     )
 )]
 pub(super) async fn logout(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
-    require_store(&state)?
-        .revoke_session(principal.session_id, principal.user_id, false)
-        .await
-        .map_err(map_identity)?;
-
+    enforce_origin(&state, &headers)?;
+    if let (Some(store), Some(token)) = (state.store.as_ref(), cookie(&headers, SESSION_COOKIE))
+        && let Err(error) = store.revoke_session_by_token(token).await
+    {
+        // Logout is intentionally idempotent and fail-closed in the browser.
+        // A transient database failure must not prevent credential expiry.
+        warn!(%error, "server-side logout revocation failed");
+    }
     let mut response = StatusCode::NO_CONTENT.into_response();
     expire_session_cookies(&mut response);
+    prevent_sensitive_response_caching(&mut response);
     Ok(response)
 }
 
@@ -441,11 +510,8 @@ pub(super) fn session_response(
     status: StatusCode,
     material: &SessionMaterial,
     user: UserResponse,
+    session_ttl: chrono::Duration,
 ) -> Result<Response, Problem> {
-    let cookie = format!(
-        "{SESSION_COOKIE}={}; Path=/; Max-Age=43200; Secure; HttpOnly; SameSite=Lax",
-        material.token()
-    );
     let mut response = (
         status,
         Json(SessionResponse {
@@ -454,18 +520,8 @@ pub(super) fn session_response(
         }),
     )
         .into_response();
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(|_| Problem::internal())?,
-    );
-    let csrf_cookie = format!(
-        "{CSRF_COOKIE}={}; Path=/; Max-Age=43200; Secure; SameSite=Lax",
-        material.csrf_token()
-    );
-    response.headers_mut().append(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&csrf_cookie).map_err(|_| Problem::internal())?,
-    );
+    append_session_cookies(&mut response, material, session_ttl)?;
+    clear_recent_auth_cookie(&mut response);
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
 }

@@ -62,13 +62,38 @@ describe('session API', () => {
     expect(getCsrfToken()).toBe('known-good-token');
   });
 
-  it('clears stale CSRF state when the current session has no valid CSRF cookie', async () => {
+  it('fails closed on an empty CSRF token without replacing CSRF state', async () => {
     setCsrfToken('stale-token');
     captureRequests(() => jsonResponse(sessionResponse('operator', '')));
 
-    await currentSession();
+    const error = await currentSession().catch((value: unknown) => value);
 
-    expect(getCsrfToken()).toBeNull();
+    expect(error).toBeInstanceOf(ApiProblem);
+    expect((error as ApiProblem).problem).toMatchObject({
+      title: 'The session response is invalid',
+      status: 502
+    });
+    expect(getCsrfToken()).toBe('stale-token');
+  });
+
+  it('does not let a delayed current-session recovery replace newer CSRF state', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    captureRequests(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+    setCsrfToken('csrf-for-session-s1');
+
+    const recovery = currentSession();
+    await vi.waitFor(() => expect(resolveResponse).toBeTypeOf('function'));
+    setCsrfToken('csrf-for-newer-session-s2');
+    resolveResponse!(jsonResponse(sessionResponse('owner', 'csrf-recovered-for-s1')));
+
+    await recovery;
+
+    expect(getCsrfToken()).toBe('csrf-for-newer-session-s2');
   });
 
   it('sends only login credentials and installs the returned CSRF token', async () => {

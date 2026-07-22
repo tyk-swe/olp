@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { ApiProblem, ensureSuccess, result } from './http';
-import { clearCsrfToken, setCsrfToken } from './session';
+import { clearCsrfToken, getCsrfTokenVersion, setCsrfToken } from './session';
 
 const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
 
@@ -24,6 +24,7 @@ function sessionResult(
   const user = value.user as Partial<Schemas['UserResponse']> | null | undefined;
   if (
     typeof value.csrf_token !== 'string' ||
+    value.csrf_token.length === 0 ||
     typeof user?.id !== 'string' ||
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||
@@ -46,13 +47,13 @@ function sessionResult(
 }
 
 export async function currentSession(signal?: AbortSignal): Promise<CurrentSession> {
+  // A current-session recovery can race a login or security transition. If a
+  // newer response has already installed CSRF state, do not let this older
+  // session response replace it after its body finishes parsing.
+  const csrfTokenVersion = getCsrfTokenVersion();
   const { data, error, response } = await apiClient.GET('/api/v1/sessions/current', { signal });
   const session = sessionResult(data, error, response);
-  if (session.csrf_token) {
-    setCsrfToken(session.csrf_token);
-  } else {
-    clearCsrfToken();
-  }
+  if (getCsrfTokenVersion() === csrfTokenVersion) setCsrfToken(session.csrf_token);
   return session;
 }
 

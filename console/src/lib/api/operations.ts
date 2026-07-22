@@ -82,6 +82,10 @@ export type PriceDraft = components['schemas']['PriceRequest'];
 export type ProfileUpdate = { display_name: string };
 export type PasswordChange = { current_password: string; new_password: string };
 export type PasswordEnrollment = { new_password: string };
+export type RecentAuthenticationPurpose =
+  | 'password_enrollment'
+  | 'oidc_link'
+  | 'oidc_unlink';
 
 function compact<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(
@@ -254,6 +258,21 @@ export async function updateProfile(profile: UserProfile, input: ProfileUpdate):
   return result(data, error, response);
 }
 
+export async function reauthenticateWithPassword(
+  currentPassword: string,
+  purpose: RecentAuthenticationPurpose,
+  resourceId?: string
+): Promise<void> {
+  const { error, response } = await apiClient.POST('/api/v1/profile/reauthenticate', {
+    body: {
+      current_password: currentPassword,
+      purpose,
+      ...(resourceId ? { resource_id: resourceId } : {})
+    }
+  });
+  ensureSuccess(error, response);
+}
+
 export async function changePassword(profile: UserProfile, input: PasswordChange): Promise<UserProfile> {
   const { data, error, response } = await apiClient.POST('/api/v1/profile/password', {
     params: { header: { 'If-Match': profile.etag } },
@@ -290,6 +309,16 @@ export async function revokeSession(id: string): Promise<void> {
 export async function listOidcIdentities(): Promise<OidcIdentityList> {
   const { data, error, response } = await apiClient.GET('/api/v1/oidc/identities');
   return result(data, error, response);
+}
+
+export async function beginOidcReauthentication(
+  purpose: RecentAuthenticationPurpose,
+  resourceId?: string
+): Promise<string> {
+  const { data, error, response } = await apiClient.POST('/api/v1/oidc/reauthenticate', {
+    body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) }
+  });
+  return result(data, error, response).authorization_url;
 }
 
 export async function beginOidcLink(): Promise<string> {

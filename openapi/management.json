@@ -1285,13 +1285,17 @@
             },
             "type": "array"
           },
+          "has_local_password": {
+            "type": "boolean"
+          },
           "linking_available": {
             "type": "boolean"
           }
         },
         "required": [
           "data",
-          "linking_available"
+          "linking_available",
+          "has_local_password"
         ],
         "type": "object"
       },
@@ -1330,6 +1334,26 @@
           "issuer",
           "created_at",
           "can_unlink"
+        ],
+        "type": "object"
+      },
+      "OidcReauthenticationRequest": {
+        "properties": {
+          "purpose": {
+            "description": "Exact durable security operation that the resulting one-time grant may authorize.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Required only when unlinking one specific OIDC identity.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose"
         ],
         "type": "object"
       },
@@ -2835,6 +2859,31 @@
           "enabled_model_count",
           "capability_count",
           "certified_capability_count"
+        ],
+        "type": "object"
+      },
+      "RecentAuthenticationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "purpose": {
+            "description": "Exact security operation authorized by this one-time grant.",
+            "type": "string"
+          },
+          "resource_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "current_password",
+          "purpose"
         ],
         "type": "object"
       },
@@ -5999,7 +6048,7 @@
         ],
         "responses": {
           "303": {
-            "description": "OIDC identity authenticated and local session issued"
+            "description": "OIDC login, identity link, or recent authentication completed"
           },
           "400": {
             "content": {
@@ -6019,7 +6068,17 @@
                 }
               }
             },
-            "description": "ID token validation failed"
+            "description": "ID token validation or initiating session failed"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Fresh identity did not match the initiating local account"
           },
           "409": {
             "content": {
@@ -6249,7 +6308,7 @@
                 }
               }
             },
-            "description": "OIDC identities linked to the current account"
+            "description": "OIDC identities and authentication methods for the current account"
           },
           "401": {
             "content": {
@@ -6309,7 +6368,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Identity unlinked"
+            "description": "Identity unlinked and session rotated"
           },
           "401": {
             "content": {
@@ -6319,7 +6378,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "No active session"
           },
           "403": {
             "content": {
@@ -6329,7 +6388,7 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "CSRF or origin check failed"
           },
           "404": {
             "content": {
@@ -6350,6 +6409,16 @@
               }
             },
             "description": "Unlink would remove the final authentication method"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Recent authentication is required"
           },
           "500": {
             "content": {
@@ -6406,6 +6475,16 @@
               }
             },
             "description": "CSRF or origin check failed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Recent authentication is required"
           },
           "429": {
             "content": {
@@ -6488,6 +6567,92 @@
           }
         },
         "security": [],
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/reauthenticate": {
+      "post": {
+        "operationId": "begin_reauthentication",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcReauthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Authorization URL for fresh IdP authentication"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid operation scope"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No active local session"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "CSRF or origin check failed"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC authorization flow creation is rate limited"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
         "tags": [
           "oidc"
         ]
@@ -6960,7 +7125,7 @@
                 }
               }
             },
-            "description": "Local password changed; other sessions revoked",
+            "description": "Local password changed; every previous session revoked and this browser rotated",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -7075,7 +7240,7 @@
                 }
               }
             },
-            "description": "First local password enrolled; other sessions revoked",
+            "description": "First local password enrolled; every previous session revoked and this browser rotated",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -7134,6 +7299,95 @@
               }
             },
             "description": "New password is invalid"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Recent authentication is required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Password work is rate limited"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/profile/reauthenticate": {
+      "post": {
+        "operationId": "recent_authentication",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecentAuthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "One-time recent-authentication grant issued"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Session changed while authenticating"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Current password is invalid or local auth is unavailable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Purpose or resource binding is invalid"
           },
           "429": {
             "content": {
@@ -11498,7 +11752,7 @@
         "operationId": "logout",
         "responses": {
           "204": {
-            "description": "Session ended"
+            "description": "Session ended and browser credentials expired"
           },
           "401": {
             "content": {
@@ -11508,7 +11762,7 @@
                 }
               }
             },
-            "description": "No active session"
+            "description": "Authentication required."
           },
           "403": {
             "content": {
@@ -11518,7 +11772,7 @@
                 }
               }
             },
-            "description": "CSRF or origin check failed"
+            "description": "Origin check failed"
           },
           "500": {
             "content": {
@@ -11573,6 +11827,16 @@
               }
             },
             "description": "The session lacks permission or mutation CSRF/origin checks failed."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Another request recovered the session CSRF credential"
           },
           "500": {
             "content": {

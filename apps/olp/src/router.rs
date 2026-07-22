@@ -223,8 +223,11 @@ pub(super) fn sensitive_request_headers() -> [HeaderName; 6] {
     ]
 }
 
-pub(super) fn sensitive_response_headers() -> [HeaderName; 1] {
-    [axum::http::header::SET_COOKIE]
+pub(super) fn sensitive_response_headers() -> [HeaderName; 2] {
+    [
+        axum::http::header::SET_COOKIE,
+        HeaderName::from_static(management_api::CSRF_HEADER),
+    ]
 }
 
 pub(super) fn request_trace_path(uri: &Uri) -> &str {

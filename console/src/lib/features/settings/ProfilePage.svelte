@@ -1,14 +1,17 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     beginOidcLink,
+    beginOidcReauthentication,
     changePassword,
     enrollPassword,
     getProfile,
     listOidcIdentities,
     listSessions,
+    reauthenticateWithPassword,
     revokeSession,
     unlinkOidcIdentity,
     updateProfile
@@ -16,6 +19,13 @@
   import { clearCsrfToken } from '$lib/api/session';
   import { formatDate } from '$lib/features/operations/format';
   import { validateDisplayName, validateNewPassword, validatePassword } from './validation';
+
+  const ENROLLMENT_GRANT_TTL_MS = 5 * 60 * 1000;
+  const ENROLLMENT_GRANT_READY_MESSAGE =
+    'Identity verified. Add your local password within five minutes.';
+  type PendingIdentityAction =
+    | { purpose: 'oidc_link' }
+    | { purpose: 'oidc_unlink'; resourceId: string };
 
   let displayName = $state('');
   let displayNameError = $state('');
@@ -30,6 +40,9 @@
   let revoking = $state('');
   let identityBusy = $state('');
   let identityError = $state('');
+  let pendingIdentityAction = $state<PendingIdentityAction | undefined>();
+  let enrollmentGrantReady = $state(false);
+  let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
   let sessionCursor = $state<string | undefined>();
   let sessionHistory = $state<string[]>([]);
 
@@ -44,7 +57,118 @@
   }));
   const sessions = createQuery(() => ({ queryKey: ['profile-sessions', sessionCursor], queryFn: () => listSessions(sessionCursor) }));
   const identities = createQuery(() => ({ queryKey: ['profile-oidc-identities'], queryFn: listOidcIdentities }));
-  let passwordEnrollmentNeeded = $derived(identities.data?.data.some((identity) => !identity.can_unlink) ?? false);
+  let passwordEnrollmentNeeded = $derived(
+    identities.data ? !identities.data.has_local_password : false
+  );
+
+  onMount(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const purpose = parameters.get('reauthenticated');
+    const resourceId = parameters.get('resource_id') ?? undefined;
+    if (['password_enrollment', 'oidc_link', 'oidc_unlink'].includes(purpose ?? '')) {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      // Callback query parameters are only a display hint. They must never
+      // directly begin a link or unlink request, because another site can
+      // navigate a signed-in browser to this URL.
+      void resumeSecurityOperation(purpose as 'password_enrollment' | 'oidc_link' | 'oidc_unlink', resourceId);
+    }
+    return cancelEnrollmentGrantExpiry;
+  });
+
+  function cancelEnrollmentGrantExpiry() {
+    if (enrollmentGrantExpiry === undefined) return;
+    clearTimeout(enrollmentGrantExpiry);
+    enrollmentGrantExpiry = undefined;
+  }
+
+  function clearEnrollmentGrant() {
+    cancelEnrollmentGrantExpiry();
+    enrollmentGrantReady = false;
+  }
+
+  function markEnrollmentGrantReady() {
+    clearEnrollmentGrant();
+    enrollmentGrantReady = true;
+    enrollmentGrantExpiry = setTimeout(() => {
+      enrollmentGrantExpiry = undefined;
+      enrollmentGrantReady = false;
+      if (message === ENROLLMENT_GRANT_READY_MESSAGE) message = '';
+      passwordError = 'Identity verification expired. Verify your identity with OIDC again.';
+    }, ENROLLMENT_GRANT_TTL_MS);
+  }
+
+  async function resumeSecurityOperation(
+    purpose: 'password_enrollment' | 'oidc_link' | 'oidc_unlink',
+    resourceId?: string
+  ) {
+    identityError = passwordError = message = '';
+    try {
+      if (purpose === 'password_enrollment') {
+        pendingIdentityAction = undefined;
+        markEnrollmentGrantReady();
+        message = ENROLLMENT_GRANT_READY_MESSAGE;
+        return;
+      }
+      if (purpose === 'oidc_link') {
+        pendingIdentityAction = { purpose };
+        message = 'Identity verified. Confirm before linking your OIDC identity.';
+        return;
+      }
+      if (!resourceId) throw new Error('The identity selected for unlinking is missing.');
+      pendingIdentityAction = { purpose, resourceId };
+      message = 'Identity verified. Confirm before unlinking this OIDC identity.';
+    } catch (cause) {
+      identityError = cause instanceof Error ? cause.message : 'The security operation could not be completed.';
+    } finally {
+      identityBusy = '';
+    }
+  }
+
+  async function completePendingIdentityAction() {
+    const action = pendingIdentityAction;
+    if (!action) return;
+    identityBusy = action.purpose === 'oidc_link' ? 'link' : action.resourceId;
+    identityError = message = '';
+    try {
+      if (action.purpose === 'oidc_link') {
+        window.location.assign(await beginOidcLink());
+        return;
+      }
+      await unlinkOidcIdentity(action.resourceId);
+      pendingIdentityAction = undefined;
+      message = 'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
+      await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
+    } catch (cause) {
+      identityError = cause instanceof Error ? cause.message : 'The security operation could not be completed.';
+    } finally {
+      identityBusy = '';
+    }
+  }
+
+  async function acquireRecentAuthentication(
+    purpose: 'oidc_link' | 'oidc_unlink',
+    resourceId?: string
+  ): Promise<boolean> {
+    if (identities.data?.has_local_password) {
+      const password = window.prompt('Enter your current password to continue.');
+      if (password === null) return false;
+      await reauthenticateWithPassword(password, purpose, resourceId);
+      return true;
+    }
+    window.location.assign(await beginOidcReauthentication(purpose, resourceId));
+    return false;
+  }
+
+  async function verifyPasswordEnrollment() {
+    passwordError = message = '';
+    savingPassword = true;
+    try {
+      window.location.assign(await beginOidcReauthentication('password_enrollment'));
+    } catch (cause) {
+      passwordError = cause instanceof Error ? cause.message : 'Identity verification could not start.';
+      savingPassword = false;
+    }
+  }
 
   function changeDisplayName(value: string) {
     displayName = value;
@@ -85,21 +209,30 @@
     if (!profile.data) return;
     passwordError = message = '';
     savingPassword = true;
+    if (passwordEnrollmentNeeded && !enrollmentGrantReady) {
+      passwordError = 'Verify your identity with OIDC before adding a local password.';
+      savingPassword = false;
+      return;
+    }
+    let enrollmentSubmitted = false;
     try {
       const next = passwordEnrollmentNeeded
         ? validateNewPassword(newPassword, confirmPassword)
         : validatePassword(currentPassword, newPassword, confirmPassword);
       if (passwordEnrollmentNeeded) {
+        enrollmentSubmitted = true;
         await enrollPassword(profile.data, { new_password: next });
       } else {
         await changePassword(profile.data, { current_password: currentPassword, new_password: next });
       }
       currentPassword = newPassword = confirmPassword = '';
+      clearEnrollmentGrant();
       message = passwordEnrollmentNeeded
-        ? 'Local password added. Your other sessions were revoked.'
-        : 'Password changed. Your other sessions were revoked.';
+        ? 'Local password added. All previous sessions were revoked and this browser was rotated.'
+        : 'Password changed. All previous sessions were revoked and this browser was rotated.';
       await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
+      if (enrollmentSubmitted) clearEnrollmentGrant();
       passwordError =
         cause instanceof Error
           ? cause.message
@@ -131,24 +264,29 @@
   }
 
   async function linkIdentity() {
+    pendingIdentityAction = undefined;
     identityBusy = 'link';
     identityError = '';
     try {
+      if (!(await acquireRecentAuthentication('oidc_link'))) return;
       window.location.assign(await beginOidcLink());
     } catch (cause) {
       identityError = cause instanceof Error ? cause.message : 'The OIDC link flow could not start.';
+    } finally {
       identityBusy = '';
     }
   }
 
   async function unlinkIdentity(id: string, issuer: string) {
     if (!confirm(`Unlink the identity from ${issuer}?`)) return;
+    pendingIdentityAction = undefined;
     identityBusy = id;
     identityError = '';
     try {
+      if (!(await acquireRecentAuthentication('oidc_unlink', id))) return;
       await unlinkOidcIdentity(id);
-      message = 'OIDC identity unlinked.';
-      await identities.refetch();
+      message = 'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
+      await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
       identityError = cause instanceof Error ? cause.message : 'The OIDC identity could not be unlinked.';
     } finally {
@@ -194,13 +332,17 @@
         <p role="status">Checking your sign-in methods…</p>
       {:else if identities.isError}
         <p class="field-error" role="alert">Your sign-in methods are unavailable. <button class="text-button" type="button" onclick={() => identities.refetch()}>Try again</button></p>
+      {:else if passwordEnrollmentNeeded && !enrollmentGrantReady}
+        <p class="security-note">A fresh identity-provider sign-in is required before adding a durable local credential.</p>
+        {#if passwordError}<p id="password-error" class="field-error" role="alert">{passwordError}</p>{/if}
+        <button class="button button-primary" type="button" onclick={verifyPasswordEnrollment} disabled={savingPassword}>{savingPassword ? 'Redirecting…' : 'Verify identity with OIDC'}</button>
       {:else}
         {#if !passwordEnrollmentNeeded}<div class="form-field"><label for="current-password">Current password</label><input id="current-password" bind:value={currentPassword} type="password" autocomplete="current-password" aria-invalid={Boolean(passwordError)} aria-describedby={passwordError ? 'password-error' : undefined} /></div>{/if}
         <div class="form-field"><label for="new-password">New password</label><input id="new-password" bind:value={newPassword} type="password" autocomplete="new-password" aria-invalid={Boolean(passwordError)} aria-describedby={passwordError ? 'new-password-help password-error' : 'new-password-help'} /><small id="new-password-help">Use at least 12 characters.</small></div>
         <div class="form-field"><label for="confirm-password">Confirm new password</label><input id="confirm-password" bind:value={confirmPassword} type="password" autocomplete="new-password" aria-invalid={Boolean(passwordError)} aria-describedby={passwordError ? 'password-error' : undefined} /></div>
         {#if passwordError}<p id="password-error" class="field-error" role="alert">{passwordError}</p>{/if}
         <button class="button button-primary" type="submit" disabled={savingPassword}>{savingPassword ? 'Saving…' : passwordEnrollmentNeeded ? 'Add local password' : 'Change password'}</button>
-        <p class="security-note">{passwordEnrollmentNeeded ? 'Add a password before unlinking your final OIDC identity.' : 'Changing your password revokes every other session.'}</p>
+        <p class="security-note">This change revokes every previous session and rotates this browser to a new session.</p>
       {/if}
     </form>
 
@@ -212,6 +354,8 @@
         {#if identities.data?.data.length}
           <div class="identity-list">{#each identities.data.data as identity (identity.id)}<article class="identity-row"><div><strong>{identity.email_at_link ?? 'OIDC identity'}</strong><small>{identity.issuer}</small><small>{identity.last_login_at ? `Last used ${formatDate(identity.last_login_at)}` : `Linked ${formatDate(identity.created_at)}`}</small></div><button class="button button-secondary" type="button" onclick={() => unlinkIdentity(identity.id, identity.issuer)} disabled={!identity.can_unlink || Boolean(identityBusy)} title={identity.can_unlink ? 'Unlink this identity' : 'Add another authentication method before unlinking'}>{identityBusy === identity.id ? 'Unlinking…' : 'Unlink'}</button></article>{/each}</div>
         {:else}<p class="security-note">No OIDC identity is linked to this account.</p>{/if}
+        {#if pendingIdentityAction?.purpose === 'oidc_link'}<p class="security-note">Your fresh identity verification is ready. Confirm to continue to your identity provider.</p><button class="button button-primary" type="button" onclick={completePendingIdentityAction} disabled={Boolean(identityBusy)}>{identityBusy === 'link' ? 'Redirecting…' : 'Confirm OIDC identity link'}</button>{/if}
+        {#if pendingIdentityAction?.purpose === 'oidc_unlink'}<p class="security-note">Your fresh identity verification is ready. Confirm the selected OIDC identity unlink.</p><button class="button button-secondary danger-button" type="button" onclick={completePendingIdentityAction} disabled={Boolean(identityBusy)}>{identityBusy === pendingIdentityAction.resourceId ? 'Unlinking…' : 'Confirm OIDC identity unlink'}</button>{/if}
         {#if identities.data?.linking_available}<button class="button button-secondary" type="button" onclick={linkIdentity} disabled={Boolean(identityBusy)}>{identityBusy === 'link' ? 'Redirecting…' : 'Link an OIDC identity'}</button>{/if}
       {/if}
       {#if identityError}<p class="field-error" role="alert">{identityError}</p>{/if}
@@ -242,6 +386,7 @@
   dd { margin: 0.1rem 0 0; }
   .field-error { margin: 0; color: var(--danger); font-weight: 700; }
   .security-note { margin: 0; color: var(--foreground-muted); font-size: 0.75rem; }
+  .danger-button { color: var(--danger); }
   .sessions { margin-top: 2rem; }
   .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; }
   .section-heading p:last-child { margin: 0.3rem 0 0; color: var(--foreground-muted); }

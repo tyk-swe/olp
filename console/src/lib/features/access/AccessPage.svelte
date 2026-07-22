@@ -24,6 +24,11 @@
     type OidcConfiguration,
     type OidcConfigurationInput
   } from '$lib/api/management/oidc';
+  import {
+    beginOidcReauthentication,
+    listOidcIdentities,
+    reauthenticateWithPassword
+  } from '$lib/api/operations';
   import type { CursorPage } from '$lib/api/management/shared';
 
   type Tab = 'members' | 'invitations' | 'sessions' | 'oidc';
@@ -197,6 +202,16 @@
 
   async function linkIdentity() {
     await run('oidc-link', async () => {
+      const identities = await listOidcIdentities();
+      if (!identities.has_local_password) {
+        // The callback returns to the profile page, where the user explicitly
+        // confirms the link before its one-time OIDC grant is consumed.
+        window.location.assign(await beginOidcReauthentication('oidc_link'));
+        return;
+      }
+      const password = window.prompt('Enter your current password to link an OIDC identity.');
+      if (password === null) return;
+      await reauthenticateWithPassword(password, 'oidc_link');
       const authorizationUrl = await beginOidcLink();
       window.location.assign(authorizationUrl);
     });

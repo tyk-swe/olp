@@ -276,6 +276,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oidc/reauthenticate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["begin_reauthentication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playground": {
         parameters: {
             query?: never;
@@ -350,6 +366,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["enroll_password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile/reauthenticate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["recent_authentication"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1509,6 +1541,7 @@ export interface components {
         };
         OidcIdentityListResponse: {
             data: components["schemas"]["OidcIdentityResponse"][];
+            has_local_password: boolean;
             linking_available: boolean;
         };
         OidcIdentityResponse: {
@@ -1521,6 +1554,15 @@ export interface components {
             issuer: string;
             /** Format: date-time */
             last_login_at?: string | null;
+        };
+        OidcReauthenticationRequest: {
+            /** @description Exact durable security operation that the resulting one-time grant may authorize. */
+            purpose: string;
+            /**
+             * Format: uuid
+             * @description Required only when unlinking one specific OIDC identity.
+             */
+            resource_id?: string | null;
         };
         OidcRoleMappingRequest: {
             claim_value: string;
@@ -1922,6 +1964,13 @@ export interface components {
             state: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        RecentAuthenticationRequest: {
+            current_password: string;
+            /** @description Exact security operation authorized by this one-time grant. */
+            purpose: string;
+            /** Format: uuid */
+            resource_id?: string | null;
         };
         ReplaceRouteDraftRequest: {
             /** Format: int32 */
@@ -3364,7 +3413,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OIDC identity authenticated and local session issued */
+            /** @description OIDC login, identity link, or recent authentication completed */
             303: {
                 headers: {
                     [name: string]: unknown;
@@ -3380,8 +3429,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description ID token validation failed */
+            /** @description ID token validation or initiating session failed */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Fresh identity did not match the initiating local account */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3559,7 +3617,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OIDC identities linked to the current account */
+            /** @description OIDC identities and authentication methods for the current account */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3609,14 +3667,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Identity unlinked */
+            /** @description Identity unlinked and session rotated */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Authentication required. */
+            /** @description No active session */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3625,7 +3683,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description CSRF or origin check failed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3645,6 +3703,15 @@ export interface operations {
             };
             /** @description Unlink would remove the final authentication method */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Recent authentication is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3692,6 +3759,15 @@ export interface operations {
             };
             /** @description CSRF or origin check failed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Recent authentication is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3764,6 +3840,75 @@ export interface operations {
             };
             /** @description OIDC dependency unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    begin_reauthentication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OidcReauthenticationRequest"];
+            };
+        };
+        responses: {
+            /** @description Authorization URL for fresh IdP authentication */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OidcAuthorizationResponse"];
+                };
+            };
+            /** @description Invalid operation scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No active local session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description CSRF or origin check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description OIDC authorization flow creation is rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4119,7 +4264,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Local password changed; other sessions revoked */
+            /** @description Local password changed; every previous session revoked and this browser rotated */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -4202,7 +4347,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description First local password enrolled; other sessions revoked */
+            /** @description First local password enrolled; every previous session revoked and this browser rotated */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -4250,6 +4395,82 @@ export interface operations {
                 };
             };
             /** @description New password is invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Recent authentication is required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Password work is rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    recent_authentication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecentAuthenticationRequest"];
+            };
+        };
+        responses: {
+            /** @description One-time recent-authentication grant issued */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session changed while authenticating */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Current password is invalid or local auth is unavailable */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Purpose or resource binding is invalid */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7136,6 +7357,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Another request recovered the session CSRF credential */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -7156,14 +7386,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Session ended */
+            /** @description Session ended and browser credentials expired */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description No active session */
+            /** @description Authentication required. */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7172,7 +7402,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description CSRF or origin check failed */
+            /** @description Origin check failed */
             403: {
                 headers: {
                     [name: string]: unknown;

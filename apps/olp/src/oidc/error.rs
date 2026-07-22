@@ -3,7 +3,10 @@ use olp_providers::OidcNetworkError;
 use olp_storage::OidcError;
 use tracing::{error, warn};
 
-use crate::{FieldErrors, Problem};
+use crate::{
+    FieldErrors, Problem,
+    management_api::{map_persistence, reauthentication_required},
+};
 
 pub(super) fn invalid_login_flow_cookie() -> Problem {
     Problem::bad_request(
@@ -40,10 +43,7 @@ pub(super) fn oidc_not_configured() -> Problem {
 
 pub(super) fn map_oidc(error: OidcError) -> Problem {
     match error {
-        OidcError::Persistence(error) => {
-            error!(%error, "OIDC persistence operation failed");
-            Problem::service_unavailable("database_unavailable")
-        }
+        OidcError::Persistence(error) => map_persistence(error),
         OidcError::Invalid(detail) => field_problem("oidc", &detail),
         OidcError::NotConfigured | OidcError::Disabled => oidc_not_configured(),
         OidcError::PreconditionRequired => Problem::new(
@@ -94,6 +94,14 @@ pub(super) fn map_oidc(error: OidcError) -> Problem {
         OidcError::InactiveUser => {
             Problem::forbidden("account_inactive", "The linked local account is inactive.")
         }
+        OidcError::RecentAuthenticationRequired => reauthentication_required(),
+        OidcError::SessionUnavailable => Problem::unauthorized(
+            "The initiating session is missing, expired, or no longer current.",
+        ),
+        OidcError::ReauthenticationIdentityMismatch => Problem::forbidden(
+            "oidc_reauthentication_identity_mismatch",
+            "Fresh provider authentication did not match an identity linked to this account.",
+        ),
         OidcError::Corrupt => {
             error!("stored OIDC data is invalid");
             Problem::internal()
