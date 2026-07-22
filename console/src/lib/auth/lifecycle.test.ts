@@ -271,6 +271,60 @@ describe('authentication lifecycle', () => {
     expect(secondRequest.headers.get('x-csrf-token')).toBe('csrf-refreshed');
   });
 
+  it('keeps a passive refresh from superseding a stale mutation validation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const lifecycle = new AuthenticationLifecycle();
+    let resolveSession!: (value: AuthenticatedSession) => void;
+    const loaded = new Promise<AuthenticatedSession>((resolve) => {
+      resolveSession = resolve;
+    });
+    const loadSession = vi.fn(async () => loaded);
+    lifecycle.registerBoundary(boundary(loadSession));
+    lifecycle.establishSession(session());
+    vi.advanceTimersByTime(60_001);
+
+    const preparation = lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+    );
+    vi.advanceTimersByTime(501);
+    const passiveValidation = lifecycle.validateSession({ passive: true });
+
+    expect(loadSession).toHaveBeenCalledOnce();
+    resolveSession(session('csrf-refreshed'));
+    const [request, passiveSession] = await Promise.all([preparation, passiveValidation]);
+
+    expect(passiveSession).toMatchObject({ csrf_token: 'csrf-refreshed' });
+    expect(request.headers.get('x-csrf-token')).toBe('csrf-refreshed');
+  });
+
+  it('rejects a stale mutation when session recovery changes principals', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const lifecycle = new AuthenticationLifecycle();
+    let resolveSession!: (value: AuthenticatedSession) => void;
+    const loaded = new Promise<AuthenticatedSession>((resolve) => {
+      resolveSession = resolve;
+    });
+    lifecycle.registerBoundary(boundary(async () => loaded));
+    lifecycle.establishSession(sessionFor('first-principal', 'csrf-first'));
+    vi.advanceTimersByTime(60_001);
+
+    const preparation = lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+    );
+    resolveSession(sessionFor('second-principal', 'csrf-second'));
+    const error = await preparation.catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe('AbortError');
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: sessionFor('second-principal', 'csrf-second').user
+    });
+    expect(getCsrfToken()).toBe('csrf-second');
+  });
+
   it('preserves CSRF until the logout request has been prepared', async () => {
     const lifecycle = new AuthenticationLifecycle();
     lifecycle.establishSession(session('csrf-for-logout'));
@@ -303,6 +357,23 @@ describe('authentication lifecycle', () => {
 
     expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
     expect(getCsrfToken()).toBeNull();
+  });
+
+  it('uses the same cleanup path when the current session is revoked', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loaded = deferred<AuthenticatedSession>();
+    const registeredBoundary = boundary(async () => loaded.promise);
+    lifecycle.registerBoundary(registeredBoundary);
+    lifecycle.establishSession(session('csrf-old'));
+
+    const validation = lifecycle.validateSession({ passive: true });
+    await lifecycle.endCurrentSession(async () => undefined);
+    loaded.resolve(session('csrf-stale'));
+    await validation;
+
+    expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
+    expect(getCsrfToken()).toBeNull();
+    expect(registeredBoundary.navigate).toHaveBeenCalledWith('/login');
   });
 
   it('keeps an authenticated session read-only when CSRF recovery is empty', async () => {

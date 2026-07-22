@@ -2,6 +2,8 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
+  import { logout } from '$lib/api/auth';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { ApiProblem } from '$lib/api/http';
@@ -158,9 +160,13 @@
   async function removeSession(id: string, current: boolean) {
     if (!confirm(current ? 'Sign out this current session?' : 'Revoke this session?')) return;
     await run(`session-${id}`, async () => {
+      if (current) {
+        await authLifecycle.endCurrentSession((signal) => logout(signal));
+        return;
+      }
       await revokeSession(id);
-      if (current) window.location.assign(resolve('/login'));
-      else { await sessions.refetch(); notice = 'Session revoked.'; }
+      await sessions.refetch();
+      notice = 'Session revoked.';
     });
   }
 

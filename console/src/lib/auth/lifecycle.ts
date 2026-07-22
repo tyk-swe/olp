@@ -42,7 +42,6 @@ type AuthenticationRequest = (signal: AbortSignal) => Promise<AuthenticatedSessi
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SESSION_FRESHNESS_MS = 60_000;
-const PASSIVE_COALESCE_MS = 500;
 
 function unauthorizedError(error: unknown): boolean {
   return (error as { problem?: { status?: unknown } } | null)?.problem?.status === 401;
@@ -127,7 +126,6 @@ export class AuthenticationLifecycle {
   private validationGeneration = 0;
   private authenticationGeneration = 0;
   private activeValidation: Promise<AuthenticatedSession | null> | null = null;
-  private activeValidationStartedAt = 0;
   private unauthorizedTransition: Promise<void> | null = null;
   private unauthorizedHandled = false;
 
@@ -208,15 +206,8 @@ export class AuthenticationLifecycle {
   async validateSession(options: ValidateOptions = {}): Promise<AuthenticatedSession | null> {
     const boundary = this.boundary;
     if (!boundary) return null;
+    if (options.passive && this.activeValidation) return this.activeValidation;
     if (options.passive && this.snapshotValue.phase !== 'authenticated') {
-      return this.activeValidation;
-    }
-    const now = Date.now();
-    if (
-      options.passive &&
-      this.activeValidation &&
-      now - this.activeValidationStartedAt < PASSIVE_COALESCE_MS
-    ) {
       return this.activeValidation;
     }
 
@@ -224,7 +215,6 @@ export class AuthenticationLifecycle {
     const controller = new AbortController();
     this.sessionController = controller;
     const generation = this.validationGeneration;
-    this.activeValidationStartedAt = now;
     this.unauthorizedHandled = false;
     const authenticatedSnapshot =
       this.snapshotValue.phase === 'authenticated' && this.snapshotValue.user
@@ -292,10 +282,17 @@ export class AuthenticationLifecycle {
     if (!this.snapshotValue.user || this.snapshotValue.phase !== 'authenticated') {
       throw new DOMException('No authenticated principal is active.', 'AbortError');
     }
+    const startingPartition = this.partition;
     const age = Date.now() - (this.snapshotValue.lastValidatedAt ?? 0);
     if (getCsrfToken() && age <= SESSION_FRESHNESS_MS) return;
     const session = await (this.activeValidation ?? this.validateSession());
     if (!session) throw new DOMException('Session validation did not complete.', 'AbortError');
+    if (startingPartition !== this.partition) {
+      throw new DOMException(
+        'The authenticated principal changed while the request was being prepared.',
+        'AbortError'
+      );
+    }
     if (!getCsrfToken()) {
       throw new DOMException(
         'This session cannot make changes until you sign in again.',

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
+  import { logout } from '$lib/api/auth';
   import {
     beginOidcLink,
     beginOidcReauthentication,
@@ -16,7 +16,7 @@
     unlinkOidcIdentity,
     updateProfile
   } from '$lib/api/operations';
-  import { clearCsrfToken } from '$lib/api/session';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import { formatDate } from '$lib/features/operations/format';
   import { validateDisplayName, validateNewPassword, validatePassword } from './validation';
 
@@ -248,12 +248,11 @@
     revoking = id;
     passwordError = message = '';
     try {
-      await revokeSession(id);
       if (current) {
-        clearCsrfToken();
-        await goto(resolve('/login'), { replaceState: true });
+        await authLifecycle.endCurrentSession((signal) => logout(signal));
         return;
       }
+      await revokeSession(id);
       message = 'Session revoked.';
       await sessions.refetch();
     } catch (cause) {
