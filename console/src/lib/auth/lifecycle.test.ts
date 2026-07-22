@@ -240,6 +240,17 @@ describe('authentication lifecycle', () => {
     expect(request.headers.get('x-csrf-token')).toBe('csrf-refreshed');
   });
 
+  it.each([
+    ['GET', '/api/v1/auth/capabilities'],
+    ['GET', '/api/v1/oidc/login'],
+    ['POST', '/api/v1/oidc/login']
+  ])('allows public authentication request %s %s without a session', async (method, pathname) => {
+    const lifecycle = new AuthenticationLifecycle();
+    const request = new Request(`https://console.example.test${pathname}`, { method });
+
+    await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
+  });
+
   it('shares one freshness validation between concurrent stale-session mutations', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
@@ -344,6 +355,80 @@ describe('authentication lifecycle', () => {
     expect(lifecycle.snapshot().phase).toBe('anonymous');
   });
 
+  it('applies a CSRF rotation from a request in the current authentication generation', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    lifecycle.establishSession(session('csrf-original'));
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+    );
+
+    await lifecycle.handleResponse(
+      request,
+      new Response(null, { headers: { 'x-csrf-token': 'csrf-rotated' } })
+    );
+
+    expect(getCsrfToken()).toBe('csrf-rotated');
+  });
+
+  it('ignores a CSRF rotation from a superseded authentication generation', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    lifecycle.establishSession(session('csrf-original'));
+    const staleRequest = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+    );
+    await lifecycle.authenticate(async () => session('csrf-current'));
+
+    await lifecycle.handleResponse(
+      staleRequest,
+      new Response(null, { headers: { 'x-csrf-token': 'csrf-stale-rotation' } })
+    );
+
+    expect(getCsrfToken()).toBe('csrf-current');
+  });
+
+  it('keeps a renewed session when a stale request returns 401', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loadSession = vi.fn(async () => session('csrf-renewed'));
+    const registeredBoundary = boundary(loadSession);
+    lifecycle.registerBoundary(registeredBoundary);
+    lifecycle.establishSession(session('csrf-stale'));
+    const staleRequest = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile')
+    );
+
+    await lifecycle.handleResponse(staleRequest, new Response(null, { status: 401 }));
+
+    expect(loadSession).toHaveBeenCalledOnce();
+    expect(registeredBoundary.navigate).not.toHaveBeenCalled();
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: session().user
+    });
+    expect(getCsrfToken()).toBe('csrf-renewed');
+  });
+
+  it('ignores a 401 from a superseded authentication generation', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loadSession = vi.fn(async () => session('csrf-unexpected'));
+    const registeredBoundary = boundary(loadSession);
+    lifecycle.registerBoundary(registeredBoundary);
+    lifecycle.establishSession(session('csrf-old'));
+    const staleRequest = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile')
+    );
+    await lifecycle.authenticate(async () => session('csrf-current'));
+
+    await lifecycle.handleResponse(staleRequest, new Response(null, { status: 401 }));
+
+    expect(loadSession).not.toHaveBeenCalled();
+    expect(registeredBoundary.navigate).not.toHaveBeenCalled();
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: session().user
+    });
+    expect(getCsrfToken()).toBe('csrf-current');
+  });
+
   it('does not let a pre-logout validation restore the signed-out session', async () => {
     const lifecycle = new AuthenticationLifecycle();
     const loaded = deferred<AuthenticatedSession>();
@@ -374,6 +459,29 @@ describe('authentication lifecycle', () => {
     expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
     expect(getCsrfToken()).toBeNull();
     expect(registeredBoundary.navigate).toHaveBeenCalledWith('/login');
+  });
+
+  it('retains a failed current-session exit error after restoring the session', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const registeredBoundary = boundary(async () => session('csrf-restored'));
+    lifecycle.registerBoundary(registeredBoundary);
+    lifecycle.establishSession(session('csrf-before-exit'));
+
+    const error = await lifecycle
+      .endCurrentSession(async () => {
+        throw new Error('Session revoke service unavailable');
+      })
+      .catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Session revoke service unavailable');
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: session().user,
+      principalExitError: 'Session revoke service unavailable'
+    });
+    expect(getCsrfToken()).toBe('csrf-restored');
+    expect(registeredBoundary.navigate).not.toHaveBeenCalled();
   });
 
   it('keeps an authenticated session read-only when CSRF recovery is empty', async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from './client';
-import { clearCsrfToken, setCsrfToken } from './session';
+import { clearCsrfToken, getCsrfToken, setCsrfToken } from './session';
 import { authLifecycle } from '$lib/auth/lifecycle';
 import { captureRequests, jsonResponse } from './test/requestCapture';
 
@@ -93,5 +93,19 @@ describe('generated API request boundary', () => {
       body: { email: 'operator@example.com', password: 'correct horse battery staple' }
     });
     expect(requests[5]?.headers.has('x-csrf-token')).toBe(false);
+  });
+
+  it('routes response-side CSRF rotation through the lifecycle', async () => {
+    captureRequests(() =>
+      jsonResponse({}, { headers: { 'x-csrf-token': 'csrf-rotated-by-response' } })
+    );
+    authLifecycle.establishSession(session);
+
+    await apiClient.PATCH('/api/v1/profile', {
+      params: { header: { 'If-Match': 'profile-etag' } },
+      body: { display_name: 'Operator' }
+    });
+
+    expect(getCsrfToken()).toBe('csrf-rotated-by-response');
   });
 });

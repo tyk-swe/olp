@@ -23,6 +23,7 @@
     oidc_login_enabled: false
   });
   let message = $state('');
+  const publicAuthController = new AbortController();
 
   function destination() {
     return relativeReturnTo(page.url.searchParams.get('return_to'), page.url.origin);
@@ -71,7 +72,7 @@
     message = '';
     oidcBusy = true;
     try {
-      const authorizationUrl = await beginOidcLogin(destination());
+      const authorizationUrl = await beginOidcLogin(destination(), publicAuthController.signal);
       window.location.assign(authorizationUrl);
     } catch (error) {
       message = problemMessage(error, 'Single sign-on could not be started.');
@@ -81,22 +82,23 @@
   }
 
   onMount(() => {
-    const controller = new AbortController();
-    void authenticationCapabilities(controller.signal)
+    void authenticationCapabilities(publicAuthController.signal)
       .then((value) => {
         capabilities = value;
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (publicAuthController.signal.aborted) return;
         message = problemMessage(error, 'Sign-in options could not be loaded.');
       })
       .finally(() => {
-        if (!controller.signal.aborted) capabilitiesLoading = false;
-    });
-    return () => controller.abort();
+        if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
+      });
   });
 
-  onDestroy(() => authLifecycle.abortAuthenticationWork());
+  onDestroy(() => {
+    publicAuthController.abort();
+    authLifecycle.abortAuthenticationWork();
+  });
 </script>
 
 <svelte:head><title>Sign in · OpenLLMProxy</title></svelte:head>

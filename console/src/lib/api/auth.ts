@@ -52,9 +52,10 @@ export async function authenticationCapabilities(
   return value;
 }
 
-export async function beginOidcLogin(returnTo: string): Promise<string> {
+export async function beginOidcLogin(returnTo: string, signal?: AbortSignal): Promise<string> {
   const { data, error, response } = await apiClient.POST('/api/v1/oidc/login', {
-    body: { return_to: returnTo }
+    body: { return_to: returnTo },
+    signal
   });
   const value = result(data, error, response);
   if (typeof value.authorization_url !== 'string') {

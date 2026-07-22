@@ -25,6 +25,7 @@ export type AuthenticationSnapshot = {
   phase: AuthenticationPhase;
   user: AuthenticatedUser | null;
   error: string;
+  principalExitError: string;
   lastValidatedAt: number | null;
 };
 
@@ -63,7 +64,8 @@ function isAuthenticationEndpoint(request: Request): boolean {
     (method === 'POST' && pathname === '/api/v1/setup') ||
     (method === 'POST' && pathname === '/api/v1/sessions') ||
     (method === 'POST' && pathname === '/api/v1/invitations/accept') ||
-    (method === 'GET' && pathname === '/api/v1/oidc/login') ||
+    (method === 'GET' && pathname === '/api/v1/auth/capabilities') ||
+    ((method === 'GET' || method === 'POST') && pathname === '/api/v1/oidc/login') ||
     (method === 'GET' && pathname === '/api/v1/oidc/callback')
   );
 }
@@ -114,6 +116,7 @@ export class AuthenticationLifecycle {
     phase: 'anonymous',
     user: null,
     error: '',
+    principalExitError: '',
     lastValidatedAt: null
   };
   private partitionGeneration = 0;
@@ -123,6 +126,8 @@ export class AuthenticationLifecycle {
   private authenticationController: AbortController | null = null;
   private principalExitController: AbortController | null = null;
   private authenticatedRequestController = new AbortController();
+  private authenticatedRequestGeneration = 0;
+  private requestGenerations = new WeakMap<Request, number>();
   private validationGeneration = 0;
   private authenticationGeneration = 0;
   private activeValidation: Promise<AuthenticatedSession | null> | null = null;
@@ -158,7 +163,13 @@ export class AuthenticationLifecycle {
   }
 
   markProtectedBoundaryChecking(): void {
-    this.setSnapshot({ phase: 'checking', user: null, error: '', lastValidatedAt: null });
+    this.setSnapshot({
+      phase: 'checking',
+      user: null,
+      error: '',
+      principalExitError: '',
+      lastValidatedAt: null
+    });
   }
 
   queryKeyHash(key: readonly unknown[]): string {
@@ -199,6 +210,7 @@ export class AuthenticationLifecycle {
       phase: 'authenticated',
       user: session.user,
       error: '',
+      principalExitError: this.snapshotValue.principalExitError,
       lastValidatedAt: Date.now()
     });
   }
@@ -307,13 +319,26 @@ export class AuthenticationLifecycle {
     }
     const mutation = !SAFE_METHODS.has(request.method.toUpperCase());
     if (mutation && !isCurrentSessionDeletion(request)) await this.ensureFreshSession();
+    const generation = this.authenticatedRequestGeneration;
     const signal = combineSignals(request.signal, this.authenticatedRequestController.signal);
     const headers = new Headers(request.headers);
     if (mutation) {
       const csrf = getCsrfToken();
       if (csrf) headers.set('x-csrf-token', csrf);
     }
-    return new Request(request, { headers, signal });
+    const prepared = new Request(request, { headers, signal });
+    this.requestGenerations.set(request, generation);
+    this.requestGenerations.set(prepared, generation);
+    return prepared;
+  }
+
+  async handleResponse(request: Request, response: Response): Promise<void> {
+    const requestGeneration = this.requestGenerations.get(request);
+    if (requestGeneration === this.authenticatedRequestGeneration) {
+      const rotatedCsrf = response.headers.get('x-csrf-token');
+      if (rotatedCsrf) setCsrfToken(rotatedCsrf);
+    }
+    if (response.status === 401) await this.handleUnauthorized(request);
   }
 
   async handleUnauthorized(request: Request): Promise<void> {
@@ -322,6 +347,20 @@ export class AuthenticationLifecycle {
       isSessionValidationEndpoint(request) ||
       isCurrentSessionDeletion(request)
     ) {
+      return;
+    }
+    const requestGeneration = this.requestGenerations.get(request);
+    if (
+      requestGeneration !== undefined &&
+      requestGeneration !== this.authenticatedRequestGeneration
+    ) {
+      return;
+    }
+    // A 401 can belong to a request sent with a cookie that another tab has
+    // since replaced. Validate the browser's current cookie before deciding
+    // that this tab has become anonymous.
+    if (this.boundary) {
+      await this.validateSession({ passive: true });
       return;
     }
     await this.transitionToAnonymous();
@@ -363,12 +402,23 @@ export class AuthenticationLifecycle {
       await request(controller.signal);
       if (controller.signal.aborted) return false;
       clearCsrfToken();
-      this.setSnapshot({ phase: 'anonymous', user: null, error: '', lastValidatedAt: null });
+      this.setSnapshot({
+        phase: 'anonymous',
+        user: null,
+        error: '',
+        principalExitError: '',
+        lastValidatedAt: null
+      });
       return true;
     } catch (error) {
       if (controller.signal.aborted || abortError(error)) return false;
-      if (!controller.signal.aborted) await this.validateSession();
-      if (this.unauthorizedHandled && !this.snapshotValue.user) return false;
+      await this.validateSession();
+      if (controller.signal.aborted || (this.unauthorizedHandled && !this.snapshotValue.user)) return false;
+      this.setSnapshot({
+        ...this.snapshotValue,
+        principalExitError:
+          error instanceof Error ? error.message : 'The sign-out request could not be completed.'
+      });
       throw error;
     } finally {
       if (this.principalExitController === controller) this.principalExitController = null;
@@ -395,7 +445,13 @@ export class AuthenticationLifecycle {
       await this.cancelAndClearQueries();
       if (controller.signal.aborted || boundaryGeneration !== this.boundaryGeneration) return;
       if (!boundary) {
-        this.setSnapshot({ phase: 'anonymous', user: null, error: '', lastValidatedAt: null });
+        this.setSnapshot({
+          phase: 'anonymous',
+          user: null,
+          error: '',
+          principalExitError: '',
+          lastValidatedAt: null
+        });
         return;
       }
       const destination = await boundary.unauthenticatedDestination(controller.signal);
@@ -408,6 +464,7 @@ export class AuthenticationLifecycle {
             phase: 'unavailable',
             user: null,
             error: error instanceof Error ? error.message : 'The login destination could not be loaded.',
+            principalExitError: '',
             lastValidatedAt: null
           });
         }
@@ -446,10 +503,11 @@ export class AuthenticationLifecycle {
   private rotateAuthenticatedRequests(): void {
     this.authenticatedRequestController.abort();
     this.authenticatedRequestController = new AbortController();
+    this.authenticatedRequestGeneration++;
   }
 
   private gateProtectedContent(phase: AuthenticationPhase, error = ''): void {
-    this.setSnapshot({ phase, user: null, error, lastValidatedAt: null });
+    this.setSnapshot({ phase, user: null, error, principalExitError: '', lastValidatedAt: null });
   }
 
   private setSnapshot(snapshot: AuthenticationSnapshot): void {

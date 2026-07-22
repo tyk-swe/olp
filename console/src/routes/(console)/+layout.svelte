@@ -88,7 +88,7 @@
     {/if}
   </main>
 {:else}
-  <AppShell user={authentication.user} {signingOut} {signOutError} onSignOut={signOut}>
+  <AppShell user={authentication.user} {signingOut} signOutError={signOutError || authentication.principalExitError} onSignOut={signOut}>
     {@render children()}
   </AppShell>
 {/if}

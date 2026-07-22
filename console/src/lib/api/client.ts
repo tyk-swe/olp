@@ -26,7 +26,7 @@ apiClient.use({
     return authLifecycle.prepareRequest(request);
   },
   async onResponse({ request, response }) {
-    if (response.status === 401) await authLifecycle.handleUnauthorized(request);
+    await authLifecycle.handleResponse(request, response);
     return response;
   }
 });
