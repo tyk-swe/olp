@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { onDestroy, onMount } from 'svelte';
   import {
     authenticationCapabilities,
     beginOidcLogin,
@@ -8,9 +9,9 @@
     type AuthenticationCapabilities
   } from '$lib/api/auth';
   import { ApiProblem } from '$lib/api/http';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import { relativeReturnTo } from '$lib/auth/relativeReturnTo';
   import SetupFrame from '$lib/features/setup/SetupFrame.svelte';
-  import { onMount } from 'svelte';
 
   let email = $state('');
   let password = $state('');
@@ -53,7 +54,7 @@
     }
     busy = true;
     try {
-      await login(email.trim(), password);
+      await authLifecycle.authenticate((signal) => login(email.trim(), password, signal));
       // destination() rejects external, ambiguous, malformed, and login-loop values.
       // eslint-disable-next-line svelte/no-navigation-without-resolve
       await goto(destination(), { replaceState: true, invalidateAll: true });
@@ -91,9 +92,11 @@
       })
       .finally(() => {
         if (!controller.signal.aborted) capabilitiesLoading = false;
-      });
+    });
     return () => controller.abort();
   });
+
+  onDestroy(() => authLifecycle.abortAuthenticationWork());
 </script>
 
 <svelte:head><title>Sign in · OpenLLMProxy</title></svelte:head>

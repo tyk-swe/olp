@@ -3,61 +3,21 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { onMount } from 'svelte';
-  import { currentSession, logout, type SessionUser } from '$lib/api/auth';
-  import { ApiProblem } from '$lib/api/http';
-  import { clearCsrfToken } from '$lib/api/session';
+  import { currentSession, logout } from '$lib/api/auth';
   import { getSetupStatus } from '$lib/api/setup';
+  import { authLifecycle, type AuthenticationSnapshot } from '$lib/auth/lifecycle';
+  import { currentRelativeDestination } from '$lib/auth/paths';
   import AppShell from '$lib/components/AppShell.svelte';
 
   let { children } = $props();
-  let user = $state<SessionUser | null>(null);
-  let sessionState = $state<'checking' | 'ready' | 'unavailable'>('checking');
-  let sessionError = $state('');
+  authLifecycle.markProtectedBoundaryChecking();
+  let authentication = $state<AuthenticationSnapshot>(authLifecycle.snapshot());
   let signOutError = $state('');
   let signingOut = $state(false);
-  let activeController: AbortController | undefined;
 
   function loginDestination() {
-    const returnTo = `${page.url.pathname}${page.url.search}${page.url.hash}`;
+    const returnTo = currentRelativeDestination(page.url);
     return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}`;
-  }
-
-  async function requireSession() {
-    activeController?.abort();
-    activeController = new AbortController();
-    const { signal } = activeController;
-    sessionState = 'checking';
-    sessionError = '';
-    try {
-      const session = await currentSession(signal);
-      user = session.user;
-      sessionState = 'ready';
-    } catch (error) {
-      if (signal.aborted) return;
-      clearCsrfToken();
-      if (error instanceof ApiProblem && error.problem.status === 401) {
-        try {
-          const setup = await getSetupStatus(signal);
-          if (signal.aborted) return;
-          // The destination combines a resolved local login route and an encoded same-origin return path.
-          // eslint-disable-next-line svelte/no-navigation-without-resolve
-          await goto(setup.setup_required ? resolve('/setup') : loginDestination(), {
-            replaceState: true
-          });
-          return;
-        } catch (setupError) {
-          if (signal.aborted) return;
-          sessionError =
-            setupError instanceof Error
-              ? setupError.message
-              : 'The installation state could not be loaded.';
-        }
-      } else {
-        sessionError =
-          error instanceof Error ? error.message : 'The current session could not be loaded.';
-      }
-      sessionState = 'unavailable';
-    }
   }
 
   async function signOut() {
@@ -65,40 +25,70 @@
     signingOut = true;
     signOutError = '';
     try {
-      await logout();
-      await goto(resolve('/login'), { replaceState: true });
+      await authLifecycle.signOut((signal) => logout(signal), resolve('/login'));
     } catch (error) {
       signOutError =
-        error instanceof Error
-          ? error.message
-          : 'The sign-out request could not be completed.';
+        error instanceof Error ? error.message : 'The sign-out request could not be completed.';
     } finally {
       signingOut = false;
     }
   }
 
   onMount(() => {
-    void requireSession();
-    return () => activeController?.abort();
+    const unsubscribe = authLifecycle.subscribe((snapshot) => {
+      authentication = snapshot;
+    });
+    const unregister = authLifecycle.registerBoundary({
+      loadSession: currentSession,
+      async unauthenticatedDestination(signal) {
+        const setup = await getSetupStatus(signal);
+        return setup.setup_required ? resolve('/setup') : loginDestination();
+      },
+      loginDestination,
+      async navigate(destination) {
+        // Every destination is either a resolved local route or a validated
+        // same-origin relative return path constructed above.
+        // eslint-disable-next-line svelte/no-navigation-without-resolve
+        await goto(destination, { replaceState: true });
+      }
+    });
+
+    const revalidate = () => {
+      if (document.visibilityState === 'visible' && authLifecycle.snapshot().phase === 'authenticated') {
+        void authLifecycle.validateSession({ passive: true });
+      }
+    };
+    window.addEventListener('focus', revalidate);
+    document.addEventListener('visibilitychange', revalidate);
+    void authLifecycle.validateSession();
+
+    return () => {
+      window.removeEventListener('focus', revalidate);
+      document.removeEventListener('visibilitychange', revalidate);
+      unregister();
+      unsubscribe();
+    };
   });
 </script>
 
-{#if sessionState === 'checking'}
+{#if authentication.phase === 'checking' || authentication.phase === 'transitioning'}
   <main class="session-gate" aria-busy="true">
     <p role="status"><span aria-hidden="true"></span>Verifying your session…</p>
   </main>
-{:else if sessionState === 'unavailable' || !user}
+{:else if authentication.phase !== 'authenticated' || !authentication.user}
   <main class="session-gate">
-    <div class="problem-banner" role="alert">
-      <div>
-        <strong>Session verification unavailable</strong>
-        <p>{sessionError} Protected console content has not been loaded.</p>
+    {#if authentication.phase === 'unavailable'}
+      <div class="problem-banner" role="alert">
+        <div>
+          <strong>Session verification unavailable</strong>
+          <p>{authentication.error} Protected console content has not been loaded.</p>
+        </div>
+        <button class="button button-secondary" type="button" onclick={() => authLifecycle.validateSession()}>Retry</button>
       </div>
-      <button class="button button-secondary" type="button" onclick={requireSession}>Retry</button>
-    </div>
+    {/if}
   </main>
 {:else}
-  <AppShell {user} {signingOut} {signOutError} onSignOut={signOut}>
+  <AppShell user={authentication.user} {signingOut} {signOutError} onSignOut={signOut}>
     {@render children()}
   </AppShell>
 {/if}
@@ -129,11 +119,7 @@
     animation: session-spin 700ms linear infinite;
   }
 
-  .session-gate .problem-banner {
-    width: min(100%, 42rem);
-  }
+  .session-gate .problem-banner { width: min(100%, 42rem); }
 
-  @keyframes session-spin {
-    to { transform: rotate(360deg); }
-  }
+  @keyframes session-spin { to { transform: rotate(360deg); } }
 </style>

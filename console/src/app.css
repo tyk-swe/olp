@@ -558,3 +558,14 @@ button:not(:disabled),
     color: ButtonText;
   }
 }
+
+/* iOS WebKit zooms focused form controls below 16px. Keep the surrounding
+   density in spacing while preserving a stable visual viewport on touch and
+   narrow screens. */
+@media (max-width: 64rem), (hover: none) and (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
   import type { SessionUser } from '$lib/api/auth';
+  import { provideAuthorization } from '$lib/auth/authorization';
   import BrandMark from './BrandMark.svelte';
   import NavIcon from './NavIcon.svelte';
   import Navigation from './Navigation.svelte';
@@ -21,6 +22,7 @@
     onSignOut: () => void;
   } = $props();
   let mobileNavigation = $state<HTMLDialogElement>();
+  const authorization = provideAuthorization(() => user.role);
 
   function openNavigation() {
     mobileNavigation?.showModal();
@@ -75,7 +77,7 @@
           </summary>
           <div class="account-popover">
             <a href={resolve('/settings/profile')}>Personal profile</a>
-            <a href={resolve('/settings')}>Installation settings</a>
+            {#if authorization.can('settings.read')}<a href={resolve('/settings')}>Installation settings</a>{/if}
             <button type="button" onclick={onSignOut} disabled={signingOut} aria-busy={signingOut}>
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>

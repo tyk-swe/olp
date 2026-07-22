@@ -1,18 +1,12 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { ApiProblem, ensureSuccess, result } from './http';
-import { clearCsrfToken, getCsrfTokenVersion, setCsrfToken } from './session';
-
-const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
-
-export type FixedRole = (typeof FIXED_ROLE_VALUES)[number];
-
-const FIXED_ROLES = new Set<string>(FIXED_ROLE_VALUES);
+import { isFixedRole, type FixedRole } from '$lib/auth/authorization';
 
 type Schemas = components['schemas'];
 
+export type { FixedRole };
 export type SessionUser = Schemas['UserResponse'] & { role: FixedRole };
-
 export type CurrentSession = Omit<Schemas['SessionResponse'], 'user'> & { user: SessionUser };
 
 export type AuthenticationCapabilities = Schemas['AuthenticationCapabilities'];
@@ -30,18 +24,11 @@ function sessionResult(
     typeof user?.id !== 'string' ||
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||
-    typeof user?.role !== 'string'
+    !isFixedRole(user?.role)
   ) {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
       title: 'The session response is invalid',
-      status: 502
-    });
-  }
-  if (!FIXED_ROLES.has(user.role)) {
-    throw new ApiProblem({
-      type: 'urn:olp:problem:invalid-api-response',
-      title: 'The session response contains an invalid role',
       status: 502
     });
   }
@@ -92,41 +79,37 @@ export async function beginOidcLogin(returnTo: string): Promise<string> {
 }
 
 export async function currentSession(signal?: AbortSignal): Promise<CurrentSession> {
-  // A current-session recovery can race a login or security transition. If a
-  // newer response has already installed CSRF state, do not let this older
-  // session response replace it after its body finishes parsing.
-  const csrfTokenVersion = getCsrfTokenVersion();
   const { data, error, response } = await apiClient.GET('/api/v1/sessions/current', { signal });
-  const session = sessionResult(data, error, response);
-  if (getCsrfTokenVersion() === csrfTokenVersion) setCsrfToken(session.csrf_token);
-  return session;
+  return sessionResult(data, error, response);
 }
 
-export async function login(email: string, password: string): Promise<CurrentSession> {
+export async function login(
+  email: string,
+  password: string,
+  signal?: AbortSignal
+): Promise<CurrentSession> {
   const { data, error, response } = await apiClient.POST('/api/v1/sessions', {
-    body: { email, password }
+    body: { email, password },
+    signal
   });
-  const session = sessionResult(data, error, response);
-  setCsrfToken(session.csrf_token);
-  return session;
+  return sessionResult(data, error, response);
 }
 
 export async function acceptInvitation(
-  input: Schemas['AcceptInvitationRequest']
+  input: Schemas['AcceptInvitationRequest'],
+  signal?: AbortSignal
 ): Promise<CurrentSession> {
   const { data, error, response } = await apiClient.POST('/api/v1/invitations/accept', {
-    body: input
+    body: input,
+    signal
   });
-  const session = sessionResult(data, error, response);
-  setCsrfToken(session.csrf_token);
-  return session;
+  return sessionResult(data, error, response);
 }
 
-export async function logout(): Promise<void> {
-  const { error, response } = await apiClient.DELETE('/api/v1/sessions/current');
-  // An absent server-side session is already the desired end state. Treat it
-  // as a completed logout so an expired session cannot trap the user on a
-  // protected page with stale client-side CSRF state.
+export async function logout(signal?: AbortSignal): Promise<void> {
+  const { error, response } = await apiClient.DELETE('/api/v1/sessions/current', { signal });
+  // An absent server-side session is already the desired end state. The
+  // lifecycle boundary has already hidden protected content and cleared its
+  // local authority before this request is sent.
   if (response.status !== 401) ensureSuccess(error, response);
-  clearCsrfToken();
 }
