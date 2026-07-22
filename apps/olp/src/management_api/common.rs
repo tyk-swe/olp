@@ -9,8 +9,8 @@ use axum::{
 };
 use olp_domain::{Permission, Role};
 use olp_storage::{
-    AccessError, ConfigurationError, IdempotencyOutcome, IdentityError, PersistenceError, PgStore,
-    SessionMaterial, SessionPrincipal,
+    AccessError, ConfigurationError, CsrfMaterial, IdempotencyOutcome, IdentityError,
+    PersistenceError, PgStore, RecentAuthMaterial, SessionMaterial, SessionPrincipal,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use tracing::{error, warn};
@@ -20,8 +20,9 @@ use zeroize::Zeroize;
 
 use crate::{ApiState, FieldErrors, Problem};
 
-pub(super) const SESSION_COOKIE: &str = "__Host-olp_session";
-pub(super) const CSRF_COOKIE: &str = "__Host-olp_csrf";
+pub(crate) const SESSION_COOKIE: &str = "__Host-olp_session";
+pub(crate) const CSRF_COOKIE: &str = "__Host-olp_csrf";
+pub(crate) const RECENT_AUTH_COOKIE: &str = "__Host-olp_recent_auth";
 pub(crate) const CSRF_HEADER: &str = "x-csrf-token";
 pub(crate) const SETUP_TOKEN_HEADER: &str = "x-olp-setup-token";
 
@@ -72,7 +73,7 @@ pub(super) struct PageQuery {
     pub limit: Option<u16>,
 }
 
-pub(super) fn prevent_sensitive_response_caching(response: &mut Response) {
+pub(crate) fn prevent_sensitive_response_caching(response: &mut Response) {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -114,17 +115,118 @@ pub(super) fn parse_user_role(role: &str) -> Result<Role, Problem> {
     })
 }
 
-pub(super) fn expire_session_cookies(response: &mut Response) {
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_static(
-            "__Host-olp_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+pub(crate) fn append_session_cookies(
+    response: &mut Response,
+    material: &SessionMaterial,
+    ttl: chrono::Duration,
+) -> Result<(), Problem> {
+    let max_age = cookie_max_age(ttl)?;
+    append_set_cookie(
+        response,
+        format!(
+            "{SESSION_COOKIE}={}; Path=/; Max-Age={max_age}; Secure; HttpOnly; SameSite=Lax",
+            material.token()
         ),
+    )?;
+    append_set_cookie(
+        response,
+        format!(
+            "{CSRF_COOKIE}={}; Path=/; Max-Age={max_age}; Secure; SameSite=Lax",
+            material.csrf_token()
+        ),
+    )?;
+    Ok(())
+}
+
+pub(crate) fn append_security_transition_cookies(
+    response: &mut Response,
+    material: &SessionMaterial,
+    ttl: chrono::Duration,
+) -> Result<(), Problem> {
+    append_session_cookies(response, material, ttl)?;
+    response.headers_mut().insert(
+        CSRF_HEADER,
+        HeaderValue::from_str(material.csrf_token()).map_err(|_| Problem::internal())?,
     );
+    clear_recent_auth_cookie(response);
+    prevent_sensitive_response_caching(response);
+    Ok(())
+}
+
+pub(crate) fn append_csrf_cookie(
+    response: &mut Response,
+    material: &CsrfMaterial,
+    ttl: chrono::Duration,
+) -> Result<(), Problem> {
+    let max_age = cookie_max_age(ttl)?;
+    append_set_cookie(
+        response,
+        format!(
+            "{CSRF_COOKIE}={}; Path=/; Max-Age={max_age}; Secure; SameSite=Lax",
+            material.token()
+        ),
+    )
+}
+
+pub(crate) fn append_recent_auth_cookie(
+    response: &mut Response,
+    material: &RecentAuthMaterial,
+    ttl: chrono::Duration,
+) -> Result<(), Problem> {
+    let max_age = cookie_max_age(ttl)?;
+    append_set_cookie(
+        response,
+        format!(
+            "{RECENT_AUTH_COOKIE}={}; Path=/; Max-Age={max_age}; Secure; HttpOnly; SameSite=Lax",
+            material.token()
+        ),
+    )
+}
+
+pub(crate) fn clear_recent_auth_cookie(response: &mut Response) {
+    append_static_cookie(
+        response,
+        "__Host-olp_recent_auth=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+    );
+}
+
+pub(crate) fn expire_session_cookies(response: &mut Response) {
+    append_static_cookie(
+        response,
+        "__Host-olp_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+    );
+    append_static_cookie(
+        response,
+        "__Host-olp_csrf=; Path=/; Max-Age=0; Secure; SameSite=Lax",
+    );
+    clear_recent_auth_cookie(response);
+}
+
+pub(crate) fn validate_session_cookie_ttl(ttl: chrono::Duration) -> Result<(), Problem> {
+    cookie_max_age(ttl).map(|_| ())
+}
+
+fn cookie_max_age(ttl: chrono::Duration) -> Result<i64, Problem> {
+    let seconds = ttl.num_seconds();
+    if !(1..=i64::from(i32::MAX)).contains(&seconds) {
+        error!(seconds, "session cookie lifetime is not representable");
+        return Err(Problem::internal());
+    }
+    Ok(seconds)
+}
+
+fn append_set_cookie(response: &mut Response, cookie: String) -> Result<(), Problem> {
     response.headers_mut().append(
         header::SET_COOKIE,
-        HeaderValue::from_static("__Host-olp_csrf=; Path=/; Max-Age=0; Secure; SameSite=Lax"),
+        HeaderValue::from_str(&cookie).map_err(|_| Problem::internal())?,
     );
+    Ok(())
+}
+
+fn append_static_cookie(response: &mut Response, cookie: &'static str) {
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, HeaderValue::from_static(cookie));
 }
 
 pub(crate) fn enforce_origin(state: &ApiState, headers: &HeaderMap) -> Result<(), Problem> {
@@ -142,12 +244,12 @@ pub(crate) fn enforce_origin(state: &ApiState, headers: &HeaderMap) -> Result<()
     Ok(())
 }
 
-pub(super) fn session_cookie(headers: &HeaderMap) -> Result<&str, Problem> {
+pub(crate) fn session_cookie(headers: &HeaderMap) -> Result<&str, Problem> {
     cookie(headers, SESSION_COOKIE)
         .ok_or_else(|| Problem::unauthorized("The session cookie is missing."))
 }
 
-pub(super) fn cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
+pub(crate) fn cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
     headers
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())
@@ -195,6 +297,15 @@ pub(crate) async fn require_mutation_session(
         ));
     }
     Ok(principal)
+}
+
+pub(crate) fn reauthentication_required() -> Problem {
+    Problem::new(
+        StatusCode::PRECONDITION_REQUIRED,
+        "reauthentication_required",
+        "Recent authentication required",
+        "Authenticate again in this browser before changing account security settings.",
+    )
 }
 
 pub(crate) fn require_permission(
@@ -491,12 +602,27 @@ pub(super) fn map_identity(error: IdentityError) -> Problem {
             "local_password_already_configured",
             "A local password is already configured. Use the password-change operation.",
         ),
+        IdentityError::RecentAuthenticationRequired => reauthentication_required(),
+        IdentityError::SessionUnavailable => Problem::unauthorized(
+            "The session changed while the security operation was in progress.",
+        ),
     }
 }
 
 pub(crate) fn map_persistence(error: PersistenceError) -> Problem {
-    error!(%error, "management persistence operation failed");
-    Problem::service_unavailable("database_unavailable")
+    match error {
+        PersistenceError::SessionUnavailable => {
+            Problem::unauthorized("The session is missing, expired, or no longer current.")
+        }
+        PersistenceError::InvalidSessionTtl | PersistenceError::InvalidRecentAuthentication => {
+            error!(%error, "invalid server authentication configuration");
+            Problem::internal()
+        }
+        other => {
+            error!(error = %other, "management persistence operation failed");
+            Problem::service_unavailable("database_unavailable")
+        }
+    }
 }
 
 pub(crate) fn json_payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, Problem> {

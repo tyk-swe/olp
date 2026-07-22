@@ -4,7 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     IdempotencyOutcome, IdempotencyResponse, InvitationMaterial, PersistenceError, PgStore,
-    ReplayableIdempotency, SessionMaterial, split_page,
+    ReplayableIdempotency, SessionMaterial,
+    authentication::insert_versioned_session,
+    split_page,
     store::{
         ReplayableIdempotencyClaim, claim_idempotency, claim_replayable_idempotency,
         complete_idempotency, complete_replayable_idempotency,
@@ -314,19 +316,14 @@ impl PgStore {
             &user_id.to_string(),
         )
         .await?;
-        let session_id = Uuid::now_v7();
-        sqlx::query(
-            "INSERT INTO sessions \
-             (id, user_id, token_digest, csrf_digest, expires_at, last_seen_at, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $6)",
+        let session_id = insert_versioned_session(
+            &mut transaction,
+            user_id,
+            1,
+            session,
+            session_expires_at,
+            now,
         )
-        .bind(session_id)
-        .bind(user_id)
-        .bind(session.token_digest().to_vec())
-        .bind(session.csrf_digest().to_vec())
-        .bind(session_expires_at)
-        .bind(now)
-        .execute(&mut *transaction)
         .await?;
         insert_audit(
             &mut transaction,

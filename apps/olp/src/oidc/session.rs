@@ -6,7 +6,10 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
-use olp_storage::{EncryptedSecret, MasterKey, OidcFlowPurpose, SessionMaterial, constant_time_eq};
+use olp_storage::{
+    EncryptedSecret, MasterKey, OidcFlowPurpose, RecentAuthMaterial, RecentAuthPurpose,
+    SessionMaterial, constant_time_eq,
+};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use uuid::Uuid;
@@ -14,10 +17,14 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::error::invalid_login_flow_cookie;
 use super::helpers::{require_master_key, valid_binding_token};
-use crate::{ApiState, Problem};
+use crate::{
+    ApiState, Problem,
+    management_api::{
+        append_recent_auth_cookie, append_security_transition_cookies,
+        prevent_sensitive_response_caching,
+    },
+};
 
-pub(super) const SESSION_COOKIE: &str = "__Host-olp_session";
-pub(super) const CSRF_COOKIE: &str = "__Host-olp_csrf";
 /// Legacy persisted-flow cookie. New login flows deliberately do not use it;
 /// it remains solely for authenticated link flows and login redirects created
 /// by a pre-stateless-flow release.
@@ -25,6 +32,7 @@ pub(super) const FLOW_COOKIE: &str = "__Host-olp_oidc_flow";
 pub(super) const LOGIN_FLOW_COOKIE: &str = "__Host-olp_oidc_login_flow";
 pub(super) const LOGIN_FLOW_COOKIE_VERSION: u8 = 2;
 pub(super) const FLOW_TTL: Duration = Duration::minutes(10);
+pub(super) const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
 const LOGIN_FLOW_COOKIE_MAX_BYTES: usize = 4 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -81,6 +89,10 @@ impl Drop for LoginFlowCookiePayload {
 pub(super) struct CallbackFlow {
     pub(super) purpose: OidcFlowPurpose,
     pub(super) actor_user_id: Option<Uuid>,
+    pub(super) actor_session_id: Option<Uuid>,
+    pub(super) actor_security_version: Option<i64>,
+    pub(super) recent_auth_purpose: Option<RecentAuthPurpose>,
+    pub(super) recent_auth_resource_id: Option<Uuid>,
     pub(super) configuration_id: Uuid,
     pub(super) configuration_etag: Uuid,
     pub(super) login_consumption: Option<LoginFlowConsumption>,
@@ -104,30 +116,37 @@ pub(super) struct LoginFlowConsumption {
     pub(super) expires_at: DateTime<Utc>,
 }
 
-pub(super) fn authenticated_redirect(material: &SessionMaterial) -> Result<Response, Problem> {
+pub(super) fn authenticated_redirect(
+    material: &SessionMaterial,
+    session_ttl: Duration,
+) -> Result<Response, Problem> {
     let mut response = StatusCode::SEE_OTHER.into_response();
     response
         .headers_mut()
         .insert(header::LOCATION, HeaderValue::from_static("/"));
-    for cookie in [
-        format!(
-            "{SESSION_COOKIE}={}; Path=/; Max-Age=43200; Secure; HttpOnly; SameSite=Lax",
-            material.token()
+    append_security_transition_cookies(&mut response, material, session_ttl)?;
+    Ok(response)
+}
+
+pub(super) fn reauthenticated_redirect(
+    material: &RecentAuthMaterial,
+    purpose: RecentAuthPurpose,
+    resource_id: Option<Uuid>,
+) -> Result<Response, Problem> {
+    let location = match resource_id {
+        Some(resource_id) => format!(
+            "/settings/profile?reauthenticated={}&resource_id={resource_id}",
+            purpose.as_str()
         ),
-        format!(
-            "{CSRF_COOKIE}={}; Path=/; Max-Age=43200; Secure; SameSite=Lax",
-            material.csrf_token()
-        ),
-        clear_flow_cookie(FLOW_COOKIE),
-    ] {
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            HeaderValue::from_str(&cookie).map_err(|_| Problem::internal())?,
-        );
-    }
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        None => format!("/settings/profile?reauthenticated={}", purpose.as_str()),
+    };
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    response.headers_mut().insert(
+        header::LOCATION,
+        HeaderValue::from_str(&location).map_err(|_| Problem::internal())?,
+    );
+    append_recent_auth_cookie(&mut response, material, RECENT_AUTH_TTL)?;
+    prevent_sensitive_response_caching(&mut response);
     Ok(response)
 }
 
@@ -189,6 +208,10 @@ pub(super) fn consume_login_flow_cookie(
     Ok(CallbackFlow {
         purpose: OidcFlowPurpose::Login,
         actor_user_id: None,
+        actor_session_id: None,
+        actor_security_version: None,
+        recent_auth_purpose: None,
+        recent_auth_resource_id: None,
         configuration_id: payload.configuration_id,
         configuration_etag: payload.configuration_etag,
         login_consumption: Some(LoginFlowConsumption {

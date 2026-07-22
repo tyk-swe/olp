@@ -1,7 +1,7 @@
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::SessionMaterial;
+use crate::{SessionMaterial, authentication::insert_versioned_session};
 
 use super::{
     InstallationSetupInput, InstallationSetupResult, PersistenceError, PgStore,
@@ -113,21 +113,10 @@ impl PgStore {
         .await?;
 
         let session_id = if let Some((material, ttl)) = session {
-            let session_id = Uuid::now_v7();
             let expires_at = checked_session_expiry(now, ttl)?;
-            sqlx::query(
-                "INSERT INTO sessions \
-                 (id, user_id, token_digest, csrf_digest, expires_at, last_seen_at, created_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $6)",
-            )
-            .bind(session_id)
-            .bind(user_id)
-            .bind(material.token_digest().to_vec())
-            .bind(material.csrf_digest().to_vec())
-            .bind(expires_at)
-            .bind(now)
-            .execute(&mut *transaction)
-            .await?;
+            let session_id =
+                insert_versioned_session(&mut transaction, user_id, 1, material, expires_at, now)
+                    .await?;
             sqlx::query(
                 "INSERT INTO audit_events \
                  (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \

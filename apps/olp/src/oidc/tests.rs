@@ -57,7 +57,16 @@ fn hmac_id_tokens_are_rejected_before_key_use() {
         &EncodingKey::from_secret(b"secret"),
     )
     .unwrap();
-    assert!(validate_id_token(&token, &JwkSet { keys: vec![] }, &configuration, "nonce").is_err());
+    assert!(
+        validate_id_token(
+            &token,
+            &JwkSet { keys: vec![] },
+            &configuration,
+            "nonce",
+            false
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -270,7 +279,9 @@ fn asymmetric_validation_enforces_signature_issuer_audience_nonce_and_time() {
     }]}))
     .unwrap();
     let valid_token = sign_ed_token(&valid_claims);
-    assert!(validate_id_token(&valid_token, &jwks, &configuration, "expected-nonce").is_ok());
+    assert!(
+        validate_id_token(&valid_token, &jwks, &configuration, "expected-nonce", false).is_ok()
+    );
 
     for (claim, invalid_value) in [
         ("iss", json!("https://other-issuer.example")),
@@ -287,7 +298,8 @@ fn asymmetric_validation_enforces_signature_issuer_audience_nonce_and_time() {
                 &sign_ed_token(&claims),
                 &jwks,
                 &configuration,
-                "expected-nonce"
+                "expected-nonce",
+                false,
             )
             .is_err(),
             "{claim} must be validated"
@@ -309,7 +321,8 @@ fn asymmetric_validation_enforces_signature_issuer_audience_nonce_and_time() {
             &tampered_parts.join("."),
             &jwks,
             &configuration,
-            "expected-nonce"
+            "expected-nonce",
+            false,
         )
         .is_err()
     );

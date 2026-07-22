@@ -35,6 +35,10 @@ pub enum PersistenceError {
     Serialize(#[from] serde_json::Error),
     #[error("session lifetime must be positive and representable")]
     InvalidSessionTtl,
+    #[error("recent-authentication metadata is invalid")]
+    InvalidRecentAuthentication,
+    #[error("a session cannot be created for the requested user")]
+    SessionUnavailable,
     #[error("request metadata gap is invalid")]
     InvalidRequestMetadataGap,
     #[error("request metadata event timing or status is invalid")]
@@ -203,6 +207,7 @@ pub struct SessionPrincipal {
     pub email: String,
     pub display_name: String,
     pub role: String,
+    pub security_version: i64,
     pub csrf_digest: Vec<u8>,
     pub expires_at: DateTime<Utc>,
 }
@@ -216,6 +221,7 @@ impl fmt::Debug for SessionPrincipal {
             .field("email", &self.email)
             .field("display_name", &self.display_name)
             .field("role", &self.role)
+            .field("security_version", &self.security_version)
             .field("csrf_digest", &"[REDACTED]")
             .field("expires_at", &self.expires_at)
             .finish()

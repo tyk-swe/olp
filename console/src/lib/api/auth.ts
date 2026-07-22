@@ -24,6 +24,7 @@ function sessionResult(
   const user = value.user as Partial<Schemas['UserResponse']> | null | undefined;
   if (
     typeof value.csrf_token !== 'string' ||
+    value.csrf_token.length === 0 ||
     typeof user?.id !== 'string' ||
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||
@@ -48,11 +49,7 @@ function sessionResult(
 export async function currentSession(signal?: AbortSignal): Promise<CurrentSession> {
   const { data, error, response } = await apiClient.GET('/api/v1/sessions/current', { signal });
   const session = sessionResult(data, error, response);
-  if (session.csrf_token) {
-    setCsrfToken(session.csrf_token);
-  } else {
-    clearCsrfToken();
-  }
+  setCsrfToken(session.csrf_token);
   return session;
 }
 

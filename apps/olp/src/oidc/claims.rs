@@ -24,6 +24,7 @@ pub(super) fn validate_id_token(
     jwks: &JwkSet,
     configuration: &OidcConfiguration,
     expected_nonce: &str,
+    require_recent_authentication: bool,
 ) -> Result<ValidatedIdentity, Problem> {
     let header = decode_header(id_token).map_err(|_| invalid_id_token())?;
     if matches!(
@@ -64,6 +65,18 @@ pub(super) fn validate_id_token(
     let now = Utc::now().timestamp();
     if issued_at > now + 60 || issued_at < now - FLOW_TTL.num_seconds() || expires_at <= issued_at {
         return Err(invalid_id_token());
+    }
+    if require_recent_authentication {
+        let authenticated_at = claims
+            .get("auth_time")
+            .and_then(Value::as_i64)
+            .ok_or_else(invalid_id_token)?;
+        if authenticated_at > now + 60
+            || authenticated_at < now - FLOW_TTL.num_seconds()
+            || authenticated_at > issued_at + 60
+        {
+            return Err(invalid_id_token());
+        }
     }
     let nonce = claims
         .get("nonce")

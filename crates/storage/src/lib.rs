@@ -4,6 +4,7 @@
 //! does not expose SQLx types through the core ports.
 
 mod access;
+mod authentication;
 mod configuration;
 mod identity;
 mod limits;
@@ -19,9 +20,10 @@ mod store;
 mod usage;
 mod valkey;
 
+pub use authentication::{RecentAuthPurpose, SessionSecurityContext};
 pub use identity::{
     AcceptInvitation, AcceptedInvitation, IdentityError, InvitationCreated, InvitationRecord,
-    NewInvitation, SessionRecord, UserRecord,
+    NewInvitation, PasswordSessionRotation, SessionRecord, UserRecord,
 };
 pub use limits::{DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest};
 pub use maintenance::{MaintenanceError, MaintenanceReport};
@@ -31,9 +33,10 @@ pub use media_jobs::{
     NewMediaJobReservation,
 };
 pub use oidc::{
-    CompleteOidcLink, CompleteOidcLogin, NewOidcFlow, OidcAuthenticatedUser, OidcConfiguration,
-    OidcError, OidcFlowMaterial, OidcFlowPurpose, OidcFlowRecord, OidcIdentityRecord,
-    OidcRoleMapping, UpsertOidcConfiguration,
+    CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, NewOidcFlow,
+    OidcAuthenticatedUser, OidcConfiguration, OidcError, OidcFlowMaterial, OidcFlowPurpose,
+    OidcFlowRecord, OidcIdentityRecord, OidcRoleMapping, UnlinkOidcIdentity,
+    UpsertOidcConfiguration,
 };
 pub use operations::{
     AttemptRecord, AuditRecord, OperationsError, OperationsPage, PriceInput, PricingRevisionRecord,
@@ -57,10 +60,10 @@ pub use request_metadata::{
 };
 pub use runtime_compiler::RuntimeCompileError;
 pub use security::{
-    ApiKeyMaterial, AuthHmacKey, EncryptedSecret, InvitationMaterial, MasterKey, ParsedApiKey,
-    SecurityError, SessionMaterial, constant_time_eq, credential_aad, hash_password,
-    idempotency_replay_aad, idempotency_replay_scope, oidc_client_secret_aad,
-    oidc_flow_payload_aad, verify_password,
+    ApiKeyMaterial, AuthHmacKey, CsrfMaterial, EncryptedSecret, InvitationMaterial, MasterKey,
+    ParsedApiKey, RecentAuthMaterial, SecurityError, SessionMaterial, constant_time_eq,
+    credential_aad, hash_password, idempotency_replay_aad, idempotency_replay_scope,
+    oidc_client_secret_aad, oidc_flow_payload_aad, verify_password,
 };
 pub use store::{
     IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, InstallationSetupResult,

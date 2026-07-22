@@ -7,7 +7,8 @@ use axum::{
 };
 use jsonwebtoken::jwk::JwkSet;
 use olp_storage::{
-    CompleteOidcLink, CompleteOidcLogin, OidcFlowPurpose, SessionMaterial,
+    CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, OidcFlowPurpose,
+    RecentAuthMaterial, SessionMaterial, SessionPrincipal,
     oidc_client_secret_aad as client_secret_aad, oidc_flow_payload_aad as flow_payload_aad,
 };
 use serde::Deserialize;
@@ -21,12 +22,13 @@ use super::helpers::{
     callback_url, cookie, network_policy, oauth_form_component, require_master_key,
 };
 use super::session::{
-    CallbackFlow, CallbackSecret, FLOW_COOKIE, FlowSecretPayload, LOGIN_FLOW_COOKIE, append_cookie,
-    authenticated_redirect, clear_flow_cookie, consume_login_flow_cookie,
+    CallbackFlow, CallbackSecret, FLOW_COOKIE, FlowSecretPayload, LOGIN_FLOW_COOKIE,
+    RECENT_AUTH_TTL, append_cookie, authenticated_redirect, clear_flow_cookie,
+    consume_login_flow_cookie, reauthenticated_redirect,
 };
 use crate::{
     ApiState, Problem,
-    management_api::{require_read_session, require_store},
+    management_api::{require_read_session, require_store, validate_session_cookie_ttl},
 };
 
 const TOKEN_RESPONSE_LIMIT: usize = 256 * 1024;
@@ -71,9 +73,10 @@ impl fmt::Debug for CallbackQuery {
         ("error" = Option<String>, Query, description = "Provider error code")
     ),
     responses(
-        (status = 303, description = "OIDC identity authenticated and local session issued"),
+        (status = 303, description = "OIDC login, identity link, or recent authentication completed"),
         (status = 400, description = "Invalid or rejected callback", body = Problem),
-        (status = 401, description = "ID token validation failed", body = Problem),
+        (status = 401, description = "ID token validation or initiating session failed", body = Problem),
+        (status = 403, description = "Fresh identity did not match the initiating local account", body = Problem),
         (status = 409, description = "Explicit link required or identity already linked", body = Problem)
     )
 )]
@@ -86,7 +89,7 @@ pub(super) async fn callback(
     // flow cookie even when parsing, decryption, IdP exchange, or completion
     // fails so a stale or tampered browser value cannot be retried forever.
     let had_login_cookie = cookie(&headers, LOGIN_FLOW_COOKIE).is_some();
-    let had_legacy_cookie = cookie(&headers, FLOW_COOKIE).is_some();
+    let had_persisted_cookie = cookie(&headers, FLOW_COOKIE).is_some();
     let result = match query {
         Ok(Query(query)) => callback_inner(&state, &headers, query).await,
         // Capture extractor failures so malformed query decoding still reaches
@@ -100,7 +103,7 @@ pub(super) async fn callback(
     if had_login_cookie {
         append_cookie(&mut response, clear_flow_cookie(LOGIN_FLOW_COOKIE));
     }
-    if had_legacy_cookie {
+    if had_persisted_cookie {
         append_cookie(&mut response, clear_flow_cookie(FLOW_COOKIE));
     }
     response
@@ -127,6 +130,17 @@ async fn callback_inner(
             "The identity provider did not authorize this request.",
         ));
     }
+    let actor = match flow.purpose {
+        OidcFlowPurpose::Login => {
+            validate_session_cookie_ttl(state.session_ttl)?;
+            None
+        }
+        OidcFlowPurpose::Link => {
+            validate_session_cookie_ttl(state.session_ttl)?;
+            Some(require_exact_actor(state, headers, &flow).await?)
+        }
+        OidcFlowPurpose::Reauthenticate => Some(require_exact_actor(state, headers, &flow).await?),
+    };
     let code = Zeroizing::new(query.code.ok_or_else(|| {
         Problem::bad_request("oidc_code_missing", "The authorization code is missing.")
     })?);
@@ -212,13 +226,14 @@ async fn callback_inner(
         &jwks,
         &configuration,
         &flow_secret.nonce,
+        flow.purpose == OidcFlowPurpose::Reauthenticate,
     )?;
     drop(token_response);
     drop(flow_secret);
 
-    let material = SessionMaterial::generate();
     match flow.purpose {
         OidcFlowPurpose::Login => {
+            let material = SessionMaterial::generate();
             let mapped_role = if identity.email_verified {
                 identity
                     .email
@@ -241,21 +256,16 @@ async fn callback_inner(
                 })
                 .await
                 .map_err(map_oidc_flow_completion)?;
+            authenticated_redirect(&material, state.session_ttl)
         }
         OidcFlowPurpose::Link => {
-            let actor_user_id = flow.actor_user_id.ok_or_else(Problem::internal)?;
-            // Linking never correlates on email. It requires the same active
-            // local session that explicitly initiated this flow.
-            let principal = require_read_session(state, headers).await?;
-            if principal.user_id != actor_user_id {
-                return Err(Problem::forbidden(
-                    "oidc_link_session_changed",
-                    "Sign in with the local account that started this link operation.",
-                ));
-            }
+            let actor = actor.ok_or_else(Problem::internal)?;
+            let material = SessionMaterial::generate();
             store
                 .complete_oidc_link(CompleteOidcLink {
-                    user_id: actor_user_id,
+                    user_id: actor.user_id,
+                    session_id: actor.session_id,
+                    security_version: actor.security_version,
                     configuration_id: configuration.id,
                     configuration_etag: configuration.etag,
                     issuer: &configuration.issuer,
@@ -269,9 +279,49 @@ async fn callback_inner(
                 })
                 .await
                 .map_err(map_oidc_flow_completion)?;
+            authenticated_redirect(&material, state.session_ttl)
+        }
+        OidcFlowPurpose::Reauthenticate => {
+            let actor = actor.ok_or_else(Problem::internal)?;
+            let purpose = flow.recent_auth_purpose.ok_or_else(Problem::internal)?;
+            let material = RecentAuthMaterial::generate();
+            store
+                .complete_oidc_reauthentication(CompleteOidcReauthentication {
+                    user_id: actor.user_id,
+                    session_id: actor.session_id,
+                    security_version: actor.security_version,
+                    configuration_id: configuration.id,
+                    configuration_etag: configuration.etag,
+                    issuer: &configuration.issuer,
+                    subject: &identity.subject,
+                    purpose,
+                    resource_id: flow.recent_auth_resource_id,
+                    material: &material,
+                    grant_ttl: RECENT_AUTH_TTL,
+                })
+                .await
+                .map_err(map_oidc_flow_completion)?;
+            reauthenticated_redirect(&material, purpose, flow.recent_auth_resource_id)
         }
     }
-    authenticated_redirect(&material)
+}
+
+async fn require_exact_actor(
+    state: &ApiState,
+    headers: &HeaderMap,
+    flow: &CallbackFlow,
+) -> Result<SessionPrincipal, Problem> {
+    let principal = require_read_session(state, headers).await?;
+    if Some(principal.user_id) != flow.actor_user_id
+        || Some(principal.session_id) != flow.actor_session_id
+        || Some(principal.security_version) != flow.actor_security_version
+    {
+        return Err(Problem::forbidden(
+            "oidc_flow_session_changed",
+            "Sign in with the exact session that started this security operation.",
+        ));
+    }
+    Ok(principal)
 }
 
 async fn consume_callback_flow(
@@ -291,9 +341,6 @@ async fn consume_callback_flow(
         return Ok(flow);
     }
 
-    // New releases never create persisted login flows, but retained rows can
-    // complete during their existing ten-minute lifetime. This also preserves
-    // authenticated identity-link flows, which intentionally stay durable.
     let browser_binding = Zeroizing::new(
         cookie(headers, FLOW_COOKIE)
             .ok_or_else(|| {
@@ -331,6 +378,10 @@ async fn consume_callback_flow(
     Ok(CallbackFlow {
         purpose: flow.purpose,
         actor_user_id: flow.actor_user_id,
+        actor_session_id: flow.actor_session_id,
+        actor_security_version: flow.actor_security_version,
+        recent_auth_purpose: flow.recent_auth_purpose,
+        recent_auth_resource_id: flow.recent_auth_resource_id,
         configuration_id: flow.configuration_id,
         configuration_etag,
         login_consumption: None,
@@ -353,8 +404,8 @@ pub(super) fn matching_login_callback_flow(
         Ok(flow) => Ok(Some(flow)),
         Err(problem) if cookie(headers, FLOW_COOKIE).is_none() => Err(problem),
         // An abandoned login can leave its stateless cookie alongside a newer
-        // persisted link flow. Let callback state plus browser binding select
-        // the persisted flow instead of rejecting the valid link.
+        // persisted authenticated flow. Let callback state plus browser
+        // binding select the persisted flow instead of rejecting it.
         Err(_) => Ok(None),
     }
 }

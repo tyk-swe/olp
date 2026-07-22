@@ -2,9 +2,10 @@ use axum::{
     Json,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use olp_storage::OidcIdentityRecord;
+use olp_storage::{OidcIdentityRecord, RecentAuthMaterial, SessionMaterial, UnlinkOidcIdentity};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -12,7 +13,11 @@ use uuid::Uuid;
 use super::error::map_oidc;
 use crate::{
     ApiState, Problem,
-    management_api::{require_mutation_session, require_read_session, require_store},
+    management_api::{
+        RECENT_AUTH_COOKIE, append_security_transition_cookies, cookie, map_persistence,
+        reauthentication_required, require_mutation_session, require_read_session, require_store,
+        validate_session_cookie_ttl,
+    },
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -42,6 +47,7 @@ impl From<OidcIdentityRecord> for OidcIdentityResponse {
 pub struct OidcIdentityListResponse {
     pub data: Vec<OidcIdentityResponse>,
     pub linking_available: bool,
+    pub has_local_password: bool,
 }
 
 #[utoipa::path(
@@ -49,7 +55,7 @@ pub struct OidcIdentityListResponse {
     path = "/api/v1/oidc/identities",
     tag = "oidc",
     responses(
-        (status = 200, description = "OIDC identities linked to the current account", body = OidcIdentityListResponse),
+        (status = 200, description = "OIDC identities and authentication methods for the current account", body = OidcIdentityListResponse),
         (status = 401, description = "No active session", body = Problem)
     )
 )]
@@ -68,9 +74,15 @@ pub(super) async fn list_identities(
         .await
         .map_err(map_oidc)?
         .is_some_and(|configuration| configuration.enabled);
+    let has_local_password = store
+        .user_has_local_password(principal.user_id)
+        .await
+        .map_err(map_persistence)?
+        .ok_or_else(|| Problem::unauthorized("The session is missing or expired."))?;
     Ok(Json(OidcIdentityListResponse {
         data: identities.into_iter().map(Into::into).collect(),
         linking_available,
+        has_local_password,
     }))
 }
 
@@ -80,20 +92,38 @@ pub(super) async fn list_identities(
     tag = "oidc",
     params(("identity_id" = Uuid, Path, description = "Linked identity ID")),
     responses(
-        (status = 204, description = "Identity unlinked"),
+        (status = 204, description = "Identity unlinked and session rotated"),
+        (status = 401, description = "No active session", body = Problem),
+        (status = 403, description = "CSRF or origin check failed", body = Problem),
         (status = 404, description = "Identity not linked to this account", body = Problem),
-        (status = 409, description = "Unlink would remove the final authentication method", body = Problem)
+        (status = 409, description = "Unlink would remove the final authentication method", body = Problem),
+        (status = 428, description = "Recent authentication is required", body = Problem)
     )
 )]
 pub(super) async fn unlink_identity(
     State(state): State<ApiState>,
     Path(identity_id): Path<Uuid>,
     headers: HeaderMap,
-) -> Result<StatusCode, Problem> {
+) -> Result<Response, Problem> {
+    validate_session_cookie_ttl(state.session_ttl)?;
     let principal = require_mutation_session(&state, &headers).await?;
+    let recent_auth_token = cookie(&headers, RECENT_AUTH_COOKIE)
+        .filter(|value| value.len() == 43)
+        .ok_or_else(reauthentication_required)?;
+    let replacement_session = SessionMaterial::generate();
     require_store(&state)?
-        .unlink_oidc_identity(principal.user_id, identity_id)
+        .unlink_oidc_identity(UnlinkOidcIdentity {
+            user_id: principal.user_id,
+            identity_id,
+            session_id: principal.session_id,
+            security_version: principal.security_version,
+            recent_auth_token_digest: RecentAuthMaterial::digest_token(recent_auth_token),
+            replacement_session: &replacement_session,
+            session_ttl: state.session_ttl,
+        })
         .await
         .map_err(map_oidc)?;
-    Ok(StatusCode::NO_CONTENT)
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    append_security_transition_cookies(&mut response, &replacement_session, state.session_ttl)?;
+    Ok(response)
 }

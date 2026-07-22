@@ -7,7 +7,9 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use super::helpers::{random_token, role_rank, token_digest};
-use crate::{EncryptedSecret, PersistenceError, SessionMaterial};
+use crate::{
+    EncryptedSecret, PersistenceError, RecentAuthMaterial, RecentAuthPurpose, SessionMaterial,
+};
 
 #[derive(Debug, Error)]
 pub enum OidcError {
@@ -41,6 +43,12 @@ pub enum OidcError {
     ProvisioningDenied,
     #[error("the linked local account is inactive")]
     InactiveUser,
+    #[error("recent authentication is required for this security change")]
+    RecentAuthenticationRequired,
+    #[error("the initiating session is no longer current")]
+    SessionUnavailable,
+    #[error("fresh OIDC authentication did not match an identity linked to this account")]
+    ReauthenticationIdentityMismatch,
     #[error("stored OIDC data is invalid")]
     Corrupt,
 }
@@ -156,6 +164,7 @@ impl fmt::Debug for UpsertOidcConfiguration {
 pub enum OidcFlowPurpose {
     Login,
     Link,
+    Reauthenticate,
 }
 
 impl OidcFlowPurpose {
@@ -163,6 +172,7 @@ impl OidcFlowPurpose {
         match self {
             Self::Login => "login",
             Self::Link => "link",
+            Self::Reauthenticate => "reauthenticate",
         }
     }
 
@@ -170,6 +180,7 @@ impl OidcFlowPurpose {
         match value {
             "login" => Ok(Self::Login),
             "link" => Ok(Self::Link),
+            "reauthenticate" => Ok(Self::Reauthenticate),
             _ => Err(OidcError::Corrupt),
         }
     }
@@ -246,6 +257,11 @@ pub struct NewOidcFlow {
     pub configuration_etag: Uuid,
     pub purpose: OidcFlowPurpose,
     pub actor_user_id: Option<Uuid>,
+    pub actor_session_id: Option<Uuid>,
+    pub actor_security_version: Option<i64>,
+    pub recent_auth_purpose: Option<RecentAuthPurpose>,
+    pub recent_auth_resource_id: Option<Uuid>,
+    pub recent_auth_token_digest: Option<[u8; 32]>,
     pub state_digest: [u8; 32],
     pub browser_binding_digest: [u8; 32],
     pub encrypted_payload: EncryptedSecret,
@@ -261,6 +277,11 @@ impl fmt::Debug for NewOidcFlow {
             .field("configuration_etag", &self.configuration_etag)
             .field("purpose", &self.purpose)
             .field("actor_user_id", &self.actor_user_id)
+            .field("actor_session_id", &self.actor_session_id)
+            .field("actor_security_version", &self.actor_security_version)
+            .field("recent_auth_purpose", &self.recent_auth_purpose)
+            .field("recent_auth_resource_id", &self.recent_auth_resource_id)
+            .field("recent_auth_token_digest", &"[REDACTED]")
             .field("state_digest", &"[REDACTED]")
             .field("browser_binding_digest", &"[REDACTED]")
             .field("encrypted_payload", &"[REDACTED]")
@@ -275,6 +296,10 @@ pub struct OidcFlowRecord {
     pub configuration_id: Uuid,
     pub purpose: OidcFlowPurpose,
     pub actor_user_id: Option<Uuid>,
+    pub actor_session_id: Option<Uuid>,
+    pub actor_security_version: Option<i64>,
+    pub recent_auth_purpose: Option<RecentAuthPurpose>,
+    pub recent_auth_resource_id: Option<Uuid>,
     pub encrypted_payload: EncryptedSecret,
 }
 
@@ -286,6 +311,10 @@ impl fmt::Debug for OidcFlowRecord {
             .field("configuration_id", &self.configuration_id)
             .field("purpose", &self.purpose)
             .field("actor_user_id", &self.actor_user_id)
+            .field("actor_session_id", &self.actor_session_id)
+            .field("actor_security_version", &self.actor_security_version)
+            .field("recent_auth_purpose", &self.recent_auth_purpose)
+            .field("recent_auth_resource_id", &self.recent_auth_resource_id)
             .field("encrypted_payload", &"[REDACTED]")
             .finish()
     }
@@ -340,6 +369,8 @@ impl fmt::Debug for CompleteOidcLogin<'_> {
 
 pub struct CompleteOidcLink<'a> {
     pub user_id: Uuid,
+    pub session_id: Uuid,
+    pub security_version: i64,
     pub configuration_id: Uuid,
     pub configuration_etag: Uuid,
     pub issuer: &'a str,
@@ -354,12 +385,72 @@ impl fmt::Debug for CompleteOidcLink<'_> {
         formatter
             .debug_struct("CompleteOidcLink")
             .field("user_id", &self.user_id)
+            .field("session_id", &self.session_id)
+            .field("security_version", &self.security_version)
             .field("configuration_id", &self.configuration_id)
             .field("configuration_etag", &self.configuration_etag)
             .field("issuer", &self.issuer)
             .field("subject", &self.subject)
             .field("email", &self.email)
             .field("session", &"[REDACTED]")
+            .field("session_ttl", &self.session_ttl)
+            .finish()
+    }
+}
+
+pub struct CompleteOidcReauthentication<'a> {
+    pub user_id: Uuid,
+    pub session_id: Uuid,
+    pub security_version: i64,
+    pub configuration_id: Uuid,
+    pub configuration_etag: Uuid,
+    pub issuer: &'a str,
+    pub subject: &'a str,
+    pub purpose: RecentAuthPurpose,
+    pub resource_id: Option<Uuid>,
+    pub material: &'a RecentAuthMaterial,
+    pub grant_ttl: Duration,
+}
+
+impl fmt::Debug for CompleteOidcReauthentication<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CompleteOidcReauthentication")
+            .field("user_id", &self.user_id)
+            .field("session_id", &self.session_id)
+            .field("security_version", &self.security_version)
+            .field("configuration_id", &self.configuration_id)
+            .field("configuration_etag", &self.configuration_etag)
+            .field("issuer", &self.issuer)
+            .field("subject", &self.subject)
+            .field("purpose", &self.purpose)
+            .field("resource_id", &self.resource_id)
+            .field("material", &"[REDACTED]")
+            .field("grant_ttl", &self.grant_ttl)
+            .finish()
+    }
+}
+
+pub struct UnlinkOidcIdentity<'a> {
+    pub user_id: Uuid,
+    pub identity_id: Uuid,
+    pub session_id: Uuid,
+    pub security_version: i64,
+    pub recent_auth_token_digest: [u8; 32],
+    pub replacement_session: &'a SessionMaterial,
+    pub session_ttl: Duration,
+}
+
+impl fmt::Debug for UnlinkOidcIdentity<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("UnlinkOidcIdentity")
+            .field("user_id", &self.user_id)
+            .field("identity_id", &self.identity_id)
+            .field("session_id", &self.session_id)
+            .field("security_version", &self.security_version)
+            .field("recent_auth_token_digest", &"[REDACTED]")
+            .field("replacement_session", &"[REDACTED]")
             .field("session_ttl", &self.session_ttl)
             .finish()
     }
