@@ -58,15 +58,7 @@ pub(super) fn optional_if_match(headers: &HeaderMap) -> Result<Option<Uuid>, Pro
 }
 
 pub(super) fn cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
-    headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies.split(';').find_map(|cookie| {
-                let (name, value) = cookie.trim().split_once('=')?;
-                (name == expected_name).then_some(value)
-            })
-        })
+    crate::cookies::find(headers, expected_name)
 }
 
 pub(super) fn valid_binding_token(value: &str) -> bool {

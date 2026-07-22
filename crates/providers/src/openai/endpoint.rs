@@ -1,51 +1,21 @@
 use std::{fmt, net::IpAddr, time::Duration};
 
-use crate::http_egress::{
-    is_public_ip,
-    pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool, literal_ip},
-};
 use reqwest::{Client, Url};
 use thiserror::Error;
 
+use crate::provider_endpoint::{ProviderEndpoint, ProviderEndpointError};
+
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1/";
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 256;
 
+#[derive(Clone)]
 pub(crate) struct Endpoint {
-    base_url: Url,
+    inner: ProviderEndpoint,
     fixed_query: Option<(String, String)>,
-    client_connect_timeout: Duration,
-    client_pool: PinnedClientPool,
-    #[cfg(any(test, feature = "test-util"))]
-    allow_unsafe_test_target: bool,
-}
-
-// Cloning configuration must not accidentally make independently configured
-// providers share a transport pool. A connector reuses its own Endpoint, while
-// a cloned ConnectorConfig receives a new, credential-neutral pool.
-impl Clone for Endpoint {
-    fn clone(&self) -> Self {
-        Self {
-            base_url: self.base_url.clone(),
-            fixed_query: self.fixed_query.clone(),
-            client_connect_timeout: self.client_connect_timeout,
-            client_pool: self.client_pool.clone(),
-            #[cfg(any(test, feature = "test-util"))]
-            allow_unsafe_test_target: self.allow_unsafe_test_target,
-        }
-    }
 }
 
 impl fmt::Debug for Endpoint {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Endpoint")
-            .field("scheme", &self.base_url.scheme())
-            .field("host", &self.base_url.host_str())
-            .field("port", &self.base_url.port())
-            .field("path", &"[REDACTED]")
-            .finish_non_exhaustive()
+        self.inner.fmt_redacted("Endpoint", formatter)
     }
 }
 
@@ -57,67 +27,32 @@ impl Default for Endpoint {
 
 impl Endpoint {
     pub(crate) fn parse(value: &str) -> Result<Self, EndpointError> {
-        Self::parse_with_policy(value, false)
-    }
-
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
-        let mut base_url =
-            Url::parse(value).map_err(|error| EndpointError::InvalidUrl(error.to_string()))?;
-        if base_url.scheme() != "https" && !allow_unsafe_target {
-            return Err(EndpointError::HttpsRequired);
-        }
-        if !matches!(base_url.scheme(), "http" | "https") {
-            return Err(EndpointError::UnsupportedScheme);
-        }
-        if !base_url.username().is_empty() || base_url.password().is_some() {
-            return Err(EndpointError::UserInfoForbidden);
-        }
-        if base_url.host().is_none() {
-            return Err(EndpointError::MissingHost);
-        }
-        if base_url.port() == Some(0) {
-            return Err(EndpointError::InvalidPort);
-        }
-        if base_url.query().is_some() || base_url.fragment().is_some() {
-            return Err(EndpointError::QueryOrFragmentForbidden);
-        }
-
-        if !base_url.path().ends_with('/') {
-            let normalized_path = format!("{}/", base_url.path());
-            base_url.set_path(&normalized_path);
-        }
-
-        if let Some(ip) = literal_ip(&base_url)
-            && !allow_unsafe_target
-            && !is_public_ip(ip)
-        {
-            return Err(EndpointError::ForbiddenAddress(ip));
-        }
-
         Ok(Self {
-            base_url,
+            inner: ProviderEndpoint::parse(value)?,
             fixed_query: None,
-            client_connect_timeout: DEFAULT_CONNECT_TIMEOUT,
-            client_pool: PinnedClientPool::default(),
-            #[cfg(any(test, feature = "test-util"))]
-            allow_unsafe_test_target: allow_unsafe_target,
         })
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn for_local_test(value: &str) -> Self {
-        Self::parse_with_policy(value, true).expect("local test endpoint must be a valid HTTP URL")
+        Self {
+            inner: ProviderEndpoint::for_local_test(value)
+                .expect("local test endpoint must be a valid HTTP URL"),
+            fixed_query: None,
+        }
     }
 
     pub(crate) fn resource_url(&self, path: &str) -> Result<Url, EndpointError> {
-        if path.starts_with('/') || path.contains("..") || path.contains(['\\', '?', '#']) {
+        if path.is_empty()
+            || path.starts_with('/')
+            || path.contains(['\\', '?', '#'])
+            || path.chars().any(char::is_control)
+        {
             return Err(EndpointError::InvalidResourcePath);
         }
-        let mut url = self
-            .base_url
-            .join(path)
-            .map_err(|error| EndpointError::InvalidUrl(error.to_string()))?;
-        if url.origin() != self.base_url.origin() || !url.path().starts_with(self.base_url.path()) {
+        let base_url = self.inner.base_url();
+        let mut url = self.inner.join(path).map_err(EndpointError::from)?;
+        if url.origin() != base_url.origin() || !url.path().starts_with(base_url.path()) {
             return Err(EndpointError::InvalidResourcePath);
         }
         if let Some((name, value)) = &self.fixed_query {
@@ -140,44 +75,36 @@ impl Endpoint {
     }
 
     pub(crate) fn set_connect_timeout(&mut self, value: Duration) {
-        self.client_connect_timeout = value;
+        self.inner.set_connect_timeout(value);
     }
 
     pub(crate) async fn pinned_client(
         &self,
         connect_timeout: Duration,
     ) -> Result<Client, EndpointError> {
-        #[cfg(any(test, feature = "test-util"))]
-        let allow_unsafe_target = self.allow_unsafe_test_target;
-        #[cfg(not(any(test, feature = "test-util")))]
-        let allow_unsafe_target = false;
-        self.client_pool
-            .client(
-                &self.base_url,
-                connect_timeout,
-                PinnedClientConfig {
-                    connect_timeout: self.client_connect_timeout,
-                    pool_idle_timeout: Some(POOL_IDLE_TIMEOUT),
-                    pool_max_idle_per_host: Some(MAX_IDLE_CONNECTIONS_PER_HOST),
-                    allow_unsafe_target,
-                    user_agent: "openllmproxy",
-                },
-            )
+        self.inner
+            .pinned_client(connect_timeout)
             .await
             .map_err(EndpointError::from)
     }
 }
 
-impl From<PinnedClientError> for EndpointError {
-    fn from(error: PinnedClientError) -> Self {
+impl From<ProviderEndpointError> for EndpointError {
+    fn from(error: ProviderEndpointError) -> Self {
         match error {
-            PinnedClientError::MissingHost => Self::MissingHost,
-            PinnedClientError::MissingPort => Self::MissingPort,
-            PinnedClientError::DnsTimeout => Self::DnsTimeout,
-            PinnedClientError::DnsResolution(error) => Self::DnsResolution(error),
-            PinnedClientError::NoAddresses => Self::NoAddresses,
-            PinnedClientError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
-            PinnedClientError::ClientBuild(error) => Self::ClientBuild(error),
+            ProviderEndpointError::HttpsRequired => Self::HttpsRequired,
+            ProviderEndpointError::UnsupportedScheme => Self::UnsupportedScheme,
+            ProviderEndpointError::UserInfoForbidden => Self::UserInfoForbidden,
+            ProviderEndpointError::MissingHost => Self::MissingHost,
+            ProviderEndpointError::MissingPort => Self::MissingPort,
+            ProviderEndpointError::InvalidPort => Self::InvalidPort,
+            ProviderEndpointError::QueryOrFragmentForbidden => Self::QueryOrFragmentForbidden,
+            ProviderEndpointError::InvalidUrl(error) => Self::InvalidUrl(error),
+            ProviderEndpointError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
+            ProviderEndpointError::DnsTimeout => Self::DnsTimeout,
+            ProviderEndpointError::DnsResolution(error) => Self::DnsResolution(error),
+            ProviderEndpointError::NoAddresses => Self::NoAddresses,
+            ProviderEndpointError::ClientBuild(error) => Self::ClientBuild(error),
         }
     }
 }
@@ -229,6 +156,10 @@ mod tests {
             Err(EndpointError::HttpsRequired)
         ));
         assert!(matches!(
+            Endpoint::parse("file:///tmp/openai"),
+            Err(EndpointError::HttpsRequired)
+        ));
+        assert!(matches!(
             Endpoint::parse("https://user:secret@api.openai.com/v1"),
             Err(EndpointError::UserInfoForbidden)
         ));
@@ -248,21 +179,22 @@ mod tests {
     }
 
     #[test]
-    fn resource_paths_cannot_escape_the_configured_origin_with_backslashes() {
+    fn resource_paths_cannot_escape_the_configured_origin() {
         let endpoint = Endpoint::parse("https://example.com/proxy/v1").unwrap();
 
-        assert!(matches!(
-            endpoint.resource_url(r"\\attacker.example/v1"),
-            Err(EndpointError::InvalidResourcePath)
-        ));
-        assert!(matches!(
-            endpoint.resource_url(r"videos\job-id"),
-            Err(EndpointError::InvalidResourcePath)
-        ));
-        assert!(matches!(
-            endpoint.resource_url("%2e%2e/credentials"),
-            Err(EndpointError::InvalidResourcePath)
-        ));
+        for path in [
+            r"\\attacker.example/v1",
+            r"videos\job-id",
+            "%2e%2e/credentials",
+            "../credentials",
+            "/absolute",
+            "models?key=ambient",
+        ] {
+            assert!(matches!(
+                endpoint.resource_url(path),
+                Err(EndpointError::InvalidResourcePath)
+            ));
+        }
     }
 
     #[test]
@@ -283,7 +215,8 @@ mod tests {
         ));
         assert!(matches!(
             Endpoint::parse("https://[::1]/v1"),
-            Err(EndpointError::ForbiddenAddress(address)) if address == IpAddr::V6(Ipv6Addr::LOCALHOST)
+            Err(EndpointError::ForbiddenAddress(address))
+                if address == IpAddr::V6(Ipv6Addr::LOCALHOST)
         ));
     }
 }

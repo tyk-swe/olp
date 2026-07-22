@@ -3,9 +3,20 @@ use std::{fmt, time::Duration};
 use http::{HeaderValue, StatusCode};
 use olp_domain::{AttemptFailureClass, MediaSpoolError, TransportError, TransportPhase};
 use tokio::time::Instant;
-use zeroize::Zeroizing;
 
-use crate::openai::{OpenAiApiKey, endpoint::EndpointError};
+use crate::{
+    openai::{OpenAiApiKey, endpoint::EndpointError},
+    transport_support::{
+        map_send_error as map_provider_send_error,
+        safe_upstream_error_message as format_upstream_error_message,
+        secret_header as build_secret_header,
+    },
+};
+
+pub(super) use crate::{
+    transport_io::bounded_duration,
+    transport_support::transport_error,
+};
 
 pub(super) fn serialize_wire<T: serde::Serialize>(
     operation: &'static str,
@@ -64,10 +75,7 @@ pub(super) fn map_spool_error(error: MediaSpoolError) -> TransportError {
 }
 
 pub(super) fn bearer_header(api_key: &OpenAiApiKey) -> Result<HeaderValue, TransportError> {
-    let mut value = Zeroizing::new(Vec::with_capacity(7 + api_key.expose().len()));
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(api_key.expose().as_bytes());
-    HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
+    build_secret_header(b"Bearer ", api_key.expose()).map_err(|_| {
         transport_error(
             TransportPhase::Connect,
             AttemptFailureClass::Protocol,
@@ -78,7 +86,7 @@ pub(super) fn bearer_header(api_key: &OpenAiApiKey) -> Result<HeaderValue, Trans
 }
 
 pub(super) fn raw_api_key_header(api_key: &OpenAiApiKey) -> Result<HeaderValue, TransportError> {
-    HeaderValue::from_bytes(api_key.expose().as_bytes()).map_err(|_| {
+    build_secret_header(b"", api_key.expose()).map_err(|_| {
         transport_error(
             TransportPhase::Connect,
             AttemptFailureClass::Protocol,
@@ -93,25 +101,7 @@ pub(super) fn safe_upstream_error_message(
     body: &[u8],
     api_key: &str,
 ) -> String {
-    let message = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| value.get("error").cloned())
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(|message| message.as_str())
-                .map(str::to_owned)
-        })
-        .map(|message| message.replace(api_key, "[REDACTED]"))
-        .map(|message| message.chars().take(512).collect::<String>());
-    match message {
-        Some(message) if !message.is_empty() => format!("OpenAI returned HTTP {status}: {message}"),
-        _ => format!("OpenAI returned HTTP {status}"),
-    }
-}
-
-pub(super) fn bounded_duration(configured: Duration, remaining: Duration) -> Duration {
-    configured.min(remaining)
+    format_upstream_error_message("OpenAI", status, body, &[api_key])
 }
 
 pub(super) fn bounded_instant(configured: Instant, deadline: Instant) -> Instant {
@@ -151,30 +141,7 @@ pub(super) fn map_endpoint_error(error: EndpointError) -> TransportError {
 }
 
 pub(super) fn map_send_error(error: reqwest::Error) -> TransportError {
-    let (phase, class, message) = if error.is_connect() {
-        (
-            TransportPhase::Connect,
-            if error.is_timeout() {
-                AttemptFailureClass::Timeout
-            } else {
-                AttemptFailureClass::Connect
-            },
-            "OpenAI connection failed",
-        )
-    } else if error.is_timeout() {
-        (
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Timeout,
-            "OpenAI first-byte deadline elapsed",
-        )
-    } else {
-        (
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Connect,
-            "OpenAI request failed before response headers",
-        )
-    };
-    transport_error(phase, class, false, message)
+    map_provider_send_error("OpenAI", error)
 }
 
 pub(super) fn map_ambiguous_send_error(error: reqwest::Error) -> TransportError {
@@ -198,32 +165,6 @@ pub(super) fn ambiguous_multipart_timeout() -> TransportError {
     )
 }
 
-pub(super) fn map_first_body_error(error: reqwest::Error) -> TransportError {
-    transport_error(
-        TransportPhase::FirstByte,
-        if error.is_timeout() {
-            AttemptFailureClass::Timeout
-        } else {
-            AttemptFailureClass::Connect
-        },
-        false,
-        "OpenAI response body failed before its first byte",
-    )
-}
-
-pub(super) fn map_body_error(error: reqwest::Error, committed: bool) -> TransportError {
-    transport_error(
-        TransportPhase::Body,
-        if error.is_timeout() {
-            AttemptFailureClass::Timeout
-        } else {
-            AttemptFailureClass::Connect
-        },
-        committed,
-        "OpenAI response body failed",
-    )
-}
-
 pub(super) fn first_byte_timeout() -> TransportError {
     transport_error(
         TransportPhase::FirstByte,
@@ -231,36 +172,4 @@ pub(super) fn first_byte_timeout() -> TransportError {
         false,
         "OpenAI first-byte deadline elapsed",
     )
-}
-
-pub(super) fn body_idle_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::Body,
-        AttemptFailureClass::Timeout,
-        false,
-        "OpenAI response idle deadline elapsed",
-    )
-}
-
-pub(super) fn attempt_body_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::Body,
-        AttemptFailureClass::Timeout,
-        false,
-        "OpenAI attempt deadline elapsed while reading the response",
-    )
-}
-
-pub(super) fn transport_error(
-    phase: TransportPhase,
-    class: AttemptFailureClass,
-    response_committed: bool,
-    message: impl Into<String>,
-) -> TransportError {
-    TransportError {
-        phase,
-        class,
-        response_committed,
-        message: message.into(),
-    }
 }

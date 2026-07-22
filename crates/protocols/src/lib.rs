@@ -3,5 +3,6 @@
 pub mod anthropic;
 mod client;
 pub mod gemini;
+mod json_pointer;
 pub mod openai;
 pub mod sse;

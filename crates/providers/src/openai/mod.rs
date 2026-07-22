@@ -12,58 +12,29 @@ mod endpoint;
 mod headers;
 mod transport;
 
-use std::{fmt, time::Duration};
+use std::fmt;
+
+#[cfg(test)]
+use std::time::Duration;
 
 pub use certification::{
-    CompatibleCapability, CompatibleCapabilityCertificationError, NativeOpenAiCertificationEvidence,
+    CompatibleCapability, CompatibleCapabilityCertificationError,
+    NativeOpenAiCertificationEvidence,
 };
 pub use endpoint::EndpointError;
 pub use transport::OpenAiConnector;
-use zeroize::Zeroizing;
 
+pub use crate::connector_config::{
+    ConnectorTimeouts, DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES,
+};
+use crate::connector_config::{ResponseLimits, SecretString, SecretValidationError};
 use crate::openai::endpoint::Endpoint;
-
-pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ConnectorTimeouts {
-    pub connect: Duration,
-    pub first_byte: Duration,
-    pub idle: Duration,
-}
-
-impl Default for ConnectorTimeouts {
-    fn default() -> Self {
-        Self {
-            connect: Duration::from_secs(5),
-            first_byte: Duration::from_secs(30),
-            idle: Duration::from_secs(60),
-        }
-    }
-}
-
-impl ConnectorTimeouts {
-    fn validate(self) -> Result<Self, ConnectorBuildError> {
-        if self.connect.is_zero() {
-            return Err(ConnectorBuildError::ZeroTimeout("connect"));
-        }
-        if self.first_byte.is_zero() {
-            return Err(ConnectorBuildError::ZeroTimeout("first_byte"));
-        }
-        if self.idle.is_zero() {
-            return Err(ConnectorBuildError::ZeroTimeout("idle"));
-        }
-        Ok(self)
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct ConnectorConfig {
     endpoint: Endpoint,
     timeouts: ConnectorTimeouts,
-    max_response_bytes: usize,
-    max_event_bytes: usize,
+    response_limits: ResponseLimits,
 }
 
 impl Default for ConnectorConfig {
@@ -71,8 +42,7 @@ impl Default for ConnectorConfig {
         Self {
             endpoint: Endpoint::default(),
             timeouts: ConnectorTimeouts::default(),
-            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
-            max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
+            response_limits: ResponseLimits::default(),
         }
     }
 }
@@ -89,7 +59,9 @@ impl ConnectorConfig {
         mut self,
         timeouts: ConnectorTimeouts,
     ) -> Result<Self, ConnectorBuildError> {
-        self.timeouts = timeouts.validate()?;
+        self.timeouts = timeouts
+            .validate()
+            .map_err(ConnectorBuildError::ZeroTimeout)?;
         self.endpoint.set_connect_timeout(self.timeouts.connect);
         Ok(self)
     }
@@ -99,14 +71,8 @@ impl ConnectorConfig {
         max_response_bytes: usize,
         max_event_bytes: usize,
     ) -> Result<Self, ConnectorBuildError> {
-        if max_response_bytes == 0 {
-            return Err(ConnectorBuildError::ZeroLimit("max_response_bytes"));
-        }
-        if max_event_bytes == 0 {
-            return Err(ConnectorBuildError::ZeroLimit("max_event_bytes"));
-        }
-        self.max_response_bytes = max_response_bytes;
-        self.max_event_bytes = max_event_bytes;
+        self.response_limits = ResponseLimits::new(max_response_bytes, max_event_bytes)
+            .map_err(ConnectorBuildError::ZeroLimit)?;
         Ok(self)
     }
 
@@ -125,28 +91,24 @@ impl ConnectorConfig {
         Self {
             endpoint,
             timeouts,
-            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
-            max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
+            response_limits: ResponseLimits::default(),
         }
     }
 }
 
-pub struct OpenAiApiKey(Zeroizing<String>);
+pub struct OpenAiApiKey(SecretString);
 
 impl OpenAiApiKey {
     pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(ConnectorBuildError::EmptyApiKey);
+        match SecretString::new(value) {
+            Ok(value) => Ok(Self(value)),
+            Err(SecretValidationError::Empty) => Err(ConnectorBuildError::EmptyApiKey),
+            Err(SecretValidationError::Invalid) => Err(ConnectorBuildError::InvalidApiKey),
         }
-        if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
-            return Err(ConnectorBuildError::InvalidApiKey);
-        }
-        Ok(Self(Zeroizing::new(value)))
     }
 
     pub(crate) fn expose(&self) -> &str {
-        self.0.as_str()
+        self.0.expose()
     }
 }
 

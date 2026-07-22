@@ -44,7 +44,7 @@ pub(super) async fn execute(
     let bytes = read_deadline_body(
         response,
         connector.config.timeouts.idle,
-        connector.config.max_response_bytes,
+        connector.config.response_limits.response_bytes,
     )
     .await?;
     let wire: OpenAiImageResponse = parse_wire("image", &bytes)?;
@@ -139,7 +139,7 @@ async fn execute_multipart(
     let response = read_deadline_body(
         response,
         connector.config.timeouts.idle,
-        connector.config.max_response_bytes,
+        connector.config.response_limits.response_bytes,
     )
     .await?;
     let wire: OpenAiImageResponse = parse_wire("image", &response)?;

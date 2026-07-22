@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, fmt, future::ready};
 #[cfg(test)]
 use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(test)]
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -13,7 +12,7 @@ use olp_domain::CanonicalEventKind;
 use olp_domain::{
     AttemptFailureClass, CanonicalEvent, CanonicalResult, ContentPart, DiscoveredProviderModel,
     MediaSource, MediaSpool, Operation, ProviderEventStream, ProviderKind, ProviderOutput,
-    ProviderRequest, ProviderTransport, SourceExtensions, Surface, TokenCountResult,
+    ProviderRequest, ProviderTransport, Surface, TokenCountResult,
     TransportError, TransportMode, TransportPhase, media_handle_from_inline_marker,
 };
 use olp_protocols::anthropic::{
@@ -24,14 +23,19 @@ use olp_protocols::anthropic::{
 };
 use reqwest::{Response, Url};
 use tokio::time::{Instant, timeout};
-use zeroize::Zeroizing;
 
 use crate::anthropic::{
     AnthropicApiKey, ConnectorConfig, endpoint::EndpointError, headers::sanitize_forward_headers,
 };
+use crate::inline_media::{InlineMediaError, MAX_INLINE_MEDIA_BYTES, read_base64};
 use crate::transport_io::{
     CanonicalEventDecoder, DecodedEventStream, ProviderResponseIo, ReqwestByteStream,
     bounded_duration,
+};
+use crate::transport_support::{
+    map_send_error as map_provider_send_error,
+    safe_upstream_error_message as format_upstream_error_message,
+    secret_header as build_secret_header, source_extensions, transport_error,
 };
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
@@ -140,7 +144,7 @@ impl AnthropicConnector {
                     first_byte_deadline,
                     attempt_deadline,
                     self.config.timeouts.idle,
-                    self.config.max_response_bytes,
+                    self.config.response_limits.response_bytes,
                 )
                 .await?;
             let value: serde_json::Value = serde_json::from_slice(&body).map_err(|error| {
@@ -349,7 +353,7 @@ impl AnthropicConnector {
                 first_byte_deadline,
                 attempt_deadline,
                 self.config.timeouts.idle,
-                self.config.max_response_bytes,
+                self.config.response_limits.response_bytes,
             )
             .await?;
         match kind {
@@ -393,21 +397,9 @@ impl AnthropicConnector {
     ) -> Result<ProviderEventStream, TransportError> {
         RESPONSE_IO.require_content_type(&response, "text/event-stream")?;
         let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let first_wait = RESPONSE_IO
-            .remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(|| RESPONSE_IO.first_byte_timeout())?;
-        let first = timeout(first_wait, source.next())
-            .await
-            .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-            .ok_or_else(|| {
-                transport_error(
-                    TransportPhase::FirstByte,
-                    AttemptFailureClass::Protocol,
-                    false,
-                    "Anthropic stream ended before its first body byte",
-                )
-            })?
-            .map_err(|error| RESPONSE_IO.map_first_body_error(error))?;
+        let first = RESPONSE_IO
+            .prefetch_first_byte(&mut source, first_byte_deadline, attempt_deadline)
+            .await?;
         let source = Box::pin(stream::once(ready(Ok(first))).chain(source));
         let bytes = RESPONSE_IO.after_first_byte_stream(
             source,
@@ -415,7 +407,7 @@ impl AnthropicConnector {
             attempt_deadline,
         );
         let decoder = AnthropicMessagesStreamDecoder::with_max_event_bytes_and_raw_passthrough(
-            self.config.max_event_bytes,
+            self.config.response_limits.event_bytes,
             preserve_raw_frames,
         );
         Ok(Box::pin(DecodedEventStream::new(
@@ -438,7 +430,7 @@ impl AnthropicConnector {
                 deadline,
                 attempt_deadline,
                 self.config.timeouts.idle,
-                self.config.max_response_bytes.min(64 * 1024),
+                self.config.response_limits.response_bytes.min(64 * 1024),
             )
             .await
         {
@@ -457,8 +449,6 @@ impl AnthropicConnector {
         transport_error(TransportPhase::FirstByte, class, false, message)
     }
 }
-
-const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
 
 async fn hydrate_anthropic_messages(
     messages: &mut [Message],
@@ -506,33 +496,25 @@ async fn read_inline_media(
     marker: &str,
     spool: Option<&std::sync::Arc<dyn MediaSpool>>,
 ) -> Result<String, TransportError> {
-    let handle = media_handle_from_inline_marker(marker)
-        .ok_or_else(|| protocol_error("invalid bounded inline-media handle"))?;
-    let spool = spool.ok_or_else(|| protocol_error("bounded inline-media spool is unavailable"))?;
-    let opened = spool.open(&handle).await.map_err(|error| {
-        protocol_error(format!(
-            "bounded inline-media handle cannot be opened: {error}"
-        ))
-    })?;
-    if opened
-        .artifact
-        .content_length
-        .is_none_or(|length| length > MAX_INLINE_MEDIA_BYTES as u64)
-    {
-        return Err(protocol_error("bounded inline media exceeded its limit"));
-    }
-    let mut stream = opened.bytes;
-    let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| {
-            protocol_error(format!("bounded inline-media read failed: {error}"))
-        })?;
-        if bytes.len().saturating_add(chunk.len()) > MAX_INLINE_MEDIA_BYTES {
-            return Err(protocol_error("bounded inline media exceeded its limit"));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(STANDARD.encode(bytes))
+    read_base64(marker, spool, MAX_INLINE_MEDIA_BYTES)
+        .await
+        .map_err(|error| match error {
+            InlineMediaError::InvalidHandle => {
+                protocol_error("invalid bounded inline-media handle")
+            }
+            InlineMediaError::MissingSpool => {
+                protocol_error("bounded inline-media spool is unavailable")
+            }
+            InlineMediaError::Open(error) => protocol_error(format!(
+                "bounded inline-media handle cannot be opened: {error}"
+            )),
+            InlineMediaError::UnboundedOrTooLarge => {
+                protocol_error("bounded inline media exceeded its limit")
+            }
+            InlineMediaError::Read(error) => {
+                protocol_error(format!("bounded inline-media read failed: {error}"))
+            }
+        })
 }
 
 impl fmt::Debug for AnthropicConnector {
@@ -659,43 +641,12 @@ fn encode_count_tokens(
 }
 
 fn secret_header(api_key: &AnthropicApiKey) -> Result<HeaderValue, TransportError> {
-    let value = Zeroizing::new(api_key.expose().as_bytes().to_vec());
-    HeaderValue::from_bytes(value.as_slice())
+    build_secret_header(b"", api_key.expose())
         .map_err(|_| protocol_error("Anthropic API key cannot be represented as a header"))
 }
 
 fn safe_upstream_error_message(status: StatusCode, body: &[u8], api_key: &str) -> String {
-    let message = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| value.get("error").cloned())
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned)
-        })
-        .map(|message| message.replace(api_key, "[REDACTED]"))
-        .map(|message| message.chars().take(512).collect::<String>());
-    match message {
-        Some(message) if !message.is_empty() => {
-            format!("Anthropic returned HTTP {status}: {message}")
-        }
-        _ => format!("Anthropic returned HTTP {status}"),
-    }
-}
-
-fn source_extensions(
-    surface: Surface,
-    values: BTreeMap<String, serde_json::Value>,
-) -> SourceExtensions {
-    let values = values
-        .into_iter()
-        .map(|(key, value)| {
-            let escaped = key.replace('~', "~0").replace('/', "~1");
-            (format!("/{escaped}"), value)
-        })
-        .collect();
-    SourceExtensions::new(surface, values)
+    format_upstream_error_message("Anthropic", status, body, &[api_key])
 }
 
 fn map_endpoint_error(error: EndpointError) -> TransportError {
@@ -708,27 +659,7 @@ fn map_endpoint_error(error: EndpointError) -> TransportError {
 }
 
 fn map_send_error(error: reqwest::Error) -> TransportError {
-    if error.is_connect() {
-        transport_error(
-            TransportPhase::Connect,
-            if error.is_timeout() {
-                AttemptFailureClass::Timeout
-            } else {
-                AttemptFailureClass::Connect
-            },
-            false,
-            "Anthropic connection failed",
-        )
-    } else if error.is_timeout() {
-        RESPONSE_IO.first_byte_timeout()
-    } else {
-        transport_error(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Connect,
-            false,
-            "Anthropic request failed before response headers",
-        )
-    }
+    map_provider_send_error("Anthropic", error)
 }
 
 fn protocol_error(message: impl Into<String>) -> TransportError {
@@ -747,20 +678,6 @@ fn protocol_body_error(message: impl Into<String>) -> TransportError {
         false,
         message,
     )
-}
-
-fn transport_error(
-    phase: TransportPhase,
-    class: AttemptFailureClass,
-    response_committed: bool,
-    message: impl Into<String>,
-) -> TransportError {
-    TransportError {
-        phase,
-        class,
-        response_committed,
-        message: message.into(),
-    }
 }
 
 #[cfg(test)]

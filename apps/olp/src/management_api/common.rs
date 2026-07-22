@@ -148,15 +148,7 @@ pub(super) fn session_cookie(headers: &HeaderMap) -> Result<&str, Problem> {
 }
 
 pub(super) fn cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
-    headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies.split(';').find_map(|cookie| {
-                let (name, value) = cookie.trim().split_once('=')?;
-                (name == expected_name).then_some(value)
-            })
-        })
+    crate::cookies::find(headers, expected_name)
 }
 
 pub(crate) fn require_store(state: &ApiState) -> Result<&PgStore, Problem> {

@@ -4,6 +4,7 @@
 mod circuit;
 mod cli;
 mod connectors;
+mod cookies;
 mod event_completion;
 mod gateway;
 mod image_response;

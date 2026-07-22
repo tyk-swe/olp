@@ -19,9 +19,12 @@ use olp_protocols::openai::{
 use reqwest::multipart;
 use serde_json::Value;
 
-use super::{OpenAiConnector, errors::*, streams::*};
+use crate::{
+    inline_media::{InlineMediaError, MAX_INLINE_MEDIA_BYTES, read_base64},
+    transport_io::{ProviderResponseIo, ReqwestByteStream},
+};
 
-const MAX_INLINE_REQUEST_MEDIA_BYTES: usize = 1024 * 1024;
+use super::{OpenAiConnector, errors::*, streams::*};
 
 pub(super) async fn hydrate_chat_media(
     request: &mut ChatCompletionRequest,
@@ -101,32 +104,22 @@ async fn read_inline_request_media(
     marker: &str,
     spool: Option<&Arc<dyn MediaSpool>>,
 ) -> Result<String, TransportError> {
-    let handle = media_handle_from_inline_marker(marker)
-        .ok_or_else(|| protocol_body_error("invalid bounded inline-media handle"))?;
-    let spool =
-        spool.ok_or_else(|| protocol_body_error("bounded inline-media spool is unavailable"))?;
-    let opened = spool.open(&handle).await.map_err(map_spool_error)?;
-    if opened
-        .artifact
-        .content_length
-        .is_none_or(|length| length > MAX_INLINE_REQUEST_MEDIA_BYTES as u64)
-    {
-        return Err(protocol_body_error(
-            "bounded inline request media exceeded its limit",
-        ));
-    }
-    let mut stream = opened.bytes;
-    let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(map_spool_error)?;
-        if bytes.len().saturating_add(chunk.len()) > MAX_INLINE_REQUEST_MEDIA_BYTES {
-            return Err(protocol_body_error(
-                "bounded inline request media exceeded its limit",
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(STANDARD.encode(bytes))
+    read_base64(marker, spool, MAX_INLINE_MEDIA_BYTES)
+        .await
+        .map_err(|error| match error {
+            InlineMediaError::InvalidHandle => {
+                protocol_body_error("invalid bounded inline-media handle")
+            }
+            InlineMediaError::MissingSpool => {
+                protocol_body_error("bounded inline-media spool is unavailable")
+            }
+            InlineMediaError::Open(error) | InlineMediaError::Read(error) => {
+                map_spool_error(error)
+            }
+            InlineMediaError::UnboundedOrTooLarge => {
+                protocol_body_error("bounded inline request media exceeded its limit")
+            }
+        })
 }
 
 impl OpenAiConnector {
@@ -148,7 +141,7 @@ impl OpenAiConnector {
                 let bytes = STANDARD
                     .decode(encoded)
                     .map_err(|error| protocol_decode_error("image base64", error))?;
-                if bytes.len() > self.config.max_response_bytes {
+                if bytes.len() > self.config.response_limits.response_bytes {
                     return Err(protocol_body_error(
                         "OpenAI image payload exceeded the configured response bound",
                     ));
@@ -157,7 +150,7 @@ impl OpenAiConnector {
                     .put(MediaUpload {
                         filename: format!("image-{index}.bin"),
                         content_type: Some("application/octet-stream".into()),
-                        maximum_length: u64::try_from(self.config.max_response_bytes)
+                        maximum_length: u64::try_from(self.config.response_limits.response_bytes)
                             .unwrap_or(u64::MAX),
                         bytes: Box::pin(stream::once(ready(Ok(Bytes::from(bytes))))),
                     })
@@ -299,7 +292,7 @@ pub(super) async fn spool_response_body(
     let source: ReqwestByteStream = Box::pin(response.response.bytes_stream());
     let failures = Arc::new(Mutex::new(None::<TransportError>));
     let failure_sink = Arc::clone(&failures);
-    let bytes = DeadlineByteStream::new(
+    let bytes = ProviderResponseIo::new("OpenAI").before_first_byte_stream(
         source,
         response.first_body_deadline,
         idle_timeout,

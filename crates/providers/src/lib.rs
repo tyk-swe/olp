@@ -10,20 +10,25 @@ pub mod anthropic;
 mod azure_openai;
 #[allow(dead_code)]
 mod bedrock;
+mod connector_config;
 mod factory;
+mod forward_headers;
 #[cfg(not(any(test, feature = "test-util")))]
 #[allow(dead_code)]
 mod gemini;
 #[cfg(any(test, feature = "test-util"))]
 pub mod gemini;
 mod http_egress;
+mod inline_media;
 mod oidc;
+mod provider_endpoint;
 #[cfg(not(any(test, feature = "test-util")))]
 #[allow(dead_code)]
 mod openai;
 #[cfg(any(test, feature = "test-util"))]
 pub mod openai;
 mod transport_io;
+mod transport_support;
 #[allow(dead_code)]
 mod vertex;
 

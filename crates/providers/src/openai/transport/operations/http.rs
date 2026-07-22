@@ -69,7 +69,7 @@ impl OpenAiConnector {
         read_deadline_body(
             response,
             self.config.timeouts.idle,
-            self.config.max_response_bytes,
+            self.config.response_limits.response_bytes,
         )
         .await
     }
@@ -259,7 +259,7 @@ impl OpenAiConnector {
             first_byte_deadline,
             attempt_deadline,
             self.config.timeouts.idle,
-            self.config.max_response_bytes,
+            self.config.response_limits.response_bytes,
         )
         .await
     }
@@ -276,7 +276,7 @@ impl OpenAiConnector {
             first_byte_deadline,
             attempt_deadline,
             self.config.timeouts.idle,
-            self.config.max_response_bytes.min(64 * 1024),
+            self.config.response_limits.response_bytes.min(64 * 1024),
         )
         .await
         {

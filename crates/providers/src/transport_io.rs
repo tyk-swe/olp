@@ -1,10 +1,9 @@
 //! Shared response-body and canonical-event streaming machinery for provider
 //! transports.
 //!
-//! The Anthropic and Gemini connectors obtain their first response-body chunk
-//! before returning a stream to the gateway. This module deliberately starts
-//! its idle watchdog only after that handoff, so first-byte failures remain
-//! pre-commit and eligible for the existing retry policy.
+//! A connector may either hand this module a stream before its first body
+//! byte or prefetch that byte itself. Both modes preserve the distinction
+//! between pre-commit first-byte failures and post-commit body failures.
 
 use std::{
     collections::VecDeque,
@@ -82,6 +81,56 @@ impl ProviderResponseIo {
         .await
     }
 
+    /// Reads the first non-empty response-body chunk under the first-byte and
+    /// attempt deadlines. Providers that must decide retry eligibility before
+    /// returning a stream can use this without duplicating timeout semantics.
+    pub(crate) async fn prefetch_first_byte(
+        self,
+        source: &mut ReqwestByteStream,
+        first_byte_deadline: Instant,
+        attempt_deadline: Instant,
+    ) -> Result<Bytes, TransportError> {
+        loop {
+            let wait = self
+                .remaining_until(first_byte_deadline, attempt_deadline)
+                .ok_or_else(|| self.first_byte_timeout())?;
+            let next = timeout(wait, source.next())
+                .await
+                .map_err(|_| self.first_byte_timeout())?;
+            let Some(chunk) = next else {
+                return Err(self.protocol_error(
+                    TransportPhase::FirstByte,
+                    false,
+                    format!("{} stream ended before its first body byte", self.provider),
+                ));
+            };
+            let chunk = chunk.map_err(|error| self.map_first_body_error(error))?;
+            if !chunk.is_empty() {
+                return Ok(chunk);
+            }
+        }
+    }
+
+    /// Bounds a response stream before any body bytes have been observed.
+    /// First-byte timeout, empty-body, and transport failures remain
+    /// uncommitted and are classified independently from later body failures.
+    #[must_use]
+    pub(crate) fn before_first_byte_stream(
+        self,
+        source: ReqwestByteStream,
+        first_byte_deadline: Instant,
+        idle_timeout: Duration,
+        attempt_deadline: Instant,
+    ) -> DeadlineByteStream {
+        DeadlineByteStream::new(
+            self,
+            source,
+            StreamStart::BeforeFirstByte(first_byte_deadline),
+            idle_timeout,
+            attempt_deadline,
+        )
+    }
+
     /// Bounds a stream whose first byte has already been obtained by the
     /// caller. The source includes that buffered byte so downstream decoders
     /// observe it exactly once.
@@ -92,7 +141,13 @@ impl ProviderResponseIo {
         idle_timeout: Duration,
         attempt_deadline: Instant,
     ) -> DeadlineByteStream {
-        DeadlineByteStream::new(self, source, idle_timeout, attempt_deadline)
+        DeadlineByteStream::new(
+            self,
+            source,
+            StreamStart::AfterFirstByte,
+            idle_timeout,
+            attempt_deadline,
+        )
     }
 
     pub(crate) fn first_byte_timeout(self) -> TransportError {
@@ -156,54 +211,78 @@ impl ProviderResponseIo {
         idle_timeout: Duration,
         maximum: usize,
     ) -> Result<Vec<u8>, TransportError> {
-        let mut output = Vec::new();
-        let mut first = true;
-        loop {
-            let wait = if first {
-                self.remaining_until(first_byte_deadline, attempt_deadline)
-                    .ok_or_else(|| self.first_byte_timeout())?
-            } else {
-                bounded_duration(
-                    idle_timeout,
-                    self.remaining(attempt_deadline, TransportPhase::Body)?,
-                )
-            };
-            let next = timeout(wait, source.next()).await.map_err(|_| {
-                if first {
-                    self.first_byte_timeout()
-                } else {
-                    self.body_idle_timeout()
-                }
-            })?;
-            let Some(chunk) = next else { break };
-            let chunk = chunk.map_err(|error| {
-                if first {
-                    self.map_first_body_error(error)
-                } else {
-                    self.map_body_error(error, false)
-                }
-            })?;
-            first = false;
-            if output.len().saturating_add(chunk.len()) > maximum {
+        let first = loop {
+            let wait = self
+                .remaining_until(first_byte_deadline, attempt_deadline)
+                .ok_or_else(|| self.first_byte_timeout())?;
+            let next = timeout(wait, source.next())
+                .await
+                .map_err(|_| self.first_byte_timeout())?;
+            let Some(chunk) = next else {
                 return Err(self.protocol_error(
+                    TransportPhase::FirstByte,
+                    false,
+                    format!("{} response body was empty", self.provider),
+                ));
+            };
+            let chunk = chunk.map_err(|error| self.map_first_body_error(error))?;
+            if !chunk.is_empty() {
+                break chunk;
+            }
+        };
+
+        let mut output = Vec::with_capacity(first.len().min(maximum));
+        self.append_bounded(&mut output, &first, maximum)?;
+        let mut idle_deadline = Instant::now() + idle_timeout;
+        loop {
+            let attempt_expires_first = attempt_deadline <= idle_deadline;
+            let wait = self
+                .remaining_until(idle_deadline, attempt_deadline)
+                .ok_or_else(|| self.body_deadline_timeout(attempt_expires_first))?;
+            let next = timeout(wait, source.next())
+                .await
+                .map_err(|_| self.body_deadline_timeout(attempt_expires_first))?;
+            let Some(chunk) = next else { break };
+            let chunk = chunk.map_err(|error| self.map_body_error(error, false))?;
+            if chunk.is_empty() {
+                continue;
+            }
+            idle_deadline = Instant::now() + idle_timeout;
+            self.append_bounded(&mut output, &chunk, maximum)?;
+        }
+        Ok(output)
+    }
+
+    fn append_bounded(
+        self,
+        output: &mut Vec<u8>,
+        chunk: &[u8],
+        maximum: usize,
+    ) -> Result<(), TransportError> {
+        output
+            .len()
+            .checked_add(chunk.len())
+            .filter(|length| *length <= maximum)
+            .ok_or_else(|| {
+                self.protocol_error(
                     TransportPhase::Body,
                     false,
                     format!(
                         "{} response exceeded the {maximum} byte limit",
                         self.provider
                     ),
-                ));
-            }
-            output.extend_from_slice(&chunk);
+                )
+            })?;
+        output.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    fn body_deadline_timeout(self, attempt_expires_first: bool) -> TransportError {
+        if attempt_expires_first {
+            self.attempt_body_timeout()
+        } else {
+            self.body_idle_timeout()
         }
-        if first {
-            return Err(self.protocol_error(
-                TransportPhase::FirstByte,
-                false,
-                format!("{} response body was empty", self.provider),
-            ));
-        }
-        Ok(output)
     }
 
     fn body_idle_timeout(self) -> TransportError {
@@ -240,7 +319,7 @@ impl ProviderResponseIo {
         )
     }
 
-    fn protocol_error(
+    pub(crate) fn protocol_error(
         self,
         phase: TransportPhase,
         response_committed: bool,
@@ -282,11 +361,19 @@ pub(crate) trait CanonicalEventDecoder: Send + Unpin + 'static {
     fn finish(&mut self) -> Result<Vec<CanonicalEvent>, Self::Error>;
 }
 
+#[derive(Clone, Copy)]
+enum StreamStart {
+    BeforeFirstByte(Instant),
+    AfterFirstByte,
+}
+
 pub(crate) struct DeadlineByteStream {
     source: ReqwestByteStream,
     io: ProviderResponseIo,
+    first: bool,
     idle_timeout: Duration,
-    idle_sleep: Pin<Box<Sleep>>,
+    phase_deadline: Instant,
+    deadline_sleep: Pin<Box<Sleep>>,
     attempt_deadline: Instant,
     terminal: bool,
 }
@@ -295,18 +382,35 @@ impl DeadlineByteStream {
     fn new(
         io: ProviderResponseIo,
         source: ReqwestByteStream,
+        start: StreamStart,
         idle_timeout: Duration,
         attempt_deadline: Instant,
     ) -> Self {
+        let (first, phase_deadline) = match start {
+            StreamStart::BeforeFirstByte(deadline) => (true, deadline),
+            StreamStart::AfterFirstByte => (false, Instant::now() + idle_timeout),
+        };
         Self {
             source,
             io,
+            first,
             idle_timeout,
-            idle_sleep: Box::pin(tokio::time::sleep_until(
-                (Instant::now() + idle_timeout).min(attempt_deadline),
+            phase_deadline,
+            deadline_sleep: Box::pin(tokio::time::sleep_until(
+                phase_deadline.min(attempt_deadline),
             )),
             attempt_deadline,
             terminal: false,
+        }
+    }
+
+    fn deadline_error(&self) -> TransportError {
+        if self.first {
+            self.io.first_byte_timeout()
+        } else if self.attempt_deadline <= self.phase_deadline {
+            self.io.attempt_body_timeout()
+        } else {
+            self.io.body_idle_timeout()
         }
     }
 }
@@ -318,35 +422,43 @@ impl Stream for DeadlineByteStream {
         if self.terminal {
             return Poll::Ready(None);
         }
-        if Instant::now() >= self.attempt_deadline {
+        if self.deadline_sleep.as_mut().poll(context).is_ready() {
             self.terminal = true;
-            return Poll::Ready(Some(Err(self.io.attempt_body_timeout())));
+            return Poll::Ready(Some(Err(self.deadline_error())));
         }
         match self.source.as_mut().poll_next(context) {
             Poll::Ready(Some(Ok(chunk))) => {
-                let wake = (Instant::now() + self.idle_timeout).min(self.attempt_deadline);
-                self.idle_sleep.as_mut().reset(wake);
+                if !chunk.is_empty() {
+                    self.first = false;
+                    let phase_deadline = Instant::now() + self.idle_timeout;
+                    self.phase_deadline = phase_deadline;
+                    let wake = phase_deadline.min(self.attempt_deadline);
+                    self.deadline_sleep.as_mut().reset(wake);
+                }
                 return Poll::Ready(Some(Ok(chunk)));
             }
             Poll::Ready(Some(Err(error))) => {
                 self.terminal = true;
-                return Poll::Ready(Some(Err(self.io.map_body_error(error, false))));
+                let error = if self.first {
+                    self.io.map_first_body_error(error)
+                } else {
+                    self.io.map_body_error(error, false)
+                };
+                return Poll::Ready(Some(Err(error)));
             }
             Poll::Ready(None) => {
                 self.terminal = true;
+                if self.first {
+                    return Poll::Ready(Some(Err(self.io.protocol_error(
+                        TransportPhase::FirstByte,
+                        false,
+                        format!("{} response body was empty", self.io.provider),
+                    ))));
+                }
                 return Poll::Ready(None);
             }
-            Poll::Pending => {}
+            Poll::Pending => Poll::Pending,
         }
-        if self.idle_sleep.as_mut().poll(context).is_ready() {
-            self.terminal = true;
-            return Poll::Ready(Some(Err(if Instant::now() >= self.attempt_deadline {
-                self.io.attempt_body_timeout()
-            } else {
-                self.io.body_idle_timeout()
-            })));
-        }
-        Poll::Pending
     }
 }
 
@@ -488,6 +600,20 @@ mod tests {
         assert_eq!(oversized.phase, TransportPhase::Body);
         assert_eq!(oversized.class, AttemptFailureClass::Protocol);
         assert_eq!(oversized.message, "Test response exceeded the 3 byte limit");
+    }
+
+    #[tokio::test]
+    async fn first_byte_prefetch_ignores_empty_chunks() {
+        let io = ProviderResponseIo::new("Test");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut bytes = source([Bytes::new(), Bytes::from_static(b"first")]);
+
+        let first = io
+            .prefetch_first_byte(&mut bytes, deadline, deadline)
+            .await
+            .unwrap();
+
+        assert_eq!(first, Bytes::from_static(b"first"));
     }
 
     #[tokio::test]

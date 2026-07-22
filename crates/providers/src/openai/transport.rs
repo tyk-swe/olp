@@ -104,7 +104,7 @@ impl OpenAiConnector {
             first_byte_deadline,
             attempt_deadline,
             self.config.timeouts.idle,
-            self.config.max_response_bytes,
+            self.config.response_limits.response_bytes,
         )
         .await?;
         let value: serde_json::Value = serde_json::from_slice(&body).map_err(|error| {

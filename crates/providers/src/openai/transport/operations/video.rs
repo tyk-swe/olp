@@ -68,7 +68,7 @@ pub(super) async fn execute(
             let bytes = read_deadline_body(
                 response,
                 connector.config.timeouts.idle,
-                connector.config.max_response_bytes,
+                connector.config.response_limits.response_bytes,
             )
             .await?;
             let wire: OpenAiVideoObject = parse_wire("video create", &bytes)?;
@@ -151,7 +151,8 @@ pub(super) async fn execute(
             let spool = request.media.as_ref().ok_or_else(|| {
                 protocol_body_error("OpenAI video content requires a bounded media spool")
             })?;
-            let maximum = u64::try_from(connector.config.max_response_bytes).unwrap_or(u64::MAX);
+            let maximum = u64::try_from(connector.config.response_limits.response_bytes)
+                .unwrap_or(u64::MAX);
             let artifact = spool_response_body(
                 response,
                 spool,
@@ -199,7 +200,7 @@ pub(super) async fn execute(
             let bytes = read_deadline_body(
                 response,
                 connector.config.timeouts.idle,
-                connector.config.max_response_bytes,
+                connector.config.response_limits.response_bytes,
             )
             .await?;
             let wire: OpenAiVideoDeleteResponse = parse_wire("video delete", &bytes)?;

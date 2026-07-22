@@ -43,7 +43,8 @@ pub(super) async fn execute_speech(
     let spool = request.media.as_ref().ok_or_else(|| {
         protocol_body_error("the OpenAI speech response requires a bounded media spool")
     })?;
-    let maximum = u64::try_from(connector.config.max_response_bytes).unwrap_or(u64::MAX);
+    let maximum = u64::try_from(connector.config.response_limits.response_bytes)
+        .unwrap_or(u64::MAX);
     let artifact = spool_response_body(
         response,
         spool,
@@ -122,7 +123,7 @@ pub(super) async fn execute_transcription(
     let bytes = read_deadline_body(
         response,
         connector.config.timeouts.idle,
-        connector.config.max_response_bytes,
+        connector.config.response_limits.response_bytes,
     )
     .await?;
     let response = if response_format.is_text() {
