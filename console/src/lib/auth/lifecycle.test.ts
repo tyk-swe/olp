@@ -13,6 +13,25 @@ const session = (csrfToken = 'csrf-session'): AuthenticatedSession => ({
   csrf_token: csrfToken
 });
 
+const sessionFor = (id: string, csrfToken: string): AuthenticatedSession => ({
+  user: {
+    ...session().user,
+    id,
+    email: `${id}@example.com`
+  },
+  csrf_token: csrfToken
+});
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function boundary(loadSession: (signal: AbortSignal) => Promise<AuthenticatedSession>) {
   return {
     loadSession,
@@ -58,6 +77,124 @@ describe('authentication lifecycle', () => {
     expect((firstError as DOMException).name).toBe('AbortError');
     expect(lifecycle.snapshot().user).toEqual(session().user);
     expect(getCsrfToken()).toBe('csrf-second');
+  });
+
+  it('does not let a superseded anonymous transition erase a new session', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const transitionCancellation = deferred<void>();
+    const cancelQueries = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => transitionCancellation.promise)
+      .mockResolvedValue(undefined);
+    lifecycle.attachQueryClient({
+      cancelQueries,
+      clear: vi.fn()
+    } as unknown as QueryClient);
+    const registeredBoundary = boundary(async () => session());
+    lifecycle.registerBoundary(registeredBoundary);
+    lifecycle.establishSession(session('csrf-old'));
+
+    const transition = lifecycle.principalInvalidated();
+    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
+    const authenticated = lifecycle.authenticate(async () => session('csrf-new'));
+
+    await expect(authenticated).resolves.toMatchObject({ csrf_token: 'csrf-new' });
+    transitionCancellation.resolve(undefined);
+    await transition;
+
+    expect(registeredBoundary.unauthenticatedDestination).not.toHaveBeenCalled();
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: session().user
+    });
+    expect(getCsrfToken()).toBe('csrf-new');
+  });
+
+  it('does not let an obsolete transition clear a newer transition handle', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const firstCancellation = deferred<void>();
+    const secondCancellation = deferred<void>();
+    const cancelQueries = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => firstCancellation.promise)
+      .mockImplementationOnce(async () => secondCancellation.promise);
+    lifecycle.attachQueryClient({
+      cancelQueries,
+      clear: vi.fn()
+    } as unknown as QueryClient);
+    lifecycle.registerBoundary(boundary(async () => session()));
+
+    const firstTransition = lifecycle.principalInvalidated();
+    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
+    lifecycle.registerBoundary(boundary(async () => session()));
+    const secondTransition = lifecycle.principalInvalidated();
+    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledTimes(2));
+
+    firstCancellation.resolve(undefined);
+    await firstTransition;
+    const coalescedTransition = lifecycle.principalInvalidated();
+
+    expect(cancelQueries).toHaveBeenCalledTimes(2);
+    secondCancellation.resolve(undefined);
+    await Promise.all([secondTransition, coalescedTransition]);
+  });
+
+  it('does not establish a validation result superseded during cache clearing', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const validationCancellation = deferred<void>();
+    const cancelQueries = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => validationCancellation.promise)
+      .mockResolvedValue(undefined);
+    lifecycle.attachQueryClient({
+      cancelQueries,
+      clear: vi.fn()
+    } as unknown as QueryClient);
+    const staleSession = sessionFor('stale-principal', 'csrf-stale');
+    const currentSession = sessionFor('current-principal', 'csrf-current');
+    lifecycle.registerBoundary(boundary(async () => staleSession));
+    lifecycle.establishSession(session('csrf-old'));
+
+    const validation = lifecycle.validateSession();
+    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
+    await lifecycle.authenticate(async () => currentSession);
+    validationCancellation.resolve(undefined);
+    await validation;
+
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: currentSession.user
+    });
+    expect(getCsrfToken()).toBe('csrf-current');
+    expect(lifecycle.queryKeyHash(['current'])).toContain('principal:current-principal:operator');
+  });
+
+  it('does not run obsolete validation error cleanup after authentication', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const validationCancellation = deferred<void>();
+    const cancelQueries = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => validationCancellation.promise)
+      .mockResolvedValue(undefined);
+    lifecycle.attachQueryClient({
+      cancelQueries,
+      clear: vi.fn()
+    } as unknown as QueryClient);
+    lifecycle.registerBoundary(boundary(async () => Promise.reject(new Error('Unavailable'))));
+    const currentSession = sessionFor('current-principal', 'csrf-current');
+
+    const validation = lifecycle.validateSession();
+    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
+    await lifecycle.authenticate(async () => currentSession);
+    validationCancellation.resolve(undefined);
+    await validation;
+
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: currentSession.user
+    });
+    expect(getCsrfToken()).toBe('csrf-current');
+    expect(lifecycle.queryKeyHash(['current'])).toContain('principal:current-principal:operator');
   });
 
   it('keeps the authenticated snapshot mounted during passive validation', async () => {
@@ -151,6 +288,21 @@ describe('authentication lifecycle', () => {
     expect(prepared?.headers.get('x-csrf-token')).toBe('csrf-for-logout');
     expect(getCsrfToken()).toBeNull();
     expect(lifecycle.snapshot().phase).toBe('anonymous');
+  });
+
+  it('does not let a pre-logout validation restore the signed-out session', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loaded = deferred<AuthenticatedSession>();
+    lifecycle.registerBoundary(boundary(async () => loaded.promise));
+    lifecycle.establishSession(session('csrf-old'));
+
+    const validation = lifecycle.validateSession({ passive: true });
+    await lifecycle.signOut(async () => undefined);
+    loaded.resolve(session('csrf-stale'));
+    await validation;
+
+    expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
+    expect(getCsrfToken()).toBeNull();
   });
 
   it('keeps an authenticated session read-only when CSRF recovery is empty', async () => {

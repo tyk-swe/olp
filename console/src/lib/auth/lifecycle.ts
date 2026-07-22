@@ -170,7 +170,7 @@ export class AuthenticationLifecycle {
   async authenticate(request: AuthenticationRequest): Promise<AuthenticatedSession> {
     const generation = ++this.authenticationGeneration;
     this.authenticationController?.abort();
-    this.sessionController?.abort();
+    this.abortSessionValidation();
     this.transitionController?.abort();
     this.principalExitController?.abort();
     const controller = new AbortController();
@@ -220,10 +220,10 @@ export class AuthenticationLifecycle {
       return this.activeValidation;
     }
 
-    this.sessionController?.abort();
+    this.abortSessionValidation();
     const controller = new AbortController();
     this.sessionController = controller;
-    const generation = ++this.validationGeneration;
+    const generation = this.validationGeneration;
     this.activeValidationStartedAt = now;
     this.unauthorizedHandled = false;
     const authenticatedSnapshot =
@@ -245,6 +245,7 @@ export class AuthenticationLifecycle {
           this.gateProtectedContent('checking');
           this.rotateAuthenticatedRequests();
           await this.cancelAndClearQueries();
+          if (controller.signal.aborted || generation !== this.validationGeneration) return null;
           clearCsrfToken();
           this.partition = nextPartition;
         }
@@ -272,6 +273,7 @@ export class AuthenticationLifecycle {
         this.gateProtectedContent('unavailable', error instanceof Error ? error.message : 'The current session could not be loaded.');
         this.rotateAuthenticatedRequests();
         await this.cancelAndClearQueries();
+        if (controller.signal.aborted || generation !== this.validationGeneration) return null;
         clearCsrfToken();
         this.rotatePartition();
         return null;
@@ -353,6 +355,7 @@ export class AuthenticationLifecycle {
 
   private async runPrincipalExit(request: PrincipalExitRequest): Promise<boolean> {
     this.principalExitController?.abort();
+    this.abortSessionValidation();
     const controller = new AbortController();
     this.principalExitController = controller;
     this.gateProtectedContent('transitioning');
@@ -380,7 +383,7 @@ export class AuthenticationLifecycle {
     this.unauthorizedHandled = true;
     this.gateProtectedContent('transitioning');
     this.authenticationController?.abort();
-    this.sessionController?.abort();
+    this.abortSessionValidation();
     this.principalExitController?.abort();
     this.rotateAuthenticatedRequests();
     clearCsrfToken();
@@ -393,7 +396,8 @@ export class AuthenticationLifecycle {
     this.transitionController = controller;
     this.unauthorizedTransition = (async () => {
       await this.cancelAndClearQueries();
-      if (!boundary || controller.signal.aborted || boundaryGeneration !== this.boundaryGeneration) {
+      if (controller.signal.aborted || boundaryGeneration !== this.boundaryGeneration) return;
+      if (!boundary) {
         this.setSnapshot({ phase: 'anonymous', user: null, error: '', lastValidatedAt: null });
         return;
       }
@@ -412,19 +416,26 @@ export class AuthenticationLifecycle {
         }
       })
       .finally(() => {
-        if (this.transitionController === controller) this.transitionController = null;
-        this.unauthorizedTransition = null;
+        if (this.transitionController === controller) {
+          this.transitionController = null;
+          this.unauthorizedTransition = null;
+        }
       });
     return this.unauthorizedTransition;
   }
 
   private abortBoundaryWork(): void {
-    this.sessionController?.abort();
+    this.abortSessionValidation();
     this.transitionController?.abort();
-    this.sessionController = null;
     this.transitionController = null;
-    this.activeValidation = null;
     this.unauthorizedTransition = null;
+  }
+
+  private abortSessionValidation(): void {
+    this.sessionController?.abort();
+    this.sessionController = null;
+    this.activeValidation = null;
+    this.validationGeneration++;
   }
 
   private principalPartition(user: AuthenticatedUser): string {
