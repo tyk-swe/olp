@@ -135,6 +135,8 @@ config:
   # X-Forwarded-For. Required when this chart's Ingress is enabled.
   trustedProxyCidrs: ""
   publicOrigin: https://olp.example.com
+  # Hide password sign-in when every operator authenticates through OIDC.
+  localLoginEnabled: true
   databaseMaxConnections: 20
 
 nodeSelector: {}

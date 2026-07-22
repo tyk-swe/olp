@@ -60,7 +60,10 @@ test('Rust serves the console and enforces the real setup/session/management bou
   const oidcCookies = (await context.cookies('http://localhost:4175')).filter((cookie) =>
     cookie.name.startsWith('__Host-olp_oidc_')
   );
-  expect(oidcCookies.map((cookie) => cookie.name)).toEqual(['__Host-olp_oidc_login_flow']);
+  expect(oidcCookies).toHaveLength(1);
+  expect(oidcCookies[0]?.name).toMatch(
+    /^__Host-olp_oidc_login_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+  );
   for (const cookie of oidcCookies) {
     expect(cookie.domain).toBe('localhost');
     expect(cookie.path).toBe('/');

@@ -471,6 +471,18 @@ pub struct SessionMaterial {
     csrf_token: Zeroizing<String>,
 }
 
+/// One-time, purpose-bound proof of recent authentication. Only its SHA-256
+/// digest is stored on the exact session that requested the proof.
+pub struct RecentAuthMaterial {
+    token: Zeroizing<String>,
+}
+
+/// Replacement CSRF bearer used when an otherwise valid session has lost or
+/// corrupted its readable CSRF cookie.
+pub struct CsrfMaterial {
+    token: Zeroizing<String>,
+}
+
 /// One-time invitation bearer material. Only its SHA-256 digest is persisted;
 /// the plaintext is returned by the create-invitation API exactly once.
 pub struct InvitationMaterial {
@@ -504,6 +516,61 @@ impl InvitationMaterial {
 impl fmt::Debug for InvitationMaterial {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("InvitationMaterial([REDACTED])")
+    }
+}
+
+impl RecentAuthMaterial {
+    #[must_use]
+    pub fn generate() -> Self {
+        Self {
+            token: Zeroizing::new(random_token(32)),
+        }
+    }
+
+    #[must_use]
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    #[must_use]
+    pub fn token_digest(&self) -> [u8; 32] {
+        Self::digest_token(&self.token)
+    }
+
+    #[must_use]
+    pub fn digest_token(token: &str) -> [u8; 32] {
+        Sha256::digest(token.as_bytes()).into()
+    }
+}
+
+impl fmt::Debug for RecentAuthMaterial {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RecentAuthMaterial([REDACTED])")
+    }
+}
+
+impl CsrfMaterial {
+    #[must_use]
+    pub fn generate() -> Self {
+        Self {
+            token: Zeroizing::new(random_token(32)),
+        }
+    }
+
+    #[must_use]
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    #[must_use]
+    pub fn token_digest(&self) -> [u8; 32] {
+        Sha256::digest(self.token.as_bytes()).into()
+    }
+}
+
+impl fmt::Debug for CsrfMaterial {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CsrfMaterial([REDACTED])")
     }
 }
 

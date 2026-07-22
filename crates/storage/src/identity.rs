@@ -41,6 +41,10 @@ pub enum IdentityError {
     LocalPasswordUnavailable,
     #[error("a local password is already configured for this user")]
     LocalPasswordAlreadyConfigured,
+    #[error("recent authentication is required for this security change")]
+    RecentAuthenticationRequired,
+    #[error("the initiating session is no longer current")]
+    SessionUnavailable,
 }
 
 impl From<sqlx::Error> for IdentityError {
@@ -109,6 +113,12 @@ impl fmt::Debug for AcceptInvitation {
 pub struct AcceptedInvitation {
     pub user: UserRecord,
     pub invitation_id: Uuid,
+    pub session_id: Uuid,
+}
+
+#[derive(Debug, Clone)]
+pub struct PasswordSessionRotation {
+    pub user: UserRecord,
     pub session_id: Uuid,
 }
 

@@ -2,8 +2,8 @@ use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
     CompleteOidcLogin, InstallationSetupInput, MasterKey, NewOidcFlow, OidcError, OidcFlowPurpose,
-    PgStore, SessionMaterial, UpsertOidcConfiguration, hash_password, oidc_client_secret_aad,
-    oidc_flow_payload_aad,
+    PgStore, RecentAuthMaterial, RecentAuthPurpose, SessionMaterial, SessionSecurityContext,
+    UpsertOidcConfiguration, hash_password, oidc_client_secret_aad, oidc_flow_payload_aad,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -15,15 +15,26 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
         .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
-    let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "OIDC flow integration".to_owned(),
-            email: "owner@example.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
-        })
+    let owner_session = SessionMaterial::generate();
+    let (owner, owner_session_id) = store
+        .setup_installation_with_session(
+            InstallationSetupInput {
+                installation_name: "OIDC flow integration".to_owned(),
+                email: "owner@example.test".to_owned(),
+                display_name: "Owner".to_owned(),
+                password_hash: hash_password("correct horse battery staple").unwrap(),
+            },
+            &owner_session,
+            Duration::hours(1),
+        )
         .await
         .unwrap();
+    let owner_principal = store
+        .session_principal(owner_session.token())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(owner_principal.session_id, owner_session_id);
     let key = MasterKey::new(1, [53; 32]);
     let configuration_id = Uuid::now_v7();
 
@@ -92,23 +103,115 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
         Some("55000")
     );
 
+    let link_grant = RecentAuthMaterial::generate();
+    assert!(
+        store
+            .issue_recent_authentication(
+                SessionSecurityContext {
+                    session_id: owner_session_id,
+                    user_id: owner.user_id,
+                    security_version: owner_principal.security_version,
+                },
+                RecentAuthPurpose::OidcLink,
+                None,
+                &link_grant,
+                Duration::minutes(5),
+            )
+            .await
+            .unwrap()
+    );
+
     let rejected_login = login_flow(&key, configuration_id, current.etag);
     assert!(matches!(
         store.create_oidc_flow(rejected_login).await,
         Err(OidcError::Invalid(_))
     ));
 
-    let stale_flow = link_flow(&key, configuration_id, first.etag, owner.user_id);
+    let stale_flow = link_flow(
+        &key,
+        configuration_id,
+        first.etag,
+        owner.user_id,
+        owner_session_id,
+        owner_principal.security_version,
+        link_grant.token_digest(),
+    );
     assert!(matches!(
         store.create_oidc_flow(stale_flow).await,
         Err(OidcError::PreconditionFailed)
     ));
+    let state = "s".repeat(43);
+    let browser_binding = "b".repeat(43);
+    let mut consumable = link_flow(
+        &key,
+        configuration_id,
+        current.etag,
+        owner.user_id,
+        owner_session_id,
+        owner_principal.security_version,
+        link_grant.token_digest(),
+    );
+    consumable.state_digest = Sha256::digest(state.as_bytes()).into();
+    consumable.browser_binding_digest = Sha256::digest(browser_binding.as_bytes()).into();
+    let flow_id = consumable.id;
+    store.create_oidc_flow(consumable).await.unwrap();
+    assert!(matches!(
+        store
+            .consume_oidc_flow(Uuid::now_v7(), &state, &browser_binding, owner_session_id)
+            .await,
+        Err(OidcError::FlowUnavailable)
+    ));
+    assert!(matches!(
+        store
+            .consume_oidc_flow(flow_id, &state, &browser_binding, Uuid::now_v7())
+            .await,
+        Err(OidcError::FlowSessionMismatch)
+    ));
+    let consumed = store
+        .consume_oidc_flow(flow_id, &state, &browser_binding, owner_session_id)
+        .await
+        .unwrap();
+    assert_eq!(consumed.id, flow_id);
+    assert_eq!(consumed.actor_session_id, Some(owner_session_id));
+    assert_eq!(
+        consumed.actor_security_version,
+        Some(owner_principal.security_version)
+    );
+    assert!(matches!(
+        store
+            .consume_oidc_flow(flow_id, &state, &browser_binding, owner_session_id)
+            .await,
+        Err(OidcError::FlowUnavailable)
+    ));
+
+    // Configuration changes still invalidate any independently outstanding
+    // link redirect.
+    let second_link_grant = RecentAuthMaterial::generate();
+    assert!(
+        store
+            .issue_recent_authentication(
+                SessionSecurityContext {
+                    session_id: owner_session_id,
+                    user_id: owner.user_id,
+                    security_version: owner_principal.security_version,
+                },
+                RecentAuthPurpose::OidcLink,
+                None,
+                &second_link_grant,
+                Duration::minutes(5),
+            )
+            .await
+            .unwrap()
+    );
     store
         .create_oidc_flow(link_flow(
             &key,
             configuration_id,
             current.etag,
             owner.user_id,
+            owner_session_id,
+            owner_principal.security_version,
+            second_link_grant.token_digest(),
         ))
         .await
         .unwrap();
@@ -135,6 +238,9 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
                 configuration_id,
                 disabled.etag,
                 owner.user_id,
+                owner_session_id,
+                owner_principal.security_version,
+                second_link_grant.token_digest(),
             ))
             .await,
         Err(OidcError::Disabled)
@@ -230,6 +336,9 @@ fn link_flow(
     configuration_id: Uuid,
     configuration_etag: Uuid,
     actor_user_id: Uuid,
+    actor_session_id: Uuid,
+    actor_security_version: i64,
+    recent_auth_token_digest: [u8; 32],
 ) -> NewOidcFlow {
     let id = Uuid::now_v7();
     NewOidcFlow {
@@ -238,6 +347,11 @@ fn link_flow(
         configuration_etag,
         purpose: OidcFlowPurpose::Link,
         actor_user_id: Some(actor_user_id),
+        actor_session_id: Some(actor_session_id),
+        actor_security_version: Some(actor_security_version),
+        recent_auth_purpose: None,
+        recent_auth_resource_id: None,
+        recent_auth_token_digest: Some(recent_auth_token_digest),
         state_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         browser_binding_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         encrypted_payload: key
@@ -255,6 +369,11 @@ fn login_flow(key: &MasterKey, configuration_id: Uuid, configuration_etag: Uuid)
         configuration_etag,
         purpose: OidcFlowPurpose::Login,
         actor_user_id: None,
+        actor_session_id: None,
+        actor_security_version: None,
+        recent_auth_purpose: None,
+        recent_auth_resource_id: None,
+        recent_auth_token_digest: None,
         state_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         browser_binding_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         encrypted_payload: key

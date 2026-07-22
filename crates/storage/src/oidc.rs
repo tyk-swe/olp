@@ -5,9 +5,10 @@ mod identities;
 mod types;
 
 pub use types::{
-    CompleteOidcLink, CompleteOidcLogin, NewOidcFlow, OidcAuthenticatedUser, OidcConfiguration,
-    OidcError, OidcFlowMaterial, OidcFlowPurpose, OidcFlowRecord, OidcIdentityRecord,
-    OidcRoleMapping, UpsertOidcConfiguration,
+    CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, NewOidcFlow,
+    OidcAuthenticatedUser, OidcConfiguration, OidcError, OidcFlowMaterial, OidcFlowPurpose,
+    OidcFlowRecord, OidcIdentityRecord, OidcRoleMapping, UnlinkOidcIdentity,
+    UpsertOidcConfiguration,
 };
 
 #[cfg(test)]

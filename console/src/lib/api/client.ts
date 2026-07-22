@@ -1,7 +1,7 @@
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
 import { serializeIfMatch } from './http';
-import { getCsrfToken } from './session';
+import { getCsrfToken, setCsrfToken } from './session';
 
 /** Generated-schema client for feature slices that need operation-level types. */
 export const apiClient = createClient<paths>({
@@ -28,5 +28,10 @@ apiClient.use({
       if (csrf) request.headers.set('x-csrf-token', csrf);
     }
     return request;
+  },
+  async onResponse({ response }) {
+    const rotatedCsrf = response.headers.get('x-csrf-token');
+    if (rotatedCsrf) setCsrfToken(rotatedCsrf);
+    return response;
   }
 });

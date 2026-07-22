@@ -9,7 +9,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::configuration::OIDC_CONFIGURATION_LOCK_ID;
 use super::{OidcAuthenticatedUser, OidcError};
-use crate::{EncryptedSecret, SessionMaterial};
+use crate::{EncryptedSecret, SessionMaterial, authentication::insert_versioned_session};
 
 pub(super) fn encrypted_from_row(
     key_version: i32,
@@ -102,24 +102,20 @@ pub(super) async fn lock_subject(
 pub(super) async fn insert_session(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
+    security_version: i64,
     material: &SessionMaterial,
     expires_at: DateTime<chrono::Utc>,
     now: DateTime<chrono::Utc>,
-) -> Result<(), OidcError> {
-    sqlx::query(
-        "INSERT INTO sessions \
-         (id, user_id, token_digest, csrf_digest, expires_at, last_seen_at, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $6)",
+) -> Result<Uuid, OidcError> {
+    Ok(insert_versioned_session(
+        transaction,
+        user_id,
+        security_version,
+        material,
+        expires_at,
+        now,
     )
-    .bind(Uuid::now_v7())
-    .bind(user_id)
-    .bind(material.token_digest().to_vec())
-    .bind(material.csrf_digest().to_vec())
-    .bind(expires_at)
-    .bind(now)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
+    .await?)
 }
 
 pub(super) async fn insert_audit(

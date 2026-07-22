@@ -1181,6 +1181,16 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   await page.route('**/api/v1/oidc/link', async (route) => {
     await route.fulfill({ json: { authorization_url: '/oidc-test-redirect' } });
   });
+  await page.route('**/api/v1/oidc/identities', async (route) => {
+    await route.fulfill({ json: { data: [], linking_available: true, has_local_password: true } });
+  });
+  await page.route('**/api/v1/profile/reauthenticate', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      current_password: 'correct horse battery staple',
+      purpose: 'oidc_link'
+    });
+    await route.fulfill({ status: 204 });
+  });
 
   await page.goto('/access');
   await expect(page.getByRole('heading', { name: 'Access', exact: true })).toBeVisible();
@@ -1214,6 +1224,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   await expect(page.getByText('OIDC configuration validated and enabled.')).toBeVisible();
   expect(oidcBody).toMatchObject({ client_secret: 'oidc-write-only-secret', enabled: true, group_role_mappings: [{ claim_value: 'platform', role: 'operator' }] });
   await expect(page.getByLabel('Client secret')).toHaveValue('');
+  page.once('dialog', (dialog) => dialog.accept('correct horse battery staple'));
   await page.getByRole('button', { name: 'Link my identity' }).click();
   await expect(page).toHaveURL(/\/oidc-test-redirect$/);
 });

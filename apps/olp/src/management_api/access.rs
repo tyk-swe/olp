@@ -6,11 +6,12 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use olp_domain::Permission;
 use olp_storage::{
-    AcceptInvitation, IdempotencyResponse, InvitationRecord, NewInvitation, ReplayableIdempotency,
-    SessionMaterial, UserRecord, hash_password, idempotency_fingerprint, verify_password,
+    AcceptInvitation, IdempotencyResponse, InvitationRecord, NewInvitation, RecentAuthMaterial,
+    RecentAuthPurpose, ReplayableIdempotency, SessionMaterial, SessionSecurityContext, UserRecord,
+    hash_password, idempotency_fingerprint, verify_password,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -28,6 +29,7 @@ use super::{
 use crate::{ApiState, FieldErrors, Problem, public_auth_source_target_digests};
 
 pub(super) const INVALID_INVITATION_RATE_LIMIT_TARGET: &str = "<invalid-invitation-token>";
+const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
 
 #[utoipa::path(
     get,
@@ -99,6 +101,125 @@ pub(super) async fn update_profile(
 }
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RecentAuthenticationRequest {
+    #[schema(value_type = String, write_only)]
+    current_password: WriteOnlySecret,
+    /// Exact security operation authorized by this one-time grant.
+    purpose: String,
+    #[schema(value_type = Option<String>, format = Uuid)]
+    resource_id: Option<Uuid>,
+}
+
+impl fmt::Debug for RecentAuthenticationRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RecentAuthenticationRequest")
+            .field("current_password", &"[REDACTED]")
+            .field("purpose", &self.purpose)
+            .field("resource_id", &self.resource_id)
+            .finish()
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/profile/reauthenticate",
+    tag = "users",
+    request_body = RecentAuthenticationRequest,
+    responses(
+        (status = 204, description = "One-time recent-authentication grant issued"),
+        (status = 401, description = "Session changed while authenticating", body = Problem),
+        (status = 403, description = "Current password is invalid or local auth is unavailable", body = Problem),
+        (status = 422, description = "Purpose or resource binding is invalid", body = Problem),
+        (status = 429, description = "Password work is rate limited", body = Problem)
+    )
+)]
+pub(super) async fn recent_authentication(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    payload: Result<Json<RecentAuthenticationRequest>, JsonRejection>,
+) -> Result<Response, Problem> {
+    let principal = require_mutation_session(&state, &headers).await?;
+    let request = json_payload(payload)?;
+    let purpose = RecentAuthPurpose::parse(&request.purpose).ok_or_else(|| {
+        let mut errors = FieldErrors::new();
+        errors.insert(
+            "purpose".to_owned(),
+            vec!["Use password_enrollment, oidc_link, or oidc_unlink.".to_owned()],
+        );
+        Problem::validation(errors)
+    })?;
+    if request.resource_id.is_some() != purpose.requires_resource() {
+        let mut errors = FieldErrors::new();
+        errors.insert(
+            "resource_id".to_owned(),
+            vec![if purpose.requires_resource() {
+                "The exact identity ID is required for OIDC unlinking.".to_owned()
+            } else {
+                "This operation must not include a resource ID.".to_owned()
+            }],
+        );
+        return Err(Problem::validation(errors));
+    }
+    if request.current_password.expose().chars().count() > 1_024 {
+        return Err(Problem::forbidden(
+            "current_password_invalid",
+            "The current password is invalid.",
+        ));
+    }
+    let local = require_store(&state)?
+        .local_password_user(&principal.email)
+        .await
+        .map_err(map_persistence)?
+        .filter(|user| user.id == principal.user_id)
+        .ok_or_else(|| {
+            Problem::forbidden(
+                "local_password_unavailable",
+                "This profile does not have a local password.",
+            )
+        })?;
+    let password = Zeroizing::new(request.current_password.expose().to_owned());
+    let encoded = local.password_hash;
+    let valid = spawn_password_work(move || verify_password(&password, &encoded))?
+        .await
+        .map_err(|error| {
+            error!(%error, "recent-authentication password task failed");
+            Problem::internal()
+        })?;
+    if !valid {
+        return Err(Problem::forbidden(
+            "current_password_invalid",
+            "The current password is invalid.",
+        ));
+    }
+    let material = RecentAuthMaterial::generate();
+    let installed = require_store(&state)?
+        .issue_recent_authentication(
+            SessionSecurityContext {
+                session_id: principal.session_id,
+                user_id: principal.user_id,
+                security_version: principal.security_version,
+            },
+            purpose,
+            request.resource_id,
+            &material,
+            RECENT_AUTH_TTL,
+        )
+        .await
+        .map_err(map_persistence)?;
+    if !installed {
+        return Err(Problem::unauthorized(
+            "The session changed while recent authentication was being recorded.",
+        ));
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    append_recent_auth_cookie(&mut response, &material, RECENT_AUTH_TTL)?;
+    prevent_sensitive_response_caching(&mut response);
+    Ok(response)
+}
+
+#[derive(Deserialize, ToSchema)]
 pub(super) struct ChangePasswordRequest {
     #[schema(value_type = String, write_only)]
     current_password: WriteOnlySecret,
@@ -123,7 +244,7 @@ impl fmt::Debug for ChangePasswordRequest {
     params(("If-Match" = String, Header, description = "Current profile ETag")),
     request_body = ChangePasswordRequest,
     responses(
-        (status = 200, description = "Local password changed; other sessions revoked", body = UserDetailResponse),
+        (status = 200, description = "Local password changed; every previous session revoked and this browser rotated", body = UserDetailResponse),
         (status = 403, description = "Current password is invalid or local auth is unavailable", body = Problem),
         (status = 429, description = "Password work is rate limited", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem),
@@ -136,7 +257,9 @@ pub(super) async fn change_password(
     payload: Result<Json<ChangePasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
+    validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
+    let expected_etag = if_match(&headers)?;
     if !(12..=1_024).contains(&request.new_password.expose().chars().count()) {
         let mut errors = FieldErrors::new();
         errors.insert(
@@ -149,6 +272,7 @@ pub(super) async fn change_password(
         .local_password_user(&principal.email)
         .await
         .map_err(map_persistence)?
+        .filter(|user| user.id == principal.user_id)
         .ok_or_else(|| {
             Problem::forbidden(
                 "local_password_unavailable",
@@ -179,21 +303,28 @@ pub(super) async fn change_password(
             "The current password is invalid.",
         ));
     };
-    let user = require_store(&state)?
+    let replacement = SessionMaterial::generate();
+    let rotation = require_store(&state)?
         .update_local_password(
-            principal.user_id,
             &password_hash,
-            if_match(&headers)?,
-            principal.session_id,
+            expected_etag,
+            SessionSecurityContext {
+                session_id: principal.session_id,
+                user_id: principal.user_id,
+                security_version: principal.security_version,
+            },
+            &replacement,
+            state.session_ttl,
         )
         .await
         .map_err(map_identity)?;
-    let etag = user.etag;
-    let mut response = Json(UserDetailResponse::from(user)).into_response();
+    let etag = rotation.user.etag;
+    let mut response = Json(UserDetailResponse::from(rotation.user)).into_response();
     response.headers_mut().insert(
         header::ETAG,
         HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
     );
+    append_security_transition_cookies(&mut response, &replacement, state.session_ttl)?;
     Ok(response)
 }
 
@@ -220,8 +351,9 @@ impl fmt::Debug for EnrollPasswordRequest {
     params(("If-Match" = String, Header, description = "Current profile ETag")),
     request_body = EnrollPasswordRequest,
     responses(
-        (status = 200, description = "First local password enrolled; other sessions revoked", body = UserDetailResponse),
+        (status = 200, description = "First local password enrolled; every previous session revoked and this browser rotated", body = UserDetailResponse),
         (status = 409, description = "A local password is already configured", body = Problem),
+        (status = 428, description = "Recent authentication is required", body = Problem),
         (status = 429, description = "Password work is rate limited", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem),
         (status = 422, description = "New password is invalid", body = Problem)
@@ -233,7 +365,13 @@ pub(super) async fn enroll_password(
     payload: Result<Json<EnrollPasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
+    validate_session_cookie_ttl(state.session_ttl)?;
+    let recent_auth = cookie(&headers, RECENT_AUTH_COOKIE)?
+        .filter(|token| token.len() == 43)
+        .ok_or_else(reauthentication_required)?;
+    let recent_auth_token_digest = RecentAuthMaterial::digest_token(recent_auth);
     let request = json_payload(payload)?;
+    let expected_etag = if_match(&headers)?;
     if !(12..=1_024).contains(&request.new_password.expose().chars().count()) {
         let mut errors = FieldErrors::new();
         errors.insert(
@@ -253,21 +391,29 @@ pub(super) async fn enroll_password(
             error!(%error, "enrolled password hashing failed");
             Problem::internal()
         })?;
-    let user = require_store(&state)?
+    let replacement = SessionMaterial::generate();
+    let rotation = require_store(&state)?
         .enroll_local_password(
-            principal.user_id,
             &password_hash,
-            if_match(&headers)?,
-            principal.session_id,
+            expected_etag,
+            SessionSecurityContext {
+                session_id: principal.session_id,
+                user_id: principal.user_id,
+                security_version: principal.security_version,
+            },
+            recent_auth_token_digest,
+            &replacement,
+            state.session_ttl,
         )
         .await
         .map_err(map_identity)?;
-    let etag = user.etag;
-    let mut response = Json(UserDetailResponse::from(user)).into_response();
+    let etag = rotation.user.etag;
+    let mut response = Json(UserDetailResponse::from(rotation.user)).into_response();
     response.headers_mut().insert(
         header::ETAG,
         HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
     );
+    append_security_transition_cookies(&mut response, &replacement, state.session_ttl)?;
     Ok(response)
 }
 
@@ -662,6 +808,7 @@ pub(super) async fn accept_invitation(
     payload: Result<Json<AcceptInvitationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     enforce_origin(&state, &headers)?;
+    validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
     let store = require_store(&state)?;
     let (source_digest, source_target_digest) = public_auth_source_target_digests(
@@ -711,6 +858,7 @@ pub(super) async fn accept_invitation(
             display_name: accepted.user.display_name,
             role: accepted.user.role.to_string(),
         },
+        state.session_ttl,
     )
 }
 

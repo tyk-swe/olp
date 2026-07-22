@@ -6,7 +6,9 @@ use axum::{
 };
 use chrono::Utc;
 use olp_domain::{Permission, Role};
-use olp_storage::{ConfigurationError, IdempotencyOutcome, IdempotencyResponse, SessionPrincipal};
+use olp_storage::{
+    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, SessionMaterial, SessionPrincipal,
+};
 use utoipa::OpenApi;
 use uuid::Uuid;
 
@@ -17,11 +19,13 @@ use super::{
     },
     auth::{
         INVALID_LOGIN_RATE_LIMIT_TARGET, LoginRequest, PASSWORD_WORK_CONCURRENCY, SetupRequest,
-        acquire_password_work, local_login_rate_limit_target, spawn_password_work, validate_setup,
+        acquire_password_work, csrf_recovery_cas_failure_response, local_login_rate_limit_target,
+        logout, spawn_password_work, validate_setup,
     },
     common::{
-        RuntimeGenerationResponse, WriteOnlySecret, enforce_origin, idempotency_http_response,
-        if_match, map_configuration, require_idempotency_key, require_permission, session_cookie,
+        RuntimeGenerationResponse, WriteOnlySecret, append_session_cookies, enforce_origin,
+        idempotency_http_response, if_match, map_configuration, require_idempotency_key,
+        require_permission, session_cookie,
     },
     configuration::{
         api_keys::CreateApiKeyResponse,
@@ -51,6 +55,7 @@ fn principal(role: &str) -> SessionPrincipal {
         email: "person@example.test".to_owned(),
         display_name: "Person".to_owned(),
         role: role.to_owned(),
+        security_version: 1,
         csrf_digest: vec![0; 32],
         expires_at: Utc::now() + chrono::Duration::hours(1),
     }
@@ -186,6 +191,134 @@ fn cookie_parser_uses_only_host_session_cookie() {
         HeaderValue::from_static("other=x; __Host-olp_session=secret; theme=dark"),
     );
     assert_eq!(session_cookie(&headers).unwrap(), "secret");
+}
+
+#[test]
+fn session_cookie_lifetime_uses_the_configured_ttl() {
+    let material = SessionMaterial::generate();
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    append_session_cookies(&mut response, &material, chrono::Duration::seconds(1_234)).unwrap();
+    let cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(cookies.len(), 2);
+    assert!(cookies.iter().all(|cookie| cookie.contains("Max-Age=1234")));
+}
+
+#[tokio::test]
+async fn logout_without_a_server_side_session_still_expires_every_browser_credential() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("https://olp.example.test"),
+    );
+    headers.insert(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=already-revoked"),
+    );
+    let response = logout(axum::extract::State(state()), headers)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(cookies.len(), 3);
+    assert!(cookies.iter().all(|cookie| cookie.contains("Max-Age=0")));
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-olp_session="))
+    );
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-olp_csrf="))
+    );
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-olp_recent_auth="))
+    );
+}
+
+#[tokio::test]
+async fn logout_rejects_conflicting_cookies_but_still_expires_browser_credentials() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("https://olp.example.test"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=first"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=second"),
+    );
+    let response = logout(axum::extract::State(state()), headers)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let expired = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter(|value| value.contains("Max-Age=0"))
+        .count();
+    assert_eq!(expired, 3);
+}
+
+#[test]
+fn csrf_recovery_failures_never_expire_browser_wide_credentials() {
+    for (session_is_current, status) in [
+        (true, StatusCode::CONFLICT),
+        (false, StatusCode::UNAUTHORIZED),
+    ] {
+        let response = csrf_recovery_cas_failure_response(session_is_current);
+
+        assert_eq!(response.status(), status);
+        assert!(
+            response
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .next()
+                .is_none()
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+    }
+}
+
+#[test]
+fn cookie_parser_combines_repeated_fields_and_rejects_conflicts() {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("other=x; malformed pair"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=secret"),
+    );
+    assert_eq!(session_cookie(&headers).unwrap(), "secret");
+
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=different"),
+    );
+    assert_eq!(session_cookie(&headers).unwrap_err().status, 400);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { ApiProblem, ensureSuccess, result } from './http';
-import { clearCsrfToken, setCsrfToken } from './session';
+import { clearCsrfToken, getCsrfTokenVersion, setCsrfToken } from './session';
 
 const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
 
@@ -15,6 +15,8 @@ export type SessionUser = Schemas['UserResponse'] & { role: FixedRole };
 
 export type CurrentSession = Omit<Schemas['SessionResponse'], 'user'> & { user: SessionUser };
 
+export type AuthenticationCapabilities = Schemas['AuthenticationCapabilities'];
+
 function sessionResult(
   data: Schemas['SessionResponse'] | undefined,
   error: unknown,
@@ -24,6 +26,7 @@ function sessionResult(
   const user = value.user as Partial<Schemas['UserResponse']> | null | undefined;
   if (
     typeof value.csrf_token !== 'string' ||
+    value.csrf_token.length === 0 ||
     typeof user?.id !== 'string' ||
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||
@@ -45,14 +48,57 @@ function sessionResult(
   return value as CurrentSession;
 }
 
+export async function authenticationCapabilities(
+  signal?: AbortSignal
+): Promise<AuthenticationCapabilities> {
+  const { data, error, response } = await apiClient.GET('/api/v1/auth/capabilities', { signal });
+  const value = result(data, error, response);
+  if (
+    typeof value.local_login_enabled !== 'boolean' ||
+    typeof value.oidc_login_enabled !== 'boolean'
+  ) {
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The authentication capabilities response is invalid',
+      status: 502
+    });
+  }
+  return value;
+}
+
+export async function beginOidcLogin(returnTo: string): Promise<string> {
+  const { data, error, response } = await apiClient.POST('/api/v1/oidc/login', {
+    body: { return_to: returnTo }
+  });
+  const value = result(data, error, response);
+  if (typeof value.authorization_url !== 'string') {
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The OIDC authorization response is invalid',
+      status: 502
+    });
+  }
+  try {
+    const authorizationUrl = new URL(value.authorization_url);
+    if (!['https:', 'http:'].includes(authorizationUrl.protocol)) throw new Error('invalid scheme');
+    return authorizationUrl.href;
+  } catch {
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The OIDC authorization response is invalid',
+      status: 502
+    });
+  }
+}
+
 export async function currentSession(signal?: AbortSignal): Promise<CurrentSession> {
+  // A current-session recovery can race a login or security transition. If a
+  // newer response has already installed CSRF state, do not let this older
+  // session response replace it after its body finishes parsing.
+  const csrfTokenVersion = getCsrfTokenVersion();
   const { data, error, response } = await apiClient.GET('/api/v1/sessions/current', { signal });
   const session = sessionResult(data, error, response);
-  if (session.csrf_token) {
-    setCsrfToken(session.csrf_token);
-  } else {
-    clearCsrfToken();
-  }
+  if (getCsrfTokenVersion() === csrfTokenVersion) setCsrfToken(session.csrf_token);
   return session;
 }
 

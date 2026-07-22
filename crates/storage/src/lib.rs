@@ -4,6 +4,7 @@
 //! does not expose SQLx types through the core ports.
 
 mod access;
+mod authentication;
 mod configuration;
 mod identity;
 mod limits;
@@ -19,9 +20,10 @@ mod store;
 mod usage;
 mod valkey;
 
+pub use authentication::{RecentAuthPurpose, SessionSecurityContext};
 pub use identity::{
     AcceptInvitation, AcceptedInvitation, IdentityError, InvitationCreated, InvitationRecord,
-    NewInvitation, SessionRecord, UserRecord,
+    NewInvitation, PasswordSessionRotation, SessionRecord, UserRecord,
 };
 pub use limits::{DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest};
 pub use maintenance::{MaintenanceError, MaintenanceReport};
@@ -31,9 +33,10 @@ pub use media_jobs::{
     NewMediaJobReservation,
 };
 pub use oidc::{
-    CompleteOidcLink, CompleteOidcLogin, NewOidcFlow, OidcAuthenticatedUser, OidcConfiguration,
-    OidcError, OidcFlowMaterial, OidcFlowPurpose, OidcFlowRecord, OidcIdentityRecord,
-    OidcRoleMapping, UpsertOidcConfiguration,
+    CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, NewOidcFlow,
+    OidcAuthenticatedUser, OidcConfiguration, OidcError, OidcFlowMaterial, OidcFlowPurpose,
+    OidcFlowRecord, OidcIdentityRecord, OidcRoleMapping, UnlinkOidcIdentity,
+    UpsertOidcConfiguration,
 };
 pub use operations::{
     AttemptRecord, AuditRecord, OperationsError, OperationsPage, PriceInput, PricingRevisionRecord,
@@ -57,10 +60,10 @@ pub use request_metadata::{
 };
 pub use runtime_compiler::RuntimeCompileError;
 pub use security::{
-    ApiKeyMaterial, AuthHmacKey, EncryptedSecret, InvitationMaterial, MasterKey, ParsedApiKey,
-    SecurityError, SessionMaterial, constant_time_eq, credential_aad, hash_password,
-    idempotency_replay_aad, idempotency_replay_scope, oidc_client_secret_aad,
-    oidc_flow_payload_aad, verify_password,
+    ApiKeyMaterial, AuthHmacKey, CsrfMaterial, EncryptedSecret, InvitationMaterial, MasterKey,
+    ParsedApiKey, RecentAuthMaterial, SecurityError, SessionMaterial, constant_time_eq,
+    credential_aad, hash_password, idempotency_replay_aad, idempotency_replay_scope,
+    oidc_client_secret_aad, oidc_flow_payload_aad, verify_password,
 };
 pub use store::{
     IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, InstallationSetupResult,
@@ -108,7 +111,32 @@ pub use configuration::{
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::split_page;
+
+    #[test]
+    fn migration_versions_are_unique() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut versions = BTreeSet::new();
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if !name.ends_with(".sql") {
+                continue;
+            }
+            let (version, _) = name
+                .split_once('_')
+                .unwrap_or_else(|| panic!("invalid migration filename: {name}"));
+            let version = version
+                .parse::<u32>()
+                .unwrap_or_else(|_| panic!("invalid migration version: {name}"));
+            assert!(
+                versions.insert(version),
+                "duplicate migration version: {name}"
+            );
+        }
+        assert!(versions.contains(&29));
+    }
 
     #[test]
     fn split_page_distinguishes_complete_and_overfetched_results() {
