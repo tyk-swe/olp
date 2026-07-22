@@ -20,7 +20,6 @@ function sessionResult(
   const user = value.user as Partial<Schemas['UserResponse']> | null | undefined;
   if (
     typeof value.csrf_token !== 'string' ||
-    value.csrf_token.length === 0 ||
     typeof user?.id !== 'string' ||
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||

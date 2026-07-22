@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from './client';
 import { clearCsrfToken, setCsrfToken } from './session';
+import { authLifecycle } from '$lib/auth/lifecycle';
 import { captureRequests, jsonResponse } from './test/requestCapture';
 
-afterEach(() => {
+const session = {
+  user: {
+    id: '01980000-0000-7000-8000-000000000001',
+    email: 'operator@example.com',
+    display_name: 'Operator',
+    role: 'operator' as const
+  },
+  csrf_token: 'csrf-boundary-token'
+};
+
+afterEach(async () => {
+  await authLifecycle.principalInvalidated();
   clearCsrfToken();
   vi.unstubAllGlobals();
 });
@@ -28,6 +40,7 @@ describe('generated API request boundary', () => {
   it('serializes bare UUID If-Match values and preserves strong ETags', async () => {
     const etag = '019b036f-fcad-72a0-9a35-734fa53adf5f';
     const requests = captureRequests(() => jsonResponse({}));
+    authLifecycle.establishSession(session);
 
     await apiClient.PATCH('/api/v1/profile', {
       params: { header: { 'If-Match': etag } },
@@ -46,7 +59,7 @@ describe('generated API request boundary', () => {
 
   it('adds CSRF only to mutating methods and stops after token clearing', async () => {
     const requests = captureRequests(() => jsonResponse({}));
-    setCsrfToken('csrf-boundary-token');
+    authLifecycle.establishSession(session);
 
     await apiClient.POST('/api/v1/sessions', {
       body: { email: 'operator@example.com', password: 'correct horse battery staple' }
@@ -69,7 +82,8 @@ describe('generated API request boundary', () => {
       'DELETE',
       'GET'
     ]);
-    for (const request of requests.slice(0, 4)) {
+    expect(requests[0]?.headers.has('x-csrf-token')).toBe(false);
+    for (const request of requests.slice(1, 4)) {
       expect(request.headers.get('x-csrf-token')).toBe('csrf-boundary-token');
     }
     expect(requests[4]?.headers.has('x-csrf-token')).toBe(false);

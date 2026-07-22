@@ -190,7 +190,8 @@ export class AuthenticationLifecycle {
   establishSession(session: AuthenticatedSession): void {
     const partition = this.principalPartition(session.user);
     if (partition !== this.partition) this.partition = partition;
-    setCsrfToken(session.csrf_token);
+    if (session.csrf_token) setCsrfToken(session.csrf_token);
+    else clearCsrfToken();
     this.unauthorizedHandled = false;
     this.setSnapshot({
       phase: 'authenticated',
@@ -220,7 +221,16 @@ export class AuthenticationLifecycle {
     this.sessionController = controller;
     const generation = ++this.validationGeneration;
     this.activeValidationStartedAt = now;
-    this.setSnapshot({ ...this.snapshotValue, phase: 'checking', error: '' });
+    this.unauthorizedHandled = false;
+    const authenticatedSnapshot =
+      this.snapshotValue.phase === 'authenticated' && this.snapshotValue.user
+        ? this.snapshotValue
+        : null;
+    if (authenticatedSnapshot) {
+      this.setSnapshot({ ...authenticatedSnapshot, error: '' });
+    } else {
+      this.setSnapshot({ ...this.snapshotValue, phase: 'checking', error: '' });
+    }
 
     const validation = (async (): Promise<AuthenticatedSession | null> => {
       try {
@@ -245,6 +255,16 @@ export class AuthenticationLifecycle {
           return null;
         }
         if (this.unauthorizedHandled && this.snapshotValue.phase !== 'authenticated') return null;
+        if (authenticatedSnapshot) {
+          this.setSnapshot({
+            ...authenticatedSnapshot,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'The current session could not be loaded.'
+          });
+          return null;
+        }
         this.gateProtectedContent('unavailable', error instanceof Error ? error.message : 'The current session could not be loaded.');
         this.rotateAuthenticatedRequests();
         await this.cancelAndClearQueries();
@@ -270,20 +290,23 @@ export class AuthenticationLifecycle {
     if (getCsrfToken() && age <= SESSION_FRESHNESS_MS) return;
     const session = await this.validateSession();
     if (!session) throw new DOMException('Session validation did not complete.', 'AbortError');
+    if (!getCsrfToken()) {
+      throw new DOMException(
+        'This session cannot make changes until you sign in again.',
+        'InvalidStateError'
+      );
+    }
   }
 
   async prepareRequest(request: Request): Promise<Request> {
-    if (
-      isAuthenticationEndpoint(request) ||
-      isSessionValidationEndpoint(request) ||
-      isCurrentSessionDeletion(request)
-    ) {
+    if (isAuthenticationEndpoint(request) || isSessionValidationEndpoint(request)) {
       return request;
     }
-    if (!SAFE_METHODS.has(request.method.toUpperCase())) await this.ensureFreshSession();
+    const mutation = !SAFE_METHODS.has(request.method.toUpperCase());
+    if (mutation && !isCurrentSessionDeletion(request)) await this.ensureFreshSession();
     const signal = combineSignals(request.signal, this.authenticatedRequestController.signal);
     const headers = new Headers(request.headers);
-    if (!SAFE_METHODS.has(request.method.toUpperCase())) {
+    if (mutation) {
       const csrf = getCsrfToken();
       if (csrf) headers.set('x-csrf-token', csrf);
     }
@@ -331,11 +354,11 @@ export class AuthenticationLifecycle {
     this.gateProtectedContent('transitioning');
     this.rotateAuthenticatedRequests();
     await this.cancelAndClearQueries();
-    clearCsrfToken();
     this.rotatePartition();
     try {
       await request(controller.signal);
       if (controller.signal.aborted) return false;
+      clearCsrfToken();
       this.setSnapshot({ phase: 'anonymous', user: null, error: '', lastValidatedAt: null });
       return true;
     } catch (error) {
