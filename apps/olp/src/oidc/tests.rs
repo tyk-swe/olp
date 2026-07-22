@@ -282,6 +282,53 @@ async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
     );
 }
 
+#[tokio::test]
+async fn callback_clears_the_matching_scoped_cookie_when_query_extraction_fails() {
+    let state = ApiState::new(
+        crate::ApiMode::Control,
+        None,
+        std::sync::Arc::new(crate::RuntimeManager::empty()),
+        "https://console.example.test",
+        std::path::PathBuf::from("missing-console"),
+    );
+    let flow_id = OidcFlowId::generate();
+    let other_flow_id = OidcFlowId::generate();
+    let state_value = OidcCallbackState::encode(flow_id, &"a".repeat(43));
+    let flow_cookie = flow_cookie_name(OidcFlowPurpose::Login, flow_id);
+    let other_flow_cookie = flow_cookie_name(OidcFlowPurpose::Login, other_flow_id);
+    let response = crate::public_router(state)
+        .oneshot(
+            axum::http::Request::get(format!(
+                "/api/v1/oidc/callback?state={state_value}&code=one&code=two"
+            ))
+            .header(
+                header::COOKIE,
+                format!("{flow_cookie}=opaque; {other_flow_cookie}=opaque"),
+            )
+            .body(axum::body::Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let set_cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>();
+    assert!(
+        set_cookies
+            .iter()
+            .any(|value| value.starts_with(&format!("{flow_cookie}=;")))
+    );
+    assert!(
+        !set_cookies
+            .iter()
+            .any(|value| value.starts_with(&format!("{other_flow_cookie}=;")))
+    );
+}
+
 #[test]
 fn asymmetric_validation_enforces_signature_issuer_audience_nonce_and_time() {
     let configuration = test_configuration();

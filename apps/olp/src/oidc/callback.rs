@@ -1,7 +1,7 @@
 use std::fmt;
 
 use axum::{
-    extract::{Query, State, rejection::QueryRejection},
+    extract::{OriginalUri, Query, State, rejection::QueryRejection},
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
@@ -83,13 +83,14 @@ impl fmt::Debug for CallbackQuery {
 )]
 pub(super) async fn callback(
     State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     query: Result<Query<CallbackQuery>, QueryRejection>,
 ) -> Response {
     let cookies = RequestCookies::parse(&headers);
     let cookies_to_clear = cookies
         .as_ref()
-        .map(|cookies| callback_cookie_names(cookies, &query))
+        .map(|cookies| callback_cookie_names(cookies, &query, uri.query()))
         .unwrap_or_default();
     let result = match (cookies, query) {
         (Err(problem), _) => Err(problem),
@@ -114,15 +115,22 @@ pub(super) async fn callback(
 fn callback_cookie_names(
     cookies: &RequestCookies<'_>,
     query: &Result<Query<CallbackQuery>, QueryRejection>,
+    raw_query: Option<&str>,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    if let Ok(Query(query)) = query
-        && let Some(state) = query.state.as_ref()
-        && let Ok(state) = OidcCallbackState::parse(state.clone())
-    {
-        for name in [state.login_cookie_name(), state.link_cookie_name()] {
-            if cookies.get(&name).is_some() {
-                names.push(name);
+    if let Ok(Query(query)) = query {
+        add_callback_state_cookie_names(&mut names, cookies, query.state.as_deref());
+    } else {
+        // A duplicate or malformed non-state parameter makes Axum reject the
+        // typed query extractor. Recover only state values from the raw query
+        // so an identifiable flow is still one-shot without affecting other
+        // tabs' scoped cookies.
+        for (name, value) in raw_query
+            .into_iter()
+            .flat_map(|query| url::form_urlencoded::parse(query.as_bytes()))
+        {
+            if name == "state" {
+                add_callback_state_cookie_names(&mut names, cookies, Some(value.as_ref()));
             }
         }
     }
@@ -134,6 +142,24 @@ fn callback_cookie_names(
         }
     }
     names
+}
+
+fn add_callback_state_cookie_names(
+    names: &mut Vec<String>,
+    cookies: &RequestCookies<'_>,
+    state: Option<&str>,
+) {
+    let Some(state) = state else {
+        return;
+    };
+    let Ok(state) = OidcCallbackState::parse(state.to_owned()) else {
+        return;
+    };
+    for name in [state.login_cookie_name(), state.link_cookie_name()] {
+        if cookies.get(&name).is_some() && !names.iter().any(|existing| existing == &name) {
+            names.push(name);
+        }
+    }
 }
 
 async fn callback_inner(
