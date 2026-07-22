@@ -205,6 +205,10 @@ impl PgStore {
             input.configuration_etag,
         )
         .await?;
+        // Keep the subject-before-user order used by login completion, then
+        // lock the user before its initiating session. User access changes
+        // lock the user before deleting its sessions, so this avoids a
+        // session/user deadlock while retaining the session-revocation fence.
         lock_subject(&mut transaction, input.issuer, input.subject).await?;
         let user_row = sqlx::query(
             "SELECT id, email, display_name, role::text AS role, active, security_version \
@@ -214,6 +218,22 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(OidcError::InactiveUser)?;
+        // Hold a lock on the exact initiating session until the identity link
+        // commits. This closes the gap between HTTP authentication and the
+        // storage transaction: a concurrently revoked or expired session
+        // cannot authorize the link, and revocation cannot complete midway.
+        let initiating_session = sqlx::query(
+            "SELECT id FROM sessions \
+             WHERE id = $1 AND user_id = $2 AND expires_at > $3 FOR KEY SHARE",
+        )
+        .bind(input.session_id)
+        .bind(input.user_id)
+        .bind(now)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if initiating_session.is_none() {
+            return Err(OidcError::FlowUnavailable);
+        }
         if !user_row.get::<bool, _>("active") {
             return Err(OidcError::InactiveUser);
         }
@@ -286,7 +306,7 @@ impl PgStore {
             &mut transaction,
             input.user_id,
             security_version,
-            input.session,
+            input.replacement_session,
             expires_at,
             now,
         )

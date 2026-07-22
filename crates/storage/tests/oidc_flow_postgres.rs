@@ -140,6 +140,69 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
         store.create_oidc_flow(stale_flow).await,
         Err(OidcError::PreconditionFailed)
     ));
+    let state = "s".repeat(43);
+    let browser_binding = "b".repeat(43);
+    let mut consumable = link_flow(
+        &key,
+        configuration_id,
+        current.etag,
+        owner.user_id,
+        owner_session_id,
+        owner_principal.security_version,
+        link_grant.token_digest(),
+    );
+    consumable.state_digest = Sha256::digest(state.as_bytes()).into();
+    consumable.browser_binding_digest = Sha256::digest(browser_binding.as_bytes()).into();
+    let flow_id = consumable.id;
+    store.create_oidc_flow(consumable).await.unwrap();
+    assert!(matches!(
+        store
+            .consume_oidc_flow(Uuid::now_v7(), &state, &browser_binding, owner_session_id)
+            .await,
+        Err(OidcError::FlowUnavailable)
+    ));
+    assert!(matches!(
+        store
+            .consume_oidc_flow(flow_id, &state, &browser_binding, Uuid::now_v7())
+            .await,
+        Err(OidcError::FlowSessionMismatch)
+    ));
+    let consumed = store
+        .consume_oidc_flow(flow_id, &state, &browser_binding, owner_session_id)
+        .await
+        .unwrap();
+    assert_eq!(consumed.id, flow_id);
+    assert_eq!(consumed.actor_session_id, Some(owner_session_id));
+    assert_eq!(
+        consumed.actor_security_version,
+        Some(owner_principal.security_version)
+    );
+    assert!(matches!(
+        store
+            .consume_oidc_flow(flow_id, &state, &browser_binding, owner_session_id)
+            .await,
+        Err(OidcError::FlowUnavailable)
+    ));
+
+    // Configuration changes still invalidate any independently outstanding
+    // link redirect.
+    let second_link_grant = RecentAuthMaterial::generate();
+    assert!(
+        store
+            .issue_recent_authentication(
+                SessionSecurityContext {
+                    session_id: owner_session_id,
+                    user_id: owner.user_id,
+                    security_version: owner_principal.security_version,
+                },
+                RecentAuthPurpose::OidcLink,
+                None,
+                &second_link_grant,
+                Duration::minutes(5),
+            )
+            .await
+            .unwrap()
+    );
     store
         .create_oidc_flow(link_flow(
             &key,
@@ -148,7 +211,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
             owner.user_id,
             owner_session_id,
             owner_principal.security_version,
-            link_grant.token_digest(),
+            second_link_grant.token_digest(),
         ))
         .await
         .unwrap();
@@ -177,7 +240,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
                 owner.user_id,
                 owner_session_id,
                 owner_principal.security_version,
-                link_grant.token_digest(),
+                second_link_grant.token_digest(),
             ))
             .await,
         Err(OidcError::Disabled)

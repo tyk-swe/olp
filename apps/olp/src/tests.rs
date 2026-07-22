@@ -162,6 +162,39 @@ async fn malformed_trusted_proxy_chain_is_rejected_before_public_auth_body_handl
 }
 
 #[tokio::test]
+async fn malformed_trusted_proxy_chain_is_rejected_before_oidc_login_post_json_handling() {
+    let mut state = ApiState::new(
+        ApiMode::Control,
+        None,
+        Arc::new(RuntimeManager::empty()),
+        "https://olp.example.test",
+        PathBuf::from("missing-console"),
+    );
+    state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
+    let response = public_router(state)
+        .oneshot(
+            Request::post("/api/v1/oidc/login")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(axum::http::header::ORIGIN, "https://olp.example.test")
+                .header("x-forwarded-for", "not-an-ip")
+                .extension(axum::extract::ConnectInfo(
+                    "10.2.3.4:443".parse::<SocketAddr>().unwrap(),
+                ))
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let problem: Problem =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        problem.problem_type.as_ref(),
+        "https://openllmproxy.dev/problems/forwarded_for_invalid"
+    );
+}
+
+#[tokio::test]
 async fn bootstrap_token_digest_is_verified_then_cleared() {
     let mut state = ApiState::new(
         ApiMode::Control,

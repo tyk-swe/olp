@@ -581,6 +581,7 @@ fn public_auth_source_required(request: &Request<Body>) -> bool {
             | (&axum::http::Method::POST, "/api/v1/sessions")
             | (&axum::http::Method::POST, "/api/v1/invitations/accept")
             | (&axum::http::Method::GET, "/api/v1/oidc/login")
+            | (&axum::http::Method::POST, "/api/v1/oidc/login")
     )
 }
 

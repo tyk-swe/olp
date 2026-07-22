@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::TrustedProxyCidr;
+use crate::{PublicOrigin, TrustedProxyCidr};
 
 #[derive(Debug, Parser)]
 #[command(name = "olp", version, about = "OpenLLMProxy")]
@@ -87,7 +87,15 @@ pub(super) struct ServeArgs {
         env = "OLP_PUBLIC_ORIGIN",
         default_value = "http://127.0.0.1:8080"
     )]
-    pub(super) public_origin: String,
+    pub(super) public_origin: PublicOrigin,
+    /// Whether password-based local sign-in is exposed after installation setup.
+    #[arg(
+        long,
+        env = "OLP_LOCAL_LOGIN_ENABLED",
+        default_value = "true",
+        action = clap::ArgAction::Set
+    )]
+    pub(super) local_login_enabled: bool,
     #[arg(long, env = "OLP_CONSOLE_DIR", default_value = "console/build")]
     pub(super) console_dir: PathBuf,
     #[arg(long, env = "OLP_MEDIA_SPOOL_DIR")]

@@ -61,6 +61,8 @@ image:
 
 config:
   publicOrigin: https://olp.example.com
+  # Set false only after OIDC login is configured and verified.
+  localLoginEnabled: true
   # CIDRs of the ingress/controller peers that append X-Forwarded-For.
   trustedProxyCidrs: 10.0.0.0/8
   bootstrapTokenSecretName: olp-bootstrap-token
@@ -82,6 +84,8 @@ ingress:
 ```
 
 `config.publicOrigin` and `ingress.host` must identify the same trusted origin.
+Set `config.localLoginEnabled: false` only after OIDC login is configured and
+verified; the public capability endpoint then removes the password form.
 The chart has no gateway catch-all and refuses to render the Ingress unless the
 gateway and control Services are enabled. It also refuses to render an Ingress
 without `config.trustedProxyCidrs`: public login, invitation, and OIDC limits

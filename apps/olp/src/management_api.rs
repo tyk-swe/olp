@@ -13,9 +13,9 @@ use access::{
     update_profile, update_user_role,
 };
 use auth::{
-    LoginRequest, SessionDetailResponse, SessionListResponse, SessionResponse, SetupRequest,
-    SetupStatus, UserResponse, current_session, list_sessions, login, logout, revoke_session,
-    setup, setup_status,
+    AuthenticationCapabilities, LoginRequest, SessionDetailResponse, SessionListResponse,
+    SessionResponse, SetupRequest, SetupStatus, UserResponse, authentication_capabilities,
+    current_session, list_sessions, login, logout, revoke_session, setup, setup_status,
 };
 use axum::{Json, Router, routing::get, routing::post};
 pub(crate) use common::{
@@ -35,6 +35,10 @@ use crate::{ApiState, Problem};
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route("/api/v1/openapi.json", get(openapi))
+        .route(
+            "/api/v1/auth/capabilities",
+            get(authentication_capabilities),
+        )
         .route("/api/v1/setup/status", get(setup_status))
         .route("/api/v1/setup", post(setup))
         .route("/api/v1/sessions", get(list_sessions).post(login))
@@ -81,6 +85,7 @@ pub fn router() -> Router<ApiState> {
         description = "Management API for OpenLLMProxy."
     ),
     paths(
+        auth::authentication_capabilities,
         auth::setup_status,
         auth::setup,
         auth::login,
@@ -102,6 +107,7 @@ pub fn router() -> Router<ApiState> {
         access::accept_invitation,
     ),
     components(schemas(
+        AuthenticationCapabilities,
         SetupStatus,
         SetupRequest,
         LoginRequest,

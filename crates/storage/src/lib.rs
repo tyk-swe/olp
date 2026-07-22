@@ -111,7 +111,32 @@ pub use configuration::{
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::split_page;
+
+    #[test]
+    fn migration_versions_are_unique() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut versions = BTreeSet::new();
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if !name.ends_with(".sql") {
+                continue;
+            }
+            let (version, _) = name
+                .split_once('_')
+                .unwrap_or_else(|| panic!("invalid migration filename: {name}"));
+            let version = version
+                .parse::<u32>()
+                .unwrap_or_else(|_| panic!("invalid migration version: {name}"));
+            assert!(
+                versions.insert(version),
+                "duplicate migration version: {name}"
+            );
+        }
+        assert!(versions.contains(&29));
+    }
 
     #[test]
     fn split_page_distinguishes_complete_and_overfetched_results() {

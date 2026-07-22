@@ -366,7 +366,7 @@ pub(super) async fn enroll_password(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     validate_session_cookie_ttl(state.session_ttl)?;
-    let recent_auth = cookie(&headers, RECENT_AUTH_COOKIE)
+    let recent_auth = cookie(&headers, RECENT_AUTH_COOKIE)?
         .filter(|token| token.len() == 43)
         .ok_or_else(reauthentication_required)?;
     let recent_auth_token_digest = RecentAuthMaterial::digest_token(recent_auth);

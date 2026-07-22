@@ -15,6 +15,8 @@ export type SessionUser = Schemas['UserResponse'] & { role: FixedRole };
 
 export type CurrentSession = Omit<Schemas['SessionResponse'], 'user'> & { user: SessionUser };
 
+export type AuthenticationCapabilities = Schemas['AuthenticationCapabilities'];
+
 function sessionResult(
   data: Schemas['SessionResponse'] | undefined,
   error: unknown,
@@ -44,6 +46,49 @@ function sessionResult(
     });
   }
   return value as CurrentSession;
+}
+
+export async function authenticationCapabilities(
+  signal?: AbortSignal
+): Promise<AuthenticationCapabilities> {
+  const { data, error, response } = await apiClient.GET('/api/v1/auth/capabilities', { signal });
+  const value = result(data, error, response);
+  if (
+    typeof value.local_login_enabled !== 'boolean' ||
+    typeof value.oidc_login_enabled !== 'boolean'
+  ) {
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The authentication capabilities response is invalid',
+      status: 502
+    });
+  }
+  return value;
+}
+
+export async function beginOidcLogin(returnTo: string): Promise<string> {
+  const { data, error, response } = await apiClient.POST('/api/v1/oidc/login', {
+    body: { return_to: returnTo }
+  });
+  const value = result(data, error, response);
+  if (typeof value.authorization_url !== 'string') {
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The OIDC authorization response is invalid',
+      status: 502
+    });
+  }
+  try {
+    const authorizationUrl = new URL(value.authorization_url);
+    if (!['https:', 'http:'].includes(authorizationUrl.protocol)) throw new Error('invalid scheme');
+    return authorizationUrl.href;
+  } catch {
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The OIDC authorization response is invalid',
+      status: 502
+    });
+  }
 }
 
 export async function currentSession(signal?: AbortSignal): Promise<CurrentSession> {

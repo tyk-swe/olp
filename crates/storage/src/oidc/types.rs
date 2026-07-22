@@ -27,6 +27,8 @@ pub enum OidcError {
     PreconditionFailed,
     #[error("the OIDC authorization flow is invalid, expired, or already consumed")]
     FlowUnavailable,
+    #[error("the authenticated OIDC flow belongs to a different session")]
+    FlowSessionMismatch,
     #[error("the OIDC authorization flow capacity is exhausted")]
     FlowCapacity,
     #[error("OIDC authorization is rate limited")]
@@ -257,6 +259,7 @@ pub struct NewOidcFlow {
     pub configuration_etag: Uuid,
     pub purpose: OidcFlowPurpose,
     pub actor_user_id: Option<Uuid>,
+    /// Exact authenticated session that initiated the flow.
     pub actor_session_id: Option<Uuid>,
     pub actor_security_version: Option<i64>,
     pub recent_auth_purpose: Option<RecentAuthPurpose>,
@@ -376,7 +379,7 @@ pub struct CompleteOidcLink<'a> {
     pub issuer: &'a str,
     pub subject: &'a str,
     pub email: Option<&'a str>,
-    pub session: &'a SessionMaterial,
+    pub replacement_session: &'a SessionMaterial,
     pub session_ttl: Duration,
 }
 
@@ -392,7 +395,7 @@ impl fmt::Debug for CompleteOidcLink<'_> {
             .field("issuer", &self.issuer)
             .field("subject", &self.subject)
             .field("email", &self.email)
-            .field("session", &"[REDACTED]")
+            .field("replacement_session", &"[REDACTED]")
             .field("session_ttl", &self.session_ttl)
             .finish()
     }

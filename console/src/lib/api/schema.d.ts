@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["authentication_capabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/ready": {
         parameters: {
             query?: never;
@@ -269,7 +285,12 @@ export interface paths {
         };
         get: operations["begin_login"];
         put?: never;
-        post?: never;
+        /**
+         * Same-origin initiation used by the console so failures remain styled API
+         *     problems instead of becoming raw navigation responses. The GET endpoint is
+         *     retained for ordinary OAuth top-level navigation compatibility.
+         */
+        post: operations["begin_login_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1260,6 +1281,10 @@ export interface components {
             data: components["schemas"]["AuditEventResponse"][];
             next_cursor?: string | null;
         };
+        AuthenticationCapabilities: {
+            local_login_enabled: boolean;
+            oidc_login_enabled: boolean;
+        };
         BTreeMap: {
             [key: string]: string[];
         };
@@ -1554,6 +1579,10 @@ export interface components {
             issuer: string;
             /** Format: date-time */
             last_login_at?: string | null;
+        };
+        OidcLoginRequest: {
+            /** @description Same-origin absolute-path destination used only after a successful callback. */
+            return_to?: string | null;
         };
         OidcReauthenticationRequest: {
             /** @description Exact durable security operation that the resulting one-time grant may authorize. */
@@ -2952,6 +2981,44 @@ export interface operations {
             };
         };
     };
+    authentication_capabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public authentication capabilities */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthenticationCapabilities"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description PostgreSQL unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     management_readiness: {
         parameters: {
             query?: never;
@@ -3402,7 +3469,7 @@ export interface operations {
             query?: {
                 /** @description Authorization code */
                 code?: string;
-                /** @description One-time state */
+                /** @description One-time flow identifier and state */
                 state?: string;
                 /** @description Provider error code */
                 error?: string;
@@ -3797,7 +3864,10 @@ export interface operations {
     };
     begin_login: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Validated same-origin relative destination after login */
+                return_to?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3810,6 +3880,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description OIDC is not configured or enabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description OIDC login flow creation is rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description OIDC dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    begin_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OidcLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Authorization URL for OIDC login */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OidcAuthorizationResponse"];
+                };
+            };
+            /** @description Origin check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description OIDC is not configured or enabled */
             404: {
@@ -7285,6 +7424,15 @@ export interface operations {
             };
             /** @description Invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Local password sign-in is disabled */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

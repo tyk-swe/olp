@@ -20,11 +20,44 @@ use zeroize::Zeroizing;
 use super::common::*;
 use crate::{
     ApiState, FieldErrors, FirstOwnerSetupAuthorized, Problem, public_auth_source_target_digests,
+    request_cookies::{CSRF_COOKIE, SESSION_COOKIE},
 };
 
 pub(super) const PASSWORD_WORK_CONCURRENCY: usize = 4;
 pub(super) const INVALID_LOGIN_RATE_LIMIT_TARGET: &str = "<invalid-local-login-target>";
 static PASSWORD_WORK: Semaphore = Semaphore::const_new(PASSWORD_WORK_CONCURRENCY);
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct AuthenticationCapabilities {
+    pub local_login_enabled: bool,
+    pub oidc_login_enabled: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/capabilities",
+    tag = "sessions",
+    responses(
+        (status = 200, description = "Public authentication capabilities", body = AuthenticationCapabilities),
+        (status = 503, description = "PostgreSQL unavailable", body = Problem)
+    )
+)]
+pub(super) async fn authentication_capabilities(
+    State(state): State<ApiState>,
+) -> Result<Response, Problem> {
+    let oidc_login_enabled = require_store(&state)?
+        .oidc_configuration()
+        .await
+        .map_err(crate::oidc::map_oidc)?
+        .is_some_and(|configuration| configuration.enabled);
+    let mut response = Json(AuthenticationCapabilities {
+        local_login_enabled: state.local_login_enabled,
+        oidc_login_enabled,
+    })
+    .into_response();
+    prevent_sensitive_response_caching(&mut response);
+    Ok(response)
+}
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct SetupStatus {
@@ -196,6 +229,7 @@ impl fmt::Debug for LoginRequest {
     responses(
         (status = 201, description = "Session created", body = SessionResponse),
         (status = 401, description = "Invalid credentials", body = Problem),
+        (status = 404, description = "Local password sign-in is disabled", body = Problem),
         (status = 429, description = "Authentication work is rate limited", body = Problem),
         (status = 422, description = "Validation failed", body = Problem)
     )
@@ -206,6 +240,14 @@ pub(super) async fn login(
     headers: HeaderMap,
     payload: Result<Json<LoginRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
+    if !state.local_login_enabled {
+        return Err(Problem::new(
+            StatusCode::NOT_FOUND,
+            "local_login_disabled",
+            "Local sign-in disabled",
+            "Password-based local sign-in is disabled for this installation.",
+        ));
+    }
     enforce_origin(&state, &headers)?;
     let request = json_payload(payload)?;
     validate_session_cookie_ttl(state.session_ttl)?;
@@ -299,7 +341,7 @@ pub(super) async fn current_session(
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
-    let supplied_csrf = cookie(&headers, CSRF_COOKIE)
+    let supplied_csrf = cookie(&headers, CSRF_COOKIE)?
         .filter(|csrf| SessionMaterial::verify_csrf(csrf, &principal.csrf_digest));
     let replacement = supplied_csrf.is_none().then(CsrfMaterial::generate);
     let remaining = principal.expires_at - chrono::Utc::now();
@@ -391,14 +433,20 @@ pub(super) async fn logout(
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     enforce_origin(&state, &headers)?;
-    if let (Some(store), Some(token)) = (state.store.as_ref(), cookie(&headers, SESSION_COOKIE))
-        && let Err(error) = store.revoke_session_by_token(token).await
-    {
-        // Logout is intentionally idempotent and fail-closed in the browser.
-        // A transient database failure must not prevent credential expiry.
-        warn!(%error, "server-side logout revocation failed");
-    }
-    let mut response = StatusCode::NO_CONTENT.into_response();
+    let parsed_token = cookie(&headers, SESSION_COOKIE);
+    let mut response = match parsed_token {
+        Ok(token) => {
+            if let (Some(store), Some(token)) = (state.store.as_ref(), token)
+                && let Err(error) = store.revoke_session_by_token(token).await
+            {
+                // Logout is intentionally idempotent and fail-closed in the browser.
+                // A transient database failure must not prevent credential expiry.
+                warn!(%error, "server-side logout revocation failed");
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(problem) => problem.into_response(),
+    };
     expire_session_cookies(&mut response);
     prevent_sensitive_response_caching(&mut response);
     Ok(response)

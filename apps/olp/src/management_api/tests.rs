@@ -248,6 +248,35 @@ async fn logout_without_a_server_side_session_still_expires_every_browser_creden
     );
 }
 
+#[tokio::test]
+async fn logout_rejects_conflicting_cookies_but_still_expires_browser_credentials() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("https://olp.example.test"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=first"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=second"),
+    );
+    let response = logout(axum::extract::State(state()), headers)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let expired = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter(|value| value.contains("Max-Age=0"))
+        .count();
+    assert_eq!(expired, 3);
+}
+
 #[test]
 fn csrf_recovery_failures_never_expire_browser_wide_credentials() {
     for (session_is_current, status) in [
@@ -270,6 +299,26 @@ fn csrf_recovery_failures_never_expire_browser_wide_credentials() {
             "no-store"
         );
     }
+}
+
+#[test]
+fn cookie_parser_combines_repeated_fields_and_rejects_conflicts() {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("other=x; malformed pair"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=secret"),
+    );
+    assert_eq!(session_cookie(&headers).unwrap(), "secret");
+
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("__Host-olp_session=different"),
+    );
+    assert_eq!(session_cookie(&headers).unwrap_err().status, 400);
 }
 
 #[test]

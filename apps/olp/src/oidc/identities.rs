@@ -107,7 +107,7 @@ pub(super) async fn unlink_identity(
 ) -> Result<Response, Problem> {
     validate_session_cookie_ttl(state.session_ttl)?;
     let principal = require_mutation_session(&state, &headers).await?;
-    let recent_auth_token = cookie(&headers, RECENT_AUTH_COOKIE)
+    let recent_auth_token = cookie(&headers, RECENT_AUTH_COOKIE)?
         .filter(|value| value.len() == 43)
         .ok_or_else(reauthentication_required)?;
     let replacement_session = SessionMaterial::generate();

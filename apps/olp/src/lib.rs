@@ -19,7 +19,10 @@ mod playground;
 mod problem;
 mod provider_adapter;
 mod proxy;
+mod public_origin;
+mod relative_url;
 mod request_admission;
+mod request_cookies;
 mod router;
 mod runtime;
 mod semantic_validation;
@@ -65,6 +68,8 @@ pub use olp_providers::{
 };
 pub use problem::{FieldErrors, Problem};
 pub use proxy::{TrustedProxyCidr, TrustedProxyCidrParseError, public_auth_source};
+pub use public_origin::{PublicOrigin, PublicOriginError};
+pub use relative_url::{RelativeReturnTo, RelativeReturnToError};
 pub use router::{public_router, try_public_router};
 pub use runtime::{RuntimeBundle, RuntimeInstallError, RuntimeManager};
 
@@ -119,9 +124,10 @@ pub struct ApiState {
     multipart_admission: MultipartAdmissionState,
     pub transports: TransportRegistry,
     certification_probe_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
-    pub public_origin: Arc<str>,
+    pub public_origin: PublicOrigin,
     pub console_dir: Arc<PathBuf>,
     pub session_ttl: chrono::Duration,
+    pub local_login_enabled: bool,
     observability: ObservabilityCache,
     /// Enables loopback HTTP only for local mock-IdP tests. Runtime wiring
     /// keeps this production-safe default disabled.
@@ -133,7 +139,7 @@ impl ApiState {
         mode: ApiMode,
         store: Option<PgStore>,
         runtime: Arc<RuntimeManager>,
-        public_origin: impl Into<String>,
+        public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
     ) -> Self {
         let media_spool = media_spool::FileMediaSpool::create()
@@ -152,7 +158,7 @@ impl ApiState {
         mode: ApiMode,
         store: Option<PgStore>,
         runtime: Arc<RuntimeManager>,
-        public_origin: impl Into<String>,
+        public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
         media_spool: Arc<dyn MediaSpool>,
     ) -> Self {
@@ -177,9 +183,11 @@ impl ApiState {
             multipart_admission,
             transports: TransportRegistry::default(),
             certification_probe_connectors: Default::default(),
-            public_origin: Arc::from(public_origin.into().trim_end_matches('/')),
+            public_origin: PublicOrigin::parse(public_origin.as_ref())
+                .expect("ApiState public origin must be a valid canonical origin"),
             console_dir: Arc::new(console_dir.into()),
             session_ttl: chrono::Duration::hours(12),
+            local_login_enabled: true,
             observability: ObservabilityCache::default(),
             oidc_allow_insecure_test_endpoints: false,
         }

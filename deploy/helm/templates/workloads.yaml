@@ -70,6 +70,8 @@ spec:
               value: {{ $component.httpMaxConnections | quote }}
             - name: OLP_PUBLIC_ORIGIN
               value: {{ $root.Values.config.publicOrigin | quote }}
+            - name: OLP_LOCAL_LOGIN_ENABLED
+              value: {{ $root.Values.config.localLoginEnabled | quote }}
             - name: OLP_CONSOLE_DIR
               value: /opt/olp/console
             - name: OLP_MEDIA_SPOOL_DIR
