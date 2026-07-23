@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -188,51 +188,52 @@ pub(crate) async fn claim_replayable_idempotency(
     master_key: &MasterKey,
 ) -> Result<ReplayableIdempotencyClaim, PersistenceError> {
     let scope = idempotency_replay_scope(actor, operation, key);
-    let locked: bool =
-        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, 0))")
-            .bind(&scope)
-            .fetch_one(&mut **transaction)
-            .await?;
+    let locked: bool = sqlx::query_scalar!(
+        "SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, 0)) AS \"value!\"",
+        &scope
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
     if !locked {
         return Ok(ReplayableIdempotencyClaim::InProgress);
     }
 
-    sqlx::query(
+    sqlx::query!(
         "DELETE FROM idempotency_records \
          WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3 \
            AND expires_at <= now()",
+        actor,
+        operation,
+        key
     )
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
     .execute(&mut **transaction)
     .await?;
 
-    let existing = sqlx::query(
+    let existing = sqlx::query!(
         "SELECT state, request_fingerprint, replay_ciphertext, replay_nonce, replay_key_version \
          FROM idempotency_records \
          WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3",
+        actor,
+        operation,
+        key
     )
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(row) = existing {
-        let stored_fingerprint: Option<Vec<u8>> = row.get("request_fingerprint");
+        let stored_fingerprint: Option<Vec<u8>> = row.request_fingerprint;
         if stored_fingerprint.as_deref() != Some(request_fingerprint.as_slice()) {
             return Ok(ReplayableIdempotencyClaim::Conflict);
         }
-        let state: String = row.get("state");
+        let state: String = row.state;
         if state == "in_progress" {
             return Ok(ReplayableIdempotencyClaim::InProgress);
         }
         if state != "completed" {
             return Err(PersistenceError::IdempotencyReplayUnavailable);
         }
-        let ciphertext: Option<Vec<u8>> = row.get("replay_ciphertext");
-        let nonce: Option<Vec<u8>> = row.get("replay_nonce");
-        let key_version: Option<i32> = row.get("replay_key_version");
+        let ciphertext: Option<Vec<u8>> = row.replay_ciphertext;
+        let nonce: Option<Vec<u8>> = row.replay_nonce;
+        let key_version: Option<i32> = row.replay_key_version;
         let ciphertext = ciphertext.ok_or(PersistenceError::IdempotencyReplayUnavailable)?;
         if ciphertext.len() > MAX_IDEMPOTENCY_REPLAY_CIPHERTEXT_BYTES {
             return Err(PersistenceError::IdempotencyReplayUnavailable);
@@ -262,16 +263,16 @@ pub(crate) async fn claim_replayable_idempotency(
         return Ok(ReplayableIdempotencyClaim::Replay(response));
     }
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO idempotency_records \
          (id, actor_user_id, operation, idempotency_key, state, request_fingerprint, expires_at) \
          VALUES ($1, $2, $3, $4, 'in_progress', $5, now() + interval '24 hours')",
+        Uuid::now_v7(),
+        actor,
+        operation,
+        key,
+        request_fingerprint.as_slice()
     )
-    .bind(Uuid::now_v7())
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
-    .bind(request_fingerprint.as_slice())
     .execute(&mut **transaction)
     .await?;
     Ok(ReplayableIdempotencyClaim::Execute)
@@ -300,20 +301,20 @@ pub(crate) async fn complete_replayable_idempotency(
         .map_err(|_| PersistenceError::IdempotencyReplayEncryption)?;
     let key_version = i32::try_from(encrypted.key_version)
         .map_err(|_| PersistenceError::IdempotencyReplayEncryption)?;
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE idempotency_records \
          SET state = 'completed', replay_ciphertext = $1, \
              replay_nonce = $2, replay_key_version = $3 \
          WHERE actor_user_id = $4 AND operation = $5 AND idempotency_key = $6 \
            AND state = 'in_progress' AND request_fingerprint = $7",
+        encrypted.ciphertext,
+        encrypted.nonce.to_vec(),
+        key_version,
+        actor,
+        operation,
+        key,
+        request_fingerprint.as_slice()
     )
-    .bind(encrypted.ciphertext)
-    .bind(encrypted.nonce.to_vec())
-    .bind(key_version)
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
-    .bind(request_fingerprint.as_slice())
     .execute(&mut **transaction)
     .await?;
     if result.rows_affected() != 1 {
@@ -339,26 +340,26 @@ pub(crate) async fn claim_idempotency(
     // Expired claims must not permanently reserve a key. Keeping cleanup in
     // the caller's transaction also serializes a retry with any concurrent
     // attempt using the same actor/operation/key tuple.
-    sqlx::query(
+    sqlx::query!(
         "DELETE FROM idempotency_records \
          WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3 \
            AND expires_at <= now()",
+        actor,
+        operation,
+        key
     )
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
     .execute(&mut **transaction)
     .await?;
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "INSERT INTO idempotency_records \
          (id, actor_user_id, operation, idempotency_key, state, expires_at) \
          VALUES ($1, $2, $3, $4, 'in_progress', now() + interval '24 hours') \
          ON CONFLICT (actor_user_id, operation, idempotency_key) DO NOTHING",
+        Uuid::now_v7(),
+        actor,
+        operation,
+        key
     )
-    .bind(Uuid::now_v7())
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
     .execute(&mut **transaction)
     .await?;
     Ok(result.rows_affected() == 1)
@@ -371,14 +372,14 @@ pub(crate) async fn complete_idempotency(
     key: &str,
     resource_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE idempotency_records SET state = 'completed', resource_id = $1 \
          WHERE actor_user_id = $2 AND operation = $3 AND idempotency_key = $4",
+        resource_id,
+        actor,
+        operation,
+        key
     )
-    .bind(resource_id)
-    .bind(actor)
-    .bind(operation)
-    .bind(key)
     .execute(&mut **transaction)
     .await?;
     Ok(())

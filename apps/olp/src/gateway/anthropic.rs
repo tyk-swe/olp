@@ -1,9 +1,8 @@
 use axum::{
-    Json, Router,
+    Json,
     extract::{Extension, Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
 };
 use olp_domain::{ApiKey, CanonicalResult, OperationKind, RouteSlug, Surface, TransportMode};
 use olp_protocols::anthropic::{
@@ -15,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
-    ApiState, InferencePrincipal, RuntimeBundle,
+    GatewayState, InferencePrincipal, RuntimeBundle,
     event_completion::{CompletedEventExecution, collect_event_execution},
     json_media::{admit_anthropic_count, admit_anthropic_messages, cleanup_admitted},
     streaming_response::{
@@ -32,16 +31,8 @@ use super::{
     release_model_limits, reserve_model_limits,
 };
 
-pub(super) fn router() -> Router<ApiState> {
-    Router::new()
-        .route("/anthropic/v1/messages", post(messages))
-        .route("/anthropic/v1/messages/count_tokens", post(count_tokens))
-        .route("/anthropic/v1/models", get(models))
-        .route("/anthropic/v1/models/{id}", get(model))
-}
-
-async fn messages(
-    State(state): State<ApiState>,
+pub(super) async fn messages(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<MessagesRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
@@ -97,8 +88,8 @@ fn unary_response(mut completed: CompletedEventExecution) -> Result<Response, Pr
     Ok((StatusCode::OK, Json(response)).into_response())
 }
 
-async fn count_tokens(
-    State(state): State<ApiState>,
+pub(super) async fn count_tokens(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<CountTokensRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
@@ -142,7 +133,7 @@ async fn count_tokens(
 }
 
 #[derive(Default, Deserialize)]
-struct ModelsQuery {
+pub(super) struct ModelsQuery {
     before_id: Option<String>,
     after_id: Option<String>,
     limit: Option<usize>,
@@ -165,8 +156,8 @@ struct Model {
     kind: &'static str,
 }
 
-async fn models(
-    State(state): State<ApiState>,
+pub(super) async fn models(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
@@ -222,8 +213,8 @@ fn models_response(
     Ok((StatusCode::OK, Json(response)).into_response())
 }
 
-async fn model(
-    State(state): State<ApiState>,
+pub(super) async fn model(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(id): Path<String>,
 ) -> Result<Response, ProtocolError> {

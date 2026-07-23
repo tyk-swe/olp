@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM async_media_jobs j\n               JOIN provider_revisions pr ON pr.id = j.provider_revision_id\n               WHERE j.provider_id = $1 AND j.lifecycle_state <> 'deleted'\n                 AND pr.credential_version_id = $2\n             ) AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cfbbbff77dc1ebc3b8b2d528163e7c1071da92838ffa3477c51a7884b5c0a494"
+}

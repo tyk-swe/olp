@@ -6,7 +6,10 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, stream};
-use olp_domain::ProviderKind;
+use olp_domain::{
+    CredentialRequirement, ProviderAuthMode, ProviderConfigurationField, ProviderKind,
+    provider_kind_specs,
+};
 use olp_providers::{
     CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
     certifiable_capabilities,
@@ -20,10 +23,9 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, if_match, require_mutation_session, require_permission, require_read_session,
-        require_store,
     },
 };
 
@@ -35,7 +37,7 @@ use crate::provider_adapter::provider_connector;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderCapabilityOptionsResponse {
-    pub provider_kind: String,
+    pub provider_kind: ProviderKind,
     /// Capability tuples with a safe server-owned certification path for this
     /// provider kind. Configuration validation may support additional future tuples.
     pub capabilities: Vec<CapabilityInput>,
@@ -54,7 +56,7 @@ pub(crate) struct ProviderCapabilityOptionsResponse {
     )
 )]
 pub(crate) async fn list_provider_kind_capabilities(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_kind): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<ProviderCapabilityOptionsResponse>, Problem> {
@@ -68,7 +70,7 @@ pub(crate) async fn list_provider_kind_capabilities(
     })?;
 
     Ok(Json(ProviderCapabilityOptionsResponse {
-        provider_kind: provider_kind.as_str().to_owned(),
+        provider_kind,
         capabilities: certifiable_capabilities(provider_kind)
             .map(|(operation, surface, mode)| CapabilityInput {
                 operation: operation.as_str().to_owned(),
@@ -77,6 +79,81 @@ pub(crate) async fn list_provider_kind_capabilities(
             })
             .collect(),
     }))
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderAuthCapabilityResponse {
+    pub mode: ProviderAuthMode,
+    pub label: String,
+    pub credential: CredentialRequirement,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderFieldCapabilityResponse {
+    pub field: ProviderConfigurationField,
+    pub label: String,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderKindCapabilityResponse {
+    pub kind: ProviderKind,
+    pub label: String,
+    pub description: String,
+    pub default_auth_mode: ProviderAuthMode,
+    pub auth_modes: Vec<ProviderAuthCapabilityResponse>,
+    pub fields: Vec<ProviderFieldCapabilityResponse>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderKindCapabilityListResponse {
+    pub items: Vec<ProviderKindCapabilityResponse>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/provider-kinds",
+    tag = "providers",
+    responses(
+        (status = 200, body = ProviderKindCapabilityListResponse),
+        (status = 401, body = Problem),
+        (status = 403, body = Problem)
+    )
+)]
+pub(crate) async fn list_provider_kinds(
+    State(state): State<ManagementState>,
+    headers: HeaderMap,
+) -> Result<Json<ProviderKindCapabilityListResponse>, Problem> {
+    let principal = require_read_session(&state, &headers).await?;
+    require_permission(&principal, Permission::ReadConfiguration)?;
+    let items = provider_kind_specs()
+        .iter()
+        .map(|spec| ProviderKindCapabilityResponse {
+            kind: spec.kind,
+            label: spec.label.to_owned(),
+            description: spec.description.to_owned(),
+            default_auth_mode: spec.default_auth_mode,
+            auth_modes: spec
+                .auth_modes
+                .iter()
+                .map(|auth| ProviderAuthCapabilityResponse {
+                    mode: auth.mode,
+                    label: auth.label.to_owned(),
+                    credential: auth.credential,
+                })
+                .collect(),
+            fields: spec
+                .fields
+                .iter()
+                .map(|field| ProviderFieldCapabilityResponse {
+                    field: field.field,
+                    label: field.label.to_owned(),
+                    required: field.required,
+                })
+                .collect(),
+        })
+        .collect();
+    Ok(Json(ProviderKindCapabilityListResponse { items }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -140,7 +217,7 @@ pub(crate) struct ProviderModelListResponse {
 pub(crate) struct ProviderModelInventoryResponse {
     pub provider_id: Uuid,
     pub provider_name: String,
-    pub provider_kind: String,
+    pub provider_kind: ProviderKind,
     pub model: ProviderModelResponse,
 }
 
@@ -149,7 +226,7 @@ impl From<ProviderModelInventoryRecord> for ProviderModelInventoryResponse {
         Self {
             provider_id: value.provider_id,
             provider_name: value.provider_name,
-            provider_kind: value.provider_kind.to_string(),
+            provider_kind: value.provider_kind,
             model: value.model.into(),
         }
     }
@@ -175,7 +252,7 @@ pub(crate) struct ProviderModelInventoryListResponse {
     )
 )]
 pub(crate) async fn list_provider_model_inventory(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<ProviderModelInventoryQuery>,
 ) -> Result<Json<ProviderModelInventoryListResponse>, Problem> {
@@ -186,7 +263,8 @@ pub(crate) async fn list_provider_model_inventory(
         cursor: query.cursor,
         limit: query.limit,
     })?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_provider_model_inventory(cursor, limit, enabled)
         .await
         .map_err(map_configuration_resource)?;
@@ -211,7 +289,7 @@ pub(crate) async fn list_provider_model_inventory(
     )
 )]
 pub(crate) async fn list_provider_models(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
@@ -219,7 +297,8 @@ pub(crate) async fn list_provider_models(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_provider_models(provider_id, cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -280,7 +359,7 @@ pub(crate) struct DiscoverModelsRequest {
     responses((status = 200, body = ProviderDetailResponse), (status = 412, body = Problem), (status = 422, body = Problem))
 )]
 pub(crate) async fn discover_provider_models(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<DiscoverModelsRequest>, JsonRejection>,
@@ -314,7 +393,7 @@ pub(crate) async fn discover_provider_models(
             })
             .collect()
     };
-    let store = require_store(&state)?;
+    let store = state.store();
     let etag = store
         .discover_provider_models(provider_id, if_match(&headers)?, &models, principal.user_id)
         .await
@@ -346,7 +425,7 @@ pub(crate) struct SetModelRequest {
     responses((status = 200, body = ProviderDetailResponse), (status = 412, body = Problem))
 )]
 pub(crate) async fn set_provider_model(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((provider_id, model_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     payload: Result<Json<SetModelRequest>, JsonRejection>,
@@ -354,7 +433,7 @@ pub(crate) async fn set_provider_model(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json(payload)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let etag = store
         .set_provider_model_enabled(
             provider_id,
@@ -416,14 +495,14 @@ pub(crate) struct CapabilityCertificationResponse {
     )
 )]
 pub(crate) async fn certify_provider_model(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((provider_id, model_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let provider = store
         .get_provider(provider_id)
         .await

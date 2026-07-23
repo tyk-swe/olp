@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_authorization_flows (id, configuration_id, configuration_etag, purpose, actor_user_id, actor_session_id, actor_security_version, recent_auth_purpose, recent_auth_resource_id, state_digest, browser_binding_digest, client_digest, encrypted_payload, payload_nonce, payload_key_version, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, $12, $13, $14, $15, now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Bytea",
+        "Bytea",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c37cdf40c7024958055b1ef18e3198b374d8b287593913f42b6b63ca9b85ccca"
+}

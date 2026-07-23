@@ -13,10 +13,10 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    ApiState, FieldErrors, Problem,
+    FieldErrors, ManagementState, Problem,
     management_api::{
         Permission, map_persistence, require_mutation_session, require_permission,
-        require_read_session, require_store,
+        require_read_session,
     },
     operations::helpers::{map_operations, not_found, page_limit},
 };
@@ -116,7 +116,7 @@ pub(in crate::operations) struct RequestMetadataGatewayEpochListResponse {
     )
 )]
 pub(in crate::operations) async fn list_request_metadata_gateway_epochs(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<RequestMetadataGatewayEpochQuery>,
 ) -> Result<Json<RequestMetadataGatewayEpochListResponse>, Problem> {
@@ -133,7 +133,8 @@ pub(in crate::operations) async fn list_request_metadata_gateway_epochs(
         .as_deref()
         .map(parse_request_metadata_gateway_epoch_state)
         .transpose()?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .request_metadata_gateway_epochs(state_filter, cursor.as_ref(), page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;
@@ -194,13 +195,14 @@ impl From<RequestMetadataEpochAcknowledgement> for RequestMetadataEpochAcknowled
     )
 )]
 pub(in crate::operations) async fn acknowledge_request_metadata_gateway_epoch(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Path(process_epoch): Path<Uuid>,
 ) -> Result<Json<RequestMetadataEpochAcknowledgementResponse>, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageSettings)?;
-    let acknowledgement = require_store(&state)?
+    let acknowledgement = state
+        .store()
         .acknowledge_request_metadata_gateway_epoch(process_epoch, principal.user_id)
         .await
         .map_err(map_persistence)?

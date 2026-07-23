@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(SUM(event_count), 0)::bigint AS \"event_count!\", COALESCE(SUM(uncertain_gap_count), 0)::bigint AS \"uncertain_gap_count!\" FROM ( SELECT event_count, CASE WHEN certainty = 'lower_bound'::request_metadata_gap_certainty THEN 1::bigint ELSE 0::bigint END AS uncertain_gap_count FROM request_metadata_ingestion_gaps WHERE last_observed_at >= $1 AND first_observed_at < $2 UNION ALL SELECT event_count, uncertain_gap_count FROM request_metadata_gap_hourly WHERE last_observed_at >= $1 AND first_observed_at < $2 ) retained_gaps",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "uncertain_gap_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "e8fabedbf92a0bcba956e88998b174d67cb7dfb16ab065a2d7ae229eabd51975"
+}

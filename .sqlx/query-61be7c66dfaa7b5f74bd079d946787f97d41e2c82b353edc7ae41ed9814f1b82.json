@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_identities (issuer, subject, user_id, email_at_link, last_login_at, created_at) VALUES ($1, $2, $3, $4, $5, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "61be7c66dfaa7b5f74bd079d946787f97d41e2c82b353edc7ae41ed9814f1b82"
+}

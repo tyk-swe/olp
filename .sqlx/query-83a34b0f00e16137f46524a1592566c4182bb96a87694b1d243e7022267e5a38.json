@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO route_draft_targets (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) SELECT uuidv7(), routing_id, $1, provider_model_id, priority, weight, timeout_ms, position FROM route_revision_targets WHERE route_revision_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "83a34b0f00e16137f46524a1592566c4182bb96a87694b1d243e7022267e5a38"
+}

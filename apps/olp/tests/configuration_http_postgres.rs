@@ -45,7 +45,7 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [9; 32]);
     let configuration_state = state.clone();
-    let app = public_router(state);
+    let app = public_router(state.mode_dependencies().unwrap().management().unwrap());
     let mock_provider = MockOpenAiProvider::spawn().await;
 
     let setup = send(

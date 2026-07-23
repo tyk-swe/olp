@@ -47,14 +47,14 @@ impl PgStore {
         session: Option<(&SessionMaterial, chrono::Duration)>,
     ) -> Result<(InstallationSetupResult, Option<Uuid>), PersistenceError> {
         let mut transaction = self.pool.begin().await?;
-        sqlx::query("SELECT pg_advisory_xact_lock($1)")
-            .bind(SETUP_LOCK_ID)
-            .execute(&mut *transaction)
-            .await?;
-
-        let already_setup: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM installation)")
+        sqlx::query!("SELECT pg_advisory_xact_lock($1)", SETUP_LOCK_ID)
             .fetch_one(&mut *transaction)
             .await?;
+
+        let already_setup: bool =
+            sqlx::query_scalar!("SELECT EXISTS (SELECT 1 FROM installation) AS \"value!\"")
+                .fetch_one(&mut *transaction)
+                .await?;
         if already_setup {
             return Err(PersistenceError::AlreadySetup);
         }
@@ -62,24 +62,24 @@ impl PgStore {
         let user_id = Uuid::now_v7();
         let now = Utc::now();
         let normalized_email = input.email.trim().to_lowercase();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO installation (singleton, installation_name, created_at, updated_at) \
              VALUES (true, $1, $2, $2)",
+            input.installation_name.trim(),
+            now
         )
-        .bind(input.installation_name.trim())
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO users \
              (id, email, display_name, password_hash, role, active, created_at, updated_at) \
              VALUES ($1, $2, $3, $4, 'owner'::user_role, true, $5, $5)",
+            user_id,
+            &normalized_email,
+            input.display_name.trim(),
+            &input.password_hash,
+            now
         )
-        .bind(user_id)
-        .bind(&normalized_email)
-        .bind(input.display_name.trim())
-        .bind(&input.password_hash)
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
 
@@ -88,27 +88,27 @@ impl PgStore {
             ("retention.usage_days", "90"),
             ("retention.audit_days", "365"),
         ] {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO settings (key, value, etag, updated_by, updated_at) \
                  VALUES ($1, $2, $3, $4, $5)",
+                key,
+                value,
+                Uuid::now_v7(),
+                user_id,
+                now
             )
-            .bind(key)
-            .bind(value)
-            .bind(Uuid::now_v7())
-            .bind(user_id)
-            .bind(now)
             .execute(&mut *transaction)
             .await?;
         }
 
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'installation.setup', 'installation', 'singleton', 'success', $3)",
+            Uuid::now_v7(),
+            user_id,
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(user_id)
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
 
@@ -117,15 +117,15 @@ impl PgStore {
             let session_id =
                 insert_versioned_session(&mut transaction, user_id, 1, material, expires_at, now)
                     .await?;
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO audit_events \
                  (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
                  VALUES ($1, $2, 'session.create', 'session', $3, 'success', $4)",
+                Uuid::now_v7(),
+                user_id,
+                session_id.to_string(),
+                now
             )
-            .bind(Uuid::now_v7())
-            .bind(user_id)
-            .bind(session_id.to_string())
-            .bind(now)
             .execute(&mut *transaction)
             .await?;
             Some(session_id)

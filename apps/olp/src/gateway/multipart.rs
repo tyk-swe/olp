@@ -7,7 +7,7 @@ use olp_domain::{MediaHandle, MediaSpool};
 use olp_protocols::openai::BoundedMediaPart;
 use serde_json::Value;
 
-use crate::{ApiState, MultipartRequestAdmission, MultipartRouteAdmission};
+use crate::{GatewayState, MultipartRequestAdmission, MultipartRouteAdmission};
 
 use super::error::InferenceError;
 
@@ -196,7 +196,7 @@ const MAX_MULTIPART_TEXT_FIELD_BYTES: usize = 64 * 1024;
 const MAX_MULTIPART_TEXT_TOTAL_BYTES: usize = 512 * 1024;
 
 pub(super) async fn parse_multipart(
-    state: &ApiState,
+    state: &GatewayState,
     multipart: Multipart,
     maximum_file_bytes: u64,
     maximum_files: usize,
@@ -240,7 +240,7 @@ pub(super) async fn parse_multipart(
 }
 
 async fn parse_multipart_fields(
-    state: &ApiState,
+    state: &GatewayState,
     mut multipart: Multipart,
     maximum_file_bytes: u64,
     maximum_files: usize,

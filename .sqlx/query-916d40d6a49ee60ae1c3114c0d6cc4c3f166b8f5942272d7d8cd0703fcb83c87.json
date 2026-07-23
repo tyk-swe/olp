@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO installation (singleton, installation_name, created_at, updated_at) VALUES (true, $1, $2, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "916d40d6a49ee60ae1c3114c0d6cc4c3f166b8f5942272d7d8cd0703fcb83c87"
+}

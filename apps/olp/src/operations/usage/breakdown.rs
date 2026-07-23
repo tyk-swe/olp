@@ -9,8 +9,8 @@ use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ApiState, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
     operations::helpers::{map_operations, page_limit},
 };
 
@@ -71,7 +71,7 @@ pub(in crate::operations) struct UsageBreakdownResponse {
     responses((status = 200, description = "Usage breakdown", body = UsageBreakdownResponse))
 )]
 pub(in crate::operations) async fn usage_breakdown(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<UsageBreakdownQuery>,
 ) -> Result<Json<UsageBreakdownResponse>, Problem> {
@@ -92,7 +92,8 @@ pub(in crate::operations) async fn usage_breakdown(
         }
     };
     let filters = query.usage.filters()?;
-    let report = require_store(&state)?
+    let report = state
+        .store()
         .usage_breakdown(&filters, dimension, page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;

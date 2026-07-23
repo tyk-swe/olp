@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) VALUES ($1, $2, 'route.create_draft', 'route_draft', $3, 'success', $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "608aeca3ddb044ac816b36c98e863b18008a8b6686c7f05ad9865f3d1de8dd42"
+}

@@ -1,7 +1,9 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use chrono::Duration;
 use olp_storage::{
-    EncryptedSecret, InstallationSetupInput, MasterKey, PgStore, ReencryptionError, credential_aad,
-    hash_password, idempotency_replay_aad, oidc_client_secret_aad, oidc_flow_payload_aad,
+    EncryptedSecret, InstallationSetupInput, MasterKey, PgStore, ReencryptionError,
+    SessionMaterial, credential_aad, hash_password, idempotency_replay_aad, oidc_client_secret_aad,
+    oidc_flow_payload_aad,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -13,14 +15,24 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
-    let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "Master-key integration".to_owned(),
-            email: "owner@example.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
-        })
+    let owner_session = SessionMaterial::generate();
+    let (owner, owner_session_id) = store
+        .setup_installation_with_session(
+            InstallationSetupInput {
+                installation_name: "Master-key integration".to_owned(),
+                email: "owner@example.test".to_owned(),
+                display_name: "Owner".to_owned(),
+                password_hash: hash_password("correct horse battery staple").unwrap(),
+            },
+            &owner_session,
+            Duration::hours(1),
+        )
         .await
+        .unwrap();
+    let owner_principal = store
+        .session_principal(owner_session.token())
+        .await
+        .unwrap()
         .unwrap();
 
     let old_key = MasterKey::new(1, [17; 32]);
@@ -94,14 +106,17 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         .unwrap();
     sqlx::query(
         "INSERT INTO oidc_authorization_flows \
-         (id, configuration_id, configuration_etag, purpose, actor_user_id, state_digest, \
+         (id, configuration_id, configuration_etag, purpose, actor_user_id, actor_session_id, \
+          actor_security_version, state_digest, \
           browser_binding_digest, encrypted_payload, payload_nonce, payload_key_version, expires_at) \
-         VALUES ($1, $2, $3, 'link', $4, $5, $6, $7, $8, $9, now() + interval '5 minutes')",
+         VALUES ($1, $2, $3, 'link', $4, $5, $6, $7, $8, $9, $10, $11, now() + interval '5 minutes')",
     )
     .bind(flow_id)
     .bind(configuration_id)
     .bind(configuration_etag)
     .bind(owner.user_id)
+    .bind(owner_session_id)
+    .bind(owner_principal.security_version)
     .bind([31_u8; 32].as_slice())
     .bind([37_u8; 32].as_slice())
     .bind(&flow_secret.ciphertext)

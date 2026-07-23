@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use olp_domain::OperationKind;
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{OperationsPage, PgStore, TimestampCursor, split_page};
@@ -12,11 +12,12 @@ use super::{
 
 impl PgStore {
     pub async fn media_job(&self, id: Uuid) -> Result<MediaJobRecord, MediaJobError> {
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            MediaJobRow,
             "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
                     p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
-                    j.progress_percent::real AS progress_percent,
+                    j.operation, j.surface, j.state::text AS \"state!\", j.lifecycle_state,
+                    j.progress_percent::real AS \"progress_percent?\",
                     j.content_available, j.expires_at, j.error_class,
                     j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
                     j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
@@ -26,12 +27,12 @@ impl PgStore {
              FROM async_media_jobs j
              JOIN providers p ON p.id = j.provider_id
              WHERE j.id = $1",
+            id
         )
-        .bind(id)
         .fetch_optional(self.pool())
         .await?
         .ok_or(MediaJobError::NotFound)?;
-        media_job_from_row(&row)
+        media_job_from_row(row)
     }
 
     pub async fn media_jobs(
@@ -68,9 +69,12 @@ impl PgStore {
         query
             .push(" ORDER BY j.created_at DESC, j.id DESC LIMIT ")
             .push_bind(i64::from(limit) + 1);
-        let rows = query.build().fetch_all(self.pool()).await?;
+        let rows = query
+            .build_query_as::<MediaJobRow>()
+            .fetch_all(self.pool())
+            .await?;
         let items = rows
-            .iter()
+            .into_iter()
             .map(media_job_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) = split_page(items, usize::from(limit), |last| {
@@ -94,7 +98,7 @@ impl PgStore {
     ) -> Result<OperationsPage<MediaJobRecord>, MediaJobError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let position = if let Some(after) = after {
-            let row = sqlx::query(
+            let row = sqlx::query!(
                 "SELECT created_at, id FROM async_media_jobs
                  WHERE id = $1
                    AND lifecycle_state = 'active'
@@ -102,19 +106,16 @@ impl PgStore {
                    AND (cardinality($3::text[]) = 0 OR route_slug = ANY($3::text[]))
                    AND ($4::text IS NULL OR operation = $4)
                    AND ($5::text IS NULL OR surface = $5)",
+                after,
+                filters.api_key_id,
+                &filters.route_slugs,
+                filters.operation.map(OperationKind::as_str),
+                filters.surface.map(olp_domain::Surface::as_str)
             )
-            .bind(after)
-            .bind(filters.api_key_id)
-            .bind(&filters.route_slugs)
-            .bind(filters.operation.map(OperationKind::as_str))
-            .bind(filters.surface.map(olp_domain::Surface::as_str))
             .fetch_optional(self.pool())
             .await?
             .ok_or_else(|| MediaJobError::Invalid("video cursor is invalid".to_owned()))?;
-            Some((
-                row.try_get::<DateTime<Utc>, _>("created_at")?,
-                row.try_get::<Uuid, _>("id")?,
-            ))
+            Some((row.created_at, row.id))
         } else {
             None
         };
@@ -154,9 +155,12 @@ impl PgStore {
             }
         };
         query.push_bind(i64::from(limit) + 1);
-        let rows = query.build().fetch_all(self.pool()).await?;
+        let rows = query
+            .build_query_as::<MediaJobRow>()
+            .fetch_all(self.pool())
+            .await?;
         let items = rows
-            .iter()
+            .into_iter()
             .map(media_job_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) =
@@ -206,47 +210,73 @@ fn push_filters(query: &mut QueryBuilder<Postgres>, filters: &MediaJobFilters) {
     }
 }
 
-pub(super) fn media_job_from_row(
-    row: &sqlx::postgres::PgRow,
-) -> Result<MediaJobRecord, MediaJobError> {
+#[derive(Debug, FromRow)]
+pub(super) struct MediaJobRow {
+    pub(super) id: Uuid,
+    pub(super) upstream_job_id: Option<String>,
+    pub(super) api_key_id: Uuid,
+    pub(super) provider_id: Uuid,
+    pub(super) provider_name: String,
+    pub(super) provider_model: String,
+    pub(super) route_slug: String,
+    pub(super) operation: String,
+    pub(super) surface: String,
+    pub(super) state: String,
+    pub(super) lifecycle_state: String,
+    pub(super) progress_percent: Option<f32>,
+    pub(super) content_available: bool,
+    pub(super) expires_at: Option<DateTime<Utc>>,
+    pub(super) error_class: Option<String>,
+    pub(super) completed_at: Option<DateTime<Utc>>,
+    pub(super) last_polled_at: Option<DateTime<Utc>>,
+    pub(super) reconciliation_error: Option<String>,
+    pub(super) deleted_at: Option<DateTime<Utc>>,
+    pub(super) runtime_generation_id: Option<Uuid>,
+    pub(super) provider_revision_id: Option<Uuid>,
+    pub(super) reconciliation_claim_id: Option<Uuid>,
+    pub(super) reconciliation_attempts: i32,
+    pub(super) next_reconciliation_at: DateTime<Utc>,
+    pub(super) last_reconciliation_at: Option<DateTime<Utc>>,
+    pub(super) etag: Uuid,
+    pub(super) created_at: DateTime<Utc>,
+    pub(super) updated_at: DateTime<Utc>,
+}
+
+pub(super) fn media_job_from_row(row: MediaJobRow) -> Result<MediaJobRecord, MediaJobError> {
     Ok(MediaJobRecord {
-        id: row.try_get("id")?,
-        upstream_job_id: row.try_get("upstream_job_id")?,
-        api_key_id: row.try_get("api_key_id")?,
-        provider_id: row.try_get("provider_id")?,
-        provider_name: row.try_get("provider_name")?,
-        upstream_model: row.try_get("provider_model")?,
-        route_slug: row.try_get("route_slug")?,
-        operation: row
-            .try_get::<String, _>("operation")?
-            .parse()
-            .map_err(|_| {
-                MediaJobError::Invalid("database returned an unknown operation".to_owned())
-            })?,
-        surface: row.try_get::<String, _>("surface")?.parse().map_err(|_| {
+        id: row.id,
+        upstream_job_id: row.upstream_job_id,
+        api_key_id: row.api_key_id,
+        provider_id: row.provider_id,
+        provider_name: row.provider_name,
+        upstream_model: row.provider_model,
+        route_slug: row.route_slug,
+        operation: row.operation.parse().map_err(|_| {
+            MediaJobError::Invalid("database returned an unknown operation".to_owned())
+        })?,
+        surface: row.surface.parse().map_err(|_| {
             MediaJobError::Invalid("database returned an unknown surface".to_owned())
         })?,
-        state: MediaJobState::parse(row.try_get("state")?)?,
-        lifecycle: MediaJobLifecycle::parse(row.try_get("lifecycle_state")?)?,
-        progress_percent: row.try_get("progress_percent")?,
-        content_available: row.try_get("content_available")?,
-        expires_at: row.try_get("expires_at")?,
-        error_class: row.try_get("error_class")?,
-        completed_at: row.try_get("completed_at")?,
-        last_polled_at: row.try_get("last_polled_at")?,
-        reconciliation_error: row.try_get("reconciliation_error")?,
-        deleted_at: row.try_get("deleted_at")?,
-        runtime_generation_id: row.try_get("runtime_generation_id")?,
-        provider_revision_id: row.try_get("provider_revision_id")?,
-        reconciliation_claim_id: row.try_get("reconciliation_claim_id")?,
-        reconciliation_attempts: u32::try_from(row.try_get::<i32, _>("reconciliation_attempts")?)
-            .map_err(|_| {
+        state: MediaJobState::parse(&row.state)?,
+        lifecycle: MediaJobLifecycle::parse(&row.lifecycle_state)?,
+        progress_percent: row.progress_percent,
+        content_available: row.content_available,
+        expires_at: row.expires_at,
+        error_class: row.error_class,
+        completed_at: row.completed_at,
+        last_polled_at: row.last_polled_at,
+        reconciliation_error: row.reconciliation_error,
+        deleted_at: row.deleted_at,
+        runtime_generation_id: row.runtime_generation_id,
+        provider_revision_id: row.provider_revision_id,
+        reconciliation_claim_id: row.reconciliation_claim_id,
+        reconciliation_attempts: u32::try_from(row.reconciliation_attempts).map_err(|_| {
             MediaJobError::Invalid("reconciliation attempt count is invalid".to_owned())
         })?,
-        next_reconciliation_at: row.try_get("next_reconciliation_at")?,
-        last_reconciliation_at: row.try_get("last_reconciliation_at")?,
-        etag: row.try_get("etag")?,
-        created_at: row.try_get("created_at")?,
-        updated_at: row.try_get("updated_at")?,
+        next_reconciliation_at: row.next_reconciliation_at,
+        last_reconciliation_at: row.last_reconciliation_at,
+        etag: row.etag,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
     })
 }

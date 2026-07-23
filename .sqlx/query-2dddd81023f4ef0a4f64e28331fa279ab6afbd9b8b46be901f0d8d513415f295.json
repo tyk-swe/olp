@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_event_receipts (event_id, request_id, event_sha256, status, observed_at) SELECT $1, $2, $3, 'rejected'::request_metadata_event_receipt_status, $4 WHERE NOT EXISTS (SELECT 1 FROM usage_facts WHERE id = $1 OR request_id = $2) ON CONFLICT DO NOTHING RETURNING event_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_event_receipts",
+            "name": "event_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2dddd81023f4ef0a4f64e28331fa279ab6afbd9b8b46be901f0d8d513415f295"
+}

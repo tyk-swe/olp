@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_models pm SET upstream_model = prm.upstream_model, display_name = prm.display_name, enabled = prm.enabled, discovered_at = prm.discovered_at FROM provider_revision_models prm WHERE prm.provider_revision_id = $1 AND pm.id = prm.source_provider_model_id AND pm.provider_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c305594a5329fc7df979b4fd946fd3483e31c1cccea353e2e86b44319b37e256"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO runtime_generation_provider_configs (runtime_generation_id, provider_id, kind, endpoint, cloud_region, cloud_project, deployment, api_version, auth_mode, active_credential_version_id, provider_revision_id) SELECT $1, p.id, pr.kind, pr.endpoint, pr.cloud_region, pr.cloud_project, pr.deployment, pr.api_version, pr.auth_mode, pr.credential_version_id, pr.id FROM providers p JOIN provider_revisions pr ON pr.id = p.active_revision_id WHERE p.state <> 'disabled'::provider_state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c724f503bd3fe89d2a81b00c6db79e464d3a89c812dd93041baf9161375b9ee"
+}

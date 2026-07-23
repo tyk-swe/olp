@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO model_capabilities (provider_model_id, operation, surface, mode, source, certified_at) VALUES ($1, 'generation', $2, $3, 'declared', NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "faf0bf3962befeef2602ce307df2ce025434d25bee610cf1868d2892088ac9ba"
+}

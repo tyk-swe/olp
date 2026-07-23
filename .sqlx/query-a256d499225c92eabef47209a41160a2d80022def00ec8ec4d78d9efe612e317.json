@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO runtime_generations (id, compiled_release, release_sha256, created_by, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING sequence AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runtime_generations",
+            "name": "sequence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a256d499225c92eabef47209a41160a2d80022def00ec8ec4d78d9efe612e317"
+}

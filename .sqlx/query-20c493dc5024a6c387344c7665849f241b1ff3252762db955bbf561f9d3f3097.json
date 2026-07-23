@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_media_jobs SET\n                reconciliation_claim_id = NULL,\n                reconciliation_claimed_until = NULL,\n                next_reconciliation_at = $3,\n                reconciliation_error = $4,\n                etag = uuidv7()\n             WHERE id = $1 AND reconciliation_claim_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "20c493dc5024a6c387344c7665849f241b1ff3252762db955bbf561f9d3f3097"
+}

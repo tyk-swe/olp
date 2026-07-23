@@ -257,7 +257,9 @@ test('request filters and cursor history survive list-detail-list navigation', a
       && !filters.has('cursor')
   )).toBe(true);
   await page.getByLabel('Request pages').getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByText('request-page-two', { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText('request-page-two', { exact: true }).filter({ visible: true })
+  ).toBeVisible();
 
   await page.getByRole('link', { name: `View request ${ids.requestTwo}` }).click();
   await page.getByRole('link', { name: 'Back to requests' }).click();
@@ -272,7 +274,9 @@ test('request filters and cursor history survive list-detail-list navigation', a
   await expect(page.getByLabel('Started after')).toHaveValue('2026-07-12T10:00');
   await expect(page.getByLabel('Started before')).toHaveValue('2026-07-12T14:00');
   await expect(page.getByLabel('Request pages')).toContainText('Page 2');
-  await expect(page.getByText('request-page-two', { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText('request-page-two', { exact: true }).filter({ visible: true })
+  ).toBeVisible();
   expect(seenFilters.map((filters) => Object.fromEntries(filters))).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -356,8 +360,11 @@ test('API-key pagination survives new/cancel and resets after leaving the family
   await expect(page.getByLabel('API key pages')).toContainText('Page 2');
   await expect(page.getByText('key-page-two', { exact: true })).toBeVisible();
 
+  const navigationToggle = page.getByRole('button', { name: 'Open navigation' });
+  if (await navigationToggle.isVisible()) await navigationToggle.click();
   await page.getByRole('link', { name: 'Models', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Model inventory', exact: true })).toBeVisible();
+  if (await navigationToggle.isVisible()) await navigationToggle.click();
   await page.getByRole('link', { name: 'API Keys', exact: true }).click();
   await expect(page.getByLabel('API key pages')).toContainText('Page 1');
   await expect(page.getByText('key-page-one', { exact: true })).toBeVisible();

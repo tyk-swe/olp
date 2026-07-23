@@ -97,11 +97,13 @@ impl PgStore {
         &self,
         user_id: Uuid,
     ) -> Result<Option<bool>, PersistenceError> {
-        sqlx::query_scalar("SELECT password_hash IS NOT NULL FROM users WHERE id = $1 AND active")
-            .bind(user_id)
-            .fetch_optional(self.pool())
-            .await
-            .map_err(Into::into)
+        sqlx::query_scalar!(
+            "SELECT password_hash IS NOT NULL AS \"value!\" FROM users WHERE id = $1 AND active",
+            user_id
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(Into::into)
     }
 }
 
@@ -117,7 +119,7 @@ pub(crate) async fn install_recent_authentication(
     if resource_id.is_some() != purpose.requires_resource() || expires_at <= now {
         return Ok(false);
     }
-    let updated = sqlx::query(
+    let updated = sqlx::query!(
         "UPDATE sessions session SET \
              recent_auth_token_digest = $5, recent_auth_purpose = $6, \
              recent_auth_resource_id = $7, recent_auth_expires_at = $8 \
@@ -128,15 +130,15 @@ pub(crate) async fn install_recent_authentication(
                WHERE users.id = session.user_id AND users.active \
                  AND users.security_version = session.security_version \
            )",
+        context.session_id,
+        context.user_id,
+        context.security_version,
+        now,
+        material.token_digest().to_vec(),
+        purpose.as_str(),
+        resource_id,
+        expires_at
     )
-    .bind(context.session_id)
-    .bind(context.user_id)
-    .bind(context.security_version)
-    .bind(now)
-    .bind(material.token_digest().to_vec())
-    .bind(purpose.as_str())
-    .bind(resource_id)
-    .bind(expires_at)
     .execute(&mut **transaction)
     .await?
     .rows_affected();
@@ -168,7 +170,7 @@ pub(crate) async fn consume_recent_authentication(
     if resource_id.is_some() != purpose.requires_resource() {
         return Ok(false);
     }
-    let consumed = sqlx::query(
+    let consumed = sqlx::query!(
         "UPDATE sessions session SET \
              recent_auth_token_digest = NULL, recent_auth_purpose = NULL, \
              recent_auth_resource_id = NULL, recent_auth_expires_at = NULL \
@@ -183,13 +185,13 @@ pub(crate) async fn consume_recent_authentication(
                WHERE users.id = session.user_id AND users.active \
                  AND users.security_version = session.security_version \
            )",
+        session_id,
+        user_id,
+        security_version,
+        token_digest.to_vec(),
+        purpose.as_str(),
+        resource_id
     )
-    .bind(session_id)
-    .bind(user_id)
-    .bind(security_version)
-    .bind(token_digest.to_vec())
-    .bind(purpose.as_str())
-    .bind(resource_id)
     .execute(&mut **transaction)
     .await?
     .rows_affected();
@@ -205,19 +207,19 @@ pub(crate) async fn insert_versioned_session(
     now: DateTime<Utc>,
 ) -> Result<Uuid, sqlx::Error> {
     let session_id = Uuid::now_v7();
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO sessions \
          (id, user_id, security_version, token_digest, csrf_digest, expires_at, \
           last_seen_at, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $7)",
+        session_id,
+        user_id,
+        security_version,
+        material.token_digest().to_vec(),
+        material.csrf_digest().to_vec(),
+        expires_at,
+        now
     )
-    .bind(session_id)
-    .bind(user_id)
-    .bind(security_version)
-    .bind(material.token_digest().to_vec())
-    .bind(material.csrf_digest().to_vec())
-    .bind(expires_at)
-    .bind(now)
     .execute(&mut **transaction)
     .await?;
     Ok(session_id)
@@ -227,11 +229,12 @@ pub(crate) async fn revoke_user_sessions(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    Ok(sqlx::query("DELETE FROM sessions WHERE user_id = $1")
-        .bind(user_id)
-        .execute(&mut **transaction)
-        .await?
-        .rows_affected())
+    Ok(
+        sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user_id)
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected(),
+    )
 }
 
 pub(crate) async fn insert_security_audit(
@@ -242,17 +245,17 @@ pub(crate) async fn insert_security_audit(
     resource_id: &str,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO audit_events \
          (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
          VALUES ($1, $2, $3, $4, $5, 'success', $6)",
+        Uuid::now_v7(),
+        actor_user_id,
+        action,
+        resource_type,
+        resource_id,
+        occurred_at
     )
-    .bind(Uuid::now_v7())
-    .bind(actor_user_id)
-    .bind(action)
-    .bind(resource_type)
-    .bind(resource_id)
-    .bind(occurred_at)
     .execute(&mut **transaction)
     .await?;
     Ok(())

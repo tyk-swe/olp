@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO model_capabilities (provider_model_id, operation, surface, mode, source, certified_at) SELECT prm.source_provider_model_id, prc.operation, prc.surface, prc.mode, 'declared', NULL FROM provider_revision_models prm JOIN provider_revision_capabilities prc ON prc.provider_revision_model_id = prm.id WHERE prm.provider_revision_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3f387280e479250f742885b57d8c2733b0513d7c72719b541f76c76ae06a6c2a"
+}

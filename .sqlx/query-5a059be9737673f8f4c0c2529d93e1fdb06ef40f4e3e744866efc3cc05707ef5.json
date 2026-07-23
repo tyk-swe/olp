@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM public_auth_rate_limits WHERE window_started_at <= now() - interval '10 minutes' LIMIT $1 ) DELETE FROM public_auth_rate_limits rate_limit USING expired WHERE rate_limit.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a059be9737673f8f4c0c2529d93e1fdb06ef40f4e3e744866efc3cc05707ef5"
+}

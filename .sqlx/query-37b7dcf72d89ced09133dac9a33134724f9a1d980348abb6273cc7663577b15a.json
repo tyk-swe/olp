@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT prm.source_provider_model_id FROM providers p JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id WHERE p.id = $1 AND prm.upstream_model = $2 AND prm.enabled AND p.state <> 'disabled'::provider_state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_provider_model_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_models",
+            "name": "source_provider_model_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "37b7dcf72d89ced09133dac9a33134724f9a1d980348abb6273cc7663577b15a"
+}

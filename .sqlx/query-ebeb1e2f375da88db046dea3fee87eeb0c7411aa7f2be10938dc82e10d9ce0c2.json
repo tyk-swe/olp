@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cv.id, cv.version, COALESCE(cv.id = ar.credential_version_id, false) AS \"active!\", COALESCE(p.state = 'draft'::provider_state AND cv.id = p.active_credential_version_id, false) AS \"draft_selected!\", cv.created_at, cv.revoked_at FROM provider_credential_versions cv JOIN providers p ON p.id = cv.provider_id LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id WHERE cv.provider_id = $1 AND ($2::int IS NULL OR cv.version < $2) ORDER BY cv.version DESC LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "active!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "draft_selected!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "revoked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "revoked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "ebeb1e2f375da88db046dea3fee87eeb0c7411aa7f2be10938dc82e10d9ce0c2"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM api_key_route_allowlist WHERE api_key_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf399fb619a628abdd0b199be5e6e4c1ba30d1f8ad61dd092d2a38490abfc9c4"
+}

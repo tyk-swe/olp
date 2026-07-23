@@ -5,7 +5,9 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_domain::ProviderKind;
+use olp_domain::{
+    ProviderAuthMode, ProviderConfiguration, ProviderKind, validate_provider_configuration,
+};
 use olp_providers::ProviderFactory;
 use olp_storage::{ProviderRecord, UpdateProvider};
 use serde::{Deserialize, Serialize};
@@ -13,10 +15,10 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, Problem,
+    FieldErrors, ManagementState, Problem,
     management_api::{
         Permission, common::RuntimeGenerationResponse, if_match, require_idempotency_key,
-        require_mutation_session, require_permission, require_read_session, require_store,
+        require_mutation_session, require_permission, require_read_session,
     },
     provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
 };
@@ -30,7 +32,7 @@ use crate::management_api::configuration::common::{
 pub(crate) struct ProviderSummaryResponse {
     pub id: Uuid,
     pub name: String,
-    pub kind: String,
+    pub kind: ProviderKind,
     pub state: String,
     pub connector_ready: bool,
     pub etag: Uuid,
@@ -51,7 +53,7 @@ impl From<ProviderRecord> for ProviderSummaryResponse {
         Self {
             id: value.id,
             name: value.name,
-            kind: value.kind.to_string(),
+            kind: value.kind,
             state: value.state.to_string(),
             connector_ready: value.connector_ready,
             etag: value.etag,
@@ -73,14 +75,14 @@ impl From<ProviderRecord> for ProviderSummaryResponse {
 pub(crate) struct ProviderDetailResponse {
     pub id: Uuid,
     pub name: String,
-    pub kind: String,
+    pub kind: ProviderKind,
     pub state: String,
     pub endpoint: Option<String>,
     pub cloud_region: Option<String>,
     pub cloud_project: Option<String>,
     pub deployment: Option<String>,
     pub api_version: Option<String>,
-    pub auth_mode: String,
+    pub auth_mode: ProviderAuthMode,
     pub connector_ready: bool,
     pub etag: Uuid,
     pub active_revision: Option<u32>,
@@ -105,14 +107,14 @@ impl From<ProviderRecord> for ProviderDetailResponse {
         Self {
             id: value.id,
             name: value.name,
-            kind: value.kind.to_string(),
+            kind: value.kind,
             state: value.state.to_string(),
             endpoint: value.endpoint,
             cloud_region: value.cloud_region,
             cloud_project: value.cloud_project,
             deployment: value.deployment,
             api_version: value.api_version,
-            auth_mode: value.auth_mode.to_string(),
+            auth_mode: value.auth_mode,
             connector_ready: value.connector_ready,
             etag: value.etag,
             active_revision: value.active_revision,
@@ -155,14 +157,15 @@ pub(crate) struct ProviderListResponse {
     )
 )]
 pub(crate) async fn list_providers(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<ProviderListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_providers(cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -180,13 +183,14 @@ pub(crate) async fn list_providers(
     responses((status = 200, body = ProviderDetailResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn get_provider(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let provider: ProviderDetailResponse = require_store(&state)?
+    let provider: ProviderDetailResponse = state
+        .store()
         .get_provider(provider_id)
         .await
         .map_err(map_configuration_resource)?
@@ -203,7 +207,7 @@ pub(crate) struct UpdateProviderRequest {
     pub cloud_project: Option<String>,
     pub deployment: Option<String>,
     pub api_version: Option<String>,
-    pub auth_mode: String,
+    pub auth_mode: ProviderAuthMode,
 }
 
 #[utoipa::path(
@@ -215,7 +219,7 @@ pub(crate) struct UpdateProviderRequest {
     responses((status = 200, body = ProviderDetailResponse), (status = 412, body = Problem), (status = 422, body = Problem))
 )]
 pub(crate) async fn update_provider(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<UpdateProviderRequest>, JsonRejection>,
@@ -223,13 +227,12 @@ pub(crate) async fn update_provider(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json(payload)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let current = store
         .get_provider(provider_id)
         .await
         .map_err(map_configuration_resource)?;
-    validate_provider_update(&current, &request)
-        .map_err(|detail| validation("provider", &detail))?;
+    validate_provider_update(&current, &request)?;
     let etag = store
         .update_provider(
             provider_id,
@@ -241,9 +244,7 @@ pub(crate) async fn update_provider(
                 cloud_project: request.cloud_project,
                 deployment: request.deployment,
                 api_version: request.api_version,
-                auth_mode: request.auth_mode.parse().map_err(|_| {
-                    validation("auth_mode", "Provider authentication mode is invalid.")
-                })?,
+                auth_mode: request.auth_mode,
             },
             principal.user_id,
         )
@@ -273,13 +274,14 @@ pub(crate) async fn update_provider(
     )
 )]
 pub(crate) async fn disable_provider(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let result = require_store(&state)?
+    let result = state
+        .store()
         .disable_provider(
             provider_id,
             if_match(&headers)?,
@@ -315,13 +317,13 @@ pub(crate) async fn disable_provider(
     responses((status = 200, body = ProviderDetailResponse), (status = 412, body = Problem))
 )]
 pub(crate) async fn restore_provider_as_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let etag = store
         .restore_provider_as_draft(
             provider_id,
@@ -342,132 +344,47 @@ pub(crate) async fn restore_provider_as_draft(
 fn validate_provider_update(
     provider: &ProviderRecord,
     request: &UpdateProviderRequest,
-) -> Result<(), String> {
-    if request.auth_mode != provider.auth_mode.as_str() {
-        return Err(
-            "Provider authentication mode is immutable; create a separate provider to change identity mode."
-                .to_owned(),
-        );
+) -> Result<(), Problem> {
+    if request.auth_mode != provider.auth_mode {
+        return Err(validation(
+            "auth_mode",
+            "Provider authentication mode is immutable; create a separate provider to change identity mode.",
+        ));
     }
-    let model = provider
-        .probe_model
-        .clone()
-        .unwrap_or_else(|| "configuration-probe".to_owned());
-    let kind = provider.kind;
-    match kind {
-        ProviderKind::OpenAi => {
-            require_auth_mode(request, "api_key")?;
-            reject_cloud_fields(request)?;
-            if request.endpoint.is_some() {
-                return Err("Native OpenAI uses the official endpoint; use an OpenAI-compatible provider for a custom endpoint.".to_owned());
-            }
-        }
-        ProviderKind::OpenAiCompatible => {
-            require_auth_mode(request, "api_key")?;
-            reject_cloud_fields(request)?;
-            if request.endpoint.is_none() {
-                return Err("An OpenAI-compatible HTTPS endpoint is required".to_owned());
-            }
-        }
-        ProviderKind::Anthropic => {
-            require_auth_mode(request, "api_key")?;
-            reject_cloud_fields(request)?;
-            if request.endpoint.is_some() {
-                return Err("Native Anthropic uses the official endpoint.".to_owned());
-            }
-        }
-        ProviderKind::Gemini => {
-            require_auth_mode(request, "api_key")?;
-            reject_cloud_fields(request)?;
-            if request.endpoint.is_some() {
-                return Err("Gemini Developer API uses the official endpoint.".to_owned());
-            }
-        }
-        ProviderKind::VertexAi => {
-            if !matches!(request.auth_mode.as_str(), "adc" | "service_account") {
-                return Err("Vertex AI authentication must be adc or service_account.".to_owned());
-            }
-            if request.endpoint.is_some()
-                || request.deployment.is_some()
-                || request.api_version.is_some()
-            {
-                return Err(
-                    "Vertex AI endpoint is derived from its project and location and does not use deployment/API-version fields.".to_owned(),
-                );
-            }
-            if request.cloud_project.is_none() {
-                return Err("Vertex AI cloud project is required".to_owned());
-            }
-            if request.cloud_region.is_none() {
-                return Err("Vertex AI cloud location is required".to_owned());
-            }
-        }
-        ProviderKind::Bedrock => {
-            if !matches!(request.auth_mode.as_str(), "default_chain" | "static") {
-                return Err("Bedrock authentication must be default_chain or static.".to_owned());
-            }
-            if request.endpoint.is_some()
-                || request.cloud_project.is_some()
-                || request.deployment.is_some()
-                || request.api_version.is_some()
-            {
-                return Err("Bedrock accepts only an AWS region and credential mode.".to_owned());
-            }
-            if request.cloud_region.is_none() {
-                return Err("Bedrock AWS region is required".to_owned());
-            }
-        }
-        ProviderKind::AzureOpenAi => {
-            require_auth_mode(request, "api_key")?;
-            if request.cloud_region.is_some() || request.cloud_project.is_some() {
-                return Err("Azure OpenAI does not accept project or region fields.".to_owned());
-            }
-            if request.endpoint.is_none() {
-                return Err("Azure OpenAI resource endpoint is required".to_owned());
-            }
-            if request.deployment.is_none() {
-                return Err("Azure OpenAI deployment is required".to_owned());
-            }
-            if request.api_version.is_none() {
-                return Err("Azure OpenAI API version is required".to_owned());
-            }
-        }
-    }
-    let config = provider_config(ProviderConfigFields {
-        kind,
+
+    let mut errors = FieldErrors::new();
+    for violation in validate_provider_configuration(ProviderConfiguration {
+        kind: provider.kind,
+        auth_mode: request.auth_mode,
         endpoint: request.endpoint.as_deref(),
         cloud_region: request.cloud_region.as_deref(),
         cloud_project: request.cloud_project.as_deref(),
         deployment: request.deployment.as_deref(),
         api_version: request.api_version.as_deref(),
-        auth_mode: request
-            .auth_mode
-            .parse()
-            .map_err(|_| "Provider authentication mode is invalid".to_owned())?,
-        probe_model: Some(&model),
+        model: provider.probe_model.as_deref(),
+        credential_present: Some(provider.draft_credential_id.is_some()),
+    }) {
+        errors
+            .entry(violation.field.as_str().to_owned())
+            .or_default()
+            .push(violation.detail.to_owned());
+    }
+    if !errors.is_empty() {
+        return Err(Problem::validation(errors));
+    }
+
+    let config = provider_config(ProviderConfigFields {
+        kind: provider.kind,
+        endpoint: request.endpoint.as_deref(),
+        cloud_region: request.cloud_region.as_deref(),
+        cloud_project: request.cloud_project.as_deref(),
+        deployment: request.deployment.as_deref(),
+        api_version: request.api_version.as_deref(),
+        auth_mode: request.auth_mode,
+        probe_model: provider.probe_model.as_deref(),
     })
-    .map_err(|error| error.to_string())?;
-    ProviderFactory::validate(&config).map_err(|error| error.to_string())
-}
-
-fn require_auth_mode(request: &UpdateProviderRequest, expected: &str) -> Result<(), String> {
-    if request.auth_mode == expected {
-        Ok(())
-    } else {
-        Err(format!("Provider authentication must be {expected}."))
-    }
-}
-
-fn reject_cloud_fields(request: &UpdateProviderRequest) -> Result<(), String> {
-    if request.cloud_region.is_some()
-        || request.cloud_project.is_some()
-        || request.deployment.is_some()
-        || request.api_version.is_some()
-    {
-        Err("This connector does not accept cloud project, region, deployment, or API-version fields.".to_owned())
-    } else {
-        Ok(())
-    }
+    .map_err(|error| validation("provider", &error.to_string()))?;
+    ProviderFactory::validate(&config).map_err(|error| validation("provider", &error.to_string()))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -495,13 +412,13 @@ pub(crate) struct ProbeResponse {
     )
 )]
 pub(crate) async fn probe_provider(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let expected_etag = if_match(&headers)?;
     let provider = store
         .get_provider(provider_id)

@@ -1,7 +1,21 @@
-use axum::http::Method;
+//! Canonical inference endpoint registry.
+//!
+//! Each routed `(method, path)` pair is declared exactly once in [`ENDPOINTS`].
+//! The declaration owns its handler, surface, operation/metadata policy, body
+//! admission, token estimation, and route extraction behavior.  Axum routing
+//! and request-boundary classification both consume this registry.
+
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    http::Method,
+    routing::{MethodFilter, MethodRouter, on},
+};
 use olp_domain::{OperationKind, RouteSlug, Surface};
 
-use crate::{MAX_JSON_BODY_BYTES, MAX_MEDIA_BODY_BYTES};
+use crate::{GatewayState, MAX_JSON_BODY_BYTES, MAX_MEDIA_BODY_BYTES};
+
+use super::{anthropic, chat, gemini, media, openai_models, responses, videos};
 
 pub(crate) const IMAGE_VARIATION_BODY_BYTES: usize = 55 * 1024 * 1024;
 pub(crate) const TRANSCRIPTION_BODY_BYTES: usize = 30 * 1024 * 1024;
@@ -18,7 +32,7 @@ pub(crate) enum TokenEstimate {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MetadataPolicy {
-    pub(crate) operation: &'static str,
+    pub(crate) operation: OperationKind,
     pub(crate) fallback_route: &'static str,
     pub(crate) always_emit: bool,
 }
@@ -33,8 +47,106 @@ enum BodyAdmission {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) enum EndpointId {
+    OpenAiChatCompletions,
+    OpenAiResponses,
+    OpenAiResponseInputTokens,
+    OpenAiEmbeddings,
+    OpenAiModerations,
+    OpenAiImageGenerations,
+    OpenAiImageEdits,
+    OpenAiImageVariations,
+    OpenAiSpeech,
+    OpenAiTranscriptions,
+    OpenAiVideoCreate,
+    OpenAiVideoList,
+    OpenAiVideoGet,
+    OpenAiVideoDelete,
+    OpenAiVideoContent,
+    OpenAiModelList,
+    OpenAiModelGet,
+    AnthropicMessages,
+    AnthropicCountTokens,
+    AnthropicModelList,
+    AnthropicModelGet,
+    GeminiV1ModelList,
+    GeminiV1ModelGet,
+    GeminiV1ModelAction,
+    GeminiV1BetaModelList,
+    GeminiV1BetaModelGet,
+    GeminiV1BetaModelAction,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InferenceEndpoint {
+enum EndpointMethod {
+    Get,
+    Post,
+    Delete,
+}
+
+impl EndpointMethod {
+    fn matches(self, method: &Method) -> bool {
+        matches!(
+            (self, method),
+            (Self::Get, &Method::GET)
+                | (Self::Post, &Method::POST)
+                | (Self::Delete, &Method::DELETE)
+        )
+    }
+
+    const fn filter(self) -> MethodFilter {
+        match self {
+            Self::Get => MethodFilter::GET,
+            Self::Post => MethodFilter::POST,
+            Self::Delete => MethodFilter::DELETE,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PathMatcher {
+    Exact,
+    SingleSegment {
+        prefix: &'static str,
+        suffix: Option<&'static str>,
+    },
+    Remainder {
+        prefix: &'static str,
+    },
+}
+
+impl PathMatcher {
+    fn matches(self, route_path: &str, request_path: &str) -> bool {
+        match self {
+            Self::Exact => request_path == route_path,
+            Self::SingleSegment { prefix, suffix } => single_segment(request_path, prefix, suffix),
+            Self::Remainder { prefix } => request_path
+                .strip_prefix(prefix)
+                .is_some_and(|resource| !resource.is_empty()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RouteExtraction {
+    JsonModel,
+    JsonModelOrPath,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Policy {
+    Fixed {
+        operation: OperationKind,
+        fallback_route: &'static str,
+        always_emit: bool,
+        token_estimate: TokenEstimate,
+    },
+    GeminiAction,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Handler {
     OpenAiChatCompletions,
     OpenAiResponses,
     OpenAiResponseInputTokens,
@@ -58,171 +170,602 @@ pub(crate) enum InferenceEndpoint {
     AnthropicModelGet,
     GeminiModelList,
     GeminiModelGet,
-    GeminiGenerateContent,
-    GeminiStreamGenerateContent,
-    GeminiCountTokens,
-    GeminiUnknownAction,
+    GeminiModelAction,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct EndpointSpec {
+    pub(crate) id: EndpointId,
+    method: EndpointMethod,
+    pub(crate) route_path: &'static str,
+    matcher: PathMatcher,
+    surface: Surface,
+    policy: Policy,
+    body_admission: BodyAdmission,
+    route_extraction: RouteExtraction,
+    handler: Handler,
+    axum_body_limit: Option<usize>,
+}
+
+macro_rules! fixed_endpoint {
+    (
+        $id:expr, $method:expr, $route_path:expr, $matcher:expr, $surface:expr,
+        $operation:expr, $fallback_route:expr, $always_emit:expr, $token_estimate:expr,
+        $body_admission:expr, $route_extraction:expr, $handler:expr,
+        $axum_body_limit:expr $(,)?
+    ) => {
+        EndpointSpec {
+            id: $id,
+            method: $method,
+            route_path: $route_path,
+            matcher: $matcher,
+            surface: $surface,
+            policy: Policy::Fixed {
+                operation: $operation,
+                fallback_route: $fallback_route,
+                always_emit: $always_emit,
+                token_estimate: $token_estimate,
+            },
+            body_admission: $body_admission,
+            route_extraction: $route_extraction,
+            handler: $handler,
+            axum_body_limit: $axum_body_limit,
+        }
+    };
+}
+
+const fn gemini(
+    id: EndpointId,
+    method: EndpointMethod,
+    route_path: &'static str,
+    matcher: PathMatcher,
+    policy: Policy,
+    operation: OperationKind,
+    handler: Handler,
+) -> EndpointSpec {
+    EndpointSpec {
+        id,
+        method,
+        route_path,
+        matcher,
+        surface: Surface::Gemini,
+        policy: match policy {
+            Policy::GeminiAction => Policy::GeminiAction,
+            Policy::Fixed { .. } => Policy::Fixed {
+                operation,
+                fallback_route: "models",
+                always_emit: true,
+                token_estimate: TokenEstimate::Default,
+            },
+        },
+        body_admission: BodyAdmission::Standard,
+        route_extraction: if matches!(handler, Handler::GeminiModelList) {
+            RouteExtraction::JsonModel
+        } else {
+            RouteExtraction::JsonModelOrPath
+        },
+        handler,
+        axum_body_limit: None,
+    }
+}
+
+const EXACT: PathMatcher = PathMatcher::Exact;
+const INVALID_ROUTE: &str = "invalid-request";
+
+pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
+    fixed_endpoint!(
+        EndpointId::OpenAiChatCompletions,
+        EndpointMethod::Post,
+        "/openai/v1/chat/completions",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::Generation,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Generation,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiChatCompletions,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiResponses,
+        EndpointMethod::Post,
+        "/openai/v1/responses",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::Generation,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Generation,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiResponses,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiResponseInputTokens,
+        EndpointMethod::Post,
+        "/openai/v1/responses/input_tokens",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::TokenCount,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiResponseInputTokens,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiEmbeddings,
+        EndpointMethod::Post,
+        "/openai/v1/embeddings",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::Embeddings,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Embeddings,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiEmbeddings,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiModerations,
+        EndpointMethod::Post,
+        "/openai/v1/moderations",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::Moderation,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiModerations,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiImageGenerations,
+        EndpointMethod::Post,
+        "/openai/v1/images/generations",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::ImageGeneration,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Media,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiImageGenerations,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiImageEdits,
+        EndpointMethod::Post,
+        "/openai/v1/images/edits",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::ImageEdit,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Media,
+        BodyAdmission::Multipart {
+            operation: OperationKind::ImageEdit,
+            reservation_bytes: MAX_MEDIA_BODY_BYTES as u64,
+        },
+        RouteExtraction::JsonModel,
+        Handler::OpenAiImageEdits,
+        Some(MAX_MEDIA_BODY_BYTES),
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiImageVariations,
+        EndpointMethod::Post,
+        "/openai/v1/images/variations",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::ImageVariation,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Media,
+        BodyAdmission::Multipart {
+            operation: OperationKind::ImageVariation,
+            reservation_bytes: IMAGE_VARIATION_BODY_BYTES as u64,
+        },
+        RouteExtraction::JsonModel,
+        Handler::OpenAiImageVariations,
+        Some(IMAGE_VARIATION_BODY_BYTES),
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiSpeech,
+        EndpointMethod::Post,
+        "/openai/v1/audio/speech",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::Speech,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Media,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiSpeech,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiTranscriptions,
+        EndpointMethod::Post,
+        "/openai/v1/audio/transcriptions",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::Transcription,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Transcription,
+        BodyAdmission::Multipart {
+            operation: OperationKind::Transcription,
+            reservation_bytes: TRANSCRIPTION_BODY_BYTES as u64,
+        },
+        RouteExtraction::JsonModel,
+        Handler::OpenAiTranscriptions,
+        Some(TRANSCRIPTION_BODY_BYTES),
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiVideoCreate,
+        EndpointMethod::Post,
+        "/openai/v1/videos",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::VideoCreate,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Media,
+        BodyAdmission::Multipart {
+            operation: OperationKind::VideoCreate,
+            reservation_bytes: VIDEO_CREATE_BODY_BYTES as u64,
+        },
+        RouteExtraction::JsonModel,
+        Handler::OpenAiVideoCreate,
+        Some(VIDEO_CREATE_BODY_BYTES),
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiVideoList,
+        EndpointMethod::Get,
+        "/openai/v1/videos",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::VideoList,
+        "videos",
+        true,
+        TokenEstimate::Media,
+        BodyAdmission::Media,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiVideoList,
+        Some(VIDEO_CREATE_BODY_BYTES),
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiVideoGet,
+        EndpointMethod::Get,
+        "/openai/v1/videos/{video_id}",
+        PathMatcher::SingleSegment {
+            prefix: "/openai/v1/videos/",
+            suffix: None,
+        },
+        Surface::OpenAi,
+        OperationKind::VideoGet,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiVideoGet,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiVideoDelete,
+        EndpointMethod::Delete,
+        "/openai/v1/videos/{video_id}",
+        PathMatcher::SingleSegment {
+            prefix: "/openai/v1/videos/",
+            suffix: None,
+        },
+        Surface::OpenAi,
+        OperationKind::VideoDelete,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiVideoDelete,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiVideoContent,
+        EndpointMethod::Get,
+        "/openai/v1/videos/{video_id}/content",
+        PathMatcher::SingleSegment {
+            prefix: "/openai/v1/videos/",
+            suffix: Some("/content"),
+        },
+        Surface::OpenAi,
+        OperationKind::VideoContent,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiVideoContent,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiModelList,
+        EndpointMethod::Get,
+        "/openai/v1/models",
+        EXACT,
+        Surface::OpenAi,
+        OperationKind::ModelList,
+        "models",
+        true,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::OpenAiModelList,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::OpenAiModelGet,
+        EndpointMethod::Get,
+        "/openai/v1/models/{id}",
+        PathMatcher::SingleSegment {
+            prefix: "/openai/v1/models/",
+            suffix: None,
+        },
+        Surface::OpenAi,
+        OperationKind::ModelGet,
+        "models",
+        true,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModelOrPath,
+        Handler::OpenAiModelGet,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::AnthropicMessages,
+        EndpointMethod::Post,
+        "/anthropic/v1/messages",
+        EXACT,
+        Surface::Anthropic,
+        OperationKind::Generation,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Generation,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::AnthropicMessages,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::AnthropicCountTokens,
+        EndpointMethod::Post,
+        "/anthropic/v1/messages/count_tokens",
+        EXACT,
+        Surface::Anthropic,
+        OperationKind::TokenCount,
+        INVALID_ROUTE,
+        false,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::AnthropicCountTokens,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::AnthropicModelList,
+        EndpointMethod::Get,
+        "/anthropic/v1/models",
+        EXACT,
+        Surface::Anthropic,
+        OperationKind::ModelList,
+        "models",
+        true,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModel,
+        Handler::AnthropicModelList,
+        None,
+    ),
+    fixed_endpoint!(
+        EndpointId::AnthropicModelGet,
+        EndpointMethod::Get,
+        "/anthropic/v1/models/{id}",
+        PathMatcher::SingleSegment {
+            prefix: "/anthropic/v1/models/",
+            suffix: None,
+        },
+        Surface::Anthropic,
+        OperationKind::ModelGet,
+        "models",
+        true,
+        TokenEstimate::Default,
+        BodyAdmission::Standard,
+        RouteExtraction::JsonModelOrPath,
+        Handler::AnthropicModelGet,
+        None,
+    ),
+    gemini(
+        EndpointId::GeminiV1ModelList,
+        EndpointMethod::Get,
+        "/gemini/v1/models",
+        EXACT,
+        Policy::Fixed {
+            operation: OperationKind::ModelList,
+            fallback_route: "models",
+            always_emit: true,
+            token_estimate: TokenEstimate::Default,
+        },
+        OperationKind::ModelList,
+        Handler::GeminiModelList,
+    ),
+    gemini(
+        EndpointId::GeminiV1ModelGet,
+        EndpointMethod::Get,
+        "/gemini/v1/models/{*resource}",
+        PathMatcher::Remainder {
+            prefix: "/gemini/v1/models/",
+        },
+        Policy::Fixed {
+            operation: OperationKind::ModelGet,
+            fallback_route: "models",
+            always_emit: true,
+            token_estimate: TokenEstimate::Default,
+        },
+        OperationKind::ModelGet,
+        Handler::GeminiModelGet,
+    ),
+    gemini(
+        EndpointId::GeminiV1ModelAction,
+        EndpointMethod::Post,
+        "/gemini/v1/models/{*resource}",
+        PathMatcher::Remainder {
+            prefix: "/gemini/v1/models/",
+        },
+        Policy::GeminiAction,
+        OperationKind::Generation,
+        Handler::GeminiModelAction,
+    ),
+    gemini(
+        EndpointId::GeminiV1BetaModelList,
+        EndpointMethod::Get,
+        "/gemini/v1beta/models",
+        EXACT,
+        Policy::Fixed {
+            operation: OperationKind::ModelList,
+            fallback_route: "models",
+            always_emit: true,
+            token_estimate: TokenEstimate::Default,
+        },
+        OperationKind::ModelList,
+        Handler::GeminiModelList,
+    ),
+    gemini(
+        EndpointId::GeminiV1BetaModelGet,
+        EndpointMethod::Get,
+        "/gemini/v1beta/models/{*resource}",
+        PathMatcher::Remainder {
+            prefix: "/gemini/v1beta/models/",
+        },
+        Policy::Fixed {
+            operation: OperationKind::ModelGet,
+            fallback_route: "models",
+            always_emit: true,
+            token_estimate: TokenEstimate::Default,
+        },
+        OperationKind::ModelGet,
+        Handler::GeminiModelGet,
+    ),
+    gemini(
+        EndpointId::GeminiV1BetaModelAction,
+        EndpointMethod::Post,
+        "/gemini/v1beta/models/{*resource}",
+        PathMatcher::Remainder {
+            prefix: "/gemini/v1beta/models/",
+        },
+        Policy::GeminiAction,
+        OperationKind::Generation,
+        Handler::GeminiModelAction,
+    ),
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GeminiAction {
+    Generate,
+    StreamGenerate,
+    CountTokens,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InferenceEndpoint {
+    Registered {
+        spec: &'static EndpointSpec,
+        action: Option<GeminiAction>,
+    },
     Unknown {
         surface: Surface,
         media_body: bool,
-        metadata: Option<MetadataPolicy>,
         token_estimate: TokenEstimate,
-        route_from_path: bool,
     },
 }
 
 impl InferenceEndpoint {
     pub(crate) fn classify(method: &Method, path: &str) -> Option<Self> {
-        let endpoint = match (method, path) {
-            (&Method::POST, "/openai/v1/chat/completions") => Self::OpenAiChatCompletions,
-            (&Method::POST, "/openai/v1/responses") => Self::OpenAiResponses,
-            (&Method::POST, "/openai/v1/responses/input_tokens") => Self::OpenAiResponseInputTokens,
-            (&Method::POST, "/openai/v1/embeddings") => Self::OpenAiEmbeddings,
-            (&Method::POST, "/openai/v1/moderations") => Self::OpenAiModerations,
-            (&Method::POST, "/openai/v1/images/generations") => Self::OpenAiImageGenerations,
-            (&Method::POST, "/openai/v1/images/edits") => Self::OpenAiImageEdits,
-            (&Method::POST, "/openai/v1/images/variations") => Self::OpenAiImageVariations,
-            (&Method::POST, "/openai/v1/audio/speech") => Self::OpenAiSpeech,
-            (&Method::POST, "/openai/v1/audio/transcriptions") => Self::OpenAiTranscriptions,
-            (&Method::POST, "/openai/v1/videos") => Self::OpenAiVideoCreate,
-            (&Method::GET, "/openai/v1/videos") => Self::OpenAiVideoList,
-            (&Method::GET, "/openai/v1/models") => Self::OpenAiModelList,
-            (&Method::GET, "/anthropic/v1/models") => Self::AnthropicModelList,
-            (&Method::POST, "/anthropic/v1/messages") => Self::AnthropicMessages,
-            (&Method::POST, "/anthropic/v1/messages/count_tokens") => Self::AnthropicCountTokens,
-            _ if method == Method::GET
-                && single_segment(path, "/openai/v1/videos/", Some("/content")) =>
-            {
-                Self::OpenAiVideoContent
-            }
-            _ if method == Method::GET && single_segment(path, "/openai/v1/videos/", None) => {
-                Self::OpenAiVideoGet
-            }
-            _ if method == Method::DELETE && single_segment(path, "/openai/v1/videos/", None) => {
-                Self::OpenAiVideoDelete
-            }
-            _ if method == Method::GET && single_segment(path, "/openai/v1/models/", None) => {
-                Self::OpenAiModelGet
-            }
-            _ if method == Method::GET && single_segment(path, "/anthropic/v1/models/", None) => {
-                Self::AnthropicModelGet
-            }
-            _ if let Some(resource) = gemini_model_resource(path) => match *method {
-                Method::GET => Self::GeminiModelGet,
-                Method::POST if resource.ends_with(":generateContent") => {
-                    Self::GeminiGenerateContent
-                }
-                Method::POST if resource.ends_with(":streamGenerateContent") => {
-                    Self::GeminiStreamGenerateContent
-                }
-                Method::POST if resource.ends_with(":countTokens") => Self::GeminiCountTokens,
-                Method::POST => Self::GeminiUnknownAction,
-                _ => return Self::unknown(method, path),
-            },
-            _ if method == Method::GET
-                && matches!(path, "/gemini/v1/models" | "/gemini/v1beta/models") =>
-            {
-                Self::GeminiModelList
-            }
-            _ => return Self::unknown(method, path),
-        };
-        Some(endpoint)
-    }
-
-    fn unknown(method: &Method, path: &str) -> Option<Self> {
+        if let Some(spec) = ENDPOINTS
+            .iter()
+            .find(|spec| spec.method.matches(method) && spec.matcher.matches(spec.route_path, path))
+        {
+            let action = matches!(spec.policy, Policy::GeminiAction).then(|| gemini_action(path));
+            return Some(Self::Registered { spec, action });
+        }
         let surface = surface_from_path(path)?;
-        let metadata = legacy_metadata(method, path);
         Some(Self::Unknown {
             surface,
             media_body: path.starts_with("/openai/v1/images/")
                 || path.starts_with("/openai/v1/audio/")
                 || path == "/openai/v1/videos",
-            metadata,
             token_estimate: token_estimate_from_path(path),
-            route_from_path: metadata.is_some() && path.contains("/models/"),
         })
     }
 
     pub(crate) const fn surface(self) -> Surface {
         match self {
-            Self::AnthropicMessages
-            | Self::AnthropicCountTokens
-            | Self::AnthropicModelList
-            | Self::AnthropicModelGet => Surface::Anthropic,
-            Self::GeminiModelList
-            | Self::GeminiModelGet
-            | Self::GeminiGenerateContent
-            | Self::GeminiStreamGenerateContent
-            | Self::GeminiCountTokens
-            | Self::GeminiUnknownAction => Surface::Gemini,
+            Self::Registered { spec, .. } => spec.surface,
             Self::Unknown { surface, .. } => surface,
-            _ => Surface::OpenAi,
         }
     }
 
     pub(crate) const fn metadata(self) -> Option<MetadataPolicy> {
-        let (operation, fallback_route, always_emit) = match self {
-            Self::OpenAiModelList | Self::AnthropicModelList | Self::GeminiModelList => {
-                ("model_list", "models", true)
-            }
-            Self::OpenAiModelGet | Self::AnthropicModelGet | Self::GeminiModelGet => {
-                ("model_get", "models", true)
-            }
-            Self::OpenAiVideoList => ("video_list", "videos", true),
-            Self::OpenAiVideoCreate => ("video_create", "invalid-request", false),
-            Self::OpenAiVideoGet => ("video_get", "invalid-request", false),
-            Self::OpenAiVideoDelete => ("video_delete", "invalid-request", false),
-            Self::OpenAiVideoContent => ("video_content", "invalid-request", false),
-            Self::OpenAiResponseInputTokens
-            | Self::AnthropicCountTokens
-            | Self::GeminiCountTokens => ("token_count", "invalid-request", false),
-            Self::OpenAiEmbeddings => ("embeddings", "invalid-request", false),
-            Self::OpenAiImageGenerations => ("image_generation", "invalid-request", false),
-            Self::OpenAiImageEdits => ("image_edit", "invalid-request", false),
-            Self::OpenAiImageVariations => ("image_variation", "invalid-request", false),
-            Self::OpenAiSpeech => ("speech", "invalid-request", false),
-            Self::OpenAiTranscriptions => ("transcription", "invalid-request", false),
-            Self::OpenAiModerations => ("moderation", "invalid-request", false),
-            Self::OpenAiChatCompletions
-            | Self::OpenAiResponses
-            | Self::AnthropicMessages
-            | Self::GeminiGenerateContent
-            | Self::GeminiStreamGenerateContent => ("generation", "invalid-request", false),
-            Self::GeminiUnknownAction => return None,
-            Self::Unknown { metadata, .. } => return metadata,
+        let Self::Registered { spec, action } = self else {
+            return None;
         };
-        Some(MetadataPolicy {
-            operation,
-            fallback_route,
-            always_emit,
-        })
+        match spec.policy {
+            Policy::Fixed {
+                operation,
+                fallback_route,
+                always_emit,
+                ..
+            } => Some(MetadataPolicy {
+                operation,
+                fallback_route,
+                always_emit,
+            }),
+            Policy::GeminiAction => match action {
+                Some(GeminiAction::Generate | GeminiAction::StreamGenerate) => {
+                    Some(MetadataPolicy {
+                        operation: OperationKind::Generation,
+                        fallback_route: INVALID_ROUTE,
+                        always_emit: false,
+                    })
+                }
+                Some(GeminiAction::CountTokens) => Some(MetadataPolicy {
+                    operation: OperationKind::TokenCount,
+                    fallback_route: INVALID_ROUTE,
+                    always_emit: false,
+                }),
+                Some(GeminiAction::Unsupported) | None => None,
+            },
+        }
     }
 
     const fn body_admission(self) -> BodyAdmission {
         match self {
-            Self::OpenAiImageEdits => BodyAdmission::Multipart {
-                operation: OperationKind::ImageEdit,
-                reservation_bytes: MAX_MEDIA_BODY_BYTES as u64,
-            },
-            Self::OpenAiImageVariations => BodyAdmission::Multipart {
-                operation: OperationKind::ImageVariation,
-                reservation_bytes: IMAGE_VARIATION_BODY_BYTES as u64,
-            },
-            Self::OpenAiTranscriptions => BodyAdmission::Multipart {
-                operation: OperationKind::Transcription,
-                reservation_bytes: TRANSCRIPTION_BODY_BYTES as u64,
-            },
-            Self::OpenAiVideoCreate => BodyAdmission::Multipart {
-                operation: OperationKind::VideoCreate,
-                reservation_bytes: VIDEO_CREATE_BODY_BYTES as u64,
-            },
-            Self::OpenAiImageGenerations | Self::OpenAiSpeech | Self::OpenAiVideoList => {
-                BodyAdmission::Media
-            }
+            Self::Registered { spec, .. } => spec.body_admission,
             Self::Unknown {
                 media_body: true, ..
             } => BodyAdmission::Media,
-            _ => BodyAdmission::Standard,
+            Self::Unknown { .. } => BodyAdmission::Standard,
         }
     }
 
@@ -244,25 +787,24 @@ impl InferenceEndpoint {
                 operation,
                 reservation_bytes,
             } => Some((operation, reservation_bytes)),
-            _ => None,
+            BodyAdmission::Standard | BodyAdmission::Media => None,
         }
     }
 
     pub(crate) const fn token_estimate(self) -> TokenEstimate {
         match self {
-            Self::OpenAiChatCompletions
-            | Self::OpenAiResponses
-            | Self::AnthropicMessages
-            | Self::GeminiGenerateContent
-            | Self::GeminiStreamGenerateContent => TokenEstimate::Generation,
-            Self::OpenAiEmbeddings => TokenEstimate::Embeddings,
-            Self::OpenAiTranscriptions => TokenEstimate::Transcription,
-            Self::OpenAiImageEdits
-            | Self::OpenAiImageVariations
-            | Self::OpenAiVideoCreate
-            | Self::OpenAiVideoList => TokenEstimate::Media,
+            Self::Registered { spec, action } => match spec.policy {
+                Policy::Fixed { token_estimate, .. } => token_estimate,
+                Policy::GeminiAction => match action {
+                    Some(GeminiAction::Generate | GeminiAction::StreamGenerate) => {
+                        TokenEstimate::Generation
+                    }
+                    Some(GeminiAction::CountTokens | GeminiAction::Unsupported) | None => {
+                        TokenEstimate::Default
+                    }
+                },
+            },
             Self::Unknown { token_estimate, .. } => token_estimate,
-            _ => TokenEstimate::Default,
         }
     }
 
@@ -273,27 +815,54 @@ impl InferenceEndpoint {
         {
             return Some(model.to_owned());
         }
-        let route_from_path = matches!(
-            self,
-            Self::OpenAiModelGet
-                | Self::AnthropicModelGet
-                | Self::GeminiModelGet
-                | Self::GeminiGenerateContent
-                | Self::GeminiStreamGenerateContent
-                | Self::GeminiCountTokens
-                | Self::GeminiUnknownAction
-                | Self::Unknown {
-                    route_from_path: true,
-                    ..
-                }
-        );
-        if !route_from_path {
+        let Self::Registered { spec, .. } = self else {
+            return None;
+        };
+        if spec.route_extraction != RouteExtraction::JsonModelOrPath {
             return None;
         }
         let resource = path.split("/models/").nth(1)?;
         let model = resource.split(':').next()?;
         RouteSlug::parse(model).is_ok().then(|| model.to_owned())
     }
+}
+
+pub(super) fn router() -> Router<GatewayState> {
+    ENDPOINTS.iter().fold(Router::new(), register)
+}
+
+fn register(router: Router<GatewayState>, spec: &'static EndpointSpec) -> Router<GatewayState> {
+    let filter = spec.method.filter();
+    let method_router: MethodRouter<GatewayState> = match spec.handler {
+        Handler::OpenAiChatCompletions => on(filter, chat::chat_completions),
+        Handler::OpenAiResponses => on(filter, responses::responses),
+        Handler::OpenAiResponseInputTokens => on(filter, responses::response_input_tokens),
+        Handler::OpenAiEmbeddings => on(filter, media::embeddings),
+        Handler::OpenAiModerations => on(filter, media::moderations),
+        Handler::OpenAiImageGenerations => on(filter, media::image_generations),
+        Handler::OpenAiImageEdits => on(filter, media::image_edits),
+        Handler::OpenAiImageVariations => on(filter, media::image_variations),
+        Handler::OpenAiSpeech => on(filter, media::speech),
+        Handler::OpenAiTranscriptions => on(filter, media::transcriptions),
+        Handler::OpenAiVideoCreate => on(filter, videos::video_create),
+        Handler::OpenAiVideoList => on(filter, videos::video_list),
+        Handler::OpenAiVideoGet => on(filter, videos::video_get),
+        Handler::OpenAiVideoDelete => on(filter, videos::video_delete),
+        Handler::OpenAiVideoContent => on(filter, videos::video_content),
+        Handler::OpenAiModelList => on(filter, openai_models::list_models),
+        Handler::OpenAiModelGet => on(filter, openai_models::get_model),
+        Handler::AnthropicMessages => on(filter, anthropic::messages),
+        Handler::AnthropicCountTokens => on(filter, anthropic::count_tokens),
+        Handler::AnthropicModelList => on(filter, anthropic::models),
+        Handler::AnthropicModelGet => on(filter, anthropic::model),
+        Handler::GeminiModelList => on(filter, gemini::models),
+        Handler::GeminiModelGet => on(filter, gemini::model),
+        Handler::GeminiModelAction => on(filter, gemini::action),
+    };
+    let method_router = spec.axum_body_limit.map_or(method_router.clone(), |limit| {
+        method_router.layer(DefaultBodyLimit::max(limit))
+    });
+    router.route(spec.route_path, method_router)
 }
 
 fn surface_from_path(path: &str) -> Option<Surface> {
@@ -322,10 +891,16 @@ fn single_segment(path: &str, prefix: &str, suffix: Option<&str>) -> bool {
     !resource.is_empty() && !resource.contains('/')
 }
 
-fn gemini_model_resource(path: &str) -> Option<&str> {
-    path.strip_prefix("/gemini/v1/models/")
-        .or_else(|| path.strip_prefix("/gemini/v1beta/models/"))
-        .filter(|resource| !resource.is_empty())
+fn gemini_action(path: &str) -> GeminiAction {
+    if path.ends_with(":generateContent") {
+        GeminiAction::Generate
+    } else if path.ends_with(":streamGenerateContent") {
+        GeminiAction::StreamGenerate
+    } else if path.ends_with(":countTokens") {
+        GeminiAction::CountTokens
+    } else {
+        GeminiAction::Unsupported
+    }
 }
 
 fn is_media_content_type(content_type: &str) -> bool {
@@ -358,445 +933,83 @@ fn token_estimate_from_path(path: &str) -> TokenEstimate {
     }
 }
 
-fn legacy_metadata(method: &Method, path: &str) -> Option<MetadataPolicy> {
-    let (operation, fallback_route, always_emit) = if method == Method::GET
-        && matches!(
-            path,
-            "/openai/v1/models"
-                | "/anthropic/v1/models"
-                | "/gemini/v1/models"
-                | "/gemini/v1beta/models"
-        ) {
-        ("model_list", "models", true)
-    } else if method == Method::GET
-        && (path.starts_with("/openai/v1/models/")
-            || path.starts_with("/anthropic/v1/models/")
-            || path.starts_with("/gemini/v1/models/")
-            || path.starts_with("/gemini/v1beta/models/"))
-    {
-        ("model_get", "models", true)
-    } else if path == "/openai/v1/videos" && method == Method::GET {
-        ("video_list", "videos", true)
-    } else if path == "/openai/v1/videos" && method == Method::POST {
-        ("video_create", "invalid-request", false)
-    } else if path.starts_with("/openai/v1/videos/") && path.ends_with("/content") {
-        ("video_content", "invalid-request", false)
-    } else if path.starts_with("/openai/v1/videos/") && method == Method::DELETE {
-        ("video_delete", "invalid-request", false)
-    } else if path.starts_with("/openai/v1/videos/") && method == Method::GET {
-        ("video_get", "invalid-request", false)
-    } else if path == "/openai/v1/responses/input_tokens"
-        || path == "/anthropic/v1/messages/count_tokens"
-        || path.ends_with(":countTokens")
-    {
-        ("token_count", "invalid-request", false)
-    } else if path == "/openai/v1/embeddings" {
-        ("embeddings", "invalid-request", false)
-    } else if path == "/openai/v1/images/generations" {
-        ("image_generation", "invalid-request", false)
-    } else if path == "/openai/v1/images/edits" {
-        ("image_edit", "invalid-request", false)
-    } else if path == "/openai/v1/images/variations" {
-        ("image_variation", "invalid-request", false)
-    } else if path == "/openai/v1/audio/speech" {
-        ("speech", "invalid-request", false)
-    } else if path == "/openai/v1/audio/transcriptions" {
-        ("transcription", "invalid-request", false)
-    } else if path == "/openai/v1/moderations" {
-        ("moderation", "invalid-request", false)
-    } else if path == "/openai/v1/chat/completions"
-        || path == "/openai/v1/responses"
-        || path == "/anthropic/v1/messages"
-        || path.ends_with(":generateContent")
-        || path.ends_with(":streamGenerateContent")
-    {
-        ("generation", "invalid-request", false)
-    } else {
-        return None;
-    };
-    Some(MetadataPolicy {
-        operation,
-        fallback_route,
-        always_emit,
-    })
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
-    fn assert_registered_facts(endpoint: InferenceEndpoint, path: &str) {
-        let expected_surface = match endpoint {
-            InferenceEndpoint::AnthropicMessages
-            | InferenceEndpoint::AnthropicCountTokens
-            | InferenceEndpoint::AnthropicModelList
-            | InferenceEndpoint::AnthropicModelGet => Surface::Anthropic,
-            InferenceEndpoint::GeminiModelList
-            | InferenceEndpoint::GeminiModelGet
-            | InferenceEndpoint::GeminiGenerateContent
-            | InferenceEndpoint::GeminiStreamGenerateContent
-            | InferenceEndpoint::GeminiCountTokens
-            | InferenceEndpoint::GeminiUnknownAction => Surface::Gemini,
-            InferenceEndpoint::Unknown { .. } => panic!("registered matrix contains an unknown"),
-            _ => Surface::OpenAi,
-        };
-        assert_eq!(endpoint.surface(), expected_surface, "surface for {path}");
-
-        let expected_metadata = match endpoint {
-            InferenceEndpoint::OpenAiModelList
-            | InferenceEndpoint::AnthropicModelList
-            | InferenceEndpoint::GeminiModelList => Some(("model_list", "models", true)),
-            InferenceEndpoint::OpenAiModelGet
-            | InferenceEndpoint::AnthropicModelGet
-            | InferenceEndpoint::GeminiModelGet => Some(("model_get", "models", true)),
-            InferenceEndpoint::OpenAiVideoList => Some(("video_list", "videos", true)),
-            InferenceEndpoint::OpenAiVideoCreate => {
-                Some(("video_create", "invalid-request", false))
+    fn representative_path(spec: &EndpointSpec) -> String {
+        match spec.matcher {
+            PathMatcher::Exact => spec.route_path.to_owned(),
+            PathMatcher::SingleSegment { prefix, suffix } => {
+                format!("{prefix}route-1{}", suffix.unwrap_or_default())
             }
-            InferenceEndpoint::OpenAiVideoGet => Some(("video_get", "invalid-request", false)),
-            InferenceEndpoint::OpenAiVideoDelete => {
-                Some(("video_delete", "invalid-request", false))
+            PathMatcher::Remainder { prefix } => {
+                if matches!(spec.policy, Policy::GeminiAction) {
+                    format!("{prefix}route-1:generateContent")
+                } else {
+                    format!("{prefix}route-1")
+                }
             }
-            InferenceEndpoint::OpenAiVideoContent => {
-                Some(("video_content", "invalid-request", false))
-            }
-            InferenceEndpoint::OpenAiResponseInputTokens
-            | InferenceEndpoint::AnthropicCountTokens
-            | InferenceEndpoint::GeminiCountTokens => {
-                Some(("token_count", "invalid-request", false))
-            }
-            InferenceEndpoint::OpenAiEmbeddings => Some(("embeddings", "invalid-request", false)),
-            InferenceEndpoint::OpenAiImageGenerations => {
-                Some(("image_generation", "invalid-request", false))
-            }
-            InferenceEndpoint::OpenAiImageEdits => Some(("image_edit", "invalid-request", false)),
-            InferenceEndpoint::OpenAiImageVariations => {
-                Some(("image_variation", "invalid-request", false))
-            }
-            InferenceEndpoint::OpenAiSpeech => Some(("speech", "invalid-request", false)),
-            InferenceEndpoint::OpenAiTranscriptions => {
-                Some(("transcription", "invalid-request", false))
-            }
-            InferenceEndpoint::OpenAiModerations => Some(("moderation", "invalid-request", false)),
-            InferenceEndpoint::OpenAiChatCompletions
-            | InferenceEndpoint::OpenAiResponses
-            | InferenceEndpoint::AnthropicMessages
-            | InferenceEndpoint::GeminiGenerateContent
-            | InferenceEndpoint::GeminiStreamGenerateContent => {
-                Some(("generation", "invalid-request", false))
-            }
-            InferenceEndpoint::GeminiUnknownAction => None,
-            InferenceEndpoint::Unknown { .. } => unreachable!(),
-        };
-        assert_eq!(
-            endpoint.metadata().map(|policy| (
-                policy.operation,
-                policy.fallback_route,
-                policy.always_emit
-            )),
-            expected_metadata,
-            "metadata for {path}"
-        );
-
-        let expected_multipart = match endpoint {
-            InferenceEndpoint::OpenAiImageEdits => {
-                Some((OperationKind::ImageEdit, MAX_MEDIA_BODY_BYTES as u64))
-            }
-            InferenceEndpoint::OpenAiImageVariations => Some((
-                OperationKind::ImageVariation,
-                IMAGE_VARIATION_BODY_BYTES as u64,
-            )),
-            InferenceEndpoint::OpenAiTranscriptions => Some((
-                OperationKind::Transcription,
-                TRANSCRIPTION_BODY_BYTES as u64,
-            )),
-            InferenceEndpoint::OpenAiVideoCreate => {
-                Some((OperationKind::VideoCreate, VIDEO_CREATE_BODY_BYTES as u64))
-            }
-            _ => None,
-        };
-        assert_eq!(
-            endpoint.multipart(),
-            expected_multipart,
-            "multipart for {path}"
-        );
-        let uses_media_ceiling = matches!(
-            endpoint,
-            InferenceEndpoint::OpenAiImageGenerations
-                | InferenceEndpoint::OpenAiImageEdits
-                | InferenceEndpoint::OpenAiImageVariations
-                | InferenceEndpoint::OpenAiSpeech
-                | InferenceEndpoint::OpenAiTranscriptions
-                | InferenceEndpoint::OpenAiVideoCreate
-                | InferenceEndpoint::OpenAiVideoList
-        );
-        assert_eq!(
-            endpoint.body_limit("multipart/form-data; boundary=matrix"),
-            if uses_media_ceiling {
-                MAX_MEDIA_BODY_BYTES
-            } else {
-                MAX_JSON_BODY_BYTES
-            },
-            "body class for {path}"
-        );
-
-        let expected_tokens = match endpoint {
-            InferenceEndpoint::OpenAiChatCompletions
-            | InferenceEndpoint::OpenAiResponses
-            | InferenceEndpoint::AnthropicMessages
-            | InferenceEndpoint::GeminiGenerateContent
-            | InferenceEndpoint::GeminiStreamGenerateContent => TokenEstimate::Generation,
-            InferenceEndpoint::OpenAiEmbeddings => TokenEstimate::Embeddings,
-            InferenceEndpoint::OpenAiTranscriptions => TokenEstimate::Transcription,
-            InferenceEndpoint::OpenAiImageEdits
-            | InferenceEndpoint::OpenAiImageVariations
-            | InferenceEndpoint::OpenAiVideoCreate
-            | InferenceEndpoint::OpenAiVideoList => TokenEstimate::Media,
-            InferenceEndpoint::Unknown { .. } => unreachable!(),
-            _ => TokenEstimate::Default,
-        };
-        assert_eq!(
-            endpoint.token_estimate(),
-            expected_tokens,
-            "tokens for {path}"
-        );
-
-        let expected_path_route = match endpoint {
-            InferenceEndpoint::OpenAiModelGet
-            | InferenceEndpoint::AnthropicModelGet
-            | InferenceEndpoint::GeminiModelGet
-            | InferenceEndpoint::GeminiGenerateContent
-            | InferenceEndpoint::GeminiStreamGenerateContent
-            | InferenceEndpoint::GeminiCountTokens
-            | InferenceEndpoint::GeminiUnknownAction => path
-                .split("/models/")
-                .nth(1)
-                .and_then(|resource| resource.split(':').next())
-                .filter(|model| RouteSlug::parse(*model).is_ok())
-                .map(str::to_owned),
-            _ => None,
-        };
-        assert_eq!(
-            endpoint.route_from_json(path, b"{}"),
-            expected_path_route,
-            "path route for {path}"
-        );
+        }
     }
 
-    #[test]
-    fn registered_endpoint_policy_matrix_is_complete() {
-        let cases = [
-            (
-                Method::POST,
-                "/openai/v1/chat/completions",
-                InferenceEndpoint::OpenAiChatCompletions,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/responses",
-                InferenceEndpoint::OpenAiResponses,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/responses/input_tokens",
-                InferenceEndpoint::OpenAiResponseInputTokens,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/embeddings",
-                InferenceEndpoint::OpenAiEmbeddings,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/moderations",
-                InferenceEndpoint::OpenAiModerations,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/images/generations",
-                InferenceEndpoint::OpenAiImageGenerations,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/images/edits",
-                InferenceEndpoint::OpenAiImageEdits,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/images/variations",
-                InferenceEndpoint::OpenAiImageVariations,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/audio/speech",
-                InferenceEndpoint::OpenAiSpeech,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/audio/transcriptions",
-                InferenceEndpoint::OpenAiTranscriptions,
-            ),
-            (
-                Method::POST,
-                "/openai/v1/videos",
-                InferenceEndpoint::OpenAiVideoCreate,
-            ),
-            (
-                Method::GET,
-                "/openai/v1/videos",
-                InferenceEndpoint::OpenAiVideoList,
-            ),
-            (
-                Method::GET,
-                "/openai/v1/videos/video-1",
-                InferenceEndpoint::OpenAiVideoGet,
-            ),
-            (
-                Method::DELETE,
-                "/openai/v1/videos/video-1",
-                InferenceEndpoint::OpenAiVideoDelete,
-            ),
-            (
-                Method::GET,
-                "/openai/v1/videos/video-1/content",
-                InferenceEndpoint::OpenAiVideoContent,
-            ),
-            (
-                Method::GET,
-                "/openai/v1/models",
-                InferenceEndpoint::OpenAiModelList,
-            ),
-            (
-                Method::GET,
-                "/openai/v1/models/route-1",
-                InferenceEndpoint::OpenAiModelGet,
-            ),
-            (
-                Method::POST,
-                "/anthropic/v1/messages",
-                InferenceEndpoint::AnthropicMessages,
-            ),
-            (
-                Method::POST,
-                "/anthropic/v1/messages/count_tokens",
-                InferenceEndpoint::AnthropicCountTokens,
-            ),
-            (
-                Method::GET,
-                "/anthropic/v1/models",
-                InferenceEndpoint::AnthropicModelList,
-            ),
-            (
-                Method::GET,
-                "/anthropic/v1/models/route-1",
-                InferenceEndpoint::AnthropicModelGet,
-            ),
-            (
-                Method::GET,
-                "/gemini/v1/models",
-                InferenceEndpoint::GeminiModelList,
-            ),
-            (
-                Method::GET,
-                "/gemini/v1/models/route-1",
-                InferenceEndpoint::GeminiModelGet,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1/models/route-1:generateContent",
-                InferenceEndpoint::GeminiGenerateContent,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1/models/route-1:streamGenerateContent",
-                InferenceEndpoint::GeminiStreamGenerateContent,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1/models/route-1:countTokens",
-                InferenceEndpoint::GeminiCountTokens,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1/models/route-1:unknown",
-                InferenceEndpoint::GeminiUnknownAction,
-            ),
-            (
-                Method::GET,
-                "/gemini/v1beta/models",
-                InferenceEndpoint::GeminiModelList,
-            ),
-            (
-                Method::GET,
-                "/gemini/v1beta/models/team/route-1",
-                InferenceEndpoint::GeminiModelGet,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1beta/models/team/route-1:generateContent",
-                InferenceEndpoint::GeminiGenerateContent,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1beta/models/team/route-1:streamGenerateContent",
-                InferenceEndpoint::GeminiStreamGenerateContent,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1beta/models/team/route-1:countTokens",
-                InferenceEndpoint::GeminiCountTokens,
-            ),
-            (
-                Method::POST,
-                "/gemini/v1beta/models/team/route-1:unknown",
-                InferenceEndpoint::GeminiUnknownAction,
-            ),
-        ];
-        for (method, path, expected) in cases {
-            assert_eq!(
-                InferenceEndpoint::classify(&method, path),
-                Some(expected),
-                "{method} {path}"
-            );
-            assert_registered_facts(expected, path);
+    fn method(spec: &EndpointSpec) -> Method {
+        match spec.method {
+            EndpointMethod::Get => Method::GET,
+            EndpointMethod::Post => Method::POST,
+            EndpointMethod::Delete => Method::DELETE,
         }
     }
 
     #[test]
-    fn representative_unknown_paths_keep_protocol_boundary_policy() {
-        for (method, path, surface) in [
-            (Method::GET, "/openai/v1/not-enabled", Surface::OpenAi),
-            (Method::GET, "/anthropic/v2/messages", Surface::Anthropic),
-            (
-                Method::DELETE,
-                "/gemini/v1/models/route:generateContent",
-                Surface::Gemini,
-            ),
-            (Method::GET, "/openai/v1/videos/id/extra", Surface::OpenAi),
-        ] {
-            let endpoint = InferenceEndpoint::classify(&method, path).unwrap();
+    fn registry_identities_and_routes_are_unique() {
+        let mut identities = BTreeSet::new();
+        let mut routes = BTreeSet::new();
+        for spec in ENDPOINTS {
             assert!(
-                matches!(endpoint, InferenceEndpoint::Unknown { .. }),
-                "{method} {path}"
+                identities.insert(spec.id),
+                "duplicate identity: {:?}",
+                spec.id
             );
-            assert_eq!(endpoint.surface(), surface);
+            assert!(
+                routes.insert((spec.method as u8, spec.route_path)),
+                "duplicate route: {:?} {}",
+                spec.method,
+                spec.route_path
+            );
         }
-        assert_eq!(
-            InferenceEndpoint::classify(&Method::GET, "/api/v1/models"),
-            None
-        );
     }
 
     #[test]
-    fn resource_names_do_not_change_endpoint_token_categories() {
-        for path in [
-            "/openai/v1/models/responses",
-            "/openai/v1/videos/embeddings",
-            "/anthropic/v1/models/messages",
-            "/gemini/v1/models/route:generateContent",
-        ] {
-            let endpoint = InferenceEndpoint::classify(&Method::GET, path).unwrap();
-            assert_eq!(endpoint.token_estimate(), TokenEstimate::Default, "{path}");
+    fn every_registry_entry_drives_classification_and_policy() {
+        for spec in ENDPOINTS {
+            let path = representative_path(spec);
+            let endpoint = InferenceEndpoint::classify(&method(spec), &path)
+                .expect("a registered surface is classified");
+            let InferenceEndpoint::Registered {
+                spec: classified, ..
+            } = endpoint
+            else {
+                panic!("registered endpoint classified as unknown: {:?}", spec.id);
+            };
+            assert_eq!(classified.id, spec.id);
+            assert_eq!(endpoint.surface(), spec.surface);
+            assert!(endpoint.metadata().is_some());
         }
+    }
+
+    #[test]
+    fn unsupported_gemini_actions_are_explicit_and_metadata_free() {
+        let endpoint =
+            InferenceEndpoint::classify(&Method::POST, "/gemini/v1/models/route-1:unsupported")
+                .unwrap();
+        assert_eq!(endpoint.surface(), Surface::Gemini);
+        assert_eq!(endpoint.metadata(), None);
+        assert_eq!(
+            endpoint.route_from_json("/gemini/v1/models/route-1:unsupported", b"{}"),
+            Some("route-1".to_owned())
+        );
     }
 }

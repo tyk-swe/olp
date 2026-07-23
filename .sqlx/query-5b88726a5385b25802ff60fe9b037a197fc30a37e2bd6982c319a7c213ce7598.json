@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE providers SET name = $1, endpoint = $2, cloud_region = $3, cloud_project = $4, deployment = $5, api_version = $6, auth_mode = $7, connector_ready = $8, active_credential_version_id = $9, state = 'draft'::provider_state, etag = $10, updated_at = now(), last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL WHERE id = $11",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b88726a5385b25802ff60fe9b037a197fc30a37e2bd6982c319a7c213ce7598"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oidc_group_role_mappings WHERE configuration_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c750bac7e99a8cb94e487928b818601cdc458c269f6fcba47fd76f661c8bdbf7"
+}

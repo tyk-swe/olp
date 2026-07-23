@@ -40,8 +40,9 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [31; 32])));
     configure_bootstrap(&mut state, [32; 32]);
-    let observability_state = state.clone();
-    let app = public_router(state);
+    let dependencies = state.mode_dependencies().unwrap();
+    let observability_state = dependencies.observability();
+    let app = public_router(dependencies.management().unwrap());
     let observability = observability_router(observability_state.clone());
 
     let setup = send(

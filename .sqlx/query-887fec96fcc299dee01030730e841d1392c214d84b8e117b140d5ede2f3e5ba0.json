@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT concat(p.name, '/', pm.upstream_model) AS \"value!\" FROM route_draft_targets rdt JOIN provider_models pm ON pm.id = rdt.provider_model_id JOIN providers p ON p.id = pm.provider_id LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id AND prm.source_provider_model_id = pm.id WHERE rdt.route_draft_id = $1 AND (p.state = 'disabled'::provider_state OR prm.id IS NULL OR NOT prm.enabled) ORDER BY rdt.position LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "887fec96fcc299dee01030730e841d1392c214d84b8e117b140d5ede2f3e5ba0"
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE model_capabilities SET source = 'certified', certified_at = $1 WHERE provider_model_id = $2 AND operation = $3 AND surface = $4 AND mode = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7c047bd950aa6f2ae2de8ba4893d7e8ceab0cd3bc70af931d55f2b0e93de9d24"
+}

@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) FILTER (WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL) AS \"open_epochs!\", count(*) FILTER (WHERE stale_detected_at IS NOT NULL AND acknowledged_at IS NULL) AS \"unresolved_epochs!\", COALESCE(sum(GREATEST(accepted - persisted - abandoned, 0)) FILTER (WHERE stale_detected_at IS NOT NULL AND acknowledged_at IS NULL), 0) AS \"unresolved_lower_bound!\", (SELECT count(*) FROM request_metadata_ingestion_gaps WHERE certainty = 'lower_bound'::request_metadata_gap_certainty) + (SELECT COALESCE(sum(uncertain_gap_count), 0) FROM request_metadata_gap_hourly) AS \"historical_uncertain_gap_count!\" FROM request_metadata_gateway_epochs",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "open_epochs!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "unresolved_epochs!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "unresolved_lower_bound!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "historical_uncertain_gap_count!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9e752495401a6b98e29010ef53fd9eba5d2a6db8778dc9f974eb03f5375fba2f"
+}

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{ApiState, FieldErrors, Problem, management_api::common::*};
+use crate::{FieldErrors, ManagementState, Problem, management_api::common::*};
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct CreateRouteDraftRequest {
@@ -74,7 +74,7 @@ pub(crate) struct RouteActivationResponse {
     )
 )]
 pub(crate) async fn create_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<CreateRouteDraftRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -117,7 +117,8 @@ pub(crate) async fn create_route_draft(
             timeout_ms: target.timeout_ms,
         })
         .collect();
-    let created = require_store(&state)?
+    let created = state
+        .store()
         .create_route_draft(
             NewRouteDraft {
                 slug: request.slug,
@@ -162,13 +163,14 @@ pub(crate) async fn create_route_draft(
     )
 )]
 pub(crate) async fn validate_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
-    let (etag, slug) = require_store(&state)?
+    let (etag, slug) = state
+        .store()
         .validate_route_draft(draft_id, if_match(&headers)?, principal.user_id)
         .await
         .map_err(map_configuration)?;
@@ -205,7 +207,7 @@ pub(crate) async fn validate_route_draft(
     )
 )]
 pub(crate) async fn activate_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -213,7 +215,8 @@ pub(crate) async fn activate_route_draft(
     require_route_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let expected_etag = if_match(&headers)?;
-    let activated = require_store(&state)?
+    let activated = state
+        .store()
         .activate_route_draft(draft_id, expected_etag, principal.user_id, idempotency_key)
         .await
         .map_err(map_configuration)?;

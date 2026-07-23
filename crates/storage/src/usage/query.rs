@@ -1,8 +1,13 @@
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{UsageFilters, UsageRangeCoverage};
 use crate::{OperationsError, PgStore};
+
+#[derive(Debug, FromRow)]
+struct UsageBoundaryRow {
+    excluded_boundaries: i64,
+}
 
 impl PgStore {
     pub(super) async fn usage_range_coverage(
@@ -34,9 +39,12 @@ impl PgStore {
         );
         query.push_bind(&boundary_buckets).push("::timestamptz[])");
         push_usage_dimension_filters(&mut query, filters);
-        let row = query.build().fetch_one(self.pool()).await?;
+        let row = query
+            .build_query_as::<UsageBoundaryRow>()
+            .fetch_one(self.pool())
+            .await?;
         let excluded = crate::operations::cursor::checked_u64(
-            row.get("excluded_boundaries"),
+            row.excluded_boundaries,
             "excluded partial aggregate boundary count",
         )?;
         let excluded = u8::try_from(excluded).map_err(|_| {

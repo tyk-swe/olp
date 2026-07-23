@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO provider_revision_models (id, provider_revision_id, source_provider_model_id, upstream_model, display_name, enabled, discovered_at) SELECT uuidv7(), $1, pm.id, pm.upstream_model, pm.display_name, pm.enabled, pm.discovered_at FROM provider_models pm WHERE pm.provider_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca356462282faa0fd5902032c90a29901fd770b1b84d69ee200e152ee2f975c6"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE providers SET state = 'disabled'::provider_state, active_revision_id = NULL, etag = $1, updated_at = now() WHERE id = $2 AND etag = $3 AND state <> 'disabled'::provider_state AND active_revision_id IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "97864be9fe9d2fd93f6616e484999f6cbf86b7f9038c624c31ab3f21323a3596"
+}

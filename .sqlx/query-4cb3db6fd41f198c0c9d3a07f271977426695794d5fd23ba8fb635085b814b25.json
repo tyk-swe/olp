@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH authenticated AS MATERIALIZED ( SELECT s.id AS session_id, s.security_version, s.csrf_digest, s.expires_at, u.id AS user_id, u.email, u.display_name, u.role::text AS role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_digest = $1 AND s.expires_at > now() AND u.active AND s.security_version = u.security_version ), touched AS ( UPDATE sessions s SET last_seen_at = now() FROM authenticated authenticated_session WHERE s.id = authenticated_session.session_id AND s.security_version = authenticated_session.security_version AND s.expires_at > now() AND s.last_seen_at <= now() - interval '5 minutes' RETURNING s.id ) SELECT authenticated.session_id, authenticated.security_version, authenticated.csrf_digest, authenticated.expires_at, authenticated.user_id, authenticated.email, authenticated.display_name, authenticated.role AS \"role!\" FROM authenticated CROSS JOIN (SELECT count(*) FROM touched) activity",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "security_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "security_version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "csrf_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "csrf_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "email"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "role!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "4cb3db6fd41f198c0c9d3a07f271977426695794d5fd23ba8fb635085b814b25"
+}

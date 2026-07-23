@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id\n             FROM async_media_jobs j\n             JOIN providers p ON p.id = j.provider_id\n             LEFT JOIN provider_revisions authority\n               ON authority.id = COALESCE(j.provider_revision_id, p.active_revision_id)\n             JOIN provider_revisions candidate ON candidate.id = $2\n             WHERE j.provider_id = $1 AND j.lifecycle_state <> 'deleted'\n               AND (\n                 authority.id IS NULL\n                 OR authority.kind IS DISTINCT FROM candidate.kind\n                 OR authority.endpoint IS DISTINCT FROM candidate.endpoint\n                 OR authority.cloud_region IS DISTINCT FROM candidate.cloud_region\n                 OR authority.cloud_project IS DISTINCT FROM candidate.cloud_project\n                 OR authority.deployment IS DISTINCT FROM candidate.deployment\n                 OR authority.api_version IS DISTINCT FROM candidate.api_version\n                 OR authority.auth_mode IS DISTINCT FROM candidate.auth_mode\n                 OR authority.credential_version_id IS DISTINCT FROM candidate.credential_version_id\n                 OR NOT EXISTS (\n                   SELECT 1 FROM provider_revision_models prm\n                   WHERE prm.provider_revision_id = candidate.id\n                     AND prm.upstream_model = j.provider_model AND prm.enabled\n                     AND NOT EXISTS (\n                       SELECT required.operation\n                       FROM (VALUES ('video_get'), ('video_content'), ('video_delete'))\n                            AS required(operation)\n                       WHERE NOT EXISTS (\n                         SELECT 1 FROM provider_revision_capabilities prc\n                         WHERE prc.provider_revision_model_id = prm.id\n                           AND prc.operation = required.operation\n                           AND prc.surface = j.surface\n                           AND prc.mode = 'unary' AND prc.source = 'certified'\n                       )\n                     )\n                 )\n               )\n             ORDER BY j.created_at, j.id LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4a202640bb03b9054e8121ffce97ceaeebc987c8ef6acaa729856480110a6a6c"
+}

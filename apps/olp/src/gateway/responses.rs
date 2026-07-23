@@ -14,7 +14,7 @@ use olp_protocols::openai::{
 use serde_json::{Value, json};
 
 use crate::{
-    ApiState, InferencePrincipal,
+    GatewayState, InferencePrincipal,
     event_completion::collect_provider_events,
     json_media::{admit_openai_response_input_tokens, admit_openai_responses, cleanup_admitted},
     streaming_response::{
@@ -35,7 +35,7 @@ use super::{
 };
 
 pub(super) async fn responses(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ResponseCreateRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
@@ -71,7 +71,7 @@ pub(super) async fn responses(
 }
 
 async fn responses_unary_response(
-    state: &ApiState,
+    state: &GatewayState,
     mut execution: RoutedEventExecution,
 ) -> Result<Response, InferenceError> {
     let events = collect_provider_events(
@@ -113,7 +113,7 @@ async fn responses_unary_response(
     }
 }
 
-fn responses_streaming_response(state: ApiState, execution: RoutedEventExecution) -> Response {
+fn responses_streaming_response(state: GatewayState, execution: RoutedEventExecution) -> Response {
     let encoder = OpenAiResponsesHttpStreamEncoder(OpenAiResponsesStreamEncoder::new(
         execution.route_slug.as_str(),
         format!("resp_{}", execution.request_id.simple()),
@@ -159,7 +159,7 @@ fn responses_error_sse(error: &InferenceError) -> Bytes {
 }
 
 pub(super) async fn response_input_tokens(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ResponseInputTokensRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {

@@ -142,16 +142,16 @@ async fn insert_audit(
     resource_type: &str,
     resource_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO audit_events \
          (id, actor_user_id, action, resource_type, resource_id, outcome) \
          VALUES ($1, $2, $3, $4, $5, 'success')",
+        Uuid::now_v7(),
+        actor,
+        action,
+        resource_type,
+        resource_id
     )
-    .bind(Uuid::now_v7())
-    .bind(actor)
-    .bind(action)
-    .bind(resource_type)
-    .bind(resource_id)
     .execute(&mut **transaction)
     .await?;
     Ok(())

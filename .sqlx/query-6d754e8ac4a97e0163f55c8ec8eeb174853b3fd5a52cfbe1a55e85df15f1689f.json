@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS ( SELECT 1 FROM sessions session JOIN users ON users.id = session.user_id WHERE session.id = $1 AND session.user_id = $2 AND session.security_version = $3 AND users.security_version = $3 AND users.active AND session.expires_at > now() ) AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6d754e8ac4a97e0163f55c8ec8eeb174853b3fd5a52cfbe1a55e85df15f1689f"
+}

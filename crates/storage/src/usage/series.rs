@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
     UsageFilters, UsageGranularity, UsageRangeCoverage,
@@ -25,6 +25,20 @@ pub struct UsagePoint {
 pub struct UsageSeries {
     pub points: Vec<UsagePoint>,
     pub coverage: UsageRangeCoverage,
+}
+
+#[derive(Debug, FromRow)]
+struct UsagePointRow {
+    bucket: DateTime<Utc>,
+    request_count: i64,
+    input_tokens: String,
+    output_tokens: String,
+    cached_input_tokens: String,
+    media_units: String,
+    estimated_cost: Option<String>,
+    unpriced_count: i64,
+    incomplete_count: i64,
+    currency: Option<String>,
 }
 
 impl PgStore {
@@ -56,7 +70,10 @@ impl PgStore {
              FROM usage_rows",
         );
         query.push(" GROUP BY bucket ORDER BY bucket");
-        let rows = query.build().fetch_all(self.pool()).await?;
+        let rows = query
+            .build_query_as::<UsagePointRow>()
+            .fetch_all(self.pool())
+            .await?;
         let points = rows
             .into_iter()
             .map(usage_point_from_row)
@@ -68,17 +85,17 @@ impl PgStore {
     }
 }
 
-fn usage_point_from_row(row: sqlx::postgres::PgRow) -> Result<UsagePoint, OperationsError> {
+fn usage_point_from_row(row: UsagePointRow) -> Result<UsagePoint, OperationsError> {
     Ok(UsagePoint {
-        bucket: row.get("bucket"),
-        request_count: checked_u64(row.get("request_count"), "request count")?,
-        input_tokens: row.get("input_tokens"),
-        output_tokens: row.get("output_tokens"),
-        cached_input_tokens: row.get("cached_input_tokens"),
-        media_units: row.get("media_units"),
-        estimated_cost: row.get("estimated_cost"),
-        currency: crate::operations::cursor::trimmed_optional(row.get("currency")),
-        unpriced_count: checked_u64(row.get("unpriced_count"), "unpriced count")?,
-        incomplete_count: checked_u64(row.get("incomplete_count"), "incomplete count")?,
+        bucket: row.bucket,
+        request_count: checked_u64(row.request_count, "request count")?,
+        input_tokens: row.input_tokens,
+        output_tokens: row.output_tokens,
+        cached_input_tokens: row.cached_input_tokens,
+        media_units: row.media_units,
+        estimated_cost: row.estimated_cost,
+        currency: crate::operations::cursor::trimmed_optional(row.currency),
+        unpriced_count: checked_u64(row.unpriced_count, "unpriced count")?,
+        incomplete_count: checked_u64(row.incomplete_count, "incomplete count")?,
     })
 }

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE idempotency_records SET replay_ciphertext = $1, replay_nonce = $2, replay_key_version = $3 WHERE id = $4 AND replay_key_version = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Int4",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9014244bb38091a7b3d5a753b3c9e84debe7309418790a695cb0a302951019fc"
+}

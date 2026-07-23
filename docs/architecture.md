@@ -8,6 +8,9 @@ keep durable records free of request content.
 ## Contents
 
 - [Component boundaries](#component-boundaries)
+- [Typed HTTP composition](#typed-http-composition)
+- [Canonical endpoint and provider policy](#canonical-endpoint-and-provider-policy)
+- [Checked storage access](#checked-storage-access)
 - [Runtime publication](#runtime-publication)
 - [Capability certification](#capability-certification)
 - [Data-safety invariants](#data-safety-invariants)
@@ -35,6 +38,41 @@ apps/olp (olp) ─┬─> olp-domain
 conformance corpus; it is outside the production dependency graph. The console
 is a client-only static application with no server routes or production Node
 adapter.
+
+## Typed HTTP composition
+
+Startup first finalizes mode-specific dependency bundles and only then builds
+routers. Gateway, management, and observability surfaces have immutable state
+types whose mandatory stores, keys, emitters, and runtime services are
+non-optional. Axum `FromRef` exposes narrower capabilities to handlers; the
+startup assembly object is never an endpoint service locator. Consequently a
+routed handler cannot represent a mode that is missing one of its required
+dependencies.
+
+## Canonical endpoint and provider policy
+
+`apps/olp/src/gateway/endpoint_policy.rs` is the inference endpoint registry.
+Each entry binds one identity to its HTTP method and path, Axum handler,
+surface, typed operation, body admission, route extraction, token estimation,
+and metadata behavior. Routing and classification both consume that registry,
+and uniqueness tests reject duplicate identities or method/path pairs.
+
+`crates/domain/src/provider_configuration.rs` is the provider capability
+registry. It exhaustively binds each `ProviderKind` to supported/default
+authentication, credential rules, supported and required fields, stable API
+metadata, and complete-candidate validation. Management create and update use
+the same validator; the console obtains the matrix from the management
+capability endpoint and uses generated OpenAPI enums for wire values.
+
+## Checked storage access
+
+Static PostgreSQL statements use SQLx checked macros and the committed `.sqlx`
+metadata. Large or conditionally assembled reads use `QueryBuilder` but decode
+only through subsystem-owned `FromRow` records. String-key `PgRow` decoding is
+forbidden in production storage, and `scripts/check-storage-sqlx.sh` enforces
+the single execute-only dynamic statement exception. CI compiles with
+`SQLX_OFFLINE=true` and verifies the metadata against a freshly migrated
+PostgreSQL 18 database.
 
 ## Runtime publication
 

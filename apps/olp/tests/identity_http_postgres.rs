@@ -33,7 +33,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [8; 32]);
-    let app = public_router(state);
+    let app = public_router(state.mode_dependencies().unwrap().management().unwrap());
 
     let setup = send_json(
         &app,
@@ -132,6 +132,14 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     )
     .await;
     assert_eq!(changed_password.status(), StatusCode::OK);
+    let owner_cookie = cookie_header(&changed_password);
+    let owner_csrf = changed_password
+        .headers()
+        .get("x-csrf-token")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     let revoked_other_session = send_empty(
         &app,
         Method::GET,

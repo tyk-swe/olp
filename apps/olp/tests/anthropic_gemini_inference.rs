@@ -16,7 +16,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use futures::{Stream, stream};
 use http_body_util::BodyExt;
-use olp::{ApiMode, ApiState, RuntimeManager, public_router};
+use olp::{ApiMode, ApiState, GatewayState, RuntimeManager, public_router};
 use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, CanonicalResult,
@@ -26,7 +26,7 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TokenCountResult, TransportError,
     TransportMode, TransportPhase, Usage,
 };
-use olp_storage::AuthHmacKey;
+use olp_storage::{AuthHmacKey, PgStore};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -130,7 +130,7 @@ fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
 }
 
 struct TestGateway {
-    state: ApiState,
+    state: GatewayState,
     key: String,
     calls: Arc<Mutex<Vec<RecordedCall>>>,
     anthropic_provider: ProviderId,
@@ -268,12 +268,19 @@ fn test_gateway() -> TestGateway {
     runtime.install(snapshot, transports).unwrap();
     let mut state = ApiState::new(
         ApiMode::Gateway,
-        None,
+        Some(PgStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .acquire_timeout(Duration::from_millis(10))
+                .connect_lazy("postgres://olp:olp@127.0.0.1/olp")
+                .unwrap(),
+        )),
         runtime,
         "https://olp.test",
         "console",
     );
     state.auth_hmac_key = Some(auth_hmac_key);
+    let state = state.mode_dependencies().unwrap().gateway().unwrap();
     TestGateway {
         state,
         key,
@@ -613,8 +620,8 @@ async fn inline_media_is_admitted_for_same_protocol_and_rejected_when_malformed_
 
 #[tokio::test]
 async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_loss() {
-    let mut fixture = test_gateway();
-    let pinned = fixture.state.runtime.pin();
+    let fixture = test_gateway();
+    let pinned = fixture.state.runtime().pin();
     let mut snapshot = RuntimeSnapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
@@ -646,8 +653,9 @@ async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_lo
     route
         .targets
         .retain(|target| target.provider_id == fixture.anthropic_provider);
-    let runtime = Arc::new(RuntimeManager::empty());
-    runtime
+    fixture
+        .state
+        .runtime()
         .install(
             snapshot,
             BTreeMap::from([(
@@ -661,7 +669,6 @@ async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_lo
             )]),
         )
         .unwrap();
-    fixture.state.runtime = runtime;
     let app = public_router(fixture.state.clone());
 
     let response = app
@@ -805,11 +812,14 @@ impl ProviderTransport for NeverCalledTransport {
 
 #[tokio::test]
 async fn streaming_never_fails_over_after_the_first_canonical_event() {
-    let mut fixture = test_gateway();
-    let runtime = Arc::new(RuntimeManager::empty());
-    let snapshot = fixture.state.runtime.pin();
+    let fixture = test_gateway();
+    let snapshot = fixture.state.runtime().pin();
     let mut snapshot = RuntimeSnapshot {
-        generation: snapshot.generation.clone(),
+        generation: RuntimeGeneration {
+            id: RuntimeGenerationId::new(),
+            ordinal: snapshot.generation.ordinal + 1,
+            activated_at: Utc::now(),
+        },
         providers: snapshot.providers.clone(),
         routes: snapshot.routes.clone(),
         api_keys: snapshot.api_keys.clone(),
@@ -846,8 +856,11 @@ async fn streaming_never_fails_over_after_the_first_canonical_event() {
             Arc::new(NeverCalledTransport(secondary_calls.clone())) as Arc<dyn ProviderTransport>,
         ),
     ]);
-    runtime.install(snapshot, transports).unwrap();
-    fixture.state.runtime = runtime;
+    fixture
+        .state
+        .runtime()
+        .install(snapshot, transports)
+        .unwrap();
     let response = public_router(fixture.state)
         .oneshot(post_json(
             "/anthropic/v1/messages",
@@ -923,11 +936,14 @@ impl ProviderTransport for DropAwareTransport {
 
 #[tokio::test]
 async fn client_disconnect_drops_the_upstream_stream() {
-    let mut fixture = test_gateway();
-    let runtime = Arc::new(RuntimeManager::empty());
-    let snapshot = fixture.state.runtime.pin();
+    let fixture = test_gateway();
+    let snapshot = fixture.state.runtime().pin();
     let mut snapshot = RuntimeSnapshot {
-        generation: snapshot.generation.clone(),
+        generation: RuntimeGeneration {
+            id: RuntimeGenerationId::new(),
+            ordinal: snapshot.generation.ordinal + 1,
+            activated_at: Utc::now(),
+        },
         providers: snapshot.providers.clone(),
         routes: snapshot.routes.clone(),
         api_keys: snapshot.api_keys.clone(),
@@ -949,7 +965,9 @@ async fn client_disconnect_drops_the_upstream_stream() {
         TransportMode::Streaming,
     )]);
     let dropped = Arc::new(AtomicBool::new(false));
-    runtime
+    fixture
+        .state
+        .runtime()
         .install(
             snapshot,
             BTreeMap::from([(
@@ -958,7 +976,6 @@ async fn client_disconnect_drops_the_upstream_stream() {
             )]),
         )
         .unwrap();
-    fixture.state.runtime = runtime;
     let response = public_router(fixture.state)
         .oneshot(post_json(
             "/anthropic/v1/messages",

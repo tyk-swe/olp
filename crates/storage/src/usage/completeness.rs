@@ -1,4 +1,4 @@
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
     UsageFilters, UsageRangeCoverage,
@@ -26,6 +26,16 @@ pub struct UsageCompleteness {
     pub complete: bool,
 }
 
+#[derive(Debug, FromRow)]
+struct UsageCompletenessRow {
+    request_count: i64,
+    priced_count: i64,
+    unpriced_count: i64,
+    incomplete_count: i64,
+    estimated_cost: Option<String>,
+    currency: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct RequestMetadataGapEvidence {
     pub(super) event_count: i64,
@@ -50,10 +60,13 @@ impl PgStore {
                       (SELECT btrim(currency) FROM pricing_currency WHERE singleton)) AS currency \
              FROM usage_rows",
         );
-        let row = query.build().fetch_one(self.pool()).await?;
+        let row = query
+            .build_query_as::<UsageCompletenessRow>()
+            .fetch_one(self.pool())
+            .await?;
         let gap = self.request_metadata_gap_evidence(filters).await?;
-        let unpriced_count = checked_u64(row.get("unpriced_count"), "unpriced count")?;
-        let incomplete_count = checked_u64(row.get("incomplete_count"), "incomplete count")?;
+        let unpriced_count = checked_u64(row.unpriced_count, "unpriced count")?;
+        let incomplete_count = checked_u64(row.incomplete_count, "incomplete count")?;
         let request_metadata_gap_events = checked_u64(gap.event_count, "gap event count")?;
         let uncertain_request_metadata_gap_count =
             checked_u64(gap.uncertain_gap_count, "uncertain gap count")?;
@@ -62,14 +75,14 @@ impl PgStore {
             .request_metadata_consumer_status(chrono::Utc::now())
             .await?;
         Ok(UsageCompleteness {
-            request_count: checked_u64(row.get("request_count"), "request count")?,
-            priced_count: checked_u64(row.get("priced_count"), "priced count")?,
+            request_count: checked_u64(row.request_count, "request count")?,
+            priced_count: checked_u64(row.priced_count, "priced count")?,
             unpriced_count,
             incomplete_count,
             request_metadata_gap_events,
             uncertain_request_metadata_gap_count,
-            estimated_cost: row.get("estimated_cost"),
-            currency: trimmed_optional(row.get("currency")),
+            estimated_cost: row.estimated_cost,
+            currency: trimmed_optional(row.currency),
             coverage,
             request_metadata_consumer,
             complete: unpriced_count == 0
@@ -85,9 +98,9 @@ impl PgStore {
         &self,
         filters: &UsageFilters,
     ) -> Result<RequestMetadataGapEvidence, OperationsError> {
-        let row = sqlx::query(
-            "SELECT COALESCE(SUM(event_count), 0)::bigint AS event_count, \
-                    COALESCE(SUM(uncertain_gap_count), 0)::bigint AS uncertain_gap_count \
+        let row = sqlx::query!(
+            "SELECT COALESCE(SUM(event_count), 0)::bigint AS \"event_count!\", \
+                    COALESCE(SUM(uncertain_gap_count), 0)::bigint AS \"uncertain_gap_count!\" \
              FROM ( \
                SELECT event_count, \
                       CASE WHEN certainty = 'lower_bound'::request_metadata_gap_certainty \
@@ -98,14 +111,14 @@ impl PgStore {
                SELECT event_count, uncertain_gap_count FROM request_metadata_gap_hourly \
                 WHERE last_observed_at >= $1 AND first_observed_at < $2 \
              ) retained_gaps",
+            filters.observed_after,
+            filters.observed_before
         )
-        .bind(filters.observed_after)
-        .bind(filters.observed_before)
         .fetch_one(self.pool())
         .await?;
         Ok(RequestMetadataGapEvidence {
-            event_count: row.get("event_count"),
-            uncertain_gap_count: row.get("uncertain_gap_count"),
+            event_count: row.event_count,
+            uncertain_gap_count: row.uncertain_gap_count,
         })
     }
 }

@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pending_events, lag_events, oldest_pending_at, checked_at FROM request_metadata_consumer_health WHERE singleton",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending_events",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "pending_events"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lag_events",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "lag_events"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "oldest_pending_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "oldest_pending_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "checked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "b1109b259e7fe6a67414adcc4d14bf0ba91adc8d96db7e4770f1a147ea3a83e3"
+}

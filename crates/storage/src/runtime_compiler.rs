@@ -12,7 +12,7 @@ use olp_domain::{
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -92,9 +92,8 @@ pub(crate) async fn prepare_runtime_mutation(
 pub(crate) async fn lock_runtime_publication(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<(), RuntimeCompileError> {
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(PUBLICATION_LOCK_ID)
-        .execute(&mut **transaction)
+    sqlx::query!("SELECT pg_advisory_xact_lock($1)", PUBLICATION_LOCK_ID)
+        .fetch_one(&mut **transaction)
         .await?;
     Ok(())
 }
@@ -111,20 +110,19 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
     let preliminary_sha: [u8; 32] = Sha256::digest(&preliminary_payload).into();
     let generation_id = snapshot.generation.id.as_uuid();
     let now = Utc::now();
-    let sequence: i64 = sqlx::query(
+    let sequence = sqlx::query_scalar!(
         "INSERT INTO runtime_generations \
          (id, compiled_release, release_sha256, created_by, created_at) \
-         VALUES ($1, $2, $3, $4, $5) RETURNING sequence",
+         VALUES ($1, $2, $3, $4, $5) RETURNING sequence AS \"value!\"",
+        generation_id,
+        &preliminary_payload,
+        preliminary_sha.to_vec(),
+        actor,
+        now
     )
-    .bind(generation_id)
-    .bind(&preliminary_payload)
-    .bind(preliminary_sha.to_vec())
-    .bind(actor)
-    .bind(now)
     .fetch_one(&mut **transaction)
-    .await?
-    .get("sequence");
-    sqlx::query(
+    .await?;
+    sqlx::query!(
         "INSERT INTO runtime_generation_provider_configs \
          (runtime_generation_id, provider_id, kind, endpoint, cloud_region, cloud_project, \
           deployment, api_version, auth_mode, active_credential_version_id, provider_revision_id) \
@@ -132,8 +130,8 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
                 pr.api_version, pr.auth_mode, pr.credential_version_id, pr.id \
          FROM providers p JOIN provider_revisions pr ON pr.id = p.active_revision_id \
          WHERE p.state <> 'disabled'::provider_state",
+        generation_id
     )
-    .bind(generation_id)
     .execute(&mut **transaction)
     .await?;
     snapshot.generation.ordinal = u64::try_from(sequence).map_err(|_| {
@@ -144,27 +142,27 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
     snapshot.generation.activated_at = now;
     let payload = serde_json::to_vec(&snapshot)?;
     let sha256: [u8; 32] = Sha256::digest(&payload).into();
-    sqlx::query(
+    sqlx::query!(
         "UPDATE runtime_generations SET compiled_release = $1, release_sha256 = $2 WHERE id = $3",
+        &payload,
+        sha256.to_vec(),
+        generation_id
     )
-    .bind(&payload)
-    .bind(sha256.to_vec())
-    .bind(generation_id)
     .execute(&mut **transaction)
     .await?;
     let hint = serde_json::to_vec(&RuntimeHint {
         generation_id,
         sequence,
     })?;
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO transactional_outbox \
          (id, topic, aggregate_id, payload, created_at) \
          VALUES ($1, 'runtime.generation.activated', $2, $3, $4)",
+        Uuid::now_v7(),
+        generation_id,
+        hint,
+        now
     )
-    .bind(Uuid::now_v7())
-    .bind(generation_id)
-    .bind(hint)
-    .bind(now)
     .execute(&mut **transaction)
     .await?;
     Ok(PublishedRuntimeRelease {
@@ -180,7 +178,7 @@ async fn compile_snapshot(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<RuntimeSnapshot, RuntimeCompileError> {
     let mut providers = BTreeMap::new();
-    for row in sqlx::query(
+    for row in sqlx::query!(
         "SELECT p.id, pr.name, pr.kind, pr.credential_version_id \
          FROM providers p JOIN provider_revisions pr ON pr.id = p.active_revision_id \
          WHERE p.state <> 'disabled'::provider_state ORDER BY p.id",
@@ -188,21 +186,21 @@ async fn compile_snapshot(
     .fetch_all(&mut **transaction)
     .await?
     {
-        let id = ProviderId::from_uuid(row.get("id"));
-        let credential: Option<Uuid> = row.get("credential_version_id");
+        let id = ProviderId::from_uuid(row.id);
+        let credential: Option<Uuid> = row.credential_version_id;
         providers.insert(
             id,
             Provider {
                 id,
-                name: row.get("name"),
-                kind: parse_provider_kind(row.get::<String, _>("kind").as_str())?,
+                name: row.name,
+                kind: parse_provider_kind(row.kind.as_str())?,
                 enabled: true,
                 active_credential: credential.map(CredentialVersionId::from_uuid),
                 capabilities: BTreeSet::new(),
             },
         );
     }
-    for row in sqlx::query(
+    for row in sqlx::query!(
         "SELECT pr.provider_id, prm.upstream_model, prc.operation, prc.surface, prc.mode \
          FROM provider_revision_capabilities prc \
          JOIN provider_revision_models prm ON prm.id = prc.provider_revision_model_id \
@@ -215,19 +213,19 @@ async fn compile_snapshot(
     .fetch_all(&mut **transaction)
     .await?
     {
-        let provider_id = ProviderId::from_uuid(row.get("provider_id"));
+        let provider_id = ProviderId::from_uuid(row.provider_id);
         let provider = providers.get_mut(&provider_id).ok_or_else(|| {
             RuntimeCompileError::InvalidConfiguration("capability has no active provider".into())
         })?;
         provider.capabilities.insert(Capability::new(
-            row.get::<String, _>("upstream_model"),
-            parse_operation(row.get::<String, _>("operation").as_str())?,
-            parse_surface(row.get::<String, _>("surface").as_str())?,
-            parse_mode(row.get::<String, _>("mode").as_str())?,
+            row.upstream_model,
+            parse_operation(row.operation.as_str())?,
+            parse_surface(row.surface.as_str())?,
+            parse_mode(row.mode.as_str())?,
         ));
     }
 
-    let route_rows = sqlx::query(
+    let route_rows = sqlx::query!(
         "SELECT r.id, r.slug, rr.id AS revision_id, rr.routing_id, rr.overall_timeout_ms, rr.max_attempts \
          FROM routes r \
          JOIN LATERAL ( \
@@ -239,20 +237,20 @@ async fn compile_snapshot(
     .await?;
     let mut routes = BTreeMap::new();
     for row in route_rows {
-        let revision_id: Uuid = row.get("revision_id");
-        let slug = RouteSlug::parse(row.get::<String, _>("slug"))
+        let revision_id: Uuid = row.revision_id;
+        let slug = RouteSlug::parse(row.slug)
             .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
-        let operations = sqlx::query(
+        let operations = sqlx::query!(
             "SELECT operation FROM route_revision_operations \
              WHERE route_revision_id = $1 ORDER BY operation",
+            revision_id
         )
-        .bind(revision_id)
         .fetch_all(&mut **transaction)
         .await?
         .into_iter()
-        .map(|row| parse_operation(row.get::<String, _>("operation").as_str()))
+        .map(|row| parse_operation(row.operation.as_str()))
         .collect::<Result<BTreeSet<_>, _>>()?;
-        let targets = sqlx::query(
+        let targets = sqlx::query!(
             "SELECT rt.id, rt.routing_id, pr.provider_id, prm.upstream_model, rt.priority, rt.weight, rt.timeout_ms \
              FROM route_revision_targets rt \
              JOIN provider_revision_models prm \
@@ -262,37 +260,36 @@ async fn compile_snapshot(
              WHERE rt.route_revision_id = $1 AND prm.enabled \
                AND p.state <> 'disabled'::provider_state \
              ORDER BY rt.position",
-        )
-        .bind(revision_id)
+        revision_id)
         .fetch_all(&mut **transaction)
         .await?
         .into_iter()
         .map(|target| {
-            let weight: i32 = target.get("weight");
+            let weight: i32 = target.weight;
             Ok(Target {
-                id: TargetId::from_uuid(target.get("id")),
-                routing_id: Some(TargetId::from_uuid(target.get("routing_id"))),
-                provider_id: ProviderId::from_uuid(target.get("provider_id")),
-                upstream_model: target.get("upstream_model"),
-                priority: u16::try_from(target.get::<i32, _>("priority")).map_err(|_| {
+                id: TargetId::from_uuid(target.id),
+                routing_id: Some(TargetId::from_uuid(target.routing_id)),
+                provider_id: ProviderId::from_uuid(target.provider_id),
+                upstream_model: target.upstream_model,
+                priority: u16::try_from(target.priority).map_err(|_| {
                     RuntimeCompileError::InvalidConfiguration("target priority is invalid".into())
                 })?,
                 weight: NonZeroU32::new(u32::try_from(weight).unwrap_or_default()).ok_or_else(
                     || RuntimeCompileError::InvalidConfiguration("target weight is zero".into()),
                 )?,
                 timeout: DurationMs::new(
-                    u64::try_from(target.get::<i32, _>("timeout_ms")).map_err(|_| {
+                    u64::try_from(target.timeout_ms).map_err(|_| {
                         RuntimeCompileError::InvalidConfiguration("target timeout is invalid".into())
                     })?,
                 ),
             })
         })
         .collect::<Result<Vec<_>, RuntimeCompileError>>()?;
-        let overall_timeout_ms: i32 = row.get("overall_timeout_ms");
-        let max_attempts: i16 = row.get("max_attempts");
+        let overall_timeout_ms: i32 = row.overall_timeout_ms;
+        let max_attempts: i16 = row.max_attempts;
         let route = Route {
-            id: RouteId::from_uuid(row.get("id")),
-            routing_id: Some(RouteId::from_uuid(row.get("routing_id"))),
+            id: RouteId::from_uuid(row.id),
+            routing_id: Some(RouteId::from_uuid(row.routing_id)),
             slug: slug.clone(),
             operations,
             overall_timeout: DurationMs::new(u64::try_from(overall_timeout_ms).map_err(|_| {
@@ -325,7 +322,7 @@ async fn compile_api_keys(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
     let mut api_keys = BTreeMap::new();
-    for row in sqlx::query(
+    for row in sqlx::query!(
         "SELECT id, lookup_id, secret_digest, expires_at, requests_per_minute, \
                 tokens_per_minute, max_concurrency \
          FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) \
@@ -334,43 +331,43 @@ async fn compile_api_keys(
     .fetch_all(&mut **transaction)
     .await?
     {
-        let id: Uuid = row.get("id");
-        let lookup_id = ApiKeyLookupId::parse(row.get::<String, _>("lookup_id"))
+        let id: Uuid = row.id;
+        let lookup_id = ApiKeyLookupId::parse(row.lookup_id)
             .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
-        let digest: Vec<u8> = row.get("secret_digest");
+        let digest: Vec<u8> = row.secret_digest;
         let digest: [u8; 32] = digest.try_into().map_err(|_| {
             RuntimeCompileError::InvalidConfiguration("API key digest is not 32 bytes".into())
         })?;
-        let scopes =
-            sqlx::query("SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope")
-                .bind(id)
-                .fetch_all(&mut **transaction)
-                .await?
-                .into_iter()
-                .map(|scope| match scope.get::<String, _>("scope").as_str() {
-                    "inference" => Ok(ApiKeyScope::Inference),
-                    "models_read" => Ok(ApiKeyScope::ModelsRead),
-                    value => Err(RuntimeCompileError::InvalidConfiguration(format!(
-                        "unknown API key scope {value}"
-                    ))),
-                })
-                .collect::<Result<BTreeSet<_>, _>>()?;
-        let allowed_routes = sqlx::query(
-            "SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug",
+        let scopes = sqlx::query!(
+            "SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope",
+            id
         )
-        .bind(id)
+        .fetch_all(&mut **transaction)
+        .await?
+        .into_iter()
+        .map(|scope| match scope.scope.as_str() {
+            "inference" => Ok(ApiKeyScope::Inference),
+            "models_read" => Ok(ApiKeyScope::ModelsRead),
+            value => Err(RuntimeCompileError::InvalidConfiguration(format!(
+                "unknown API key scope {value}"
+            ))),
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+        let allowed_routes = sqlx::query!(
+            "SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug",
+        id)
         .fetch_all(&mut **transaction)
         .await?
         .into_iter()
         .map(|route| {
-            RouteSlug::parse(route.get::<String, _>("route_slug")).map_err(|error| {
+            RouteSlug::parse(route.route_slug).map_err(|error| {
                 RuntimeCompileError::InvalidConfiguration(error.to_string())
             })
         })
         .collect::<Result<BTreeSet<_>, _>>()?;
-        let rpm: Option<i32> = row.get("requests_per_minute");
-        let tpm: Option<i64> = row.get("tokens_per_minute");
-        let concurrency: Option<i32> = row.get("max_concurrency");
+        let rpm: Option<i32> = row.requests_per_minute;
+        let tpm: Option<i64> = row.tokens_per_minute;
+        let concurrency: Option<i32> = row.max_concurrency;
         api_keys.insert(
             lookup_id.clone(),
             ApiKey {
@@ -378,7 +375,7 @@ async fn compile_api_keys(
                 lookup_id,
                 digest: ApiKeyDigest::new(digest),
                 status: ApiKeyStatus::Active,
-                expires_at: row.get("expires_at"),
+                expires_at: row.expires_at,
                 scopes,
                 allowed_routes,
                 limits: ApiKeyLimits {

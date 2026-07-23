@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_ingestion_gaps (id, gateway_instance, event_count, reason, certainty, first_observed_at, last_observed_at) VALUES ($1, 'request-metadata-consumer', 0, 'request_metadata_event_outside_replay_window', 'lower_bound'::request_metadata_gap_certainty, now(), now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b3dd9aa74bd3927fe945e5d819274fe35259597a5a31f4e110c680adeec5702c"
+}

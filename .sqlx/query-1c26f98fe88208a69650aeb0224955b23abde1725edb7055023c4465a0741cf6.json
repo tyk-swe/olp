@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE request_metadata_gateway_epochs SET acknowledged_at = GREATEST($1, stale_detected_at), acknowledged_by = $2 WHERE process_epoch = $3 AND acknowledged_at IS NULL RETURNING acknowledged_at AS \"acknowledged_at!\", acknowledged_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "acknowledged_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "acknowledged_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "acknowledged_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "acknowledged_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "1c26f98fe88208a69650aeb0224955b23abde1725edb7055023c4465a0741cf6"
+}

@@ -1,0 +1,246 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, r.surface, r.started_at, r.completed_at, r.status_code, r.error_class, r.total_latency_ms, r.first_byte_ms, r.attempt_count, u.input_tokens AS \"input_tokens?\", u.output_tokens AS \"output_tokens?\", u.cached_input_tokens AS \"cached_input_tokens?\", u.estimated_cost::text AS \"estimated_cost?\", u.currency::text AS \"currency?\", u.unpriced AS \"unpriced?\", u.usage_complete AS \"usage_complete?\" FROM requests r LEFT JOIN usage_facts u ON u.request_id = r.id AND u.request_started_at = r.started_at WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "runtime_generation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "runtime_generation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "api_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "api_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "route_slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "route_slug"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "surface",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "surface"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "status_code",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "status_code"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "error_class",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "error_class"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "total_latency_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "total_latency_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "first_byte_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "first_byte_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "attempt_count",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "requests",
+            "name": "attempt_count"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "input_tokens?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_facts",
+            "name": "input_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "output_tokens?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_facts",
+            "name": "output_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "cached_input_tokens?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_facts",
+            "name": "cached_input_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "estimated_cost?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 17,
+        "name": "currency?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 18,
+        "name": "unpriced?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "usage_facts",
+            "name": "unpriced"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "usage_complete?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "usage_facts",
+            "name": "usage_complete"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "9214340f2628753dbe55f38a2f890891b7c6da67dad4d5f012b85508a3dbe3f1"
+}

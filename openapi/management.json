@@ -597,9 +597,13 @@
             ]
           },
           "auth_mode": {
-            "type": [
-              "string",
-              "null"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderAuthMode"
+              }
             ]
           },
           "cloud_project": {
@@ -637,8 +641,8 @@
             ]
           },
           "kind": {
-            "description": "`openai` uses the official endpoint; `openai_compatible` requires an\nexplicit HTTPS endpoint and live certification of reviewed capabilities.",
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "`openai` uses the official endpoint; `openai_compatible` requires an\nexplicit HTTPS endpoint and live certification of reviewed capabilities."
           },
           "model": {
             "description": "Optional seed/probe model. Vertex AI requires one because its publisher\nmodel collection has no list operation; other connectors can discover\nmodels after the draft is created.",
@@ -712,6 +716,13 @@
           "items"
         ],
         "type": "object"
+      },
+      "CredentialRequirement": {
+        "enum": [
+          "required",
+          "forbidden"
+        ],
+        "type": "string"
       },
       "CredentialResponse": {
         "properties": {
@@ -1708,18 +1719,6 @@
         ],
         "type": "string"
       },
-      "PriceProviderKind": {
-        "enum": [
-          "openai",
-          "anthropic",
-          "gemini",
-          "vertex_ai",
-          "bedrock",
-          "azure_openai",
-          "openai_compatible"
-        ],
-        "type": "string"
-      },
       "PriceRequest": {
         "properties": {
           "currency": {
@@ -1751,7 +1750,7 @@
             ]
           },
           "provider_kind": {
-            "$ref": "#/components/schemas/PriceProviderKind"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "unit_price": {
             "type": [
@@ -1799,7 +1798,7 @@
             ]
           },
           "provider_kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "unit_price": {
             "type": [
@@ -1990,6 +1989,35 @@
         ],
         "type": "object"
       },
+      "ProviderAuthCapabilityResponse": {
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/CredentialRequirement"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ProviderAuthMode"
+          }
+        },
+        "required": [
+          "mode",
+          "label",
+          "credential"
+        ],
+        "type": "object"
+      },
+      "ProviderAuthMode": {
+        "enum": [
+          "api_key",
+          "adc",
+          "service_account",
+          "default_chain",
+          "static"
+        ],
+        "type": "string"
+      },
       "ProviderCapabilityOptionsResponse": {
         "properties": {
           "capabilities": {
@@ -2000,7 +2028,7 @@
             "type": "array"
           },
           "provider_kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           }
         },
         "required": [
@@ -2008,6 +2036,17 @@
           "capabilities"
         ],
         "type": "object"
+      },
+      "ProviderConfigurationField": {
+        "enum": [
+          "endpoint",
+          "cloud_region",
+          "cloud_project",
+          "deployment",
+          "api_version",
+          "model"
+        ],
+        "type": "string"
       },
       "ProviderDetailResponse": {
         "properties": {
@@ -2026,7 +2065,7 @@
             ]
           },
           "auth_mode": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderAuthMode"
           },
           "capability_count": {
             "format": "int64",
@@ -2097,7 +2136,7 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "last_probe_at": {
             "format": "date-time",
@@ -2169,6 +2208,25 @@
         ],
         "type": "object"
       },
+      "ProviderFieldCapabilityResponse": {
+        "properties": {
+          "field": {
+            "$ref": "#/components/schemas/ProviderConfigurationField"
+          },
+          "label": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "field",
+          "label",
+          "required"
+        ],
+        "type": "object"
+      },
       "ProviderHealthItem": {
         "properties": {
           "attempt_count": {
@@ -2214,7 +2272,7 @@
             "type": "string"
           },
           "provider_kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "provider_name": {
             "type": "string"
@@ -2286,6 +2344,69 @@
         ],
         "type": "object"
       },
+      "ProviderKind": {
+        "enum": [
+          "openai",
+          "anthropic",
+          "gemini",
+          "vertex_ai",
+          "bedrock",
+          "azure_openai",
+          "openai_compatible"
+        ],
+        "type": "string"
+      },
+      "ProviderKindCapabilityListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderKindCapabilityResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProviderKindCapabilityResponse": {
+        "properties": {
+          "auth_modes": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderAuthCapabilityResponse"
+            },
+            "type": "array"
+          },
+          "default_auth_mode": {
+            "$ref": "#/components/schemas/ProviderAuthMode"
+          },
+          "description": {
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderFieldCapabilityResponse"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "description",
+          "default_auth_mode",
+          "auth_modes",
+          "fields"
+        ],
+        "type": "object"
+      },
       "ProviderListResponse": {
         "properties": {
           "items": {
@@ -2336,7 +2457,7 @@
             "type": "string"
           },
           "provider_kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "provider_name": {
             "type": "string"
@@ -2461,7 +2582,7 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "model": {
             "type": [
@@ -2607,7 +2728,7 @@
             ]
           },
           "auth_mode": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderAuthMode"
           },
           "capability_count": {
             "format": "int64",
@@ -2664,7 +2785,7 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "model_count": {
             "format": "int64",
@@ -2762,7 +2883,7 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "model_count": {
             "format": "int64",
@@ -2838,7 +2959,7 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderKind"
           },
           "last_probe_at": {
             "format": "date-time",
@@ -4214,7 +4335,7 @@
             ]
           },
           "auth_mode": {
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderAuthMode"
           },
           "cloud_project": {
             "type": [
@@ -7667,6 +7788,61 @@
         ],
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/provider-kinds": {
+      "get": {
+        "operationId": "list_provider_kinds",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderKindCapabilityListResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "providers"
         ]
       }
     },

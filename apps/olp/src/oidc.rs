@@ -20,11 +20,11 @@ pub use identities::{OidcIdentityListResponse, OidcIdentityResponse};
 use identities::{list_identities, unlink_identity};
 use utoipa::OpenApi;
 
-use crate::{ApiState, Problem};
+use crate::{ManagementState, Problem};
 
 pub(crate) use error::map_oidc;
 
-pub(crate) fn router() -> Router<ApiState> {
+pub(crate) fn router() -> Router<ManagementState> {
     Router::new()
         .route(
             "/api/v1/oidc/configuration",

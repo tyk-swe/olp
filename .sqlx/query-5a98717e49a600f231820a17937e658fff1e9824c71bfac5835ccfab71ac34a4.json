@@ -1,0 +1,174 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rpc.provider_id AS id, rpc.kind, rpc.endpoint, rpc.cloud_region, rpc.cloud_project, rpc.deployment, rpc.api_version, rpc.auth_mode, cv.id AS \"credential_id?\", cv.version AS \"credential_version?\", cv.ciphertext AS \"ciphertext?\", cv.nonce AS \"nonce?\", cv.master_key_version AS \"master_key_version?\" FROM runtime_generation_provider_configs rpc JOIN providers p ON p.id = rpc.provider_id LEFT JOIN provider_credential_versions cv ON cv.id = rpc.active_credential_version_id AND cv.revoked_at IS NULL WHERE rpc.provider_id = $1 AND rpc.runtime_generation_id = $3 AND rpc.active_credential_version_id IS NOT DISTINCT FROM $2 AND p.active_revision_id IS NOT NULL AND p.state <> 'disabled'::provider_state AND (rpc.active_credential_version_id IS NULL OR cv.id IS NOT NULL)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "endpoint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cloud_region",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "cloud_region"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "cloud_project",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "cloud_project"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "deployment",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "deployment"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "api_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "api_version"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "auth_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_generation_provider_configs",
+            "name": "auth_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "credential_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "credential_version?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "ciphertext?",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "nonce?",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "master_key_version?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "master_key_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5a98717e49a600f231820a17937e658fff1e9824c71bfac5835ccfab71ac34a4"
+}

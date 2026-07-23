@@ -1,0 +1,153 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.revision, r.effective_at, r.created_by, r.created_at, p.provider_kind AS \"provider_kind?\", p.provider_id AS \"provider_id?\", p.model AS \"model?\", p.operation AS \"operation?\", p.input_per_million::text AS \"input_per_million?\", p.output_per_million::text AS \"output_per_million?\", p.unit_price::text AS \"unit_price?\", p.currency::text AS \"currency?\" FROM pricing_revisions r LEFT JOIN prices p ON p.pricing_revision_id = r.id WHERE r.id IN (SELECT id FROM pricing_revisions WHERE ($1::int IS NULL OR revision < $1) ORDER BY revision DESC LIMIT $2) ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, p.model, p.operation",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "pricing_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "pricing_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "effective_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "pricing_revisions",
+            "name": "effective_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "pricing_revisions",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "pricing_revisions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_kind?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prices",
+            "name": "provider_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "provider_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "prices",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "model?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prices",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "operation?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prices",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "input_per_million?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "output_per_million?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "unit_price?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "currency?",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2edfbf27f84416addd1d0c75362720baec6d4b597014578c6d64fbd7e2ab49f6"
+}

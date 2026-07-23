@@ -41,26 +41,26 @@ fn media_job_surface_preserves_wire_contract() {
 #[test]
 fn pricing_provider_kind_uses_current_wire_names_only() {
     assert_eq!(
-        serde_json::to_value(pricing::PriceProviderKind::OpenAi).unwrap(),
+        serde_json::to_value(olp_domain::ProviderKind::OpenAi).unwrap(),
         "openai"
     );
     assert_eq!(
-        serde_json::to_value(pricing::PriceProviderKind::AzureOpenAi).unwrap(),
+        serde_json::to_value(olp_domain::ProviderKind::AzureOpenAi).unwrap(),
         "azure_openai"
     );
     assert_eq!(
-        serde_json::to_value(pricing::PriceProviderKind::OpenAiCompatible).unwrap(),
+        serde_json::to_value(olp_domain::ProviderKind::OpenAiCompatible).unwrap(),
         "openai_compatible"
     );
     for legacy in ["open_ai", "azure_open_ai", "open_ai_compatible"] {
         assert!(
-            serde_json::from_value::<pricing::PriceProviderKind>(legacy.into()).is_err(),
+            serde_json::from_value::<olp_domain::ProviderKind>(legacy.into()).is_err(),
             "accepted legacy provider kind {legacy}"
         );
     }
     let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
     assert_eq!(
-        document["components"]["schemas"]["PriceProviderKind"]["enum"],
+        document["components"]["schemas"]["ProviderKind"]["enum"],
         serde_json::json!([
             "openai",
             "anthropic",

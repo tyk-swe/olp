@@ -16,42 +16,13 @@ use uuid::Uuid;
 
 use super::helpers::{PageQuery, map_operations, page_limit};
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, idempotency_http_response, json_payload, map_persistence,
         require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, require_store,
+        require_read_session,
     },
 };
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum PriceProviderKind {
-    #[serde(rename = "openai")]
-    OpenAi,
-    Anthropic,
-    Gemini,
-    VertexAi,
-    Bedrock,
-    #[serde(rename = "azure_openai")]
-    AzureOpenAi,
-    #[serde(rename = "openai_compatible")]
-    OpenAiCompatible,
-}
-
-impl From<PriceProviderKind> for ProviderKind {
-    fn from(value: PriceProviderKind) -> Self {
-        match value {
-            PriceProviderKind::OpenAi => Self::OpenAi,
-            PriceProviderKind::Anthropic => Self::Anthropic,
-            PriceProviderKind::Gemini => Self::Gemini,
-            PriceProviderKind::VertexAi => Self::VertexAi,
-            PriceProviderKind::Bedrock => Self::Bedrock,
-            PriceProviderKind::AzureOpenAi => Self::AzureOpenAi,
-            PriceProviderKind::OpenAiCompatible => Self::OpenAiCompatible,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -99,7 +70,7 @@ impl From<PriceOperation> for OperationKind {
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(super) struct PriceRequest {
-    provider_kind: PriceProviderKind,
+    provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
     provider_id: Option<Uuid>,
     model: String,
@@ -113,7 +84,7 @@ pub(super) struct PriceRequest {
 impl From<PriceRequest> for PriceInput {
     fn from(price: PriceRequest) -> Self {
         Self {
-            provider_kind: ProviderKind::from(price.provider_kind),
+            provider_kind: price.provider_kind,
             provider_id: price.provider_id,
             model: price.model,
             operation: OperationKind::from(price.operation),
@@ -133,7 +104,7 @@ pub(super) struct PricingRevisionRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct PriceResponse {
-    provider_kind: String,
+    provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
     provider_id: Option<Uuid>,
     model: String,
@@ -147,7 +118,7 @@ pub(super) struct PriceResponse {
 impl From<PriceInput> for PriceResponse {
     fn from(price: PriceInput) -> Self {
         Self {
-            provider_kind: price.provider_kind.to_string(),
+            provider_kind: price.provider_kind,
             provider_id: price.provider_id,
             model: price.model,
             operation: price.operation.to_string(),
@@ -198,7 +169,7 @@ pub(super) struct PricingRevisionsResponse {
     responses((status = 200, description = "Pricing revisions", body = PricingRevisionsResponse))
 )]
 pub(super) async fn list_pricing_revisions(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<PricingRevisionsResponse>, Problem> {
@@ -210,7 +181,8 @@ pub(super) async fn list_pricing_revisions(
         .map(str::parse::<u32>)
         .transpose()
         .map_err(|_| Problem::bad_request("invalid_cursor", "The cursor is invalid."))?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .pricing_revisions_page(before, page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;
@@ -234,7 +206,7 @@ pub(super) async fn list_pricing_revisions(
     )
 )]
 pub(super) async fn create_pricing_revision(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<PricingRevisionRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -252,7 +224,8 @@ pub(super) async fn create_pricing_revision(
         .into_iter()
         .map(Into::into)
         .collect::<Vec<_>>();
-    let revision = require_store(&state)?
+    let revision = state
+        .store()
         .create_pricing_revision(
             principal.user_id,
             &idempotency_key,

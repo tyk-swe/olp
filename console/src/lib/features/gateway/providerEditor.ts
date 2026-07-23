@@ -2,6 +2,7 @@ import type {
   CreateProviderInput,
   ProviderAuthMode,
   ProviderKind,
+  ProviderKindCapability,
   UpdateProviderInput
 } from '$lib/api/management/providers';
 
@@ -43,108 +44,108 @@ export type ProviderStatusValue = Pick<ProviderReadiness, 'state'> & {
   pending_activation: boolean;
 };
 
-type AuthOption = readonly [ProviderAuthMode, string];
-
-const apiKeyAuthOptions: readonly AuthOption[] = [['api_key', 'Stored API key']];
-
-export function createProviderDraft(): ProviderDraft {
+export function createProviderDraft(spec: ProviderKindCapability): ProviderDraft {
   return {
-    kind: 'openai',
+    kind: spec.kind,
     name: '',
     endpoint: '',
     apiVersion: '',
     cloudRegion: '',
     cloudProject: '',
     deployment: '',
-    authMode: 'api_key',
+    authMode: spec.default_auth_mode,
     credential: '',
     model: ''
   };
 }
 
-export function authOptionsFor(kind: ProviderKind): readonly AuthOption[] {
-  if (kind === 'vertex_ai') {
-    return [
-      ['adc', 'Application Default Credentials'],
-      ['service_account', 'Stored service account JSON']
-    ] as const;
-  }
-  if (kind === 'bedrock') {
-    return [
-      ['default_chain', 'AWS default chain'],
-      ['static', 'Stored static AWS credential']
-    ] as const;
-  }
-  return apiKeyAuthOptions;
+export function authOptionsFor(
+  spec: ProviderKindCapability
+): readonly (readonly [ProviderAuthMode, string])[] {
+  return spec.auth_modes.map((auth) => [auth.mode, auth.label] as const);
 }
 
-export function requiresCredential(authMode: ProviderAuthMode): boolean {
-  return !['adc', 'default_chain'].includes(authMode);
+export function requiresCredential(
+  spec: ProviderKindCapability,
+  authMode: ProviderAuthMode
+): boolean {
+  return spec.auth_modes.find((auth) => auth.mode === authMode)?.credential === 'required';
 }
 
-export function requiresSeedModel(kind: ProviderKind): boolean {
-  return kind === 'vertex_ai';
+function hasField(spec: ProviderKindCapability, field: string): boolean {
+  return spec.fields.some((candidate) => candidate.field === field);
 }
 
-export function hasCustomEndpoint(kind: ProviderKind): boolean {
-  return ['openai_compatible', 'azure_openai'].includes(kind);
+function requiresField(spec: ProviderKindCapability, field: string): boolean {
+  return spec.fields.some((candidate) => candidate.field === field && candidate.required);
 }
 
-export function hasCloudRegion(kind: ProviderKind): boolean {
-  return ['vertex_ai', 'bedrock'].includes(kind);
+export function requiresSeedModel(spec: ProviderKindCapability): boolean {
+  return requiresField(spec, 'model');
 }
 
-export function hasCloudProject(kind: ProviderKind): boolean {
-  return kind === 'vertex_ai';
+export function hasCustomEndpoint(spec: ProviderKindCapability): boolean {
+  return hasField(spec, 'endpoint');
 }
 
-export function hasDeployment(kind: ProviderKind): boolean {
-  return kind === 'azure_openai';
+export function hasCloudRegion(spec: ProviderKindCapability): boolean {
+  return hasField(spec, 'cloud_region');
 }
 
-export function hasApiVersion(kind: ProviderKind): boolean {
-  return kind === 'azure_openai';
+export function hasCloudProject(spec: ProviderKindCapability): boolean {
+  return hasField(spec, 'cloud_project');
 }
 
-export function validateProviderDraft(draft: ProviderDraft): string | null {
+export function hasDeployment(spec: ProviderKindCapability): boolean {
+  return hasField(spec, 'deployment');
+}
+
+export function hasApiVersion(spec: ProviderKindCapability): boolean {
+  return hasField(spec, 'api_version');
+}
+
+export function validateProviderDraft(
+  draft: ProviderDraft,
+  spec: ProviderKindCapability
+): string | null {
   if (
     !draft.name.trim() ||
-    (requiresSeedModel(draft.kind) && !draft.model.trim()) ||
-    (requiresCredential(draft.authMode) && !draft.credential)
+    (requiresSeedModel(spec) && !draft.model.trim()) ||
+    (requiresCredential(spec, draft.authMode) && !draft.credential)
   ) {
-    return requiresSeedModel(draft.kind)
+    return requiresSeedModel(spec)
       ? 'Name, Vertex probe model, and the selected identity fields are required.'
       : 'Name and the selected identity fields are required.';
   }
-  if (draft.kind === 'openai_compatible' && !draft.endpoint.trim()) {
-    return 'An HTTPS endpoint is required for an OpenAI-compatible provider.';
-  }
-  if (draft.kind === 'vertex_ai' && (!draft.cloudProject.trim() || !draft.cloudRegion.trim())) {
-    return 'Vertex AI requires a cloud project and location.';
-  }
-  if (draft.kind === 'bedrock' && !draft.cloudRegion.trim()) {
-    return 'AWS Bedrock requires a cloud region.';
-  }
-  if (
-    draft.kind === 'azure_openai' &&
-    (!draft.endpoint.trim() || !draft.deployment.trim() || !draft.apiVersion.trim())
-  ) {
-    return 'Azure OpenAI requires its resource endpoint, deployment, and API version.';
+  const values: Record<string, string> = {
+    endpoint: draft.endpoint,
+    api_version: draft.apiVersion,
+    cloud_region: draft.cloudRegion,
+    cloud_project: draft.cloudProject,
+    deployment: draft.deployment,
+    model: draft.model
+  };
+  const missing = spec.fields.filter((field) => field.required && !values[field.field]?.trim());
+  if (missing.length) {
+    return `${spec.label} requires ${missing.map((field) => field.label.toLowerCase()).join(', ')}.`;
   }
   return null;
 }
 
-export function buildCreateProviderInput(draft: ProviderDraft): CreateProviderInput {
+export function buildCreateProviderInput(
+  draft: ProviderDraft,
+  spec: ProviderKindCapability
+): CreateProviderInput {
   return {
     name: draft.name.trim(),
     kind: draft.kind,
     credential: draft.credential || undefined,
     model: draft.model.trim() || null,
-    endpoint: hasCustomEndpoint(draft.kind) ? draft.endpoint.trim() || null : null,
-    api_version: hasApiVersion(draft.kind) ? draft.apiVersion.trim() || null : null,
-    cloud_region: hasCloudRegion(draft.kind) ? draft.cloudRegion.trim() || null : null,
-    cloud_project: hasCloudProject(draft.kind) ? draft.cloudProject.trim() || null : null,
-    deployment: hasDeployment(draft.kind) ? draft.deployment.trim() || null : null,
+    endpoint: hasCustomEndpoint(spec) ? draft.endpoint.trim() || null : null,
+    api_version: hasApiVersion(spec) ? draft.apiVersion.trim() || null : null,
+    cloud_region: hasCloudRegion(spec) ? draft.cloudRegion.trim() || null : null,
+    cloud_project: hasCloudProject(spec) ? draft.cloudProject.trim() || null : null,
+    deployment: hasDeployment(spec) ? draft.deployment.trim() || null : null,
     auth_mode: draft.authMode,
     display_name: draft.name.trim()
   };
@@ -159,29 +160,29 @@ export function providerEditValues(current: {
   cloud_project?: string | null;
   deployment?: string | null;
   auth_mode: ProviderAuthMode;
-}): ProviderEditValues {
+}, spec: ProviderKindCapability): ProviderEditValues {
   return {
     name: current.name,
-    endpoint: hasCustomEndpoint(current.kind) ? current.endpoint ?? '' : '',
-    apiVersion: hasApiVersion(current.kind) ? current.api_version ?? '' : '',
-    cloudRegion: hasCloudRegion(current.kind) ? current.cloud_region ?? '' : '',
-    cloudProject: hasCloudProject(current.kind) ? current.cloud_project ?? '' : '',
-    deployment: hasDeployment(current.kind) ? current.deployment ?? '' : '',
+    endpoint: hasCustomEndpoint(spec) ? current.endpoint ?? '' : '',
+    apiVersion: hasApiVersion(spec) ? current.api_version ?? '' : '',
+    cloudRegion: hasCloudRegion(spec) ? current.cloud_region ?? '' : '',
+    cloudProject: hasCloudProject(spec) ? current.cloud_project ?? '' : '',
+    deployment: hasDeployment(spec) ? current.deployment ?? '' : '',
     authMode: current.auth_mode
   };
 }
 
 export function buildUpdateProviderInput(
-  current: { kind: ProviderKind },
-  values: ProviderEditValues
+  values: ProviderEditValues,
+  spec: ProviderKindCapability
 ): UpdateProviderInput {
   return {
     name: values.name.trim(),
-    endpoint: hasCustomEndpoint(current.kind) ? values.endpoint.trim() || null : null,
-    api_version: hasApiVersion(current.kind) ? values.apiVersion.trim() || null : null,
-    cloud_region: hasCloudRegion(current.kind) ? values.cloudRegion.trim() || null : null,
-    cloud_project: hasCloudProject(current.kind) ? values.cloudProject.trim() || null : null,
-    deployment: hasDeployment(current.kind) ? values.deployment.trim() || null : null,
+    endpoint: hasCustomEndpoint(spec) ? values.endpoint.trim() || null : null,
+    api_version: hasApiVersion(spec) ? values.apiVersion.trim() || null : null,
+    cloud_region: hasCloudRegion(spec) ? values.cloudRegion.trim() || null : null,
+    cloud_project: hasCloudProject(spec) ? values.cloudProject.trim() || null : null,
+    deployment: hasDeployment(spec) ? values.deployment.trim() || null : null,
     auth_mode: values.authMode
   };
 }

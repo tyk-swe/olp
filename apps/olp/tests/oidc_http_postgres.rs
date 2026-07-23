@@ -82,7 +82,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     api_state.master_key = Some(Arc::new(MasterKey::new(1, [42_u8; 32])));
     configure_bootstrap(&mut api_state, [43_u8; 32]);
     api_state.oidc_allow_insecure_test_endpoints = true;
-    let app = public_router(api_state);
+    let app = public_router(api_state.mode_dependencies().unwrap().management().unwrap());
 
     let setup = send_json(
         &app,
@@ -149,7 +149,14 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
         PathBuf::from("missing-console-for-oidc-only-test"),
     );
     oidc_only_state.local_login_enabled = false;
-    let oidc_only_app = public_router(oidc_only_state);
+    configure_bootstrap(&mut oidc_only_state, [44_u8; 32]);
+    let oidc_only_app = public_router(
+        oidc_only_state
+            .mode_dependencies()
+            .unwrap()
+            .management()
+            .unwrap(),
+    );
     let oidc_only_capabilities = send_empty(
         &oidc_only_app,
         Method::GET,
@@ -308,13 +315,8 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     let nonce = query_value(&first_flow.authorization_url, "nonce");
     assert!(!first_flow.flow_cookie.contains(&nonce));
     arm_idp(&idp, &first_flow.authorization_url, false).await;
-    let wrong_binding = callback_request(
-        &app,
-        &first_flow.state,
-        "0000000000000000000000000000000000000000000",
-        None,
-    )
-    .await;
+    let wrong_cookie = format!("v2.{}", "0".repeat(43));
+    let wrong_binding = callback_request(&app, &first_flow.state, &wrong_cookie, None).await;
     assert_eq!(wrong_binding.status(), StatusCode::BAD_REQUEST);
 
     // A correctly signed token with the wrong nonce is still rejected.

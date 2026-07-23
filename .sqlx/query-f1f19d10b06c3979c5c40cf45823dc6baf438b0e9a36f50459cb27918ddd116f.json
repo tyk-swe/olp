@@ -1,0 +1,251 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, discovery_url, issuer, authorization_endpoint, token_endpoint, jwks_uri, token_endpoint_auth_method, client_id, encrypted_client_secret, secret_nonce, secret_key_version, scopes, email_claim, groups_claim, default_role::text AS \"default_role?\", enabled, etag, created_at, updated_at, COALESCE((SELECT jsonb_agg(jsonb_build_object( 'claim_value', mapping.email, 'role', mapping.role::text) ORDER BY mapping.email) FROM oidc_email_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), '[]'::jsonb) AS \"email_mappings!\", COALESCE((SELECT jsonb_agg(jsonb_build_object( 'claim_value', mapping.group_name, 'role', mapping.role::text) ORDER BY mapping.group_name) FROM oidc_group_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), '[]'::jsonb) AS \"group_mappings!\" FROM oidc_configurations WHERE singleton LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "discovery_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "discovery_url"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "issuer",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "issuer"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "authorization_endpoint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "authorization_endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "token_endpoint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "token_endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "jwks_uri",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "jwks_uri"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "token_endpoint_auth_method",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "token_endpoint_auth_method"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "client_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "client_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "encrypted_client_secret",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "encrypted_client_secret"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "secret_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "secret_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "secret_key_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "secret_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "scopes",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "scopes"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "email_claim",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "email_claim"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "groups_claim",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "groups_claim"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "default_role?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 15,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "email_mappings!",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 20,
+        "name": "group_mappings!",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "f1f19d10b06c3979c5c40cf45823dc6baf438b0e9a36f50459cb27918ddd116f"
+}

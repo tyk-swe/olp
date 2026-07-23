@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_credential_versions SET ciphertext = $1, nonce = $2, master_key_version = $3 WHERE id = $4 AND master_key_version = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Int4",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d8d8d07a1179128ffcfbd3c60b72066cde4a8eb8b091eaeb5c3317bc917f36b6"
+}

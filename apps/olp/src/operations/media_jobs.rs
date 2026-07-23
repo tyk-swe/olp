@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, not_found, page_limit, validate_time_range};
 use crate::{
-    ApiState, FieldErrors, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    FieldErrors, ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -118,7 +118,7 @@ pub(super) struct MediaJobListResponse {
     )
 )]
 pub(super) async fn list_media_jobs(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<MediaJobQuery>,
 ) -> Result<Json<MediaJobListResponse>, Problem> {
@@ -144,7 +144,8 @@ pub(super) async fn list_media_jobs(
         validate_time_range("created_after", after, "created_before", before)?;
     }
     let limit = page_limit(query.limit)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .media_jobs(
             &MediaJobFilters {
                 api_key_id: query.api_key_id,
@@ -199,13 +200,14 @@ fn parse_media_job_lifecycle(value: &str) -> Result<MediaJobLifecycle, Problem> 
     )
 )]
 pub(super) async fn get_media_job(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Path(job_id): Path<Uuid>,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let record = require_store(&state)?
+    let record = state
+        .store()
         .media_job(job_id)
         .await
         .map_err(map_media_job)?;

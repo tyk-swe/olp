@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT gateway_instance, acknowledged_at, acknowledged_by FROM request_metadata_gateway_epochs WHERE process_epoch = $1 AND stale_detected_at IS NOT NULL FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "gateway_instance",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "gateway_instance"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "acknowledged_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "acknowledged_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "acknowledged_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "5ca57b45052c1db44a49d5bc7bc09d6a7d639ee9d1bb6293dc8b32d142238620"
+}

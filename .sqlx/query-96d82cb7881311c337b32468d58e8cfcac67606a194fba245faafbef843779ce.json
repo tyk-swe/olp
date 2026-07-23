@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS ( SELECT 1 FROM oidc_identities identity JOIN users ON users.id = identity.user_id JOIN sessions session ON session.user_id = users.id WHERE identity.issuer = $1 AND identity.subject = $2 AND users.id = $3 AND users.active AND users.security_version = $5 AND session.id = $4 AND session.security_version = $5 AND session.expires_at > now() ) AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "96d82cb7881311c337b32468d58e8cfcac67606a194fba245faafbef843779ce"
+}

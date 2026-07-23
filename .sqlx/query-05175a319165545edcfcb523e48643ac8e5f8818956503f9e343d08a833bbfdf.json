@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_authorization_flows SET encrypted_payload = $1, payload_nonce = $2, payload_key_version = $3 WHERE id = $4 AND payload_key_version = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Int4",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "05175a319165545edcfcb523e48643ac8e5f8818956503f9e343d08a833bbfdf"
+}

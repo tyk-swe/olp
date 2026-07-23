@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oidc_authorization_flows WHERE configuration_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2874d996153d51209d4f3d1fd3a5eade3f83e5f6056f40f36e6d458e23e5dbff"
+}

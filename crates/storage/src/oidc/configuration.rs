@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use chrono::Utc;
-use sqlx::{Postgres, Row, Transaction};
+use chrono::{DateTime, Utc};
+use sqlx::{FromRow, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::helpers::{encrypted_from_row, normalize_email, required_string, valid_claim_name};
@@ -13,19 +13,20 @@ const MAX_MAPPINGS: usize = 500;
 
 impl PgStore {
     pub async fn oidc_configuration(&self) -> Result<Option<OidcConfiguration>, OidcError> {
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            OidcConfigurationRow,
             "SELECT id, discovery_url, issuer, authorization_endpoint, token_endpoint, jwks_uri, \
                     token_endpoint_auth_method, client_id, encrypted_client_secret, secret_nonce, \
-                    secret_key_version, scopes, email_claim, groups_claim, default_role::text AS default_role, \
+                    secret_key_version, scopes, email_claim, groups_claim, default_role::text AS \"default_role?\", \
                     enabled, etag, created_at, updated_at, \
                     COALESCE((SELECT jsonb_agg(jsonb_build_object( \
                         'claim_value', mapping.email, 'role', mapping.role::text) ORDER BY mapping.email) \
                         FROM oidc_email_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), \
-                        '[]'::jsonb) AS email_mappings, \
+                        '[]'::jsonb) AS \"email_mappings!\", \
                     COALESCE((SELECT jsonb_agg(jsonb_build_object( \
                         'claim_value', mapping.group_name, 'role', mapping.role::text) ORDER BY mapping.group_name) \
                         FROM oidc_group_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), \
-                        '[]'::jsonb) AS group_mappings \
+                        '[]'::jsonb) AS \"group_mappings!\" \
              FROM oidc_configurations WHERE singleton LIMIT 1",
         )
         .fetch_optional(self.pool())
@@ -55,18 +56,20 @@ impl PgStore {
     ) -> Result<OidcConfiguration, OidcError> {
         validate_configuration(&input)?;
         let mut transaction = self.pool().begin().await?;
-        sqlx::query("SELECT pg_advisory_xact_lock($1)")
-            .bind(OIDC_CONFIGURATION_LOCK_ID)
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock($1)",
+            OIDC_CONFIGURATION_LOCK_ID
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
         let current =
-            sqlx::query("SELECT id, etag FROM oidc_configurations WHERE singleton FOR UPDATE")
+            sqlx::query!("SELECT id, etag FROM oidc_configurations WHERE singleton FOR UPDATE")
                 .fetch_optional(&mut *transaction)
                 .await?;
         match current {
             Some(row) => {
-                let current_id: Uuid = row.get("id");
-                let current_etag: Uuid = row.get("etag");
+                let current_id: Uuid = row.id;
+                let current_etag: Uuid = row.etag;
                 let expected = input.expected_etag.ok_or(OidcError::PreconditionRequired)?;
                 if current_id != input.id || current_etag != expected {
                     return Err(OidcError::PreconditionFailed);
@@ -78,14 +81,14 @@ impl PgStore {
 
         let etag = Uuid::now_v7();
         let now = Utc::now();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO oidc_configurations \
              (id, singleton, discovery_url, issuer, authorization_endpoint, token_endpoint, jwks_uri, \
               token_endpoint_auth_method, client_id, encrypted_client_secret, secret_nonce, \
               secret_key_version, scopes, email_claim, groups_claim, default_role, enabled, etag, \
               updated_by, created_at, updated_at) \
              VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
-                     CAST($15 AS user_role), $16, $17, $18, $19, $19) \
+                     CAST($15::text AS user_role), $16, $17, $18, $19, $19) \
              ON CONFLICT (singleton) DO UPDATE SET \
                discovery_url = EXCLUDED.discovery_url, issuer = EXCLUDED.issuer, \
                authorization_endpoint = EXCLUDED.authorization_endpoint, \
@@ -97,37 +100,22 @@ impl PgStore {
                groups_claim = EXCLUDED.groups_claim, default_role = EXCLUDED.default_role, \
                enabled = EXCLUDED.enabled, etag = EXCLUDED.etag, updated_by = EXCLUDED.updated_by, \
                updated_at = EXCLUDED.updated_at",
-        )
-        .bind(input.id)
-        .bind(input.discovery_url.trim())
-        .bind(input.issuer.trim())
-        .bind(input.authorization_endpoint.trim())
-        .bind(input.token_endpoint.trim())
-        .bind(input.jwks_uri.trim())
-        .bind(&input.token_endpoint_auth_method)
-        .bind(input.client_id.trim())
-        .bind(&input.encrypted_client_secret.ciphertext)
-        .bind(input.encrypted_client_secret.nonce.to_vec())
-        .bind(i32::try_from(input.encrypted_client_secret.key_version).map_err(|_| OidcError::Corrupt)?)
-        .bind(&input.scopes)
-        .bind(&input.email_claim)
-        .bind(&input.groups_claim)
-        .bind(input.default_role.map(|role| role.as_str()))
-        .bind(input.enabled)
-        .bind(etag)
-        .bind(input.actor_user_id)
-        .bind(now)
+        input.id, input.discovery_url.trim(), input.issuer.trim(), input.authorization_endpoint.trim(), input.token_endpoint.trim(), input.jwks_uri.trim(), &input.token_endpoint_auth_method, input.client_id.trim(), &input.encrypted_client_secret.ciphertext, input.encrypted_client_secret.nonce.to_vec(), i32::try_from(input.encrypted_client_secret.key_version).map_err(|_| OidcError::Corrupt)?, &input.scopes, &input.email_claim, &input.groups_claim, input.default_role.map(|role| role.as_str()), input.enabled, etag, input.actor_user_id, now)
         .execute(&mut *transaction)
         .await?;
 
-        sqlx::query("DELETE FROM oidc_email_role_mappings WHERE configuration_id = $1")
-            .bind(input.id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM oidc_group_role_mappings WHERE configuration_id = $1")
-            .bind(input.id)
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query!(
+            "DELETE FROM oidc_email_role_mappings WHERE configuration_id = $1",
+            input.id
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM oidc_group_role_mappings WHERE configuration_id = $1",
+            input.id
+        )
+        .execute(&mut *transaction)
+        .await?;
         insert_mappings(&mut transaction, input.id, &input.email_role_mappings, true).await?;
         insert_mappings(
             &mut transaction,
@@ -138,19 +126,21 @@ impl PgStore {
         .await?;
         // Configuration changes invalidate outstanding redirects and their
         // encrypted PKCE material.
-        sqlx::query("DELETE FROM oidc_authorization_flows WHERE configuration_id = $1")
-            .bind(input.id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(
+        sqlx::query!(
+            "DELETE FROM oidc_authorization_flows WHERE configuration_id = $1",
+            input.id
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'oidc.configuration_update', 'oidc_configuration', $3, 'success', $4)",
+            Uuid::now_v7(),
+            input.actor_user_id,
+            input.id.to_string(),
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(input.actor_user_id)
-        .bind(input.id.to_string())
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -158,15 +148,41 @@ impl PgStore {
     }
 }
 
-fn oidc_configuration_from_row(row: sqlx::postgres::PgRow) -> Result<OidcConfiguration, OidcError> {
-    let id: Uuid = row.get("id");
-    let discovery_url = required_string(&row, "discovery_url")?;
-    let authorization_endpoint = required_string(&row, "authorization_endpoint")?;
-    let token_endpoint = required_string(&row, "token_endpoint")?;
-    let jwks_uri = required_string(&row, "jwks_uri")?;
-    let ciphertext: Option<Vec<u8>> = row.get("encrypted_client_secret");
-    let nonce: Option<Vec<u8>> = row.get("secret_nonce");
-    let key_version: Option<i32> = row.get("secret_key_version");
+#[derive(Debug, FromRow)]
+struct OidcConfigurationRow {
+    id: Uuid,
+    discovery_url: Option<String>,
+    issuer: String,
+    authorization_endpoint: Option<String>,
+    token_endpoint: Option<String>,
+    jwks_uri: Option<String>,
+    token_endpoint_auth_method: String,
+    client_id: String,
+    encrypted_client_secret: Option<Vec<u8>>,
+    secret_nonce: Option<Vec<u8>>,
+    secret_key_version: Option<i32>,
+    scopes: Vec<String>,
+    email_claim: String,
+    groups_claim: String,
+    default_role: Option<String>,
+    enabled: bool,
+    etag: Uuid,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    email_mappings: serde_json::Value,
+    group_mappings: serde_json::Value,
+}
+
+fn oidc_configuration_from_row(row: OidcConfigurationRow) -> Result<OidcConfiguration, OidcError> {
+    let id: Uuid = row.id;
+    let discovery_url = required_string(row.discovery_url, "discovery_url")?;
+    let authorization_endpoint =
+        required_string(row.authorization_endpoint, "authorization_endpoint")?;
+    let token_endpoint = required_string(row.token_endpoint, "token_endpoint")?;
+    let jwks_uri = required_string(row.jwks_uri, "jwks_uri")?;
+    let ciphertext: Option<Vec<u8>> = row.encrypted_client_secret;
+    let nonce: Option<Vec<u8>> = row.secret_nonce;
+    let key_version: Option<i32> = row.secret_key_version;
     let encrypted_client_secret = encrypted_from_row(
         key_version.ok_or(OidcError::Corrupt)?,
         nonce.ok_or(OidcError::Corrupt)?,
@@ -175,26 +191,26 @@ fn oidc_configuration_from_row(row: sqlx::postgres::PgRow) -> Result<OidcConfigu
     Ok(OidcConfiguration {
         id,
         discovery_url,
-        issuer: row.get("issuer"),
+        issuer: row.issuer,
         authorization_endpoint,
         token_endpoint,
         jwks_uri,
-        token_endpoint_auth_method: row.get("token_endpoint_auth_method"),
-        client_id: row.get("client_id"),
+        token_endpoint_auth_method: row.token_endpoint_auth_method,
+        client_id: row.client_id,
         encrypted_client_secret,
-        scopes: row.get("scopes"),
-        email_claim: row.get("email_claim"),
-        groups_claim: row.get("groups_claim"),
+        scopes: row.scopes,
+        email_claim: row.email_claim,
+        groups_claim: row.groups_claim,
         default_role: row
-            .get::<Option<String>, _>("default_role")
+            .default_role
             .map(|value| value.parse().map_err(|_| OidcError::Corrupt))
             .transpose()?,
-        email_role_mappings: mappings_from_json(row.get("email_mappings"))?,
-        group_role_mappings: mappings_from_json(row.get("group_mappings"))?,
-        enabled: row.get("enabled"),
-        etag: row.get("etag"),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
+        email_role_mappings: mappings_from_json(row.email_mappings)?,
+        group_role_mappings: mappings_from_json(row.group_mappings)?,
+        enabled: row.enabled,
+        etag: row.etag,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
     })
 }
 
@@ -272,19 +288,27 @@ async fn insert_mappings(
         } else {
             mapping.claim_value.trim().to_owned()
         };
-        let statement = if email {
-            "INSERT INTO oidc_email_role_mappings (configuration_id, email, role) \
-             VALUES ($1, $2, CAST($3 AS user_role))"
-        } else {
-            "INSERT INTO oidc_group_role_mappings (configuration_id, group_name, role) \
-             VALUES ($1, $2, CAST($3 AS user_role))"
-        };
-        sqlx::query(statement)
-            .bind(configuration_id)
-            .bind(value)
-            .bind(mapping.role.as_str())
+        if email {
+            sqlx::query!(
+                "INSERT INTO oidc_email_role_mappings (configuration_id, email, role) \
+                 VALUES ($1, $2, CAST(CAST($3 AS text) AS user_role))",
+                configuration_id,
+                value,
+                mapping.role.as_str(),
+            )
             .execute(&mut **transaction)
             .await?;
+        } else {
+            sqlx::query!(
+                "INSERT INTO oidc_group_role_mappings (configuration_id, group_name, role) \
+                 VALUES ($1, $2, CAST(CAST($3 AS text) AS user_role))",
+                configuration_id,
+                value,
+                mapping.role.as_str(),
+            )
+            .execute(&mut **transaction)
+            .await?;
+        }
     }
     Ok(())
 }

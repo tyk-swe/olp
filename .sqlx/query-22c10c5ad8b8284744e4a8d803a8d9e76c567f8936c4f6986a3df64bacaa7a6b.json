@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, encrypted_client_secret, secret_nonce, secret_key_version FROM oidc_configurations WHERE secret_key_version IS NOT NULL AND secret_key_version <> $1 ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "encrypted_client_secret",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "encrypted_client_secret"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "secret_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "secret_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "secret_key_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "oidc_configurations",
+            "name": "secret_key_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "22c10c5ad8b8284744e4a8d803a8d9e76c567f8936c4f6986a3df64bacaa7a6b"
+}

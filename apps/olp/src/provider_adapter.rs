@@ -1,4 +1,7 @@
-use olp_domain::{ProviderAuthMode, ProviderId, ProviderKind, RuntimeSnapshot};
+use olp_domain::{
+    ProviderAuthMode, ProviderConfiguration, ProviderId, ProviderKind, RuntimeSnapshot,
+    validate_provider_configuration,
+};
 use olp_providers::{
     CredentialKind, ProviderConfig, ProviderCredential, ProviderError, ProviderFacade,
     ProviderFactory,
@@ -8,9 +11,9 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     cli::AppResult,
-    management_api::{map_configuration_resource, require_store, validation},
+    management_api::{map_configuration_resource, validation},
 };
 
 /// Application-owned provider fields before they cross into `olp-providers`.
@@ -59,6 +62,23 @@ impl<'a> From<&'a RuntimeProviderConfiguration> for ProviderConfigFields<'a> {
 pub(crate) fn provider_config(
     fields: ProviderConfigFields<'_>,
 ) -> Result<ProviderConfig, ProviderError> {
+    if let Some(violation) = validate_provider_configuration(ProviderConfiguration {
+        kind: fields.kind,
+        auth_mode: fields.auth_mode,
+        endpoint: fields.endpoint,
+        cloud_region: fields.cloud_region,
+        cloud_project: fields.cloud_project,
+        deployment: fields.deployment,
+        api_version: fields.api_version,
+        model: fields.probe_model,
+        credential_present: None,
+    })
+    .into_iter()
+    .next()
+    {
+        return Err(ProviderError::Configuration(violation.detail.to_owned()));
+    }
+
     let required = |value: Option<&str>, message: &'static str| {
         value
             .map(str::to_owned)
@@ -118,10 +138,10 @@ pub(crate) fn provider_credential(
 }
 
 pub(crate) async fn provider_connector(
-    state: &ApiState,
+    state: &ManagementState,
     provider_id: Uuid,
 ) -> Result<ProviderFacade, Problem> {
-    let store = require_store(state)?;
+    let store = state.store();
     let provider = store
         .get_provider(provider_id)
         .await

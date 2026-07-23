@@ -4,6 +4,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 #[error("invalid {kind} value: {value}")]
@@ -14,10 +15,11 @@ pub struct ClosedSetParseError {
 
 macro_rules! closed_set {
     ($name:ident, $kind:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
-        #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+        #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, ToSchema)]
         pub enum $name {
             $(
                 #[serde(rename = $wire)]
+                #[schema(rename = $wire)]
                 $variant
             ),+
         }

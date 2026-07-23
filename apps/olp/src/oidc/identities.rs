@@ -12,10 +12,10 @@ use uuid::Uuid;
 
 use super::error::map_oidc;
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         RECENT_AUTH_COOKIE, append_security_transition_cookies, cookie, map_persistence,
-        reauthentication_required, require_mutation_session, require_read_session, require_store,
+        reauthentication_required, require_mutation_session, require_read_session,
         validate_session_cookie_ttl,
     },
 };
@@ -60,11 +60,11 @@ pub struct OidcIdentityListResponse {
     )
 )]
 pub(super) async fn list_identities(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Json<OidcIdentityListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let identities = store
         .oidc_identities_for_user(principal.user_id)
         .await
@@ -101,7 +101,7 @@ pub(super) async fn list_identities(
     )
 )]
 pub(super) async fn unlink_identity(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(identity_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -111,7 +111,8 @@ pub(super) async fn unlink_identity(
         .filter(|value| value.len() == 43)
         .ok_or_else(reauthentication_required)?;
     let replacement_session = SessionMaterial::generate();
-    require_store(&state)?
+    state
+        .store()
         .unlink_oidc_identity(UnlinkOidcIdentity {
             user_id: principal.user_id,
             identity_id,

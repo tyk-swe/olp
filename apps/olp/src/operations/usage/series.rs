@@ -10,8 +10,8 @@ use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ApiState, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
     operations::helpers::map_operations,
 };
 
@@ -70,7 +70,7 @@ pub(in crate::operations) struct UsageTimeSeriesResponse {
     responses((status = 200, description = "Usage time series", body = UsageTimeSeriesResponse))
 )]
 pub(in crate::operations) async fn usage_time_series(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<UsageSeriesQuery>,
 ) -> Result<Json<UsageTimeSeriesResponse>, Problem> {
@@ -88,7 +88,8 @@ pub(in crate::operations) async fn usage_time_series(
         }
     };
     let filters = query.usage.filters()?;
-    let series = require_store(&state)?
+    let series = state
+        .store()
         .usage_series(&filters, granularity)
         .await
         .map_err(map_operations)?;

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM route_draft_targets WHERE route_draft_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba184fcf64af84c46b4146a01b1530465b1a9959ff30bb3930cc49934f0a2857"
+}

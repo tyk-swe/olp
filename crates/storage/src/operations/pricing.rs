@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use olp_domain::{OperationKind, ProviderKind};
-use sqlx::Row;
+use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use super::{
@@ -80,20 +80,20 @@ impl PgStore {
             }
         }
         validate_prices(prices)?;
-        sqlx::query("SELECT pg_advisory_xact_lock($1)")
-            .bind(PRICING_LOCK_ID)
-            .execute(&mut *transaction)
+        sqlx::query!("SELECT pg_advisory_xact_lock($1)", PRICING_LOCK_ID)
+            .fetch_one(&mut *transaction)
             .await?;
         let requested_currency = prices
             .first()
-            .expect("validated pricing revision is nonempty")
+            .ok_or_else(|| OperationsError::Invalid("pricing revision is empty".to_owned()))?
             .currency
             .trim()
             .to_uppercase();
-        let configured_currency: Option<String> =
-            sqlx::query_scalar("SELECT currency::text FROM pricing_currency WHERE singleton")
-                .fetch_optional(&mut *transaction)
-                .await?;
+        let configured_currency: Option<String> = sqlx::query_scalar!(
+            "SELECT currency::text AS \"value!\" FROM pricing_currency WHERE singleton"
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
         if configured_currency
             .as_deref()
             .is_some_and(|currency| currency.trim() != requested_currency)
@@ -106,28 +106,31 @@ impl PgStore {
                     .unwrap_or_default()
             )));
         }
-        let revision: i32 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(revision), 0) + 1 FROM pricing_revisions")
-                .fetch_one(&mut *transaction)
-                .await?;
+        let revision: i32 = sqlx::query_scalar!(
+            "SELECT COALESCE(MAX(revision), 0) + 1 AS \"value!\" FROM pricing_revisions"
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
         let id = Uuid::now_v7();
         let now = Utc::now();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO pricing_revisions (id, revision, effective_at, created_by, created_at) \
              VALUES ($1, $2, $3, $4, $5)",
+            id,
+            revision,
+            effective_at,
+            actor,
+            now
         )
-        .bind(id)
-        .bind(revision)
-        .bind(effective_at)
-        .bind(actor)
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         for price in prices {
+            let input_per_million = parse_optional_decimal(price.input_per_million.as_deref())?;
+            let output_per_million = parse_optional_decimal(price.output_per_million.as_deref())?;
+            let unit_price = parse_optional_decimal(price.unit_price.as_deref())?;
             if let Some(provider_id) = price.provider_id {
                 let provider_kind: Option<String> =
-                    sqlx::query_scalar("SELECT kind FROM providers WHERE id = $1")
-                        .bind(provider_id)
+                    sqlx::query_scalar!("SELECT kind FROM providers WHERE id = $1", provider_id)
                         .fetch_optional(&mut *transaction)
                         .await?;
                 if provider_kind.as_deref() != Some(price.provider_kind.as_str()) {
@@ -137,33 +140,33 @@ impl PgStore {
                     ));
                 }
             }
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO prices \
                  (pricing_revision_id, provider_kind, provider_id, model, operation, \
                   input_per_million, output_per_million, unit_price, currency) \
                  VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9)",
+                id,
+                price.provider_kind.as_str(),
+                price.provider_id,
+                price.model.trim(),
+                price.operation.as_str(),
+                input_per_million,
+                output_per_million,
+                unit_price,
+                price.currency.trim().to_uppercase()
             )
-            .bind(id)
-            .bind(price.provider_kind.as_str())
-            .bind(price.provider_id)
-            .bind(price.model.trim())
-            .bind(price.operation.as_str())
-            .bind(price.input_per_million.as_deref())
-            .bind(price.output_per_million.as_deref())
-            .bind(price.unit_price.as_deref())
-            .bind(price.currency.trim().to_uppercase())
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'pricing_revision.create', 'pricing_revision', $3, 'success', $4)",
+            Uuid::now_v7(),
+            actor,
+            id.to_string(),
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(actor)
-        .bind(id.to_string())
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         let record = PricingRevisionRecord {
@@ -203,62 +206,72 @@ impl PgStore {
             .transpose()
             .map_err(|_| OperationsError::InvalidCursor)?;
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT r.id, r.revision, r.effective_at, r.created_by, r.created_at, \
-                    p.provider_kind, p.provider_id, p.model, p.operation, \
-                    p.input_per_million::text AS input_per_million, \
-                    p.output_per_million::text AS output_per_million, p.unit_price::text AS unit_price, \
-                    p.currency::text AS currency \
+                    p.provider_kind AS \"provider_kind?\", p.provider_id AS \"provider_id?\", \
+                    p.model AS \"model?\", p.operation AS \"operation?\", \
+                    p.input_per_million::text AS \"input_per_million?\", \
+                    p.output_per_million::text AS \"output_per_million?\", \
+                    p.unit_price::text AS \"unit_price?\", p.currency::text AS \"currency?\" \
              FROM pricing_revisions r LEFT JOIN prices p ON p.pricing_revision_id = r.id \
              WHERE r.id IN (SELECT id FROM pricing_revisions \
                             WHERE ($1::int IS NULL OR revision < $1) \
                             ORDER BY revision DESC LIMIT $2) \
              ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, \
                       p.model, p.operation",
+            before_revision,
+            i64::from(page_size) + 1
         )
-        .bind(before_revision)
-        .bind(i64::from(page_size) + 1)
         .fetch_all(self.pool())
         .await?;
         let mut revisions = Vec::<PricingRevisionRecord>::new();
         for row in rows {
-            let id: Uuid = row.get("id");
+            let id: Uuid = row.id;
             if revisions.last().is_none_or(|revision| revision.id != id) {
                 revisions.push(PricingRevisionRecord {
                     id,
-                    revision: u32::try_from(row.get::<i32, _>("revision")).map_err(|_| {
+                    revision: u32::try_from(row.revision).map_err(|_| {
                         OperationsError::Invalid("stored pricing revision is invalid".to_owned())
                     })?,
-                    effective_at: row.get("effective_at"),
-                    created_by: row.get("created_by"),
-                    created_at: row.get("created_at"),
+                    effective_at: row.effective_at,
+                    created_by: row.created_by,
+                    created_at: row.created_at,
                     prices: Vec::new(),
                 });
             }
-            let provider_kind: Option<String> = row.get("provider_kind");
+            let provider_kind: Option<String> = row.provider_kind;
             if let Some(provider_kind) = provider_kind {
-                revisions
-                    .last_mut()
-                    .expect("revision was inserted above")
-                    .prices
-                    .push(PriceInput {
-                        provider_kind: provider_kind.parse().map_err(|_| {
-                            OperationsError::Invalid(
-                                "stored pricing provider kind is invalid".to_owned(),
-                            )
-                        })?,
-                        provider_id: row.get("provider_id"),
-                        model: row.get("model"),
-                        operation: row.get::<String, _>("operation").parse().map_err(|_| {
+                let revision = revisions.last_mut().ok_or_else(|| {
+                    OperationsError::Invalid("pricing revision grouping is invalid".to_owned())
+                })?;
+                revision.prices.push(PriceInput {
+                    provider_kind: provider_kind.parse().map_err(|_| {
+                        OperationsError::Invalid(
+                            "stored pricing provider kind is invalid".to_owned(),
+                        )
+                    })?,
+                    provider_id: row.provider_id,
+                    model: row
+                        .model
+                        .ok_or(PersistenceError::InvalidStoredValue("pricing model"))?,
+                    operation: row
+                        .operation
+                        .ok_or(PersistenceError::InvalidStoredValue("pricing operation"))?
+                        .parse()
+                        .map_err(|_| {
                             OperationsError::Invalid(
                                 "stored pricing operation is invalid".to_owned(),
                             )
                         })?,
-                        input_per_million: row.get("input_per_million"),
-                        output_per_million: row.get("output_per_million"),
-                        unit_price: row.get("unit_price"),
-                        currency: row.get::<String, _>("currency").trim().to_owned(),
-                    });
+                    input_per_million: row.input_per_million,
+                    output_per_million: row.output_per_million,
+                    unit_price: row.unit_price,
+                    currency: row
+                        .currency
+                        .ok_or(PersistenceError::InvalidStoredValue("pricing currency"))?
+                        .trim()
+                        .to_owned(),
+                });
             }
         }
         let (revisions, next_cursor) = split_page(revisions, usize::from(page_size), |revision| {
@@ -347,4 +360,14 @@ pub(super) fn validate_decimal(value: &str) -> Result<(), OperationsError> {
         ));
     }
     Ok(())
+}
+
+fn parse_optional_decimal(value: Option<&str>) -> Result<Option<Decimal>, OperationsError> {
+    value
+        .map(|value| {
+            value.trim().parse().map_err(|_| {
+                OperationsError::Invalid("price is outside the supported numeric range".to_owned())
+            })
+        })
+        .transpose()
 }

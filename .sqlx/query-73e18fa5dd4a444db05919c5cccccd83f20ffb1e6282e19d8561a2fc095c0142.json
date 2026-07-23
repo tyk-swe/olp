@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO idempotency_records (id, actor_user_id, operation, idempotency_key, state, request_fingerprint, expires_at) VALUES ($1, $2, $3, $4, 'in_progress', $5, now() + interval '24 hours')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73e18fa5dd4a444db05919c5cccccd83f20ffb1e6282e19d8561a2fc095c0142"
+}

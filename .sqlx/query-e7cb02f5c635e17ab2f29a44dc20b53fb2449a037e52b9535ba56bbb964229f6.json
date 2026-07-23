@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH orphan AS ( SELECT anchor.request_id, anchor.request_started_at FROM usage_request_anchors anchor WHERE anchor.request_started_at < $1 AND NOT EXISTS ( SELECT 1 FROM usage_facts fact WHERE fact.request_id = anchor.request_id AND fact.request_started_at = anchor.request_started_at ) FOR UPDATE OF anchor SKIP LOCKED ) DELETE FROM usage_request_anchors anchor USING orphan WHERE anchor.request_id = orphan.request_id AND anchor.request_started_at = orphan.request_started_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e7cb02f5c635e17ab2f29a44dc20b53fb2449a037e52b9535ba56bbb964229f6"
+}

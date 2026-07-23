@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE transactional_outbox SET published_at = now() WHERE id = $1 AND published_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3f1a0c1819a0f5eb901f9f06491029cc5c76dc5c9aba0f791cccde8dcb52d46"
+}

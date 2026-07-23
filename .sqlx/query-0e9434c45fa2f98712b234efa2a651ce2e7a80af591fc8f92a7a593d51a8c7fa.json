@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO transactional_outbox (id, topic, aggregate_id, payload, created_at) VALUES ($1, 'runtime.generation.activated', $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e9434c45fa2f98712b234efa2a651ce2e7a80af591fc8f92a7a593d51a8c7fa"
+}

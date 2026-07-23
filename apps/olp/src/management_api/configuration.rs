@@ -4,15 +4,19 @@ use axum::{
 };
 use utoipa::OpenApi;
 
-use crate::{ApiState, Problem};
+use crate::{ManagementState, Problem};
 
 pub(crate) mod api_keys;
 pub(crate) mod common;
 pub(crate) mod providers;
 mod routes;
 
-pub fn router() -> Router<ApiState> {
+pub fn router() -> Router<ManagementState> {
     Router::new()
+        .route(
+            "/api/v1/provider-kinds",
+            get(providers::list_provider_kinds),
+        )
         .route(
             "/api/v1/provider-kinds/{provider_kind}/capabilities",
             get(providers::list_provider_kind_capabilities),
@@ -152,6 +156,7 @@ pub fn router() -> Router<ApiState> {
     paths(
         providers::create_provider,
         providers::activate_provider,
+        providers::list_provider_kinds,
         providers::list_provider_kind_capabilities,
         providers::list_providers,
         providers::list_provider_model_inventory,
@@ -199,6 +204,10 @@ pub fn router() -> Router<ApiState> {
         providers::ProviderResponse,
         providers::ProviderActivationResponse,
         providers::ProviderCapabilityOptionsResponse,
+        providers::ProviderAuthCapabilityResponse,
+        providers::ProviderFieldCapabilityResponse,
+        providers::ProviderKindCapabilityResponse,
+        providers::ProviderKindCapabilityListResponse,
         providers::CapabilityResponse,
         providers::ProviderModelResponse,
         providers::ProviderModelListResponse,

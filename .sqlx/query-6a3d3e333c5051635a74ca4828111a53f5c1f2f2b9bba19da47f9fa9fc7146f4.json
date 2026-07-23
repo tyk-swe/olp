@@ -1,0 +1,342 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,\n                    p.name AS provider_name, j.provider_model, j.route_slug,\n                    j.operation, j.surface, j.state::text AS \"state!\", j.lifecycle_state,\n                    j.progress_percent::real AS \"progress_percent?\",\n                    j.content_available, j.expires_at, j.error_class,\n                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,\n                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,\n                    j.reconciliation_attempts, j.next_reconciliation_at,\n                    j.last_reconciliation_at, j.etag,\n                    j.created_at, j.updated_at\n             FROM async_media_jobs j\n             JOIN providers p ON p.id = j.provider_id\n             WHERE j.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "upstream_job_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "upstream_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "api_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "api_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "provider_model"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "route_slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "route_slug"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "surface",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "surface"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "lifecycle_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "lifecycle_state"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "progress_percent?",
+        "type_info": "Float4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "content_available",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "content_available"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "error_class",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "error_class"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "last_polled_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "last_polled_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "reconciliation_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "reconciliation_error"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "deleted_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "deleted_at"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "runtime_generation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "runtime_generation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "provider_revision_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "provider_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "reconciliation_claim_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "reconciliation_claim_id"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "reconciliation_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "reconciliation_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "next_reconciliation_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "next_reconciliation_at"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "last_reconciliation_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "last_reconciliation_at"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6a3d3e333c5051635a74ca4828111a53f5c1f2f2b9bba19da47f9fa9fc7146f4"
+}

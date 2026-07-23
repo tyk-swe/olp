@@ -1,9 +1,8 @@
 use axum::{
-    Json, Router,
+    Json,
     extract::{Extension, Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use olp_domain::{ApiKey, CanonicalResult, OperationKind, RouteSlug, Surface, TransportMode};
@@ -15,7 +14,7 @@ use olp_protocols::gemini::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ApiState, InferencePrincipal, RuntimeBundle,
+    GatewayState, InferencePrincipal, RuntimeBundle,
     event_completion::{CompletedEventExecution, collect_event_execution},
     json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
     streaming_response::{
@@ -32,16 +31,8 @@ use super::{
     release_model_limits, reserve_model_limits,
 };
 
-pub(super) fn router() -> Router<ApiState> {
-    Router::new()
-        .route("/gemini/v1/models", get(models))
-        .route("/gemini/v1/models/{*resource}", get(model).post(action))
-        .route("/gemini/v1beta/models", get(models))
-        .route("/gemini/v1beta/models/{*resource}", get(model).post(action))
-}
-
-async fn action(
-    State(state): State<ApiState>,
+pub(super) async fn action(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(resource): Path<String>,
     Query(query): Query<ActionQuery>,
@@ -186,13 +177,13 @@ fn count_result(mut executed: RoutedUnaryResult) -> Result<Response, ProtocolErr
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ActionQuery {
+pub(super) struct ActionQuery {
     alt: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ModelsQuery {
+pub(super) struct ModelsQuery {
     page_size: Option<usize>,
     page_token: Option<String>,
 }
@@ -216,8 +207,8 @@ struct Model {
     supported_generation_methods: Vec<&'static str>,
 }
 
-async fn models(
-    State(state): State<ApiState>,
+pub(super) async fn models(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
@@ -279,8 +270,8 @@ fn models_response(
         .into_response())
 }
 
-async fn model(
-    State(state): State<ApiState>,
+pub(super) async fn model(
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(resource): Path<String>,
 ) -> Result<Response, ProtocolError> {

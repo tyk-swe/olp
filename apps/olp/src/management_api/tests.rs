@@ -5,7 +5,10 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
-use olp_domain::{Permission, Role};
+use olp_domain::{
+    Permission, ProviderAuthMode, ProviderConfiguration, ProviderKind, Role,
+    validate_provider_configuration,
+};
 use olp_storage::{
     ConfigurationError, IdempotencyOutcome, IdempotencyResponse, SessionMaterial, SessionPrincipal,
 };
@@ -27,19 +30,13 @@ use super::{
         idempotency_http_response, if_match, map_configuration, require_idempotency_key,
         require_permission, session_cookie,
     },
-    configuration::{
-        api_keys::CreateApiKeyResponse,
-        providers::{
-            CreateProviderRequest, reject_create_cloud_fields, reject_create_field,
-            require_create_auth_mode,
-        },
-    },
+    configuration::{api_keys::CreateApiKeyResponse, providers::CreateProviderRequest},
     management_openapi,
 };
-use crate::{ApiState, FieldErrors};
+use crate::ManagementState;
 
-fn state() -> ApiState {
-    ApiState::new(
+fn state() -> ManagementState {
+    ManagementState::new(
         crate::ApiMode::Control,
         None,
         Arc::new(crate::RuntimeManager::empty()),
@@ -136,34 +133,44 @@ async fn unauthenticated_password_work_remains_bounded_after_request_cancellatio
 fn native_provider_create_shape_rejects_custom_and_cloud_fields() {
     let request = CreateProviderRequest {
         name: "native".to_owned(),
-        kind: "openai".to_owned(),
+        kind: ProviderKind::OpenAi,
         endpoint: Some("https://proxy.example.test/v1".to_owned()),
         cloud_region: Some("region".to_owned()),
         cloud_project: None,
         deployment: None,
         api_version: None,
-        auth_mode: Some("custom".to_owned()),
+        auth_mode: Some(ProviderAuthMode::ApplicationDefault),
         credential: Some(WriteOnlySecret("sk-test-secret".to_owned())),
         legacy_api_key: None,
         model: None,
         display_name: None,
     };
-    let mut errors = FieldErrors::new();
-    require_create_auth_mode(
-        &mut errors,
-        request.auth_mode.as_deref().unwrap(),
-        "api_key",
+    let errors = validate_provider_configuration(ProviderConfiguration {
+        kind: request.kind,
+        auth_mode: request.auth_mode.unwrap(),
+        endpoint: request.endpoint.as_deref(),
+        cloud_region: request.cloud_region.as_deref(),
+        cloud_project: request.cloud_project.as_deref(),
+        deployment: request.deployment.as_deref(),
+        api_version: request.api_version.as_deref(),
+        model: request.model.as_deref(),
+        credential_present: Some(request.credential.is_some()),
+    });
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.field.as_str() == "endpoint")
     );
-    reject_create_field(
-        &mut errors,
-        "endpoint",
-        request.endpoint.is_some(),
-        "Native OpenAI uses the official endpoint.",
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.field.as_str() == "cloud_region")
     );
-    reject_create_cloud_fields(&mut errors, &request);
-    assert!(errors.contains_key("endpoint"));
-    assert!(errors.contains_key("cloud_region"));
-    assert!(errors.contains_key("auth_mode"));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.field.as_str() == "auth_mode")
+    );
 }
 
 #[test]

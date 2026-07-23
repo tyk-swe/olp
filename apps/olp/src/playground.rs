@@ -18,12 +18,12 @@ use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    ApiState, FieldErrors, Problem,
+    FieldErrors, ManagementState, Problem,
     gateway::{InferenceError, execute_session_generation},
     management_api::{Permission, json_payload, require_mutation_session, require_permission},
 };
 
-pub(crate) fn router() -> Router<ApiState> {
+pub(crate) fn router() -> Router<ManagementState> {
     Router::new().route("/api/v1/playground", post(execute_playground))
 }
 
@@ -175,7 +175,7 @@ struct ToolCallBuilder {
     )
 )]
 async fn execute_playground(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<PlaygroundRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {

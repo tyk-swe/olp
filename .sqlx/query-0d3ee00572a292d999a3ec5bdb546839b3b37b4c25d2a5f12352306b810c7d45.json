@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS ( SELECT 1 FROM routes r JOIN LATERAL (SELECT id FROM route_revisions WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true JOIN route_revision_targets rt ON rt.route_revision_id = rr.id JOIN provider_models pm ON pm.id = rt.provider_model_id WHERE pm.provider_id = $1 ) AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0d3ee00572a292d999a3ec5bdb546839b3b37b4c25d2a5f12352306b810c7d45"
+}

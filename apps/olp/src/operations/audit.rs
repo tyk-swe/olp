@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use super::helpers::{PageQuery, map_operations, page_limit};
 use crate::{
-    ApiState, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -58,7 +58,7 @@ pub(super) struct AuditListResponse {
     responses((status = 200, description = "Audit page", body = AuditListResponse))
 )]
 pub(super) async fn list_audit_events(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<AuditListResponse>, Problem> {
@@ -71,7 +71,8 @@ pub(super) async fn list_audit_events(
         .transpose()
         .map_err(map_operations)?;
     let limit = page_limit(query.limit)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .audit_events(cursor.as_ref(), limit)
         .await
         .map_err(map_operations)?;

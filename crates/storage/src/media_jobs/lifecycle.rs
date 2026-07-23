@@ -4,7 +4,8 @@ use crate::PgStore;
 
 use super::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
-    NewMediaJobReservation, queries::media_job_from_row,
+    NewMediaJobReservation,
+    queries::{MediaJobRow, media_job_from_row},
 };
 
 impl PgStore {
@@ -16,7 +17,7 @@ impl PgStore {
         input: NewMediaJobReservation,
     ) -> Result<MediaJobRecord, MediaJobError> {
         validate_reservation(&input)?;
-        let inserted = sqlx::query(
+        let inserted = sqlx::query!(
             "WITH authority AS (
                 SELECT rpc.runtime_generation_id, rpc.provider_revision_id
                 FROM runtime_generation_provider_configs rpc
@@ -33,15 +34,15 @@ impl PgStore {
              FROM (SELECT 1) seed LEFT JOIN authority ON true
              WHERE authority.provider_revision_id IS NOT NULL
                 OR NOT EXISTS (SELECT 1 FROM runtime_generations)",
+            input.id,
+            input.api_key_id,
+            input.provider_id,
+            input.upstream_model,
+            input.route_slug,
+            input.operation.as_str(),
+            input.surface.as_str(),
+            input.runtime_generation_id
         )
-        .bind(input.id)
-        .bind(input.api_key_id)
-        .bind(input.provider_id)
-        .bind(input.upstream_model)
-        .bind(input.route_slug)
-        .bind(input.operation.as_str())
-        .bind(input.surface.as_str())
-        .bind(input.runtime_generation_id)
         .execute(self.pool())
         .await?;
         if inserted.rows_affected() != 1 {
@@ -64,13 +65,14 @@ impl PgStore {
             ));
         }
         validate_update(&update)?;
-        let result = sqlx::query(
+        let result = sqlx::query_as!(
+            MediaJobRow,
             "WITH attached AS (
                 UPDATE async_media_jobs SET
                     upstream_job_id = $2,
-                    state = $3::media_job_state,
+                    state = $3::text::media_job_state,
                     lifecycle_state = 'active',
-                    progress_percent = $4,
+                    progress_percent = $4::real::numeric,
                     content_available = $5,
                     expires_at = $6,
                     error_class = $7,
@@ -82,8 +84,8 @@ impl PgStore {
              )
              SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
                     p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
-                    j.progress_percent::real AS progress_percent,
+                    j.operation, j.surface, j.state::text AS \"state!\", j.lifecycle_state,
+                    j.progress_percent::real AS \"progress_percent?\",
                     j.content_available, j.expires_at, j.error_class,
                     j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
                     j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
@@ -92,22 +94,22 @@ impl PgStore {
                     j.created_at, j.updated_at
              FROM attached j
              JOIN providers p ON p.id = j.provider_id",
+            id,
+            upstream_job_id,
+            update.state.as_str(),
+            update.progress_percent,
+            update.content_available,
+            update.expires_at,
+            update.error_class,
+            update.last_polled_at
         )
-        .bind(id)
-        .bind(upstream_job_id)
-        .bind(update.state.as_str())
-        .bind(update.progress_percent)
-        .bind(update.content_available)
-        .bind(update.expires_at)
-        .bind(update.error_class)
-        .bind(update.last_polled_at)
         .fetch_optional(self.pool())
         .await;
         match result {
             // Return the row from the same statement that made it active. A
             // connection failure after commit is retried by the caller, so a
             // subsequent active row with this exact identity is also success.
-            Ok(Some(row)) => media_job_from_row(&row),
+            Ok(Some(row)) => media_job_from_row(row),
             Ok(None) => {
                 let current = self.media_job(id).await?;
                 if current.lifecycle == MediaJobLifecycle::Active
@@ -176,13 +178,13 @@ impl PgStore {
         &self,
         id: Uuid,
     ) -> Result<MediaJobRecord, MediaJobError> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "UPDATE async_media_jobs SET lifecycle_state = 'delete_pending',
                     reconciliation_error = NULL, next_reconciliation_at = now(),
                     etag = uuidv7()
              WHERE id = $1 AND lifecycle_state = 'active'",
+            id
         )
-        .bind(id)
         .execute(self.pool())
         .await?;
         let record = self.media_job(id).await?;
@@ -208,11 +210,12 @@ impl PgStore {
     ) -> Result<MediaJobRecord, MediaJobError> {
         validate_update(&update)?;
         let mut transaction = self.pool().begin().await?;
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            MediaJobRow,
             "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
                     p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
-                    j.progress_percent::real AS progress_percent,
+                    j.operation, j.surface, j.state::text AS \"state!\", j.lifecycle_state,
+                    j.progress_percent::real AS \"progress_percent?\",
                     j.content_available, j.expires_at, j.error_class,
                     j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
                     j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
@@ -222,12 +225,12 @@ impl PgStore {
              FROM async_media_jobs j
              JOIN providers p ON p.id = j.provider_id
              WHERE j.id = $1 FOR UPDATE OF j",
+            id
         )
-        .bind(id)
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(MediaJobError::NotFound)?;
-        let current = media_job_from_row(&row)?;
+        let current = media_job_from_row(row)?;
         let stale = current
             .last_polled_at
             .is_some_and(|last| last > update.last_polled_at);
@@ -235,9 +238,9 @@ impl PgStore {
             transaction.commit().await?;
             return Ok(current);
         }
-        sqlx::query(
+        sqlx::query!(
             "UPDATE async_media_jobs SET
-                state = $2::media_job_state,
+                state = $2::text::media_job_state,
                 progress_percent = CASE
                     WHEN $3::real IS NULL THEN progress_percent
                     WHEN progress_percent IS NULL THEN $3::real::numeric
@@ -249,14 +252,14 @@ impl PgStore {
                 last_polled_at = $7,
                 etag = uuidv7()
              WHERE id = $1",
+            id,
+            update.state.as_str(),
+            update.progress_percent,
+            update.content_available,
+            update.expires_at,
+            update.error_class,
+            update.last_polled_at
         )
-        .bind(id)
-        .bind(update.state.as_str())
-        .bind(update.progress_percent)
-        .bind(update.content_available)
-        .bind(update.expires_at)
-        .bind(update.error_class)
-        .bind(update.last_polled_at)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -271,7 +274,7 @@ impl PgStore {
     /// metadata-only tombstone makes retries idempotent and preserves evidence
     /// that PostgreSQL finalization lagged the upstream side effect.
     pub async fn finalize_media_job_deletion(&self, id: Uuid) -> Result<bool, MediaJobError> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "UPDATE async_media_jobs
              SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
                  reconciliation_error = NULL, content_available = false, etag = uuidv7()
@@ -279,18 +282,18 @@ impl PgStore {
                AND lifecycle_state IN (
                    'creating', 'create_ambiguous', 'create_cleanup_pending', 'delete_pending'
                )",
+            id
         )
-        .bind(id)
         .execute(self.pool())
         .await?;
         Ok(result.rows_affected() == 1)
     }
 
     pub(super) async fn missing_or_changed(&self, id: Uuid) -> Result<MediaJobError, sqlx::Error> {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (SELECT 1 FROM async_media_jobs WHERE id = $1)",
+        let exists = sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM async_media_jobs WHERE id = $1) AS \"value!\"",
+            id
         )
-        .bind(id)
         .fetch_one(self.pool())
         .await?;
         Ok(if exists {
@@ -323,19 +326,19 @@ async fn update_reconciliation_lifecycle(
 ) -> Result<MediaJobRecord, MediaJobError> {
     let allowed = allowed
         .iter()
-        .map(|value| value.as_str())
+        .map(|value| value.as_str().to_owned())
         .collect::<Vec<_>>();
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE async_media_jobs SET lifecycle_state = $2,
                 upstream_job_id = COALESCE($3, upstream_job_id),
                 reconciliation_error = $4, next_reconciliation_at = now(), etag = uuidv7()
          WHERE id = $1 AND lifecycle_state = ANY($5::text[])",
+        id,
+        lifecycle.as_str(),
+        upstream_job_id,
+        reconciliation_error,
+        &allowed
     )
-    .bind(id)
-    .bind(lifecycle.as_str())
-    .bind(upstream_job_id)
-    .bind(reconciliation_error)
-    .bind(allowed)
     .execute(store.pool())
     .await?;
     if result.rows_affected() == 0 {

@@ -112,7 +112,7 @@ impl PgStore {
             transaction.rollback().await?;
             return Ok(false);
         }
-        sqlx::query(
+        sqlx::query!(
             "WITH expired AS ( \
                SELECT ctid FROM public_auth_rate_limits \
                WHERE window_started_at <= now() - interval '10 minutes' \
@@ -120,8 +120,8 @@ impl PgStore {
              ) \
              DELETE FROM public_auth_rate_limits rate_limit USING expired \
              WHERE rate_limit.ctid = expired.ctid",
+            PUBLIC_AUTH_DELETE_BATCH
         )
-        .bind(PUBLIC_AUTH_DELETE_BATCH)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -136,7 +136,7 @@ async fn consume_public_auth_bucket(
     key_digest: &[u8; 32],
     limit: i32,
 ) -> Result<bool, sqlx::Error> {
-    let admitted: Option<bool> = sqlx::query_scalar(
+    let admitted: Option<bool> = sqlx::query_scalar!(
         "INSERT INTO public_auth_rate_limits \
          (action, scope, key_digest, window_started_at, attempts) \
          VALUES ($1, $2, $3, now(), 1) \
@@ -149,12 +149,12 @@ async fn consume_public_auth_bucket(
                  THEN 1 ELSE public_auth_rate_limits.attempts + 1 END \
          WHERE public_auth_rate_limits.window_started_at <= now() - interval '1 minute' \
             OR public_auth_rate_limits.attempts < $4 \
-         RETURNING true",
+         RETURNING true AS \"value!\"",
+        action,
+        scope,
+        key_digest.as_slice(),
+        limit
     )
-    .bind(action)
-    .bind(scope)
-    .bind(key_digest.as_slice())
-    .bind(limit)
     .fetch_optional(&mut **transaction)
     .await?;
     Ok(admitted.unwrap_or(false))

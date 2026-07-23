@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( DELETE FROM usage_facts WHERE observed_at < date_trunc('hour', $1::timestamptz) RETURNING route_slug, provider_id, upstream_model, operation, surface, api_key_id, observed_at, input_tokens, output_tokens, cached_input_tokens, media_units, estimated_cost, unpriced, usage_complete, currency ), rolled AS ( INSERT INTO usage_hourly (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id, request_count, input_tokens, output_tokens, cached_input_tokens, media_units, estimated_cost, unpriced_count, incomplete_count, currency) SELECT date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, operation, surface, api_key_id, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(media_units), 0), SUM(estimated_cost), COUNT(*) FILTER (WHERE unpriced), COUNT(*) FILTER (WHERE NOT usage_complete), MAX(currency) FROM expired GROUP BY date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, operation, surface, api_key_id ON CONFLICT ON CONSTRAINT usage_hourly_dimensions_key DO UPDATE SET request_count = usage_hourly.request_count + EXCLUDED.request_count, input_tokens = usage_hourly.input_tokens + EXCLUDED.input_tokens, output_tokens = usage_hourly.output_tokens + EXCLUDED.output_tokens, estimated_cost = CASE WHEN usage_hourly.estimated_cost IS NULL AND EXCLUDED.estimated_cost IS NULL THEN NULL ELSE COALESCE(usage_hourly.estimated_cost, 0) + COALESCE(EXCLUDED.estimated_cost, 0) END, cached_input_tokens = usage_hourly.cached_input_tokens + EXCLUDED.cached_input_tokens, media_units = usage_hourly.media_units + EXCLUDED.media_units, unpriced_count = usage_hourly.unpriced_count + EXCLUDED.unpriced_count, incomplete_count = usage_hourly.incomplete_count + EXCLUDED.incomplete_count, currency = COALESCE(usage_hourly.currency, EXCLUDED.currency) RETURNING 1 ) SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", (SELECT count(*) FROM expired) AS \"usage_rows!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup_rows!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "usage_rows!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "4106d6fd7d9b2a7563cf6729c4634f0ac35311dc02c381c0da4bdb0ac1d1b4d5"
+}

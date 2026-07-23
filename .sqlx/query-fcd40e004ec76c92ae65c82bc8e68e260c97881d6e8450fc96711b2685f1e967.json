@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT process_epoch, accepted, persisted, abandoned, updated_at FROM request_metadata_gateway_epochs WHERE gateway_instance = $1 AND process_epoch <> $2 AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "process_epoch",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "process_epoch"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "accepted",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "accepted"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "persisted",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "persisted"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "abandoned",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "abandoned"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fcd40e004ec76c92ae65c82bc8e68e260c97881d6e8450fc96711b2685f1e967"
+}

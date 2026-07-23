@@ -1,6 +1,6 @@
 use std::fmt;
 
-use olp_domain::{ProviderAuthMode, ProviderKind};
+use olp_domain::{CredentialRequirement, ProviderAuthMode, ProviderKind, provider_kind_spec};
 use zeroize::Zeroizing;
 
 use crate::anthropic::{AnthropicApiKey, ConnectorConfig as AnthropicConnectorConfig};
@@ -240,38 +240,20 @@ pub enum CredentialKind {
 pub(super) fn raw_credential_kind(
     spec: ConnectorSpec<'_>,
 ) -> Result<RawCredentialKind, ProviderError> {
-    match spec.kind {
-        ProviderKind::OpenAi
-        | ProviderKind::OpenAiCompatible
-        | ProviderKind::Anthropic
-        | ProviderKind::Gemini
-        | ProviderKind::AzureOpenAi
-            if spec.auth_mode == ProviderAuthMode::ApiKey =>
-        {
-            Ok(RawCredentialKind::Text)
+    let auth = provider_kind_spec(spec.kind)
+        .auth_mode(spec.auth_mode)
+        .ok_or_else(|| {
+            ProviderError::configuration(format!(
+                "Unsupported {} authentication mode {}",
+                spec.kind, spec.auth_mode
+            ))
+        })?;
+    match auth.credential {
+        CredentialRequirement::Forbidden => Ok(RawCredentialKind::None),
+        CredentialRequirement::Required if spec.kind == ProviderKind::Bedrock => {
+            Ok(RawCredentialKind::Bytes)
         }
-        ProviderKind::OpenAi
-        | ProviderKind::OpenAiCompatible
-        | ProviderKind::Anthropic
-        | ProviderKind::Gemini
-        | ProviderKind::AzureOpenAi => Err(ProviderError::configuration(format!(
-            "Unsupported {} authentication mode {}",
-            spec.kind, spec.auth_mode
-        ))),
-        ProviderKind::VertexAi => match spec.auth_mode {
-            ProviderAuthMode::ApplicationDefault => Ok(RawCredentialKind::None),
-            ProviderAuthMode::ServiceAccount => Ok(RawCredentialKind::Text),
-            mode => Err(ProviderError::configuration(format!(
-                "Unsupported Vertex AI authentication mode {mode}"
-            ))),
-        },
-        ProviderKind::Bedrock => match spec.auth_mode {
-            ProviderAuthMode::DefaultChain => Ok(RawCredentialKind::None),
-            ProviderAuthMode::Static => Ok(RawCredentialKind::Bytes),
-            mode => Err(ProviderError::configuration(format!(
-                "Unsupported Bedrock authentication mode {mode}"
-            ))),
-        },
+        CredentialRequirement::Required => Ok(RawCredentialKind::Text),
     }
 }
 
@@ -410,18 +392,13 @@ pub(super) fn connector_configuration(
     spec: ConnectorSpec<'_>,
 ) -> Result<ConnectorConfiguration, ProviderError> {
     match spec.kind {
-        ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => {
-            require_api_key_auth(spec)?;
-            spec.endpoint
-                .map(OpenAiConnectorConfig::with_base_url)
-                .transpose()
-                .map(|configuration| {
-                    ConnectorConfiguration::OpenAi(configuration.unwrap_or_default())
-                })
-                .map_err(ProviderError::configuration)
-        }
+        ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => spec
+            .endpoint
+            .map(OpenAiConnectorConfig::with_base_url)
+            .transpose()
+            .map(|configuration| ConnectorConfiguration::OpenAi(configuration.unwrap_or_default()))
+            .map_err(ProviderError::configuration),
         ProviderKind::Anthropic => {
-            require_api_key_auth(spec)?;
             let mut configuration = spec
                 .endpoint
                 .map(AnthropicConnectorConfig::with_base_url)
@@ -435,16 +412,12 @@ pub(super) fn connector_configuration(
             }
             Ok(ConnectorConfiguration::Anthropic(configuration))
         }
-        ProviderKind::Gemini => {
-            require_api_key_auth(spec)?;
-            spec.endpoint
-                .map(GeminiConnectorConfig::with_base_url)
-                .transpose()
-                .map(|configuration| {
-                    ConnectorConfiguration::Gemini(configuration.unwrap_or_default())
-                })
-                .map_err(ProviderError::configuration)
-        }
+        ProviderKind::Gemini => spec
+            .endpoint
+            .map(GeminiConnectorConfig::with_base_url)
+            .transpose()
+            .map(|configuration| ConnectorConfiguration::Gemini(configuration.unwrap_or_default()))
+            .map_err(ProviderError::configuration),
         ProviderKind::VertexAi => {
             let configuration = vertex_configuration(spec)?;
             let auth_mode = match spec.auth_mode {
@@ -509,17 +482,6 @@ pub(super) fn connector_configuration(
                 .map_err(ProviderError::configuration)?,
             )))
         }
-    }
-}
-
-fn require_api_key_auth(spec: ConnectorSpec<'_>) -> Result<(), ProviderError> {
-    if spec.auth_mode == ProviderAuthMode::ApiKey {
-        Ok(())
-    } else {
-        Err(ProviderError::configuration(format!(
-            "Unsupported {} authentication mode {}",
-            spec.kind, spec.auth_mode
-        )))
     }
 }
 

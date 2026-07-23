@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use super::helpers::{PageQuery, map_operations, page_limit};
 use crate::{
-    ApiState, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -54,7 +54,7 @@ pub(super) struct RuntimeGenerationListResponse {
     responses((status = 200, description = "Runtime generations", body = RuntimeGenerationListResponse))
 )]
 pub(super) async fn list_runtime_generations(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<RuntimeGenerationListResponse>, Problem> {
@@ -67,7 +67,8 @@ pub(super) async fn list_runtime_generations(
         .transpose()
         .map_err(|_| Problem::bad_request("invalid_cursor", "The cursor is invalid."))?;
     let limit = page_limit(query.limit)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .runtime_generations(before, limit)
         .await
         .map_err(map_operations)?;

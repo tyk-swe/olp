@@ -11,7 +11,10 @@
     type Setting
   } from '$lib/api/operations';
   import { dateTimeLocalValue, formatDate } from '$lib/features/operations/format';
-  import { connectorOptions } from '$lib/features/gateway/providerOptions';
+  import {
+    listProviderKinds,
+    type ProviderKind
+  } from '$lib/api/management/providers';
   import { optionalDecimal } from './validation';
 
   let values = $state<Record<string, string>>({});
@@ -19,13 +22,12 @@
   let status = $state('');
   let error = $state('');
 
-  const providerKindOptions = connectorOptions.map(([kind]) => kind);
   const operationOptions = [
     'generation', 'embeddings', 'token_count', 'image_generation', 'image_edit',
     'image_variation', 'speech', 'transcription', 'video_create', 'video_list',
     'video_get', 'video_content', 'video_delete', 'moderation', 'model_list', 'model_get'
   ] as const;
-  let providerKind = $state<(typeof providerKindOptions)[number]>('openai');
+  let providerKind = $state<ProviderKind | null>(null);
   let providerId = $state('');
   let model = $state('');
   let operation = $state<(typeof operationOptions)[number]>('generation');
@@ -46,6 +48,15 @@
       return data;
     }
   }));
+
+  const providerKinds = createQuery(() => ({
+    queryKey: ['provider-kinds'],
+    queryFn: ({ signal }) => listProviderKinds(signal)
+  }));
+
+  $effect(() => {
+    if (!providerKind && providerKinds.data?.[0]) providerKind = providerKinds.data[0].kind;
+  });
 
   const pricing = createQuery(() => ({
     queryKey: ['pricing', pricingCursor ?? 'first'],
@@ -92,8 +103,8 @@
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
     error = status = '';
-    if (!model.trim() || !operation.trim()) {
-      error = 'Model and operation are required.';
+    if (!providerKind || !model.trim() || !operation.trim()) {
+      error = 'Provider kind, model, and operation are required.';
       return;
     }
     savingPrice = true;
@@ -141,7 +152,7 @@
 <section class="settings-section" aria-labelledby="pricing-title"><div class="section-heading"><div><p class="eyebrow">Cost estimates</p><h2 id="pricing-title">Pricing revisions</h2><p>Prices are exact decimals. A missing price remains visibly unpriced and is never treated as zero.</p></div></div>
   <form class="card price-form" onsubmit={addPricing}>
     <div class="form-grid">
-      <div class="form-field"><label for="provider-kind">Provider kind</label><select id="provider-kind" bind:value={providerKind}>{#each providerKindOptions as kind (kind)}<option value={kind}>{kind}</option>{/each}</select></div>
+      <div class="form-field"><label for="provider-kind">Provider kind</label><select id="provider-kind" bind:value={providerKind} disabled={providerKinds.isPending || providerKinds.isError}>{#each providerKinds.data ?? [] as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}</select>{#if providerKinds.isPending}<small>Loading provider capabilities…</small>{:else if providerKinds.isError}<small class="inline-problem">Provider capabilities are unavailable; pricing changes are disabled.</small>{/if}</div>
       <div class="form-field"><label for="provider-id">Provider ID override</label><input id="provider-id" bind:value={providerId} class="mono" placeholder="Optional UUID" /></div>
       <div class="form-field"><label for="price-model">Upstream model</label><input id="price-model" bind:value={model} required /></div>
       <div class="form-field"><label for="price-operation">Operation</label><select id="price-operation" bind:value={operation}>{#each operationOptions as option (option)}<option value={option}>{option}</option>{/each}</select></div>
@@ -151,7 +162,7 @@
       <div class="form-field"><label for="currency">Currency</label><input id="currency" bind:value={currency} maxlength="3" required /></div>
       <div class="form-field full"><label for="effective-at">Effective at</label><input id="effective-at" bind:value={effectiveAt} type="datetime-local" required /></div>
     </div>
-    <button class="button button-primary" type="submit" disabled={savingPrice}>{savingPrice ? 'Creating…' : 'Create pricing revision'}</button>
+    <button class="button button-primary" type="submit" disabled={savingPrice || !providerKind || providerKinds.isError}>{savingPrice ? 'Creating…' : 'Create pricing revision'}</button>
   </form>
 
   {#if pricing.isPending}<div class="loading-state" role="status">Loading revisions…</div>

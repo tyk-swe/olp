@@ -1,7 +1,7 @@
 use axum::{Router, routing::get};
 use utoipa::OpenApi;
 
-use crate::{ApiState, HealthResponse, Problem};
+use crate::{HealthResponse, ManagementState, Problem};
 
 #[cfg(test)]
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -23,7 +23,7 @@ mod runtime;
 mod settings;
 mod usage;
 
-pub(crate) fn router() -> Router<ApiState> {
+pub(crate) fn router() -> Router<ManagementState> {
     Router::new()
         .route("/api/v1/requests", get(requests::list_requests))
         .route("/api/v1/requests/{request_id}", get(requests::get_request))
@@ -122,7 +122,6 @@ pub(crate) fn router() -> Router<ApiState> {
         settings::SettingResponse,
         settings::SettingsResponse,
         settings::UpdateSettingRequest,
-        pricing::PriceProviderKind,
         pricing::PriceOperation,
         pricing::PriceRequest,
         pricing::PricingRevisionRequest,

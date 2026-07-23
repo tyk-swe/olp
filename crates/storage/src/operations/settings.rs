@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::cursor::OperationsError;
@@ -16,7 +15,7 @@ pub struct SettingRecord {
 
 impl PgStore {
     pub async fn settings(&self) -> Result<Vec<SettingRecord>, OperationsError> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT key, value, etag, updated_by, updated_at FROM settings ORDER BY key",
         )
         .fetch_all(self.pool())
@@ -24,11 +23,11 @@ impl PgStore {
         Ok(rows
             .into_iter()
             .map(|row| SettingRecord {
-                key: row.get("key"),
-                value: row.get("value"),
-                etag: row.get("etag"),
-                updated_by: row.get("updated_by"),
-                updated_at: row.get("updated_at"),
+                key: row.key,
+                value: row.value,
+                etag: row.etag,
+                updated_by: row.updated_by,
+                updated_at: row.updated_at,
             })
             .collect())
     }
@@ -60,49 +59,50 @@ impl PgStore {
         let mut transaction = self.pool().begin().await?;
         let etag = Uuid::now_v7();
         let now = Utc::now();
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "UPDATE settings SET value = $1, etag = $2, updated_by = $3, updated_at = $4 \
              WHERE key = $5 AND etag = $6 \
              RETURNING key, value, etag, updated_by, updated_at",
+            value,
+            etag,
+            actor,
+            now,
+            key,
+            expected_etag
         )
-        .bind(value)
-        .bind(etag)
-        .bind(actor)
-        .bind(now)
-        .bind(key)
-        .bind(expected_etag)
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(row) = row else {
-            let exists: bool =
-                sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM settings WHERE key = $1)")
-                    .bind(key)
-                    .fetch_one(&mut *transaction)
-                    .await?;
+            let exists: bool = sqlx::query_scalar!(
+                "SELECT EXISTS (SELECT 1 FROM settings WHERE key = $1) AS \"value!\"",
+                key
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
             return Err(if exists {
                 OperationsError::PreconditionFailed
             } else {
                 OperationsError::NotFound
             });
         };
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'setting.update', 'setting', $3, 'success', $4)",
+            Uuid::now_v7(),
+            actor,
+            key,
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(actor)
-        .bind(key)
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok(SettingRecord {
-            key: row.get("key"),
-            value: row.get("value"),
-            etag: row.get("etag"),
-            updated_by: row.get("updated_by"),
-            updated_at: row.get("updated_at"),
+            key: row.key,
+            value: row.value,
+            etag: row.etag,
+            updated_by: row.updated_by,
+            updated_at: row.updated_at,
         })
     }
 }

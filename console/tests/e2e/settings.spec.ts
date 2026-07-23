@@ -1,7 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import { mockProviderKinds } from './provider-capabilities';
+
 test('updates retention with ETag and creates an exact-decimal pricing revision', async ({ page }) => {
+  await mockProviderKinds(page);
   const etag = '01980000-0000-7000-8000-000000000021';
   let retention = '30';
   let settingHeaders: Record<string, string> = {};

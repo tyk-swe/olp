@@ -10,24 +10,9 @@ import {
 
 type Schemas = components['schemas'];
 
-export type ProviderKind =
-  | 'openai'
-  | 'anthropic'
-  | 'gemini'
-  | 'vertex_ai'
-  | 'bedrock'
-  | 'azure_openai'
-  | 'openai_compatible';
-export type ProviderAuthMode =
-  | 'api_key'
-  | 'adc'
-  | 'service_account'
-  | 'default_chain'
-  | 'static';
-export type Provider = Omit<Schemas['ProviderDetailResponse'], 'kind' | 'auth_mode'> & {
-  kind: ProviderKind;
-  auth_mode: ProviderAuthMode;
-};
+export type ProviderKind = Schemas['ProviderKind'];
+export type ProviderAuthMode = Schemas['ProviderAuthMode'];
+export type Provider = Schemas['ProviderDetailResponse'];
 export type ProviderSummary = Schemas['ProviderSummaryResponse'];
 export type ProviderModel = Schemas['ProviderModelResponse'];
 export type ProviderModelInventory = Schemas['ProviderModelInventoryResponse'];
@@ -37,19 +22,12 @@ export type ProviderCredential = Schemas['CredentialResponse'] & {
   /** Credential selected only by the mutable draft. */
   draft_selected?: boolean;
 };
-export type CreateProviderInput = Omit<Schemas['CreateProviderRequest'], 'kind' | 'auth_mode'> & {
-  kind: ProviderKind;
-  auth_mode?: ProviderAuthMode | null;
-};
-export type UpdateProviderInput = Omit<Schemas['UpdateProviderRequest'], 'auth_mode'> & {
-  auth_mode: ProviderAuthMode;
-};
+export type CreateProviderInput = Schemas['CreateProviderRequest'];
+export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
 export type CapabilityDeclaration = Schemas['CapabilityInput'];
-export type ProviderCapabilityOptions = Omit<
-  Schemas['ProviderCapabilityOptionsResponse'],
-  'provider_kind'
-> & { provider_kind: ProviderKind };
+export type ProviderCapabilityOptions = Schemas['ProviderCapabilityOptionsResponse'];
+export type ProviderKindCapability = Schemas['ProviderKindCapabilityResponse'];
 export type CapabilityCertification = Schemas['CapabilityCertificationResponse'];
 export type ProviderRevision = Schemas['ProviderRevisionSummaryResponse'];
 export type ProviderRevisionDiff = Schemas['ProviderRevisionDiffResponse'];
@@ -71,6 +49,11 @@ export async function getProviderCapabilityOptions(
     response.error,
     response.response
   ) as ProviderCapabilityOptions;
+}
+
+export async function listProviderKinds(signal?: AbortSignal): Promise<ProviderKindCapability[]> {
+  const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
+  return requireResponseData(response.data, response.error, response.response).items;
 }
 
 export async function listProviderPage(

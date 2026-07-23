@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE providers SET etag = $1 WHERE id = $2 AND etag = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6412cf5c34b59e8855dc91854681b78352d98b04cbb21bf328cc275a5cce27bf"
+}

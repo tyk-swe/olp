@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, activated_by, activated_at FROM route_revisions WHERE route_id = $1 AND id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "routing_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "routing_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "route_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "route_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "overall_timeout_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "overall_timeout_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "max_attempts",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "max_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "source_draft_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "source_draft_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "activated_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "activated_by"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "activated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "activated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bcf6327e96b72f64602e1fcc70d53da51d60521a4b8ce5c49a4c3586bd696bcb"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT operation FROM route_draft_operations WHERE route_draft_id = $1 ORDER BY operation",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_draft_operations",
+            "name": "operation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8658d166aaccf5a8efe919425cc6aeb161a9b489b8092679c88882a0a2bdc3ad"
+}

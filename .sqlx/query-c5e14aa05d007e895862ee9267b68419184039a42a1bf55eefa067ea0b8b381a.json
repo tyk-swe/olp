@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_group_role_mappings (configuration_id, group_name, role) VALUES ($1, $2, CAST(CAST($3 AS text) AS user_role))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c5e14aa05d007e895862ee9267b68419184039a42a1bf55eefa067ea0b8b381a"
+}

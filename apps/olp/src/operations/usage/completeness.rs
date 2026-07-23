@@ -9,8 +9,8 @@ use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ApiState, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
     operations::{
         helpers::map_operations, request_metadata::RequestMetadataConsumerStatusResponse,
     },
@@ -57,7 +57,7 @@ impl From<UsageCompleteness> for UsageCompletenessResponse {
     responses((status = 200, description = "Usage and pricing completeness", body = UsageCompletenessResponse))
 )]
 pub(in crate::operations) async fn usage_completeness(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<UsageQuery>,
 ) -> Result<Json<UsageCompletenessResponse>, Problem> {
@@ -65,7 +65,8 @@ pub(in crate::operations) async fn usage_completeness(
     require_permission(&principal, Permission::ReadOperations)?;
     query.validate()?;
     let filters = query.filters()?;
-    let summary = require_store(&state)?
+    let summary = state
+        .store()
         .usage_completeness(&filters)
         .await
         .map_err(map_operations)?;

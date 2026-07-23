@@ -1,6 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
+import { mockProviderKinds } from './provider-capabilities';
+
+test.beforeEach(async ({ page }) => mockProviderKinds(page));
+
 const ids = {
   provider: '01980000-0000-7000-8000-000000000101',
   model: '01980000-0000-7000-8000-000000000102',

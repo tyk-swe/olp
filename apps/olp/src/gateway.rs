@@ -1,10 +1,6 @@
-use axum::{
-    Router,
-    extract::DefaultBodyLimit,
-    routing::{get, post},
-};
+use axum::Router;
 
-use crate::{ApiState, MAX_MEDIA_BODY_BYTES};
+use crate::GatewayState;
 
 mod anthropic;
 mod chat;
@@ -26,10 +22,7 @@ mod responses;
 mod telemetry;
 mod videos;
 
-pub(crate) use endpoint_policy::{
-    IMAGE_VARIATION_BODY_BYTES, InferenceEndpoint, TRANSCRIPTION_BODY_BYTES, TokenEstimate,
-    VIDEO_CREATE_BODY_BYTES,
-};
+pub(crate) use endpoint_policy::{InferenceEndpoint, TokenEstimate};
 pub(crate) use error::InferenceError;
 pub(crate) use execution::{
     RoutedEventExecution, RoutedUnaryResult, authorize_model_access,
@@ -41,50 +34,8 @@ pub use media_jobs::reconcile_media_jobs_once;
 pub(crate) use protocol_error::{inference_error_response, problem_response};
 pub(crate) use telemetry::{UsageCapture, emit_event_execution_metadata};
 
-pub fn router() -> Router<ApiState> {
-    Router::new()
-        .route("/openai/v1/chat/completions", post(chat::chat_completions))
-        .route("/openai/v1/responses", post(responses::responses))
-        .route(
-            "/openai/v1/responses/input_tokens",
-            post(responses::response_input_tokens),
-        )
-        .route("/openai/v1/embeddings", post(media::embeddings))
-        .route("/openai/v1/moderations", post(media::moderations))
-        .route(
-            "/openai/v1/images/generations",
-            post(media::image_generations),
-        )
-        .route(
-            "/openai/v1/images/edits",
-            post(media::image_edits).layer(DefaultBodyLimit::max(MAX_MEDIA_BODY_BYTES)),
-        )
-        .route(
-            "/openai/v1/images/variations",
-            post(media::image_variations).layer(DefaultBodyLimit::max(IMAGE_VARIATION_BODY_BYTES)),
-        )
-        .route("/openai/v1/audio/speech", post(media::speech))
-        .route(
-            "/openai/v1/audio/transcriptions",
-            post(media::transcriptions).layer(DefaultBodyLimit::max(TRANSCRIPTION_BODY_BYTES)),
-        )
-        .route(
-            "/openai/v1/videos",
-            post(videos::video_create)
-                .get(videos::video_list)
-                .layer(DefaultBodyLimit::max(VIDEO_CREATE_BODY_BYTES)),
-        )
-        .route(
-            "/openai/v1/videos/{video_id}",
-            get(videos::video_get).delete(videos::video_delete),
-        )
-        .route(
-            "/openai/v1/videos/{video_id}/content",
-            get(videos::video_content),
-        )
-        .merge(openai_models::router())
-        .merge(anthropic::router())
-        .merge(gemini::router())
+pub fn router() -> Router<GatewayState> {
+    endpoint_policy::router()
 }
 
 #[cfg(test)]

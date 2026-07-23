@@ -142,76 +142,73 @@ impl PgStore {
                 "expiration must be in the future".to_owned(),
             ));
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO api_keys \
              (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, \
               tokens_per_minute, max_concurrency, etag) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-        )
-        .bind(id)
-        .bind(&key.material.lookup_id)
-        .bind(key.material.digest.to_vec())
-        .bind(key.name.trim())
-        .bind(key.actor)
-        .bind(key.expires_at)
-        .bind(
+            id,
+            &key.material.lookup_id,
+            key.material.digest.to_vec(),
+            key.name.trim(),
+            key.actor,
+            key.expires_at,
             key.limits
                 .requests_per_minute
                 .map(|value| i32::try_from(value.get()))
                 .transpose()
                 .map_err(|_| AccessError::Invalid("RPM limit is too large".to_owned()))?,
-        )
-        .bind(
             key.limits
                 .tokens_per_minute
                 .map(|value| i64::try_from(value.get()))
                 .transpose()
                 .map_err(|_| AccessError::Invalid("TPM limit is too large".to_owned()))?,
-        )
-        .bind(
             key.limits
                 .concurrency
                 .map(|value| i32::try_from(value.get()))
                 .transpose()
                 .map_err(|_| AccessError::Invalid("concurrency limit is too large".to_owned()))?,
+            etag
         )
-        .bind(etag)
         .execute(&mut *transaction)
         .await?;
         for scope in &key.scopes {
-            sqlx::query("INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)")
-                .bind(id)
-                .bind(scope.as_str())
-                .execute(&mut *transaction)
-                .await?;
+            sqlx::query!(
+                "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
+                id,
+                scope.as_str()
+            )
+            .execute(&mut *transaction)
+            .await?;
         }
         for route in &key.allowed_routes {
-            let exists: bool =
-                sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1)")
-                    .bind(route.as_str())
-                    .fetch_one(&mut *transaction)
-                    .await?;
+            let exists: bool = sqlx::query_scalar!(
+                "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
+                route.as_str()
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
             if !exists {
                 return Err(AccessError::Invalid(format!(
                     "allowlisted route {route} is not active"
                 )));
             }
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) VALUES ($1, $2)",
+                id,
+                route.as_str()
             )
-            .bind(id)
-            .bind(route.as_str())
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
              VALUES ($1, $2, 'api_key.create', 'api_key', $3, 'success')",
+            Uuid::now_v7(),
+            key.actor,
+            id.to_string()
         )
-        .bind(Uuid::now_v7())
-        .bind(key.actor)
-        .bind(id.to_string())
         .execute(&mut *transaction)
         .await?;
         let release =
@@ -255,17 +252,16 @@ impl PgStore {
         if !claim_idempotency(&mut transaction, actor, "api_key.revoke", idempotency_key).await? {
             return Err(AccessError::IdempotencyConflict);
         }
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() \
              WHERE id = $1 AND etag = $2 AND revoked_at IS NULL RETURNING etag",
+            id,
+            expected_etag
         )
-        .bind(id)
-        .bind(expected_etag)
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(result) = result else {
-            let row = sqlx::query("SELECT etag FROM api_keys WHERE id = $1")
-                .bind(id)
+            let row = sqlx::query!("SELECT etag FROM api_keys WHERE id = $1", id)
                 .fetch_optional(&mut *transaction)
                 .await?;
             return Err(if row.is_some() {
@@ -282,20 +278,20 @@ impl PgStore {
             &id.to_string(),
         )
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
              VALUES ($1, $2, 'api_key.revoke', 'api_key', $3, 'success')",
+            Uuid::now_v7(),
+            actor,
+            id.to_string()
         )
-        .bind(Uuid::now_v7())
-        .bind(actor)
-        .bind(id.to_string())
         .execute(&mut *transaction)
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
         transaction.commit().await?;
         Ok(ApiKeyRevoked {
-            etag: sqlx::Row::get(&result, "etag"),
+            etag: result.etag,
             release,
         })
     }

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "LOCK TABLE async_media_jobs IN SHARE MODE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6dd5e46a85d747145753dcf43ea405b08e5bec889c67e97a951cdb367e9eecb4"
+}

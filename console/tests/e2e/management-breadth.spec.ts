@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
+import { mockProviderKinds } from './provider-capabilities';
+
 const ids = {
   user: '01980000-0000-7000-8000-000000000a01',
   provider: '01980000-0000-7000-8000-000000000a02',
@@ -81,6 +83,7 @@ function revision(id: string, number: number) {
 
 test('provider studio compares redacted history and restores non-secret configuration', async ({ page }) => {
   await mockSession(page);
+  await mockProviderKinds(page);
   let current = providerRecord();
   let restoreHeaders: Record<string, string> = {};
   await page.route('**/api/v1/providers/**', async (route) => {

@@ -9,6 +9,7 @@ pub mod canonical;
 pub mod ids;
 pub mod ports;
 pub mod provider;
+pub mod provider_configuration;
 pub mod routing;
 
 pub use auth::{
@@ -42,6 +43,12 @@ pub use ports::{
 };
 pub use provider::{
     CapabilitySource, ClosedSetParseError, ProviderAuthMode, ProviderState, RouteDraftState,
+};
+pub use provider_configuration::{
+    CredentialRequirement, ProviderAuthModeSpec, ProviderConfiguration, ProviderConfigurationField,
+    ProviderConfigurationViolation, ProviderFieldSpec, ProviderKindSpec, ProviderViolationCode,
+    ProviderViolationField, provider_kind_spec, provider_kind_specs,
+    validate_provider_configuration,
 };
 pub use routing::{
     AttemptPlan, Capability, CapabilityKey, InvalidProviderKind, Provider, ProviderKind, Route,

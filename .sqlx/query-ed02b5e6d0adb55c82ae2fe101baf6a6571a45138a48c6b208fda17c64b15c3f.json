@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE model_capabilities SET source = 'declared', certified_at = NULL WHERE provider_model_id IN (SELECT id FROM provider_models WHERE provider_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed02b5e6d0adb55c82ae2fe101baf6a6571a45138a48c6b208fda17c64b15c3f"
+}

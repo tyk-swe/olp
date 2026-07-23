@@ -18,7 +18,7 @@ use zeroize::{Zeroize, Zeroizing};
 use super::error::invalid_login_flow_cookie;
 use super::helpers::{require_master_key, valid_binding_token};
 use crate::{
-    ApiState, Problem, RelativeReturnTo,
+    ManagementState, Problem, RelativeReturnTo,
     management_api::{
         append_recent_auth_cookie, append_security_transition_cookies,
         prevent_sensitive_response_caching,
@@ -258,7 +258,7 @@ pub(super) fn successful_redirect(destination: &RelativeReturnTo) -> Result<Resp
 }
 
 pub(super) fn seal_login_flow_cookie(
-    state: &ApiState,
+    state: &ManagementState,
     master_key: &MasterKey,
     payload: &LoginFlowCookiePayload,
 ) -> Result<String, Problem> {
@@ -286,7 +286,7 @@ pub(super) fn seal_login_flow_cookie(
 }
 
 pub(super) fn consume_login_flow_cookie(
-    state: &ApiState,
+    state: &ManagementState,
     encoded: &str,
     callback_state: &OidcCallbackState,
 ) -> Result<CallbackFlow, Problem> {
@@ -380,7 +380,7 @@ fn parse_login_flow_cookie_envelope(value: &str) -> Result<EncryptedSecret, Prob
     })
 }
 
-fn login_flow_cookie_aad(state: &ApiState) -> Vec<u8> {
+fn login_flow_cookie_aad(state: &ManagementState) -> Vec<u8> {
     // Keep the public origin in the authenticated context. A flow issued for
     // one operator-configured external origin cannot be replayed after an
     // origin change or against another deployment sharing a master key.

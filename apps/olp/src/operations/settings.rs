@@ -12,10 +12,10 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, not_found};
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, json_payload, require_mutation_session, require_permission,
-        require_read_session, require_store,
+        require_read_session,
     },
 };
 
@@ -54,15 +54,12 @@ pub(super) struct SettingsResponse {
     responses((status = 200, description = "Installation settings", body = SettingsResponse))
 )]
 pub(super) async fn list_settings(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Json<SettingsResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let settings = require_store(&state)?
-        .settings()
-        .await
-        .map_err(map_operations)?;
+    let settings = state.store().settings().await.map_err(map_operations)?;
     Ok(Json(SettingsResponse {
         data: settings.into_iter().map(Into::into).collect(),
     }))
@@ -76,13 +73,14 @@ pub(super) async fn list_settings(
     responses((status = 200, description = "Setting with ETag", body = SettingResponse))
 )]
 pub(super) async fn get_setting(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let setting = require_store(&state)?
+    let setting = state
+        .store()
         .settings()
         .await
         .map_err(map_operations)?
@@ -112,7 +110,7 @@ pub(super) struct UpdateSettingRequest {
     )
 )]
 pub(super) async fn update_setting(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Path(key): Path<String>,
     payload: Result<Json<UpdateSettingRequest>, JsonRejection>,
@@ -121,7 +119,8 @@ pub(super) async fn update_setting(
     require_permission(&principal, Permission::ManageSettings)?;
     let etag = if_match(&headers)?;
     let request = json_payload(payload)?;
-    let setting = require_store(&state)?
+    let setting = state
+        .store()
         .update_setting(&key, &request.value, etag, principal.user_id)
         .await
         .map_err(map_operations)?;

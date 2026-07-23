@@ -5,12 +5,12 @@ use olp_domain::{ApiKey, MediaByteStream, MediaHandle, MediaSpool, Operation};
 use olp_storage::{LimitError, LimitLease, LimitRequest};
 use tracing::{error, warn};
 
-use crate::ApiState;
+use crate::GatewayState;
 
 use super::error::InferenceError;
 
 pub(super) async fn reserve_limits(
-    state: &ApiState,
+    state: &GatewayState,
     key: &ApiKey,
     operation: &Operation,
     lookup_id: &str,
@@ -196,7 +196,7 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
         .sum()
 }
 
-pub(crate) async fn release_limits(state: &ApiState, lease: Option<&LimitLease>) {
+pub(crate) async fn release_limits(state: &GatewayState, lease: Option<&LimitLease>) {
     if let (Some(limiter), Some(lease)) = (state.limiter.current(), lease) {
         match tokio::time::timeout(Duration::from_millis(250), limiter.release(lease)).await {
             Ok(Ok(())) => {}

@@ -29,10 +29,10 @@ use super::session::{
     seal_login_flow_cookie,
 };
 use crate::{
-    ApiState, Problem, RelativeReturnTo,
+    ManagementState, Problem, RelativeReturnTo,
     management_api::{
         RECENT_AUTH_COOKIE, clear_recent_auth_cookie, cookie, enforce_origin, json_payload,
-        reauthentication_required, require_mutation_session, require_store,
+        reauthentication_required, require_mutation_session,
     },
 };
 
@@ -83,7 +83,7 @@ struct PersistentFlowContext<'a> {
     )
 )]
 pub(super) async fn begin_login(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     query: Result<Query<OidcLoginQuery>, QueryRejection>,
@@ -123,7 +123,7 @@ pub(super) async fn begin_login(
     )
 )]
 pub(super) async fn begin_login_post(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     payload: Result<Json<OidcLoginRequest>, JsonRejection>,
@@ -160,7 +160,7 @@ pub(super) async fn begin_login_post(
     )
 )]
 pub(super) async fn begin_link(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
@@ -202,7 +202,7 @@ pub(super) async fn begin_link(
     )
 )]
 pub(super) async fn begin_reauthentication(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Json(request): Json<OidcReauthenticationRequest>,
 ) -> Result<Response, Problem> {
@@ -237,7 +237,7 @@ pub(super) async fn begin_reauthentication(
 }
 
 async fn admit_login(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
 ) -> Result<(), Problem> {
@@ -245,7 +245,8 @@ async fn admit_login(
     // Admit before constructing cryptographic material or issuing a redirect.
     // The source digest is keyed and never persisted in its raw network form.
     let source_digest = crate::public_auth_source_digest(state, headers, peer)?;
-    let admitted = require_store(state)?
+    let admitted = state
+        .store()
         .admit_oidc_login_attempt(source_digest)
         .await
         .map_err(|error| {
@@ -264,7 +265,7 @@ async fn admit_login(
 }
 
 async fn begin_authorization(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
     purpose: OidcFlowPurpose,
     context: Option<PersistentFlowContext<'_>>,
@@ -275,7 +276,8 @@ async fn begin_authorization(
     // state. The returned expirations make room for the new flow without
     // allowing a fixed-name cookie to overwrite an unrelated tab.
     let evictions = flow_cookie_evictions(headers)?;
-    let configuration = require_store(state)?
+    let configuration = state
+        .store()
         .enabled_oidc_configuration()
         .await
         .map_err(map_oidc)?;
@@ -321,7 +323,8 @@ async fn begin_authorization(
                     error!(%error, "OIDC authenticated flow encryption failed");
                     Problem::internal()
                 })?;
-            require_store(state)?
+            state
+                .store()
                 .create_oidc_flow(NewOidcFlow {
                     id: flow_id.as_uuid(),
                     configuration_id: configuration.id,

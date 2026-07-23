@@ -1,6 +1,6 @@
 use std::fmt;
 
-use sqlx::Row;
+use sqlx::FromRow;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -128,8 +128,9 @@ impl PgStore {
         // unusable active key before even a read-only rehearsal can report a
         // misleadingly healthy rotation state.
         let _ = database_version(active_version)?;
-        let rows = sqlx::query(
-            "SELECT encrypted_table, key_version, count(*)::bigint AS row_count FROM ( \
+        let rows = sqlx::query!(
+            "SELECT encrypted_table AS \"encrypted_table!\", key_version AS \"key_version!\", \
+                    count(*)::bigint AS \"row_count!\" FROM ( \
                SELECT 'provider_credential_versions'::text AS encrypted_table, \
                       master_key_version AS key_version \
                  FROM provider_credential_versions \
@@ -149,24 +150,22 @@ impl PgStore {
         .await?;
         let mut references = Vec::with_capacity(rows.len());
         for row in rows {
-            let table_name: String = row.get("encrypted_table");
+            let table_name: String = row.encrypted_table;
             let table =
                 parse_table(&table_name).ok_or_else(|| ReencryptionError::CorruptEnvelope {
                     table: EncryptedTable::IdempotencyRecords,
                     row_id: Uuid::nil(),
                 })?;
-            let key_version = u32::try_from(row.get::<i32, _>("key_version")).map_err(|_| {
-                ReencryptionError::CorruptEnvelope {
+            let key_version =
+                u32::try_from(row.key_version).map_err(|_| ReencryptionError::CorruptEnvelope {
                     table,
                     row_id: Uuid::nil(),
-                }
-            })?;
-            let row_count = u64::try_from(row.get::<i64, _>("row_count")).map_err(|_| {
-                ReencryptionError::CorruptEnvelope {
+                })?;
+            let row_count =
+                u64::try_from(row.row_count).map_err(|_| ReencryptionError::CorruptEnvelope {
                     table,
                     row_id: Uuid::nil(),
-                }
-            })?;
+                })?;
             references.push(KeyVersionReference {
                 table,
                 key_version,
@@ -281,26 +280,27 @@ impl PgStore {
         limit: u64,
     ) -> Result<u64, ReencryptionError> {
         let mut transaction = self.pool().begin().await?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id, provider_id, version, ciphertext, nonce, master_key_version \
              FROM provider_credential_versions WHERE master_key_version <> $1 \
              ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED",
+            database_version(master_key.version())?,
+            checked_limit(limit)?
         )
-        .bind(database_version(master_key.version())?)
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *transaction)
         .await?;
-        for row in &rows {
-            let id: Uuid = row.get("id");
-            let provider_id: Uuid = row.get("provider_id");
-            let credential_version = u32::try_from(row.get::<i32, _>("version"))
+        let row_count = rows.len();
+        for row in rows {
+            let id: Uuid = row.id;
+            let provider_id: Uuid = row.provider_id;
+            let credential_version = u32::try_from(row.version)
                 .map_err(|_| corrupt(EncryptedTable::ProviderCredentialVersions, id))?;
             let encrypted = encrypted_from_row(
                 EncryptedTable::ProviderCredentialVersions,
                 id,
-                row.get("master_key_version"),
-                row.get("nonce"),
-                row.get("ciphertext"),
+                row.master_key_version,
+                row.nonce,
+                row.ciphertext,
             )?;
             let resealed = reseal(
                 master_key,
@@ -319,7 +319,7 @@ impl PgStore {
             .await?;
         }
         transaction.commit().await?;
-        Ok(u64::try_from(rows.len()).unwrap_or(u64::MAX))
+        checked_row_count(row_count)
     }
 
     async fn reencrypt_oidc_configurations(
@@ -328,24 +328,28 @@ impl PgStore {
         limit: u64,
     ) -> Result<u64, ReencryptionError> {
         let mut transaction = self.pool().begin().await?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id, encrypted_client_secret, secret_nonce, secret_key_version \
              FROM oidc_configurations \
              WHERE secret_key_version IS NOT NULL AND secret_key_version <> $1 \
              ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED",
+            database_version(master_key.version())?,
+            checked_limit(limit)?
         )
-        .bind(database_version(master_key.version())?)
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *transaction)
         .await?;
-        for row in &rows {
-            let id: Uuid = row.get("id");
+        let row_count = rows.len();
+        for row in rows {
+            let id: Uuid = row.id;
             let encrypted = encrypted_from_row(
                 EncryptedTable::OidcConfigurations,
                 id,
-                row.get("secret_key_version"),
-                row.get("secret_nonce"),
-                row.get("encrypted_client_secret"),
+                row.secret_key_version
+                    .ok_or_else(|| corrupt(EncryptedTable::OidcConfigurations, id))?,
+                row.secret_nonce
+                    .ok_or_else(|| corrupt(EncryptedTable::OidcConfigurations, id))?,
+                row.encrypted_client_secret
+                    .ok_or_else(|| corrupt(EncryptedTable::OidcConfigurations, id))?,
             )?;
             let resealed = reseal(
                 master_key,
@@ -364,7 +368,7 @@ impl PgStore {
             .await?;
         }
         transaction.commit().await?;
-        Ok(u64::try_from(rows.len()).unwrap_or(u64::MAX))
+        checked_row_count(row_count)
     }
 
     async fn reencrypt_oidc_flows(
@@ -373,23 +377,24 @@ impl PgStore {
         limit: u64,
     ) -> Result<u64, ReencryptionError> {
         let mut transaction = self.pool().begin().await?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id, encrypted_payload, payload_nonce, payload_key_version \
              FROM oidc_authorization_flows WHERE payload_key_version <> $1 \
              ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED",
+            database_version(master_key.version())?,
+            checked_limit(limit)?
         )
-        .bind(database_version(master_key.version())?)
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *transaction)
         .await?;
-        for row in &rows {
-            let id: Uuid = row.get("id");
+        let row_count = rows.len();
+        for row in rows {
+            let id: Uuid = row.id;
             let encrypted = encrypted_from_row(
                 EncryptedTable::OidcAuthorizationFlows,
                 id,
-                row.get("payload_key_version"),
-                row.get("payload_nonce"),
-                row.get("encrypted_payload"),
+                row.payload_key_version,
+                row.payload_nonce,
+                row.encrypted_payload,
             )?;
             let resealed = reseal(
                 master_key,
@@ -408,7 +413,7 @@ impl PgStore {
             .await?;
         }
         transaction.commit().await?;
-        Ok(u64::try_from(rows.len()).unwrap_or(u64::MAX))
+        checked_row_count(row_count)
     }
 
     async fn reencrypt_idempotency_records(
@@ -417,28 +422,32 @@ impl PgStore {
         limit: u64,
     ) -> Result<u64, ReencryptionError> {
         let mut transaction = self.pool().begin().await?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id, actor_user_id, operation, idempotency_key, replay_ciphertext, \
                     replay_nonce, replay_key_version \
              FROM idempotency_records \
              WHERE replay_key_version IS NOT NULL AND replay_key_version <> $1 \
              ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED",
+            database_version(master_key.version())?,
+            checked_limit(limit)?
         )
-        .bind(database_version(master_key.version())?)
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *transaction)
         .await?;
-        for row in &rows {
-            let id: Uuid = row.get("id");
-            let actor: Uuid = row.get("actor_user_id");
-            let operation: String = row.get("operation");
-            let key: String = row.get("idempotency_key");
+        let row_count = rows.len();
+        for row in rows {
+            let id: Uuid = row.id;
+            let actor: Uuid = row.actor_user_id;
+            let operation = row.operation;
+            let key = row.idempotency_key;
             let encrypted = encrypted_from_row(
                 EncryptedTable::IdempotencyRecords,
                 id,
-                row.get("replay_key_version"),
-                row.get("replay_nonce"),
-                row.get("replay_ciphertext"),
+                row.replay_key_version
+                    .ok_or_else(|| corrupt(EncryptedTable::IdempotencyRecords, id))?,
+                row.replay_nonce
+                    .ok_or_else(|| corrupt(EncryptedTable::IdempotencyRecords, id))?,
+                row.replay_ciphertext
+                    .ok_or_else(|| corrupt(EncryptedTable::IdempotencyRecords, id))?,
             )?;
             let resealed = reseal(
                 master_key,
@@ -457,7 +466,7 @@ impl PgStore {
             .await?;
         }
         transaction.commit().await?;
-        Ok(u64::try_from(rows.len()).unwrap_or(u64::MAX))
+        checked_row_count(row_count)
     }
 
     async fn verify_encrypted_table(
@@ -469,85 +478,94 @@ impl PgStore {
         let mut cursor: Option<Uuid> = None;
         let mut verified = 0_u64;
         loop {
-            let rows = match table {
-                EncryptedTable::ProviderCredentialVersions => {
-                    sqlx::query(
-                        "SELECT id, provider_id, version, ciphertext AS encrypted, nonce, \
-                            master_key_version AS key_version \
+            let rows =
+                match table {
+                    EncryptedTable::ProviderCredentialVersions => {
+                        sqlx::query_as!(
+                            VerificationRow,
+                            "SELECT id, provider_id AS \"provider_id?\", version AS \"version?\", \
+                            ciphertext AS \"encrypted?\", nonce AS \"nonce?\", \
+                            master_key_version AS \"key_version?\", \
+                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
+                            NULL::text AS \"idempotency_key?\" \
                      FROM provider_credential_versions WHERE ($1::uuid IS NULL OR id > $1) \
                      ORDER BY id LIMIT $2",
-                    )
-                    .bind(cursor)
-                    .bind(i64::from(batch_size))
-                    .fetch_all(self.pool())
-                    .await?
-                }
-                EncryptedTable::OidcConfigurations => {
-                    sqlx::query(
-                        "SELECT id, NULL::uuid AS provider_id, NULL::integer AS version, \
-                            encrypted_client_secret AS encrypted, secret_nonce AS nonce, \
-                            secret_key_version AS key_version \
+                            cursor,
+                            i64::from(batch_size)
+                        )
+                        .fetch_all(self.pool())
+                        .await?
+                    }
+                    EncryptedTable::OidcConfigurations => sqlx::query_as!(
+                        VerificationRow,
+                        "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
+                            encrypted_client_secret AS \"encrypted?\", secret_nonce AS \"nonce?\", \
+                            secret_key_version AS \"key_version?\", \
+                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
+                            NULL::text AS \"idempotency_key?\" \
                      FROM oidc_configurations WHERE secret_key_version IS NOT NULL \
                        AND ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+                        cursor,
+                        i64::from(batch_size)
                     )
-                    .bind(cursor)
-                    .bind(i64::from(batch_size))
                     .fetch_all(self.pool())
-                    .await?
-                }
-                EncryptedTable::OidcAuthorizationFlows => {
-                    sqlx::query(
-                        "SELECT id, NULL::uuid AS provider_id, NULL::integer AS version, \
-                            encrypted_payload AS encrypted, payload_nonce AS nonce, \
-                            payload_key_version AS key_version \
+                    .await?,
+                    EncryptedTable::OidcAuthorizationFlows => sqlx::query_as!(
+                        VerificationRow,
+                        "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
+                            encrypted_payload AS \"encrypted?\", payload_nonce AS \"nonce?\", \
+                            payload_key_version AS \"key_version?\", \
+                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
+                            NULL::text AS \"idempotency_key?\" \
                      FROM oidc_authorization_flows WHERE ($1::uuid IS NULL OR id > $1) \
                      ORDER BY id LIMIT $2",
+                        cursor,
+                        i64::from(batch_size)
                     )
-                    .bind(cursor)
-                    .bind(i64::from(batch_size))
                     .fetch_all(self.pool())
-                    .await?
-                }
-                EncryptedTable::IdempotencyRecords => {
-                    sqlx::query(
-                        "SELECT id, NULL::uuid AS provider_id, NULL::integer AS version, \
-                            replay_ciphertext AS encrypted, replay_nonce AS nonce, \
-                            replay_key_version AS key_version, actor_user_id, operation, \
-                            idempotency_key \
+                    .await?,
+                    EncryptedTable::IdempotencyRecords => sqlx::query_as!(
+                        VerificationRow,
+                        "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
+                            replay_ciphertext AS \"encrypted?\", replay_nonce AS \"nonce?\", \
+                            replay_key_version AS \"key_version?\", \
+                            actor_user_id AS \"actor_user_id?\", operation AS \"operation?\", \
+                            idempotency_key AS \"idempotency_key?\" \
                      FROM idempotency_records WHERE replay_key_version IS NOT NULL \
                        AND ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+                        cursor,
+                        i64::from(batch_size)
                     )
-                    .bind(cursor)
-                    .bind(i64::from(batch_size))
                     .fetch_all(self.pool())
-                    .await?
-                }
-            };
+                    .await?,
+                };
             if rows.is_empty() {
                 break;
             }
             for row in &rows {
-                let id: Uuid = row.get("id");
+                let id: Uuid = row.id;
                 let encrypted = encrypted_from_row(
                     table,
                     id,
-                    row.get("key_version"),
-                    row.get("nonce"),
-                    row.get("encrypted"),
+                    row.key_version.ok_or_else(|| corrupt(table, id))?,
+                    row.nonce.clone().ok_or_else(|| corrupt(table, id))?,
+                    row.encrypted.clone().ok_or_else(|| corrupt(table, id))?,
                 )?;
                 let aad = match table {
                     EncryptedTable::ProviderCredentialVersions => {
-                        let provider_id: Uuid = row.get("provider_id");
-                        let version = u32::try_from(row.get::<i32, _>("version"))
+                        let provider_id = row.provider_id.ok_or_else(|| corrupt(table, id))?;
+                        let version = u32::try_from(row.version.ok_or_else(|| corrupt(table, id))?)
                             .map_err(|_| corrupt(table, id))?;
                         credential_aad(provider_id, id, version)
                     }
                     EncryptedTable::OidcConfigurations => oidc_client_secret_aad(id),
                     EncryptedTable::OidcAuthorizationFlows => oidc_flow_payload_aad(id),
                     EncryptedTable::IdempotencyRecords => idempotency_replay_aad(
-                        row.get("actor_user_id"),
-                        row.get::<String, _>("operation").as_str(),
-                        row.get::<String, _>("idempotency_key").as_str(),
+                        row.actor_user_id.ok_or_else(|| corrupt(table, id))?,
+                        row.operation.as_deref().ok_or_else(|| corrupt(table, id))?,
+                        row.idempotency_key
+                            .as_deref()
+                            .ok_or_else(|| corrupt(table, id))?,
                     ),
                 };
                 master_key.open(&encrypted, &aad).map_err(|source| {
@@ -568,6 +586,19 @@ impl PgStore {
     }
 }
 
+#[derive(Debug, FromRow)]
+struct VerificationRow {
+    id: Uuid,
+    provider_id: Option<Uuid>,
+    version: Option<i32>,
+    encrypted: Option<Vec<u8>>,
+    nonce: Option<Vec<u8>>,
+    key_version: Option<i32>,
+    actor_user_id: Option<Uuid>,
+    operation: Option<String>,
+    idempotency_key: Option<String>,
+}
+
 fn parse_table(value: &str) -> Option<EncryptedTable> {
     EncryptedTable::ALL
         .into_iter()
@@ -580,6 +611,14 @@ fn validate_batch_size(batch_size: u16) -> Result<(), ReencryptionError> {
     } else {
         Ok(())
     }
+}
+
+fn checked_limit(limit: u64) -> Result<i64, ReencryptionError> {
+    i64::try_from(limit).map_err(|_| ReencryptionError::InvalidBatchSize)
+}
+
+fn checked_row_count(count: usize) -> Result<u64, ReencryptionError> {
+    u64::try_from(count).map_err(|_| ReencryptionError::InvalidBatchSize)
 }
 
 fn database_version(version: u32) -> Result<i32, ReencryptionError> {
@@ -638,58 +677,58 @@ async fn update_envelope(
     let previous_version = database_version(previous_version)?;
     let updated = match table {
         EncryptedTable::ProviderCredentialVersions => {
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE provider_credential_versions \
              SET ciphertext = $1, nonce = $2, master_key_version = $3 \
              WHERE id = $4 AND master_key_version = $5",
+                ciphertext,
+                nonce,
+                key_version,
+                row_id,
+                previous_version
             )
-            .bind(ciphertext)
-            .bind(nonce)
-            .bind(key_version)
-            .bind(row_id)
-            .bind(previous_version)
             .execute(&mut **transaction)
             .await?
         }
         EncryptedTable::OidcConfigurations => {
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE oidc_configurations \
              SET encrypted_client_secret = $1, secret_nonce = $2, secret_key_version = $3 \
              WHERE id = $4 AND secret_key_version = $5",
+                ciphertext,
+                nonce,
+                key_version,
+                row_id,
+                previous_version
             )
-            .bind(ciphertext)
-            .bind(nonce)
-            .bind(key_version)
-            .bind(row_id)
-            .bind(previous_version)
             .execute(&mut **transaction)
             .await?
         }
         EncryptedTable::OidcAuthorizationFlows => {
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE oidc_authorization_flows \
              SET encrypted_payload = $1, payload_nonce = $2, payload_key_version = $3 \
              WHERE id = $4 AND payload_key_version = $5",
+                ciphertext,
+                nonce,
+                key_version,
+                row_id,
+                previous_version
             )
-            .bind(ciphertext)
-            .bind(nonce)
-            .bind(key_version)
-            .bind(row_id)
-            .bind(previous_version)
             .execute(&mut **transaction)
             .await?
         }
         EncryptedTable::IdempotencyRecords => {
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE idempotency_records \
              SET replay_ciphertext = $1, replay_nonce = $2, replay_key_version = $3 \
              WHERE id = $4 AND replay_key_version = $5",
+                ciphertext,
+                nonce,
+                key_version,
+                row_id,
+                previous_version
             )
-            .bind(ciphertext)
-            .bind(nonce)
-            .bind(key_version)
-            .bind(row_id)
-            .bind(previous_version)
             .execute(&mut **transaction)
             .await?
         }

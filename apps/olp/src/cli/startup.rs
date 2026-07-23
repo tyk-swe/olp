@@ -44,9 +44,9 @@ pub(super) async fn serve(
             std::io::Error::other("OLP_HTTP_MAX_CONNECTIONS must be greater than zero").into(),
         );
     }
-    if mode.serves_control() && args.auth_hmac_key_file.is_none() {
+    if args.auth_hmac_key_file.is_none() {
         return Err(std::io::Error::other(
-            "OLP_AUTH_HMAC_KEY_FILE is required when serving the control plane",
+            "OLP_AUTH_HMAC_KEY_FILE is required when serving an HTTP mode",
         )
         .into());
     }
@@ -138,12 +138,6 @@ pub(super) async fn serve(
         state.master_key.clone(),
         background_shutdown_receiver.clone(),
     ));
-    if mode.serves_gateway() {
-        background_tasks.push(tokio::spawn(media_reconciliation_supervisor(
-            state.clone(),
-            background_shutdown_receiver.clone(),
-        )));
-    }
     if let Some(url) = &args.valkey_url {
         if mode.serves_gateway() || run_worker_in_process {
             preflight_request_metadata_stream_or_defer(url).await?;
@@ -222,8 +216,16 @@ pub(super) async fn serve(
             background_shutdown_receiver.clone(),
         )));
     }
+    let dependencies = state.mode_dependencies()?;
+    let observability_state = dependencies.observability();
+    if let Some(gateway_state) = dependencies.gateway() {
+        background_tasks.push(tokio::spawn(media_reconciliation_supervisor(
+            gateway_state,
+            background_shutdown_receiver.clone(),
+        )));
+    }
     background_tasks.push(crate::spawn_observability_cache(
-        state.clone(),
+        observability_state.clone(),
         background_shutdown_receiver.clone(),
     ));
 
@@ -231,7 +233,7 @@ pub(super) async fn serve(
     info!(address = %args.observability_listen_addr, ?mode, "OLP observability listener ready");
     let public_server = listener::serve_http(
         listener,
-        crate::try_public_router(state.clone())?,
+        crate::router::validated_public_router(dependencies),
         listener::HttpServerConfig::standard(args.http_max_connections),
         listener_shutdown_receiver.clone(),
     );
@@ -240,7 +242,7 @@ pub(super) async fn serve(
     // listener's entire process-level resource budget.
     let observability_server = listener::serve_http(
         observability_listener,
-        crate::observability_router(state),
+        crate::observability_router(observability_state),
         listener::HttpServerConfig::standard(args.http_max_connections.clamp(1, 32)),
         listener_shutdown_receiver,
     );
@@ -344,7 +346,10 @@ pub(super) async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
     }
 }
 
-async fn media_reconciliation_supervisor(state: ApiState, mut shutdown: watch::Receiver<bool>) {
+async fn media_reconciliation_supervisor(
+    state: crate::GatewayState,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {

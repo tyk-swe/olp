@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{CsrfMaterial, SessionMaterial, authentication::insert_versioned_session};
@@ -16,10 +15,10 @@ impl PgStore {
         let now = Utc::now();
         let expires_at = checked_session_expiry(now, ttl)?;
         let mut transaction = self.pool.begin().await?;
-        let security_version: Option<i64> = sqlx::query_scalar(
+        let security_version: Option<i64> = sqlx::query_scalar!(
             "SELECT security_version FROM users WHERE id = $1 AND active FOR SHARE",
+            user_id
         )
-        .bind(user_id)
         .fetch_optional(&mut *transaction)
         .await?;
         let security_version = security_version.ok_or(PersistenceError::SessionUnavailable)?;
@@ -32,26 +31,26 @@ impl PgStore {
             now,
         )
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'session.create', 'session', $3, 'success', $4)",
+            Uuid::now_v7(),
+            user_id,
+            id.to_string(),
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(user_id)
-        .bind(id.to_string())
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'local_auth.login', 'session', $3, 'success', $4)",
+            Uuid::now_v7(),
+            user_id,
+            id.to_string(),
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(user_id)
-        .bind(id.to_string())
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -66,14 +65,14 @@ impl PgStore {
         &self,
         user_id: Option<Uuid>,
     ) -> Result<(), PersistenceError> {
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'local_auth.login', 'session', NULL, 'failure', $3)",
+            Uuid::now_v7(),
+            user_id,
+            Utc::now()
         )
-        .bind(Uuid::now_v7())
-        .bind(user_id)
-        .bind(Utc::now())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -83,19 +82,20 @@ impl PgStore {
         &self,
         email: &str,
     ) -> Result<Option<LocalPasswordUser>, PersistenceError> {
-        let row = sqlx::query(
-            "SELECT id, email, display_name, password_hash, role::text AS role \
+        let row = sqlx::query!(
+            "SELECT id, email, display_name, password_hash AS \"password_hash!\", \
+                    role::text AS \"role!\" \
              FROM users WHERE email = $1 AND active AND password_hash IS NOT NULL",
+            email.trim().to_lowercase()
         )
-        .bind(email.trim().to_lowercase())
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|row| LocalPasswordUser {
-            id: row.get("id"),
-            email: row.get("email"),
-            display_name: row.get("display_name"),
-            password_hash: row.get("password_hash"),
-            role: row.get("role"),
+            id: row.id,
+            email: row.email,
+            display_name: row.display_name,
+            password_hash: row.password_hash,
+            role: row.role,
         }))
     }
 
@@ -104,7 +104,7 @@ impl PgStore {
         plaintext_token: &str,
     ) -> Result<Option<SessionPrincipal>, PersistenceError> {
         let digest = SessionMaterial::digest_token(plaintext_token);
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "WITH authenticated AS MATERIALIZED ( \
                  SELECT s.id AS session_id, s.security_version, s.csrf_digest, s.expires_at, \
                         u.id AS user_id, u.email, u.display_name, u.role::text AS role \
@@ -123,23 +123,23 @@ impl PgStore {
              SELECT authenticated.session_id, authenticated.security_version, \
                     authenticated.csrf_digest, authenticated.expires_at, \
                     authenticated.user_id, authenticated.email, \
-                    authenticated.display_name, authenticated.role \
+                    authenticated.display_name, authenticated.role AS \"role!\" \
              FROM authenticated \
              CROSS JOIN (SELECT count(*) FROM touched) activity",
+            digest.to_vec()
         )
-        .bind(digest.to_vec())
         .fetch_optional(&self.pool)
         .await?;
 
         Ok(row.map(|row| SessionPrincipal {
-            session_id: row.get("session_id"),
-            user_id: row.get("user_id"),
-            email: row.get("email"),
-            display_name: row.get("display_name"),
-            role: row.get("role"),
-            security_version: row.get("security_version"),
-            csrf_digest: row.get("csrf_digest"),
-            expires_at: row.get("expires_at"),
+            session_id: row.session_id,
+            user_id: row.user_id,
+            email: row.email,
+            display_name: row.display_name,
+            role: row.role,
+            security_version: row.security_version,
+            csrf_digest: row.csrf_digest,
+            expires_at: row.expires_at,
         }))
     }
 
@@ -155,7 +155,7 @@ impl PgStore {
     ) -> Result<bool, PersistenceError> {
         let now = Utc::now();
         let mut transaction = self.pool.begin().await?;
-        let updated = sqlx::query(
+        let updated = sqlx::query!(
             "UPDATE sessions session SET csrf_digest = $5 \
              WHERE session.id = $1 AND session.user_id = $2 \
                AND session.security_version = $3 AND session.csrf_digest = $4 \
@@ -165,26 +165,26 @@ impl PgStore {
                    WHERE users.id = session.user_id AND users.active \
                      AND users.security_version = session.security_version \
                )",
+            session_id,
+            user_id,
+            security_version,
+            expected_digest,
+            replacement.token_digest().to_vec(),
+            now
         )
-        .bind(session_id)
-        .bind(user_id)
-        .bind(security_version)
-        .bind(expected_digest)
-        .bind(replacement.token_digest().to_vec())
-        .bind(now)
         .execute(&mut *transaction)
         .await?
         .rows_affected();
         if updated == 1 {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO audit_events \
                  (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
                  VALUES ($1, $2, 'session.csrf_rotate', 'session', $3, 'success', $4)",
+                Uuid::now_v7(),
+                user_id,
+                session_id.to_string(),
+                now
             )
-            .bind(Uuid::now_v7())
-            .bind(user_id)
-            .bind(session_id.to_string())
-            .bind(now)
             .execute(&mut *transaction)
             .await?;
             transaction.commit().await?;
@@ -204,23 +204,24 @@ impl PgStore {
         let digest = SessionMaterial::digest_token(plaintext_token);
         let now = Utc::now();
         let mut transaction = self.pool.begin().await?;
-        let deleted =
-            sqlx::query("DELETE FROM sessions WHERE token_digest = $1 RETURNING id, user_id")
-                .bind(digest.to_vec())
-                .fetch_optional(&mut *transaction)
-                .await?;
+        let deleted = sqlx::query!(
+            "DELETE FROM sessions WHERE token_digest = $1 RETURNING id, user_id",
+            digest.to_vec()
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
         if let Some(row) = deleted {
-            let session_id: Uuid = row.get("id");
-            let user_id: Uuid = row.get("user_id");
-            sqlx::query(
+            let session_id: Uuid = row.id;
+            let user_id: Uuid = row.user_id;
+            sqlx::query!(
                 "INSERT INTO audit_events \
                  (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
                  VALUES ($1, $2, 'session.logout', 'session', $3, 'success', $4)",
+                Uuid::now_v7(),
+                user_id,
+                session_id.to_string(),
+                now
             )
-            .bind(Uuid::now_v7())
-            .bind(user_id)
-            .bind(session_id.to_string())
-            .bind(now)
             .execute(&mut *transaction)
             .await?;
         }

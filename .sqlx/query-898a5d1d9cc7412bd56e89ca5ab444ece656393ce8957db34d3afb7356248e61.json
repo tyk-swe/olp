@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_media_jobs SET lifecycle_state = $2,\n                upstream_job_id = COALESCE($3, upstream_job_id),\n                reconciliation_error = $4, next_reconciliation_at = now(), etag = uuidv7()\n         WHERE id = $1 AND lifecycle_state = ANY($5::text[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "898a5d1d9cc7412bd56e89ca5ab444ece656393ce8957db34d3afb7356248e61"
+}

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.etag, p.active_credential_version_id, ar.credential_version_id AS \"activated_credential_version_id?\" FROM providers p LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id WHERE p.id = $1 FOR UPDATE OF p",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "active_credential_version_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "active_credential_version_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "activated_credential_version_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "credential_version_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "09e3589881155d4c01dbbeb236fbd941695b71e7f0652ac52fbbb74d0c84d511"
+}

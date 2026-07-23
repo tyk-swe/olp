@@ -26,7 +26,7 @@ use super::{
     },
     common::*,
 };
-use crate::{ApiState, FieldErrors, Problem, public_auth_source_target_digests};
+use crate::{FieldErrors, ManagementState, Problem, public_auth_source_target_digests};
 
 pub(super) const INVALID_INVITATION_RATE_LIMIT_TARGET: &str = "<invalid-invitation-token>";
 const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
@@ -41,11 +41,12 @@ const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
     )
 )]
 pub(super) async fn profile(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
-    let user = require_store(&state)?
+    let user = state
+        .store()
         .user(principal.user_id)
         .await
         .map_err(map_identity)?
@@ -77,13 +78,14 @@ pub(super) struct UpdateProfileRequest {
     )
 )]
 pub(super) async fn update_profile(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<UpdateProfileRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     let request = json_payload(payload)?;
-    let user = require_store(&state)?
+    let user = state
+        .store()
         .update_profile(
             principal.user_id,
             &request.display_name,
@@ -136,7 +138,7 @@ impl fmt::Debug for RecentAuthenticationRequest {
     )
 )]
 pub(super) async fn recent_authentication(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<RecentAuthenticationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -168,7 +170,8 @@ pub(super) async fn recent_authentication(
             "The current password is invalid.",
         ));
     }
-    let local = require_store(&state)?
+    let local = state
+        .store()
         .local_password_user(&principal.email)
         .await
         .map_err(map_persistence)?
@@ -194,7 +197,8 @@ pub(super) async fn recent_authentication(
         ));
     }
     let material = RecentAuthMaterial::generate();
-    let installed = require_store(&state)?
+    let installed = state
+        .store()
         .issue_recent_authentication(
             SessionSecurityContext {
                 session_id: principal.session_id,
@@ -252,7 +256,7 @@ impl fmt::Debug for ChangePasswordRequest {
     )
 )]
 pub(super) async fn change_password(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<ChangePasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -268,7 +272,8 @@ pub(super) async fn change_password(
         );
         return Err(Problem::validation(errors));
     }
-    let local = require_store(&state)?
+    let local = state
+        .store()
         .local_password_user(&principal.email)
         .await
         .map_err(map_persistence)?
@@ -304,7 +309,8 @@ pub(super) async fn change_password(
         ));
     };
     let replacement = SessionMaterial::generate();
-    let rotation = require_store(&state)?
+    let rotation = state
+        .store()
         .update_local_password(
             &password_hash,
             expected_etag,
@@ -360,7 +366,7 @@ impl fmt::Debug for EnrollPasswordRequest {
     )
 )]
 pub(super) async fn enroll_password(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<EnrollPasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -392,7 +398,8 @@ pub(super) async fn enroll_password(
             Problem::internal()
         })?;
     let replacement = SessionMaterial::generate();
-    let rotation = require_store(&state)?
+    let rotation = state
+        .store()
         .enroll_local_password(
             &password_hash,
             expected_etag,
@@ -467,14 +474,15 @@ pub(super) struct UserListResponse {
     )
 )]
 pub(super) async fn list_users(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<UserListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
     let (cursor, limit) = page_parameters(query)?;
-    let (users, next_cursor) = require_store(&state)?
+    let (users, next_cursor) = state
+        .store()
         .list_users(cursor, limit)
         .await
         .map_err(map_identity)?;
@@ -495,13 +503,14 @@ pub(super) async fn list_users(
     )
 )]
 pub(super) async fn get_user(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(user_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
-    let user = require_store(&state)?
+    let user = state
+        .store()
         .user(user_id)
         .await
         .map_err(map_identity)?
@@ -538,7 +547,7 @@ pub(super) struct UpdateUserRoleRequest {
     )
 )]
 pub(super) async fn update_user_role(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(user_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<UpdateUserRoleRequest>, JsonRejection>,
@@ -561,7 +570,8 @@ pub(super) async fn update_user_role(
         ));
     }
     let role = request.role.as_deref().map(parse_user_role).transpose()?;
-    let user = require_store(&state)?
+    let user = state
+        .store()
         .update_user_access(
             user_id,
             role,
@@ -654,14 +664,15 @@ pub(super) struct CreateInvitationResponse {
     responses((status = 200, description = "Invitation history", body = InvitationListResponse))
 )]
 pub(super) async fn list_invitations(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<InvitationListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
     let (cursor, limit) = page_parameters(query)?;
-    let (invitations, next_cursor) = require_store(&state)?
+    let (invitations, next_cursor) = state
+        .store()
         .list_invitations(cursor, limit)
         .await
         .map_err(map_identity)?;
@@ -685,7 +696,7 @@ pub(super) async fn list_invitations(
     )
 )]
 pub(super) async fn create_invitation(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<CreateInvitationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -711,7 +722,8 @@ pub(super) async fn create_invitation(
     let expires_at = Utc::now()
         .checked_add_signed(chrono::Duration::hours(i64::from(hours)))
         .ok_or_else(Problem::internal)?;
-    let created = require_store(&state)?
+    let created = state
+        .store()
         .create_invitation(
             NewInvitation {
                 email: request.email,
@@ -751,13 +763,14 @@ pub(super) async fn create_invitation(
     )
 )]
 pub(super) async fn revoke_invitation(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(invitation_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<InvitationResponse>, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
-    let invitation = require_store(&state)?
+    let invitation = state
+        .store()
         .revoke_invitation(
             invitation_id,
             principal.user_id,
@@ -802,7 +815,7 @@ impl fmt::Debug for AcceptInvitationRequest {
     )
 )]
 pub(super) async fn accept_invitation(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     payload: Result<Json<AcceptInvitationRequest>, JsonRejection>,
@@ -810,7 +823,7 @@ pub(super) async fn accept_invitation(
     enforce_origin(&state, &headers)?;
     validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let (source_digest, source_target_digest) = public_auth_source_target_digests(
         &state,
         &headers,

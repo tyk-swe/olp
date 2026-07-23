@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::buffer::RequestMetadataBufferSnapshot;
@@ -85,46 +84,50 @@ pub struct RequestMetadataGatewayEpochRecord {
 pub const REQUEST_METADATA_GATEWAY_EPOCH_STALE_AFTER_SECONDS: i64 = 60;
 const REQUEST_METADATA_GATEWAY_EPOCH_CONFIRM_AFTER_SECONDS: i64 = 10;
 
+struct UncleanRequestMetadataEpoch<'a> {
+    gateway_instance: &'a str,
+    process_epoch: Uuid,
+    accepted: i64,
+    persisted: i64,
+    abandoned: i64,
+    last_checkpoint: DateTime<Utc>,
+    detected_at: DateTime<Utc>,
+}
+
 async fn record_unclean_request_metadata_epoch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    gateway_instance: &str,
-    row: &sqlx::postgres::PgRow,
-    detected_at: DateTime<Utc>,
+    epoch: UncleanRequestMetadataEpoch<'_>,
 ) -> Result<i64, PersistenceError> {
-    let process_epoch: Uuid = row.get("process_epoch");
-    let accepted: i64 = row.get("accepted");
-    let persisted: i64 = row.get("persisted");
-    let abandoned: i64 = row.get("abandoned");
-    let last_checkpoint: DateTime<Utc> = row.get("updated_at");
-    let lower_bound = accepted
-        .saturating_sub(persisted)
-        .saturating_sub(abandoned)
+    let lower_bound = epoch
+        .accepted
+        .saturating_sub(epoch.persisted)
+        .saturating_sub(epoch.abandoned)
         .max(0);
     let gap_id = Uuid::now_v7();
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO request_metadata_ingestion_gaps \
          (id, gateway_instance, event_count, reason, certainty, first_observed_at, \
           last_observed_at, reported_at) \
          VALUES ($1, $2, $3, 'gateway_epoch_unclean_shutdown', \
                  'lower_bound'::request_metadata_gap_certainty, $4, $5, $5)",
+        gap_id,
+        epoch.gateway_instance,
+        lower_bound,
+        epoch.last_checkpoint,
+        epoch.detected_at.max(epoch.last_checkpoint)
     )
-    .bind(gap_id)
-    .bind(gateway_instance)
-    .bind(lower_bound)
-    .bind(last_checkpoint)
-    .bind(detected_at.max(last_checkpoint))
     .execute(&mut **transaction)
     .await?;
-    sqlx::query(
+    sqlx::query!(
         "UPDATE request_metadata_gateway_epochs \
          SET stale_detected_at = $1, uncertainty_gap_id = $2 \
          WHERE gateway_instance = $3 AND process_epoch = $4 \
            AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL",
+        epoch.detected_at,
+        gap_id,
+        epoch.gateway_instance,
+        epoch.process_epoch
     )
-    .bind(detected_at)
-    .bind(gap_id)
-    .bind(gateway_instance)
-    .bind(process_epoch)
     .execute(&mut **transaction)
     .await?;
     Ok(lower_bound)
@@ -181,59 +184,64 @@ impl PgStore {
             .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
         let now = Utc::now();
         let mut transaction = self.pool().begin().await?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-            .bind(gateway_instance)
-            .bind(REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED)
-            .execute(&mut *transaction)
-            .await?;
-        let previous = sqlx::query(
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+            gateway_instance,
+            REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let previous = sqlx::query!(
             "SELECT accepted, persisted, dropped, abandoned, writer_closed, updated_at, \
                     gracefully_closed_at, stale_detected_at \
              FROM request_metadata_gateway_epochs \
              WHERE gateway_instance = $1 AND process_epoch = $2 FOR UPDATE",
+            gateway_instance,
+            snapshot.process_epoch
         )
-        .bind(gateway_instance)
-        .bind(snapshot.process_epoch)
         .fetch_optional(&mut *transaction)
         .await?;
         let process_epoch_changed = previous.is_none();
         if previous.is_none() {
             // A replacement epoch with the same stable gateway identity proves
             // that every older unclosed epoch ended without its shutdown hook.
-            let superseded = sqlx::query(
+            let superseded = sqlx::query!(
                 "SELECT process_epoch, accepted, persisted, abandoned, updated_at \
                  FROM request_metadata_gateway_epochs \
                  WHERE gateway_instance = $1 AND process_epoch <> $2 \
                    AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL \
                  FOR UPDATE",
+                gateway_instance,
+                snapshot.process_epoch
             )
-            .bind(gateway_instance)
-            .bind(snapshot.process_epoch)
             .fetch_all(&mut *transaction)
             .await?;
             for epoch in superseded {
                 record_unclean_request_metadata_epoch(
                     &mut transaction,
-                    gateway_instance,
-                    &epoch,
-                    now,
+                    UncleanRequestMetadataEpoch {
+                        gateway_instance,
+                        process_epoch: epoch.process_epoch,
+                        accepted: epoch.accepted,
+                        persisted: epoch.persisted,
+                        abandoned: epoch.abandoned,
+                        last_checkpoint: epoch.updated_at,
+                        detected_at: now,
+                    },
                 )
                 .await?;
             }
         }
         let (previous_dropped, previous_abandoned, previous_checkpoint) =
             if let Some(row) = previous {
-                if row
-                    .get::<Option<DateTime<Utc>>, _>("stale_detected_at")
-                    .is_some()
-                {
+                if row.stale_detected_at.is_some() {
                     return Err(PersistenceError::InvalidRequestMetadataGap);
                 }
-                let previous_accepted = row.get::<i64, _>("accepted");
-                let previous_persisted = row.get::<i64, _>("persisted");
-                let previous_dropped = row.get::<i64, _>("dropped");
-                let previous_abandoned = row.get::<i64, _>("abandoned");
-                let previously_closed = row.get::<bool, _>("writer_closed");
+                let previous_accepted = row.accepted;
+                let previous_persisted = row.persisted;
+                let previous_dropped = row.dropped;
+                let previous_abandoned = row.abandoned;
+                let previously_closed = row.writer_closed;
                 if accepted < previous_accepted
                     || persisted < previous_persisted
                     || dropped < previous_dropped
@@ -242,10 +250,7 @@ impl PgStore {
                 {
                     return Err(PersistenceError::InvalidRequestMetadataGap);
                 }
-                if row
-                    .get::<Option<DateTime<Utc>>, _>("gracefully_closed_at")
-                    .is_some()
-                {
+                if row.gracefully_closed_at.is_some() {
                     if graceful_close
                         && snapshot.closed
                         && accepted == previous_accepted
@@ -263,11 +268,7 @@ impl PgStore {
                     }
                     return Err(PersistenceError::InvalidRequestMetadataGap);
                 }
-                (
-                    previous_dropped,
-                    previous_abandoned,
-                    row.get::<DateTime<Utc>, _>("updated_at"),
-                )
+                (previous_dropped, previous_abandoned, row.updated_at)
             } else {
                 (0_i64, 0_i64, snapshot.started_at)
             };
@@ -286,64 +287,53 @@ impl PgStore {
                     .map_or(previous_checkpoint, |first| first.max(previous_checkpoint))
             }
             .min(last_observed_at);
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO request_metadata_ingestion_gaps \
                  (id, gateway_instance, event_count, reason, first_observed_at, \
                   last_observed_at, reported_at) \
                  VALUES ($1, $2, $3, 'gateway_local_buffer_loss', $4, $5, $6)",
+                Uuid::now_v7(),
+                gateway_instance,
+                event_count,
+                first_observed_at,
+                last_observed_at,
+                now
             )
-            .bind(Uuid::now_v7())
-            .bind(gateway_instance)
-            .bind(event_count)
-            .bind(first_observed_at)
-            .bind(last_observed_at)
-            .bind(now)
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO request_metadata_gateway_epochs \
              (gateway_instance, process_epoch, started_at, accepted, persisted, dropped, abandoned, \
               retrying, writer_closed, updated_at, gracefully_closed_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, \
-                     CASE WHEN $11 THEN $10 ELSE NULL END) \
+                     CASE WHEN $11 THEN $10::timestamptz ELSE NULL END) \
              ON CONFLICT (gateway_instance, process_epoch) DO UPDATE SET \
                accepted = EXCLUDED.accepted, persisted = EXCLUDED.persisted, \
                dropped = EXCLUDED.dropped, abandoned = EXCLUDED.abandoned, \
                retrying = EXCLUDED.retrying, writer_closed = EXCLUDED.writer_closed, \
                updated_at = EXCLUDED.updated_at, stale_candidate_at = NULL, \
                gracefully_closed_at = CASE WHEN $11 \
-                 THEN COALESCE(request_metadata_gateway_epochs.gracefully_closed_at, $10) \
+                 THEN COALESCE(request_metadata_gateway_epochs.gracefully_closed_at, $10::timestamptz) \
                  ELSE request_metadata_gateway_epochs.gracefully_closed_at END",
-        )
-        .bind(gateway_instance)
-        .bind(snapshot.process_epoch)
-        .bind(snapshot.started_at)
-        .bind(accepted)
-        .bind(persisted)
-        .bind(dropped)
-        .bind(abandoned)
-        .bind(snapshot.retrying)
-        .bind(snapshot.closed)
-        .bind(now)
-        .bind(graceful_close)
+        gateway_instance, snapshot.process_epoch, snapshot.started_at, accepted, persisted, dropped, abandoned, snapshot.retrying, snapshot.closed, now, graceful_close)
         .execute(&mut *transaction)
         .await?;
         // Preserve the historical cumulative checkpoint for diagnostics. Epoch
         // detection uses the process-scoped rows above instead.
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO request_metadata_loss_reporter_state \
              (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
              VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (gateway_instance) DO UPDATE SET \
                process_epoch = EXCLUDED.process_epoch, dropped = EXCLUDED.dropped, \
                abandoned = EXCLUDED.abandoned, updated_at = EXCLUDED.updated_at",
+            gateway_instance,
+            snapshot.process_epoch,
+            dropped,
+            abandoned,
+            now
         )
-        .bind(gateway_instance)
-        .bind(snapshot.process_epoch)
-        .bind(dropped)
-        .bind(abandoned)
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -370,7 +360,7 @@ impl PgStore {
         let confirmation_cutoff =
             now - chrono::Duration::seconds(REQUEST_METADATA_GATEWAY_EPOCH_CONFIRM_AFTER_SECONDS);
         let mut transaction = self.pool().begin().await?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT gateway_instance, process_epoch, accepted, persisted, abandoned, updated_at, \
                     stale_candidate_at \
              FROM request_metadata_gateway_epochs \
@@ -378,21 +368,27 @@ impl PgStore {
                AND updated_at < $1 \
              ORDER BY updated_at, gateway_instance, process_epoch \
              LIMIT 100 FOR UPDATE SKIP LOCKED",
+            stale_cutoff
         )
-        .bind(stale_cutoff)
         .fetch_all(&mut *transaction)
         .await?;
         let mut report = RequestMetadataEpochDetection::default();
         for row in rows {
-            let gateway_instance: String = row.get("gateway_instance");
-            let process_epoch: Uuid = row.get("process_epoch");
-            match row.get::<Option<DateTime<Utc>>, _>("stale_candidate_at") {
+            let gateway_instance: String = row.gateway_instance;
+            let process_epoch: Uuid = row.process_epoch;
+            match row.stale_candidate_at {
                 Some(candidate_at) if candidate_at <= confirmation_cutoff => {
                     let lower_bound = record_unclean_request_metadata_epoch(
                         &mut transaction,
-                        &gateway_instance,
-                        &row,
-                        now,
+                        UncleanRequestMetadataEpoch {
+                            gateway_instance: &gateway_instance,
+                            process_epoch: row.process_epoch,
+                            accepted: row.accepted,
+                            persisted: row.persisted,
+                            abandoned: row.abandoned,
+                            last_checkpoint: row.updated_at,
+                            detected_at: now,
+                        },
                     )
                     .await?;
                     report.detected_epochs = report.detected_epochs.saturating_add(1);
@@ -401,14 +397,14 @@ impl PgStore {
                         .saturating_add(u64::try_from(lower_bound).unwrap_or(u64::MAX));
                 }
                 None => {
-                    sqlx::query(
+                    sqlx::query!(
                         "UPDATE request_metadata_gateway_epochs SET stale_candidate_at = $1 \
                          WHERE gateway_instance = $2 AND process_epoch = $3 \
                            AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL",
+                        now,
+                        &gateway_instance,
+                        process_epoch
                     )
-                    .bind(now)
-                    .bind(&gateway_instance)
-                    .bind(process_epoch)
                     .execute(&mut *transaction)
                     .await?;
                     report.candidate_epochs = report.candidate_epochs.saturating_add(1);
@@ -423,32 +419,30 @@ impl PgStore {
     pub async fn request_metadata_gateway_epoch_health(
         &self,
     ) -> Result<RequestMetadataEpochHealth, PersistenceError> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT count(*) FILTER (WHERE gracefully_closed_at IS NULL \
-                                      AND stale_detected_at IS NULL) AS open_epochs, \
+                                      AND stale_detected_at IS NULL) AS \"open_epochs!\", \
                     count(*) FILTER (WHERE stale_detected_at IS NOT NULL \
-                                      AND acknowledged_at IS NULL) AS unresolved_epochs, \
+                                      AND acknowledged_at IS NULL) AS \"unresolved_epochs!\", \
                     COALESCE(sum(GREATEST(accepted - persisted - abandoned, 0)) \
                       FILTER (WHERE stale_detected_at IS NOT NULL \
-                              AND acknowledged_at IS NULL), 0) AS unresolved_lower_bound, \
+                              AND acknowledged_at IS NULL), 0) AS \"unresolved_lower_bound!\", \
                     (SELECT count(*) FROM request_metadata_ingestion_gaps \
                       WHERE certainty = 'lower_bound'::request_metadata_gap_certainty) \
                     + (SELECT COALESCE(sum(uncertain_gap_count), 0) FROM request_metadata_gap_hourly) \
-                      AS historical_uncertain_gap_count \
+                      AS \"historical_uncertain_gap_count!\" \
              FROM request_metadata_gateway_epochs",
         )
         .fetch_one(self.pool())
         .await?;
-        let historical_uncertain_gap_count = request_metadata_gap_count_from_decimal(
-            row.try_get::<Decimal, _>("historical_uncertain_gap_count")?,
-        )?;
-        let unresolved_event_lower_bound = request_metadata_gap_count_from_decimal(
-            row.try_get::<Decimal, _>("unresolved_lower_bound")?,
-        )?;
+        let historical_uncertain_gap_count =
+            request_metadata_gap_count_from_decimal(row.historical_uncertain_gap_count)?;
+        let unresolved_event_lower_bound =
+            request_metadata_gap_count_from_decimal(row.unresolved_lower_bound)?;
         Ok(RequestMetadataEpochHealth {
-            open_epochs: u64::try_from(row.get::<i64, _>("open_epochs"))
+            open_epochs: u64::try_from(row.open_epochs)
                 .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-            unresolved_epochs: u64::try_from(row.get::<i64, _>("unresolved_epochs"))
+            unresolved_epochs: u64::try_from(row.unresolved_epochs)
                 .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
             historical_uncertain_gap_count,
             unresolved_event_lower_bound,
@@ -464,21 +458,21 @@ impl PgStore {
         actor: Uuid,
     ) -> Result<Option<RequestMetadataEpochAcknowledgement>, PersistenceError> {
         let mut transaction = self.pool().begin().await?;
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT gateway_instance, acknowledged_at, acknowledged_by \
              FROM request_metadata_gateway_epochs \
              WHERE process_epoch = $1 AND stale_detected_at IS NOT NULL \
              FOR UPDATE",
+            process_epoch
         )
-        .bind(process_epoch)
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(row) = row else {
             return Ok(None);
         };
-        let gateway_instance: String = row.get("gateway_instance");
-        let existing_at: Option<DateTime<Utc>> = row.get("acknowledged_at");
-        let existing_actor: Option<Uuid> = row.get("acknowledged_by");
+        let gateway_instance: String = row.gateway_instance;
+        let existing_at: Option<DateTime<Utc>> = row.acknowledged_at;
+        let existing_actor: Option<Uuid> = row.acknowledged_by;
         if let Some(acknowledged_at) = existing_at {
             transaction.commit().await?;
             return Ok(Some(RequestMetadataEpochAcknowledgement {
@@ -489,29 +483,25 @@ impl PgStore {
             }));
         }
         let acknowledged_at = Utc::now();
-        let acknowledgement = sqlx::query(
+        let acknowledgement = sqlx::query!(
             "UPDATE request_metadata_gateway_epochs \
              SET acknowledged_at = GREATEST($1, stale_detected_at), acknowledged_by = $2 \
              WHERE process_epoch = $3 AND acknowledged_at IS NULL \
-             RETURNING acknowledged_at, acknowledged_by",
+             RETURNING acknowledged_at AS \"acknowledged_at!\", acknowledged_by",
+            acknowledged_at,
+            actor,
+            process_epoch
         )
-        .bind(acknowledged_at)
-        .bind(actor)
-        .bind(process_epoch)
         .fetch_one(&mut *transaction)
         .await?;
-        let acknowledged_at: DateTime<Utc> = acknowledgement.get("acknowledged_at");
-        let acknowledged_by: Option<Uuid> = acknowledgement.get("acknowledged_by");
-        sqlx::query(
+        let acknowledged_at: DateTime<Utc> = acknowledgement.acknowledged_at;
+        let acknowledged_by: Option<Uuid> = acknowledgement.acknowledged_by;
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'request_metadata.gateway_epoch_acknowledge', 'request_metadata_gateway_epoch', \
                      $3, 'success', $4)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(actor)
-        .bind(process_epoch.to_string())
-        .bind(acknowledged_at)
+        Uuid::now_v7(), actor, process_epoch.to_string(), acknowledged_at)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;

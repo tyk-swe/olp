@@ -1,0 +1,344 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH candidates AS (\n                SELECT id FROM async_media_jobs\n                WHERE lifecycle_state <> 'deleted'\n                  AND next_reconciliation_at <= $1\n                  AND (reconciliation_claimed_until IS NULL\n                       OR reconciliation_claimed_until <= $1)\n                  AND (\n                    lifecycle_state IN (\n                        'create_ambiguous', 'create_cleanup_pending', 'delete_pending'\n                    )\n                    OR (lifecycle_state = 'creating'\n                        AND updated_at <= $1 - interval '5 minutes')\n                    OR (lifecycle_state = 'active'\n                        AND upstream_job_id IS NOT NULL\n                        AND (\n                          (state IN ('queued', 'running')\n                           AND (last_polled_at IS NULL\n                                OR last_polled_at <= $1 - interval '5 seconds'))\n                          OR expires_at <= $1\n                          OR created_at <= $1 - interval '30 days'\n                        ))\n                  )\n                ORDER BY\n                    CASE WHEN lifecycle_state = 'active' THEN 1 ELSE 0 END,\n                    next_reconciliation_at, created_at, id\n                FOR UPDATE SKIP LOCKED\n                LIMIT $2\n             ), claimed AS (\n                UPDATE async_media_jobs j SET\n                    reconciliation_claim_id = $3,\n                    reconciliation_claimed_until = $1 + interval '2 minutes',\n                    last_reconciliation_at = $1,\n                    next_reconciliation_at = $1 + interval '2 minutes',\n                    reconciliation_attempts = reconciliation_attempts + 1,\n                    etag = uuidv7()\n                FROM candidates c WHERE j.id = c.id\n                RETURNING j.*\n             )\n             SELECT c.id, c.upstream_job_id, c.api_key_id, c.provider_id,\n                    p.name AS provider_name, c.provider_model, c.route_slug,\n                    c.operation, c.surface, c.state::text AS \"state!\", c.lifecycle_state,\n                    c.progress_percent::real AS \"progress_percent?\",\n                    c.content_available, c.expires_at, c.error_class,\n                    c.completed_at, c.last_polled_at, c.reconciliation_error, c.deleted_at,\n                    c.runtime_generation_id, c.provider_revision_id, c.reconciliation_claim_id,\n                    c.reconciliation_attempts, c.next_reconciliation_at,\n                    c.last_reconciliation_at, c.etag, c.created_at, c.updated_at\n             FROM claimed c JOIN providers p ON p.id = c.provider_id\n             ORDER BY c.created_at, c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "upstream_job_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "upstream_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "api_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "api_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "provider_model"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "route_slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "route_slug"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "surface",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "surface"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "lifecycle_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "lifecycle_state"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "progress_percent?",
+        "type_info": "Float4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "content_available",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "content_available"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "error_class",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "error_class"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "last_polled_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "last_polled_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "reconciliation_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "reconciliation_error"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "deleted_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "deleted_at"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "runtime_generation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "runtime_generation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "provider_revision_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "provider_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "reconciliation_claim_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "reconciliation_claim_id"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "reconciliation_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "reconciliation_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "next_reconciliation_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "next_reconciliation_at"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "last_reconciliation_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "last_reconciliation_at"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a6239d43d934366b4f040fca64af120e995af35a10ad358f2a3871d02ef2ec5b"
+}

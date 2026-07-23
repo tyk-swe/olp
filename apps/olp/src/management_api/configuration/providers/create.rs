@@ -4,7 +4,10 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use olp_domain::ProviderKind;
+use olp_domain::{
+    ProviderAuthMode, ProviderConfiguration, ProviderKind, provider_kind_spec,
+    validate_provider_configuration,
+};
 use olp_providers::{ProviderError, ProviderFactory};
 use olp_storage::{
     IdempotencyOutcome, IdempotencyResponse, NewProviderDraft, ReplayableIdempotency,
@@ -16,7 +19,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, FieldErrors, Problem,
+    FieldErrors, ManagementState, Problem,
     management_api::common::*,
     provider_adapter::{ProviderConfigFields, provider_config, provider_credential},
 };
@@ -26,13 +29,13 @@ pub(crate) struct CreateProviderRequest {
     pub name: String,
     /// `openai` uses the official endpoint; `openai_compatible` requires an
     /// explicit HTTPS endpoint and live certification of reviewed capabilities.
-    pub kind: String,
+    pub kind: ProviderKind,
     pub endpoint: Option<String>,
     pub cloud_region: Option<String>,
     pub cloud_project: Option<String>,
     pub deployment: Option<String>,
     pub api_version: Option<String>,
-    pub auth_mode: Option<String>,
+    pub auth_mode: Option<ProviderAuthMode>,
     #[schema(value_type = String, write_only, required = false)]
     pub(crate) credential: Option<WriteOnlySecret>,
     #[serde(rename = "api_key")]
@@ -48,13 +51,13 @@ pub(crate) struct CreateProviderRequest {
 #[derive(Serialize)]
 struct CreateProviderFingerprint<'a> {
     name: &'a str,
-    kind: &'a str,
+    kind: ProviderKind,
     endpoint: Option<&'a str>,
     cloud_region: Option<&'a str>,
     cloud_project: Option<&'a str>,
     deployment: Option<&'a str>,
     api_version: Option<&'a str>,
-    auth_mode: Option<&'a str>,
+    auth_mode: Option<ProviderAuthMode>,
     credential_sha256: Option<[u8; 32]>,
     model: Option<&'a str>,
     display_name: Option<&'a str>,
@@ -64,13 +67,13 @@ impl<'a> From<&'a CreateProviderRequest> for CreateProviderFingerprint<'a> {
     fn from(request: &'a CreateProviderRequest) -> Self {
         Self {
             name: &request.name,
-            kind: &request.kind,
+            kind: request.kind,
             endpoint: request.endpoint.as_deref(),
             cloud_region: request.cloud_region.as_deref(),
             cloud_project: request.cloud_project.as_deref(),
             deployment: request.deployment.as_deref(),
             api_version: request.api_version.as_deref(),
-            auth_mode: request.auth_mode.as_deref(),
+            auth_mode: request.auth_mode,
             credential_sha256: request
                 .credential
                 .as_ref()
@@ -118,12 +121,7 @@ fn provider_connector_validation(kind: ProviderKind, error: ProviderError) -> Pr
     }
 }
 
-pub(crate) fn reject_create_field(
-    errors: &mut FieldErrors,
-    field: &str,
-    present: bool,
-    detail: &str,
-) {
+fn reject_create_field(errors: &mut FieldErrors, field: &str, present: bool, detail: &str) {
     if present {
         errors
             .entry(field.to_owned())
@@ -132,40 +130,12 @@ pub(crate) fn reject_create_field(
     }
 }
 
-pub(crate) fn reject_create_cloud_fields(
-    errors: &mut FieldErrors,
-    request: &CreateProviderRequest,
-) {
-    for (field, present) in [
-        ("cloud_region", request.cloud_region.is_some()),
-        ("cloud_project", request.cloud_project.is_some()),
-        ("deployment", request.deployment.is_some()),
-        ("api_version", request.api_version.is_some()),
-    ] {
-        reject_create_field(
-            errors,
-            field,
-            present,
-            "This connector does not accept cloud project, region, deployment, or API-version fields.",
-        );
-    }
-}
-
-pub(crate) fn require_create_auth_mode(errors: &mut FieldErrors, actual: &str, expected: &str) {
-    if actual != expected {
-        errors
-            .entry("auth_mode".to_owned())
-            .or_default()
-            .push(format!("Provider authentication must be {expected}."));
-    }
-}
-
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderResponse {
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
     pub name: String,
-    pub kind: String,
+    pub kind: ProviderKind,
     pub state: String,
     pub model: Option<String>,
     #[schema(value_type = String, format = Uuid)]
@@ -189,7 +159,7 @@ pub(crate) struct ProviderResponse {
     )
 )]
 pub(crate) async fn create_provider(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<CreateProviderRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -240,274 +210,36 @@ pub(crate) async fn create_provider(
             .or_default()
             .push("Provide a credential no larger than 8 KiB.".to_owned());
     }
-    let (kind, base_url, surface) = match request.kind.as_str() {
-        "openai" => (
-            ProviderKind::OpenAi,
-            request.endpoint.clone().unwrap_or_default(),
-            Some("openai"),
-        ),
-        "openai_compatible" => {
-            if let Some(endpoint) = request.endpoint.clone() {
-                (ProviderKind::OpenAiCompatible, endpoint, Some("openai"))
-            } else {
-                errors
-                    .entry("endpoint".to_owned())
-                    .or_default()
-                    .push("An HTTPS endpoint is required.".to_owned());
-                (
-                    ProviderKind::OpenAiCompatible,
-                    String::new(),
-                    Some("openai"),
-                )
-            }
-        }
-        "anthropic" => (
-            ProviderKind::Anthropic,
-            request.endpoint.clone().unwrap_or_default(),
-            Some("anthropic"),
-        ),
-        "gemini" => (
-            ProviderKind::Gemini,
-            request.endpoint.clone().unwrap_or_default(),
-            Some("gemini"),
-        ),
-        "vertex_ai" => (
-            ProviderKind::VertexAi,
-            request.endpoint.clone().unwrap_or_default(),
-            Some("gemini"),
-        ),
-        "azure_openai" => (
-            ProviderKind::AzureOpenAi,
-            request.endpoint.clone().unwrap_or_default(),
-            Some("openai"),
-        ),
-        "bedrock" => (
-            ProviderKind::Bedrock,
-            request.endpoint.clone().unwrap_or_default(),
-            None,
-        ),
-        _ => {
-            errors
-                .entry("kind".to_owned())
-                .or_default()
-                .push(
-                    "Use openai, openai_compatible, anthropic, gemini, vertex_ai, azure_openai, or bedrock."
-                        .to_owned(),
-                );
-            (ProviderKind::OpenAi, String::new(), Some("openai"))
-        }
-    };
-    let auth_mode = request.auth_mode.clone().unwrap_or_else(|| match kind {
-        ProviderKind::VertexAi => "adc".to_owned(),
-        ProviderKind::Bedrock => "default_chain".to_owned(),
-        _ => "api_key".to_owned(),
-    });
-    let credential_required = matches!(
+    let kind = request.kind;
+    let spec = provider_kind_spec(kind);
+    let auth_mode = request.auth_mode.unwrap_or(spec.default_auth_mode);
+    for violation in validate_provider_configuration(ProviderConfiguration {
         kind,
-        ProviderKind::OpenAi
-            | ProviderKind::OpenAiCompatible
-            | ProviderKind::Anthropic
-            | ProviderKind::Gemini
-            | ProviderKind::AzureOpenAi
-    ) || matches!(
-        (kind, auth_mode.as_str()),
-        (ProviderKind::VertexAi, "service_account") | (ProviderKind::Bedrock, "static")
-    );
-    if credential_required && request.credential.is_none() {
-        errors
-            .entry("credential".to_owned())
-            .or_default()
-            .push("This authentication mode requires a write-only credential.".to_owned());
-    }
-    match kind {
-        ProviderKind::OpenAi => {
-            require_create_auth_mode(&mut errors, &auth_mode, "api_key");
-            reject_create_field(
-                &mut errors,
-                "endpoint",
-                request.endpoint.is_some(),
-                "Native OpenAI uses the official endpoint; use an OpenAI-compatible provider for a custom endpoint.",
-            );
-            reject_create_cloud_fields(&mut errors, &request);
-        }
-        ProviderKind::OpenAiCompatible => {
-            require_create_auth_mode(&mut errors, &auth_mode, "api_key");
-            reject_create_cloud_fields(&mut errors, &request);
-        }
-        ProviderKind::Anthropic => {
-            require_create_auth_mode(&mut errors, &auth_mode, "api_key");
-            reject_create_field(
-                &mut errors,
-                "endpoint",
-                request.endpoint.is_some(),
-                "Native Anthropic uses the official endpoint.",
-            );
-            reject_create_cloud_fields(&mut errors, &request);
-        }
-        ProviderKind::Gemini => {
-            require_create_auth_mode(&mut errors, &auth_mode, "api_key");
-            reject_create_field(
-                &mut errors,
-                "endpoint",
-                request.endpoint.is_some(),
-                "Gemini Developer API uses the official endpoint.",
-            );
-            reject_create_cloud_fields(&mut errors, &request);
-        }
-        ProviderKind::VertexAi => {
-            if request.model.is_none() {
-                errors
-                    .entry("model".to_owned())
-                    .or_default()
-                    .push("Vertex AI requires an explicit model to probe.".to_owned());
-            }
-            if request.cloud_project.as_deref().is_none_or(str::is_empty) {
-                errors
-                    .entry("cloud_project".to_owned())
-                    .or_default()
-                    .push("Vertex AI requires a cloud project.".to_owned());
-            }
-            if request.cloud_region.as_deref().is_none_or(str::is_empty) {
-                errors
-                    .entry("cloud_region".to_owned())
-                    .or_default()
-                    .push("Vertex AI requires a cloud region.".to_owned());
-            }
-            if !matches!(auth_mode.as_str(), "adc" | "service_account") {
-                errors
-                    .entry("auth_mode".to_owned())
-                    .or_default()
-                    .push("Use adc or service_account for Vertex AI.".to_owned());
-            }
-            if auth_mode == "adc" && request.credential.is_some() {
-                errors
-                    .entry("credential".to_owned())
-                    .or_default()
-                    .push("Do not submit a credential when using Vertex ADC.".to_owned());
-            }
-            if request.endpoint.is_some() {
-                errors
-                    .entry("endpoint".to_owned())
-                    .or_default()
-                    .push(
-                        "Vertex AI derives its regional Google endpoint from cloud_project and cloud_region."
-                            .to_owned(),
-                    );
-            }
-            reject_create_field(
-                &mut errors,
-                "deployment",
-                request.deployment.is_some(),
-                "Vertex AI does not accept a deployment field.",
-            );
-            reject_create_field(
-                &mut errors,
-                "api_version",
-                request.api_version.is_some(),
-                "Vertex AI does not accept an API-version field.",
-            );
-        }
-        ProviderKind::Bedrock => {
-            if request.cloud_region.as_deref().is_none_or(str::is_empty) {
-                errors
-                    .entry("cloud_region".to_owned())
-                    .or_default()
-                    .push("Bedrock requires an AWS region.".to_owned());
-            }
-            if !matches!(auth_mode.as_str(), "default_chain" | "static") {
-                errors
-                    .entry("auth_mode".to_owned())
-                    .or_default()
-                    .push("Use default_chain or static for Bedrock.".to_owned());
-            }
-            if request.endpoint.is_some() {
-                errors
-                    .entry("endpoint".to_owned())
-                    .or_default()
-                    .push(
-                        "Bedrock uses the official regional AWS endpoint; custom endpoints are not accepted."
-                            .to_owned(),
-                    );
-            }
-            reject_create_field(
-                &mut errors,
-                "cloud_project",
-                request.cloud_project.is_some(),
-                "Bedrock does not accept a cloud project.",
-            );
-            reject_create_field(
-                &mut errors,
-                "deployment",
-                request.deployment.is_some(),
-                "Bedrock does not accept a deployment field.",
-            );
-            reject_create_field(
-                &mut errors,
-                "api_version",
-                request.api_version.is_some(),
-                "Bedrock does not accept an API-version field.",
-            );
-            if auth_mode == "default_chain" && request.credential.is_some() {
-                errors.entry("credential".to_owned()).or_default().push(
-                    "Do not submit a credential when using the AWS default chain.".to_owned(),
-                );
-            }
-        }
-        ProviderKind::AzureOpenAi => {
-            if base_url.is_empty() {
-                errors
-                    .entry("endpoint".to_owned())
-                    .or_default()
-                    .push("Azure OpenAI requires an HTTPS resource endpoint.".to_owned());
-            }
-            if request.deployment.as_deref().is_none_or(str::is_empty) {
-                errors
-                    .entry("deployment".to_owned())
-                    .or_default()
-                    .push("Azure OpenAI requires a deployment name.".to_owned());
-            }
-            if request.api_version.as_deref().is_none_or(str::is_empty) {
-                errors
-                    .entry("api_version".to_owned())
-                    .or_default()
-                    .push("Azure OpenAI requires an API version.".to_owned());
-            }
-            if auth_mode != "api_key" {
-                errors
-                    .entry("auth_mode".to_owned())
-                    .or_default()
-                    .push("Azure OpenAI currently requires api_key authentication.".to_owned());
-            }
-            reject_create_field(
-                &mut errors,
-                "cloud_region",
-                request.cloud_region.is_some(),
-                "Azure OpenAI does not accept a cloud region.",
-            );
-            reject_create_field(
-                &mut errors,
-                "cloud_project",
-                request.cloud_project.is_some(),
-                "Azure OpenAI does not accept a cloud project.",
-            );
-        }
-    }
-    if !errors.is_empty() {
-        return Err(Problem::validation(errors));
-    }
-    let parsed_auth_mode = auth_mode.parse().map_err(|_| Problem::internal())?;
-    let config = provider_config(ProviderConfigFields {
-        kind,
-        endpoint: matches!(
-            kind,
-            ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi
-        )
-        .then_some(base_url.as_str()),
+        auth_mode,
+        endpoint: request.endpoint.as_deref(),
         cloud_region: request.cloud_region.as_deref(),
         cloud_project: request.cloud_project.as_deref(),
         deployment: request.deployment.as_deref(),
         api_version: request.api_version.as_deref(),
-        auth_mode: parsed_auth_mode,
+        model: request.model.as_deref(),
+        credential_present: Some(request.credential.is_some()),
+    }) {
+        errors
+            .entry(violation.field.as_str().to_owned())
+            .or_default()
+            .push(violation.detail.to_owned());
+    }
+    if !errors.is_empty() {
+        return Err(Problem::validation(errors));
+    }
+    let config = provider_config(ProviderConfigFields {
+        kind,
+        endpoint: request.endpoint.as_deref(),
+        cloud_region: request.cloud_region.as_deref(),
+        cloud_project: request.cloud_project.as_deref(),
+        deployment: request.deployment.as_deref(),
+        api_version: request.api_version.as_deref(),
+        auth_mode,
         probe_model: request.model.as_deref(),
     })
     .map_err(|_| Problem::internal())?;
@@ -542,9 +274,10 @@ pub(crate) async fn create_provider(
         _ => return Err(Problem::internal()),
     };
     let response_name = request.name.clone();
-    let response_kind = request.kind.clone();
+    let response_kind = request.kind;
     let response_model = request.model.clone();
-    let created = require_store(&state)?
+    let created = state
+        .store()
         .create_provider_draft(
             NewProviderDraft {
                 provider_id,
@@ -552,16 +285,12 @@ pub(crate) async fn create_provider(
                 model_id,
                 name: request.name.clone(),
                 kind,
-                endpoint: matches!(
-                    kind,
-                    ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi
-                )
-                .then_some(base_url),
+                endpoint: request.endpoint.clone(),
                 cloud_region: request.cloud_region.clone(),
                 cloud_project: request.cloud_project.clone(),
                 deployment: request.deployment.clone(),
                 api_version: request.api_version.clone(),
-                auth_mode: auth_mode.parse().map_err(|_| Problem::internal())?,
+                auth_mode,
                 connector_ready: connector_available,
                 credential: encrypted,
                 model: request.model.clone(),
@@ -572,13 +301,7 @@ pub(crate) async fn create_provider(
                         .unwrap_or_else(|| model.clone())
                 }),
                 model_enabled: connector_available && request.model.is_some(),
-                surface: request
-                    .model
-                    .as_ref()
-                    .and(surface)
-                    .map(str::parse)
-                    .transpose()
-                    .map_err(|_| Problem::internal())?,
+                surface: request.model.as_ref().and(spec.seed_surface),
                 actor: principal.user_id,
                 idempotency_key,
             },
@@ -630,7 +353,7 @@ pub(crate) async fn create_provider(
     )
 )]
 pub(crate) async fn activate_provider(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -638,7 +361,8 @@ pub(crate) async fn activate_provider(
     require_provider_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
-    let activated = require_store(&state)?
+    let activated = state
+        .store()
         .activate_provider(
             provider_id,
             expected_etag,

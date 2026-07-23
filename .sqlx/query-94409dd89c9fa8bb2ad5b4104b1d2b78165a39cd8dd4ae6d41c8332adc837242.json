@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rr.slug FROM route_drafts rd JOIN route_revisions rr ON rr.id = rd.based_on_revision_id WHERE rd.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "slug"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "94409dd89c9fa8bb2ad5b4104b1d2b78165a39cd8dd4ae6d41c8332adc837242"
+}

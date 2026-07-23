@@ -24,10 +24,10 @@ use super::claims::is_allowed_algorithm_name;
 use super::error::{field_problem, map_discovery_network, map_oidc, oidc_not_configured};
 use super::helpers::{network_policy, optional_if_match, require_master_key, valid_claim_name};
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, json_payload, require_mutation_session, require_permission,
-        require_read_session, require_store,
+        require_read_session,
     },
 };
 
@@ -162,12 +162,13 @@ struct DiscoveryDocument {
     )
 )]
 pub(super) async fn get_configuration(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
-    let configuration = require_store(&state)?
+    let configuration = state
+        .store()
         .oidc_configuration()
         .await
         .map_err(map_oidc)?
@@ -189,7 +190,7 @@ pub(super) async fn get_configuration(
     )
 )]
 pub(super) async fn put_configuration(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<OidcConfigurationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -197,7 +198,7 @@ pub(super) async fn put_configuration(
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
     validate_configuration_request(&request)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     let existing = store.oidc_configuration().await.map_err(map_oidc)?;
     let expected_etag = optional_if_match(&headers)?;
     if existing.is_some() && expected_etag.is_none() {

@@ -31,22 +31,20 @@ mod streaming_response;
 
 use std::{
     collections::BTreeMap,
-    net::IpAddr,
     path::PathBuf,
     sync::{
         Arc, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Instant,
 };
 
 use arc_swap::ArcSwapOption;
-use olp_domain::{MediaSpool, ProviderId, ProviderKind, ProviderTransport};
+use olp_domain::{MediaSpool, ProviderId, ProviderTransport};
 use olp_storage::{AuthHmacKey, DistributedLimiter, MasterKey, PgStore, RequestMetadataEmitter};
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
-use observability::{ObservabilityCache, cached_readiness_from_snapshot};
+use observability::ObservabilityCache;
 use request_admission::MultipartAdmissionState;
 
 pub use cli::run_cli;
@@ -59,6 +57,7 @@ pub use mode_dependencies::{
     ConfigurationDependencies, IdentityDependencies, InferenceDependencies, ModeDependencies,
     ModeDependencyError, OperationsDependencies, WorkerDependencies,
 };
+pub use mode_dependencies::{GatewayState, ManagementState, ObservabilityState};
 pub use observability::{
     observability_router, refresh_observability_cache, spawn_observability_cache,
 };
@@ -70,7 +69,7 @@ pub use problem::{FieldErrors, Problem};
 pub use proxy::{TrustedProxyCidr, TrustedProxyCidrParseError, public_auth_source};
 pub use public_origin::{PublicOrigin, PublicOriginError};
 pub use relative_url::{RelativeReturnTo, RelativeReturnToError};
-pub use router::{public_router, try_public_router};
+pub use router::{IntoPublicRouter, public_router};
 pub use runtime::{RuntimeBundle, RuntimeInstallError, RuntimeManager};
 
 pub(crate) use observability::HealthResponse;
@@ -205,38 +204,6 @@ impl ApiState {
         self.bootstrap_token_digest = Arc::new(AsyncRwLock::new(Some(Zeroizing::new(digest))));
     }
 
-    pub(crate) async fn verify_bootstrap_token(&self, supplied: Option<&str>) -> Option<bool> {
-        let digest = self.bootstrap_token_digest.read().await;
-        let expected = digest.as_ref()?;
-        let Some(auth_hmac_key) = self.auth_hmac_key.as_ref() else {
-            return Some(false);
-        };
-        Some(supplied.is_some_and(|supplied| {
-            auth_hmac_key.verify_bootstrap_token_digest(supplied, expected)
-        }))
-    }
-
-    pub(crate) async fn clear_bootstrap_token(&self) {
-        let mut digest = self.bootstrap_token_digest.write().await;
-        // `Zeroizing` clears the digest as it is dropped.
-        *digest = None;
-    }
-
-    #[must_use]
-    fn peer_is_trusted_proxy(&self, peer: IpAddr) -> bool {
-        self.trusted_proxy_cidrs
-            .iter()
-            .any(|cidr| cidr.contains(peer))
-    }
-
-    pub(crate) fn record_media_reconciliation_gap(&self) {
-        let _ = self.media_reconciliation_gaps.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |value| Some(value.saturating_add(1)),
-        );
-    }
-
     /// Installs a prebuilt OpenAI connector for certification and connectivity probes.
     ///
     /// This is an internal dependency-injection seam used by integration tests
@@ -251,26 +218,6 @@ impl ApiState {
     ) {
         self.certification_probe_connectors
             .register(provider_id, connector);
-    }
-
-    pub(crate) fn certification_probe_connector(
-        &self,
-        provider_id: uuid::Uuid,
-        kind: ProviderKind,
-    ) -> Option<olp_providers::ProviderFacade> {
-        self.certification_probe_connectors.get(provider_id, kind)
-    }
-
-    fn media_reconciliation_gap_count(&self) -> u64 {
-        self.media_reconciliation_gaps.load(Ordering::Relaxed)
-    }
-
-    /// Returns the cached readiness evaluation without performing dependency
-    /// I/O. Management callers use this authenticated view instead of reaching
-    /// the private observability listener from a browser.
-    pub(crate) fn cached_readiness(&self) -> Result<HealthResponse, Problem> {
-        let snapshot = self.observability.readiness();
-        cached_readiness_from_snapshot(&snapshot, Instant::now())
     }
 }
 

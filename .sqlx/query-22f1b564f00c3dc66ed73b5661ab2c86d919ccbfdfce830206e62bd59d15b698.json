@@ -1,0 +1,146 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id AS provider_id, p.name AS provider_name, p.kind AS provider_kind,\n                    p.state::text AS \"provider_state!\", p.last_probe_at, p.last_probe_status,\n                    p.last_probe_detail, max(a.started_at) AS last_attempt_at,\n                    count(a.id) AS \"attempt_count!\",\n                    count(a.id) FILTER (WHERE a.error_class IS NULL\n                        AND (a.status_code IS NULL OR a.status_code < 400)) AS \"success_count!\",\n                    count(a.id) FILTER (WHERE a.status_code = 429\n                        OR a.error_class = 'rate_limit') AS \"rate_limit_count!\",\n                    count(a.id) FILTER (WHERE a.status_code >= 500\n                        OR a.error_class = 'upstream_server') AS \"server_error_count!\",\n                    count(a.id) FILTER (WHERE a.error_class IN\n                        ('connect', 'timeout', 'transport', 'cancelled', 'ambiguous'))\n                        AS \"transport_error_count!\",\n                    avg(a.latency_ms)::float8 AS average_latency_ms\n             FROM providers p\n             LEFT JOIN attempts a ON a.provider_id = p.id\n                AND a.started_at >= now() - make_interval(mins => $1)\n             WHERE ($2::uuid IS NULL OR p.id > $2)\n             GROUP BY p.id, p.name, p.kind, p.state, p.last_probe_at,\n                      p.last_probe_status, p.last_probe_detail\n             ORDER BY p.id LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "provider_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_probe_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "last_probe_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_probe_status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "last_probe_status"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "last_probe_detail",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "last_probe_detail"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_attempt_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "attempt_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "rate_limit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "server_error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "transport_error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "average_latency_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "22f1b564f00c3dc66ed73b5661ab2c86d919ccbfdfce830206e62bd59d15b698"
+}
