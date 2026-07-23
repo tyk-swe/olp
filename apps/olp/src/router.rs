@@ -96,6 +96,7 @@ fn compose_public_router(
     request_limit_state: GatewayState,
 ) -> Router {
     let request_id = HeaderName::from_static("x-request-id");
+    let public_origin_is_https = request_limit_state.public_origin.is_https();
     // The request boundary protects public authentication as well as
     // inference, so control-only mode uses the playground's validated gateway
     // capabilities without exposing gateway routes.
@@ -179,10 +180,7 @@ fn compose_public_router(
             enforce_request_limits,
         ))
         .layer(middleware::from_fn(normalize_management_rejection));
-    if management_state
-        .as_ref()
-        .is_none_or(|state| state.public_origin.is_https())
-    {
+    if public_origin_is_https {
         router.layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("strict-transport-security"),
             axum::http::HeaderValue::from_static("max-age=31536000"),
@@ -348,31 +346,38 @@ mod tests {
 
     #[tokio::test]
     async fn hsts_follows_the_canonical_public_origin_scheme() {
-        for (origin, expected) in [
-            ("https://console.example.test", true),
-            ("http://127.0.0.1:8080", false),
-        ] {
-            let state = ApiState::new(
-                crate::ApiMode::Control,
-                None,
-                std::sync::Arc::new(crate::RuntimeManager::empty()),
-                origin,
-                std::path::PathBuf::from("missing-console"),
-            );
-            let response = public_router(state.management_state_for_test())
-                .oneshot(
-                    Request::builder()
-                        .uri("/metrics")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response.headers().contains_key("strict-transport-security"),
-                expected,
-                "{origin}",
-            );
+        for mode in [crate::ApiMode::Gateway, crate::ApiMode::Control] {
+            for (origin, expected) in [
+                ("https://console.example.test", true),
+                ("http://127.0.0.1:8080", false),
+            ] {
+                let state = ApiState::new(
+                    mode,
+                    None,
+                    std::sync::Arc::new(crate::RuntimeManager::empty()),
+                    origin,
+                    std::path::PathBuf::from("missing-console"),
+                );
+                let router = match mode {
+                    crate::ApiMode::Gateway => public_router(state.gateway_state_for_test()),
+                    crate::ApiMode::Control => public_router(state.management_state_for_test()),
+                    crate::ApiMode::All => unreachable!("all mode is not part of this test"),
+                };
+                let response = router
+                    .oneshot(
+                        Request::builder()
+                            .uri("/metrics")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.headers().contains_key("strict-transport-security"),
+                    expected,
+                    "{mode:?} {origin}",
+                );
+            }
         }
     }
 }

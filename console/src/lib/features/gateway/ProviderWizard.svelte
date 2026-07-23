@@ -282,7 +282,7 @@
 {#if wizardStep === 1 && providerKinds.isPending}
   <div class="card stage" role="status">Loading provider capabilities…</div>
 {:else if wizardStep === 1 && providerKinds.isError}
-  <div class="inline-problem" role="alert">Provider capabilities could not be loaded. Retry before configuring a provider.</div>
+  <div class="inline-problem" role="alert">Provider capabilities could not be loaded. Retry before configuring a provider. <button class="button button-secondary" type="button" onclick={() => providerKinds.refetch()}>Retry</button></div>
 {:else if wizardStep === 1 && draft && selectedSpec}
   <form class="card editor" onsubmit={createDraft} novalidate>
     <fieldset>
