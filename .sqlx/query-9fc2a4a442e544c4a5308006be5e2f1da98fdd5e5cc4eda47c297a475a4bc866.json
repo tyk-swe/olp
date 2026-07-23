@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT selected.pricing_revision_id AS \"pricing_revision_id?\", selected.currency AS \"currency?\", selected.pricing_revision_id IS NOT NULL AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) AS \"pricing_complete!\", CASE WHEN $8::boolean AND selected.pricing_revision_id IS NOT NULL AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) + COALESCE($7::numeric * selected.unit_price, 0)) ELSE NULL END AS \"estimated_cost?\" FROM providers provider LEFT JOIN LATERAL ( SELECT revision.id AS pricing_revision_id, price.input_per_million, price.output_per_million, price.unit_price, price.currency::text AS currency FROM pricing_revisions revision JOIN prices price ON price.pricing_revision_id = revision.id WHERE revision.effective_at <= $4 AND price.provider_kind = provider.kind AND (price.provider_id IS NULL OR price.provider_id = provider.id) AND price.model = $2 AND price.operation = $3 ORDER BY (price.provider_id IS NOT NULL) DESC, revision.effective_at DESC, revision.revision DESC LIMIT 1 ) selected ON true WHERE provider.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pricing_revision_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "pricing_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "currency?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "pricing_complete!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "estimated_cost?",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int8",
+        "Int8",
+        "Numeric",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "9fc2a4a442e544c4a5308006be5e2f1da98fdd5e5cc4eda47c297a475a4bc866"
+}

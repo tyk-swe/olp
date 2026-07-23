@@ -410,7 +410,7 @@ async fn multipart_route_header_mismatch_cleans_the_staged_file() {
         "route mismatch\r\n",
         "--olp-test-boundary--\r\n"
     );
-    let response = crate::public_router(state.clone())
+    let response = crate::router::gateway_router_for_test(state.clone())
         .oneshot(
             Request::post("/openai/v1/images/edits")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -621,7 +621,7 @@ impl ProviderTransport for FiniteStaticTransport {
     }
 }
 
-fn test_state(streaming: bool) -> (ApiState, String) {
+fn test_state(streaming: bool) -> (GatewayState, String) {
     let auth_hmac_key = Arc::new(AuthHmacKey::new([7; 32]));
     let material = auth_hmac_key.generate_api_key();
     let plaintext = material.expose_once().to_owned();
@@ -722,24 +722,24 @@ fn test_state(streaming: bool) -> (ApiState, String) {
     runtime
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
-    let mut state = ApiState::new(
+    let mut state = GatewayState::new(
         crate::ApiMode::Gateway,
         None,
         runtime,
         "https://olp.test",
         "console",
     );
-    state.auth_hmac_key = Some(auth_hmac_key);
+    state.auth_hmac_key = auth_hmac_key;
     (state, plaintext)
 }
 
-fn test_principal(state: &ApiState, surface: Surface) -> crate::InferencePrincipal {
+fn test_principal(state: &GatewayState, surface: Surface) -> crate::InferencePrincipal {
     let runtime = state.runtime.pin();
     let (lookup_id, _) = runtime.api_keys.iter().next().unwrap();
     crate::InferencePrincipal::for_test(Arc::clone(&runtime), lookup_id.clone(), surface)
 }
 
-fn reinstall_api_keys(state: &ApiState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
+fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
     let pinned = state.runtime.pin();
     let snapshot = RuntimeSnapshot {
         generation: RuntimeGeneration {
@@ -759,7 +759,7 @@ fn reinstall_api_keys(state: &ApiState, api_keys: BTreeMap<ApiKeyLookupId, ApiKe
     state.runtime.install(snapshot, transports).unwrap();
 }
 
-fn install_hard_limits(state: &ApiState) {
+fn install_hard_limits(state: &GatewayState) {
     let pinned = state.runtime.pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys
@@ -772,21 +772,21 @@ fn install_hard_limits(state: &ApiState) {
     reinstall_api_keys(state, api_keys);
 }
 
-fn restrict_api_key_to_route(state: &ApiState, route: RouteSlug) {
+fn restrict_api_key_to_route(state: &GatewayState, route: RouteSlug) {
     let pinned = state.runtime.pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys.values_mut().next().unwrap().allowed_routes = BTreeSet::from([route]);
     reinstall_api_keys(state, api_keys);
 }
 
-fn replace_api_key_scopes(state: &ApiState, scopes: BTreeSet<ApiKeyScope>) {
+fn replace_api_key_scopes(state: &GatewayState, scopes: BTreeSet<ApiKeyScope>) {
     let pinned = state.runtime.pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys.values_mut().next().unwrap().scopes = scopes;
     reinstall_api_keys(state, api_keys);
 }
 
-fn install_result(state: &ApiState, operation: OperationKind, result: CanonicalResult) {
+fn install_result(state: &GatewayState, operation: OperationKind, result: CanonicalResult) {
     let pinned = state.runtime.pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
     let mut providers = pinned.providers.clone();
@@ -818,7 +818,7 @@ fn install_result(state: &ApiState, operation: OperationKind, result: CanonicalR
         .unwrap();
 }
 
-fn install_transport(state: &ApiState, transport: Arc<dyn ProviderTransport>) {
+fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>) {
     let pinned = state.runtime.pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
     let snapshot = RuntimeSnapshot {
@@ -838,7 +838,7 @@ fn install_transport(state: &ApiState, transport: Arc<dyn ProviderTransport>) {
 }
 
 fn install_event_stream(
-    state: &ApiState,
+    state: &GatewayState,
     operation: OperationKind,
     events: Vec<CanonicalEvent>,
     finite: bool,
@@ -946,7 +946,7 @@ async fn unary_openai_route_authenticates_routes_and_encodes() {
     state.request_metadata = Some(emitter);
     let response = tokio::time::timeout(
         Duration::from_millis(250),
-        crate::public_router(state).oneshot(
+        crate::router::gateway_router_for_test(state).oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
                 .header(header::CONTENT_TYPE, "application/json")
@@ -974,7 +974,7 @@ async fn unary_openai_route_authenticates_routes_and_encodes() {
 #[tokio::test]
 async fn openai_json_audio_and_responses_pdf_reach_same_protocol_transport() {
     let (state, key) = test_state(false);
-    let app = crate::public_router(state);
+    let app = crate::router::gateway_router_for_test(state);
     let response = app
         .clone()
         .oneshot(
@@ -1076,12 +1076,7 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
     install_hard_limits(&state);
     let snapshot = state.runtime.pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
-    let lookup = state
-        .auth_hmac_key
-        .as_ref()
-        .unwrap()
-        .lookup_id(&key)
-        .unwrap();
+    let lookup = state.auth_hmac_key.as_ref().lookup_id(&key).unwrap();
     let operation = decode_chat_completion(
         serde_json::from_value(json!({
             "model": "default",
@@ -1114,12 +1109,7 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
     reinstall_api_keys(&state, api_keys);
     let snapshot = state.runtime.pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
-    let lookup = state
-        .auth_hmac_key
-        .as_ref()
-        .unwrap()
-        .lookup_id(&key)
-        .unwrap();
+    let lookup = state.auth_hmac_key.as_ref().lookup_id(&key).unwrap();
     let operation = Operation::Images(olp_domain::ImageOperation::Edit(
         olp_domain::ImageEditRequest {
             route: RouteSlug::parse("default").unwrap(),
@@ -1144,7 +1134,7 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
 #[tokio::test]
 async fn invalid_proxy_key_gets_native_openai_error() {
     let (state, _) = test_state(false);
-    let response = crate::public_router(state)
+    let response = crate::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(header::AUTHORIZATION, "Bearer olp_v2_deadbeef0000_bad")
@@ -1163,7 +1153,7 @@ async fn invalid_proxy_key_gets_native_openai_error() {
 #[tokio::test]
 async fn responses_surface_encodes_responses_object_not_chat_object() {
     let (state, key) = test_state(false);
-    let response = crate::public_router(state)
+    let response = crate::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/responses")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1203,7 +1193,7 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
             extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         }),
     );
-    let response = crate::public_router(state)
+    let response = crate::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/embeddings")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1221,8 +1211,8 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
     assert_eq!(value["data"][0]["embedding"][0], 0.25);
 }
 
-async fn post_json(state: &ApiState, key: &str, path: &str, body: &'static str) -> Response {
-    crate::public_router(state.clone())
+async fn post_json(state: &GatewayState, key: &str, path: &str, body: &'static str) -> Response {
+    crate::router::gateway_router_for_test(state.clone())
         .oneshot(
             Request::post(path)
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1234,8 +1224,8 @@ async fn post_json(state: &ApiState, key: &str, path: &str, body: &'static str) 
         .unwrap()
 }
 
-async fn post_multipart(state: &ApiState, key: &str, path: &str, body: String) -> Response {
-    crate::public_router(state.clone())
+async fn post_multipart(state: &GatewayState, key: &str, path: &str, body: String) -> Response {
+    crate::router::gateway_router_for_test(state.clone())
         .oneshot(
             Request::post(path)
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1743,7 +1733,7 @@ async fn speech_surface_streams_bounded_spooled_result() {
 #[tokio::test]
 async fn malformed_multipart_is_rejected_before_routing() {
     let (state, key) = test_state(false);
-    let response = crate::public_router(state)
+    let response = crate::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/images/edits")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1795,7 +1785,7 @@ async fn dropping_client_stream_drops_upstream_within_one_second() {
             dropped: dropped.clone(),
         }),
     );
-    let response = crate::public_router(state)
+    let response = crate::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))

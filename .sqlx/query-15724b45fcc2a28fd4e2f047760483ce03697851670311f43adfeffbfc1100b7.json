@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO idempotency_records (id, actor_user_id, operation, idempotency_key, state, expires_at) VALUES ($1, $2, $3, $4, 'in_progress', now() + interval '24 hours') ON CONFLICT (actor_user_id, operation, idempotency_key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "15724b45fcc2a28fd4e2f047760483ce03697851670311f43adfeffbfc1100b7"
+}

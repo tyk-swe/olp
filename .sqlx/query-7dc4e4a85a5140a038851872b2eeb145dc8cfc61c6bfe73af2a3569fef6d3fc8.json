@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO public_auth_rate_limits (action, scope, key_digest, window_started_at, attempts) VALUES ($1, $2, $3, now(), 1) ON CONFLICT (action, scope, key_digest) DO UPDATE SET window_started_at = CASE WHEN public_auth_rate_limits.window_started_at <= now() - interval '1 minute' THEN now() ELSE public_auth_rate_limits.window_started_at END, attempts = CASE WHEN public_auth_rate_limits.window_started_at <= now() - interval '1 minute' THEN 1 ELSE public_auth_rate_limits.attempts + 1 END WHERE public_auth_rate_limits.window_started_at <= now() - interval '1 minute' OR public_auth_rate_limits.attempts < $4 RETURNING true AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7dc4e4a85a5140a038851872b2eeb145dc8cfc61c6bfe73af2a3569fef6d3fc8"
+}

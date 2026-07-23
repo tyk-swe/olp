@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE request_metadata_gateway_epochs SET stale_detected_at = $1, uncertainty_gap_id = $2 WHERE gateway_instance = $3 AND process_epoch = $4 AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc8e1ce616767d264c86dfebbd349cc5be0a2556db96a70192e1ea38e750e026"
+}

@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_consumer_health (singleton, pending_events, lag_events, oldest_pending_at, checked_at) VALUES (true, $1, $2, $3, $4) ON CONFLICT (singleton) DO UPDATE SET pending_events = EXCLUDED.pending_events, lag_events = EXCLUDED.lag_events, oldest_pending_at = EXCLUDED.oldest_pending_at, checked_at = EXCLUDED.checked_at RETURNING pending_events, lag_events, oldest_pending_at, checked_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending_events",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "pending_events"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lag_events",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "lag_events"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "oldest_pending_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "oldest_pending_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_consumer_health",
+            "name": "checked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4836d1e9eb42d8d4a18e0f7a4c2cdd45fe69ca475d35630764de9014fec10f06"
+}

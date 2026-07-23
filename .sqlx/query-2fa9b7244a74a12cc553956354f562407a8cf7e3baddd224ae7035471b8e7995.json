@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT provider_model_id, operation, surface, mode, source, certified_at FROM model_capabilities WHERE provider_model_id = ANY($1::uuid[]) ORDER BY provider_model_id, operation, surface, mode",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_model_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "model_capabilities",
+            "name": "provider_model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_capabilities",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "surface",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_capabilities",
+            "name": "surface"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_capabilities",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_capabilities",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "certified_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "model_capabilities",
+            "name": "certified_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2fa9b7244a74a12cc553956354f562407a8cf7e3baddd224ae7035471b8e7995"
+}

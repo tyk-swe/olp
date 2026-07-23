@@ -10,7 +10,7 @@ use olp_domain::{CanonicalEvent, CanonicalEventKind};
 use olp_protocols::sse::{SseEncodeError, SseFrame, encode_frame};
 
 use crate::{
-    ApiState,
+    GatewayState,
     gateway::{
         InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata,
         release_limits,
@@ -215,7 +215,7 @@ pub(crate) trait ProtocolStreamEncoder: Send + 'static {
 }
 
 pub(crate) fn protocol_streaming_response<E>(
-    state: ApiState,
+    state: GatewayState,
     mut execution: RoutedEventExecution,
     mut encoder: E,
 ) -> Response

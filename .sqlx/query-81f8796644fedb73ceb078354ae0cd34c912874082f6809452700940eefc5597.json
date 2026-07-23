@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_keys SET name = $1, requests_per_minute = $2, tokens_per_minute = $3, max_concurrency = $4, expires_at = $5, etag = $6 WHERE id = $7 AND etag = $8 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Timestamptz",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "81f8796644fedb73ceb078354ae0cd34c912874082f6809452700940eefc5597"
+}

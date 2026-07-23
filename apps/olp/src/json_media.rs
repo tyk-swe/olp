@@ -21,7 +21,7 @@ use olp_protocols::{
 };
 use serde_json::Value;
 
-use crate::{ApiState, gateway::InferenceError};
+use crate::{GatewayState, gateway::InferenceError};
 
 pub(crate) const MAX_INLINE_MEDIA_ITEMS: usize = 4;
 pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
@@ -34,7 +34,7 @@ struct InlineMediaAdmission {
 }
 
 impl InlineMediaAdmission {
-    fn new(state: &ApiState) -> Self {
+    fn new(state: &GatewayState) -> Self {
         Self {
             spool: state.media_spool.clone(),
             handles: Vec::new(),
@@ -216,7 +216,7 @@ async fn admit_anthropic_block(
 }
 
 pub(crate) async fn admit_anthropic_messages(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut AnthropicMessagesRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
@@ -228,7 +228,7 @@ pub(crate) async fn admit_anthropic_messages(
 }
 
 pub(crate) async fn admit_anthropic_count(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut AnthropicCountTokensRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
@@ -271,7 +271,7 @@ async fn admit_gemini_content(
 }
 
 pub(crate) async fn admit_gemini_generate(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut GeminiGenerateContentRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
@@ -282,7 +282,7 @@ pub(crate) async fn admit_gemini_generate(
 }
 
 pub(crate) async fn admit_gemini_count(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut GeminiCountTokensRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
@@ -301,7 +301,7 @@ pub(crate) async fn admit_gemini_count(
 }
 
 pub(crate) async fn admit_openai_chat(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut ChatCompletionRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
@@ -334,21 +334,21 @@ pub(crate) async fn admit_openai_chat(
 }
 
 pub(crate) async fn admit_openai_responses(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut ResponseCreateRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     admit_openai_response_input(state, &mut request.input).await
 }
 
 pub(crate) async fn admit_openai_response_input_tokens(
-    state: &ApiState,
+    state: &GatewayState,
     request: &mut ResponseInputTokensRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     admit_openai_response_input(state, &mut request.input).await
 }
 
 async fn admit_openai_response_input(
-    state: &ApiState,
+    state: &GatewayState,
     input: &mut ResponseInput,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
@@ -443,7 +443,7 @@ async fn admit_openai_response_input(
     Ok(admission.into_handles())
 }
 
-pub(crate) async fn cleanup_admitted(state: &ApiState, handles: Vec<MediaHandle>) {
+pub(crate) async fn cleanup_admitted(state: &GatewayState, handles: Vec<MediaHandle>) {
     cleanup_handles_owned(state.media_spool.clone(), handles).await;
 }
 
@@ -483,8 +483,8 @@ mod tests {
     use super::*;
     use crate::{ApiMode, RuntimeManager};
 
-    fn state() -> ApiState {
-        ApiState::new(
+    fn state() -> GatewayState {
+        GatewayState::new(
             ApiMode::Gateway,
             None,
             Arc::new(RuntimeManager::empty()),
@@ -493,7 +493,7 @@ mod tests {
         )
     }
 
-    async fn assert_spooled(state: &ApiState, handle: &MediaHandle, expected: &[u8]) {
+    async fn assert_spooled(state: &GatewayState, handle: &MediaHandle, expected: &[u8]) {
         let mut opened = state.media_spool.open(handle).await.unwrap().bytes;
         let mut actual = Vec::new();
         while let Some(chunk) = opened.next().await {

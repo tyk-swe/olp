@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH authority AS (\n                SELECT rpc.runtime_generation_id, rpc.provider_revision_id\n                FROM runtime_generation_provider_configs rpc\n                WHERE rpc.runtime_generation_id = $8 AND rpc.provider_id = $3\n                  AND rpc.provider_revision_id IS NOT NULL\n             )\n             INSERT INTO async_media_jobs (\n                id, upstream_job_id, api_key_id, provider_id, provider_model,\n                route_slug, operation, surface, state, lifecycle_state,\n                runtime_generation_id, provider_revision_id\n             )\n             SELECT $1, NULL, $2, $3, $4, $5, $6, $7, 'queued', 'creating',\n                    authority.runtime_generation_id, authority.provider_revision_id\n             FROM (SELECT 1) seed LEFT JOIN authority ON true\n             WHERE authority.provider_revision_id IS NOT NULL\n                OR NOT EXISTS (SELECT 1 FROM runtime_generations)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f9b50d5304ca5235b0d22cfa900a39c997533985a51edab36f7844903421d06d"
+}

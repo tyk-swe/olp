@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE route_drafts SET state = 'validated'::route_draft_state, etag = $1, updated_at = now() WHERE id = $2 AND etag = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5719c636b1604753560bb5419b7929738cb6d00c03f649ee5c7aa50dee1d4cfe"
+}

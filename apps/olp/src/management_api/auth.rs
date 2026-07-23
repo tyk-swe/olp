@@ -19,7 +19,8 @@ use zeroize::Zeroizing;
 
 use super::common::*;
 use crate::{
-    ApiState, FieldErrors, FirstOwnerSetupAuthorized, Problem, public_auth_source_target_digests,
+    FieldErrors, FirstOwnerSetupAuthorized, ManagementState, Problem,
+    public_auth_source_target_digests,
     request_cookies::{CSRF_COOKIE, SESSION_COOKIE},
 };
 
@@ -43,9 +44,10 @@ pub(super) struct AuthenticationCapabilities {
     )
 )]
 pub(super) async fn authentication_capabilities(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
 ) -> Result<Response, Problem> {
-    let oidc_login_enabled = require_store(&state)?
+    let oidc_login_enabled = state
+        .store()
         .oidc_configuration()
         .await
         .map_err(crate::oidc::map_oidc)?
@@ -74,9 +76,9 @@ pub(super) struct SetupStatus {
     )
 )]
 pub(super) async fn setup_status(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
 ) -> Result<Json<SetupStatus>, Problem> {
-    let store = require_store(&state)?;
+    let store = state.store();
     let setup_required = store.setup_required().await.map_err(map_persistence)?;
     Ok(Json(SetupStatus { setup_required }))
 }
@@ -150,11 +152,11 @@ impl fmt::Debug for SessionResponse {
     )
 )]
 pub(super) async fn setup(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Extension(FirstOwnerSetupAuthorized): Extension<FirstOwnerSetupAuthorized>,
     payload: Result<Json<SetupRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let store = require_store(&state)?;
+    let store = state.store();
     validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
     validate_setup(&request)?;
@@ -235,7 +237,7 @@ impl fmt::Debug for LoginRequest {
     )
 )]
 pub(super) async fn login(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     payload: Result<Json<LoginRequest>, JsonRejection>,
@@ -251,7 +253,7 @@ pub(super) async fn login(
     enforce_origin(&state, &headers)?;
     let request = json_payload(payload)?;
     validate_session_cookie_ttl(state.session_ttl)?;
-    let store = require_store(&state)?;
+    let store = state.store();
     // Admit every syntactically decoded login attempt before the inexpensive
     // validation branch below. Otherwise an attacker can rotate oversized
     // credentials to bypass the per-source budget while creating unbounded
@@ -337,7 +339,7 @@ pub(super) async fn login(
     )
 )]
 pub(super) async fn current_session(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
@@ -357,7 +359,8 @@ pub(super) async fn current_session(
         return Ok(response);
     }
     if let Some(replacement) = replacement.as_ref() {
-        let rotated = require_store(&state)?
+        let rotated = state
+            .store()
             .rotate_session_csrf(
                 principal.session_id,
                 principal.user_id,
@@ -429,15 +432,15 @@ pub(super) fn csrf_recovery_cas_failure_response(session_is_current: bool) -> Re
     )
 )]
 pub(super) async fn logout(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     enforce_origin(&state, &headers)?;
     let parsed_token = cookie(&headers, SESSION_COOKIE);
     let mut response = match parsed_token {
         Ok(token) => {
-            if let (Some(store), Some(token)) = (state.store.as_ref(), token)
-                && let Err(error) = store.revoke_session_by_token(token).await
+            if let Some(token) = token
+                && let Err(error) = state.store().revoke_session_by_token(token).await
             {
                 // Logout is intentionally idempotent and fail-closed in the browser.
                 // A transient database failure must not prevent credential expiry.
@@ -492,7 +495,7 @@ pub(super) struct SessionListResponse {
     )
 )]
 pub(super) async fn list_sessions(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<SessionPageQuery>,
 ) -> Result<Json<SessionListResponse>, Problem> {
@@ -505,7 +508,8 @@ pub(super) async fn list_sessions(
         cursor: query.cursor,
         limit: query.limit,
     })?;
-    let (sessions, next_cursor) = require_store(&state)?
+    let (sessions, next_cursor) = state
+        .store()
         .list_sessions(user_id, cursor, limit)
         .await
         .map_err(map_identity)?;
@@ -537,13 +541,14 @@ pub(super) async fn list_sessions(
     )
 )]
 pub(super) async fn revoke_session(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(session_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     let can_manage_all = require_permission(&principal, Permission::ManageSessions).is_ok();
-    require_store(&state)?
+    state
+        .store()
         .revoke_session(session_id, principal.user_id, can_manage_all)
         .await
         .map_err(map_identity)?;

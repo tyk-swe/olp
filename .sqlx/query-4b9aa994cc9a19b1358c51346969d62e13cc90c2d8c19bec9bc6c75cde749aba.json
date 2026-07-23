@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM async_media_jobs\n             WHERE lifecycle_state = 'deleted' AND deleted_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4b9aa994cc9a19b1358c51346969d62e13cc90c2d8c19bec9bc6c75cde749aba"
+}

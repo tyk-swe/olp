@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ProviderKindCapability } from '$lib/api/management/providers';
 import {
   activationReady,
   authOptionsFor,
@@ -21,87 +22,106 @@ import {
   type ProviderEditValues
 } from './providerEditor';
 
+const openAiSpec: ProviderKindCapability = {
+  kind: 'openai',
+  label: 'OpenAI',
+  description: 'Official OpenAI HTTPS API',
+  default_auth_mode: 'api_key',
+  auth_modes: [{ mode: 'api_key', label: 'Stored API key', credential: 'required' }],
+  fields: [{ field: 'model', label: 'Seed model', required: false }]
+};
+const vertexSpec: ProviderKindCapability = {
+  ...openAiSpec,
+  kind: 'vertex_ai',
+  label: 'Vertex AI',
+  default_auth_mode: 'adc',
+  auth_modes: [
+    { mode: 'adc', label: 'Application Default Credentials', credential: 'forbidden' },
+    { mode: 'service_account', label: 'Stored service account JSON', credential: 'required' }
+  ],
+  fields: [
+    { field: 'cloud_project', label: 'Cloud project', required: true },
+    { field: 'cloud_region', label: 'Cloud location', required: true },
+    { field: 'model', label: 'Probe model', required: true }
+  ]
+};
+const azureSpec: ProviderKindCapability = {
+  ...openAiSpec,
+  kind: 'azure_openai',
+  label: 'Azure OpenAI',
+  fields: [
+    { field: 'endpoint', label: 'Resource endpoint', required: true },
+    { field: 'deployment', label: 'Deployment', required: true },
+    { field: 'api_version', label: 'API version', required: true },
+    { field: 'model', label: 'Seed model', required: false }
+  ]
+};
+const compatibleSpec: ProviderKindCapability = {
+  ...openAiSpec,
+  kind: 'openai_compatible',
+  label: 'OpenAI-compatible',
+  fields: [
+    { field: 'endpoint', label: 'HTTPS endpoint', required: true },
+    { field: 'model', label: 'Seed model', required: false }
+  ]
+};
 const apiKeyDraft = {
-  ...createProviderDraft(),
+  ...createProviderDraft(openAiSpec),
   name: 'production-openai',
   credential: 'write-only-secret'
 };
 
-describe('provider editor connector policy', () => {
-  it('selects only connector-supported identity modes', () => {
-    expect(authOptionsFor('openai')).toEqual([['api_key', 'Stored API key']]);
-    expect(authOptionsFor('vertex_ai')).toEqual([
+describe('provider editor capability policy', () => {
+  it('derives identity modes and credential guidance from server metadata', () => {
+    expect(authOptionsFor(vertexSpec)).toEqual([
       ['adc', 'Application Default Credentials'],
       ['service_account', 'Stored service account JSON']
     ]);
-    expect(authOptionsFor('bedrock')).toEqual([
-      ['default_chain', 'AWS default chain'],
-      ['static', 'Stored static AWS credential']
-    ]);
-    expect(requiresCredential('api_key')).toBe(true);
-    expect(requiresCredential('service_account')).toBe(true);
-    expect(requiresCredential('adc')).toBe(false);
-    expect(requiresCredential('default_chain')).toBe(false);
+    expect(requiresCredential(vertexSpec, 'service_account')).toBe(true);
+    expect(requiresCredential(vertexSpec, 'adc')).toBe(false);
   });
 
-  it('keeps connector context fields limited to their owning connectors', () => {
-    expect(requiresSeedModel('vertex_ai')).toBe(true);
-    expect(requiresSeedModel('openai')).toBe(false);
-    expect(hasCustomEndpoint('openai_compatible')).toBe(true);
-    expect(hasCustomEndpoint('azure_openai')).toBe(true);
-    expect(hasCustomEndpoint('openai')).toBe(false);
-    expect(hasCloudRegion('vertex_ai')).toBe(true);
-    expect(hasCloudRegion('bedrock')).toBe(true);
-    expect(hasCloudRegion('gemini')).toBe(false);
-    expect(hasCloudProject('vertex_ai')).toBe(true);
-    expect(hasCloudProject('bedrock')).toBe(false);
-    expect(hasDeployment('azure_openai')).toBe(true);
-    expect(hasApiVersion('azure_openai')).toBe(true);
-    expect(hasDeployment('openai_compatible')).toBe(false);
-    expect(hasApiVersion('openai_compatible')).toBe(false);
+  it('derives field visibility and requirements from server metadata', () => {
+    expect(requiresSeedModel(vertexSpec)).toBe(true);
+    expect(requiresSeedModel(openAiSpec)).toBe(false);
+    expect(hasCustomEndpoint(compatibleSpec)).toBe(true);
+    expect(hasCustomEndpoint(openAiSpec)).toBe(false);
+    expect(hasCloudRegion(vertexSpec)).toBe(true);
+    expect(hasCloudProject(vertexSpec)).toBe(true);
+    expect(hasDeployment(azureSpec)).toBe(true);
+    expect(hasApiVersion(azureSpec)).toBe(true);
   });
 
-  it('enforces connector-specific creation requirements', () => {
-    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'openai_compatible' })).toBe(
-      'An HTTPS endpoint is required for an OpenAI-compatible provider.'
+  it('validates required fields declared by capability metadata', () => {
+    expect(validateProviderDraft({ ...apiKeyDraft, kind: compatibleSpec.kind }, compatibleSpec)).toBe(
+      'OpenAI-compatible requires https endpoint.'
     );
     expect(
-      validateProviderDraft({
-        ...apiKeyDraft,
-        kind: 'vertex_ai',
-        authMode: 'adc',
-        credential: '',
-        model: ''
-      })
+      validateProviderDraft(
+        { ...apiKeyDraft, kind: vertexSpec.kind, authMode: 'adc', credential: '', model: '' },
+        vertexSpec
+      )
     ).toBe('Name, Vertex probe model, and the selected identity fields are required.');
-    expect(
-      validateProviderDraft({
-        ...apiKeyDraft,
-        kind: 'bedrock',
-        authMode: 'default_chain',
-        credential: ''
-      })
-    ).toBe('AWS Bedrock requires a cloud region.');
-    expect(validateProviderDraft({ ...apiKeyDraft, kind: 'azure_openai' })).toBe(
-      'Azure OpenAI requires its resource endpoint, deployment, and API version.'
-    );
   });
 });
 
 describe('provider editor API mappings', () => {
-  it('trims and maps Azure creation fields without leaking other connector context', () => {
+  it('trims and maps fields selected by capability metadata', () => {
     expect(
-      buildCreateProviderInput({
-        ...apiKeyDraft,
-        kind: 'azure_openai',
-        name: ' production-azure ',
-        model: ' deployment-probe ',
-        endpoint: ' https://resource.openai.azure.com ',
-        apiVersion: ' 2026-01-01 ',
-        deployment: ' chat ',
-        cloudRegion: 'ignored',
-        cloudProject: 'ignored'
-      })
+      buildCreateProviderInput(
+        {
+          ...apiKeyDraft,
+          kind: azureSpec.kind,
+          name: ' production-azure ',
+          model: ' deployment-probe ',
+          endpoint: ' https://resource.openai.azure.com ',
+          apiVersion: ' 2026-01-01 ',
+          deployment: ' chat ',
+          cloudRegion: 'ignored',
+          cloudProject: 'ignored'
+        },
+        azureSpec
+      )
     ).toEqual({
       name: 'production-azure',
       kind: 'azure_openai',
@@ -117,7 +137,7 @@ describe('provider editor API mappings', () => {
     });
   });
 
-  it('never sends a native provider endpoint or cloud context back to the API', () => {
+  it('never sends fields omitted by capability metadata', () => {
     const values: ProviderEditValues = {
       name: ' Primary OpenAI ',
       endpoint: 'https://api.openai.com/v1/',
@@ -127,8 +147,7 @@ describe('provider editor API mappings', () => {
       deployment: 'ignored',
       authMode: 'api_key'
     };
-
-    expect(buildUpdateProviderInput({ kind: 'openai' }, values)).toEqual({
+    expect(buildUpdateProviderInput(values, openAiSpec)).toEqual({
       name: 'Primary OpenAI',
       endpoint: null,
       api_version: null,
@@ -138,16 +157,19 @@ describe('provider editor API mappings', () => {
       auth_mode: 'api_key'
     });
     expect(
-      providerEditValues({
-        name: 'Primary OpenAI',
-        kind: 'openai',
-        endpoint: 'https://api.openai.com/v1/',
-        api_version: 'ignored',
-        cloud_region: 'ignored',
-        cloud_project: 'ignored',
-        deployment: 'ignored',
-        auth_mode: 'api_key'
-      })
+      providerEditValues(
+        {
+          name: 'Primary OpenAI',
+          kind: 'openai',
+          endpoint: 'https://api.openai.com/v1/',
+          api_version: 'ignored',
+          cloud_region: 'ignored',
+          cloud_project: 'ignored',
+          deployment: 'ignored',
+          auth_mode: 'api_key'
+        },
+        openAiSpec
+      )
     ).toEqual({
       name: 'Primary OpenAI',
       endpoint: '',

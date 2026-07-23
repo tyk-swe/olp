@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pr.provider_id, prm.upstream_model, prc.operation, prc.surface, prc.mode FROM provider_revision_capabilities prc JOIN provider_revision_models prm ON prm.id = prc.provider_revision_model_id JOIN provider_revisions pr ON pr.id = prm.provider_revision_id JOIN providers p ON p.id = pr.provider_id AND p.active_revision_id = pr.id WHERE prm.enabled AND prc.source = 'certified' AND p.state <> 'disabled'::provider_state ORDER BY pr.provider_id, prm.upstream_model, prc.operation, prc.surface, prc.mode",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_models",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "surface",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "surface"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "mode"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf4e22d3ac9b829c8fe491eac96931e20a7909b5f47a070131d51036aa5e8afc"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM request_metadata_gateway_epochs WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1) OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f42691d0ac8a4ceda193b40052bbbcc77028a850bd6603d81efa1be30921d786"
+}

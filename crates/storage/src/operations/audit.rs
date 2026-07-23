@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use super::{
@@ -20,6 +20,20 @@ pub struct AuditRecord {
     pub source_ip: Option<String>,
     pub user_agent_family: Option<String>,
     pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct AuditRow {
+    id: Uuid,
+    actor_user_id: Option<Uuid>,
+    actor_email: Option<String>,
+    action: String,
+    resource_type: String,
+    resource_id: Option<String>,
+    outcome: String,
+    source_ip: Option<String>,
+    user_agent_family: Option<String>,
+    occurred_at: DateTime<Utc>,
 }
 
 impl PgStore {
@@ -44,20 +58,23 @@ impl PgStore {
         }
         query.push(" ORDER BY a.occurred_at DESC, a.id DESC LIMIT ");
         query.push_bind(i64::from(page_size) + 1);
-        let rows = query.build().fetch_all(self.pool()).await?;
+        let rows = query
+            .build_query_as::<AuditRow>()
+            .fetch_all(self.pool())
+            .await?;
         let items = rows
             .into_iter()
             .map(|row| AuditRecord {
-                id: row.get("id"),
-                actor_user_id: row.get("actor_user_id"),
-                actor_email: row.get("actor_email"),
-                action: row.get("action"),
-                resource_type: row.get("resource_type"),
-                resource_id: row.get("resource_id"),
-                outcome: row.get("outcome"),
-                source_ip: row.get("source_ip"),
-                user_agent_family: row.get("user_agent_family"),
-                occurred_at: row.get("occurred_at"),
+                id: row.id,
+                actor_user_id: row.actor_user_id,
+                actor_email: row.actor_email,
+                action: row.action,
+                resource_type: row.resource_type,
+                resource_id: row.resource_id,
+                outcome: row.outcome,
+                source_ip: row.source_ip,
+                user_agent_family: row.user_agent_family,
+                occurred_at: row.occurred_at,
             })
             .collect::<Vec<_>>();
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {

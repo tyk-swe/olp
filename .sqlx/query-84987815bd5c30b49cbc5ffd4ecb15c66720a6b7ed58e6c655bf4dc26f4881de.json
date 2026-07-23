@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO route_draft_operations (route_draft_id, operation) VALUES ($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "84987815bd5c30b49cbc5ffd4ecb15c66720a6b7ed58e6c655bf4dc26f4881de"
+}

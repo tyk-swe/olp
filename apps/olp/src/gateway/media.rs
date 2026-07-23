@@ -22,7 +22,7 @@ use olp_protocols::openai::{
 use tracing::warn;
 
 use crate::{
-    ApiState, InferencePrincipal, MultipartRequestAdmission,
+    GatewayState, InferencePrincipal, MultipartRequestAdmission,
     image_response::streaming_image_json_response,
     streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
 };
@@ -40,7 +40,7 @@ use super::{
 };
 
 pub(super) async fn embeddings(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<EmbeddingRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
@@ -63,7 +63,7 @@ pub(super) async fn embeddings(
 }
 
 pub(super) async fn moderations(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<OpenAiModerationRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
@@ -85,7 +85,7 @@ pub(super) async fn moderations(
 }
 
 pub(super) async fn image_generations(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<OpenAiImageGenerationRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
@@ -109,7 +109,7 @@ pub(super) async fn image_generations(
 }
 
 pub(super) async fn image_edits(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
@@ -153,7 +153,7 @@ pub(super) async fn image_edits(
 }
 
 pub(super) async fn image_variations(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
@@ -182,7 +182,7 @@ pub(super) async fn image_variations(
 }
 
 async fn encode_executed_images(
-    state: &ApiState,
+    state: &GatewayState,
     mut executed: RoutedUnaryResult,
 ) -> Result<Response, InferenceError> {
     let CanonicalResult::Images(result) = executed.result.as_ref() else {
@@ -194,7 +194,7 @@ async fn encode_executed_images(
 }
 
 pub(super) async fn speech(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<OpenAiSpeechRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
@@ -253,7 +253,7 @@ pub(super) async fn speech(
 }
 
 pub(super) async fn transcriptions(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
@@ -342,7 +342,10 @@ pub(super) async fn transcriptions(
     outcome
 }
 
-fn raw_media_streaming_response(state: ApiState, mut execution: RoutedEventExecution) -> Response {
+fn raw_media_streaming_response(
+    state: GatewayState,
+    mut execution: RoutedEventExecution,
+) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
@@ -461,7 +464,7 @@ fn raw_media_event_bytes(event: CanonicalEvent) -> Result<Option<Bytes>, Inferen
 }
 
 pub(super) async fn open_response_media(
-    state: &ApiState,
+    state: &GatewayState,
     handle: &MediaHandle,
 ) -> Result<olp_domain::OpenedMedia, InferenceError> {
     match state.media_spool.open(handle).await {

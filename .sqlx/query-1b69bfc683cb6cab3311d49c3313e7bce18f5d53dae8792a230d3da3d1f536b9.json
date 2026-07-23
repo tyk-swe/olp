@@ -1,0 +1,161 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.ordinal, a.provider_id, p.name AS provider_name, a.upstream_model, a.started_at, a.completed_at, a.status_code, a.error_class, a.committed, a.latency_ms, a.first_byte_ms FROM attempts a JOIN providers p ON p.id = a.provider_id WHERE a.request_id = $1 AND a.request_started_at = $2 ORDER BY a.ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ordinal",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "ordinal"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status_code",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "status_code"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "error_class",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "error_class"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "committed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "committed"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "latency_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "latency_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "first_byte_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "first_byte_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "1b69bfc683cb6cab3311d49c3313e7bce18f5d53dae8792a230d3da3d1f536b9"
+}

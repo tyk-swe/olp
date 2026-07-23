@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration};
 use olp_domain::Role;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -23,26 +23,28 @@ pub(super) fn encrypted_from_row(
     })
 }
 
-pub(super) fn required_string(
-    row: &sqlx::postgres::PgRow,
-    name: &str,
-) -> Result<String, OidcError> {
-    row.get::<Option<String>, _>(name)
+pub(super) fn required_string(value: Option<String>, _name: &str) -> Result<String, OidcError> {
+    value
         .filter(|value| !value.is_empty())
         .ok_or(OidcError::Corrupt)
 }
 
+#[derive(Debug, sqlx::FromRow)]
+pub(super) struct AuthenticatedUserRow {
+    pub(super) id: Uuid,
+    pub(super) email: String,
+    pub(super) display_name: String,
+    pub(super) role: String,
+}
+
 pub(super) fn authenticated_user_from_row(
-    row: &sqlx::postgres::PgRow,
+    row: AuthenticatedUserRow,
 ) -> Result<OidcAuthenticatedUser, OidcError> {
     Ok(OidcAuthenticatedUser {
-        id: row.get("id"),
-        email: row.get("email"),
-        display_name: row.get("display_name"),
-        role: row
-            .get::<String, _>("role")
-            .parse()
-            .map_err(|_| OidcError::Corrupt)?,
+        id: row.id,
+        email: row.email,
+        display_name: row.display_name,
+        role: row.role.parse().map_err(|_| OidcError::Corrupt)?,
     })
 }
 
@@ -51,22 +53,27 @@ pub(super) async fn require_current_enabled_configuration(
     configuration_id: Uuid,
     configuration_etag: Uuid,
 ) -> Result<(), OidcError> {
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(OIDC_CONFIGURATION_LOCK_ID)
-        .execute(&mut **transaction)
-        .await?;
-    let enabled: Option<bool> =
-        sqlx::query_scalar("SELECT enabled FROM oidc_configurations WHERE id = $1 AND etag = $2")
-            .bind(configuration_id)
-            .bind(configuration_etag)
-            .fetch_optional(&mut **transaction)
-            .await?;
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock($1)",
+        OIDC_CONFIGURATION_LOCK_ID
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    let enabled: Option<bool> = sqlx::query_scalar!(
+        "SELECT enabled FROM oidc_configurations WHERE id = $1 AND etag = $2",
+        configuration_id,
+        configuration_etag
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
     match enabled {
         Some(true) => {
-            sqlx::query("SELECT set_config('olp.oidc_configuration_etag', $1, true)")
-                .bind(configuration_etag.to_string())
-                .execute(&mut **transaction)
-                .await?;
+            sqlx::query!(
+                "SELECT set_config('olp.oidc_configuration_etag', $1, true)",
+                configuration_etag.to_string()
+            )
+            .fetch_one(&mut **transaction)
+            .await?;
             Ok(())
         }
         Some(false) => Err(OidcError::Disabled),
@@ -78,11 +85,13 @@ pub(super) async fn lock_email(
     transaction: &mut Transaction<'_, Postgres>,
     email: &str,
 ) -> Result<(), OidcError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(email)
-        .bind(OIDC_CONFIGURATION_LOCK_ID)
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+        email,
+        OIDC_CONFIGURATION_LOCK_ID
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
     Ok(())
 }
 
@@ -91,11 +100,13 @@ pub(super) async fn lock_subject(
     issuer: &str,
     subject: &str,
 ) -> Result<(), OidcError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(format!("{}:{issuer}:{subject}", issuer.len()))
-        .bind(OIDC_CONFIGURATION_LOCK_ID ^ 0x5355_424a)
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+        format!("{}:{issuer}:{subject}", issuer.len()),
+        OIDC_CONFIGURATION_LOCK_ID ^ 0x5355_424a
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
     Ok(())
 }
 
@@ -126,17 +137,17 @@ pub(super) async fn insert_audit(
     resource_id: &str,
     now: DateTime<chrono::Utc>,
 ) -> Result<(), OidcError> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO audit_events \
          (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
          VALUES ($1, $2, $3, $4, $5, 'success', $6)",
+        Uuid::now_v7(),
+        actor_user_id,
+        action,
+        resource_type,
+        resource_id,
+        now
     )
-    .bind(Uuid::now_v7())
-    .bind(actor_user_id)
-    .bind(action)
-    .bind(resource_type)
-    .bind(resource_id)
-    .bind(now)
     .execute(&mut **transaction)
     .await?;
     Ok(())

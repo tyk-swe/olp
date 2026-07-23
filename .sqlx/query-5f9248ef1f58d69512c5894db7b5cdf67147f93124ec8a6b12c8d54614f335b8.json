@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM providers p JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id WHERE prm.source_provider_model_id = $1 AND prm.enabled AND p.state <> 'disabled'::provider_state) AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5f9248ef1f58d69512c5894db7b5cdf67147f93124ec8a6b12c8d54614f335b8"
+}

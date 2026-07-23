@@ -15,7 +15,7 @@ use serde_json::Value;
 use tracing::{error, warn};
 
 use crate::{
-    ApiState, InferencePrincipal, semantic_validation::select_representable_attempts_filtered,
+    GatewayState, InferencePrincipal, semantic_validation::select_representable_attempts_filtered,
 };
 
 use super::{
@@ -26,7 +26,7 @@ use super::{
 };
 
 pub(super) fn select_video_create_target(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: &Operation,
     local_job_id: uuid::Uuid,
@@ -60,13 +60,12 @@ pub(super) fn select_video_create_target(
 }
 
 pub(super) async fn attach_media_job_with_retry(
-    state: &ApiState,
+    state: &GatewayState,
     id: uuid::Uuid,
     upstream_job_id: &str,
     update: MediaJobUpdate,
 ) -> Result<MediaJobRecord, MediaJobError> {
-    let store = require_inference_store(state)
-        .map_err(|_| MediaJobError::Invalid("media persistence is not configured".to_owned()))?;
+    let store = state.store();
     for attempt in 0..3 {
         match store
             .attach_media_job_upstream(id, upstream_job_id, update.clone())
@@ -117,11 +116,11 @@ pub(super) fn valid_upstream_media_job_id(value: &str) -> bool {
 /// the API key that originally created each job. This is intentionally public
 /// for the single-binary process supervisor; it is not an HTTP endpoint.
 pub async fn reconcile_media_jobs_once(
-    state: &ApiState,
+    state: &GatewayState,
     limit: u16,
 ) -> Result<MediaReconciliationPass, MediaJobError> {
-    let records = require_inference_store(state)
-        .map_err(|_| MediaJobError::Invalid("media persistence is not configured".to_owned()))?
+    let records = state
+        .store()
         .claim_media_reconciliation_jobs(Utc::now(), limit)
         .await?;
     let claimed = u16::try_from(records.len()).unwrap_or(u16::MAX);
@@ -139,13 +138,12 @@ pub async fn reconcile_media_jobs_once(
     })
 }
 
-async fn reconcile_claimed_media_job(state: &ApiState, mut record: MediaJobRecord) -> bool {
+async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobRecord) -> bool {
     let Some(claim_id) = record.reconciliation_claim_id else {
         state.record_media_reconciliation_gap();
         return false;
     };
-    let store = require_inference_store(state)
-        .expect("claimed media reconciliation always has a configured store");
+    let store = state.store();
     let outcome = reconcile_media_job_operation(state, &mut record).await;
     let now = Utc::now();
     let (next_attempt_at, error_class) = match outcome {
@@ -182,10 +180,10 @@ async fn reconcile_claimed_media_job(state: &ApiState, mut record: MediaJobRecor
 }
 
 async fn reconcile_media_job_operation(
-    state: &ApiState,
+    state: &GatewayState,
     record: &mut MediaJobRecord,
 ) -> Result<(), &'static str> {
-    let store = require_inference_store(state).map_err(|_| "persistence_unavailable")?;
+    let store = state.store();
     match record.lifecycle {
         MediaJobLifecycle::Creating => {
             if let Some(upstream_id) = record.upstream_job_id.as_deref() {
@@ -296,7 +294,7 @@ async fn reconcile_media_job_operation(
 }
 
 async fn execute_media_reconciliation_result(
-    state: &ApiState,
+    state: &GatewayState,
     record: &MediaJobRecord,
     operation: Operation,
 ) -> Result<Box<CanonicalResult>, &'static str> {
@@ -340,7 +338,7 @@ async fn execute_media_reconciliation_result(
                 false,
                 &UsageCapture::default(),
                 Surface::OpenAi,
-                operation_kind.as_str(),
+                operation_kind,
             );
             return Err(failure.code);
         }
@@ -383,7 +381,7 @@ async fn execute_media_reconciliation_result(
                 false,
                 &UsageCapture::default(),
                 Surface::OpenAi,
-                operation_kind.as_str(),
+                operation_kind,
             );
             return Err(failure.error.code);
         }
@@ -405,7 +403,7 @@ async fn execute_media_reconciliation_result(
             true,
             &UsageCapture::default(),
             Surface::OpenAi,
-            operation_kind.as_str(),
+            operation_kind,
         );
         return Err("provider_protocol_error");
     };
@@ -426,13 +424,13 @@ async fn execute_media_reconciliation_result(
         true,
         &usage_from_result(&result),
         Surface::OpenAi,
-        operation_kind.as_str(),
+        operation_kind,
     );
     Ok(result)
 }
 
 pub(super) async fn refresh_video_list_record(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     record: MediaJobRecord,
 ) -> MediaJobRecord {
@@ -480,8 +478,8 @@ pub(super) async fn refresh_video_list_record(
             .map(|error| format!("{:?}", error.class).to_lowercase()),
         last_polled_at: Utc::now(),
     };
-    let updated = require_inference_store(state)
-        .expect("list refresh runs only with a configured store")
+    let updated = state
+        .store()
         .refresh_media_job(record.id, update)
         .await
         .unwrap_or(record);
@@ -490,7 +488,7 @@ pub(super) async fn refresh_video_list_record(
 }
 
 pub(super) async fn owned_media_job(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     video_id: &str,
     operation: OperationKind,
@@ -498,10 +496,7 @@ pub(super) async fn owned_media_job(
     let key = authorize_principal(principal, operation, None)?;
     let id = uuid::Uuid::parse_str(video_id)
         .map_err(|_| InferenceError::resource_not_found("video_not_found"))?;
-    let record = require_inference_store(state)?
-        .media_job(id)
-        .await
-        .map_err(media_job_error)?;
+    let record = state.store().media_job(id).await.map_err(media_job_error)?;
     if record.api_key_id != key.id.as_uuid() {
         return Err(InferenceError::resource_not_found("video_not_found"));
     }
@@ -539,15 +534,6 @@ pub(super) fn set_video_route(
         _ => return Err(InferenceError::unavailable("media_job_operation_invalid")),
     }
     Ok(())
-}
-
-pub(super) fn require_inference_store(
-    state: &ApiState,
-) -> Result<&olp_storage::PgStore, InferenceError> {
-    state
-        .store
-        .as_ref()
-        .ok_or_else(|| InferenceError::unavailable("persistence_unavailable"))
 }
 
 pub(super) fn media_job_error(error: MediaJobError) -> InferenceError {

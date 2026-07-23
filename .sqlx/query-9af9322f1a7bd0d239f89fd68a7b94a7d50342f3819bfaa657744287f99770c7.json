@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT concat(r.slug, '/', rro.operation) AS \"value!\" FROM routes r JOIN LATERAL (SELECT id FROM route_revisions WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true JOIN route_revision_operations rro ON rro.route_revision_id = rr.id WHERE NOT EXISTS ( SELECT 1 FROM route_revision_targets rt JOIN provider_models pm ON pm.id = rt.provider_model_id JOIN providers target_provider ON target_provider.id = pm.provider_id JOIN provider_revision_models prm ON prm.source_provider_model_id = pm.id AND prm.provider_revision_id = CASE WHEN target_provider.id = $1 THEN $2 ELSE target_provider.active_revision_id END AND prm.enabled JOIN provider_revision_capabilities prc ON prc.provider_revision_model_id = prm.id AND prc.operation = rro.operation AND prc.source = 'certified' WHERE rt.route_revision_id = rr.id AND target_provider.state <> 'disabled'::provider_state) ORDER BY r.slug, rro.operation LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9af9322f1a7bd0d239f89fd68a7b94a7d50342f3819bfaa657744287f99770c7"
+}

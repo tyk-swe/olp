@@ -368,7 +368,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
     .await
     .unwrap();
 
-    MIGRATOR.run(store.pool()).await.unwrap();
+    MIGRATOR.run_to(24, store.pool()).await.unwrap();
 
     let migrated_etag: Uuid =
         sqlx::query_scalar("SELECT configuration_etag FROM oidc_authorization_flows WHERE id = $1")
@@ -377,6 +377,15 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
             .await
             .unwrap();
     assert_eq!(migrated_etag, configuration_etag);
+
+    MIGRATOR.run(store.pool()).await.unwrap();
+    let invalidated_flow_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM oidc_authorization_flows WHERE id = $1")
+            .bind(flow_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(invalidated_flow_count, 0);
 
     let renamed_dimensions: Vec<(String, String)> = sqlx::query_as(
         "SELECT 'providers', kind FROM providers \

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET security_version = security_version + 1, etag = $2, updated_at = $3 WHERE id = $1 RETURNING security_version",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "security_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "security_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1880bb91a59c0a623b35d89b47d0ed11f47f61b69b09b784671561fc9374f016"
+}

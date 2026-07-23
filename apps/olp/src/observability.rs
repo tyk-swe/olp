@@ -19,7 +19,7 @@ use serde::Serialize;
 use tower::ServiceBuilder;
 use utoipa::ToSchema;
 
-use crate::{ApiState, Problem};
+use crate::{ObservabilityState, Problem};
 
 const OBSERVABILITY_CONCURRENCY_LIMIT: usize = 8;
 const OBSERVABILITY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -34,7 +34,7 @@ pub(super) const OBSERVABILITY_SNAPSHOT_STALE_AFTER: Duration = Duration::from_s
 
 /// Builds the private observability router. It exposes no console,
 /// management, or inference routes.
-pub fn observability_router(state: ApiState) -> Router {
+pub fn observability_router(state: ObservabilityState) -> Router {
     Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
@@ -171,7 +171,7 @@ impl ObservabilityCache {
 /// Refresh both snapshots immediately. This is public so embeddings and
 /// integration tests can prime the cache before opening an observability
 /// listener; production servers should use [`spawn_observability_cache`].
-pub async fn refresh_observability_cache(state: &ApiState) {
+pub async fn refresh_observability_cache(state: &ObservabilityState) {
     tokio::join!(refresh_readiness_cache(state), refresh_metrics_cache(state));
 }
 
@@ -179,7 +179,7 @@ pub async fn refresh_observability_cache(state: &ApiState) {
 /// listener. Readiness is refreshed every five seconds, while the more
 /// expensive metrics rollups are refreshed every fifteen seconds.
 pub fn spawn_observability_cache(
-    state: ApiState,
+    state: ObservabilityState,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -225,7 +225,7 @@ pub fn spawn_observability_cache(
     })
 }
 
-async fn refresh_readiness_cache(state: &ApiState) {
+async fn refresh_readiness_cache(state: &ObservabilityState) {
     let result =
         match tokio::time::timeout(OBSERVABILITY_REFRESH_TIMEOUT, collect_readiness(state)).await {
             Ok(result) => result,
@@ -239,7 +239,7 @@ async fn refresh_readiness_cache(state: &ApiState) {
     state.observability.record_readiness(result);
 }
 
-async fn refresh_metrics_cache(state: &ApiState) {
+async fn refresh_metrics_cache(state: &ObservabilityState) {
     match tokio::time::timeout(OBSERVABILITY_REFRESH_TIMEOUT, collect_metrics(state)).await {
         Ok(body) => state.observability.record_metrics(body),
         Err(_) => {
@@ -327,7 +327,7 @@ async fn live() -> axum::Json<HealthResponse> {
     })
 }
 
-async fn ready(axum::extract::State(state): axum::extract::State<ApiState>) -> Response {
+async fn ready(axum::extract::State(state): axum::extract::State<ObservabilityState>) -> Response {
     let now = Instant::now();
     let snapshot = state.observability.readiness();
     let fresh = cached_readiness_is_fresh(&snapshot, now);
@@ -343,44 +343,33 @@ async fn ready(axum::extract::State(state): axum::extract::State<ApiState>) -> R
     response
 }
 
-async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> {
+async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse, Problem> {
     let generation = state.runtime.active_generation_ordinal();
     let now = chrono::Utc::now();
     let unknown_consumer = RequestMetadataConsumerStatus::from_health(None, now);
     let (database, media_reconciliation, request_metadata_consumer, request_metadata_epochs) =
-        if let Some(store) = &state.store {
-            match store.ping().await {
-                Ok(()) => {
-                    let (media, consumer, epochs) = tokio::join!(
-                        store.media_reconciliation_summary(now),
-                        store.request_metadata_consumer_status(now),
-                        store.request_metadata_gateway_epoch_health(),
-                    );
-                    let media =
-                        media.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
-                    let consumer = consumer
-                        .map_err(|_| Problem::service_unavailable("database_unavailable"))?;
-                    let epochs =
-                        epochs.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
-                    ("ok", Some(media), consumer, epochs)
-                }
-                Err(_) if state.mode.serves_gateway() && generation.is_some() => (
-                    "unavailable_lkg",
-                    None,
-                    unknown_consumer,
-                    RequestMetadataEpochHealth::default(),
-                ),
-                Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
+        match state.store().ping().await {
+            Ok(()) => {
+                let (media, consumer, epochs) = tokio::join!(
+                    state.store().media_reconciliation_summary(now),
+                    state.store().request_metadata_consumer_status(now),
+                    state.store().request_metadata_gateway_epoch_health(),
+                );
+                let media =
+                    media.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+                let consumer =
+                    consumer.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+                let epochs =
+                    epochs.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+                ("ok", Some(media), consumer, epochs)
             }
-        } else if state.mode.serves_control() {
-            return Err(Problem::service_unavailable("database_not_configured"));
-        } else {
-            (
-                "not_configured",
+            Err(_) if state.mode.serves_gateway() && generation.is_some() => (
+                "unavailable_lkg",
                 None,
                 unknown_consumer,
                 RequestMetadataEpochHealth::default(),
-            )
+            ),
+            Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
         };
 
     if state.mode.serves_gateway() {
@@ -388,11 +377,6 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
         if generation.is_none() {
             return Err(Problem::service_unavailable(
                 "runtime_generation_unavailable",
-            ));
-        }
-        if state.auth_hmac_key.is_none() {
-            return Err(Problem::service_unavailable(
-                "api_key_authentication_unavailable",
             ));
         }
         if !snapshot.has_all_transports() {
@@ -486,7 +470,9 @@ async fn collect_readiness(state: &ApiState) -> Result<HealthResponse, Problem> 
     })
 }
 
-async fn metrics(axum::extract::State(state): axum::extract::State<ApiState>) -> Response {
+async fn metrics(
+    axum::extract::State(state): axum::extract::State<ObservabilityState>,
+) -> Response {
     let now = Instant::now();
     let readiness = state.observability.readiness();
     let metrics = state.observability.metrics();
@@ -534,7 +520,7 @@ async fn metrics(axum::extract::State(state): axum::extract::State<ApiState>) ->
     response
 }
 
-async fn collect_metrics(state: &ApiState) -> String {
+async fn collect_metrics(state: &ObservabilityState) -> String {
     let request_metadata = state
         .request_metadata
         .as_ref()
@@ -543,30 +529,25 @@ async fn collect_metrics(state: &ApiState) -> String {
     let now = chrono::Utc::now();
     let mut request_metadata_consumer = RequestMetadataConsumerStatus::from_health(None, now);
     let mut request_metadata_epochs = RequestMetadataEpochHealth::default();
-    let mut operations_summary = None;
     let mut provider_health = Vec::new();
-    let media_reconciliation = if let Some(store) = &state.store {
-        let (consumer, epochs, operations, providers, media) = tokio::join!(
-            store.request_metadata_consumer_status(now),
-            store.request_metadata_gateway_epoch_health(),
-            store.prometheus_operations_summary(5),
-            store.provider_health(15, None, 100),
-            store.media_reconciliation_summary(now),
-        );
-        if let Ok(status) = consumer {
-            request_metadata_consumer = status;
-        }
-        if let Ok(health) = epochs {
-            request_metadata_epochs = health;
-        }
-        operations_summary = operations.ok();
-        if let Ok(page) = providers {
-            provider_health = page.items;
-        }
-        media.ok()
-    } else {
-        None
-    };
+    let (consumer, epochs, operations, providers, media) = tokio::join!(
+        state.store().request_metadata_consumer_status(now),
+        state.store().request_metadata_gateway_epoch_health(),
+        state.store().prometheus_operations_summary(5),
+        state.store().provider_health(15, None, 100),
+        state.store().media_reconciliation_summary(now),
+    );
+    if let Ok(status) = consumer {
+        request_metadata_consumer = status;
+    }
+    if let Ok(health) = epochs {
+        request_metadata_epochs = health;
+    }
+    let operations_summary = operations.ok();
+    if let Ok(page) = providers {
+        provider_health = page.items;
+    }
+    let media_reconciliation = media.ok();
     let mut body = format!(
         "# HELP olp_runtime_generation Current immutable runtime generation.\n\
          # TYPE olp_runtime_generation gauge\n\

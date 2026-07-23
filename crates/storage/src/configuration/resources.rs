@@ -9,7 +9,7 @@ use olp_domain::{
     RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
     weighted_rendezvous_score,
 };
-use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{

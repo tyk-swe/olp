@@ -7,15 +7,15 @@ impl PgStore {
         limit: i64,
     ) -> Result<ConfigurationPage<ApiKeyRecord>, ConfigurationError> {
         let limit = checked_limit(limit)?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id FROM api_keys WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+            cursor,
+            limit + 1
         )
-        .bind(cursor)
-        .bind(limit + 1)
         .fetch_all(self.pool())
         .await?;
-        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.get::<Uuid, _>("id"));
-        let ids: Vec<Uuid> = rows.into_iter().map(|row| row.get("id")).collect();
+        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
+        let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
         let mut items = Vec::with_capacity(ids.len());
         for id in ids {
             items.push(self.get_api_key(id).await?);
@@ -24,34 +24,32 @@ impl PgStore {
     }
 
     pub async fn get_api_key(&self, id: Uuid) -> Result<ApiKeyRecord, ConfigurationError> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
                     k.revoked_at, k.rotated_at, k.etag, k.created_at \
              FROM api_keys k JOIN users u ON u.id = k.created_by WHERE k.id = $1",
+            id
         )
-        .bind(id)
         .fetch_optional(self.pool())
         .await?
         .ok_or(ConfigurationError::NotFound)?;
         Ok(ApiKeyRecord {
-            id: row.get("id"),
-            lookup_id: row.get("lookup_id"),
-            name: row.get("name"),
-            created_by: row.get("created_by"),
-            created_by_email: row.get("created_by_email"),
-            scopes: sqlx::query_scalar("SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope")
-                .bind(id).fetch_all(self.pool()).await?,
-            allowed_routes: sqlx::query_scalar("SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug")
-                .bind(id).fetch_all(self.pool()).await?,
-            requests_per_minute: row.get("requests_per_minute"),
-            tokens_per_minute: row.get("tokens_per_minute"),
-            max_concurrency: row.get("max_concurrency"),
-            expires_at: row.get("expires_at"),
-            revoked_at: row.get("revoked_at"),
-            rotated_at: row.get("rotated_at"),
-            etag: row.get("etag"),
-            created_at: row.get("created_at"),
+            id: row.id,
+            lookup_id: row.lookup_id,
+            name: row.name,
+            created_by: row.created_by,
+            created_by_email: row.created_by_email,
+            scopes: sqlx::query_scalar!("SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope", id).fetch_all(self.pool()).await?,
+            allowed_routes: sqlx::query_scalar!("SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug", id).fetch_all(self.pool()).await?,
+            requests_per_minute: row.requests_per_minute,
+            tokens_per_minute: row.tokens_per_minute,
+            max_concurrency: row.max_concurrency,
+            expires_at: row.expires_at,
+            revoked_at: row.revoked_at,
+            rotated_at: row.rotated_at,
+            etag: row.etag,
+            created_at: row.created_at,
         })
     }
 
@@ -141,11 +139,12 @@ impl PgStore {
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
         for route in &allowed_routes {
-            let exists: bool =
-                sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1)")
-                    .bind(route.as_str())
-                    .fetch_one(&mut *transaction)
-                    .await?;
+            let exists: bool = sqlx::query_scalar!(
+                "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
+                route.as_str()
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
             if !exists {
                 return Err(ConfigurationError::Invalid(format!(
                     "allowlisted route {route} is not active"
@@ -153,57 +152,61 @@ impl PgStore {
             }
         }
         let etag = Uuid::now_v7();
-        let updated = sqlx::query(
+        let updated = sqlx::query!(
             "UPDATE api_keys SET name = $1, requests_per_minute = $2, tokens_per_minute = $3, \
                     max_concurrency = $4, expires_at = $5, etag = $6 \
              WHERE id = $7 AND etag = $8 AND revoked_at IS NULL \
                AND (expires_at IS NULL OR expires_at > now())",
+            name,
+            requests_per_minute,
+            tokens_per_minute,
+            max_concurrency,
+            input.expires_at,
+            etag,
+            id,
+            expected_etag
         )
-        .bind(name)
-        .bind(requests_per_minute)
-        .bind(tokens_per_minute)
-        .bind(max_concurrency)
-        .bind(input.expires_at)
-        .bind(etag)
-        .bind(id)
-        .bind(expected_etag)
         .execute(&mut *transaction)
         .await?;
         if updated.rows_affected() != 1 {
-            let row =
-                sqlx::query("SELECT etag, revoked_at, expires_at FROM api_keys WHERE id = $1")
-                    .bind(id)
-                    .fetch_optional(&mut *transaction)
-                    .await?
-                    .ok_or(ConfigurationError::NotFound)?;
-            if row.get::<Uuid, _>("etag") != expected_etag {
+            let row = sqlx::query!(
+                "SELECT etag, revoked_at, expires_at FROM api_keys WHERE id = $1",
+                id
+            )
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(ConfigurationError::NotFound)?;
+            if row.etag != expected_etag {
                 return Err(ConfigurationError::PreconditionFailed);
             }
             return Err(ConfigurationError::Invalid(
                 "revoked or expired keys cannot be updated".to_owned(),
             ));
         }
-        sqlx::query("DELETE FROM api_key_scopes WHERE api_key_id = $1")
-            .bind(id)
+        sqlx::query!("DELETE FROM api_key_scopes WHERE api_key_id = $1", id)
             .execute(&mut *transaction)
             .await?;
         for scope in scopes {
-            sqlx::query("INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)")
-                .bind(id)
-                .bind(scope)
-                .execute(&mut *transaction)
-                .await?;
-        }
-        sqlx::query("DELETE FROM api_key_route_allowlist WHERE api_key_id = $1")
-            .bind(id)
+            sqlx::query!(
+                "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
+                id,
+                scope
+            )
             .execute(&mut *transaction)
             .await?;
+        }
+        sqlx::query!(
+            "DELETE FROM api_key_route_allowlist WHERE api_key_id = $1",
+            id
+        )
+        .execute(&mut *transaction)
+        .await?;
         for route in allowed_routes {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) VALUES ($1, $2)",
+                id,
+                route.as_str()
             )
-            .bind(id)
-            .bind(route.as_str())
             .execute(&mut *transaction)
             .await?;
         }
@@ -268,26 +271,27 @@ impl PgStore {
             }
         }
         let etag = Uuid::now_v7();
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "UPDATE api_keys SET lookup_id = $1, secret_digest = $2, etag = $3, rotated_at = now() \
              WHERE id = $4 AND etag = $5 AND revoked_at IS NULL \
                AND (expires_at IS NULL OR expires_at > now())",
+            &material.lookup_id,
+            material.digest.to_vec(),
+            etag,
+            id,
+            expected_etag
         )
-        .bind(&material.lookup_id)
-        .bind(material.digest.to_vec())
-        .bind(etag)
-        .bind(id)
-        .bind(expected_etag)
         .execute(&mut *transaction)
         .await?;
         if result.rows_affected() != 1 {
-            let row =
-                sqlx::query("SELECT etag, revoked_at, expires_at FROM api_keys WHERE id = $1")
-                    .bind(id)
-                    .fetch_optional(&mut *transaction)
-                    .await?
-                    .ok_or(ConfigurationError::NotFound)?;
-            if row.get::<Uuid, _>("etag") != expected_etag {
+            let row = sqlx::query!(
+                "SELECT etag, revoked_at, expires_at FROM api_keys WHERE id = $1",
+                id
+            )
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(ConfigurationError::NotFound)?;
+            if row.etag != expected_etag {
                 return Err(ConfigurationError::PreconditionFailed);
             }
             return Err(ConfigurationError::Invalid(

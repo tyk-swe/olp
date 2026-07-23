@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( DELETE FROM request_metadata_ingestion_gaps WHERE reported_at < $1 AND (deduplication_key IS NULL OR reported_at < now() - make_interval( days => $2::integer, mins => $3::integer)) RETURNING gateway_instance, reason, event_count, certainty, first_observed_at, last_observed_at ), rolled AS ( INSERT INTO request_metadata_gap_hourly (bucket, gateway_instance, reason, event_count, uncertain_gap_count, first_observed_at, last_observed_at) SELECT date_trunc('hour', first_observed_at), gateway_instance, reason, SUM(event_count), COUNT(*) FILTER (WHERE certainty = 'lower_bound'::request_metadata_gap_certainty), MIN(first_observed_at), MAX(last_observed_at) FROM expired GROUP BY date_trunc('hour', first_observed_at), gateway_instance, reason ON CONFLICT (bucket, gateway_instance, reason) DO UPDATE SET event_count = request_metadata_gap_hourly.event_count + EXCLUDED.event_count, uncertain_gap_count = request_metadata_gap_hourly.uncertain_gap_count + EXCLUDED.uncertain_gap_count, first_observed_at = LEAST(request_metadata_gap_hourly.first_observed_at, EXCLUDED.first_observed_at), last_observed_at = GREATEST(request_metadata_gap_hourly.last_observed_at, EXCLUDED.last_observed_at) RETURNING 1 ) SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", (SELECT count(*) FROM expired) AS \"gap_rows!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup_rows!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "gap_rows!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "644b6f5924c7dd69d38c5775eef2bf9ec58c79f5a6cf4faa326efb82b12ac3a5"
+}

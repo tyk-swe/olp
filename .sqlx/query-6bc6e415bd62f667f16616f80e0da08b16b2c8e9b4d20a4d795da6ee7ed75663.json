@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id FROM async_media_jobs j JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug WHERE j.lifecycle_state <> 'deleted' AND NOT EXISTS ( SELECT 1 FROM route_draft_targets rdt JOIN provider_models pm ON pm.id = rdt.provider_model_id WHERE rdt.route_draft_id = rd.id AND pm.provider_id = j.provider_id AND pm.upstream_model = j.provider_model) ORDER BY j.created_at, j.id LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6bc6e415bd62f667f16616f80e0da08b16b2c8e9b4d20a4d795da6ee7ed75663"
+}

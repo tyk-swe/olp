@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::reconciliation::{RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState};
 use crate::{
@@ -61,16 +61,12 @@ impl RequestMetadataConsumerStatus {
                 heartbeat_age_seconds: None,
             };
         };
-        let age_seconds = u64::try_from(
-            now.signed_duration_since(health.checked_at)
-                .num_seconds()
-                .max(0),
-        )
-        .unwrap_or(u64::MAX);
-        let state = if age_seconds
-            > u64::try_from(REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS)
-                .expect("the consumer stale threshold is positive")
-        {
+        let age = now
+            .signed_duration_since(health.checked_at)
+            .num_seconds()
+            .max(0);
+        let age_seconds = u64::try_from(age).map_or(u64::MAX, |value| value);
+        let state = if age > REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS {
             RequestMetadataConsumerState::Stale
         } else if health.pending_events > 0 || health.lag_events > 0 {
             RequestMetadataConsumerState::Backlogged
@@ -116,7 +112,7 @@ impl PgStore {
         {
             return Err(PersistenceError::InvalidRequestMetadataGap);
         }
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO request_metadata_consumer_health \
              (singleton, pending_events, lag_events, oldest_pending_at, checked_at) \
              VALUES (true, $1, $2, $3, $4) \
@@ -126,27 +122,27 @@ impl PgStore {
                oldest_pending_at = EXCLUDED.oldest_pending_at, \
                checked_at = EXCLUDED.checked_at \
              RETURNING pending_events, lag_events, oldest_pending_at, checked_at",
+            pending_events,
+            lag_events,
+            oldest_pending_at,
+            checked_at
         )
-        .bind(pending_events)
-        .bind(lag_events)
-        .bind(oldest_pending_at)
-        .bind(checked_at)
         .fetch_one(self.pool())
         .await?;
         Ok(RequestMetadataConsumerHealth {
-            pending_events: u64::try_from(row.get::<i64, _>("pending_events"))
+            pending_events: u64::try_from(row.pending_events)
                 .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-            lag_events: u64::try_from(row.get::<i64, _>("lag_events"))
+            lag_events: u64::try_from(row.lag_events)
                 .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-            oldest_pending_at: row.get("oldest_pending_at"),
-            checked_at: row.get("checked_at"),
+            oldest_pending_at: row.oldest_pending_at,
+            checked_at: row.checked_at,
         })
     }
 
     pub async fn request_metadata_consumer_health(
         &self,
     ) -> Result<Option<RequestMetadataConsumerHealth>, PersistenceError> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT pending_events, lag_events, oldest_pending_at, checked_at \
              FROM request_metadata_consumer_health WHERE singleton",
         )
@@ -154,12 +150,12 @@ impl PgStore {
         .await?;
         row.map(|row| {
             Ok(RequestMetadataConsumerHealth {
-                pending_events: u64::try_from(row.get::<i64, _>("pending_events"))
+                pending_events: u64::try_from(row.pending_events)
                     .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-                lag_events: u64::try_from(row.get::<i64, _>("lag_events"))
+                lag_events: u64::try_from(row.lag_events)
                     .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-                oldest_pending_at: row.get("oldest_pending_at"),
-                checked_at: row.get("checked_at"),
+                oldest_pending_at: row.oldest_pending_at,
+                checked_at: row.checked_at,
             })
         })
         .transpose()
@@ -217,7 +213,10 @@ impl PgStore {
         }
         query.push(" ORDER BY updated_at DESC, process_epoch DESC LIMIT ");
         query.push_bind(i64::from(page_size) + 1);
-        let rows = query.build().fetch_all(self.pool()).await?;
+        let rows = query
+            .build_query_as::<RequestMetadataGatewayEpochRow>()
+            .fetch_all(self.pool())
+            .await?;
         let items = rows
             .into_iter()
             .map(request_metadata_gateway_epoch_from_row)
@@ -233,12 +232,31 @@ impl PgStore {
     }
 }
 
+#[derive(Debug, FromRow)]
+struct RequestMetadataGatewayEpochRow {
+    gateway_instance: String,
+    process_epoch: uuid::Uuid,
+    started_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    accepted: i64,
+    persisted: i64,
+    dropped: i64,
+    abandoned: i64,
+    retrying: bool,
+    writer_closed: bool,
+    gracefully_closed_at: Option<DateTime<Utc>>,
+    stale_detected_at: Option<DateTime<Utc>>,
+    acknowledged_at: Option<DateTime<Utc>>,
+    acknowledged_by: Option<uuid::Uuid>,
+    uncertain_lower_bound: i64,
+}
+
 fn request_metadata_gateway_epoch_from_row(
-    row: sqlx::postgres::PgRow,
+    row: RequestMetadataGatewayEpochRow,
 ) -> Result<RequestMetadataGatewayEpochRecord, OperationsError> {
-    let gracefully_closed_at: Option<DateTime<Utc>> = row.get("gracefully_closed_at");
-    let stale_detected_at: Option<DateTime<Utc>> = row.get("stale_detected_at");
-    let acknowledged_at: Option<DateTime<Utc>> = row.get("acknowledged_at");
+    let gracefully_closed_at: Option<DateTime<Utc>> = row.gracefully_closed_at;
+    let stale_detected_at: Option<DateTime<Utc>> = row.stale_detected_at;
+    let acknowledged_at: Option<DateTime<Utc>> = row.acknowledged_at;
     let state = if gracefully_closed_at.is_some() {
         RequestMetadataGatewayEpochState::GracefullyClosed
     } else if stale_detected_at.is_some() && acknowledged_at.is_some() {
@@ -248,26 +266,26 @@ fn request_metadata_gateway_epoch_from_row(
     } else {
         RequestMetadataGatewayEpochState::Open
     };
-    let checked_count = |column| {
-        u64::try_from(row.get::<i64, _>(column))
+    let checked_count = |value| {
+        u64::try_from(value)
             .map_err(|_| OperationsError::Persistence(PersistenceError::InvalidRequestMetadataGap))
     };
     Ok(RequestMetadataGatewayEpochRecord {
-        gateway_instance: row.get("gateway_instance"),
-        process_epoch: row.get("process_epoch"),
+        gateway_instance: row.gateway_instance,
+        process_epoch: row.process_epoch,
         state,
-        started_at: row.get("started_at"),
-        updated_at: row.get("updated_at"),
-        accepted: checked_count("accepted")?,
-        persisted: checked_count("persisted")?,
-        dropped: checked_count("dropped")?,
-        abandoned: checked_count("abandoned")?,
-        uncertain_event_lower_bound: checked_count("uncertain_lower_bound")?,
-        retrying: row.get("retrying"),
-        writer_closed: row.get("writer_closed"),
+        started_at: row.started_at,
+        updated_at: row.updated_at,
+        accepted: checked_count(row.accepted)?,
+        persisted: checked_count(row.persisted)?,
+        dropped: checked_count(row.dropped)?,
+        abandoned: checked_count(row.abandoned)?,
+        uncertain_event_lower_bound: checked_count(row.uncertain_lower_bound)?,
+        retrying: row.retrying,
+        writer_closed: row.writer_closed,
         gracefully_closed_at,
         stale_detected_at,
         acknowledged_at,
-        acknowledged_by: row.get("acknowledged_by"),
+        acknowledged_by: row.acknowledged_by,
     })
 }

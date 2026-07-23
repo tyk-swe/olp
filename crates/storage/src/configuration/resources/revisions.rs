@@ -1,5 +1,7 @@
 use super::{
-    helpers::{audit_in_transaction, capability_from_row, configuration_count},
+    helpers::{
+        CapabilityRow, audit_in_transaction, capability_from_row, checked_configuration_count,
+    },
     *,
 };
 
@@ -11,21 +13,22 @@ impl PgStore {
         limit: i64,
     ) -> Result<ConfigurationPage<ProviderRevisionRecord>, ConfigurationError> {
         let limit = checked_limit(limit)?;
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM providers WHERE id = $1)")
-                .bind(provider_id)
-                .fetch_one(self.pool())
-                .await?;
+        let exists: bool = sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM providers WHERE id = $1) AS \"value!\"",
+            provider_id
+        )
+        .fetch_one(self.pool())
+        .await?;
         if !exists {
             return Err(ConfigurationError::NotFound);
         }
         let before_revision: Option<i32> = match cursor {
             Some(cursor) => Some(
-                sqlx::query_scalar(
+                sqlx::query_scalar!(
                     "SELECT revision FROM provider_revisions WHERE provider_id = $1 AND id = $2",
+                    provider_id,
+                    cursor
                 )
-                .bind(provider_id)
-                .bind(cursor)
                 .fetch_optional(self.pool())
                 .await?
                 .ok_or_else(|| {
@@ -36,13 +39,16 @@ impl PgStore {
             ),
             None => None,
         };
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ProviderRevisionRow,
             "SELECT pr.id, pr.provider_id, pr.revision, pr.name, pr.kind, pr.endpoint, \
                     pr.cloud_region, pr.cloud_project, pr.deployment, pr.api_version, \
                     pr.auth_mode, pr.connector_ready, pr.credential_version_id, \
-                    cv.version AS credential_version, pr.source_etag, pr.activated_by, \
-                    pr.activated_at, stats.model_count, stats.enabled_model_count, \
-                    stats.capability_count, stats.certified_capability_count \
+                    cv.version AS \"credential_version?\", pr.source_etag, pr.activated_by, \
+                    pr.activated_at, stats.model_count AS \"model_count!\", \
+                    stats.enabled_model_count AS \"enabled_model_count!\", \
+                    stats.capability_count AS \"capability_count!\", \
+                    stats.certified_capability_count AS \"certified_capability_count!\" \
              FROM provider_revisions pr \
              LEFT JOIN provider_credential_versions cv ON cv.id = pr.credential_version_id \
              LEFT JOIN LATERAL ( \
@@ -61,13 +67,13 @@ impl PgStore {
              WHERE pr.provider_id = $1 \
              AND ($2::int IS NULL OR pr.revision < $2) \
              ORDER BY pr.revision DESC LIMIT $3",
+            provider_id,
+            before_revision,
+            limit + 1
         )
-        .bind(provider_id)
-        .bind(before_revision)
-        .bind(limit + 1)
         .fetch_all(self.pool())
         .await?;
-        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.get::<Uuid, _>("id"));
+        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
         let revisions = rows
             .into_iter()
             .map(provider_revision_from_row)
@@ -83,13 +89,16 @@ impl PgStore {
         provider_id: Uuid,
         revision_id: Uuid,
     ) -> Result<ProviderRevisionRecord, ConfigurationError> {
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            ProviderRevisionRow,
             "SELECT pr.id, pr.provider_id, pr.revision, pr.name, pr.kind, pr.endpoint, \
                     pr.cloud_region, pr.cloud_project, pr.deployment, pr.api_version, \
                     pr.auth_mode, pr.connector_ready, pr.credential_version_id, \
-                    cv.version AS credential_version, pr.source_etag, pr.activated_by, \
-                    pr.activated_at, stats.model_count, stats.enabled_model_count, \
-                    stats.capability_count, stats.certified_capability_count \
+                    cv.version AS \"credential_version?\", pr.source_etag, pr.activated_by, \
+                    pr.activated_at, stats.model_count AS \"model_count!\", \
+                    stats.enabled_model_count AS \"enabled_model_count!\", \
+                    stats.capability_count AS \"capability_count!\", \
+                    stats.certified_capability_count AS \"certified_capability_count!\" \
              FROM provider_revisions pr \
              LEFT JOIN provider_credential_versions cv ON cv.id = pr.credential_version_id \
              LEFT JOIN LATERAL ( \
@@ -106,9 +115,9 @@ impl PgStore {
                  WHERE prm.provider_revision_id = pr.id \
              ) stats ON true \
              WHERE pr.provider_id = $1 AND pr.id = $2",
+            provider_id,
+            revision_id
         )
-        .bind(provider_id)
-        .bind(revision_id)
         .fetch_optional(self.pool())
         .await?
         .ok_or(ConfigurationError::NotFound)?;
@@ -124,57 +133,56 @@ impl PgStore {
     ) -> Result<ConfigurationPage<ProviderModelRecord>, ConfigurationError> {
         let limit = checked_limit(limit)?;
         ensure_provider_revision_exists(self, provider_id, revision_id).await?;
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ProviderRevisionModelRow,
             "SELECT id AS revision_model_id, source_provider_model_id, upstream_model, \
                     display_name, enabled, discovered_at \
              FROM provider_revision_models WHERE provider_revision_id = $1 \
                AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT $3",
+            revision_id,
+            cursor,
+            limit + 1
         )
-        .bind(revision_id)
-        .bind(cursor)
-        .bind(limit + 1)
         .fetch_all(self.pool())
         .await?;
-        let (rows, next_cursor) = split_page(rows, limit as usize, |row| {
-            row.get::<Uuid, _>("revision_model_id")
-        });
+        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.revision_model_id);
         let items = self.provider_revision_models_from_rows(rows, None).await?;
         Ok(ConfigurationPage { items, next_cursor })
     }
 
     async fn provider_revision_models_from_rows(
         &self,
-        rows: Vec<PgRow>,
+        rows: Vec<ProviderRevisionModelRow>,
         capability_limit: Option<usize>,
     ) -> Result<Vec<ProviderModelRecord>, ConfigurationError> {
         let revision_model_ids = rows
             .iter()
-            .map(|row| row.get::<Uuid, _>("revision_model_id"))
+            .map(|row| row.revision_model_id)
             .collect::<Vec<_>>();
-        let capability_rows = if revision_model_ids.is_empty() {
-            Vec::new()
-        } else if let Some(limit) = capability_limit {
-            sqlx::query(
+        let capability_rows =
+            if revision_model_ids.is_empty() {
+                Vec::new()
+            } else if let Some(limit) = capability_limit {
+                sqlx::query_as!(
+                RevisionCapabilityRow,
                 "SELECT provider_revision_model_id, operation, surface, mode, source, certified_at \
                  FROM provider_revision_capabilities \
                  WHERE provider_revision_model_id = ANY($1::uuid[]) \
                  ORDER BY provider_revision_model_id, operation, surface, mode LIMIT $2",
-            )
-            .bind(&revision_model_ids)
-            .bind(limit as i64 + 1)
+            &revision_model_ids, limit as i64 + 1)
             .fetch_all(self.pool())
             .await?
-        } else {
-            sqlx::query(
+            } else {
+                sqlx::query_as!(
+                RevisionCapabilityRow,
                 "SELECT provider_revision_model_id, operation, surface, mode, source, certified_at \
                  FROM provider_revision_capabilities \
                  WHERE provider_revision_model_id = ANY($1::uuid[]) \
                  ORDER BY provider_revision_model_id, operation, surface, mode",
-            )
-            .bind(&revision_model_ids)
+            &revision_model_ids)
             .fetch_all(self.pool())
             .await?
-        };
+            };
         if let Some(limit) = capability_limit {
             enforce_provider_revision_diff_limit(
                 capability_rows.len(),
@@ -184,21 +192,22 @@ impl PgStore {
         }
         let mut capabilities = BTreeMap::<Uuid, Vec<CapabilityRecord>>::new();
         for row in capability_rows {
+            let (provider_revision_model_id, capability) = row.split();
             capabilities
-                .entry(row.get("provider_revision_model_id"))
+                .entry(provider_revision_model_id)
                 .or_default()
-                .push(capability_from_row(&row)?);
+                .push(capability_from_row(capability)?);
         }
         Ok(rows
             .into_iter()
             .map(|row| {
-                let revision_model_id = row.get("revision_model_id");
+                let revision_model_id = row.revision_model_id;
                 ProviderModelRecord {
-                    id: row.get("source_provider_model_id"),
-                    upstream_model: row.get("upstream_model"),
-                    display_name: row.get("display_name"),
-                    enabled: row.get("enabled"),
-                    discovered_at: row.get("discovered_at"),
+                    id: row.source_provider_model_id,
+                    upstream_model: row.upstream_model,
+                    display_name: row.display_name,
+                    enabled: row.enabled,
+                    discovered_at: row.discovered_at,
                     capabilities: capabilities.remove(&revision_model_id).unwrap_or_default(),
                 }
             })
@@ -209,13 +218,14 @@ impl PgStore {
         &self,
         revision_id: Uuid,
     ) -> Result<Vec<ProviderModelRecord>, ConfigurationError> {
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ProviderRevisionModelRow,
             "SELECT id AS revision_model_id, source_provider_model_id, upstream_model, \
                     display_name, enabled, discovered_at \
              FROM provider_revision_models WHERE provider_revision_id = $1 ORDER BY id LIMIT $2",
+            revision_id,
+            PROVIDER_REVISION_DIFF_MODEL_LIMIT as i64 + 1
         )
-        .bind(revision_id)
-        .bind(PROVIDER_REVISION_DIFF_MODEL_LIMIT as i64 + 1)
         .fetch_all(self.pool())
         .await?;
         enforce_provider_revision_diff_limit(
@@ -319,81 +329,83 @@ impl PgStore {
         {
             return Err(ConfigurationError::IdempotencyConflict);
         }
-        let provider = sqlx::query(
+        let provider = sqlx::query!(
             "SELECT etag, kind, active_credential_version_id \
              FROM providers WHERE id = $1 FOR UPDATE",
+            provider_id
         )
-        .bind(provider_id)
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(ConfigurationError::NotFound)?;
-        if provider.get::<Uuid, _>("etag") != expected_etag {
+        if provider.etag != expected_etag {
             return Err(ConfigurationError::PreconditionFailed);
         }
-        if provider.get::<String, _>("kind") != revision.kind.as_str() {
+        if provider.kind != revision.kind.as_str() {
             return Err(ConfigurationError::Invalid(
                 "a historical revision cannot change the provider connector kind".to_owned(),
             ));
         }
-        let selected_credential: Option<Uuid> = provider.get("active_credential_version_id");
+        let selected_credential: Option<Uuid> = provider.active_credential_version_id;
         let selected_credential = if let Some(credential_id) = selected_credential {
-            sqlx::query_scalar::<_, Uuid>(
+            sqlx::query_scalar!(
                 "SELECT id FROM provider_credential_versions \
                  WHERE id = $1 AND provider_id = $2 AND revoked_at IS NULL",
+                credential_id,
+                provider_id
             )
-            .bind(credential_id)
-            .bind(provider_id)
             .fetch_optional(&mut *transaction)
             .await?
         } else {
             None
         };
         let etag = Uuid::now_v7();
-        sqlx::query(
+        sqlx::query!(
             "UPDATE providers SET name = $1, endpoint = $2, cloud_region = $3, \
                     cloud_project = $4, deployment = $5, api_version = $6, auth_mode = $7, \
                     connector_ready = $8, active_credential_version_id = $9, \
                     state = 'draft'::provider_state, etag = $10, updated_at = now(), \
                     last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
              WHERE id = $11",
+            &revision.name,
+            revision.endpoint.as_deref(),
+            revision.cloud_region.as_deref(),
+            revision.cloud_project.as_deref(),
+            revision.deployment.as_deref(),
+            revision.api_version.as_deref(),
+            revision.auth_mode.as_str(),
+            revision.connector_ready,
+            selected_credential,
+            etag,
+            provider_id
         )
-        .bind(&revision.name)
-        .bind(&revision.endpoint)
-        .bind(&revision.cloud_region)
-        .bind(&revision.cloud_project)
-        .bind(&revision.deployment)
-        .bind(&revision.api_version)
-        .bind(revision.auth_mode.as_str())
-        .bind(revision.connector_ready)
-        .bind(selected_credential)
-        .bind(etag)
-        .bind(provider_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query("UPDATE provider_models SET enabled = false WHERE provider_id = $1")
-            .bind(provider_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(
+        sqlx::query!(
+            "UPDATE provider_models SET enabled = false WHERE provider_id = $1",
+            provider_id
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
             "UPDATE provider_models pm SET upstream_model = prm.upstream_model, \
                     display_name = prm.display_name, enabled = prm.enabled, \
                     discovered_at = prm.discovered_at \
              FROM provider_revision_models prm \
              WHERE prm.provider_revision_id = $1 \
                AND pm.id = prm.source_provider_model_id AND pm.provider_id = $2",
+            revision_id,
+            provider_id
         )
-        .bind(revision_id)
-        .bind(provider_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "DELETE FROM model_capabilities WHERE provider_model_id IN \
                (SELECT id FROM provider_models WHERE provider_id = $1)",
+            provider_id
         )
-        .bind(provider_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO model_capabilities \
                (provider_model_id, operation, surface, mode, source, certified_at) \
              SELECT prm.source_provider_model_id, prc.operation, prc.surface, prc.mode, \
@@ -402,8 +414,8 @@ impl PgStore {
              JOIN provider_revision_capabilities prc \
                ON prc.provider_revision_model_id = prm.id \
              WHERE prm.provider_revision_id = $1",
+            revision_id
         )
-        .bind(revision_id)
         .execute(&mut *transaction)
         .await?;
         audit_in_transaction(
@@ -430,34 +442,102 @@ impl PgStore {
     }
 }
 
-fn provider_revision_from_row(row: PgRow) -> Result<ProviderRevisionRecord, ConfigurationError> {
+#[derive(Debug, sqlx::FromRow)]
+struct ProviderRevisionRow {
+    id: Uuid,
+    provider_id: Uuid,
+    revision: i32,
+    name: String,
+    kind: String,
+    endpoint: Option<String>,
+    cloud_region: Option<String>,
+    cloud_project: Option<String>,
+    deployment: Option<String>,
+    api_version: Option<String>,
+    auth_mode: String,
+    connector_ready: bool,
+    credential_version_id: Option<Uuid>,
+    credential_version: Option<i32>,
+    source_etag: Uuid,
+    activated_by: Uuid,
+    activated_at: DateTime<Utc>,
+    model_count: i64,
+    enabled_model_count: i64,
+    capability_count: i64,
+    certified_capability_count: i64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ProviderRevisionModelRow {
+    revision_model_id: Uuid,
+    source_provider_model_id: Uuid,
+    upstream_model: String,
+    display_name: String,
+    enabled: bool,
+    discovered_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RevisionCapabilityRow {
+    provider_revision_model_id: Uuid,
+    operation: String,
+    surface: String,
+    mode: String,
+    source: String,
+    certified_at: Option<DateTime<Utc>>,
+}
+
+impl RevisionCapabilityRow {
+    fn split(self) -> (Uuid, CapabilityRow) {
+        (
+            self.provider_revision_model_id,
+            CapabilityRow {
+                operation: self.operation,
+                surface: self.surface,
+                mode: self.mode,
+                source: self.source,
+                certified_at: self.certified_at,
+            },
+        )
+    }
+}
+
+fn provider_revision_from_row(
+    row: ProviderRevisionRow,
+) -> Result<ProviderRevisionRecord, ConfigurationError> {
     Ok(ProviderRevisionRecord {
-        id: row.get("id"),
-        provider_id: row.get("provider_id"),
-        revision: row.get("revision"),
-        name: row.get("name"),
+        id: row.id,
+        provider_id: row.provider_id,
+        revision: row.revision,
+        name: row.name,
         kind: row
-            .get::<String, _>("kind")
+            .kind
             .parse()
             .map_err(|_| PersistenceError::InvalidStoredValue("provider revision kind"))?,
-        endpoint: row.get("endpoint"),
-        cloud_region: row.get("cloud_region"),
-        cloud_project: row.get("cloud_project"),
-        deployment: row.get("deployment"),
-        api_version: row.get("api_version"),
-        auth_mode: row.get::<String, _>("auth_mode").parse().map_err(|_| {
+        endpoint: row.endpoint,
+        cloud_region: row.cloud_region,
+        cloud_project: row.cloud_project,
+        deployment: row.deployment,
+        api_version: row.api_version,
+        auth_mode: row.auth_mode.parse().map_err(|_| {
             PersistenceError::InvalidStoredValue("provider revision authentication mode")
         })?,
-        connector_ready: row.get("connector_ready"),
-        credential_version_id: row.get("credential_version_id"),
-        credential_version: row.get("credential_version"),
-        source_etag: row.get("source_etag"),
-        activated_by: row.get("activated_by"),
-        activated_at: row.get("activated_at"),
-        model_count: configuration_count(&row, "model_count")?,
-        enabled_model_count: configuration_count(&row, "enabled_model_count")?,
-        capability_count: configuration_count(&row, "capability_count")?,
-        certified_capability_count: configuration_count(&row, "certified_capability_count")?,
+        connector_ready: row.connector_ready,
+        credential_version_id: row.credential_version_id,
+        credential_version: row.credential_version,
+        source_etag: row.source_etag,
+        activated_by: row.activated_by,
+        activated_at: row.activated_at,
+        model_count: checked_configuration_count(row.model_count, "model_count")?,
+        enabled_model_count: checked_configuration_count(
+            row.enabled_model_count,
+            "enabled_model_count",
+        )?,
+        capability_count: checked_configuration_count(row.capability_count, "capability_count")?,
+        certified_capability_count: checked_configuration_count(
+            row.certified_capability_count,
+            "certified_capability_count",
+        )?,
     })
 }
 
@@ -466,12 +546,12 @@ async fn ensure_provider_revision_exists(
     provider_id: Uuid,
     revision_id: Uuid,
 ) -> Result<(), ConfigurationError> {
-    let exists: bool = sqlx::query_scalar(
+    let exists: bool = sqlx::query_scalar!(
         "SELECT EXISTS (SELECT 1 FROM provider_revisions \
-         WHERE provider_id = $1 AND id = $2)",
+         WHERE provider_id = $1 AND id = $2) AS \"value!\"",
+        provider_id,
+        revision_id
     )
-    .bind(provider_id)
-    .bind(revision_id)
     .fetch_one(store.pool())
     .await?;
     exists.then_some(()).ok_or(ConfigurationError::NotFound)

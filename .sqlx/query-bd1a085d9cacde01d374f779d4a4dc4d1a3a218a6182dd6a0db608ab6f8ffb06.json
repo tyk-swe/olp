@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_media_jobs SET\n                state = $2::text::media_job_state,\n                progress_percent = CASE\n                    WHEN $3::real IS NULL THEN progress_percent\n                    WHEN progress_percent IS NULL THEN $3::real::numeric\n                    ELSE GREATEST(progress_percent, $3::real::numeric)\n                END,\n                content_available = content_available OR $4,\n                expires_at = COALESCE($5, expires_at),\n                error_class = COALESCE($6, error_class),\n                last_polled_at = $7,\n                etag = uuidv7()\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float4",
+        "Bool",
+        "Timestamptz",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bd1a085d9cacde01d374f779d4a4dc4d1a3a218a6182dd6a0db608ab6f8ffb06"
+}

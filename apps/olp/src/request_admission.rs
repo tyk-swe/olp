@@ -17,11 +17,11 @@ use axum::{
     middleware,
     response::{IntoResponse, Response},
 };
-use olp_domain::Surface;
+use olp_domain::{OperationKind, Surface};
 use olp_storage::{RequestMetadataEmitter, RequestMetadataEvent};
 
 use crate::{
-    ApiState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem,
+    GatewayState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem,
     RuntimeBundle, gateway, management_api, proxy::public_auth_source,
     router::REQUEST_BODY_TIMEOUT,
 };
@@ -77,7 +77,7 @@ tokio::task_local! {
     pub(super) static HTTP_INFERENCE_RESERVATION_HOLD: InferenceReservation;
 }
 
-pub(crate) fn pin_inference_runtime(state: &ApiState) -> Arc<RuntimeBundle> {
+pub(crate) fn pin_inference_runtime(state: &GatewayState) -> Arc<RuntimeBundle> {
     HTTP_INFERENCE_PRINCIPAL
         .try_with(|principal| Arc::clone(principal.runtime()))
         .or_else(|_| HTTP_INFERENCE_RUNTIME.try_with(Arc::clone))
@@ -111,7 +111,7 @@ struct HttpInferenceTaskContext {
 }
 
 impl HttpInferenceTaskContext {
-    fn capture(state: &ApiState) -> Self {
+    fn capture(state: &GatewayState) -> Self {
         Self {
             runtime: pin_inference_runtime(state),
             principal: HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok(),
@@ -146,7 +146,7 @@ impl HttpInferenceTaskContext {
 }
 
 pub(crate) fn spawn_http_inference_task<F, T>(
-    state: &ApiState,
+    state: &GatewayState,
     future: F,
 ) -> tokio::task::JoinHandle<T>
 where
@@ -158,7 +158,7 @@ where
 }
 
 pub(super) async fn enforce_request_limits(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     request: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> Response {
@@ -201,7 +201,7 @@ pub(super) struct LocalRequestMetadata {
     pub(super) runtime_generation_id: uuid::Uuid,
     pub(super) api_key_id: uuid::Uuid,
     pub(super) route_slug: String,
-    pub(super) operation: &'static str,
+    pub(super) operation: OperationKind,
     pub(super) surface: Surface,
     pub(super) always_emit: bool,
 }
@@ -227,9 +227,7 @@ impl LocalRequestMetadata {
             provider_id: None,
             route_slug: self.route_slug,
             upstream_model: None,
-            operation: operation
-                .parse()
-                .expect("local metadata uses a canonical operation"),
+            operation,
             surface: self.surface,
             request_started_at: self.request_started_at,
             request_completed_at: completed_at,
@@ -251,13 +249,13 @@ impl LocalRequestMetadata {
             attempts: Vec::new(),
         };
         if let Err(error) = request_metadata.emit(event) {
-            tracing::warn!(%error, operation, "local request metadata was not queued");
+            tracing::warn!(%error, operation = %operation, "local request metadata was not queued");
         }
     }
 }
 
 async fn enforce_request_limits_inner(
-    state: &ApiState,
+    state: &GatewayState,
     request: Request<axum::body::Body>,
     next: middleware::Next,
     endpoint: Option<gateway::InferenceEndpoint>,
@@ -590,13 +588,10 @@ fn is_first_owner_setup(request: &Request<Body>) -> bool {
 }
 
 async fn preauthorize_first_owner_setup(
-    state: &ApiState,
+    state: &GatewayState,
     headers: &HeaderMap,
 ) -> Result<FirstOwnerSetupAuthorized, RequestLimitRejection> {
-    let store = state
-        .store
-        .as_ref()
-        .ok_or_else(|| Problem::service_unavailable("database_not_configured"))?;
+    let store = state.store();
     if !store
         .setup_required()
         .await

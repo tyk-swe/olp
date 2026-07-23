@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO prices (pricing_revision_id, provider_kind, provider_id, model, operation, input_per_million, output_per_million, unit_price, currency) VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Bpchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b56d96d145b161943f692a13931dbef5576387a554ce5cc2f2246db10618618"
+}

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use sqlx::Row;
+use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     AcceptInvitation, AcceptedInvitation, IdentityError, InvitationCreated, InvitationRecord,
-    NewInvitation, insert_audit, parse_role,
+    NewInvitation, accounts::UserRow, insert_audit, parse_role,
 };
 
 const MAX_PAGE_SIZE: i64 = 100;
@@ -64,49 +64,42 @@ impl PgStore {
             ));
         }
         lock_identity_email(&mut transaction, &email).await?;
-        let member_exists: bool =
-            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)")
-                .bind(&email)
-                .fetch_one(&mut *transaction)
-                .await?;
+        let member_exists: bool = sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE email = $1) AS \"value!\"",
+            &email
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
         if member_exists {
             return Err(IdentityError::EmailAlreadyMember);
         }
-        let pending_exists: bool = sqlx::query_scalar(
+        let pending_exists: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM invitations WHERE email = $1 \
-             AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now())",
+             AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()) AS \"value!\"",
+            &email
         )
-        .bind(&email)
         .fetch_one(&mut *transaction)
         .await?;
         if pending_exists {
             return Err(IdentityError::PendingInvitationExists);
         }
         // Expired pending rows no longer reserve the partial unique index.
-        sqlx::query(
+        sqlx::query!(
             "UPDATE invitations SET revoked_at = now(), revoked_by = $2 \
              WHERE email = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at <= now()",
-        )
-        .bind(&email)
-        .bind(invitation.actor)
+        &email, invitation.actor)
         .execute(&mut *transaction)
         .await?;
 
         let id = Uuid::now_v7();
         let material = InvitationMaterial::generate();
-        let row = match sqlx::query(
+        let row = match sqlx::query_as!(
+            InvitationRow,
             "INSERT INTO invitations \
              (id, email, role, token_digest, invited_by, expires_at, created_at) \
-             VALUES ($1, $2, CAST($3 AS user_role), $4, $5, $6, $7) \
-             RETURNING id, email, role::text AS role, invited_by, expires_at, accepted_at, revoked_at, created_at",
-        )
-        .bind(id)
-        .bind(&email)
-        .bind(invitation.role.as_str())
-        .bind(material.token_digest().to_vec())
-        .bind(invitation.actor)
-        .bind(invitation.expires_at)
-        .bind(now)
+             VALUES ($1, $2, CAST($3::text AS user_role), $4, $5, $6, $7) \
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, created_at",
+        id, &email, invitation.role.as_str(), material.token_digest().to_vec(), invitation.actor, invitation.expires_at, now)
         .fetch_one(&mut *transaction)
         .await
         {
@@ -152,12 +145,11 @@ impl PgStore {
         limit: i64,
     ) -> Result<(Vec<InvitationRecord>, Option<Uuid>), IdentityError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
-        let rows = sqlx::query(
-            "SELECT id, email, role::text AS role, invited_by, expires_at, accepted_at, revoked_at, created_at \
+        let rows = sqlx::query_as!(
+            InvitationRow,
+            "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, created_at \
              FROM invitations WHERE ($1::uuid IS NULL OR id < $1) ORDER BY id DESC LIMIT $2",
-        )
-        .bind(cursor)
-        .bind(limit + 1)
+        cursor, limit + 1)
         .fetch_all(self.pool())
         .await?;
         let invitations = rows
@@ -186,13 +178,12 @@ impl PgStore {
         {
             return Err(IdentityError::IdempotencyConflict);
         }
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            InvitationRow,
             "UPDATE invitations SET revoked_at = now(), revoked_by = $2 \
              WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
-             RETURNING id, email, role::text AS role, invited_by, expires_at, accepted_at, revoked_at, created_at",
-        )
-        .bind(id)
-        .bind(actor)
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, created_at",
+        id, actor)
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(IdentityError::InvitationUnavailable)?;
@@ -234,51 +225,42 @@ impl PgStore {
             .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
         let digest = InvitationMaterial::digest_token(&acceptance.token);
         let mut transaction = self.pool().begin().await?;
-        let invitation_email: String =
-            sqlx::query_scalar("SELECT email FROM invitations WHERE token_digest = $1")
-                .bind(digest.to_vec())
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or(IdentityError::InvitationUnavailable)?;
-        lock_identity_email(&mut transaction, &invitation_email).await?;
-        let invitation = sqlx::query(
-            "SELECT id, email, role::text AS role, expires_at, accepted_at, revoked_at \
-             FROM invitations WHERE token_digest = $1 FOR UPDATE",
+        let invitation_email: String = sqlx::query_scalar!(
+            "SELECT email FROM invitations WHERE token_digest = $1",
+            digest.to_vec()
         )
-        .bind(digest.to_vec())
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(IdentityError::InvitationUnavailable)?;
-        let expires_at: DateTime<Utc> = invitation.get("expires_at");
-        if invitation
-            .get::<Option<DateTime<Utc>>, _>("accepted_at")
-            .is_some()
-            || invitation
-                .get::<Option<DateTime<Utc>>, _>("revoked_at")
-                .is_some()
+        lock_identity_email(&mut transaction, &invitation_email).await?;
+        let invitation = sqlx::query!(
+            "SELECT id, email, role::text AS \"role!\", expires_at, accepted_at, revoked_at \
+             FROM invitations WHERE token_digest = $1 FOR UPDATE",
+            digest.to_vec()
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(IdentityError::InvitationUnavailable)?;
+        let expires_at: DateTime<Utc> = invitation.expires_at;
+        if invitation.accepted_at.is_some()
+            || invitation.revoked_at.is_some()
             || expires_at <= Utc::now()
         {
             return Err(IdentityError::InvitationUnavailable);
         }
-        let invitation_id: Uuid = invitation.get("id");
-        let email: String = invitation.get("email");
-        let role = parse_role(invitation.get("role"))?;
+        let invitation_id: Uuid = invitation.id;
+        let email: String = invitation.email;
+        let role = parse_role(invitation.role)?;
         let user_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
         let now = Utc::now();
-        let user_row = match sqlx::query(
+        let user_row = match sqlx::query_as!(
+            UserRow,
             "INSERT INTO users \
              (id, email, display_name, password_hash, role, active, etag, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, CAST($5 AS user_role), true, $6, $7, $7) \
-             RETURNING id, email, display_name, role::text AS role, active, etag, created_at, updated_at",
-        )
-        .bind(user_id)
-        .bind(&email)
-        .bind(acceptance.display_name.trim())
-        .bind(&acceptance.password_hash)
-        .bind(role.as_str())
-        .bind(etag)
-        .bind(now)
+             VALUES ($1, $2, $3, $4, CAST($5::text AS user_role), true, $6, $7, $7) \
+             RETURNING id, email, display_name, role::text AS \"role!\", active, etag, created_at, updated_at",
+        user_id, &email, acceptance.display_name.trim(), &acceptance.password_hash, role.as_str(), etag, now)
         .fetch_one(&mut *transaction)
         .await
         {
@@ -288,13 +270,13 @@ impl PgStore {
             }
             Err(error) => return Err(error.into()),
         };
-        let updated = sqlx::query(
+        let updated = sqlx::query!(
             "UPDATE invitations SET accepted_at = $2, accepted_by = $3 \
              WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL",
+            invitation_id,
+            now,
+            user_id
         )
-        .bind(invitation_id)
-        .bind(now)
-        .bind(user_id)
         .execute(&mut *transaction)
         .await?;
         if updated.rows_affected() != 1 {
@@ -350,16 +332,28 @@ pub(super) fn normalize_email(email: &str) -> Result<String, IdentityError> {
     Ok(email)
 }
 
-fn invitation_from_row(row: sqlx::postgres::PgRow) -> Result<InvitationRecord, IdentityError> {
+#[derive(Debug, FromRow)]
+struct InvitationRow {
+    id: Uuid,
+    email: String,
+    role: String,
+    invited_by: Uuid,
+    expires_at: DateTime<Utc>,
+    accepted_at: Option<DateTime<Utc>>,
+    revoked_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+}
+
+fn invitation_from_row(row: InvitationRow) -> Result<InvitationRecord, IdentityError> {
     Ok(InvitationRecord {
-        id: row.get("id"),
-        email: row.get("email"),
-        role: parse_role(row.get("role"))?,
-        invited_by: row.get("invited_by"),
-        expires_at: row.get("expires_at"),
-        accepted_at: row.get("accepted_at"),
-        revoked_at: row.get("revoked_at"),
-        created_at: row.get("created_at"),
+        id: row.id,
+        email: row.email,
+        role: parse_role(row.role)?,
+        invited_by: row.invited_by,
+        expires_at: row.expires_at,
+        accepted_at: row.accepted_at,
+        revoked_at: row.revoked_at,
+        created_at: row.created_at,
     })
 }
 
@@ -367,11 +361,13 @@ async fn lock_identity_email(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     email: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(email)
-        .bind(IDENTITY_EMAIL_LOCK_SEED)
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+        email,
+        IDENTITY_EMAIL_LOCK_SEED
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
     Ok(())
 }
 

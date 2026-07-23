@@ -5,7 +5,7 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -64,6 +64,7 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
         PathBuf::from("missing-console"),
     );
     state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
+    let state = state.gateway_state_for_test();
     let mut forwarded = HeaderMap::new();
     forwarded.insert(
         "x-forwarded-for",
@@ -145,7 +146,7 @@ async fn malformed_trusted_proxy_chain_is_rejected_before_public_auth_body_handl
         PathBuf::from("missing-console"),
     );
     state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
-    let response = public_router(state)
+    let response = public_router(state.management_state_for_test())
         .oneshot(
             Request::post("/api/v1/sessions")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
@@ -171,7 +172,7 @@ async fn malformed_trusted_proxy_chain_is_rejected_before_oidc_login_post_json_h
         PathBuf::from("missing-console"),
     );
     state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
-    let response = public_router(state)
+    let response = public_router(state.management_state_for_test())
         .oneshot(
             Request::post("/api/v1/oidc/login")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
@@ -210,6 +211,7 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
         .unwrap();
     state.auth_hmac_key = Some(auth_hmac_key);
     state.set_bootstrap_token_digest(digest);
+    let state = state.gateway_state_for_test();
     assert_eq!(state.verify_bootstrap_token(Some(&token)).await, Some(true));
     assert_eq!(
         state.verify_bootstrap_token(Some("not-a-token")).await,
@@ -229,13 +231,14 @@ async fn public_router_serves_console_health_and_hides_observability_paths() {
         "<!doctype html><title>OLP console</title>",
     )
     .unwrap();
-    let app = public_router(ApiState::new(
+    let state = ApiState::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
         "https://olp.example.test",
         console_dir.clone(),
-    ));
+    );
+    let app = public_router(state.management_state_for_test());
 
     let health = app
         .clone()
@@ -270,6 +273,7 @@ async fn public_router_serves_console_health_and_hides_observability_paths() {
 #[tokio::test]
 async fn observability_router_serves_cached_snapshots_and_freshness_telemetry() {
     let (state, _) = inference_state(false);
+    let state = state.observability_state_for_test();
     refresh_observability_cache(&state).await;
     let app = observability_router(state.clone());
 
@@ -313,6 +317,7 @@ async fn observability_router_serves_cached_snapshots_and_freshness_telemetry() 
 #[tokio::test]
 async fn stale_observability_snapshots_force_unready_metrics_and_readiness() {
     let (state, _) = inference_state(false);
+    let state = state.observability_state_for_test();
     refresh_observability_cache(&state).await;
     let stale_at = Instant::now() - OBSERVABILITY_SNAPSHOT_STALE_AFTER - Duration::from_secs(1);
     {
@@ -348,6 +353,7 @@ async fn stale_observability_snapshots_force_unready_metrics_and_readiness() {
 #[tokio::test]
 async fn stale_metrics_do_not_change_the_readiness_contract() {
     let (state, _) = inference_state(false);
+    let state = state.observability_state_for_test();
     refresh_observability_cache(&state).await;
     state.observability.record_metrics_failure();
 
@@ -416,28 +422,28 @@ fn local_metadata_detection_is_method_and_surface_exact() {
             .unwrap()
             .metadata()
             .map(|policy| (policy.operation, policy.fallback_route)),
-        Some(("model_list", "models"))
+        Some((OperationKind::ModelList, "models"))
     );
     assert_eq!(
         InferenceEndpoint::classify(&axum::http::Method::GET, "/gemini/v1beta/models/team-route")
             .unwrap()
             .metadata()
             .map(|policy| (policy.operation, policy.fallback_route)),
-        Some(("model_get", "models"))
+        Some((OperationKind::ModelGet, "models"))
     );
     assert_eq!(
         InferenceEndpoint::classify(&axum::http::Method::GET, "/openai/v1/videos")
             .unwrap()
             .metadata()
             .map(|policy| (policy.operation, policy.fallback_route)),
-        Some(("video_list", "videos"))
+        Some((OperationKind::VideoList, "videos"))
     );
     assert_eq!(
         InferenceEndpoint::classify(&axum::http::Method::POST, "/openai/v1/videos")
             .unwrap()
             .metadata()
             .map(|policy| (policy.operation, policy.fallback_route)),
-        Some(("video_create", "invalid-request"))
+        Some((OperationKind::VideoCreate, "invalid-request"))
     );
 }
 
@@ -452,7 +458,7 @@ async fn local_metadata_event_is_content_free_and_reconcilable() {
         runtime_generation_id: generation_id,
         api_key_id,
         route_slug: "models".to_owned(),
-        operation: "model_list",
+        operation: OperationKind::ModelList,
         surface: Surface::OpenAi,
         always_emit: true,
     }
@@ -613,13 +619,16 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
         "<!doctype html><title>OLP</title>",
     )
     .unwrap();
-    let app = public_router(ApiState::new(
-        ApiMode::Control,
-        None,
-        Arc::new(RuntimeManager::empty()),
-        "https://olp.example.test",
-        &console_dir,
-    ));
+    let app = public_router(
+        ApiState::new(
+            ApiMode::Control,
+            None,
+            Arc::new(RuntimeManager::empty()),
+            "https://olp.example.test",
+            &console_dir,
+        )
+        .management_state_for_test(),
+    );
 
     let versioned = app
         .clone()
@@ -642,13 +651,16 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
 
 #[tokio::test]
 async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
-    let app = public_router(ApiState::new(
-        ApiMode::Gateway,
-        None,
-        Arc::new(RuntimeManager::empty()),
-        "https://olp.example.test",
-        PathBuf::from("missing-console"),
-    ));
+    let app = public_router(
+        ApiState::new(
+            ApiMode::Gateway,
+            None,
+            Arc::new(RuntimeManager::empty()),
+            "https://olp.example.test",
+            PathBuf::from("missing-console"),
+        )
+        .gateway_state_for_test(),
+    );
 
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     let response = app
@@ -714,7 +726,7 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
 #[tokio::test]
 async fn authenticated_multipart_routes_reject_non_multipart_content_types() {
     let (state, key) = inference_state(false);
-    let app = public_router(state);
+    let app = public_router(state.gateway_state_for_test());
     for content_type in [None, Some("application/json")] {
         let mut request = Request::post("/openai/v1/images/edits")
             .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"));
@@ -732,13 +744,16 @@ async fn authenticated_multipart_routes_reject_non_multipart_content_types() {
 
 #[tokio::test]
 async fn management_extractor_rejections_are_rfc9457_without_query_reflection() {
-    let app = public_router(ApiState::new(
-        ApiMode::Control,
-        None,
-        Arc::new(RuntimeManager::empty()),
-        "https://olp.example.test",
-        PathBuf::from("missing-console"),
-    ));
+    let app = public_router(
+        ApiState::new(
+            ApiMode::Control,
+            None,
+            Arc::new(RuntimeManager::empty()),
+            "https://olp.example.test",
+            PathBuf::from("missing-console"),
+        )
+        .management_state_for_test(),
+    );
     for (uri, expected_instance) in [
         (
             "/api/v1/providers?limit=not-a-number&secret=must-not-reflect",
@@ -777,7 +792,7 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
         PathBuf::from("missing-console"),
     );
     state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([3; 32])));
-    let app = public_router(state);
+    let app = public_router(state.gateway_state_for_test());
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     for (path, header_name, expected_pointer) in [
         (
@@ -826,7 +841,7 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
 #[tokio::test]
 async fn every_inference_surface_and_models_endpoint_requires_its_own_well_formed_header() {
     let (state, key) = inference_state(false);
-    let app = public_router(state);
+    let app = public_router(state.gateway_state_for_test());
     let cases = [
         (
             axum::http::Method::POST,
@@ -1002,7 +1017,7 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
                 BTreeMap::new(),
             )
             .unwrap();
-        let response = public_router(state)
+        let response = public_router(state.gateway_state_for_test())
             .oneshot(
                 Request::get("/openai/v1/models")
                     .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1018,7 +1033,7 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
 #[tokio::test]
 async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior() {
     let (state, key) = inference_state(false);
-    let app = public_router(state);
+    let app = public_router(state.gateway_state_for_test());
     for (path, header_name, header_value) in [
         (
             "/openai/v1/not-enabled",
@@ -1081,7 +1096,7 @@ async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior(
 #[tokio::test]
 async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode() {
     let (state, key) = inference_state(true);
-    let app = public_router(state);
+    let app = public_router(state.gateway_state_for_test());
     for (path, header_name, header_value, content_type, body, pointer, expected) in [
         (
             "/openai/v1/chat/completions",
@@ -1155,7 +1170,7 @@ async fn malformed_inference_json_without_hard_limits_reaches_native_decoder() {
     let (mut state, key) = inference_state(false);
     let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(2);
     state.request_metadata = Some(request_metadata);
-    let response = public_router(state)
+    let response = public_router(state.gateway_state_for_test())
         .oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
@@ -1175,7 +1190,7 @@ async fn malformed_inference_json_without_hard_limits_reaches_native_decoder() {
 }
 
 async fn activate_runtime_inside_handler(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
 ) -> String {
     let pinned_before_activation = pin_inference_runtime(&state);
@@ -1224,6 +1239,7 @@ async fn activate_runtime_inside_handler(
 #[tokio::test]
 async fn inference_http_boundary_pins_one_generation_across_activation() {
     let (state, key) = inference_state(false);
+    let state = state.gateway_state_for_test();
     let original_generation = state.runtime.pin().generation.id;
     let app = Router::new()
         .route(
@@ -1323,6 +1339,7 @@ async fn detached_inference_task_holds_the_http_reservation_after_request_cancel
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
+    let state = state.gateway_state_for_test();
     let started = Arc::new(tokio::sync::Notify::new());
     let release_child = Arc::new(tokio::sync::Notify::new());
     let (completed_sender, completed) = tokio::sync::oneshot::channel();
@@ -1368,6 +1385,7 @@ async fn detached_inference_task_holds_the_http_reservation_after_request_cancel
 #[tokio::test]
 async fn spawned_inference_task_inherits_the_http_execution_context() {
     let (state, _) = inference_state(false);
+    let state = state.gateway_state_for_test();
     let pinned = state.runtime.pin();
     let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
     let principal =

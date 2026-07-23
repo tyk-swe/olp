@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET role = CAST($2::text AS user_role), security_version = security_version + 1, etag = $3, updated_at = $4 WHERE id = $1 RETURNING security_version",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "security_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "security_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f0f24af6085a86046db05deef976b1d24791b8e6609e078690a10301d7107947"
+}

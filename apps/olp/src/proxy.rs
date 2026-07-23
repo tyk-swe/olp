@@ -10,7 +10,7 @@ use std::{
 use axum::http::{HeaderMap, HeaderName};
 use olp_storage::AuthHmacKey;
 
-use crate::{ApiState, Problem};
+use crate::{GatewayState, Problem};
 
 /// A CIDR range whose peer addresses are allowed to provide a forwarding
 /// chain for public-auth source attribution. Direct clients never control the
@@ -69,7 +69,7 @@ fn forwarded_for_invalid() -> Problem {
 /// `ConnectInfo`. Embeddings that omit it fail closed rather than silently
 /// sharing a single global admission bucket.
 pub fn public_auth_source(
-    state: &ApiState,
+    state: &GatewayState,
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
 ) -> Result<String, Problem> {
@@ -117,20 +117,17 @@ pub fn public_auth_source(
 }
 
 fn resolve_auth_source<'a>(
-    state: &'a ApiState,
+    state: &'a GatewayState,
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
 ) -> Result<(String, &'a Arc<AuthHmacKey>), Problem> {
     let source = public_auth_source(state, headers, peer)?;
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(|| Problem::service_unavailable("auth_hmac_key_not_configured"))?;
+    let auth_hmac_key = &state.auth_hmac_key;
     Ok((source, auth_hmac_key))
 }
 
 pub(crate) fn public_auth_source_digest(
-    state: &ApiState,
+    state: &GatewayState,
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
 ) -> Result<[u8; 32], Problem> {
@@ -139,7 +136,7 @@ pub(crate) fn public_auth_source_digest(
 }
 
 pub(crate) fn public_auth_source_target_digests(
-    state: &ApiState,
+    state: &GatewayState,
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
     target: &str,

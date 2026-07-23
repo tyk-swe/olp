@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions session SET recent_auth_token_digest = NULL, recent_auth_purpose = NULL, recent_auth_resource_id = NULL, recent_auth_expires_at = NULL WHERE session.id = $1 AND session.user_id = $2 AND session.security_version = $3 AND session.expires_at > now() AND session.recent_auth_token_digest = $4 AND session.recent_auth_purpose = $5 AND session.recent_auth_resource_id IS NOT DISTINCT FROM $6 AND session.recent_auth_expires_at > now() AND EXISTS ( SELECT 1 FROM users WHERE users.id = session.user_id AND users.active AND users.security_version = session.security_version )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bytea",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8348c08bad1130fa3b545ea2273292e04d1e935626b9babc542394b81524ab9b"
+}

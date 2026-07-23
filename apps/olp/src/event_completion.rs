@@ -2,7 +2,7 @@ use futures::StreamExt;
 use olp_domain::{CanonicalEvent, CanonicalEventKind, ProviderEventStream, RouteSlug};
 
 use crate::{
-    ApiState,
+    GatewayState,
     gateway::{
         InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata,
         release_limits,
@@ -88,7 +88,7 @@ pub(crate) struct CompletedEventExecution {
 }
 
 struct EventRequestMetadataFinalizer {
-    state: ApiState,
+    state: GatewayState,
     execution: RoutedEventExecution,
     usage: UsageCapture,
 }
@@ -125,7 +125,7 @@ impl Drop for CompletedEventExecution {
 }
 
 pub(crate) async fn collect_event_execution(
-    state: &ApiState,
+    state: &GatewayState,
     mut execution: RoutedEventExecution,
 ) -> Result<CompletedEventExecution, InferenceError> {
     let result = collect_provider_events(

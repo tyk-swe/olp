@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "09498b6bc64ca147a258e4b5d508e7c32eec28d1bff9b3f3d4a107e86c34eef5"
+}

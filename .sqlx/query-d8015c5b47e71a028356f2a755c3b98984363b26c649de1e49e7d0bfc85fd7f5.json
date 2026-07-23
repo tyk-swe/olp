@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO provider_models (id, provider_id, upstream_model, display_name, enabled, discovered_at) VALUES ($1, $2, $3, $4, $5, now()) ON CONFLICT (provider_id, upstream_model) DO UPDATE SET display_name = EXCLUDED.display_name, enabled = EXCLUDED.enabled, discovered_at = EXCLUDED.discovered_at RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_models",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d8015c5b47e71a028356f2a755c3b98984363b26c649de1e49e7d0bfc85fd7f5"
+}

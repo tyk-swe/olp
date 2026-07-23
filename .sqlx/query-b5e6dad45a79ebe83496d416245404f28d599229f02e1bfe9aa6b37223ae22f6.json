@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) VALUES ($1, $2, 'pricing_revision.create', 'pricing_revision', $3, 'success', $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b5e6dad45a79ebe83496d416245404f28d599229f02e1bfe9aa6b37223ae22f6"
+}

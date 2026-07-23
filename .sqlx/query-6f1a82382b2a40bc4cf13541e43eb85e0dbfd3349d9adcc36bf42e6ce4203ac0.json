@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT gateway_instance, process_epoch, accepted, persisted, abandoned, updated_at, stale_candidate_at FROM request_metadata_gateway_epochs WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL AND updated_at < $1 ORDER BY updated_at, gateway_instance, process_epoch LIMIT 100 FOR UPDATE SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "gateway_instance",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "gateway_instance"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "process_epoch",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "process_epoch"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "accepted",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "accepted"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "persisted",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "persisted"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "abandoned",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "abandoned"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "stale_candidate_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_gateway_epochs",
+            "name": "stale_candidate_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "6f1a82382b2a40bc4cf13541e43eb85e0dbfd3349d9adcc36bf42e6ce4203ac0"
+}

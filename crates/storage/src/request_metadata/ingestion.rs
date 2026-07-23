@@ -3,7 +3,6 @@ use olp_domain::{OperationKind, Surface};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::{
@@ -149,7 +148,7 @@ impl PgStore {
             }
         }
         let mut transaction = self.pool().begin().await?;
-        let receipt: Option<Uuid> = sqlx::query_scalar(
+        let receipt: Option<Uuid> = sqlx::query_scalar!(
             "INSERT INTO request_metadata_event_receipts \
              (event_id, request_id, event_sha256, status, observed_at) \
              SELECT $1, $2, $3, 'pending'::request_metadata_event_receipt_status, $4 \
@@ -158,95 +157,86 @@ impl PgStore {
                AND NOT EXISTS (SELECT 1 FROM usage_facts \
                                WHERE id = $1 OR request_id = $2) \
              ON CONFLICT DO NOTHING RETURNING event_id",
+            event.event_id,
+            event.request_id,
+            event_sha256.as_slice(),
+            event.observed_at,
+            REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
+            REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES
         )
-        .bind(event.event_id)
-        .bind(event.request_id)
-        .bind(event_sha256.as_slice())
-        .bind(event.observed_at)
-        .bind(
-            i32::try_from(REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS)
-                .expect("small replay horizon"),
-        )
-        .bind(i32::try_from(REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES).expect("small future skew"))
         .fetch_optional(&mut *transaction)
         .await?;
         if receipt.is_none() {
-            let existing = sqlx::query(
+            let existing = sqlx::query!(
                 "SELECT \
                    EXISTS (SELECT 1 FROM request_metadata_event_receipts \
-                           WHERE event_id = $1 AND request_id = $2) AS receipt_exists, \
+                           WHERE event_id = $1 AND request_id = $2) AS \"receipt_exists!\", \
                    (SELECT event_sha256 FROM request_metadata_event_receipts \
                     WHERE event_id = $1 AND request_id = $2) AS event_sha256, \
                    EXISTS (SELECT 1 FROM usage_facts \
-                           WHERE id = $1 AND request_id = $2) AS fact_exists, \
+                           WHERE id = $1 AND request_id = $2) AS \"fact_exists!\", \
                    ($3 < now() - make_interval(days => $4) \
-                    OR $3 > now() + make_interval(mins => $5)) AS outside_window",
-            )
-            .bind(event.event_id)
-            .bind(event.request_id)
-            .bind(event.observed_at)
-            .bind(
-                i32::try_from(REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS)
-                    .expect("small replay horizon"),
-            )
-            .bind(
-                i32::try_from(REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES)
-                    .expect("small future skew"),
+                    OR $3 > now() + make_interval(mins => $5)) AS \"outside_window!\"",
+                event.event_id,
+                event.request_id,
+                event.observed_at,
+                REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
+                REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES,
             )
             .fetch_one(&mut *transaction)
             .await?;
-            let receipt_exists: bool = existing.get("receipt_exists");
+            let receipt_exists: bool = existing.receipt_exists;
             let exact_receipt = receipt_exists
                 && existing
-                    .get::<Option<Vec<u8>>, _>("event_sha256")
+                    .event_sha256
                     .is_none_or(|stored| stored.as_slice() == event_sha256);
-            let exact_raw_fact: bool = existing.get("fact_exists");
+            let exact_raw_fact: bool = existing.fact_exists;
             if exact_receipt || exact_raw_fact {
                 transaction.rollback().await?;
                 return Ok(RequestMetadataPersistenceOutcome::Duplicate);
             }
-            if existing.get::<bool, _>("outside_window") {
-                let rejection: Option<Uuid> = sqlx::query_scalar(
+            if existing.outside_window {
+                let rejection: Option<Uuid> = sqlx::query_scalar!(
                     "INSERT INTO request_metadata_event_receipts \
                      (event_id, request_id, event_sha256, status, observed_at) \
                      SELECT $1, $2, $3, 'rejected'::request_metadata_event_receipt_status, $4 \
                      WHERE NOT EXISTS (SELECT 1 FROM usage_facts \
                                        WHERE id = $1 OR request_id = $2) \
                      ON CONFLICT DO NOTHING RETURNING event_id",
+                    event.event_id,
+                    event.request_id,
+                    event_sha256.as_slice(),
+                    event.observed_at
                 )
-                .bind(event.event_id)
-                .bind(event.request_id)
-                .bind(event_sha256.as_slice())
-                .bind(event.observed_at)
                 .fetch_optional(&mut *transaction)
                 .await?;
                 if rejection.is_some() {
-                    sqlx::query(
+                    sqlx::query!(
                         "INSERT INTO request_metadata_ingestion_gaps \
                          (id, gateway_instance, event_count, reason, certainty, \
                           first_observed_at, last_observed_at) \
                          VALUES ($1, 'request-metadata-consumer', 0, \
                                  'request_metadata_event_outside_replay_window', \
                                  'lower_bound'::request_metadata_gap_certainty, now(), now())",
+                        Uuid::now_v7()
                     )
-                    .bind(Uuid::now_v7())
                     .execute(&mut *transaction)
                     .await?;
                     transaction.commit().await?;
                     return Ok(RequestMetadataPersistenceOutcome::RejectedOutsideReplayWindow);
                 }
-                let exact_after_race: bool = sqlx::query_scalar(
+                let exact_after_race: bool = sqlx::query_scalar!(
                     "SELECT EXISTS ( \
                        SELECT 1 FROM request_metadata_event_receipts \
                        WHERE event_id = $1 AND request_id = $2 \
                          AND (event_sha256 IS NULL OR event_sha256 = $3) \
                        UNION ALL \
                        SELECT 1 FROM usage_facts WHERE id = $1 AND request_id = $2 \
-                     )",
+                     ) AS \"value!\"",
+                    event.event_id,
+                    event.request_id,
+                    event_sha256.as_slice()
                 )
-                .bind(event.event_id)
-                .bind(event.request_id)
-                .bind(event_sha256.as_slice())
                 .fetch_one(&mut *transaction)
                 .await?;
                 transaction.rollback().await?;
@@ -259,27 +249,27 @@ impl PgStore {
             transaction.rollback().await?;
             return Err(PersistenceError::InvalidRequestMetadataEvent);
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO requests \
               (id, runtime_generation_id, api_key_id, route_slug, operation, surface, \
               started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms, \
               attempt_count, created_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8) \
              ON CONFLICT (id, started_at) DO NOTHING",
+            event.request_id,
+            event.runtime_generation_id,
+            event.api_key_id,
+            &event.route_slug,
+            event.operation.as_str(),
+            event.surface.as_str(),
+            event.request_started_at,
+            event.request_completed_at,
+            status_code,
+            event.error_class.as_deref(),
+            latency_ms,
+            first_byte_ms,
+            attempt_count
         )
-        .bind(event.request_id)
-        .bind(event.runtime_generation_id)
-        .bind(event.api_key_id)
-        .bind(&event.route_slug)
-        .bind(event.operation.as_str())
-        .bind(event.surface.as_str())
-        .bind(event.request_started_at)
-        .bind(event.request_completed_at)
-        .bind(status_code)
-        .bind(&event.error_class)
-        .bind(latency_ms)
-        .bind(first_byte_ms)
-        .bind(attempt_count)
         .execute(&mut *transaction)
         .await?;
         for attempt in &event.attempts {
@@ -290,29 +280,14 @@ impl PgStore {
                 .map(i32::try_from)
                 .transpose()
                 .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?;
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO attempts \
                  (id, request_id, request_started_at, ordinal, provider_id, upstream_model, \
                   started_at, completed_at, status_code, error_class, committed, latency_ms, first_byte_ms) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
                  ON CONFLICT (request_id, ordinal) DO NOTHING",
-            )
-            .bind(attempt.id)
-            .bind(event.request_id)
-            .bind(event.request_started_at)
-            .bind(
-                i16::try_from(attempt.ordinal)
-                    .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?,
-            )
-            .bind(attempt.provider_id)
-            .bind(&attempt.upstream_model)
-            .bind(attempt.started_at)
-            .bind(attempt.completed_at)
-            .bind(attempt.status_code.map(i32::from))
-            .bind(&attempt.error_class)
-            .bind(attempt.committed)
-            .bind(latency_ms)
-            .bind(first_byte_ms)
+            attempt.id, event.request_id, event.request_started_at, i16::try_from(attempt.ordinal)
+                    .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?,attempt.provider_id, &attempt.upstream_model, attempt.started_at, attempt.completed_at, attempt.status_code.map(i32::from), attempt.error_class.as_deref(), attempt.committed, latency_ms, first_byte_ms)
             .execute(&mut *transaction)
             .await?;
         }
@@ -327,26 +302,27 @@ impl PgStore {
 
         let provider_id = event
             .provider_id
-            .expect("validated attempted request metadata event has a provider ID");
+            .ok_or(PersistenceError::InvalidRequestMetadataEvent)?;
         let upstream_model = event
             .upstream_model
             .as_deref()
-            .expect("validated attempted request metadata event has an upstream model");
-        sqlx::query(
+            .ok_or(PersistenceError::InvalidRequestMetadataEvent)?;
+        sqlx::query!(
             "INSERT INTO usage_request_anchors (request_id, request_started_at) \
              VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            event.request_id,
+            event.request_started_at
         )
-        .bind(event.request_id)
-        .bind(event.request_started_at)
         .execute(&mut *transaction)
         .await?;
-        let pricing = sqlx::query(
-            "SELECT selected.pricing_revision_id, selected.currency, \
+        let pricing = sqlx::query!(
+            "SELECT selected.pricing_revision_id AS \"pricing_revision_id?\", \
+                    selected.currency AS \"currency?\", \
                     selected.pricing_revision_id IS NOT NULL \
                       AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
                       AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
                       AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
-                      AS pricing_complete, \
+                      AS \"pricing_complete!\", \
                     CASE WHEN $8::boolean \
                                AND selected.pricing_revision_id IS NOT NULL \
                                AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
@@ -354,8 +330,8 @@ impl PgStore {
                                AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
                          THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) \
                              + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
-                             + COALESCE($7::numeric * selected.unit_price, 0))::text \
-                         ELSE NULL END AS estimated_cost \
+                             + COALESCE($7::numeric * selected.unit_price, 0)) \
+                         ELSE NULL END AS \"estimated_cost?\" \
              FROM providers provider \
              LEFT JOIN LATERAL ( \
                  SELECT revision.id AS pricing_revision_id, price.input_per_million, \
@@ -370,25 +346,15 @@ impl PgStore {
                           revision.effective_at DESC, revision.revision DESC LIMIT 1 \
              ) selected ON true \
              WHERE provider.id = $1",
-        )
-        .bind(provider_id)
-        .bind(upstream_model)
-        .bind(event.operation.as_str())
-        .bind(event.observed_at)
-        .bind(event.input_tokens)
-        .bind(event.output_tokens)
-        .bind(event.media_units)
-        .bind(event.usage_complete)
+        provider_id, upstream_model, event.operation.as_str(), event.observed_at, event.input_tokens, event.output_tokens, event.media_units, event.usage_complete)
         .fetch_one(&mut *transaction)
         .await?;
-        let pricing_revision_id: Option<Uuid> = pricing.get("pricing_revision_id");
-        let pricing_complete: bool = pricing.get("pricing_complete");
-        let estimated_cost: Option<String> = pricing.get("estimated_cost");
-        let currency = pricing
-            .get::<Option<String>, _>("currency")
-            .map(|value| value.trim().to_owned());
+        let pricing_revision_id: Option<Uuid> = pricing.pricing_revision_id;
+        let pricing_complete: bool = pricing.pricing_complete;
+        let estimated_cost: Option<rust_decimal::Decimal> = pricing.estimated_cost;
+        let currency = pricing.currency.map(|value| value.trim().to_owned());
         let unpriced = !pricing_complete;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO usage_facts \
              (id, request_id, request_started_at, api_key_id, provider_id, route_slug, upstream_model, operation, \
               surface, observed_at, input_tokens, output_tokens, cached_input_tokens, media_units, \
@@ -396,26 +362,7 @@ impl PgStore {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
                      $15::numeric, $16, $17, $18, $19) \
              ON CONFLICT (request_id) DO NOTHING",
-        )
-        .bind(event.event_id)
-        .bind(event.request_id)
-        .bind(event.request_started_at)
-        .bind(event.api_key_id)
-        .bind(provider_id)
-        .bind(&event.route_slug)
-        .bind(upstream_model)
-        .bind(event.operation.as_str())
-        .bind(event.surface.as_str())
-        .bind(event.observed_at)
-        .bind(event.input_tokens)
-        .bind(event.output_tokens)
-        .bind(event.cached_input_tokens)
-        .bind(event.media_units)
-        .bind(estimated_cost)
-        .bind(unpriced)
-        .bind(event.usage_complete)
-        .bind(pricing_revision_id)
-        .bind(currency)
+        event.event_id, event.request_id, event.request_started_at, event.api_key_id, provider_id, &event.route_slug, upstream_model, event.operation.as_str(), event.surface.as_str(), event.observed_at, event.input_tokens, event.output_tokens, event.cached_input_tokens, event.media_units, estimated_cost, unpriced, event.usage_complete, pricing_revision_id, currency)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;

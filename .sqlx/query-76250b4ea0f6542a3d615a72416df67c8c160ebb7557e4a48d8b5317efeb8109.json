@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_media_jobs\n             SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),\n                 reconciliation_error = NULL, content_available = false, etag = uuidv7()\n             WHERE id = $1\n               AND lifecycle_state IN (\n                   'creating', 'create_ambiguous', 'create_cleanup_pending', 'delete_pending'\n               )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76250b4ea0f6542a3d615a72416df67c8c160ebb7557e4a48d8b5317efeb8109"
+}

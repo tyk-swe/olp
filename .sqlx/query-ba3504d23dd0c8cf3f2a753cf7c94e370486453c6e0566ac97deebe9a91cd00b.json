@@ -1,0 +1,250 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pr.id, pr.provider_id, pr.revision, pr.name, pr.kind, pr.endpoint, pr.cloud_region, pr.cloud_project, pr.deployment, pr.api_version, pr.auth_mode, pr.connector_ready, pr.credential_version_id, cv.version AS \"credential_version?\", pr.source_etag, pr.activated_by, pr.activated_at, stats.model_count AS \"model_count!\", stats.enabled_model_count AS \"enabled_model_count!\", stats.capability_count AS \"capability_count!\", stats.certified_capability_count AS \"certified_capability_count!\" FROM provider_revisions pr LEFT JOIN provider_credential_versions cv ON cv.id = pr.credential_version_id LEFT JOIN LATERAL ( SELECT COUNT(DISTINCT prm.id)::bigint AS model_count, COUNT(DISTINCT prm.id) FILTER (WHERE prm.enabled)::bigint AS enabled_model_count, COUNT(prc.provider_revision_model_id)::bigint AS capability_count, COUNT(prc.provider_revision_model_id) FILTER (WHERE prc.source = 'certified')::bigint AS certified_capability_count FROM provider_revision_models prm LEFT JOIN provider_revision_capabilities prc ON prc.provider_revision_model_id = prm.id WHERE prm.provider_revision_id = pr.id ) stats ON true WHERE pr.provider_id = $1 AND ($2::int IS NULL OR pr.revision < $2) ORDER BY pr.revision DESC LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "endpoint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "cloud_region",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "cloud_region"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "cloud_project",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "cloud_project"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "deployment",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "deployment"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "api_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "api_version"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "auth_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "auth_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "connector_ready",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "connector_ready"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "credential_version_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "credential_version_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "credential_version?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_credential_versions",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "source_etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "source_etag"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "activated_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "activated_by"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "activated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "activated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "model_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 18,
+        "name": "enabled_model_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 19,
+        "name": "capability_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 20,
+        "name": "certified_capability_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ba3504d23dd0c8cf3f2a753cf7c94e370486453c6e0566ac97deebe9a91cd00b"
+}

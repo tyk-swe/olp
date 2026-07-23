@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() WHERE id = $1 AND etag = $2 AND revoked_at IS NULL RETURNING etag",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "etag"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b17a6657ee8fc3cc8bc2eaeb2be2774467216ad76f3ea3ef6bb8b43f89481781"
+}

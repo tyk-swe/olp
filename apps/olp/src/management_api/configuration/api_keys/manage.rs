@@ -15,11 +15,11 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, WriteOnlySecret, common::RuntimeGenerationResponse, idempotency_http_response,
         if_match, require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, require_store,
+        require_read_session,
     },
 };
 
@@ -85,14 +85,15 @@ pub(crate) struct ApiKeyListResponse {
     responses((status = 200, body = ApiKeyListResponse))
 )]
 pub(crate) async fn list_api_keys(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<ApiKeyListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_api_keys(cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -110,13 +111,14 @@ pub(crate) async fn list_api_keys(
     responses((status = 200, body = ApiKeyDetailResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn get_api_key(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let key: ApiKeyDetailResponse = require_store(&state)?
+    let key: ApiKeyDetailResponse = state
+        .store()
         .get_api_key(api_key_id)
         .await
         .map_err(map_configuration_resource)?
@@ -160,7 +162,7 @@ pub(crate) struct ApiKeyMutationResponse {
     )
 )]
 pub(crate) async fn update_api_key(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<UpdateApiKeyRequest>, JsonRejection>,
@@ -173,7 +175,8 @@ pub(crate) async fn update_api_key(
         ExpirationValidation::RequireFuture(Utc::now()),
     )?
     .into_update_input();
-    let result = require_store(&state)?
+    let result = state
+        .store()
         .update_api_key(api_key_id, if_match(&headers)?, &input, principal.user_id)
         .await
         .map_err(map_configuration_resource)?;
@@ -231,7 +234,7 @@ impl fmt::Debug for RotateApiKeyResponse {
     )
 )]
 pub(crate) async fn rotate_api_key(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -248,13 +251,11 @@ pub(crate) async fn rotate_api_key(
         .master_key
         .as_deref()
         .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(|| Problem::service_unavailable("auth_hmac_key_not_configured"))?;
+    let auth_hmac_key = &state.auth_hmac_key;
     let material = auth_hmac_key.generate_api_key();
     let secret = WriteOnlySecret::new(material.expose_once().to_owned());
-    let result = require_store(&state)?
+    let result = state
+        .store()
         .rotate_api_key(
             RotateApiKeyInput {
                 id: api_key_id,

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_configurations SET encrypted_client_secret = $1, secret_nonce = $2, secret_key_version = $3 WHERE id = $4 AND secret_key_version = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Int4",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "439e45a870a3b09eae66df6684b6402ecd1914b47d5aaf690422219d32874ec8"
+}

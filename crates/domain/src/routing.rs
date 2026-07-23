@@ -10,13 +10,16 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::{
     ApiKey, CredentialVersionId, DurationMs, OperationKind, ProviderId, RouteId, RouteSlug,
     RuntimeGenerationId, Surface, TargetId, TransportMode,
 };
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     #[serde(rename = "openai")]

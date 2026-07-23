@@ -1,7 +1,7 @@
 use std::{fmt, time::Duration};
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -83,44 +83,47 @@ impl PgStore {
     }
 
     pub async fn ping(&self) -> Result<(), PersistenceError> {
-        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        sqlx::query_scalar!("SELECT 1::int AS \"value!\"")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(())
     }
 
     pub async fn setup_required(&self) -> Result<bool, PersistenceError> {
-        let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM installation)")
-            .fetch_one(&self.pool)
-            .await?;
+        let exists: bool =
+            sqlx::query_scalar!("SELECT EXISTS (SELECT 1 FROM installation) AS \"value!\"")
+                .fetch_one(&self.pool)
+                .await?;
         Ok(!exists)
     }
 
     pub async fn pending_outbox(&self, limit: i64) -> Result<Vec<OutboxRecord>, PersistenceError> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id, topic, aggregate_id, payload, created_at \
              FROM transactional_outbox WHERE published_at IS NULL \
              ORDER BY created_at LIMIT $1",
+            limit.clamp(1, 1_000)
         )
-        .bind(limit.clamp(1, 1_000))
         .fetch_all(&self.pool)
         .await?;
         Ok(rows
             .into_iter()
             .map(|row| OutboxRecord {
-                id: row.get("id"),
-                topic: row.get("topic"),
-                aggregate_id: row.get("aggregate_id"),
-                payload: row.get("payload"),
-                created_at: row.get("created_at"),
+                id: row.id,
+                topic: row.topic,
+                aggregate_id: row.aggregate_id,
+                payload: row.payload,
+                created_at: row.created_at,
             })
             .collect())
     }
 
     pub async fn mark_outbox_published(&self, id: Uuid) -> Result<bool, PersistenceError> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "UPDATE transactional_outbox SET published_at = now() \
              WHERE id = $1 AND published_at IS NULL",
+            id
         )
-        .bind(id)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
@@ -153,20 +156,20 @@ impl PgStore {
         {
             return Err(PersistenceError::InvalidRequestMetadataGap);
         }
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "INSERT INTO request_metadata_ingestion_gaps \
              (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at, \
               deduplication_key) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) \
              ON CONFLICT (deduplication_key) WHERE deduplication_key IS NOT NULL DO NOTHING",
+            Uuid::now_v7(),
+            gap.gateway_instance,
+            gap.event_count,
+            gap.reason,
+            gap.first_observed_at,
+            gap.last_observed_at,
+            deduplication_key
         )
-        .bind(Uuid::now_v7())
-        .bind(gap.gateway_instance)
-        .bind(gap.event_count)
-        .bind(gap.reason)
-        .bind(gap.first_observed_at)
-        .bind(gap.last_observed_at)
-        .bind(deduplication_key)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)

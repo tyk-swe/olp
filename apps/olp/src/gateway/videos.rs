@@ -21,7 +21,7 @@ use olp_storage::{
 };
 use tracing::error;
 
-use crate::{ApiState, InferencePrincipal, MultipartRequestAdmission};
+use crate::{GatewayState, InferencePrincipal, MultipartRequestAdmission};
 
 use super::{
     error::InferenceError,
@@ -31,14 +31,14 @@ use super::{
     media_jobs::{
         attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
         media_job_error, media_job_result, media_job_state, owned_media_job,
-        refresh_video_list_record, require_inference_store, select_video_create_target,
-        set_video_route, valid_upstream_media_job_id,
+        refresh_video_list_record, select_video_create_target, set_video_route,
+        valid_upstream_media_job_id,
     },
     multipart::parse_multipart,
 };
 
 pub(super) async fn video_create(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
@@ -64,7 +64,8 @@ pub(super) async fn video_create(
     let local_job_id = uuid::Uuid::now_v7();
     let (key, route_slug, required_target) =
         select_video_create_target(&state, &principal, &operation, local_job_id)?;
-    let reserved = require_inference_store(&state)?
+    let reserved = state
+        .store()
         .reserve_media_job(NewMediaJobReservation {
             id: local_job_id,
             runtime_generation_id: principal.runtime().generation.id.as_uuid(),
@@ -106,7 +107,7 @@ pub(super) async fn video_create(
 }
 
 async fn complete_video_create(
-    state: ApiState,
+    state: GatewayState,
     principal: InferencePrincipal,
     operation: Operation,
     reserved: MediaJobRecord,
@@ -124,7 +125,8 @@ async fn complete_video_create(
         Ok(executed) => executed,
         Err(error) => {
             if error.code == "ambiguous_upstream_result" {
-                if let Err(persistence_error) = require_inference_store(&state)?
+                if let Err(persistence_error) = state
+                    .store()
                     .mark_media_job_create_ambiguous(
                         reserved.id,
                         "upstream_create_result_ambiguous",
@@ -134,9 +136,7 @@ async fn complete_video_create(
                     error!(job_id = %reserved.id, %persistence_error, "failed to mark ambiguous video creation");
                 }
             } else {
-                match media_job_deletion_finalized(require_inference_store(&state)?, reserved.id)
-                    .await
-                {
+                match media_job_deletion_finalized(state.store(), reserved.id).await {
                     Ok(true) => {}
                     Ok(false) => {
                         state.record_media_reconciliation_gap();
@@ -155,7 +155,8 @@ async fn complete_video_create(
         CanonicalResult::VideoJob(result) => result.clone(),
         _ => {
             let failure = incompatible_result("video creation");
-            if let Err(error) = require_inference_store(&state)?
+            if let Err(error) = state
+                .store()
                 .mark_media_job_create_ambiguous(
                     reserved.id,
                     "upstream_create_response_missing_job_identity",
@@ -175,7 +176,8 @@ async fn complete_video_create(
             "provider_protocol_error",
             "The provider returned an invalid video job identity.",
         );
-        if let Err(error) = require_inference_store(&state)?
+        if let Err(error) = state
+            .store()
             .mark_media_job_create_ambiguous(
                 reserved.id,
                 "upstream_create_response_invalid_job_identity",
@@ -193,7 +195,8 @@ async fn complete_video_create(
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
-            if let Err(error) = require_inference_store(&state)?
+            if let Err(error) = state
+                .store()
                 .mark_media_job_create_cleanup_pending(
                     reserved.id,
                     &upstream_job_id,
@@ -232,7 +235,8 @@ async fn complete_video_create(
             let cleanup_intent_persisted = if identity_conflict {
                 false
             } else {
-                match require_inference_store(&state)?
+                match state
+                    .store()
                     .mark_media_job_create_cleanup_pending(
                         reserved.id,
                         &upstream_job_id,
@@ -294,9 +298,7 @@ async fn complete_video_create(
                 false
             };
             if compensation_confirmed {
-                match media_job_deletion_finalized(require_inference_store(&state)?, reserved.id)
-                    .await
-                {
+                match media_job_deletion_finalized(state.store(), reserved.id).await {
                     Ok(true) => {}
                     Ok(false) => {
                         state.record_media_reconciliation_gap();
@@ -332,7 +334,7 @@ async fn complete_video_create(
 }
 
 pub(super) async fn video_list(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
@@ -372,7 +374,8 @@ pub(super) async fn video_list(
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    let page = require_inference_store(&state)?
+    let page = state
+        .store()
         .media_jobs_after_id(
             &MediaJobFilters {
                 api_key_id: Some(key.id.as_uuid()),
@@ -407,7 +410,7 @@ pub(super) async fn video_list(
 }
 
 pub(super) async fn video_get(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
@@ -448,7 +451,8 @@ pub(super) async fn video_get(
             .map(|error| format!("{:?}", error.class).to_lowercase()),
         last_polled_at: Utc::now(),
     };
-    let updated = require_inference_store(&state)?
+    let updated = state
+        .store()
         .refresh_media_job(record.id, update)
         .await
         .map_err(media_job_error)?;
@@ -462,7 +466,7 @@ pub(super) async fn video_get(
 }
 
 pub(super) async fn video_content(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(video_id): Path<String>,
     Query(query): Query<OpenAiVideoContentQuery>,
@@ -525,13 +529,14 @@ pub(super) async fn video_content(
 }
 
 pub(super) async fn video_delete(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (_, loaded) =
         owned_media_job(&state, &principal, &video_id, OperationKind::VideoDelete).await?;
-    let record = require_inference_store(&state)?
+    let record = state
+        .store()
         .begin_media_job_deletion(loaded.id)
         .await
         .map_err(media_job_error)?;
@@ -576,7 +581,7 @@ pub(super) async fn video_delete(
         executed.mark_failure(&failure);
         return Err(failure);
     }
-    let finalized = media_job_deletion_finalized(require_inference_store(&state)?, record.id)
+    let finalized = media_job_deletion_finalized(state.store(), record.id)
         .await
         .map_err(media_job_error)?;
     if !finalized {

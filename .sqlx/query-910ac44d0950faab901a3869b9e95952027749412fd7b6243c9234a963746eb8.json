@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT created_at, id FROM async_media_jobs\n                 WHERE id = $1\n                   AND lifecycle_state = 'active'\n                   AND ($2::uuid IS NULL OR api_key_id = $2)\n                   AND (cardinality($3::text[]) = 0 OR route_slug = ANY($3::text[]))\n                   AND ($4::text IS NULL OR operation = $4)\n                   AND ($5::text IS NULL OR surface = $5)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "TextArray",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "910ac44d0950faab901a3869b9e95952027749412fd7b6243c9234a963746eb8"
+}

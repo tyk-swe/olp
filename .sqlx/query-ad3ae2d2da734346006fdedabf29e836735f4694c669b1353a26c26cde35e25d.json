@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT concat(j.id::text, '/', required.operation) AS \"value!\" FROM async_media_jobs j JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug CROSS JOIN (VALUES ('video_get'), ('video_content'), ('video_delete')) AS required(operation) WHERE j.lifecycle_state <> 'deleted' AND ( NOT EXISTS ( SELECT 1 FROM route_draft_operations rdo WHERE rdo.route_draft_id = rd.id AND rdo.operation = required.operation) OR NOT EXISTS ( SELECT 1 FROM route_draft_targets rdt JOIN provider_models pm ON pm.id = rdt.provider_model_id JOIN providers p ON p.id = pm.provider_id JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id AND prm.source_provider_model_id = pm.id AND prm.enabled JOIN provider_revision_capabilities prc ON prc.provider_revision_model_id = prm.id AND prc.operation = required.operation AND prc.surface = j.surface AND prc.mode = 'unary' AND prc.source = 'certified' WHERE rdt.route_draft_id = rd.id AND p.state <> 'disabled'::provider_state AND pm.provider_id = j.provider_id AND pm.upstream_model = j.provider_model)) ORDER BY j.created_at, j.id, required.operation LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ad3ae2d2da734346006fdedabf29e836735f4694c669b1353a26c26cde35e25d"
+}

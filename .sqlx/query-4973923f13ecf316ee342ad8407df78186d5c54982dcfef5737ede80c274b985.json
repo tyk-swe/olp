@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE providers SET name = $1, endpoint = $2, cloud_region = $3, cloud_project = $4, deployment = $5, api_version = $6, auth_mode = $7, active_credential_version_id = CASE WHEN $7 IN ('adc', 'default_chain') THEN NULL ELSE active_credential_version_id END, state = 'draft'::provider_state, etag = $8, updated_at = now(), last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL WHERE id = $9 AND etag = $10 AND state <> 'disabled'::provider_state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4973923f13ecf316ee342ad8407df78186d5c54982dcfef5737ede80c274b985"
+}

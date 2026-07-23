@@ -9,7 +9,7 @@ use axum::{
 };
 use olp_domain::{Permission, Role};
 use olp_storage::{
-    AccessError, ConfigurationError, IdempotencyOutcome, IdentityError, PersistenceError, PgStore,
+    AccessError, ConfigurationError, IdempotencyOutcome, IdentityError, PersistenceError,
     RecentAuthMaterial, SessionMaterial, SessionPrincipal,
 };
 use serde::{Deserialize, Serialize, Serializer};
@@ -19,7 +19,7 @@ use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::{
-    ApiState, FieldErrors, Problem,
+    FieldErrors, ManagementState, Problem,
     request_cookies::{CSRF_COOKIE, RequestCookies, SESSION_COOKIE},
 };
 
@@ -215,7 +215,10 @@ fn append_static_cookie(response: &mut Response, cookie: &'static str) {
         .append(header::SET_COOKIE, HeaderValue::from_static(cookie));
 }
 
-pub(crate) fn enforce_origin(state: &ApiState, headers: &HeaderMap) -> Result<(), Problem> {
+pub(crate) fn enforce_origin(
+    state: &crate::GatewayState,
+    headers: &HeaderMap,
+) -> Result<(), Problem> {
     let origin = headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
@@ -242,19 +245,13 @@ pub(crate) fn cookie<'a>(
     Ok(RequestCookies::parse(headers)?.get(expected_name))
 }
 
-pub(crate) fn require_store(state: &ApiState) -> Result<&PgStore, Problem> {
-    state
-        .store
-        .as_ref()
-        .ok_or_else(|| Problem::service_unavailable("database_not_configured"))
-}
-
 pub(crate) async fn require_read_session(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
 ) -> Result<SessionPrincipal, Problem> {
     let token = session_cookie(headers)?;
-    require_store(state)?
+    state
+        .store()
         .session_principal(token)
         .await
         .map_err(map_persistence)?
@@ -262,7 +259,7 @@ pub(crate) async fn require_read_session(
 }
 
 pub(crate) async fn require_mutation_session(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
 ) -> Result<SessionPrincipal, Problem> {
     enforce_origin(state, headers)?;

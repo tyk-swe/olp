@@ -18,6 +18,7 @@
     getProvider,
     getProviderCapabilityOptions,
     listProviderCredentials,
+    listProviderKinds,
     listProviderModelPage,
     listProviderRevisionPage,
     probeProvider,
@@ -46,6 +47,7 @@
     probeReady,
     providerEditValues,
     providerStatus,
+    requiresCredential,
     type ProviderEditValues
   } from './providerEditor';
 
@@ -57,6 +59,13 @@
     queryFn: ({ signal }) => getProvider(providerId, signal),
     enabled: Boolean(providerId)
   }));
+  const providerKinds = createQuery(() => ({
+    queryKey: ['provider-kinds'],
+    queryFn: ({ signal }) => listProviderKinds(signal)
+  }));
+  const providerSpec = $derived(
+    providerKinds.data?.find((candidate) => candidate.kind === provider.data?.kind)
+  );
   const capabilityOptions = createQuery(() => ({
     queryKey: ['provider-capability-options', provider.data?.kind ?? ''],
     queryFn: ({ signal }) => getProviderCapabilityOptions(provider.data!.kind, signal),
@@ -111,9 +120,9 @@
 
   $effect(() => {
     const value = provider.data;
-    if (!value || detailInitialized === value.etag) return;
+    if (!value || !providerSpec || detailInitialized === value.etag) return;
     detailInitialized = value.etag;
-    editValues = providerEditValues(value);
+    editValues = providerEditValues(value, providerSpec);
   });
 
   onDestroy(() => {
@@ -220,11 +229,12 @@
   }
 
   async function saveProvider(current: Provider) {
+    if (!providerSpec) return;
     await run('save', async () => {
       const updated = await updateProvider(
         current.id,
         current.etag,
-        buildUpdateProviderInput(current, editValues)
+        buildUpdateProviderInput(editValues, providerSpec)
       );
       queryClient.setQueryData(['provider', current.id], updated);
       clearCertificationResults();
@@ -348,6 +358,7 @@
 
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if providerKinds.isError}<div class="inline-problem" role="alert">Provider capabilities could not be loaded. Configuration editing is unavailable until a retry succeeds. <button class="button button-secondary" type="button" onclick={() => providerKinds.refetch()}>Retry</button></div>{/if}
 {#if provider.isPending}
   <div class="loading-state" role="status">Loading provider…</div>
 {:else if provider.isError}
@@ -361,19 +372,19 @@
       <div class="form-grid">
         <div class="form-field"><label for="detail-name">Name</label><input id="detail-name" bind:value={editValues.name} /></div>
         <div class="form-field"><label for="detail-auth">Authentication</label><input id="detail-auth" value={editValues.authMode} disabled /><small>Identity mode is immutable.</small></div>
-        {#if hasCustomEndpoint(current.kind)}<div class="form-field full"><label for="detail-endpoint">Endpoint</label><input id="detail-endpoint" bind:value={editValues.endpoint} /></div>{/if}
-        {#if hasApiVersion(current.kind)}<div class="form-field"><label for="detail-version">API version</label><input id="detail-version" bind:value={editValues.apiVersion} /></div>{/if}
-        {#if hasCloudRegion(current.kind)}<div class="form-field"><label for="detail-region">Cloud region</label><input id="detail-region" bind:value={editValues.cloudRegion} /></div>{/if}
-        {#if hasCloudProject(current.kind)}<div class="form-field"><label for="detail-project">Cloud project</label><input id="detail-project" bind:value={editValues.cloudProject} /></div>{/if}
-        {#if hasDeployment(current.kind)}<div class="form-field"><label for="detail-deployment">Cloud deployment</label><input id="detail-deployment" bind:value={editValues.deployment} /></div>{/if}
+        {#if providerSpec && hasCustomEndpoint(providerSpec)}<div class="form-field full"><label for="detail-endpoint">Endpoint</label><input id="detail-endpoint" bind:value={editValues.endpoint} /></div>{/if}
+        {#if providerSpec && hasApiVersion(providerSpec)}<div class="form-field"><label for="detail-version">API version</label><input id="detail-version" bind:value={editValues.apiVersion} /></div>{/if}
+        {#if providerSpec && hasCloudRegion(providerSpec)}<div class="form-field"><label for="detail-region">Cloud region</label><input id="detail-region" bind:value={editValues.cloudRegion} /></div>{/if}
+        {#if providerSpec && hasCloudProject(providerSpec)}<div class="form-field"><label for="detail-project">Cloud project</label><input id="detail-project" bind:value={editValues.cloudProject} /></div>{/if}
+        {#if providerSpec && hasDeployment(providerSpec)}<div class="form-field"><label for="detail-deployment">Cloud deployment</label><input id="detail-deployment" bind:value={editValues.deployment} /></div>{/if}
       </div>
       <ol class="activation-checklist compact" aria-label="Provider activation requirements"><li class:complete={capabilitiesCertified(current)}>{capabilitiesCertified(current) ? '✓' : '1'} Capabilities certified</li><li class:complete={probeReady(current)}>{probeReady(current) ? '✓' : '2'} Completed draft tested</li></ol>
-      <div class="form-actions"><button class="button button-secondary" type="button" onclick={() => saveProvider(current)} disabled={Boolean(busy)}>Save draft</button><button class="button button-secondary" type="button" onclick={() => testDetail(current)} disabled={Boolean(busy) || current.state !== 'draft' || !capabilitiesCertified(current)}>{busy === 'detail-probe' ? 'Testing completed draft…' : 'Test completed draft'}</button><button class="button button-primary" type="button" onclick={() => activateDetail(current)} disabled={Boolean(busy) || !activationReady(current)}>Activate changes</button></div>
+      <div class="form-actions"><button class="button button-secondary" type="button" onclick={() => saveProvider(current)} disabled={Boolean(busy) || !providerSpec}>Save draft</button><button class="button button-secondary" type="button" onclick={() => testDetail(current)} disabled={Boolean(busy) || current.state !== 'draft' || !capabilitiesCertified(current)}>{busy === 'detail-probe' ? 'Testing completed draft…' : 'Test completed draft'}</button><button class="button button-primary" type="button" onclick={() => activateDetail(current)} disabled={Boolean(busy) || !activationReady(current)}>Activate changes</button></div>
       {#if current.last_probe_at}<p class="audit-note">Last probe {new Date(current.last_probe_at).toLocaleString()}: {current.last_probe_status} — {current.last_probe_detail}</p>{/if}
     </section>
     <section class="card editor" aria-labelledby="credential-heading">
       <p class="eyebrow">Secrets</p><h2 id="credential-heading">Credential versions</h2><p class="muted">The API never returns secret material. Rotation selects a draft version; the runtime credential remains live until activation.</p>
-      {#if ['adc', 'default_chain'].includes(current.auth_mode)}<div class="identity-note"><strong>{current.auth_mode === 'adc' ? 'Application Default Credentials' : 'AWS default chain'}</strong><span>Identity is supplied by this deployment; there is no encrypted credential version.</span></div>{:else}<form class="credential-form" onsubmit={(event) => rotateCredential(current, event)}><label class="sr-only" for="rotation-secret">New credential</label><input id="rotation-secret" type="password" autocomplete="new-password" bind:value={credentialValue} placeholder="New credential" /><button class="button button-secondary" type="submit" disabled={!credentialValue || Boolean(busy)}>{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button></form>{/if}
+      {#if providerSpec && !requiresCredential(providerSpec, current.auth_mode)}<div class="identity-note"><strong>{providerSpec.auth_modes.find((auth) => auth.mode === current.auth_mode)?.label}</strong><span>Identity is supplied by this deployment; there is no encrypted credential version.</span></div>{:else}<form class="credential-form" onsubmit={(event) => rotateCredential(current, event)}><label class="sr-only" for="rotation-secret">New credential</label><input id="rotation-secret" type="password" autocomplete="new-password" bind:value={credentialValue} placeholder="New credential" /><button class="button button-secondary" type="submit" disabled={!credentialValue || Boolean(busy) || !providerSpec}>{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button></form>{/if}
       {#if credentials.isPending}<p role="status">Loading versions…</p>{:else}<ul class="credential-list">{#each credentials.data ?? [] as credential (credential.id)}<li><span><strong>Version {credential.version}</strong><small>{new Date(credential.created_at).toLocaleString()}</small></span><span class:success={credential.active} class:warning={credential.draft_selected && !credential.active} class:danger={Boolean(credential.revoked_at)} class="badge">{credential.revoked_at ? 'revoked' : credential.active && credential.draft_selected ? 'runtime active · draft selected' : credential.active ? 'runtime active' : credential.draft_selected ? 'pending activation' : 'retired'}</span>{#if !credential.active && !credential.draft_selected && !credential.revoked_at}<button class="button button-secondary" type="button" onclick={() => revokeCredential(current, credential)} disabled={Boolean(busy)}>Revoke</button>{/if}</li>{/each}</ul>{/if}
     </section>
   </div>

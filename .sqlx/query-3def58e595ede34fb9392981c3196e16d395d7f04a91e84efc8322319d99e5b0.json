@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM oidc_login_flow_consumptions WHERE expires_at <= now() LIMIT $3 ), deleted AS ( DELETE FROM oidc_login_flow_consumptions consumption USING expired WHERE consumption.ctid = expired.ctid ) INSERT INTO oidc_login_flow_consumptions (flow_id, expires_at, consumed_at) SELECT $1, $2, now() WHERE $2 > now() ON CONFLICT (flow_id) DO NOTHING RETURNING flow_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "flow_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_login_flow_consumptions",
+            "name": "flow_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3def58e595ede34fb9392981c3196e16d395d7f04a91e84efc8322319d99e5b0"
+}

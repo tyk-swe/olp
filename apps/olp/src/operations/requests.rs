@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit, validate_time_range};
 use crate::{
-    ApiState, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -150,7 +150,7 @@ pub(super) struct RequestDetailResponse {
     )
 )]
 pub(super) async fn list_requests(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<RequestQuery>,
 ) -> Result<Json<RequestListResponse>, Problem> {
@@ -166,7 +166,8 @@ pub(super) async fn list_requests(
         validate_time_range("started_after", after, "started_before", before)?;
     }
     let limit = page_limit(query.limit)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .requests(
             &RequestFilters {
                 route_slug: query.route,
@@ -211,13 +212,14 @@ pub(super) async fn list_requests(
     )
 )]
 pub(super) async fn get_request(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Path(request_id): Path<Uuid>,
 ) -> Result<Json<RequestDetailResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let detail = require_store(&state)?
+    let detail = state
+        .store()
         .request_detail(request_id)
         .await
         .map_err(map_operations)?;

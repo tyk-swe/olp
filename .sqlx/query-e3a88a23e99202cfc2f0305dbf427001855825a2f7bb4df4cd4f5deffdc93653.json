@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "route_slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "api_key_route_allowlist",
+            "name": "route_slug"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e3a88a23e99202cfc2f0305dbf427001855825a2f7bb4df4cd4f5deffdc93653"
+}

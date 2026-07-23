@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit};
 use crate::{
-    ApiState, FieldErrors, HealthResponse, Problem,
-    management_api::{Permission, require_permission, require_read_session, require_store},
+    FieldErrors, HealthResponse, ManagementState, Problem,
+    management_api::{Permission, require_permission, require_read_session},
 };
 
 #[utoipa::path(
@@ -27,7 +27,7 @@ use crate::{
     )
 )]
 pub(super) async fn management_readiness(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
 ) -> Result<Json<HealthResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
@@ -51,7 +51,7 @@ pub(super) struct ProviderHealthItem {
     #[schema(value_type = String, format = Uuid)]
     provider_id: Uuid,
     provider_name: String,
-    provider_kind: String,
+    provider_kind: olp_domain::ProviderKind,
     provider_state: String,
     status: String,
     last_probe_at: Option<DateTime<Utc>>,
@@ -71,7 +71,7 @@ impl From<ProviderHealthRecord> for ProviderHealthItem {
         Self {
             provider_id: record.provider_id,
             provider_name: record.provider_name,
-            provider_kind: record.provider_kind.to_string(),
+            provider_kind: record.provider_kind,
             provider_state: record.provider_state.to_string(),
             status: record.status,
             last_probe_at: record.last_probe_at,
@@ -107,7 +107,7 @@ pub(super) struct ProviderHealthResponse {
     )
 )]
 pub(super) async fn provider_health(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<ProviderHealthQuery>,
 ) -> Result<Json<ProviderHealthResponse>, Problem> {
@@ -128,7 +128,8 @@ pub(super) async fn provider_health(
         .map(Uuid::parse_str)
         .transpose()
         .map_err(|_| Problem::bad_request("invalid_cursor", "The cursor is invalid."))?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .provider_health(window_minutes, cursor, page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;

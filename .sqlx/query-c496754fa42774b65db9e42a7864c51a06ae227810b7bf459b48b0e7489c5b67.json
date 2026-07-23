@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_gateway_epochs (gateway_instance, process_epoch, started_at, accepted, persisted, dropped, abandoned, retrying, writer_closed, updated_at, gracefully_closed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $11 THEN $10::timestamptz ELSE NULL END) ON CONFLICT (gateway_instance, process_epoch) DO UPDATE SET accepted = EXCLUDED.accepted, persisted = EXCLUDED.persisted, dropped = EXCLUDED.dropped, abandoned = EXCLUDED.abandoned, retrying = EXCLUDED.retrying, writer_closed = EXCLUDED.writer_closed, updated_at = EXCLUDED.updated_at, stale_candidate_at = NULL, gracefully_closed_at = CASE WHEN $11 THEN COALESCE(request_metadata_gateway_epochs.gracefully_closed_at, $10::timestamptz) ELSE request_metadata_gateway_epochs.gracefully_closed_at END",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c496754fa42774b65db9e42a7864c51a06ae227810b7bf459b48b0e7489c5b67"
+}

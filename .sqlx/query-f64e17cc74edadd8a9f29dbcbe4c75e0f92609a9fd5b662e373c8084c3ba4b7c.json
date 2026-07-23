@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE providers SET state = 'draft'::provider_state, etag = $1, updated_at = now(), last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL WHERE id = $2 AND etag = $3 AND state = 'disabled'::provider_state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f64e17cc74edadd8a9f29dbcbe4c75e0f92609a9fd5b662e373c8084c3ba4b7c"
+}

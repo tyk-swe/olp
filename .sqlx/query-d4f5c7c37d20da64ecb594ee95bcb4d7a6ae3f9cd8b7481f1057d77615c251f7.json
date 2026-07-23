@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_ingestion_gaps (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at, deduplication_key) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (deduplication_key) WHERE deduplication_key IS NOT NULL DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d4f5c7c37d20da64ecb594ee95bcb4d7a6ae3f9cd8b7481f1057d77615c251f7"
+}

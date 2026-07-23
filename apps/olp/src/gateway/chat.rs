@@ -17,7 +17,7 @@ use olp_protocols::openai::{ChatCompletionRequest, decode_chat_completion};
 use olp_storage::{LimitLease, RequestAttemptMetadata};
 
 use crate::{
-    ApiState, InferencePrincipal,
+    GatewayState, InferencePrincipal,
     json_media::{admit_openai_chat, cleanup_admitted},
     semantic_validation::select_representable_attempts_filtered,
     streaming_response::{TerminalFrames, sse_stream},
@@ -33,7 +33,7 @@ use super::{
 };
 
 pub(super) async fn chat_completions(
-    State(state): State<ApiState>,
+    State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ChatCompletionRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
@@ -66,7 +66,7 @@ pub(super) async fn chat_completions(
                 false,
                 &UsageCapture::default(),
                 Surface::OpenAi,
-                "generation",
+                OperationKind::Generation,
             );
             return Err(failure);
         }
@@ -94,7 +94,7 @@ pub(super) async fn chat_completions(
                 false,
                 &UsageCapture::default(),
                 Surface::OpenAi,
-                "generation",
+                OperationKind::Generation,
             );
             return Err(failure);
         }
@@ -125,7 +125,7 @@ pub(super) async fn chat_completions(
             false,
             &UsageCapture::default(),
             Surface::OpenAi,
-            "generation",
+            OperationKind::Generation,
         );
         return Err(failure);
     }
@@ -174,7 +174,7 @@ pub(super) async fn chat_completions(
                 false,
                 &UsageCapture::default(),
                 Surface::OpenAi,
-                "generation",
+                OperationKind::Generation,
             );
             release_limits(&state, lease.as_ref()).await;
             return Err(failure);
@@ -228,7 +228,7 @@ pub(super) async fn chat_completions(
                 false,
                 &UsageCapture::default(),
                 Surface::OpenAi,
-                "generation",
+                OperationKind::Generation,
             );
             release_limits(&state, lease.as_ref()).await;
             return Err(failure.error);
@@ -285,7 +285,7 @@ pub(super) async fn chat_completions(
 
 #[allow(clippy::too_many_arguments)]
 fn streaming_response(
-    state: ApiState,
+    state: GatewayState,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
@@ -394,7 +394,7 @@ fn streaming_response(
             true,
             &usage,
             Surface::OpenAi,
-            "generation",
+            OperationKind::Generation,
         );
         release_limits(&state, lease.as_ref()).await;
     });
@@ -403,7 +403,7 @@ fn streaming_response(
 
 #[allow(clippy::too_many_arguments)]
 async fn unary_response(
-    state: &ApiState,
+    state: &GatewayState,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
@@ -442,7 +442,7 @@ async fn unary_response(
                         true,
                         &usage,
                         Surface::OpenAi,
-                        "generation",
+                        OperationKind::Generation,
                     );
                     return Err(failure);
                 }
@@ -470,7 +470,7 @@ async fn unary_response(
                         true,
                         &usage,
                         Surface::OpenAi,
-                        "generation",
+                        OperationKind::Generation,
                     );
                     return Err(failure);
                 }
@@ -507,7 +507,7 @@ async fn unary_response(
             true,
             &usage,
             Surface::OpenAi,
-            "generation",
+            OperationKind::Generation,
         );
         return Err(failure);
     }
@@ -531,7 +531,7 @@ async fn unary_response(
                     true,
                     &usage,
                     Surface::OpenAi,
-                    "generation",
+                    OperationKind::Generation,
                 );
                 return Err(failure);
             }
@@ -552,7 +552,7 @@ async fn unary_response(
         true,
         &usage,
         Surface::OpenAi,
-        "generation",
+        OperationKind::Generation,
     );
     Ok((StatusCode::OK, Json(response)).into_response())
 }

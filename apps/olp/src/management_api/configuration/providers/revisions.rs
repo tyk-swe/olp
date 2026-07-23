@@ -5,16 +5,17 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
+use olp_domain::{ProviderAuthMode, ProviderKind};
 use olp_storage::{ProviderRevisionDiff, ProviderRevisionRecord};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, if_match, require_idempotency_key, require_mutation_session,
-        require_permission, require_read_session, require_store,
+        require_permission, require_read_session,
     },
 };
 
@@ -29,13 +30,13 @@ pub(crate) struct ProviderRevisionResponse {
     pub provider_id: Uuid,
     pub revision: i32,
     pub name: String,
-    pub kind: String,
+    pub kind: ProviderKind,
     pub endpoint: Option<String>,
     pub cloud_region: Option<String>,
     pub cloud_project: Option<String>,
     pub deployment: Option<String>,
     pub api_version: Option<String>,
-    pub auth_mode: String,
+    pub auth_mode: ProviderAuthMode,
     pub connector_ready: bool,
     /// Historical metadata only. Restore never selects this credential.
     pub historical_credential_version: Option<i32>,
@@ -55,13 +56,13 @@ impl From<ProviderRevisionRecord> for ProviderRevisionResponse {
             provider_id: value.provider_id,
             revision: value.revision,
             name: value.name,
-            kind: value.kind.to_string(),
+            kind: value.kind,
             endpoint: value.endpoint,
             cloud_region: value.cloud_region,
             cloud_project: value.cloud_project,
             deployment: value.deployment,
             api_version: value.api_version,
-            auth_mode: value.auth_mode.to_string(),
+            auth_mode: value.auth_mode,
             connector_ready: value.connector_ready,
             historical_credential_version: value.credential_version,
             source_etag: value.source_etag,
@@ -81,7 +82,7 @@ pub(crate) struct ProviderRevisionSummaryResponse {
     pub provider_id: Uuid,
     pub revision: i32,
     pub name: String,
-    pub kind: String,
+    pub kind: ProviderKind,
     pub connector_ready: bool,
     /// Historical metadata only. Restore never selects this credential.
     pub historical_credential_version: Option<i32>,
@@ -100,7 +101,7 @@ impl From<ProviderRevisionRecord> for ProviderRevisionSummaryResponse {
             provider_id: value.provider_id,
             revision: value.revision,
             name: value.name,
-            kind: value.kind.to_string(),
+            kind: value.kind,
             connector_ready: value.connector_ready,
             historical_credential_version: value.credential_version,
             activated_by: value.activated_by,
@@ -185,7 +186,7 @@ pub(crate) struct ProviderRevisionRestoreResponse {
     )
 )]
 pub(crate) async fn list_provider_revisions(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
@@ -193,7 +194,8 @@ pub(crate) async fn list_provider_revisions(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_provider_revisions(provider_id, cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -214,14 +216,15 @@ pub(crate) async fn list_provider_revisions(
     )
 )]
 pub(crate) async fn get_provider_revision(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Json<ProviderRevisionResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
-        require_store(&state)?
+        state
+            .store()
             .get_provider_revision(provider_id, revision_id)
             .await
             .map_err(map_configuration_resource)?
@@ -245,7 +248,7 @@ pub(crate) async fn get_provider_revision(
     )
 )]
 pub(crate) async fn list_provider_revision_models(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
@@ -253,7 +256,8 @@ pub(crate) async fn list_provider_revision_models(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_provider_revision_models(provider_id, revision_id, cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -276,7 +280,7 @@ pub(crate) async fn list_provider_revision_models(
     )
 )]
 pub(crate) async fn diff_provider_revisions(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<DiffQuery>,
@@ -284,7 +288,8 @@ pub(crate) async fn diff_provider_revisions(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
-        require_store(&state)?
+        state
+            .store()
             .diff_provider_revisions(provider_id, query.from, query.to)
             .await
             .map_err(map_configuration_resource)?
@@ -310,13 +315,14 @@ pub(crate) async fn diff_provider_revisions(
     )
 )]
 pub(crate) async fn restore_provider_revision(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let restored = require_store(&state)?
+    let restored = state
+        .store()
         .restore_provider_revision_as_draft(
             provider_id,
             revision_id,

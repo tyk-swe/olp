@@ -15,7 +15,7 @@ use olp_protocols::openai::EmbeddingWireInput;
 use olp_storage::{DistributedLimiter, LimitError, LimitLease, LimitRequest};
 use serde::Deserialize;
 
-use crate::{ApiState, RuntimeBundle, gateway};
+use crate::{GatewayState, RuntimeBundle, gateway};
 
 type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
@@ -178,7 +178,7 @@ impl InferencePrincipal {
 }
 
 pub(super) fn authenticate_inference_headers(
-    state: &ApiState,
+    state: &GatewayState,
     headers: &HeaderMap,
     surface: Surface,
 ) -> Result<InferencePrincipal, crate::Problem> {
@@ -197,10 +197,7 @@ pub(super) fn authenticate_inference_headers(
         Surface::Gemini => inference_header_token(headers, "x-goog-api-key"),
     }
     .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(|| crate::Problem::service_unavailable("api_key_authentication_unavailable"))?;
+    let auth_hmac_key = &state.auth_hmac_key;
     let lookup = auth_hmac_key
         .lookup_id(token)
         .map_err(|_| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
@@ -232,7 +229,7 @@ pub(super) fn authenticate_inference_headers(
 }
 
 pub(super) async fn reserve_http_inference_limits(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     requested_tokens: i64,
 ) -> Result<Option<InferenceReservation>, gateway::InferenceError> {

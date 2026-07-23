@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_credential_versions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND provider_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2455f29b38e3754f9a473813582782d2ac340a9daf22e044412bce1f9d1a73ad"
+}

@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT state, request_fingerprint, replay_ciphertext, replay_nonce, replay_key_version FROM idempotency_records WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "idempotency_records",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "request_fingerprint",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "idempotency_records",
+            "name": "request_fingerprint"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "replay_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "idempotency_records",
+            "name": "replay_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "replay_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "idempotency_records",
+            "name": "replay_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "replay_key_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "idempotency_records",
+            "name": "replay_key_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "84fb4211d1a99f7954eced6d49e30a8cb5a10345be6f38b789e31f1904e3aca5"
+}

@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM request_metadata_event_receipts WHERE event_id = $1 AND request_id = $2) AS \"receipt_exists!\", (SELECT event_sha256 FROM request_metadata_event_receipts WHERE event_id = $1 AND request_id = $2) AS event_sha256, EXISTS (SELECT 1 FROM usage_facts WHERE id = $1 AND request_id = $2) AS \"fact_exists!\", ($3 < now() - make_interval(days => $4) OR $3 > now() + make_interval(mins => $5)) AS \"outside_window!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "receipt_exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_sha256",
+        "type_info": "Bytea",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "fact_exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "outside_window!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "efc358330f455aef8661a4a02170fe84d71ef180f1ec2ed57b71a784d097332f"
+}

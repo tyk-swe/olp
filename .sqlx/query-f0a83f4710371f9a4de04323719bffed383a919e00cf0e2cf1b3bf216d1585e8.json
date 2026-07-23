@@ -1,0 +1,195 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, p.cloud_project, p.deployment, p.api_version, p.auth_mode, p.connector_ready, p.etag, p.active_credential_version_id, ar.credential_version_id AS \"previously_activated_credential_id?\", (p.last_probe_status = 'succeeded' AND p.last_probe_at IS NOT NULL AND p.last_probe_at >= p.updated_at) AS \"probe_ready!\", ((p.auth_mode IN ('adc', 'default_chain') AND p.active_credential_version_id IS NULL) OR EXISTS ( SELECT 1 FROM provider_credential_versions cv WHERE cv.id = p.active_credential_version_id AND cv.provider_id = p.id AND cv.revoked_at IS NULL)) AS \"credential_ready!\", EXISTS (SELECT 1 FROM provider_models pm WHERE pm.provider_id = p.id AND pm.enabled) AS \"has_model!\", NOT EXISTS ( SELECT 1 FROM provider_models pm WHERE pm.provider_id = p.id AND pm.enabled AND ( NOT EXISTS (SELECT 1 FROM model_capabilities mc WHERE mc.provider_model_id = pm.id) OR EXISTS (SELECT 1 FROM model_capabilities mc WHERE mc.provider_model_id = pm.id AND mc.source <> 'certified'))) AS \"capabilities_ready!\" FROM providers p LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id WHERE p.id = $1 FOR UPDATE OF p",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "cloud_region",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "cloud_region"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "cloud_project",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "cloud_project"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "deployment",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "deployment"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "api_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "api_version"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "auth_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "auth_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "connector_ready",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "connector_ready"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "active_credential_version_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "active_credential_version_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "previously_activated_credential_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "credential_version_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "probe_ready!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 14,
+        "name": "credential_ready!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 15,
+        "name": "has_model!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 16,
+        "name": "capabilities_ready!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f0a83f4710371f9a4de04323719bffed383a919e00cf0e2cf1b3bf216d1585e8"
+}

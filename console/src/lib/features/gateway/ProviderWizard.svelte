@@ -18,6 +18,7 @@
     discoverProviderModels,
     getProvider,
     getProviderCapabilityOptions,
+    listProviderKinds,
     listProviderModelPage,
     probeProvider,
     setProviderModel,
@@ -26,7 +27,6 @@
     type Provider,
     type ProviderProbe
   } from '$lib/api/management/providers';
-  import { connectorOptions } from './providerOptions';
   import {
     activationReady,
     authOptionsFor,
@@ -43,10 +43,15 @@
     requiresCredential,
     requiresSeedModel,
     validateProviderDraft
+    , type ProviderDraft
   } from './providerEditor';
 
   const queryClient = useQueryClient();
-  let draft = $state(createProviderDraft());
+  const providerKinds = createQuery(() => ({
+    queryKey: ['provider-kinds'],
+    queryFn: ({ signal }) => listProviderKinds(signal)
+  }));
+  let draft = $state<ProviderDraft | null>(null);
   let wizardProvider = $state<Provider | null>(null);
   let wizardStep = $state(1);
   let wizardModelCursor = $state<string | undefined>();
@@ -68,17 +73,29 @@
   let notice = $state('');
   let certificationResults = $state<Record<string, CapabilityCertification>>({});
 
-  const authOptions = $derived(authOptionsFor(draft.kind));
-  const credentialRequired = $derived(requiresCredential(draft.authMode));
-  const seedModelRequired = $derived(requiresSeedModel(draft.kind));
+  const selectedSpec = $derived(
+    providerKinds.data?.find((candidate) => candidate.kind === draft?.kind)
+  );
+  const authOptions = $derived(selectedSpec ? authOptionsFor(selectedSpec) : []);
+  const credentialRequired = $derived(
+    Boolean(draft && selectedSpec && requiresCredential(selectedSpec, draft.authMode))
+  );
+  const seedModelRequired = $derived(Boolean(selectedSpec && requiresSeedModel(selectedSpec)));
 
   $effect(() => {
-    if (!authOptions.some(([value]) => value === draft.authMode)) draft.authMode = authOptions[0][0];
-    if (!credentialRequired) draft.credential = '';
+    const first = providerKinds.data?.[0];
+    if (!draft && first) draft = createProviderDraft(first);
+    const current = draft;
+    const spec = selectedSpec;
+    if (!current || !spec) return;
+    if (!authOptions.some(([value]) => value === current.authMode)) {
+      current.authMode = spec.default_auth_mode;
+    }
+    if (!credentialRequired) current.credential = '';
   });
 
   onDestroy(() => {
-    draft.credential = '';
+    if (draft) draft.credential = '';
   });
 
   function message(error: unknown) {
@@ -120,14 +137,17 @@
 
   async function createDraft(event: SubmitEvent) {
     event.preventDefault();
-    const issue = validateProviderDraft(draft);
+    if (!draft || !selectedSpec) return;
+    const current = draft;
+    const spec = selectedSpec;
+    const issue = validateProviderDraft(current, spec);
     if (issue) {
       errorMessage = issue;
       return;
     }
     await run('create', async () => {
-      const id = await createProvider(buildCreateProviderInput(draft));
-      draft.credential = '';
+      const id = await createProvider(buildCreateProviderInput(current, spec));
+      current.credential = '';
       wizardProvider = await getProvider(id);
       wizardStep = 2;
       await Promise.all([
@@ -259,15 +279,19 @@
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
-{#if wizardStep === 1}
+{#if wizardStep === 1 && providerKinds.isPending}
+  <div class="card stage" role="status">Loading provider capabilities…</div>
+{:else if wizardStep === 1 && providerKinds.isError}
+  <div class="inline-problem" role="alert">Provider capabilities could not be loaded. Retry before configuring a provider. <button class="button button-secondary" type="button" onclick={() => providerKinds.refetch()}>Retry</button></div>
+{:else if wizardStep === 1 && draft && selectedSpec}
   <form class="card editor" onsubmit={createDraft} novalidate>
     <fieldset>
       <legend>Choose a connector</legend>
       <div class="connector-grid">
-        {#each connectorOptions as option (option[0])}
-          <label class:selected={draft.kind === option[0]}>
-            <input type="radio" name="kind" value={option[0]} bind:group={draft.kind} />
-            <strong>{option[1]}</strong><small>{option[2]}</small>
+        {#each providerKinds.data ?? [] as option (option.kind)}
+          <label class:selected={draft.kind === option.kind}>
+            <input type="radio" name="kind" value={option.kind} bind:group={draft.kind} />
+            <strong>{option.label}</strong><small>{option.description}</small>
           </label>
         {/each}
       </div>
@@ -276,11 +300,11 @@
       <div class="form-field"><label for="provider-name">Provider name</label><input id="provider-name" autocomplete="off" bind:value={draft.name} placeholder="production-openai" required /></div>
       <div class="form-field"><label for="auth-mode">Authentication</label><select id="auth-mode" bind:value={draft.authMode}>{#each authOptions as option (option[0])}<option value={option[0]}>{option[1]}</option>{/each}</select></div>
       <div class="form-field"><label for="initial-model">{seedModelRequired ? 'Vertex probe model' : 'Seed model (optional)'}</label><input id="initial-model" autocomplete="off" bind:value={draft.model} placeholder={seedModelRequired ? 'publishers/google/models/gemini-2.5-pro' : 'gpt-5.4'} required={seedModelRequired} /><small>{seedModelRequired ? 'Vertex requires a publisher model because it has no global model-list operation.' : 'Used for the initial connector probe; upstream discovery follows.'}</small></div>
-      {#if hasCustomEndpoint(draft.kind)}<div class="form-field full"><label for="provider-endpoint">{draft.kind === 'azure_openai' ? 'Azure resource endpoint' : 'Compatible endpoint'}</label><input id="provider-endpoint" type="url" autocomplete="off" bind:value={draft.endpoint} placeholder={draft.kind === 'openai_compatible' ? 'https://models.example.com/v1' : 'https://resource.openai.azure.com'} required /><small>Custom endpoints must be HTTPS and pass the gateway SSRF policy.</small></div>{/if}
-      {#if hasApiVersion(draft.kind)}<div class="form-field"><label for="api-version">API version</label><input id="api-version" autocomplete="off" bind:value={draft.apiVersion} required /></div>{/if}
-      {#if hasCloudRegion(draft.kind)}<div class="form-field"><label for="cloud-region">Cloud region</label><input id="cloud-region" autocomplete="off" bind:value={draft.cloudRegion} placeholder="us-east-1" required /></div>{/if}
-      {#if hasCloudProject(draft.kind)}<div class="form-field"><label for="cloud-project">Cloud project</label><input id="cloud-project" autocomplete="off" bind:value={draft.cloudProject} placeholder="my-gcp-project" required /></div>{/if}
-      {#if hasDeployment(draft.kind)}<div class="form-field"><label for="deployment">Cloud deployment</label><input id="deployment" autocomplete="off" bind:value={draft.deployment} placeholder="Azure deployment name" required /></div>{/if}
+      {#if hasCustomEndpoint(selectedSpec)}<div class="form-field full"><label for="provider-endpoint">{draft.kind === 'azure_openai' ? 'Azure resource endpoint' : 'Compatible endpoint'}</label><input id="provider-endpoint" type="url" autocomplete="off" bind:value={draft.endpoint} placeholder={draft.kind === 'openai_compatible' ? 'https://models.example.com/v1' : 'https://resource.openai.azure.com'} required /><small>Custom endpoints must be HTTPS and pass the gateway SSRF policy.</small></div>{/if}
+      {#if hasApiVersion(selectedSpec)}<div class="form-field"><label for="api-version">API version</label><input id="api-version" autocomplete="off" bind:value={draft.apiVersion} required /></div>{/if}
+      {#if hasCloudRegion(selectedSpec)}<div class="form-field"><label for="cloud-region">Cloud region</label><input id="cloud-region" autocomplete="off" bind:value={draft.cloudRegion} placeholder="us-east-1" required /></div>{/if}
+      {#if hasCloudProject(selectedSpec)}<div class="form-field"><label for="cloud-project">Cloud project</label><input id="cloud-project" autocomplete="off" bind:value={draft.cloudProject} placeholder="my-gcp-project" required /></div>{/if}
+      {#if hasDeployment(selectedSpec)}<div class="form-field"><label for="deployment">Cloud deployment</label><input id="deployment" autocomplete="off" bind:value={draft.deployment} placeholder="Azure deployment name" required /></div>{/if}
       {#if credentialRequired}<div class="form-field full"><label for="provider-secret">Credential</label><input id="provider-secret" type="password" autocomplete="new-password" bind:value={draft.credential} required /><small>Sent once to this installation; never saved by the console or returned by the API.</small></div>{:else}<div class="identity-note full"><strong>No stored credential</strong><span>This provider uses the workload identity available to the OLP process.</span></div>{/if}
     </div>
     <div class="form-actions"><button class="button button-primary" type="submit" disabled={Boolean(busy)}>{busy === 'create' ? 'Saving securely…' : 'Save and test connection'} <NavIcon name="arrow" /></button></div>

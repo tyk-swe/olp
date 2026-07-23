@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{ApiState, Problem, management_api::common::*};
+use crate::{ManagementState, Problem, management_api::common::*};
 
 use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
 
@@ -73,7 +73,7 @@ impl fmt::Debug for CreateApiKeyResponse {
     )
 )]
 pub(crate) async fn create_api_key(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -90,10 +90,7 @@ pub(crate) async fn create_api_key(
         .master_key
         .as_deref()
         .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
-    let auth_hmac_key = state
-        .auth_hmac_key
-        .as_ref()
-        .ok_or_else(|| Problem::service_unavailable("auth_hmac_key_not_configured"))?;
+    let auth_hmac_key = &state.auth_hmac_key;
     let material = auth_hmac_key.generate_api_key();
     let secret = WriteOnlySecret(material.expose_once().to_owned());
     let record = NewApiKeyRecord {
@@ -106,7 +103,8 @@ pub(crate) async fn create_api_key(
         actor: principal.user_id,
         idempotency_key,
     };
-    let created = require_store(&state)?
+    let created = state
+        .store()
         .create_api_key_record(
             &record,
             ReplayableIdempotency::new(request_fingerprint, master_key),
@@ -147,14 +145,15 @@ pub(crate) async fn create_api_key(
     )
 )]
 pub(crate) async fn revoke_api_key(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_key_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?;
-    let revoked = require_store(&state)?
+    let revoked = state
+        .store()
         .revoke_api_key_record(
             api_key_id,
             if_match(&headers)?,

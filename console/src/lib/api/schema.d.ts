@@ -425,6 +425,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/provider-kinds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_provider_kinds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/provider-kinds/{provider_kind}/capabilities": {
         parameters: {
             query?: never;
@@ -1363,7 +1379,7 @@ export interface components {
         };
         CreateProviderRequest: {
             api_version?: string | null;
-            auth_mode?: string | null;
+            auth_mode?: null | components["schemas"]["ProviderAuthMode"];
             cloud_project?: string | null;
             cloud_region?: string | null;
             credential?: string;
@@ -1374,7 +1390,7 @@ export interface components {
              * @description `openai` uses the official endpoint; `openai_compatible` requires an
              *     explicit HTTPS endpoint and live certification of reviewed capabilities.
              */
-            kind: string;
+            kind: components["schemas"]["ProviderKind"];
             /**
              * @description Optional seed/probe model. Vertex AI requires one because its publisher
              *     model collection has no list operation; other connectors can discover
@@ -1396,6 +1412,8 @@ export interface components {
             items: components["schemas"]["CredentialResponse"][];
             next_cursor?: string | null;
         };
+        /** @enum {string} */
+        CredentialRequirement: "required" | "forbidden";
         CredentialResponse: {
             /** @description True when this credential is used by the immutable runtime revision. */
             active: boolean;
@@ -1669,8 +1687,6 @@ export interface components {
         };
         /** @enum {string} */
         PriceOperation: "generation" | "embeddings" | "token_count" | "image_generation" | "image_edit" | "image_variation" | "speech" | "transcription" | "video_create" | "video_list" | "video_get" | "video_content" | "video_delete" | "moderation" | "model_list" | "model_get";
-        /** @enum {string} */
-        PriceProviderKind: "openai" | "anthropic" | "gemini" | "vertex_ai" | "bedrock" | "azure_openai" | "openai_compatible";
         PriceRequest: {
             currency: string;
             input_per_million?: string | null;
@@ -1679,7 +1695,7 @@ export interface components {
             output_per_million?: string | null;
             /** Format: uuid */
             provider_id?: string | null;
-            provider_kind: components["schemas"]["PriceProviderKind"];
+            provider_kind: components["schemas"]["ProviderKind"];
             unit_price?: string | null;
         };
         PriceResponse: {
@@ -1690,7 +1706,7 @@ export interface components {
             output_per_million?: string | null;
             /** Format: uuid */
             provider_id?: string | null;
-            provider_kind: string;
+            provider_kind: components["schemas"]["ProviderKind"];
             unit_price?: string | null;
         };
         PricingRevisionRequest: {
@@ -1742,19 +1758,28 @@ export interface components {
             runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
             state: string;
         };
+        ProviderAuthCapabilityResponse: {
+            credential: components["schemas"]["CredentialRequirement"];
+            label: string;
+            mode: components["schemas"]["ProviderAuthMode"];
+        };
+        /** @enum {string} */
+        ProviderAuthMode: "api_key" | "adc" | "service_account" | "default_chain" | "static";
         ProviderCapabilityOptionsResponse: {
             /**
              * @description Capability tuples with a safe server-owned certification path for this
              *     provider kind. Configuration validation may support additional future tuples.
              */
             capabilities: components["schemas"]["CapabilityInput"][];
-            provider_kind: string;
+            provider_kind: components["schemas"]["ProviderKind"];
         };
+        /** @enum {string} */
+        ProviderConfigurationField: "endpoint" | "cloud_region" | "cloud_project" | "deployment" | "api_version" | "model";
         ProviderDetailResponse: {
             /** Format: int32 */
             active_revision?: number | null;
             api_version?: string | null;
-            auth_mode: string;
+            auth_mode: components["schemas"]["ProviderAuthMode"];
             /** Format: int64 */
             capability_count: number;
             /** Format: int64 */
@@ -1776,7 +1801,7 @@ export interface components {
             etag: string;
             /** Format: uuid */
             id: string;
-            kind: string;
+            kind: components["schemas"]["ProviderKind"];
             /** Format: date-time */
             last_probe_at?: string | null;
             last_probe_detail?: string | null;
@@ -1793,6 +1818,11 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        ProviderFieldCapabilityResponse: {
+            field: components["schemas"]["ProviderConfigurationField"];
+            label: string;
+            required: boolean;
+        };
         ProviderHealthItem: {
             /** Format: int64 */
             attempt_count: number;
@@ -1806,7 +1836,7 @@ export interface components {
             last_probe_status?: string | null;
             /** Format: uuid */
             provider_id: string;
-            provider_kind: string;
+            provider_kind: components["schemas"]["ProviderKind"];
             provider_name: string;
             provider_state: string;
             /** Format: int64 */
@@ -1825,6 +1855,19 @@ export interface components {
             /** Format: int32 */
             window_minutes: number;
         };
+        /** @enum {string} */
+        ProviderKind: "openai" | "anthropic" | "gemini" | "vertex_ai" | "bedrock" | "azure_openai" | "openai_compatible";
+        ProviderKindCapabilityListResponse: {
+            items: components["schemas"]["ProviderKindCapabilityResponse"][];
+        };
+        ProviderKindCapabilityResponse: {
+            auth_modes: components["schemas"]["ProviderAuthCapabilityResponse"][];
+            default_auth_mode: components["schemas"]["ProviderAuthMode"];
+            description: string;
+            fields: components["schemas"]["ProviderFieldCapabilityResponse"][];
+            kind: components["schemas"]["ProviderKind"];
+            label: string;
+        };
         ProviderListResponse: {
             items: components["schemas"]["ProviderSummaryResponse"][];
             next_cursor?: string | null;
@@ -1837,7 +1880,7 @@ export interface components {
             model: components["schemas"]["ProviderModelResponse"];
             /** Format: uuid */
             provider_id: string;
-            provider_kind: string;
+            provider_kind: components["schemas"]["ProviderKind"];
             provider_name: string;
         };
         ProviderModelListResponse: {
@@ -1870,7 +1913,7 @@ export interface components {
             etag: string;
             /** Format: uuid */
             id: string;
-            kind: string;
+            kind: components["schemas"]["ProviderKind"];
             model?: string | null;
             name: string;
             state: string;
@@ -1903,7 +1946,7 @@ export interface components {
             /** Format: uuid */
             activated_by: string;
             api_version?: string | null;
-            auth_mode: string;
+            auth_mode: components["schemas"]["ProviderAuthMode"];
             /** Format: int64 */
             capability_count: number;
             /** Format: int64 */
@@ -1922,7 +1965,7 @@ export interface components {
             historical_credential_version?: number | null;
             /** Format: uuid */
             id: string;
-            kind: string;
+            kind: components["schemas"]["ProviderKind"];
             /** Format: int64 */
             model_count: number;
             name: string;
@@ -1957,7 +2000,7 @@ export interface components {
             historical_credential_version?: number | null;
             /** Format: uuid */
             id: string;
-            kind: string;
+            kind: components["schemas"]["ProviderKind"];
             /** Format: int64 */
             model_count: number;
             name: string;
@@ -1982,7 +2025,7 @@ export interface components {
             etag: string;
             /** Format: uuid */
             id: string;
-            kind: string;
+            kind: components["schemas"]["ProviderKind"];
             /** Format: date-time */
             last_probe_at?: string | null;
             last_probe_status?: string | null;
@@ -2370,7 +2413,7 @@ export interface components {
         };
         UpdateProviderRequest: {
             api_version?: string | null;
-            auth_mode: string;
+            auth_mode: components["schemas"]["ProviderAuthMode"];
             cloud_project?: string | null;
             cloud_region?: string | null;
             deployment?: string | null;
@@ -4670,6 +4713,50 @@ export interface operations {
                 };
             };
             /** @description Insufficient role */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_provider_kinds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderKindCapabilityListResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             403: {
                 headers: {
                     [name: string]: unknown;

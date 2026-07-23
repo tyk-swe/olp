@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.slug, rr.id AS revision_id, rr.routing_id, rr.overall_timeout_ms, rr.max_attempts FROM routes r JOIN LATERAL ( SELECT id, routing_id, overall_timeout_ms, max_attempts FROM route_revisions WHERE route_id = r.id ORDER BY revision DESC LIMIT 1 ) rr ON true ORDER BY r.slug",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "routes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "routes",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "revision_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "routing_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "routing_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "overall_timeout_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "overall_timeout_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "max_attempts",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "route_revisions",
+            "name": "max_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ed7357beb809d56ce593222c1cc8c24366d7a4520c2a60dd730cced159d60a38"
+}

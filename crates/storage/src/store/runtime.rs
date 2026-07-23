@@ -1,6 +1,5 @@
 use olp_domain::RuntimeSnapshot;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::{PersistenceError, PgStore, PublishedRuntimeRelease};
@@ -26,22 +25,22 @@ impl PgStore {
             .map(i64::try_from)
             .transpose()
             .map_err(|_| PersistenceError::CorruptRelease)?;
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id, sequence, compiled_release, release_sha256, created_at \
              FROM runtime_generations \
              WHERE ($1::bigint IS NULL OR sequence > $1) \
              ORDER BY sequence DESC LIMIT $2",
+            installed_sequence,
+            i64::from(limit.clamp(1, 100))
         )
-        .bind(installed_sequence)
-        .bind(i64::from(limit.clamp(1, 100)))
         .fetch_all(&self.pool)
         .await?;
         let mut releases = Vec::with_capacity(rows.len());
         for row in rows {
-            let payload: Vec<u8> = row.get("compiled_release");
-            let stored_sha: Vec<u8> = row.get("release_sha256");
-            let generation_id: Uuid = row.get("id");
-            let sequence: i64 = row.get("sequence");
+            let payload: Vec<u8> = row.compiled_release;
+            let stored_sha: Vec<u8> = row.release_sha256;
+            let generation_id: Uuid = row.id;
+            let sequence: i64 = row.sequence;
             let actual_sha: [u8; 32] = Sha256::digest(&payload).into();
             if stored_sha.as_slice() != actual_sha
                 || verify_release_envelope(&payload, generation_id, sequence).is_err()
@@ -58,7 +57,7 @@ impl PgStore {
                 sequence,
                 payload,
                 payload_sha256: actual_sha,
-                created_at: row.get("created_at"),
+                created_at: row.created_at,
             });
         }
         Ok(releases)

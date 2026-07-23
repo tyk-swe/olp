@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH recent_requests AS MATERIALIZED (SELECT id, started_at, status_code, error_class, total_latency_ms FROM requests WHERE started_at >= now() - make_interval(mins => $1)) SELECT count(*) AS \"request_count!\", count(*) FILTER (WHERE error_class IS NULL AND status_code BETWEEN 200 AND 399) AS \"success_count!\", percentile_cont(0.95) WITHIN GROUP (ORDER BY total_latency_ms) FILTER (WHERE total_latency_ms IS NOT NULL) AS p95_latency_ms, percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms) FILTER (WHERE total_latency_ms IS NOT NULL) AS p99_latency_ms, (SELECT count(*) FROM attempts a JOIN recent_requests r ON r.id = a.request_id AND r.started_at = a.request_started_at WHERE a.error_class = 'cancelled') AS \"cancelled_attempt_count!\" FROM recent_requests",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "p95_latency_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "p99_latency_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "cancelled_attempt_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "291caaf6f6439365ec0a8dbfa7162d582ca607f40954928b8070cd8da1b6fa6c"
+}

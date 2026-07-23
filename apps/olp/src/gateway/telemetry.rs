@@ -2,18 +2,20 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use chrono::Utc;
-use olp_domain::{CanonicalEvent, CanonicalEventKind, CanonicalResult, RouteSlug, Surface};
+use olp_domain::{
+    CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
+};
 use olp_storage::{RequestAttemptMetadata, RequestMetadataEvent};
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
 use serde_json::Value;
 use tracing::error;
 
-use crate::ApiState;
+use crate::GatewayState;
 
 use super::{error::InferenceError, execution::RoutedEventExecution};
 
 pub(crate) fn emit_event_execution_metadata(
-    state: &ApiState,
+    state: &GatewayState,
     execution: &RoutedEventExecution,
     usage: &UsageCapture,
     failure: Option<&InferenceError>,
@@ -38,12 +40,12 @@ pub(crate) fn emit_event_execution_metadata(
         true,
         usage,
         execution.surface,
-        execution.operation_kind.as_str(),
+        execution.operation_kind,
     );
 }
 
 pub(super) struct UnaryRequestMetadataFinalizer {
-    pub(super) state: ApiState,
+    pub(super) state: GatewayState,
     pub(super) generation_id: uuid::Uuid,
     pub(super) api_key_id: uuid::Uuid,
     pub(super) request_id: uuid::Uuid,
@@ -55,7 +57,7 @@ pub(super) struct UnaryRequestMetadataFinalizer {
     pub(super) first_byte_ms: u64,
     pub(super) usage: UsageCapture,
     pub(super) surface: Surface,
-    pub(super) operation: &'static str,
+    pub(super) operation: OperationKind,
 }
 
 impl UnaryRequestMetadataFinalizer {
@@ -206,7 +208,7 @@ impl UsageCapture {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_request_metadata_event(
-    state: &ApiState,
+    state: &GatewayState,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
@@ -221,7 +223,7 @@ pub(super) fn emit_request_metadata_event(
     committed: bool,
     usage: &UsageCapture,
     surface: Surface,
-    operation: &'static str,
+    operation: OperationKind,
 ) {
     crate::claim_http_inference_metadata();
     if let Some(emitter) = &state.request_metadata {
@@ -247,9 +249,7 @@ pub(super) fn emit_request_metadata_event(
             provider_id,
             route_slug: route_slug.to_string(),
             upstream_model,
-            operation: operation
-                .parse()
-                .expect("request metadata uses a canonical operation"),
+            operation,
             surface,
             request_started_at,
             request_completed_at,

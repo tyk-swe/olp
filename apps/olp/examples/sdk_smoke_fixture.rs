@@ -16,8 +16,9 @@ use olp_domain::{
     RuntimeGenerationId, RuntimeSnapshot, Surface, Target, TargetId, TransportError, TransportMode,
     TransportPhase, Usage,
 };
-use olp_storage::AuthHmacKey;
+use olp_storage::{AuthHmacKey, PgStore};
 use serde::Serialize;
+use sqlx::postgres::PgPoolOptions;
 
 const ROUTE_SLUG: &str = "sdk-smoke-route";
 const UPSTREAM_MODEL: &str = "private-sdk-fixture-model";
@@ -195,8 +196,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&address).await?;
     let local_address = listener.local_addr()?;
     let origin = format!("http://{local_address}");
-    let mut state = ApiState::new(ApiMode::Gateway, None, runtime, &origin, "console");
+    // The SDK fixture exercises no persistence path, but the production
+    // gateway surface still has a mandatory storage capability. A lazy pool
+    // supplies that typed capability without adding a database service to this
+    // protocol-only fixture.
+    let store = PgStore::from_pool(
+        PgPoolOptions::new().connect_lazy("postgres://olp:olp@127.0.0.1/olp-sdk-smoke")?,
+    );
+    let mut state = ApiState::new(ApiMode::Gateway, Some(store), runtime, &origin, "console");
     state.auth_hmac_key = Some(auth_hmac_key);
+    let gateway_state = state.mode_dependencies()?.gateway().ok_or_else(|| {
+        std::io::Error::other("gateway mode did not produce gateway dependencies")
+    })?;
 
     tokio::fs::write(
         &metadata_path,
@@ -209,6 +220,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     eprintln!("SDK smoke fixture listening on {origin}");
 
-    axum::serve(listener, public_router(state)).await?;
+    axum::serve(listener, public_router(gateway_state)).await?;
     Ok(())
 }

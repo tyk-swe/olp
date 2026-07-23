@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) VALUES ($1, $2, 'session.csrf_rotate', 'session', $3, 'success', $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d85b8d3bbc4739f1bbfd81ca6bd42525b702a882bf47ca90dc7e3e4d183a6160"
+}

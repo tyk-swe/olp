@@ -1,4 +1,4 @@
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
     UsageFilters, UsageRangeCoverage,
@@ -27,6 +27,19 @@ pub struct UsageSummary {
     pub complete: bool,
 }
 
+#[derive(Debug, FromRow)]
+struct UsageSummaryRow {
+    request_count: i64,
+    input_tokens: String,
+    output_tokens: String,
+    cached_input_tokens: String,
+    media_units: String,
+    estimated_cost: Option<String>,
+    unpriced_count: i64,
+    incomplete_count: i64,
+    currency: Option<String>,
+}
+
 impl PgStore {
     pub async fn usage_summary(
         &self,
@@ -48,10 +61,13 @@ impl PgStore {
                       (SELECT btrim(currency) FROM pricing_currency WHERE singleton)) AS currency
              FROM usage_rows",
         );
-        let row = query.build().fetch_one(self.pool()).await?;
+        let row = query
+            .build_query_as::<UsageSummaryRow>()
+            .fetch_one(self.pool())
+            .await?;
         let gap = self.request_metadata_gap_evidence(filters).await?;
-        let unpriced_count = checked_u64(row.get("unpriced_count"), "unpriced count")?;
-        let incomplete_count = checked_u64(row.get("incomplete_count"), "incomplete count")?;
+        let unpriced_count = checked_u64(row.unpriced_count, "unpriced count")?;
+        let incomplete_count = checked_u64(row.incomplete_count, "incomplete count")?;
         let request_metadata_gap_events = checked_u64(gap.event_count, "gap event count")?;
         let uncertain_request_metadata_gap_count =
             checked_u64(gap.uncertain_gap_count, "uncertain gap count")?;
@@ -60,13 +76,13 @@ impl PgStore {
             .request_metadata_consumer_status(chrono::Utc::now())
             .await?;
         Ok(UsageSummary {
-            request_count: checked_u64(row.get("request_count"), "request count")?,
-            input_tokens: row.get("input_tokens"),
-            output_tokens: row.get("output_tokens"),
-            cached_input_tokens: row.get("cached_input_tokens"),
-            media_units: row.get("media_units"),
-            estimated_cost: row.get("estimated_cost"),
-            currency: trimmed_optional(row.get("currency")),
+            request_count: checked_u64(row.request_count, "request count")?,
+            input_tokens: row.input_tokens,
+            output_tokens: row.output_tokens,
+            cached_input_tokens: row.cached_input_tokens,
+            media_units: row.media_units,
+            estimated_cost: row.estimated_cost,
+            currency: trimmed_optional(row.currency),
             unpriced_count,
             incomplete_count,
             request_metadata_gap_events,

@@ -16,12 +16,12 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, WriteOnlySecret,
         common::{RuntimeGenerationResponse, idempotency_http_response},
         if_match, require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, require_store,
+        require_read_session,
     },
     provider_adapter::{provider_config, provider_credential},
 };
@@ -73,7 +73,7 @@ pub(crate) struct CredentialListResponse {
     responses((status = 200, body = CredentialListResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn list_provider_credentials(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
@@ -81,7 +81,8 @@ pub(crate) async fn list_provider_credentials(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_provider_credentials(provider_id, cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -132,7 +133,7 @@ pub(crate) struct ProviderMutationResponse {
     )
 )]
 pub(crate) async fn rotate_provider_credential(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<RotateCredentialRequest>, JsonRejection>,
@@ -154,7 +155,7 @@ pub(crate) async fn rotate_provider_credential(
             "Provide a credential no larger than 8 KiB.",
         ));
     }
-    let store = require_store(&state)?;
+    let store = state.store();
     let provider = store
         .get_provider(provider_id)
         .await
@@ -235,13 +236,14 @@ fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> R
     responses((status = 200, body = ProviderMutationResponse), (status = 409, body = Problem), (status = 412, body = Problem))
 )]
 pub(crate) async fn revoke_provider_credential(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((provider_id, credential_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let etag = require_store(&state)?
+    let etag = state
+        .store()
         .revoke_provider_credential(
             provider_id,
             credential_id,

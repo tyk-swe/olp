@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rt.id, rt.routing_id, pr.provider_id, prm.upstream_model, rt.priority, rt.weight, rt.timeout_ms FROM route_revision_targets rt JOIN provider_revision_models prm ON prm.source_provider_model_id = rt.provider_model_id JOIN provider_revisions pr ON pr.id = prm.provider_revision_id JOIN providers p ON p.id = pr.provider_id AND p.active_revision_id = pr.id WHERE rt.route_revision_id = $1 AND prm.enabled AND p.state <> 'disabled'::provider_state ORDER BY rt.position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "routing_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "routing_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revisions",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_models",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "priority",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "weight",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "weight"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "timeout_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "timeout_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "39c0fa8cc07db3b06d2aeb92d6852dc0d7713816071559c0b45cd8eb00e20be6"
+}

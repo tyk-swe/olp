@@ -31,18 +31,26 @@ and third-party Actions and container images pinned.
 - `openapi/management.json` owns the tracked management API contract and
   requires `pnpm --dir console api:generate` after changes.
 - SQL migrations in `crates/storage/migrations/` are forward-only.
+- `.sqlx/` owns the checked PostgreSQL query metadata. Static production SQL
+  uses `query!`, `query_as!`, or `query_scalar!`; dynamic filters use
+  `QueryBuilder::build_query_as` with a cohesive `FromRow` model. Manual
+  string-key `Row::get`/`try_get` decoding is not allowed.
 - `release-metadata.env` records the migration included in the last completed
   release and is the CI upgrade-rehearsal baseline.
 - Helm defaults, schema, and templates in `deploy/helm/` change together.
 
 ### Change maps
 
-- `crates/providers/src/factory.rs` is the provider lifecycle assembly site.
-  Keep caller-owned HTTP errors, AAD decryption, and mounted-file I/O outside
-  it.
-- `crates/domain/src/routing.rs` owns capability eligibility and weighted
-  rendezvous scoring. The management capability endpoint is generated from its
-  policy and filtered by the connector certification contract.
+- `crates/domain/src/provider_configuration.rs` owns provider kinds,
+  authentication choices, field applicability, defaults, and complete-candidate
+  validation. Provider factories own transport construction, not a parallel
+  capability matrix.
+- `apps/olp/src/gateway/endpoint_policy.rs` owns the inference endpoint
+  registry: method, path, surface, operation, handler, admission, routing, and
+  token-estimation association.
+- `crates/domain/src/routing.rs` owns runtime capability eligibility and
+  weighted rendezvous scoring. Connector certification filters those domain
+  capabilities before activation.
 - `crates/providers/src/http_egress.rs` owns public IP classification. Provider
   and OIDC modules own URL policy, DNS pinning, bounded bodies, and error
   mapping.
@@ -58,9 +66,10 @@ Run the full suite before requesting review:
 
 ```sh
 ./scripts/check-boundaries.sh
+./scripts/check-storage-sqlx.sh
 cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
+SQLX_OFFLINE=true cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+SQLX_OFFLINE=true cargo test --locked --workspace --all-features
 pnpm --dir console install --frozen-lockfile
 pnpm --dir console verify
 scripts/check-release-version.sh
@@ -68,4 +77,7 @@ scripts/check-supply-chain-pins.sh
 ```
 
 For database changes, run `./scripts/run-postgres-tests.sh` against PostgreSQL
-18. For deployment changes, run `scripts/verify-helm-contract.sh deploy/helm`.
+18, then run `cargo sqlx prepare --workspace --check -- --all-targets --all-features`
+against a migrated development database. Regenerate metadata without `--check`
+after an intentional query or schema change. For deployment changes, run
+`scripts/verify-helm-contract.sh deploy/helm`.

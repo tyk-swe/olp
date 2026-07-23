@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT provider_revision_model_id, operation, surface, mode, source, certified_at FROM provider_revision_capabilities WHERE provider_revision_model_id = ANY($1::uuid[]) ORDER BY provider_revision_model_id, operation, surface, mode",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_revision_model_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "provider_revision_model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "surface",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "surface"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "certified_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_capabilities",
+            "name": "certified_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8d7cfde14ae47154562556d4a1cbaf59ac75416cd8e903a6a68fa8734b61ae3b"
+}

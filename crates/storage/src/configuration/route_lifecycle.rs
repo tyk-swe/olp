@@ -1,5 +1,5 @@
 use olp_domain::RouteSlug;
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
@@ -77,29 +77,21 @@ impl PgStore {
         let routing_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
         let now = chrono::Utc::now();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO route_drafts \
              (id, routing_id, slug, state, overall_timeout_ms, max_attempts, etag, created_by, created_at, updated_at) \
              VALUES ($1, $2, $3, 'draft'::route_draft_state, $4, $5, $6, $7, $8, $8)",
-        )
-        .bind(id)
-        .bind(routing_id)
-        .bind(slug.as_str())
-        .bind(overall_timeout_ms)
-        .bind(i16::try_from(route.max_attempts).map_err(|_| {
+        id, routing_id, slug.as_str(), overall_timeout_ms, i16::try_from(route.max_attempts).map_err(|_| {
             ConfigurationError::InvalidRoute("max attempts is too large".to_owned())
-        })?)
-        .bind(etag)
-        .bind(route.actor)
-        .bind(now)
+        })?, etag, route.actor, now)
         .execute(&mut *transaction)
         .await?;
         for operation in route.operations {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO route_draft_operations (route_draft_id, operation) VALUES ($1, $2)",
+                id,
+                operation.as_str()
             )
-            .bind(id)
-            .bind(operation.as_str())
             .execute(&mut *transaction)
             .await?;
         }
@@ -112,15 +104,13 @@ impl PgStore {
                     "target weight/timeout is invalid".to_owned(),
                 ));
             }
-            let provider_model_id: Option<Uuid> = sqlx::query_scalar(
+            let provider_model_id: Option<Uuid> = sqlx::query_scalar!(
                 "SELECT prm.source_provider_model_id \
                  FROM providers p \
                  JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
                  WHERE p.id = $1 AND prm.upstream_model = $2 AND prm.enabled \
                    AND p.state <> 'disabled'::provider_state",
-            )
-            .bind(target.provider_id)
-            .bind(target.upstream_model.trim())
+            target.provider_id, target.upstream_model.trim())
             .fetch_optional(&mut *transaction)
             .await?;
             let provider_model_id = provider_model_id.ok_or_else(|| {
@@ -129,38 +119,28 @@ impl PgStore {
                     target.provider_id, target.upstream_model
                 ))
             })?;
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO route_draft_targets \
                  (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            )
-            .bind(Uuid::now_v7())
-            .bind(Uuid::now_v7())
-            .bind(id)
-            .bind(provider_model_id)
-            .bind(i32::from(target.priority))
-            .bind(i32::try_from(target.weight).map_err(|_| {
+            Uuid::now_v7(), Uuid::now_v7(), id, provider_model_id, i32::from(target.priority), i32::try_from(target.weight).map_err(|_| {
                 ConfigurationError::InvalidRoute("target weight is too large".to_owned())
-            })?)
-            .bind(i32::try_from(target.timeout_ms).map_err(|_| {
+            })?, i32::try_from(target.timeout_ms).map_err(|_| {
                 ConfigurationError::InvalidRoute("target timeout is too large".to_owned())
-            })?)
-            .bind(
-                i32::try_from(position)
-                    .map_err(|_| ConfigurationError::InvalidRoute("too many targets".to_owned()))?,
-            )
+            })?, i32::try_from(position)
+                    .map_err(|_| ConfigurationError::InvalidRoute("too many targets".to_owned()))?,)
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
              VALUES ($1, $2, 'route.create_draft', 'route_draft', $3, 'success', $4)",
+            Uuid::now_v7(),
+            route.actor,
+            id.to_string(),
+            now
         )
-        .bind(Uuid::now_v7())
-        .bind(route.actor)
-        .bind(id.to_string())
-        .bind(now)
         .execute(&mut *transaction)
         .await?;
         let created = RouteDraftCreated {
@@ -194,40 +174,39 @@ impl PgStore {
         actor: Uuid,
     ) -> Result<(Uuid, RouteSlug), ConfigurationError> {
         let mut transaction = self.pool().begin().await?;
-        let row = sqlx::query("SELECT etag, slug FROM route_drafts WHERE id = $1")
-            .bind(draft_id)
-            .fetch_optional(&mut *transaction)
-            .await?;
+        let row = sqlx::query!(
+            "SELECT etag, slug FROM route_drafts WHERE id = $1",
+            draft_id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
         let Some(row) = row else {
             return Err(ConfigurationError::RouteNotFound);
         };
-        if row.get::<Uuid, _>("etag") != expected_etag {
+        if row.etag != expected_etag {
             return Err(ConfigurationError::PreconditionFailed);
         }
         revalidate_route_draft(&mut transaction, draft_id).await?;
         let etag = Uuid::now_v7();
-        let updated = sqlx::query(
+        let updated = sqlx::query!(
             "UPDATE route_drafts SET state = 'validated'::route_draft_state, etag = $1, updated_at = now() \
              WHERE id = $2 AND etag = $3",
-        )
-        .bind(etag)
-        .bind(draft_id)
-        .bind(expected_etag)
+        etag, draft_id, expected_etag)
         .execute(&mut *transaction)
         .await?;
         if updated.rows_affected() != 1 {
             return Err(ConfigurationError::PreconditionFailed);
         }
-        let slug = RouteSlug::parse(row.get::<String, _>("slug"))
+        let slug = RouteSlug::parse(row.slug)
             .map_err(|error| ConfigurationError::InvalidRoute(error.to_string()))?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
              VALUES ($1, $2, 'route.validate_draft', 'route_draft', $3, 'success')",
+            Uuid::now_v7(),
+            actor,
+            draft_id.to_string()
         )
-        .bind(Uuid::now_v7())
-        .bind(actor)
-        .bind(draft_id.to_string())
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -254,38 +233,39 @@ impl PgStore {
         if !claim_idempotency(&mut transaction, actor, "route.activate", idempotency_key).await? {
             return Err(ConfigurationError::IdempotencyConflict);
         }
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-            .bind(draft_id.to_string())
-            .execute(&mut *transaction)
-            .await?;
-        let draft = sqlx::query(
-            "SELECT rd.slug, rd.routing_id, rd.state::text AS state, rd.etag, rd.overall_timeout_ms, \
-                    rd.max_attempts, rr.route_id AS based_route_id, rr.slug AS based_slug \
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            draft_id.to_string()
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let draft = sqlx::query!(
+            "SELECT rd.slug, rd.routing_id, rd.state::text AS \"state!\", rd.etag, rd.overall_timeout_ms, \
+                    rd.max_attempts, rr.route_id AS \"based_route_id?\", rr.slug AS \"based_slug?\" \
              FROM route_drafts rd \
              LEFT JOIN route_revisions rr ON rr.id = rd.based_on_revision_id \
              WHERE rd.id = $1 FOR UPDATE OF rd",
-        )
-        .bind(draft_id)
+        draft_id)
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(ConfigurationError::RouteNotFound)?;
-        if draft.get::<Uuid, _>("etag") != expected_etag {
+        if draft.etag != expected_etag {
             return Err(ConfigurationError::PreconditionFailed);
         }
-        if draft.get::<String, _>("state") != "validated" {
+        if draft.state != "validated" {
             return Err(ConfigurationError::RouteNotValidated);
         }
         // Media reservations are not runtime-publication mutations. Block
         // their short INSERT/UPDATE transactions while checking and
         // publishing so a job cannot appear against the old route after the
         // compatibility decision but before this activation commits.
-        sqlx::query("LOCK TABLE async_media_jobs IN SHARE MODE")
+        sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
             .execute(&mut *transaction)
             .await?;
         revalidate_route_draft(&mut transaction, draft_id).await?;
-        let slug: String = draft.get("slug");
-        let based_route_id: Option<Uuid> = draft.get("based_route_id");
-        let based_slug: Option<String> = draft.get("based_slug");
+        let slug: String = draft.slug;
+        let based_route_id: Option<Uuid> = draft.based_route_id;
+        let based_slug: Option<String> = draft.based_slug;
         let route_id = if let Some(route_id) = based_route_id {
             if based_slug.as_deref() != Some(slug.as_str()) {
                 return Err(ConfigurationError::InvalidRoute(
@@ -294,80 +274,62 @@ impl PgStore {
             }
             route_id
         } else {
-            sqlx::query(
+            sqlx::query_scalar!(
                 "INSERT INTO routes (id, slug, created_by) VALUES ($1, $2, $3) \
-                 ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id",
+                 ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id AS \"value!\"",
+                Uuid::now_v7(),
+                &slug,
+                actor
             )
-            .bind(Uuid::now_v7())
-            .bind(&slug)
-            .bind(actor)
             .fetch_one(&mut *transaction)
             .await?
-            .get("id")
         };
-        let revision: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(max(revision), 0) + 1 FROM route_revisions WHERE route_id = $1",
+        let revision: i32 = sqlx::query_scalar!(
+            "SELECT COALESCE(max(revision), 0) + 1 AS \"value!\" FROM route_revisions WHERE route_id = $1",
+            route_id
         )
-        .bind(route_id)
         .fetch_one(&mut *transaction)
         .await?;
         let revision_id = Uuid::now_v7();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO route_revisions \
              (id, route_id, routing_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, activated_by) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-        )
-        .bind(revision_id)
-        .bind(route_id)
-        .bind(draft.get::<Uuid, _>("routing_id"))
-        .bind(revision)
-        .bind(&slug)
-        .bind(draft.get::<i32, _>("overall_timeout_ms"))
-        .bind(draft.get::<i16, _>("max_attempts"))
-        .bind(draft_id)
-        .bind(actor)
+        revision_id, route_id, draft.routing_id, revision, &slug, draft.overall_timeout_ms, draft.max_attempts, draft_id, actor)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO route_revision_operations (route_revision_id, operation) \
              SELECT $1, operation FROM route_draft_operations WHERE route_draft_id = $2",
+            revision_id,
+            draft_id
         )
-        .bind(revision_id)
-        .bind(draft_id)
         .execute(&mut *transaction)
         .await?;
-        let targets = sqlx::query(
+        let targets = sqlx::query!(
             "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
              FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
+            draft_id
         )
-        .bind(draft_id)
         .fetch_all(&mut *transaction)
         .await?;
         for target in targets {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO route_revision_targets \
                  (id, routing_id, route_revision_id, provider_model_id, priority, weight, timeout_ms, position) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            )
-            .bind(Uuid::now_v7())
-            .bind(target.get::<Uuid, _>("routing_id"))
-            .bind(revision_id)
-            .bind(target.get::<Uuid, _>("provider_model_id"))
-            .bind(target.get::<i32, _>("priority"))
-            .bind(target.get::<i32, _>("weight"))
-            .bind(target.get::<i32, _>("timeout_ms"))
-            .bind(target.get::<i32, _>("position"))
+            Uuid::now_v7(), target.routing_id, revision_id, target.provider_model_id, target.priority, target.weight, target.timeout_ms, target.position)
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
              VALUES ($1, $2, 'route.activate', 'route', $3, 'success')",
+            Uuid::now_v7(),
+            actor,
+            route_id.to_string()
         )
-        .bind(Uuid::now_v7())
-        .bind(actor)
-        .bind(route_id.to_string())
         .execute(&mut *transaction)
         .await?;
         complete_idempotency(
@@ -393,10 +355,10 @@ async fn revalidate_route_draft(
     transaction: &mut Transaction<'_, Postgres>,
     draft_id: Uuid,
 ) -> Result<(), ConfigurationError> {
-    let target_count: i64 = sqlx::query_scalar(
-        "SELECT count(*)::bigint FROM route_draft_targets WHERE route_draft_id = $1",
+    let target_count: i64 = sqlx::query_scalar!(
+        "SELECT count(*)::bigint AS \"value!\" FROM route_draft_targets WHERE route_draft_id = $1",
+        draft_id
     )
-    .bind(draft_id)
     .fetch_one(&mut **transaction)
     .await?;
     if target_count == 0 {
@@ -405,8 +367,8 @@ async fn revalidate_route_draft(
         ));
     }
 
-    let unavailable: Option<String> = sqlx::query_scalar(
-        "SELECT concat(p.name, '/', pm.upstream_model) \
+    let unavailable: Option<String> = sqlx::query_scalar!(
+        "SELECT concat(p.name, '/', pm.upstream_model) AS \"value!\" \
          FROM route_draft_targets rdt \
          JOIN provider_models pm ON pm.id = rdt.provider_model_id \
          JOIN providers p ON p.id = pm.provider_id \
@@ -416,8 +378,8 @@ async fn revalidate_route_draft(
          WHERE rdt.route_draft_id = $1 \
            AND (p.state = 'disabled'::provider_state OR prm.id IS NULL OR NOT prm.enabled) \
          ORDER BY rdt.position LIMIT 1",
+        draft_id
     )
-    .bind(draft_id)
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(unavailable) = unavailable {
@@ -426,7 +388,7 @@ async fn revalidate_route_draft(
         )));
     }
 
-    let uncovered_operation: Option<String> = sqlx::query_scalar(
+    let uncovered_operation: Option<String> = sqlx::query_scalar!(
         "SELECT rdo.operation FROM route_draft_operations rdo \
          WHERE rdo.route_draft_id = $1 AND NOT EXISTS ( \
            SELECT 1 FROM route_draft_targets rdt \
@@ -441,8 +403,8 @@ async fn revalidate_route_draft(
            WHERE rdt.route_draft_id = $1 \
              AND p.state <> 'disabled'::provider_state) \
          ORDER BY rdo.operation LIMIT 1",
+        draft_id
     )
-    .bind(draft_id)
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(operation) = uncovered_operation {
@@ -451,7 +413,7 @@ async fn revalidate_route_draft(
         )));
     }
 
-    let media_job_without_target: Option<Uuid> = sqlx::query_scalar(
+    let media_job_without_target: Option<Uuid> = sqlx::query_scalar!(
         "SELECT j.id FROM async_media_jobs j \
          JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug \
          WHERE j.lifecycle_state <> 'deleted' AND NOT EXISTS ( \
@@ -461,8 +423,8 @@ async fn revalidate_route_draft(
              AND pm.provider_id = j.provider_id \
              AND pm.upstream_model = j.provider_model) \
          ORDER BY j.created_at, j.id LIMIT 1",
+        draft_id
     )
-    .bind(draft_id)
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(job_id) = media_job_without_target {
@@ -471,8 +433,8 @@ async fn revalidate_route_draft(
         )));
     }
 
-    let media_job_without_lifecycle: Option<String> = sqlx::query_scalar(
-        "SELECT concat(j.id::text, '/', required.operation) \
+    let media_job_without_lifecycle: Option<String> = sqlx::query_scalar!(
+        "SELECT concat(j.id::text, '/', required.operation) AS \"value!\" \
          FROM async_media_jobs j \
          JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug \
          CROSS JOIN (VALUES ('video_get'), ('video_content'), ('video_delete')) \
@@ -498,8 +460,8 @@ async fn revalidate_route_draft(
                AND pm.provider_id = j.provider_id \
                AND pm.upstream_model = j.provider_model)) \
          ORDER BY j.created_at, j.id, required.operation LIMIT 1",
+        draft_id
     )
-    .bind(draft_id)
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(requirement) = media_job_without_lifecycle {

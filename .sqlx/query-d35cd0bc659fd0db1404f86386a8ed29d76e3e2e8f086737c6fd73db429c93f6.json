@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) VALUES ($1, $2, 'oidc.configuration_update', 'oidc_configuration', $3, 'success', $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d35cd0bc659fd0db1404f86386a8ed29d76e3e2e8f086737c6fd73db429c93f6"
+}

@@ -28,8 +28,8 @@ use super::session::{
     consume_login_flow_cookie, reauthenticated_redirect,
 };
 use crate::{
-    ApiState, Problem,
-    management_api::{require_read_session, require_store, validate_session_cookie_ttl},
+    ManagementState, Problem,
+    management_api::{require_read_session, validate_session_cookie_ttl},
     request_cookies::RequestCookies,
 };
 
@@ -83,7 +83,7 @@ impl fmt::Debug for CallbackQuery {
     )
 )]
 pub(super) async fn callback(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     query: Result<Query<CallbackQuery>, QueryRejection>,
@@ -167,7 +167,7 @@ fn add_callback_state_cookie_names(
 }
 
 async fn callback_inner(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
     cookies: &RequestCookies<'_>,
     query: CallbackQuery,
@@ -202,7 +202,7 @@ async fn callback_inner(
     if code.is_empty() || code.len() > 4096 {
         return Err(invalid_callback());
     }
-    let store = require_store(state)?;
+    let store = state.store();
     let configuration = store.enabled_oidc_configuration().await.map_err(map_oidc)?;
     if configuration.id != flow.configuration_id {
         return Err(Problem::bad_request(
@@ -374,7 +374,7 @@ async fn callback_inner(
 }
 
 async fn require_exact_actor(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
     flow: &CallbackFlow,
 ) -> Result<SessionPrincipal, Problem> {
@@ -392,7 +392,7 @@ async fn require_exact_actor(
 }
 
 async fn consume_callback_flow(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
     cookies: &RequestCookies<'_>,
     callback_state: &OidcCallbackState,
@@ -402,7 +402,8 @@ async fn consume_callback_flow(
             .login_consumption
             .as_ref()
             .ok_or_else(Problem::internal)?;
-        require_store(state)?
+        state
+            .store()
             .consume_oidc_login_flow(consumption.flow_id, consumption.expires_at)
             .await
             .map_err(map_oidc)?;
@@ -429,7 +430,7 @@ async fn consume_callback_flow(
         .flow_id()
         .ok_or_else(super::error::invalid_callback)?;
     let principal = require_read_session(state, headers).await?;
-    let store = require_store(state)?;
+    let store = state.store();
     let flow = store
         .consume_oidc_flow(
             flow_id.as_uuid(),
@@ -489,7 +490,7 @@ async fn consume_callback_flow(
 }
 
 fn matching_login_callback_flow_from_cookies(
-    state: &ApiState,
+    state: &ManagementState,
     cookies: &RequestCookies<'_>,
     callback_state: &OidcCallbackState,
 ) -> Result<Option<CallbackFlow>, Problem> {
@@ -509,7 +510,7 @@ fn matching_login_callback_flow_from_cookies(
 
 #[cfg(test)]
 pub(super) fn matching_login_callback_flow(
-    state: &ApiState,
+    state: &ManagementState,
     headers: &HeaderMap,
     state_value: &str,
 ) -> Result<Option<CallbackFlow>, Problem> {

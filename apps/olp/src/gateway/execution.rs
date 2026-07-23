@@ -10,7 +10,7 @@ use olp_domain::{
 use olp_storage::{LimitLease, RequestAttemptMetadata};
 
 use crate::{
-    ApiState, InferencePrincipal, event_completion::collect_provider_events,
+    GatewayState, InferencePrincipal, event_completion::collect_provider_events,
     semantic_validation::select_representable_attempts_filtered,
 };
 
@@ -83,7 +83,7 @@ struct CompletedExecution {
 }
 
 async fn execute_operation(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -189,7 +189,7 @@ async fn execute_operation(
 }
 
 fn emit_early_failure(
-    state: &ApiState,
+    state: &GatewayState,
     context: &ExecutionContext,
     attempts: &[RequestAttemptMetadata],
     failure: &InferenceError,
@@ -210,12 +210,12 @@ fn emit_early_failure(
         false,
         &UsageCapture::default(),
         context.surface,
-        context.operation_kind.as_str(),
+        context.operation_kind,
     );
 }
 
 pub(super) async fn execute_event_operation(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -224,7 +224,7 @@ pub(super) async fn execute_event_operation(
 }
 
 pub(crate) async fn execute_event_operation_for_surface(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -239,7 +239,7 @@ pub(crate) async fn execute_event_operation_for_surface(
 }
 
 pub(super) async fn execute_event_operation_for_surface_inner(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -322,7 +322,7 @@ impl Drop for RoutedUnaryResult {
 }
 
 pub(super) async fn execute_unary_result(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
 ) -> Result<RoutedUnaryResult, InferenceError> {
@@ -330,7 +330,7 @@ pub(super) async fn execute_unary_result(
 }
 
 pub(super) async fn execute_routed_result(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -340,7 +340,7 @@ pub(super) async fn execute_routed_result(
 }
 
 pub(crate) async fn execute_routed_result_for_surface(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -358,7 +358,7 @@ pub(crate) async fn execute_routed_result_for_surface(
 }
 
 pub(super) async fn execute_routed_result_for_surface_inner(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
     mode: TransportMode,
@@ -393,7 +393,7 @@ pub(super) async fn execute_routed_result_for_surface_inner(
             true,
             &UsageCapture::default(),
             context.surface,
-            context.operation_kind.as_str(),
+            context.operation_kind,
         );
         release_limits(state, context.lease.as_ref()).await;
         return Err(failure);
@@ -425,7 +425,7 @@ pub(super) async fn execute_routed_result_for_surface_inner(
             first_byte_ms,
             usage,
             surface: context.surface,
-            operation: context.operation_kind.as_str(),
+            operation: context.operation_kind,
         }),
     })
 }
@@ -439,7 +439,7 @@ pub(crate) fn authorize_model_access(
 }
 
 pub(crate) async fn reserve_model_limits(
-    state: &ApiState,
+    state: &GatewayState,
     principal: &InferencePrincipal,
 ) -> Result<Option<LimitLease>, InferenceError> {
     let operation = Operation::Models(olp_domain::ModelOperation::List {
@@ -455,7 +455,7 @@ pub(crate) async fn reserve_model_limits(
     .await
 }
 
-pub(crate) async fn release_model_limits(state: &ApiState, lease: Option<&LimitLease>) {
+pub(crate) async fn release_model_limits(state: &GatewayState, lease: Option<&LimitLease>) {
     release_limits(state, lease).await;
 }
 
@@ -471,7 +471,7 @@ pub(crate) struct SessionGenerationExecution {
 /// failover machinery as API-key inference. The caller owns session/RBAC
 /// authorization. Content and usage are intentionally not emitted or stored.
 pub(crate) async fn execute_session_generation(
-    state: &ApiState,
+    state: &GatewayState,
     operation: Operation,
     surface: Surface,
 ) -> Result<SessionGenerationExecution, InferenceError> {
@@ -485,7 +485,7 @@ pub(crate) async fn execute_session_generation(
 }
 
 async fn execute_session_generation_inner(
-    state: &ApiState,
+    state: &GatewayState,
     operation: Operation,
     surface: Surface,
 ) -> Result<SessionGenerationExecution, InferenceError> {

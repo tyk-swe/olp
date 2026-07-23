@@ -22,8 +22,8 @@ use tower_http::{
 };
 
 use crate::{
-    ApiState, MAX_JSON_BODY_BYTES, ModeDependencyError, Problem, gateway, management_api,
-    request_admission::enforce_request_limits, static_console,
+    GatewayState, MAX_JSON_BODY_BYTES, ManagementState, ModeDependencies, Problem, gateway,
+    management_api, request_admission::enforce_request_limits, static_console,
 };
 
 pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -33,10 +33,77 @@ pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 /// callers must attach [`axum::extract::ConnectInfo`] with the socket peer; the
 /// hardened application listener does so automatically.
 ///
-pub fn public_router(state: ApiState) -> Router {
+pub trait IntoPublicRouter {
+    fn into_public_router(self) -> Router;
+}
+
+impl IntoPublicRouter for GatewayState {
+    fn into_public_router(self) -> Router {
+        compose_public_router(Some(self.clone()), None, self)
+    }
+}
+
+impl IntoPublicRouter for ManagementState {
+    fn into_public_router(self) -> Router {
+        compose_public_router(None, Some(self.clone()), self.gateway_state())
+    }
+}
+
+pub fn public_router(state: impl IntoPublicRouter) -> Router {
+    state.into_public_router()
+}
+
+pub(crate) fn validated_public_router(dependencies: ModeDependencies) -> Router {
+    let (gateway_state, management_state, request_limit_state): (
+        Option<GatewayState>,
+        Option<ManagementState>,
+        GatewayState,
+    ) = match dependencies {
+        ModeDependencies::All {
+            gateway,
+            management,
+            ..
+        } => {
+            let gateway = *gateway;
+            (Some(gateway.clone()), Some(*management), gateway)
+        }
+        ModeDependencies::Gateway { gateway, .. } => {
+            let gateway = *gateway;
+            (Some(gateway.clone()), None, gateway)
+        }
+        ModeDependencies::Control { management, .. } => {
+            let management = *management;
+            let request_limit_state = management.gateway_state();
+            (None, Some(management), request_limit_state)
+        }
+    };
+    compose_public_router(gateway_state, management_state, request_limit_state)
+}
+
+#[cfg(test)]
+pub(crate) fn gateway_router_for_test(state: GatewayState) -> Router {
+    compose_public_router(Some(state.clone()), None, state)
+}
+
+#[cfg(test)]
+pub(crate) fn management_router_for_test(state: ManagementState) -> Router {
+    compose_public_router(None, Some(state.clone()), state.gateway_state())
+}
+
+fn compose_public_router(
+    gateway_state: Option<GatewayState>,
+    management_state: Option<ManagementState>,
+    request_limit_state: GatewayState,
+) -> Router {
     let request_id = HeaderName::from_static("x-request-id");
-    let request_limit_state = state.clone();
-    let content_security_policy = static_console::content_security_policy(&state.console_dir);
+    let public_origin_is_https = request_limit_state.public_origin.is_https();
+    // The request boundary protects public authentication as well as
+    // inference, so control-only mode uses the playground's validated gateway
+    // capabilities without exposing gateway routes.
+    let content_security_policy = management_state.as_ref().map_or_else(
+        || static_console::content_security_policy(std::path::Path::new(".")),
+        |state| static_console::content_security_policy(&state.console_dir),
+    );
     // Keep observability descendants and metrics ahead of the console fallback.
     // The exact `/health` path belongs to the console; probes live below it on
     // the separate observability listener.
@@ -47,23 +114,24 @@ pub fn public_router(state: ApiState) -> Router {
         .route("/metrics/", any(public_observability_not_found))
         .route("/metrics/{*path}", any(public_observability_not_found));
 
-    if state.mode.serves_control() {
+    if let Some(state) = management_state.as_ref() {
         let control = Router::new()
             .route("/openapi.json", any(api_not_found))
             .merge(management_api::router())
             .route("/api/{*path}", any(api_not_found))
-            .layer(middleware::from_fn(normalize_management_rejection));
+            .layer(middleware::from_fn(normalize_management_rejection))
+            .with_state(state.clone());
         router = router
             .merge(control)
             .fallback_service(static_console::spa_service(&state.console_dir));
     }
 
-    if state.mode.serves_gateway() {
+    if let Some(state) = gateway_state {
         // Protocol routes are merged here by the gateway module once transports
         // have been wired. Keeping mode composition explicit prevents a control
         // deployment from accidentally becoming an inference data plane.
         router = router
-            .merge(gateway::router())
+            .merge(gateway::router().with_state(state))
             .route("/openai/{*path}", any(protocol_not_found))
             .route("/anthropic/{*path}", any(protocol_not_found))
             .route("/gemini/{*path}", any(protocol_not_found));
@@ -112,23 +180,14 @@ pub fn public_router(state: ApiState) -> Router {
             enforce_request_limits,
         ))
         .layer(middleware::from_fn(normalize_management_rejection));
-    let router = if state.public_origin.is_https() {
+    if public_origin_is_https {
         router.layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("strict-transport-security"),
             axum::http::HeaderValue::from_static("max-age=31536000"),
         ))
     } else {
         router
-    };
-    router.with_state(state)
-}
-
-/// Builds the public router only after proving the selected mode's dependency
-/// contract. Process composition uses this entrypoint so missing dependencies
-/// fail before either listener is advertised.
-pub fn try_public_router(state: ApiState) -> Result<Router, ModeDependencyError> {
-    let _dependencies = state.mode_dependencies()?;
-    Ok(public_router(state))
+    }
 }
 
 async fn public_observability_not_found() -> axum::http::StatusCode {
@@ -281,35 +340,44 @@ mod tests {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt as _;
 
+    use crate::ApiState;
+
     use super::*;
 
     #[tokio::test]
     async fn hsts_follows_the_canonical_public_origin_scheme() {
-        for (origin, expected) in [
-            ("https://console.example.test", true),
-            ("http://127.0.0.1:8080", false),
-        ] {
-            let state = ApiState::new(
-                crate::ApiMode::Control,
-                None,
-                std::sync::Arc::new(crate::RuntimeManager::empty()),
-                origin,
-                std::path::PathBuf::from("missing-console"),
-            );
-            let response = public_router(state)
-                .oneshot(
-                    Request::builder()
-                        .uri("/metrics")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response.headers().contains_key("strict-transport-security"),
-                expected,
-                "{origin}",
-            );
+        for mode in [crate::ApiMode::Gateway, crate::ApiMode::Control] {
+            for (origin, expected) in [
+                ("https://console.example.test", true),
+                ("http://127.0.0.1:8080", false),
+            ] {
+                let state = ApiState::new(
+                    mode,
+                    None,
+                    std::sync::Arc::new(crate::RuntimeManager::empty()),
+                    origin,
+                    std::path::PathBuf::from("missing-console"),
+                );
+                let router = match mode {
+                    crate::ApiMode::Gateway => public_router(state.gateway_state_for_test()),
+                    crate::ApiMode::Control => public_router(state.management_state_for_test()),
+                    crate::ApiMode::All => unreachable!("all mode is not part of this test"),
+                };
+                let response = router
+                    .oneshot(
+                        Request::builder()
+                            .uri("/metrics")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.headers().contains_key("strict-transport-security"),
+                    expected,
+                    "{mode:?} {origin}",
+                );
+            }
         }
     }
 }

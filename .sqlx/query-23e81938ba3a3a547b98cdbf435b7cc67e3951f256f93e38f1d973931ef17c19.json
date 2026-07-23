@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rdo.operation FROM route_draft_operations rdo WHERE rdo.route_draft_id = $1 AND NOT EXISTS ( SELECT 1 FROM route_draft_targets rdt JOIN provider_models pm ON pm.id = rdt.provider_model_id JOIN providers p ON p.id = pm.provider_id JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id AND prm.source_provider_model_id = pm.id AND prm.enabled JOIN provider_revision_capabilities prc ON prc.provider_revision_model_id = prm.id AND prc.operation = rdo.operation AND prc.source = 'certified' WHERE rdt.route_draft_id = $1 AND p.state <> 'disabled'::provider_state) ORDER BY rdo.operation LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_draft_operations",
+            "name": "operation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "23e81938ba3a3a547b98cdbf435b7cc67e3951f256f93e38f1d973931ef17c19"
+}

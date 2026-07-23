@@ -14,10 +14,10 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ApiState, Problem,
+    ManagementState, Problem,
     management_api::{
         Permission, if_match, require_idempotency_key, require_mutation_session,
-        require_permission, require_read_session, require_store,
+        require_permission, require_read_session,
     },
 };
 
@@ -105,14 +105,15 @@ pub(crate) struct RouteDraftListResponse {
     responses((status = 200, body = RouteDraftListResponse))
 )]
 pub(crate) async fn list_route_drafts(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<RouteDraftListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_route_drafts(cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -130,13 +131,14 @@ pub(crate) async fn list_route_drafts(
     responses((status = 200, body = RouteDraftDetailResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn get_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let draft: RouteDraftDetailResponse = require_store(&state)?
+    let draft: RouteDraftDetailResponse = state
+        .store()
         .get_route_draft(draft_id)
         .await
         .map_err(map_configuration_resource)?
@@ -171,7 +173,7 @@ pub(crate) struct ReplaceRouteDraftRequest {
     responses((status = 200, body = RouteDraftDetailResponse), (status = 412, body = Problem), (status = 422, body = Problem))
 )]
 pub(crate) async fn replace_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<ReplaceRouteDraftRequest>, JsonRejection>,
@@ -191,7 +193,7 @@ pub(crate) async fn replace_route_draft(
             )
         })
         .collect();
-    let store = require_store(&state)?;
+    let store = state.store();
     let etag = store
         .replace_route_draft(
             draft_id,
@@ -231,14 +233,15 @@ pub(crate) async fn replace_route_draft(
     responses((status = 204), (status = 409, body = Problem), (status = 412, body = Problem))
 )]
 pub(crate) async fn delete_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let expected_etag = if_match(&headers)?;
-    require_store(&state)?
+    state
+        .store()
         .delete_route_draft(draft_id, expected_etag, principal.user_id)
         .await
         .map_err(map_configuration_resource)?;
@@ -310,7 +313,7 @@ impl From<RouteSimulation> for RouteSimulationResponse {
     responses((status = 200, body = RouteSimulationResponse), (status = 422, body = Problem))
 )]
 pub(crate) async fn simulate_route_draft(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<SimulateRouteRequest>, JsonRejection>,
@@ -318,7 +321,8 @@ pub(crate) async fn simulate_route_draft(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let request = json(payload)?;
-    let simulation = require_store(&state)?
+    let simulation = state
+        .store()
         .simulate_route_draft(
             draft_id,
             request
@@ -415,14 +419,15 @@ pub(crate) struct RouteListResponse {
     responses((status = 200, body = RouteListResponse), (status = 401, body = Problem), (status = 403, body = Problem))
 )]
 pub(crate) async fn list_routes(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<RouteListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let routes = require_store(&state)?
+    let routes = state
+        .store()
         .list_routes(cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -440,13 +445,14 @@ pub(crate) async fn list_routes(
     responses((status = 200, body = RouteDetailResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn get_route(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(route_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<RouteDetailResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let route = require_store(&state)?
+    let route = state
+        .store()
         .get_route(route_id)
         .await
         .map_err(map_configuration_resource)?;
@@ -471,7 +477,7 @@ pub(crate) struct RouteRevisionListResponse {
     responses((status = 200, body = RouteRevisionListResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn list_route_revisions(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(route_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<PageQuery>,
@@ -479,7 +485,8 @@ pub(crate) async fn list_route_revisions(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
-    let page = require_store(&state)?
+    let page = state
+        .store()
         .list_route_revisions(route_id, cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
@@ -498,14 +505,15 @@ pub(crate) async fn list_route_revisions(
     responses((status = 200, body = RouteRevisionResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn get_route_revision(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((route_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Json<RouteRevisionResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
-        require_store(&state)?
+        state
+            .store()
             .get_route_revision(route_id, revision_id)
             .await
             .map_err(map_configuration_resource)?
@@ -560,7 +568,7 @@ impl From<RouteRevisionDiff> for RouteRevisionDiffResponse {
     responses((status = 200, body = RouteRevisionDiffResponse), (status = 404, body = Problem))
 )]
 pub(crate) async fn diff_route_revisions(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path(route_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<DiffQuery>,
@@ -568,7 +576,8 @@ pub(crate) async fn diff_route_revisions(
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
-        require_store(&state)?
+        state
+            .store()
             .diff_route_revisions(route_id, query.from, query.to)
             .await
             .map_err(map_configuration_resource)?
@@ -584,13 +593,14 @@ pub(crate) async fn diff_route_revisions(
     responses((status = 201, body = RouteDraftDetailResponse), (status = 409, body = Problem))
 )]
 pub(crate) async fn restore_route_revision(
-    State(state): State<ApiState>,
+    State(state): State<ManagementState>,
     Path((route_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
-    let draft: RouteDraftDetailResponse = require_store(&state)?
+    let draft: RouteDraftDetailResponse = state
+        .store()
         .restore_route_revision_as_draft(
             route_id,
             revision_id,

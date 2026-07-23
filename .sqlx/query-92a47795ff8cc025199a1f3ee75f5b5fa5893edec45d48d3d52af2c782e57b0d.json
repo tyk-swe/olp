@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_loss_reporter_state (gateway_instance, process_epoch, dropped, abandoned, updated_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (gateway_instance) DO UPDATE SET process_epoch = EXCLUDED.process_epoch, dropped = EXCLUDED.dropped, abandoned = EXCLUDED.abandoned, updated_at = EXCLUDED.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92a47795ff8cc025199a1f3ee75f5b5fa5893edec45d48d3d52af2c782e57b0d"
+}

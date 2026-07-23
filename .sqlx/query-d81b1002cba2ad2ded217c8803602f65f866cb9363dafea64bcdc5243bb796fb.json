@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_identities (issuer, subject, user_id, email_at_link, last_login_at, created_at) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (issuer, subject) DO UPDATE SET last_login_at = EXCLUDED.last_login_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d81b1002cba2ad2ded217c8803602f65f866cb9363dafea64bcdc5243bb796fb"
+}

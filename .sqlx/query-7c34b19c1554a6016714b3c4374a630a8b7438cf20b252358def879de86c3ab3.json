@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE idempotency_records SET state = 'completed', resource_id = $1 WHERE actor_user_id = $2 AND operation = $3 AND idempotency_key = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7c34b19c1554a6016714b3c4374a630a8b7438cf20b252358def879de86c3ab3"
+}

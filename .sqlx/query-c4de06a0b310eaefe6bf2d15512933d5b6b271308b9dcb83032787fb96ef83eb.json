@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE providers SET state = 'active'::provider_state, active_revision_id = $1, etag = $2, updated_at = now() WHERE id = $3 AND etag = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c4de06a0b310eaefe6bf2d15512933d5b6b271308b9dcb83032787fb96ef83eb"
+}

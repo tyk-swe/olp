@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::{
@@ -29,27 +28,27 @@ impl PgStore {
             .map(i64::try_from)
             .transpose()
             .map_err(|_| OperationsError::InvalidCursor)?;
-        let rows = sqlx::query(
-            "SELECT g.id, g.sequence, encode(g.release_sha256, 'hex') AS sha256_hex, \
+        let rows = sqlx::query!(
+            "SELECT g.id, g.sequence, encode(g.release_sha256, 'hex') AS \"sha256_hex!\", \
                     g.created_by, u.email AS created_by_email, g.created_at \
              FROM runtime_generations g JOIN users u ON u.id = g.created_by \
              WHERE ($1::bigint IS NULL OR g.sequence < $1) \
              ORDER BY g.sequence DESC LIMIT $2",
+            before,
+            i64::from(page_size) + 1
         )
-        .bind(before)
-        .bind(i64::from(page_size) + 1)
         .fetch_all(self.pool())
         .await?;
         let items = rows
             .into_iter()
             .map(|row| {
                 Ok(RuntimeGenerationRecord {
-                    id: row.get("id"),
-                    sequence: checked_u64(row.get("sequence"), "generation sequence")?,
-                    sha256_hex: row.get("sha256_hex"),
-                    created_by: row.get("created_by"),
-                    created_by_email: row.get("created_by_email"),
-                    created_at: row.get("created_at"),
+                    id: row.id,
+                    sequence: checked_u64(row.sequence, "generation sequence")?,
+                    sha256_hex: row.sha256_hex,
+                    created_by: row.created_by,
+                    created_by_email: row.created_by_email,
+                    created_at: row.created_at,
                 })
             })
             .collect::<Result<Vec<_>, OperationsError>>()?;
