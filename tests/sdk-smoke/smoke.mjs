@@ -59,6 +59,12 @@ async function smokeOpenAI() {
 
   const page = await client.models.list();
   assert.ok(page.data.some((model) => model.id === routeSlug));
+
+  const count = await client.responses.inputTokens.count({
+    model: routeSlug,
+    input: 'official token count smoke'
+  });
+  assert.equal(count.input_tokens, 7);
 }
 
 async function smokeAnthropic() {
@@ -90,6 +96,12 @@ async function smokeAnthropic() {
 
   const page = await client.models.list({ limit: 10 });
   assert.ok(page.data.some((model) => model.id === routeSlug));
+
+  const count = await client.messages.countTokens({
+    model: routeSlug,
+    messages: [{ role: 'user', content: 'official token count smoke' }]
+  });
+  assert.equal(count.input_tokens, 7);
 }
 
 async function smokeGoogle() {
@@ -122,6 +134,12 @@ async function smokeGoogle() {
   const modelNames = [];
   for await (const model of pager) modelNames.push(model.name);
   assert.ok(modelNames.includes(`models/${routeSlug}`));
+
+  const count = await client.models.countTokens({
+    model: routeSlug,
+    contents: 'official token count smoke'
+  });
+  assert.equal(count.totalTokens, 7);
 }
 
 await smokeOpenAI();

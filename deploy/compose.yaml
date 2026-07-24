@@ -83,6 +83,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The pinned image enters as root so it can make the persistent volume
+    # owned by `valkey`, then uses setpriv to become that unprivileged user.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
 
   migrate:
     <<: *olp-container

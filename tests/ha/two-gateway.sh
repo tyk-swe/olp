@@ -251,8 +251,25 @@ wait_for_key() {
   echo "$label convergence: base=$base generation=$expected_generation elapsed_ms=$((now_ms - started_ms))"
 }
 
+wait_for_exact_generation() {
+  local base=$1 expected_generation=$2 label=$3
+  local started_ms readiness observed_generation
+  started_ms=$(date +%s%3N)
+  while :; do
+    readiness=$(curl --max-time 2 -fsS "$(observability_origin "$base")/health/ready" 2>/dev/null || true)
+    observed_generation=$(jq -r '.generation // 0' <<<"${readiness:-null}")
+    [[ $observed_generation == "$expected_generation" ]] && return
+    if (( $(date +%s%3N) - started_ms >= 5500 )); then
+      echo "$base did not report exact $label runtime sequence $expected_generation (last: $observed_generation)" >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+}
+
 for base in "$control_origin" "$gateway_two"; do
   wait_for_key "$base" "$hard_key" "$hard_generation" "hard-key activation"
+  wait_for_exact_generation "$base" "$hard_generation" "hard-key activation"
 done
 
 # Prove healthy-cluster key revocation converges within the advertised bound.
@@ -264,9 +281,11 @@ fast_key_generation=$(jq -er .runtime_generation.sequence <<<"$LAST_BODY")
 fast_key_etag=$LAST_ETAG
 for base in "$control_origin" "$gateway_two"; do
   wait_for_key "$base" "$fast_key" "$fast_key_generation" "revocation-key activation"
+  wait_for_exact_generation "$base" "$fast_key_generation" "revocation-key activation"
 done
 started_ms=$(date +%s%3N)
 mutate POST "/api/v1/api-keys/$fast_key_id/revoke" '' 200 key-revoke-ha-fast-0001 "$fast_key_etag"
+fast_revoke_generation=$(jq -er .sequence <<<"$LAST_BODY")
 for base in "$control_origin" "$gateway_two"; do
   while :; do
     status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $fast_key" "$base/openai/v1/models")
@@ -278,6 +297,9 @@ for base in "$control_origin" "$gateway_two"; do
 done
 elapsed_ms=$(( $(date +%s%3N) - started_ms ))
 [[ $elapsed_ms -le 5000 ]] || { echo "healthy revocation convergence took ${elapsed_ms}ms" >&2; exit 1; }
+for base in "$control_origin" "$gateway_two"; do
+  wait_for_exact_generation "$base" "$fast_revoke_generation" "healthy revocation"
+done
 
 chat='{"model":"default","messages":[{"role":"user","content":"HA limiter probe"}],"max_tokens":1}'
 for base in "$control_origin" "$gateway_two"; do
@@ -299,6 +321,7 @@ lkg_key=$(jq -er .secret <<<"$LAST_BODY")
 pre_corrupt_generation=$(jq -er .runtime_generation.sequence <<<"$LAST_BODY")
 for base in "$control_origin" "$gateway_two"; do
   wait_for_key "$base" "$lkg_key" "$pre_corrupt_generation" "last-known-good probe activation"
+  wait_for_exact_generation "$base" "$pre_corrupt_generation" "last-known-good probe activation"
 done
 
 # Publish a corrupt higher sequence directly. Both gateways must retain the
@@ -312,7 +335,11 @@ for base in "$control_origin" "$gateway_two"; do
   status=$(curl -sS -o /dev/null -w '%{http_code}' \
     -H "Authorization: Bearer $lkg_key" "$base/openai/v1/models" || true)
   [[ $status == 200 ]] || { echo "$base did not retain its last-known-good generation after corrupt release (status: $status)" >&2; exit 1; }
-  curl -fsS "$(observability_origin "$base")/health/ready" >/dev/null
+  readiness=$(curl -fsS "$(observability_origin "$base")/health/ready")
+  [[ $(jq -r '.generation // 0' <<<"$readiness") == "$pre_corrupt_generation" ]] || {
+    echo "$base advanced beyond exact last-known-good generation $pre_corrupt_generation" >&2
+    exit 1
+  }
 done
 
 soft_key_payload='{"name":"HA no hard limits","scopes":["inference","models_read"],"allowed_routes":["default"]}'
@@ -323,6 +350,7 @@ soft_generation=$(jq -er .runtime_generation.sequence <<<"$LAST_BODY")
 soft_key_etag=$LAST_ETAG
 for base in "$control_origin" "$gateway_two"; do
   wait_for_key "$base" "$soft_key" "$soft_generation" "corrupt-release recovery"
+  wait_for_exact_generation "$base" "$soft_generation" "corrupt-release recovery"
 done
 
 if [[ -n $toxiproxy_api ]]; then
@@ -396,6 +424,7 @@ soft_status=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' -X POST \
 
 started_ms=$(date +%s%3N)
 mutate POST "/api/v1/api-keys/$soft_key_id/revoke" '' 200 key-revoke-ha-0001 "$soft_key_etag"
+soft_revoke_generation=$(jq -er .sequence <<<"$LAST_BODY")
 for base in "$control_origin" "$gateway_two"; do
   for _ in $(seq 1 120); do
     status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $soft_key" "$base/openai/v1/models")
@@ -406,5 +435,8 @@ for base in "$control_origin" "$gateway_two"; do
 done
 elapsed_ms=$(( $(date +%s%3N) - started_ms ))
 [[ $elapsed_ms -le 5500 ]] || { echo "missed-hint revocation convergence took ${elapsed_ms}ms" >&2; exit 1; }
+for base in "$control_origin" "$gateway_two"; do
+  wait_for_exact_generation "$base" "$soft_revoke_generation" "missed-hint revocation"
+done
 
-echo "two-gateway HA proof passed: generation=${soft_generation} revocation_ms=${elapsed_ms}"
+echo "two-gateway HA proof passed: generation=${soft_generation} revoked_generation=${soft_revoke_generation} revocation_ms=${elapsed_ms}"

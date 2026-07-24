@@ -1,5 +1,6 @@
 node_modules/
 __pycache__/
+/artifacts/qualification/
 *.py[cod]
 /target/
 /console/build/

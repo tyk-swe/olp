@@ -5,6 +5,7 @@ on:
   pull_request:
   push:
     branches: [main, stable]
+    tags: ["v*.*.*"]
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
@@ -15,6 +16,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -78,6 +80,8 @@ jobs:
         run: scripts/check-release-version.sh
       - name: Require immutable supply-chain references
         run: scripts/check-supply-chain-pins.sh
+      - name: Validate qualification documentation
+        run: scripts/check-docs.py
       - name: Verify Helm and Compose contracts
         run: scripts/verify-helm-contract.sh deploy/helm
       - name: Enforce dependency bans, licenses, and sources
@@ -379,6 +383,243 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  clean-install:
+    name: Clean install / Compose and Helm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.2.3
+      - uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
+        with:
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
+      - name: Build the exact clean-install image
+        run: docker build --file deploy/Dockerfile --tag openllmproxy:qualification .
+      - name: Package the exact tested chart
+        run: |
+          mkdir -p artifacts/chart
+          helm dependency build deploy/helm
+          helm lint deploy/helm
+          helm package deploy/helm --destination artifacts/chart
+          sha256sum artifacts/chart/*.tgz > artifacts/chart/SHA256SUMS
+      - name: Exercise empty Compose and Kind installations
+        env:
+          OLP_QUALIFICATION_IMAGE: openllmproxy:qualification
+        run: |
+          mkdir -p artifacts/qualification
+          OLP_QUALIFICATION_CHART=$(find artifacts/chart -maxdepth 1 \
+            -name 'openllmproxy-*.tgz' -print -quit)
+          export OLP_QUALIFICATION_CHART
+          [[ -n $OLP_QUALIFICATION_CHART ]]
+          tests/qualification/run.sh clean-install 2>&1 \
+            | tee artifacts/qualification/clean-install.log
+      - name: Upload chart and install evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: clean-install-chart-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/chart
+            artifacts/qualification
+          if-no-files-found: error
+          retention-days: 7
+
+  backup-restore:
+    name: Seeded backup / restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - name: Install PostgreSQL 18 and Valkey clients
+        run: |
+          ./scripts/ci/install-postgres-client.sh 18
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends valkey-tools
+          psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE olp_restore OWNER olp'
+      - name: Seed, quiesce, restore, and functionally verify
+        env:
+          OLP_QUALIFICATION_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+          OLP_QUALIFICATION_RESTORE_DATABASE_URL: postgres://olp:olp@localhost:5432/olp_restore
+          OLP_VALKEY_URL: redis://localhost:6379
+        run: |
+          mkdir -p artifacts/qualification/backup-restore
+          tests/qualification/run.sh backup-restore 2>&1 \
+            | tee artifacts/qualification/backup-restore/qualification.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: backup-restore-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/qualification/backup-restore
+          if-no-files-found: error
+          retention-days: 7
+
+  n-minus-one:
+    name: N-1 released baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      - name: Install database and Valkey clients
+        run: |
+          ./scripts/ci/install-postgres-client.sh 18
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends valkey-tools
+          psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE olp_upgrade OWNER olp'
+      - name: Run strict N-1 binary and migration qualification
+        env:
+          OLP_QUALIFICATION_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+          OLP_QUALIFICATION_RESTORE_DATABASE_URL: postgres://olp:olp@localhost:5432/olp_upgrade
+          OLP_VALKEY_URL: redis://localhost:6379
+        run: |
+          mkdir -p artifacts/qualification/n-minus-one
+          tests/qualification/run.sh n-minus-one 2>&1 \
+            | tee artifacts/qualification/n-minus-one/qualification.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: n-minus-one-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/qualification/n-minus-one
+          if-no-files-found: error
+          retention-days: 7
+
+  load:
+    name: Load SLO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1.1.0
+        with:
+          k6-version: "1.3.0"
+      - name: Enforce the PR request mix and latency thresholds
+        run: tests/qualification/run.sh load
+      - name: Upload load evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: load-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/qualification/load
+          if-no-files-found: error
+          retention-days: 7
+
+  image-amd64:
+    name: Image / amd64 required
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: openllmproxy:ci-amd64
+          cache-from: type=gha,scope=image-amd64
+          cache-to: type=gha,mode=max,scope=image-amd64
+      - name: Smoke packaged and clean-install image modes
+        env:
+          OLP_IMAGE_PLATFORM: linux/amd64
+          OLP_QUALIFICATION_IMAGE: openllmproxy:ci-amd64
+        run: |
+          scripts/smoke-image-modes.sh openllmproxy:ci-amd64
+          tests/qualification/compose-clean-install.sh
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: openllmproxy:ci-amd64
+          syft-version: v1.46.0
+          format: spdx-json
+          output-file: openllmproxy-amd64.spdx.json
+          upload-artifact: false
+      - name: Require a structurally valid SPDX document
+        run: jq -e '.spdxVersion | startswith("SPDX-2.")' openllmproxy-amd64.spdx.json >/dev/null
+      - name: Report all HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: openllmproxy:ci-amd64
+          version: v0.72.0
+          format: table
+          exit-code: "0"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: openllmproxy:ci-amd64
+          version: v0.72.0
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: openllmproxy-sbom-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openllmproxy-amd64.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
   required:
     name: Required
     if: ${{ always() }}
@@ -391,6 +632,12 @@ jobs:
       - sdk-compatibility
       - postgres-integration
       - console-integration
+      - clean-install
+      - backup-restore
+      - n-minus-one
+      - load
+      - image-amd64
+      - ha
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -456,7 +703,6 @@ jobs:
 
   ha:
     name: High availability
-    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -564,22 +810,11 @@ jobs:
             echo "required release metadata file is missing: $metadata_file" >&2
             exit 1
           }
-          previous_migration=''
-          metadata_assignments=0
-          while IFS= read -r line || [[ -n $line ]]; do
-            [[ $line =~ ^[[:space:]]*($|#) ]] && continue
-            if [[ $line =~ ^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=([0-9]{4})$ ]]; then
-              previous_migration=${BASH_REMATCH[1]}
-              ((metadata_assignments += 1))
-              continue
-            fi
-            echo 'release metadata contains an unsupported line' >&2
-            exit 1
-          done < "$metadata_file"
-          (( metadata_assignments == 1 )) || {
-            echo 'release metadata must contain exactly one OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=NNNN assignment' >&2
-            exit 1
-          }
+          scripts/check-release-version.sh
+          previous_migration=$(sed -nE \
+            's/^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=([0-9]{4})$/\1/p' \
+            "$metadata_file")
+          [[ $previous_migration =~ ^[0-9]{4}$ ]]
           previous_version=$((10#$previous_migration))
           OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
             OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS=test-only \
@@ -654,10 +889,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
-            runner: ubuntu-24.04
-            platform: linux/amd64
-            tag: openllmproxy:ci-amd64
           - arch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
@@ -681,10 +912,13 @@ jobs:
           tags: ${{ matrix.tag }}
           cache-from: type=gha,scope=image-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
-      - name: Smoke final ${{ matrix.arch }} image modes and packaged console
+      - name: Smoke final ${{ matrix.arch }} packaged and clean-install modes
         env:
           OLP_IMAGE_PLATFORM: ${{ matrix.platform }}
-        run: ./scripts/smoke-image-modes.sh ${{ matrix.tag }}
+          OLP_QUALIFICATION_IMAGE: ${{ matrix.tag }}
+        run: |
+          ./scripts/smoke-image-modes.sh ${{ matrix.tag }}
+          tests/qualification/compose-clean-install.sh
       - name: Generate ${{ matrix.arch }} SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
@@ -693,6 +927,17 @@ jobs:
           format: spdx-json
           output-file: openllmproxy-${{ matrix.arch }}.spdx.json
           upload-artifact: false
+      - name: Require a structurally valid ${{ matrix.arch }} SPDX document
+        run: jq -e '.spdxVersion | startswith("SPDX-2.")' openllmproxy-${{ matrix.arch }}.spdx.json >/dev/null
+      - name: Report all ${{ matrix.arch }} HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ matrix.tag }}
+          version: v0.72.0
+          format: table
+          exit-code: "0"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
       - name: Scan ${{ matrix.arch }} image for HIGH and CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
@@ -708,7 +953,7 @@ jobs:
         with:
           name: openllmproxy-sbom-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: openllmproxy-${{ matrix.arch }}.spdx.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
 
   full:

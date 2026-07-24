@@ -4,6 +4,22 @@ This document covers production deployment with the bundled Helm chart:
 required infrastructure and secrets, edge routing rules, installation, and the
 checks that must pass before the deployment receives traffic.
 
+## Clean-install qualification
+
+Before deploying a candidate, run
+[`tests/qualification/run.sh clean-install`](../tests/qualification/run.sh).
+The blocking check starts Compose from empty named volumes, applies migrations
+twice, creates the owner, recreates OLP without the bootstrap secret, and proves
+the retained session and a new API key. It then builds the same image into a
+fresh Kind cluster, installs pinned PostgreSQL and Valkey fixtures, waits for
+the Helm migration hook and workloads, and exercises both control and gateway
+Services. The harness uses isolated project/cluster names and always removes
+their volumes and cluster.
+
+This is a destructive empty-install check only within its generated Compose
+project and Kind cluster. Do not point its database variables at an existing
+installation.
+
 ## Contents
 
 - [Prerequisites and secrets](#prerequisites-and-secrets)
