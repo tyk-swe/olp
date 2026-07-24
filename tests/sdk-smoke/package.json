@@ -5,13 +5,20 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@11.10.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": ">=11 <12",
+      "onFail": "error"
+    }
+  },
   "engines": {
     "node": ">=24",
     "pnpm": ">=11 <12"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.111.0",
-    "@google/genai": "2.11.0",
-    "openai": "6.46.0"
+    "@anthropic-ai/sdk": "0.113.0",
+    "@google/genai": "2.13.0",
+    "openai": "6.48.0"
   }
 }

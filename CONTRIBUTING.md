@@ -6,7 +6,7 @@ and the validation required before review.
 
 ## Development environment
 
-Use Rust 1.97, Node.js 24 or newer, pnpm 11.10, and PostgreSQL 18 for the
+Use Rust 1.97, Node.js 24 or newer, pnpm 11, and PostgreSQL 18 for the
 full local suite. The Compose stack supplies PostgreSQL 18 and Valkey 9.1 for
 integration work.
 

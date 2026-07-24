@@ -5,6 +5,13 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@11.10.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": ">=11 <12",
+      "onFail": "error"
+    }
+  },
   "engines": {
     "node": ">=24",
     "pnpm": ">=11 <12"
@@ -24,36 +31,36 @@
     "verify": "pnpm api:check && pnpm test && pnpm check && pnpm build"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.2.8",
-    "@fontsource-variable/jetbrains-mono": "^5.2.8",
-    "@tanstack/svelte-query": "^6.1.36",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@tanstack/svelte-query": "^6.1.38",
     "bits-ui": "^2.18.1",
-    "layerchart": "^2.0.1",
+    "layerchart": "^2.0.2",
     "openapi-fetch": "^0.17.0",
     "valibot": "^1.4.2"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.10.2",
-    "@playwright/test": "^1.61.0",
-    "@storybook/addon-a11y": "^10.5.0",
-    "@storybook/svelte": "^10.5.0",
-    "@storybook/sveltekit": "^10.5.0",
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
+    "@storybook/addon-a11y": "^10.5.3",
+    "@storybook/svelte": "^10.5.3",
+    "@storybook/sveltekit": "^10.5.3",
     "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.65.1",
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "@tailwindcss/vite": "^4.3.1",
-    "@typescript-eslint/parser": "^8.61.1",
-    "eslint": "^10.5.0",
-    "eslint-plugin-svelte": "^3.19.0",
-    "globals": "^17.6.0",
+    "@sveltejs/kit": "^2.70.1",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^10.7.0",
+    "eslint-plugin-svelte": "^3.22.0",
+    "globals": "^17.7.0",
     "jsdom": "^29.1.1",
     "openapi-typescript": "^7.13.0",
-    "storybook": "^10.5.0",
-    "svelte": "^5.56.3",
-    "svelte-check": "^4.6.0",
-    "tailwindcss": "^4.3.1",
+    "storybook": "^10.5.3",
+    "svelte": "^5.56.7",
+    "svelte-check": "^4.7.3",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "8.0.16",
-    "vitest": "^4.1.9"
+    "vite": "8.1.5",
+    "vitest": "^4.1.10"
   }
 }

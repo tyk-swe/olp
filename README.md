@@ -125,7 +125,7 @@ after UI changes with `pnpm --dir console screenshots`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture boundaries,
 source-of-truth ownership, and the full validation matrix. Use Rust 1.97.0,
-Node.js 24 or newer, pnpm 11.10.0, and ripgrep. The Compose stack supplies
+Node.js 24 or newer, pnpm 11, and ripgrep. The Compose stack supplies
 PostgreSQL 18 and Valkey 9.1. Install the locked console dependencies, then run
 the standard checks:
 
