@@ -19,6 +19,8 @@ done
 artifact_dir=${OLP_QUALIFICATION_ARTIFACT_DIR:-"$root/artifacts/qualification/$profile"}
 mkdir -p "$artifact_dir"
 work=$(mktemp -d)
+spool="$work/spool"
+mkdir "$spool"
 fixture_pid=
 sampler_pid=
 cleanup() {
@@ -42,6 +44,8 @@ cargo build --locked -p olp --example sdk_smoke_fixture
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 [[ $target_dir == /* ]] || target_dir="$root/$target_dir"
 OLP_SDK_SMOKE_METADATA="$work/metadata.json" \
+OLP_MEDIA_SPOOL_DIR="$spool" \
+OLP_MEDIA_SPOOL_CAPACITY_BYTES="${OLP_MEDIA_SPOOL_CAPACITY_BYTES:-1073741824}" \
   "$target_dir/debug/examples/sdk_smoke_fixture" >"$artifact_dir/server.log" 2>&1 &
 fixture_pid=$!
 for _ in $(seq 1 300); do
@@ -51,8 +55,6 @@ for _ in $(seq 1 300); do
 done
 origin=$(jq -er .origin "$work/metadata.json")
 api_key=$(jq -er .api_key "$work/metadata.json")
-spool="$work/spool"
-mkdir "$spool"
 
 if [[ $profile == soak ]]; then
   samples="$artifact_dir/resources.tsv"

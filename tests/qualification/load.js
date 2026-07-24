@@ -45,10 +45,10 @@ export const options = {
     checks: [{ threshold: 'rate==1', abortOnFail: false }],
     dropped_iterations: ['count==0'],
     'olp_failed_checks': ['count==0'],
-    'olp_unary_latency': ['p(95)<15', 'p(99)<30'],
-    'olp_count_latency': ['p(95)<15', 'p(99)<30'],
-    'olp_discovery_latency': ['p(95)<15', 'p(99)<30'],
-    'olp_stream_ttfb': ['p(95)<15', 'p(99)<30']
+    'olp_unary_latency{phase:qualification}': ['p(95)<15', 'p(99)<30'],
+    'olp_count_latency{phase:qualification}': ['p(95)<15', 'p(99)<30'],
+    'olp_discovery_latency{phase:qualification}': ['p(95)<15', 'p(99)<30'],
+    'olp_stream_ttfb{phase:qualification}': ['p(95)<15', 'p(99)<30']
   }
 };
 

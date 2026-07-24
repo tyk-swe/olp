@@ -2,12 +2,13 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env,
     num::{NonZeroU16, NonZeroU32},
+    path::PathBuf,
     sync::Arc,
 };
 
 use chrono::Utc;
 use futures::stream;
-use olp::{ApiMode, ApiState, RuntimeManager, public_router};
+use olp::{ApiMode, ApiState, RuntimeManager, create_media_spool, public_router};
 use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, CanonicalResult,
@@ -234,7 +235,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = PgStore::from_pool(
         PgPoolOptions::new().connect_lazy("postgres://olp:olp@127.0.0.1/olp-sdk-smoke")?,
     );
-    let mut state = ApiState::new(ApiMode::Gateway, Some(store), runtime, &origin, "console");
+    let mut state = if let Some(media_spool_dir) = env::var_os("OLP_MEDIA_SPOOL_DIR") {
+        let capacity_bytes = match env::var("OLP_MEDIA_SPOOL_CAPACITY_BYTES") {
+            Ok(value) => value
+                .parse::<u64>()
+                .map_err(|error| format!("invalid OLP_MEDIA_SPOOL_CAPACITY_BYTES: {error}"))?,
+            Err(env::VarError::NotPresent) => 1_073_741_824,
+            Err(error) => {
+                return Err(format!("invalid OLP_MEDIA_SPOOL_CAPACITY_BYTES: {error}").into());
+            }
+        };
+        let media_spool = create_media_spool(&PathBuf::from(media_spool_dir), capacity_bytes)?;
+        ApiState::new_with_media_spool(
+            ApiMode::Gateway,
+            Some(store),
+            runtime,
+            &origin,
+            "console",
+            media_spool,
+        )
+    } else {
+        ApiState::new(ApiMode::Gateway, Some(store), runtime, &origin, "console")
+    };
     state.auth_hmac_key = Some(auth_hmac_key);
     let gateway_state = state.mode_dependencies()?.gateway().ok_or_else(|| {
         std::io::Error::other("gateway mode did not produce gateway dependencies")
