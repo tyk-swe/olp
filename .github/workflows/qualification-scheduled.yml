@@ -1,0 +1,76 @@
+name: Weekly qualification
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  canaries:
+    name: Live provider canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - name: Run mandatory live production-connector checks
+        env:
+          OLP_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+          OLP_VALKEY_URL: redis://localhost:6379
+          OLP_CANARY_OPENAI_API_KEY: ${{ secrets.OLP_CANARY_OPENAI_API_KEY }}
+          OLP_CANARY_OPENAI_MODEL: ${{ vars.OLP_CANARY_OPENAI_MODEL }}
+          OLP_CANARY_ANTHROPIC_API_KEY: ${{ secrets.OLP_CANARY_ANTHROPIC_API_KEY }}
+          OLP_CANARY_ANTHROPIC_MODEL: ${{ vars.OLP_CANARY_ANTHROPIC_MODEL }}
+          OLP_CANARY_GEMINI_API_KEY: ${{ secrets.OLP_CANARY_GEMINI_API_KEY }}
+          OLP_CANARY_GEMINI_MODEL: ${{ vars.OLP_CANARY_GEMINI_MODEL }}
+        run: tests/qualification/canary.sh
+
+  soak:
+    name: 30-minute soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1.1.0
+        with:
+          k6-version: "1.3.0"
+      - run: tests/qualification/run.sh soak
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: soak-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/qualification/soak
+          if-no-files-found: error
+          retention-days: 30

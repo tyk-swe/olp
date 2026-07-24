@@ -4,6 +4,9 @@ This runbook defines how to operate OpenLLMProxy in production: availability
 objectives and alerting, routine checks, backup and restore, upgrades, incident
 response, and master-key rotation.
 
+The blocking criteria, commands, thresholds, evidence, and owners are indexed
+in [operational and release qualification](qualification.md).
+
 ## Contents
 
 - [Objectives and monitoring](#objectives-and-monitoring)
@@ -71,6 +74,13 @@ activate until every enabled tuple has a certification timestamp.
 
 ## Backup and restore
 
+CI's `tests/qualification/run.sh backup-restore` seeds an owner, durable
+session, API key, active runtime generation, and an unactivated draft. It waits
+for a fresh zero-backlog worker checkpoint, stops traffic, creates a v2 backup,
+restores into an isolated database, runs `doctor`, flushes Valkey, and restarts
+with the original key files. The check then proves the original session, API
+key, exact runtime sequence, and draft all survived.
+
 For a production recovery point:
 
 1. Stop admission of new inference requests, leave the worker running, and
@@ -114,6 +124,39 @@ login, runtime loading, and a mock-provider request. Do not reuse production
 OIDC redirects or provider credentials.
 
 ## Upgrade
+
+`release-metadata.env` is a strict four-field N-1 contract. Version 2.0.0 alone
+uses `bootstrap` with migration 0021. Later versions use `released`, an
+immutable GHCR digest, the previous semantic version, and its last migration.
+The N-1 harness verifies the image's keyless release-workflow identity before
+running that binary, seeding it, backing it up, and applying the candidate
+migrations twice. Use `scripts/release-metadata-next.sh --help` for the
+post-release rollover; advancing the baseline before publication invalidates
+the qualification.
+
+## Load, soak, and canaries
+
+The PR load gate runs 100 requests/second for two minutes after a 30-second
+warm-up. Weekly and tagged releases run 50 requests/second for 30 minutes.
+Both use 55% unary generation, 25% streaming generation, 10% token count, and
+10% discovery. Unary/count/discovery latency and stream time-to-first-byte must
+have p95 below 15 ms and p99 below 30 ms, with no failed checks or dropped
+iterations. The soak additionally enforces the resource limits documented in
+[the qualification matrix](qualification.md).
+
+Live canaries require all three provider keys and model variables documented in
+that matrix. Missing configuration fails rather than skipping. Canary output is
+redacted by design; never add shell tracing or print response bodies to its
+workflow.
+
+## Release artifact verification
+
+Release images have no `latest` tag. Verify the immutable multi-architecture
+digest, every platform manifest, chart OCI digest, SPDX and provenance
+attestations, and the certificate's release-workflow identity before rollout.
+Download `SHA256SUMS` and verify the chart archive, SPDX JSON, and Sigstore
+bundles. Copyable consumer commands are in
+[operational and release qualification](qualification.md#consumer-verification).
 
 ### Naming migration prerequisites
 

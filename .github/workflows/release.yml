@@ -1,0 +1,286 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  required-and-full:
+    name: Require CI Required and Full
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run_id: ${{ steps.ci.outputs.run_id }}
+    steps:
+      - name: Wait for the exact tagged CI run
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=
+          for _ in $(seq 1 120); do
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --commit "$GITHUB_SHA" --event push --json databaseId,headBranch)
+            run_id=$(jq -r --arg ref "$GITHUB_REF_NAME" \
+              '[.[] | select(.headBranch == $ref)][0].databaseId // empty' <<<"$runs")
+            [[ -z $run_id ]] || break
+            sleep 5
+          done
+          [[ -n $run_id ]] || { echo "tagged CI run was not created" >&2; exit 1; }
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+          jobs=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json jobs)
+          jq -e '[.jobs[] | select(.name == "Required" or .name == "Full")]
+            | length == 2 and all(.[]; .conclusion == "success")' <<<"$jobs" >/dev/null
+          echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
+
+  canaries:
+    name: Release live provider canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - name: Run all mandatory providers
+        env:
+          OLP_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
+          OLP_VALKEY_URL: redis://localhost:6379
+          OLP_CANARY_OPENAI_API_KEY: ${{ secrets.OLP_CANARY_OPENAI_API_KEY }}
+          OLP_CANARY_OPENAI_MODEL: ${{ vars.OLP_CANARY_OPENAI_MODEL }}
+          OLP_CANARY_ANTHROPIC_API_KEY: ${{ secrets.OLP_CANARY_ANTHROPIC_API_KEY }}
+          OLP_CANARY_ANTHROPIC_MODEL: ${{ vars.OLP_CANARY_ANTHROPIC_MODEL }}
+          OLP_CANARY_GEMINI_API_KEY: ${{ secrets.OLP_CANARY_GEMINI_API_KEY }}
+          OLP_CANARY_GEMINI_MODEL: ${{ vars.OLP_CANARY_GEMINI_MODEL }}
+        run: tests/qualification/canary.sh
+
+  soak:
+    name: Release 30-minute soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with: { cache-on-failure: true }
+      - uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1.1.0
+        with: { k6-version: "1.3.0" }
+      - run: tests/qualification/run.sh soak
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: release-soak-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/qualification/soak
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Publish, sign, attest, and verify
+    needs: [required-and-full, canaries, soak]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      actions: read
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        with:
+          image: tonistiigi/binfmt:qemu-v10.2.1@sha256:d3b963f787999e6c0219a48dba02978769286ff61a5f4d26245cb6a6e5567ea3
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with: { version: v4.2.3 }
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      - name: Validate tag and download exact CI evidence
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ needs.required-and-full.outputs.run_id }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          [[ $GITHUB_REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "release tags must exactly match vX.Y.Z" >&2
+            exit 1
+          }
+          scripts/check-release-version.sh "$version"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "image_tag=ghcr.io/tyk-swe/olp:$version" >>"$GITHUB_OUTPUT"
+          mkdir -p release-assets/ci
+          gh run download "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'clean-install-chart-*' --dir release-assets/ci
+          gh run download "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'openllmproxy-sbom-*' --dir release-assets/ci
+          chart=$(find release-assets/ci -name "openllmproxy-${version}.tgz" -print -quit)
+          [[ -n $chart && -f $chart ]] || { echo "exact tested chart was not retained" >&2; exit 1; }
+          cp "$chart" release-assets/
+          find release-assets/ci -name '*.spdx.json' -exec cp {} release-assets/ \;
+          (( $(find release-assets -maxdepth 1 -name '*.spdx.json' | wc -l) >= 2 ))
+          for sbom in release-assets/*.spdx.json; do
+            jq -e '.spdxVersion | startswith("SPDX-2.")' "$sbom" >/dev/null
+          done
+      - name: Build and publish immutable multi-architecture image
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image_tag }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,mode=max,scope=release
+      - name: Normalize immutable references
+        id: refs
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          version=${{ steps.meta.outputs.version }}
+          image=ghcr.io/tyk-swe/olp
+          docker buildx imagetools inspect --raw "$image@$IMAGE_DIGEST" >release-assets/image-index.json
+          jq -e '[.manifests[] | select(
+            .platform.os == "linux" and
+            (.platform.architecture == "amd64" or .platform.architecture == "arm64")
+          )] | length == 2' release-assets/image-index.json >/dev/null
+          {
+            echo "version=$version"
+            echo "image=$image"
+            echo "image_digest=$IMAGE_DIGEST"
+          } >>"$GITHUB_OUTPUT"
+      - name: Generate and validate the published-digest SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ steps.refs.outputs.image }}@${{ steps.refs.outputs.image_digest }}
+          syft-version: v1.46.0
+          format: spdx-json
+          output-file: release-assets/openllmproxy-index.spdx.json
+          upload-artifact: false
+      - name: Require the published-digest SPDX document
+        run: jq -e '.spdxVersion | startswith("SPDX-2.")' release-assets/openllmproxy-index.spdx.json >/dev/null
+      - name: Attest image build provenance with GitHub OIDC
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ steps.refs.outputs.image }}
+          subject-digest: ${{ steps.refs.outputs.image_digest }}
+          push-to-registry: true
+      - name: Push exact tested chart
+        id: chart
+        env:
+          HELM_REGISTRY_CONFIG: ${{ runner.temp }}/helm-registry.json
+        run: |
+          printf '%s' '${{ github.token }}' | helm registry login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+          helm push "release-assets/openllmproxy-${{ steps.refs.outputs.version }}.tgz" \
+            oci://ghcr.io/tyk-swe/charts | tee release-assets/helm-push.log
+          digest=$(sed -nE 's/^Digest: (sha256:[0-9a-f]{64})$/\1/p' release-assets/helm-push.log)
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - name: Attest chart build provenance with GitHub OIDC
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ghcr.io/tyk-swe/charts/openllmproxy
+          subject-digest: ${{ steps.chart.outputs.digest }}
+          push-to-registry: true
+      - name: Keylessly sign and attest every immutable digest
+        env:
+          IMAGE: ${{ steps.refs.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.refs.outputs.image_digest }}
+          CHART_DIGEST: ${{ steps.chart.outputs.digest }}
+        run: |
+          mkdir -p release-assets/sigstore
+          mapfile -t digests < <(jq -r '.manifests[] | select(
+            .platform.os == "linux" and
+            (.platform.architecture == "amd64" or .platform.architecture == "arm64")
+          ) | .digest' release-assets/image-index.json)
+          digests=("$IMAGE_DIGEST" "${digests[@]}")
+          for digest in "${digests[@]}"; do
+            name=${digest#sha256:}
+            cosign sign --yes --bundle "release-assets/sigstore/image-${name}.bundle.json" "$IMAGE@$digest"
+          done
+          cosign attest --yes --type spdxjson \
+            --predicate release-assets/openllmproxy-index.spdx.json \
+            --bundle release-assets/sigstore/image-sbom.bundle.json "$IMAGE@$IMAGE_DIGEST"
+          chart_ref="ghcr.io/tyk-swe/charts/openllmproxy@$CHART_DIGEST"
+          cosign sign --yes --bundle release-assets/sigstore/chart.bundle.json "$chart_ref"
+          scripts/release-metadata-next.sh "${{ steps.refs.outputs.version }}" \
+            "$IMAGE@$IMAGE_DIGEST" release-assets/release-metadata.next.env
+          checksums="$RUNNER_TEMP/openllmproxy-SHA256SUMS"
+          (
+            cd release-assets
+            sha256sum openllmproxy-${{ steps.refs.outputs.version }}.tgz \
+              ./*.spdx.json image-index.json release-metadata.next.env \
+              sigstore/*.json
+          ) >"$checksums"
+          mv "$checksums" release-assets/SHA256SUMS
+      - name: Verify release signer identity, issuer, and SBOM attestation
+        env:
+          IMAGE: ${{ steps.refs.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.refs.outputs.image_digest }}
+          CHART_DIGEST: ${{ steps.chart.outputs.digest }}
+        run: |
+          identity="https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
+          issuer=https://token.actions.githubusercontent.com
+          mapfile -t digests < <(jq -r '.manifests[] | select(
+            .platform.os == "linux" and
+            (.platform.architecture == "amd64" or .platform.architecture == "arm64")
+          ) | .digest' release-assets/image-index.json)
+          for digest in "$IMAGE_DIGEST" "${digests[@]}"; do
+            cosign verify --certificate-identity "$identity" \
+              --certificate-oidc-issuer "$issuer" "$IMAGE@$digest" >/dev/null
+          done
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$issuer" "$IMAGE@$IMAGE_DIGEST" >/dev/null
+          cosign verify --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "ghcr.io/tyk-swe/charts/openllmproxy@$CHART_DIGEST" >/dev/null
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes --title "OpenLLMProxy ${{ steps.refs.outputs.version }}" \
+            release-assets/openllmproxy-${{ steps.refs.outputs.version }}.tgz \
+            release-assets/*.spdx.json release-assets/image-index.json release-assets/SHA256SUMS \
+            release-assets/release-metadata.next.env release-assets/sigstore/*.json

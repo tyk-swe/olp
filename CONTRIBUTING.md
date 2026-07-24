@@ -36,7 +36,8 @@ and third-party Actions and container images pinned.
   `QueryBuilder::build_query_as` with a cohesive `FromRow` model. Manual
   string-key `Row::get`/`try_get` decoding is not allowed.
 - `release-metadata.env` records the migration included in the last completed
-  release and is the CI upgrade-rehearsal baseline.
+  release and is the strict CI N-1 baseline. Bootstrap metadata is valid only
+  for 2.0.0; later versions require a verified released image digest.
 - Helm defaults, schema, and templates in `deploy/helm/` change together.
 
 ### Change maps
@@ -74,6 +75,8 @@ pnpm --dir console install --frozen-lockfile
 pnpm --dir console verify
 scripts/check-release-version.sh
 scripts/check-supply-chain-pins.sh
+scripts/check-docs.py
+tests/qualification/run.sh load
 ```
 
 For database changes, run `./scripts/run-postgres-tests.sh` against PostgreSQL
@@ -81,3 +84,10 @@ For database changes, run `./scripts/run-postgres-tests.sh` against PostgreSQL
 against a migrated development database. Regenerate metadata without `--check`
 after an intentional query or schema change. For deployment changes, run
 `scripts/verify-helm-contract.sh deploy/helm`.
+
+Operational, deployment, connector, performance, image, and release changes
+must also update [the qualification matrix](docs/qualification.md) when their
+command, tier, threshold, evidence, or failure owner changes. Run the relevant
+stable target (`clean-install`, `backup-restore`, `n-minus-one`, `load`, or
+`soak`) exactly as CI does. Never use live-provider credentials in a pull
+request; the scheduled and tagged workflows own the mandatory canaries.

@@ -3,6 +3,14 @@
 This directory contains the framework-independent conformance corpus, the
 official SDK smoke test, and pointers to the fuzz targets.
 
+## Operational qualification
+
+`qualification/run.sh` is the stable local and CI driver for `clean-install`,
+`backup-restore`, `n-minus-one`, `load`, and `soak`. Each target fails rather
+than skipping a missing runtime, tool, credential, or baseline. Thresholds,
+evidence, workflow tiers, and failure owners are defined in
+[the qualification matrix](../docs/qualification.md).
+
 ## Conformance harness and corpus
 
 `fixtures/` is a framework-independent corpus of bounded JSON and UTF-8 SSE
