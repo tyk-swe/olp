@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use olp_storage::{
     DistributedLimiter, MasterKey, MasterKeyEncryptionStatus, PgStore, RuntimeHintPublisher,
-    ValkeyAdapterError, preflight_request_metadata_stream_upgrade, run_request_metadata_consumer,
+    run_request_metadata_consumer,
 };
 use serde_json::json;
 use tokio::{sync::watch, task::JoinSet};
@@ -29,7 +29,6 @@ pub(super) async fn internal_pre_stop(args: InternalPreStopArgs) -> AppResult<()
 }
 
 pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
-    preflight_request_metadata_stream_upgrade(&args.persistence.valkey_url).await?;
     let store = connect_store(&args.persistence.database).await?;
     if let Some(target) = args.through_version {
         if std::env::var("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS").as_deref() != Ok("test-only") {
@@ -49,7 +48,6 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
 
 pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
     let store = connect_store(&args.database).await?;
-    preflight_request_metadata_stream_or_defer(&args.valkey_url).await?;
     let (sender, receiver) = watch::channel(false);
     let mut workers = JoinSet::new();
     spawn_worker_supervisors(&mut workers, store, args.valkey_url, receiver);
@@ -64,20 +62,6 @@ pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
         (None, Ok(())) => Ok(()),
         (Some(Some(Ok(()))) | Some(None), Ok(())) => {
             Err(std::io::Error::other("worker supervisor stopped unexpectedly").into())
-        }
-    }
-}
-
-pub(super) async fn preflight_request_metadata_stream_or_defer(valkey_url: &str) -> AppResult<()> {
-    match preflight_request_metadata_stream_upgrade(valkey_url).await {
-        Ok(()) => Ok(()),
-        Err(
-            error @ (ValkeyAdapterError::LegacyRequestMetadataStreamNotDrained { .. }
-            | ValkeyAdapterError::LegacyRequestMetadataStreamAcknowledgedEntries { .. }),
-        ) => Err(error.into()),
-        Err(error) => {
-            warn!(%error, "request metadata upgrade preflight deferred until Valkey reconnects");
-            Ok(())
         }
     }
 }
@@ -421,7 +405,6 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
         DistributedLimiter::connect(&args.persistence.valkey_url, "olp:v2:doctor").await?;
     limiter.ping().await?;
     checks.insert("valkey".into(), json!({ "ok": true }));
-    preflight_request_metadata_stream_upgrade(&args.persistence.valkey_url).await?;
     checks.insert(
         "request_metadata_stream_upgrade".into(),
         json!({ "ok": true }),

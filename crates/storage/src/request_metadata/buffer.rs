@@ -114,32 +114,14 @@ impl RequestMetadataReceiver {
                 }
                 connection = ConnectionManager::new(client.clone()) => connection,
             };
-            if let Ok(mut connection) = connection {
-                match crate::valkey::preflight_request_metadata_stream_connection(&mut connection)
+            if let Ok(connection) = connection {
+                self.health
+                    .retrying
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                return self
+                    .run(connection, stream, shutdown)
                     .await
-                {
-                    Ok(()) => {
-                        self.health
-                            .retrying
-                            .store(false, std::sync::atomic::Ordering::Relaxed);
-                        return self
-                            .run(connection, stream, shutdown)
-                            .await
-                            .map_err(Into::into);
-                    }
-                    Err(
-                        error @ (crate::ValkeyAdapterError::LegacyRequestMetadataStreamNotDrained {
-                            ..
-                        }
-                        | crate::ValkeyAdapterError::LegacyRequestMetadataStreamAcknowledgedEntries {
-                            ..
-                        }),
-                    ) => {
-                        self.record_abandoned(0).await;
-                        return Err(error);
-                    }
-                    Err(_) => {}
-                }
+                    .map_err(Into::into);
             }
             tokio::select! {
                 biased;

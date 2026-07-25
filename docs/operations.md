@@ -156,15 +156,7 @@ deployment-setting names as aliases.
    there are no active requests and no media-reconciliation process left that
    can write PostgreSQL. Then leave the old worker running only until both
    Stream pending and lag are durably zero, scale that worker workload to zero,
-   confirm both values remain zero, and verify `XLEN olp:v2:usage` is zero. The
-   candidate migration hook, startup, and `doctor` preflight reject a nonempty
-   legacy stream with instructions to drain it under the previous release;
-   they never read or delete it. The migration hook checks Valkey before it
-   connects to or changes PostgreSQL. If pending and lag are both zero but
-   `XLEN` is nonzero, the remaining entries were acknowledged before a failed
-   deletion. Back up Valkey, run `XTRIM olp:v2:usage MAXLEN 0`, and verify
-   `XLEN` is zero before starting the candidate. Pre-upgrade persisted login
-   flows may
+   and confirm both values remain zero. Pre-upgrade persisted login flows may
    complete only through their existing ten-minute expiry; authenticated link
    flows keep their normal expiry. Users whose login flow expires must restart
    it after the candidate is ready.
@@ -173,10 +165,8 @@ deployment-setting names as aliases.
    key files in the secret manager. This is the recovery point; a backup taken
    before quiescence is not a substitute.
 4. Run the Helm upgrade with a timeout of at least 20 minutes. Its pre-upgrade
-   migration hook reads `config.valkeySecretName` and fails before changing the
-   database unless the legacy stream is empty. The hook completes before Helm
-   rolls the candidate control, worker, and gateway Deployments; those
-   Deployments may roll concurrently. Keep
+   migration hook completes before Helm rolls the candidate control, worker,
+   and gateway Deployments; those Deployments may roll concurrently. Keep
    management and admission frozen until the migration succeeded and every
    workload is on the candidate. The database independently rejects N-1
    runtime publications, non-additive usage rollups, and OIDC completions.
