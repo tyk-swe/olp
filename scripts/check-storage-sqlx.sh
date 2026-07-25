@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+workspace_root=$(cd "$script_dir/.." && pwd)
+# shellcheck source=scripts/lib/repository-validation.sh
+source "$script_dir/lib/repository-validation.sh"
+cd "$workspace_root"
+
+for required_executable in rg awk dirname; do
+  validation_require_executable "$required_executable"
+done
+
 storage_root=crates/storage/src
+validation_require_directory "$storage_root"
 
 forbidden_row_patterns=(
   '\bPgRow\b'
@@ -12,7 +23,13 @@ forbidden_row_patterns=(
 )
 
 for pattern in "${forbidden_row_patterns[@]}"; do
-  if rg --pcre2 --line-number --glob '*.rs' "$pattern" "$storage_root"; then
+  forbidden_rows=
+  forbidden_rows_matched=
+  checked_rg_capture forbidden_rows forbidden_rows_matched \
+    "scan forbidden SQLx row decoding" "$storage_root" \
+    --pcre2 --line-number --glob '*.rs' "$pattern" "$storage_root"
+  if (( forbidden_rows_matched )); then
+    printf '%s\n' "$forbidden_rows"
     echo "production storage must decode SQL rows through checked records or typed FromRow models" >&2
     exit 1
   fi
@@ -22,9 +39,15 @@ done
 # dynamic, but each production use must be reviewed and entered here with its
 # file/line pattern. The current storage implementation needs no exceptions.
 approved_runtime_queries=()
-mapfile -t runtime_queries < <(
-  rg --line-number --glob '*.rs' 'sqlx::(query|query_as|query_scalar)\s*\(' "$storage_root" || true
-)
+runtime_query_output=
+runtime_queries_matched=
+checked_rg_capture runtime_query_output runtime_queries_matched \
+  "scan runtime SQL APIs" "$storage_root" \
+  --line-number --glob '*.rs' 'sqlx::(query|query_as|query_scalar)\s*\(' "$storage_root"
+runtime_queries=()
+if (( runtime_queries_matched )); then
+  mapfile -t runtime_queries <<< "$runtime_query_output"
+fi
 for runtime_query in "${runtime_queries[@]}"; do
   approved=false
   for pattern in "${approved_runtime_queries[@]}"; do
@@ -40,12 +63,27 @@ for runtime_query in "${runtime_queries[@]}"; do
   fi
 done
 
-checked_queries=$(rg --count-matches --glob '*.rs' \
-  'sqlx::(query|query_as|query_scalar)!\s*\(' "$storage_root" \
-  | awk -F: '{ total += $2 } END { print total + 0 }')
-typed_rows=$(rg --count-matches --glob '*.rs' \
-  '(derive\([^)]*FromRow|derive\([^)]*sqlx::FromRow)' "$storage_root" \
-  | awk -F: '{ total += $2 } END { print total + 0 }')
+checked_query_counts=
+checked_query_counts_matched=
+checked_rg_capture checked_query_counts checked_query_counts_matched \
+  "count checked SQLx queries" "$storage_root" \
+  --count-matches --glob '*.rs' \
+  'sqlx::(query|query_as|query_scalar)!\s*\(' "$storage_root"
+checked_queries=0
+if (( checked_query_counts_matched )); then
+  checked_queries=$(awk -F: '{ total += $NF } END { print total + 0 }' <<< "$checked_query_counts")
+fi
+
+typed_row_counts=
+typed_row_counts_matched=
+checked_rg_capture typed_row_counts typed_row_counts_matched \
+  "count typed SQLx rows" "$storage_root" \
+  --count-matches --glob '*.rs' \
+  '(derive\([^)]*FromRow|derive\([^)]*sqlx::FromRow)' "$storage_root"
+typed_rows=0
+if (( typed_row_counts_matched )); then
+  typed_rows=$(awk -F: '{ total += $NF } END { print total + 0 }' <<< "$typed_row_counts")
+fi
 if (( checked_queries == 0 || typed_rows == 0 )); then
   echo "checked query or typed dynamic-row coverage unexpectedly disappeared" >&2
   exit 1

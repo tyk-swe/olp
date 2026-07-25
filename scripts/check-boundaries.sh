@@ -2,88 +2,135 @@
 set -euo pipefail
 
 workspace_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+# shellcheck source=scripts/lib/repository-validation.sh
+source "$workspace_root/scripts/lib/repository-validation.sh"
 cd "$workspace_root"
+
+for required_executable in rg find realpath cargo jq sort dirname; do
+  validation_require_executable "$required_executable"
+done
+for required_file in \
+  Cargo.toml Cargo.lock console/package.json console/svelte.config.js \
+  console/src/routes/+layout.ts; do
+  validation_require_file "$required_file"
+done
+for required_directory in \
+  apps apps/olp/src crates crates/domain crates/protocols crates/providers \
+  crates/storage console/src console/src/routes; do
+  validation_require_directory "$required_directory"
+done
 
 violations=0
 
 report_matches() {
   local message="$1"
   local pattern="$2"
-  shift 2
+  local path="$3"
+  shift 3
   local output
-  if output="$(rg -n --no-heading "$pattern" "$@")"; then
+  local matched
+  checked_rg_capture output matched "$message" "$path" \
+    -n --no-heading "$pattern" "$@"
+  if (( matched )); then
     printf '%s\n%s\n' "$message" "$output" >&2
     violations=1
-  else
-    local status=$?
-    if (( status != 1 )); then
-      echo "boundary check could not scan the workspace" >&2
-      exit "$status"
-    fi
   fi
 }
-
-for required_directory in apps crates console/src console/src/routes; do
-  if [[ ! -d "$required_directory" ]]; then
-    echo "boundary check expected $required_directory to exist" >&2
-    exit 2
-  fi
-done
 
 report_matches \
   "workspace manifest enables an unsupported platform dependency:" \
   '^[[:space:]]*"?(@sveltejs/adapter-(node|cloudflare)|@cloudflare/[^"[:space:]]+|@libsql/[^"[:space:]]+|wrangler|better-sqlite3|cloudflare|cloudflare-workers|rusqlite|libsql|sqlite3?|worker)["[:space:]]*[:=]' \
+  "Cargo.toml apps crates console/package.json" \
   Cargo.toml apps crates console/package.json \
   --glob 'Cargo.toml' --glob 'package.json'
 
 report_matches \
   "PostgreSQL-only workspace enables the SQLite backend:" \
   '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' \
+  "Cargo.toml apps crates" \
   Cargo.toml apps crates \
   --glob 'Cargo.toml'
 
-mapfile -t server_routes < <(
-  find console/src/routes -type f \
-    \( -name '+page.server.*' -o -name '+layout.server.*' -o -name '+server.*' \) \
-    -print
-)
-mapfile -t server_modules < <(
-  find console/src -type f \( -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print
-)
+server_routes_output=
+if server_routes_output=$(find console/src/routes -type f \
+  \( -name '+page.server.*' -o -name '+layout.server.*' -o -name '+server.*' \) \
+  -print); then
+  :
+else
+  status=$?
+  printf '%s: producer failed: operation=find server routes path=%s exit=%d\n' \
+    "$(validation_script_name)" "console/src/routes" "$status" >&2
+  exit "$status"
+fi
+server_routes=()
+if [[ -n $server_routes_output ]]; then
+  mapfile -t server_routes <<< "$server_routes_output"
+fi
+
+server_modules_output=
+if server_modules_output=$(find console/src -type f \
+  \( -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print); then
+  :
+else
+  status=$?
+  printf '%s: producer failed: operation=find server modules path=%s exit=%d\n' \
+    "$(validation_script_name)" "console/src" "$status" >&2
+  exit "$status"
+fi
+server_modules=()
+if [[ -n $server_modules_output ]]; then
+  mapfile -t server_modules <<< "$server_modules_output"
+fi
 if (( ${#server_routes[@]} || ${#server_modules[@]} )); then
   echo "console must remain a static client-only application:" >&2
   printf '  %s\n' "${server_routes[@]}" "${server_modules[@]}" >&2
   violations=1
 fi
 
-if ! rg -q "@sveltejs/adapter-static" console/svelte.config.js; then
+adapter_static_matched=
+checked_rg_match adapter_static_matched \
+  "verify static Svelte adapter" "console/svelte.config.js" \
+  -q "@sveltejs/adapter-static" console/svelte.config.js
+if (( ! adapter_static_matched )); then
   echo "console must use @sveltejs/adapter-static" >&2
   violations=1
 fi
-if ! rg -q 'export[[:space:]]+const[[:space:]]+ssr[[:space:]]*=[[:space:]]*false' \
-  console/src/routes/+layout.ts; then
+
+ssr_disabled_matched=
+checked_rg_match ssr_disabled_matched \
+  "verify console SSR is disabled" "console/src/routes/+layout.ts" \
+  -q 'export[[:space:]]+const[[:space:]]+ssr[[:space:]]*=[[:space:]]*false' \
+  console/src/routes/+layout.ts
+if (( ! ssr_disabled_matched )); then
   echo "console root layout must disable server-side rendering" >&2
   violations=1
 fi
 
 # A path dependency may point to another workspace crate, but never escape the
 # repository workspace.
-while IFS= read -r match; do
-  manifest="${match%%:*}"
-  remainder="${match#*:}"
-  remainder="${remainder#*:}"
-  dependency_path="${remainder#*\"}"
-  dependency_path="${dependency_path%\"}"
-  resolved="$(realpath -m "$(dirname "$manifest")/$dependency_path")"
-  case "$resolved" in
-    "$workspace_root"|"$workspace_root"/*) ;;
-    *)
-      echo "$manifest has a path dependency outside the workspace: $dependency_path" >&2
-      violations=1
-      ;;
-  esac
-done < <(rg -n --no-heading -o 'path[[:space:]]*=[[:space:]]*"[^"]+"' \
-  Cargo.toml apps crates --glob 'Cargo.toml' || true)
+path_dependencies=
+path_dependencies_matched=
+checked_rg_capture path_dependencies path_dependencies_matched \
+  "scan workspace path dependencies" "Cargo.toml apps crates" \
+  -n --no-heading -o 'path[[:space:]]*=[[:space:]]*"[^"]+"' \
+  Cargo.toml apps crates --glob 'Cargo.toml'
+if (( path_dependencies_matched )); then
+  while IFS= read -r match; do
+    manifest="${match%%:*}"
+    remainder="${match#*:}"
+    remainder="${remainder#*:}"
+    dependency_path="${remainder#*\"}"
+    dependency_path="${dependency_path%\"}"
+    resolved="$(realpath -m "$(dirname "$manifest")/$dependency_path")"
+    case "$resolved" in
+      "$workspace_root"|"$workspace_root"/*) ;;
+      *)
+        echo "$manifest has a path dependency outside the workspace: $dependency_path" >&2
+        violations=1
+        ;;
+    esac
+  done <<< "$path_dependencies"
+fi
 
 metadata="$(cargo metadata --locked --no-deps --format-version 1)"
 actual_packages="$(jq -r '.packages[].name' <<<"$metadata" | sort)"
@@ -114,36 +161,48 @@ if [[ "$actual_dag" != "$expected_dag" ]]; then
   violations=1
 fi
 
-while IFS=$'\t' read -r package dependency; do
-  case "$dependency" in
-    sqlx|redis)
-      expected_owner='olp-storage'
-      ;;
-    reqwest|aws-*|google-cloud-auth)
-      expected_owner='olp-providers'
-      ;;
-    axum|clap)
-      expected_owner='olp'
-      ;;
-    *)
-      continue
-      ;;
-  esac
-  if [[ "$package" != "$expected_owner" ]]; then
-    echo "$dependency is owned by $expected_owner, not $package" >&2
-    violations=1
-  fi
-done < <(jq -r '
+dependency_rows=
+if dependency_rows=$(jq -r '
   .packages[] as $package
   | $package.dependencies[]
   | select(.kind != "dev")
   | [$package.name, .name]
   | @tsv
-' <<<"$metadata")
+' <<<"$metadata"); then
+  :
+else
+  status=$?
+  printf '%s: producer failed: operation=read workspace dependencies path=%s exit=%d\n' \
+    "$(validation_script_name)" "cargo metadata" "$status" >&2
+  exit "$status"
+fi
+if [[ -n $dependency_rows ]]; then
+  while IFS=$'\t' read -r package dependency; do
+    case "$dependency" in
+      sqlx|redis)
+        expected_owner='olp-storage'
+        ;;
+      reqwest|aws-*|google-cloud-auth)
+        expected_owner='olp-providers'
+        ;;
+      axum|clap)
+        expected_owner='olp'
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    if [[ "$package" != "$expected_owner" ]]; then
+      echo "$dependency is owned by $expected_owner, not $package" >&2
+      violations=1
+    fi
+  done <<< "$dependency_rows"
+fi
 
 report_matches \
   "concrete provider construction escaped olp-providers:" \
   '(OpenAiConnector|AnthropicConnector|GeminiConnector|VertexConnector|BedrockConnector|AzureOpenAiConnector)::(new|with_application_default|with_service_account_json)' \
+  "apps/olp/src crates/domain crates/protocols crates/storage" \
   apps/olp/src crates/domain crates/protocols crates/storage \
   --glob '*.rs'
 

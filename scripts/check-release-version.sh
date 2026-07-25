@@ -6,7 +6,23 @@ if [[ $# -gt 1 || ${1:-} == --help || ${1:-} == -h ]]; then
   [[ $# -eq 1 ]] && exit 0 || exit 2
 fi
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root=$(cd "$script_dir/.." && pwd)
+# shellcheck source=scripts/lib/repository-validation.sh
+source "$script_dir/lib/repository-validation.sh"
+
+for required_executable in rg awk sed dirname; do
+  validation_require_executable "$required_executable"
+done
+for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm"; do
+  validation_require_directory "$required_directory"
+done
+for required_file in \
+  "$root/Cargo.toml" "$root/console/package.json" \
+  "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile"; do
+  validation_require_file "$required_file"
+done
+
 expected=${1:-}
 
 workspace_version=$(awk '
@@ -49,8 +65,14 @@ if [[ -n $expected && $workspace_version != "$expected" ]]; then
   exit 1
 fi
 
-if rg -n 'path = "[^"]+", version = "(?!'"$workspace_version"')' \
-  "$root/Cargo.toml" --pcre2; then
+version_mismatches=
+version_mismatches_matched=
+checked_rg_capture version_mismatches version_mismatches_matched \
+  "scan workspace path dependency versions" "$root/Cargo.toml" \
+  -n 'path = "[^"]+", version = "(?!'"$workspace_version"')' \
+  "$root/Cargo.toml" --pcre2
+if (( version_mismatches_matched )); then
+  printf '%s\n' "$version_mismatches"
   echo "a workspace path dependency does not match $workspace_version" >&2
   exit 1
 fi

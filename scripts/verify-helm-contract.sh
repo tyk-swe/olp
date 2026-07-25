@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/lib/repository-validation.sh
+source "$script_dir/lib/repository-validation.sh"
+
 chart=${1:-deploy/helm}
-command -v helm >/dev/null || { echo "helm is required" >&2; exit 1; }
-command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
-command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
+for required_executable in \
+  helm jq docker rg dirname mktemp rm install chmod sha256sum stat grep awk sort wc; do
+  validation_require_executable "$required_executable"
+done
 docker compose version >/dev/null 2>&1 || { echo "Docker Compose is required" >&2; exit 1; }
 compose_file="$(dirname "$chart")/compose.yaml"
 bootstrap_compose_file="$(dirname "$chart")/compose.bootstrap.yaml"
@@ -13,15 +18,20 @@ compose_secret_helper="$(dirname "$chart")/../scripts/prepare-compose-secrets.sh
 compose_bootstrap_retirement_helper="$(dirname "$chart")/../scripts/retire-compose-bootstrap-secret.sh"
 
 dashboard="$(dirname "$chart")/monitoring/grafana-dashboard.json"
-[[ -f $dashboard ]] || {
-  echo "Grafana dashboard is missing: $dashboard" >&2
-  exit 1
-}
-[[ -f $compose_file && -f $bootstrap_compose_file && -f $dockerfile && \
-  -x $compose_secret_helper && -x $compose_bootstrap_retirement_helper ]] || {
-  echo "deployment Compose file, bootstrap overlay, Dockerfile, or secret helper is missing" >&2
-  exit 1
-}
+validation_require_directory "$chart"
+for required_file in \
+  "$dashboard" "$compose_file" "$bootstrap_compose_file" "$dockerfile" \
+  "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
+  validation_require_file "$required_file"
+done
+for required_helper in \
+  "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
+  if [[ ! -x $required_helper ]]; then
+    printf '%s: preflight failed: required helper is not executable: %s\n' \
+      "$(validation_script_name)" "$required_helper" >&2
+    exit 2
+  fi
+done
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -163,7 +173,11 @@ grep -Fq 'value: "9007199254740991"' "$work/max-spool-manifests.yaml" || {
   echo "rendered Helm contract did not preserve the maximum exact spool capacity" >&2
   exit 1
 }
-if rg -q 'name: OLP_TRUSTED_PROXY_CIDRS' "$work/manifests.yaml"; then
+default_proxy_cidrs_matched=
+checked_rg_match default_proxy_cidrs_matched \
+  "scan default trusted-proxy configuration" "$work/manifests.yaml" \
+  -q 'name: OLP_TRUSTED_PROXY_CIDRS' "$work/manifests.yaml"
+if (( default_proxy_cidrs_matched )); then
   echo "default chart must omit an empty trusted-proxy CIDR environment value" >&2
   exit 1
 fi
@@ -171,8 +185,13 @@ grep -Fq 'name: OLP_TRUSTED_PROXY_CIDRS' "$work/edge-manifests.yaml" || {
   echo "ingress chart must pass configured trusted-proxy CIDRs to application pods" >&2
   exit 1
 }
-if grep -Eiq 'value: "?[0-9]+(\.[0-9]+)?e[+-]?[0-9]+"?' \
-  "$work/manifests.yaml" "$work/max-spool-manifests.yaml"; then
+scientific_notation_values_matched=
+checked_rg_match scientific_notation_values_matched \
+  "scan rendered numeric notation" \
+  "$work/manifests.yaml $work/max-spool-manifests.yaml" \
+  -qi 'value: "?[0-9]+(\.[0-9]+)?e[+-]?[0-9]+"?' \
+  "$work/manifests.yaml" "$work/max-spool-manifests.yaml"
+if (( scientific_notation_values_matched )); then
   echo "rendered media spool capacity used scientific notation" >&2
   exit 1
 fi
@@ -202,7 +221,11 @@ grep -Fq "OLP_HTTP_MAX_CONNECTIONS: \${OLP_HTTP_MAX_CONNECTIONS:-1024}" "$compos
   echo "Compose does not expose the public-listener connection cap" >&2
   exit 1
 }
-if rg -q 'OLP_BOOTSTRAP_TOKEN_FILE|olp_bootstrap_token' "$compose_file"; then
+base_bootstrap_tokens_matched=
+checked_rg_match base_bootstrap_tokens_matched \
+  "scan base Compose bootstrap tokens" "$compose_file" \
+  -q 'OLP_BOOTSTRAP_TOKEN_FILE|olp_bootstrap_token' "$compose_file"
+if (( base_bootstrap_tokens_matched )); then
   echo "base Compose configuration must not require the retired bootstrap token" >&2
   exit 1
 fi
@@ -227,7 +250,11 @@ jq -e '
   echo "Compose migration must wait for and preflight Valkey" >&2
   exit 1
 }
-if rg -q 'OLP_BOOTSTRAP_TOKEN_FILE|olp_bootstrap_token' "$work/compose.yaml"; then
+rendered_bootstrap_tokens_matched=
+checked_rg_match rendered_bootstrap_tokens_matched \
+  "scan rendered base Compose bootstrap tokens" "$work/compose.yaml" \
+  -q 'OLP_BOOTSTRAP_TOKEN_FILE|olp_bootstrap_token' "$work/compose.yaml"
+if (( rendered_bootstrap_tokens_matched )); then
   echo "rendered base Compose configuration still requires the bootstrap token" >&2
   exit 1
 fi
@@ -237,7 +264,11 @@ for expected in 'OLP_BOOTSTRAP_TOKEN_FILE' 'olp_bootstrap_token'; do
     exit 1
   }
 done
-if rg -q '(^|[[:space:]])(target: 9090|published: "?9090"?)$' "$work/compose.yaml"; then
+published_observability_ports_matched=
+checked_rg_match published_observability_ports_matched \
+  "scan rendered Compose observability ports" "$work/compose.yaml" \
+  -q '(^|[[:space:]])(target: 9090|published: "?9090"?)$' "$work/compose.yaml"
+if (( published_observability_ports_matched )); then
   echo "Compose must not host-publish private observability port 9090" >&2
   exit 1
 fi
@@ -265,17 +296,30 @@ for expected in \
   }
 done
 
-if rg -q 'OLPUsage(Events|Persistence|Backlog|Consumer)|olp_usage_(events|persistence|consumer|gateway|stream)' \
-  "$work/edge-manifests.yaml"; then
+legacy_usage_telemetry_matched=
+checked_rg_match legacy_usage_telemetry_matched \
+  "scan rendered monitoring telemetry names" "$work/edge-manifests.yaml" \
+  -q 'OLPUsage(Events|Persistence|Backlog|Consumer)|olp_usage_(events|persistence|consumer|gateway|stream)' \
+  "$work/edge-manifests.yaml"
+if (( legacy_usage_telemetry_matched )); then
   echo "rendered monitoring contract contains legacy usage-named request metadata telemetry" >&2
   exit 1
 fi
 
-if awk '
+rendered_ingress=
+if rendered_ingress=$(awk '
   /^kind: Ingress$/ { ingress=1 }
   ingress { print }
   ingress && /^---$/ { exit }
-' "$work/edge-manifests.yaml" | grep -Fq 'path: /health'; then
+' "$work/edge-manifests.yaml"); then
+  :
+else
+  status=$?
+  printf '%s: producer failed: operation=extract rendered Ingress path=%s exit=%d\n' \
+    "$(validation_script_name)" "$work/edge-manifests.yaml" "$status" >&2
+  exit "$status"
+fi
+if [[ $rendered_ingress == *'path: /health'* ]]; then
   echo "public Ingress must not expose health endpoints" >&2
   exit 1
 fi
@@ -285,8 +329,12 @@ service_monitor_count=$(grep -c '^kind: ServiceMonitor$' "$work/edge-manifests.y
   echo "monitoring must render exactly one gateway and one control ServiceMonitor" >&2
   exit 1
 }
-if ! rg -U 'kind: ServiceMonitor[\s\S]*?port: observability[\s\S]*?path: /metrics' \
-  "$work/edge-manifests.yaml" >/dev/null; then
+service_monitor_targets_matched=
+checked_rg_match service_monitor_targets_matched \
+  "verify rendered ServiceMonitor targets" "$work/edge-manifests.yaml" \
+  -U 'kind: ServiceMonitor[\s\S]*?port: observability[\s\S]*?path: /metrics' \
+  "$work/edge-manifests.yaml"
+if (( ! service_monitor_targets_matched )); then
   echo "ServiceMonitors must target private observability Services" >&2
   exit 1
 fi
