@@ -116,8 +116,6 @@ fn limit_keys(namespace: &str, lookup_id: &str) -> LimitKeys {
     let prefix = format!("{namespace}:{{{lookup_id}}}");
     LimitKeys {
         rate: format!("{prefix}:rate"),
-        // Separating this from the legacy zset prevents an old binary with a
-        // skewed process clock from deleting or mis-scoring new leases.
         concurrency: format!("{prefix}:concurrency:v2"),
     }
 }

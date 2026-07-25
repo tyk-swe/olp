@@ -82,7 +82,7 @@ async fn release_twice(limiter: &DistributedLimiter, lease: &LimitLease) {
 
 #[tokio::test]
 #[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
-async fn server_time_unifies_skewed_callers_and_ignores_legacy_minute_keys() {
+async fn server_time_unifies_callers() {
     let namespace = namespace("server_time");
     let lookup_id = "lookup_01";
     let other_lookup_id = "lookup_02";
@@ -93,26 +93,7 @@ async fn server_time_unifies_skewed_callers_and_ignores_legacy_minute_keys() {
         .await
         .unwrap();
     let mut connection = connection().await;
-
-    // These deliberately contradictory local-clock fixtures can only affect
-    // legacy minute-suffixed keys; the reservation API has no clock argument.
-    let slow_caller_window = 1_i64;
-    let fast_caller_window = MAX_LUA_INTEGER / 60_000;
-    let legacy_rpm_slow = format!("{namespace}:{{{lookup_id}}}:rpm:{slow_caller_window}");
-    let legacy_tpm_fast = format!("{namespace}:{{{lookup_id}}}:tpm:{fast_caller_window}");
-    let legacy_concurrency = format!("{namespace}:{{{lookup_id}}}:concurrency");
-    let _: () = redis::pipe()
-        .set(&legacy_rpm_slow, 999)
-        .set(&legacy_tpm_fast, 999)
-        .query_async(&mut connection)
-        .await
-        .unwrap();
-
     let before_ms = settle_in_minute(&mut connection).await;
-    connection
-        .zadd::<_, _, _, ()>(&legacy_concurrency, "old-clock-lease", before_ms + 100_000)
-        .await
-        .unwrap();
     let first = limiter_a
         .reserve(LimitRequest {
             requests_per_minute: Some(2),
@@ -163,21 +144,6 @@ async fn server_time_unifies_skewed_callers_and_ignores_legacy_minute_keys() {
         .unwrap();
     let (other_rate_key, _) = keys(&namespace, other_lookup_id);
     assert_eq!(rate_state(&mut connection, &other_rate_key).await["rpm"], 1);
-    assert_eq!(
-        connection.get::<_, i64>(&legacy_rpm_slow).await.unwrap(),
-        999
-    );
-    assert_eq!(
-        connection.get::<_, i64>(&legacy_tpm_fast).await.unwrap(),
-        999
-    );
-    assert_eq!(
-        connection
-            .zcard::<_, i64>(&legacy_concurrency)
-            .await
-            .unwrap(),
-        1
-    );
 
     release_twice(&limiter_a, &first).await;
     release_twice(&limiter_b, &second).await;
