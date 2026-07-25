@@ -21,7 +21,6 @@ use crate::{
 
 const RUNTIME_HINT_CHANNEL: &str = "olp:v2:runtime";
 pub const REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
-const LEGACY_USAGE_STREAM: &str = "olp:v2:usage";
 const REQUEST_METADATA_GROUP: &str = "olp:persistence";
 const REQUEST_METADATA_CONSUMER: &str = "worker";
 
@@ -33,18 +32,6 @@ pub enum ValkeyAdapterError {
     Storage(#[from] PersistenceError),
     #[error("Valkey returned invalid stream state: {0}")]
     InvalidState(&'static str),
-    #[error(
-        "legacy Valkey stream olp:v2:usage is not drained: entries={entries} pending={pending} lag={lag}; drain it with the previous release before upgrading to olp:v2:request-metadata"
-    )]
-    LegacyRequestMetadataStreamNotDrained {
-        entries: u64,
-        pending: u64,
-        lag: u64,
-    },
-    #[error(
-        "legacy Valkey stream olp:v2:usage contains {entries} acknowledged remnants; after confirming the old consumer has zero pending and lag, back up Valkey and run XTRIM olp:v2:usage MAXLEN 0 before upgrading"
-    )]
-    LegacyRequestMetadataStreamAcknowledgedEntries { entries: u64 },
 }
 
 /// An owned runtime-hint stream. Message payloads are deliberately hidden:
@@ -97,68 +84,6 @@ impl RuntimeHintPublisher {
     }
 }
 
-/// Fails an upgrade when the old metadata stream still contains entries.
-/// Empty and absent streams both have an `XLEN` of zero.
-pub async fn preflight_request_metadata_stream_upgrade(
-    valkey_url: &str,
-) -> Result<(), ValkeyAdapterError> {
-    let mut connection = valkey_connection(valkey_url).await?;
-    preflight_request_metadata_stream_connection(&mut connection).await
-}
-
-pub(crate) async fn preflight_request_metadata_stream_connection(
-    connection: &mut ConnectionManager,
-) -> Result<(), ValkeyAdapterError> {
-    let entries: u64 = redis::cmd("XLEN")
-        .arg(LEGACY_USAGE_STREAM)
-        .query_async(connection)
-        .await?;
-    if entries == 0 {
-        return Ok(());
-    }
-    let groups: StreamInfoGroupsReply = connection.xinfo_groups(LEGACY_USAGE_STREAM).await?;
-    let Some(group) = groups
-        .groups
-        .into_iter()
-        .find(|group| group.name == REQUEST_METADATA_GROUP)
-    else {
-        return validate_legacy_stream_state(entries, 0, entries);
-    };
-    let pending = match connection
-        .xpending(LEGACY_USAGE_STREAM, REQUEST_METADATA_GROUP)
-        .await?
-    {
-        StreamPendingReply::Empty => 0,
-        StreamPendingReply::Data(data) => u64::try_from(data.count)
-            .map_err(|_| ValkeyAdapterError::InvalidState("legacy pending count overflow"))?,
-    };
-    let lag = group
-        .lag
-        .map(u64::try_from)
-        .transpose()
-        .map_err(|_| ValkeyAdapterError::InvalidState("legacy stream lag overflow"))?
-        .unwrap_or(entries);
-    validate_legacy_stream_state(entries, pending, lag)
-}
-
-fn validate_legacy_stream_state(
-    entries: u64,
-    pending: u64,
-    lag: u64,
-) -> Result<(), ValkeyAdapterError> {
-    if entries == 0 {
-        Ok(())
-    } else if pending == 0 && lag == 0 {
-        Err(ValkeyAdapterError::LegacyRequestMetadataStreamAcknowledgedEntries { entries })
-    } else {
-        Err(ValkeyAdapterError::LegacyRequestMetadataStreamNotDrained {
-            entries,
-            pending,
-            lag,
-        })
-    }
-}
-
 /// Runs the stable single-consumer request metadata worker until shutdown. PostgreSQL is
 /// committed before an entry is acknowledged and deleted from Valkey.
 pub async fn run_request_metadata_consumer(
@@ -167,7 +92,6 @@ pub async fn run_request_metadata_consumer(
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ValkeyAdapterError> {
     let mut connection = valkey_connection(valkey_url).await?;
-    preflight_request_metadata_stream_connection(&mut connection).await?;
     let create: Result<String, redis::RedisError> = redis::cmd("XGROUP")
         .arg("CREATE")
         .arg(REQUEST_METADATA_STREAM)
@@ -351,42 +275,4 @@ async fn checkpoint_request_metadata_consumer_health(
 async fn valkey_connection(url: &str) -> Result<ConnectionManager, redis::RedisError> {
     let client = redis::Client::open(url)?;
     ConnectionManager::new(client).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn legacy_stream_preflight_accepts_an_absent_or_empty_stream() {
-        assert!(validate_legacy_stream_state(0, 0, 0).is_ok());
-    }
-
-    #[test]
-    fn legacy_stream_preflight_rejects_entries_with_drain_instructions() {
-        let error = validate_legacy_stream_state(3, 1, 2).unwrap_err();
-        assert!(matches!(
-            error,
-            ValkeyAdapterError::LegacyRequestMetadataStreamNotDrained {
-                entries: 3,
-                pending: 1,
-                lag: 2
-            }
-        ));
-        assert!(
-            error
-                .to_string()
-                .contains("drain it with the previous release")
-        );
-    }
-
-    #[test]
-    fn legacy_stream_preflight_identifies_acknowledged_remnants() {
-        let error = validate_legacy_stream_state(3, 0, 0).unwrap_err();
-        assert!(matches!(
-            error,
-            ValkeyAdapterError::LegacyRequestMetadataStreamAcknowledgedEntries { entries: 3 }
-        ));
-        assert!(error.to_string().contains("XTRIM olp:v2:usage MAXLEN 0"));
-    }
 }

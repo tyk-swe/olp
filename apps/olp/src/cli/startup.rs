@@ -24,8 +24,8 @@ use crate::{
 use super::{
     AppError, AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
     commands::{
-        maintenance_supervisor, outbox_supervisor, preflight_request_metadata_stream_or_defer,
-        request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
+        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_supervisor,
+        request_metadata_epoch_supervisor,
     },
     config::ServeArgs,
     validation::{
@@ -143,9 +143,6 @@ pub(super) async fn serve(
         background_shutdown_receiver.clone(),
     ));
     if let Some(url) = &args.valkey_url {
-        if mode.serves_gateway() || run_worker_in_process {
-            preflight_request_metadata_stream_or_defer(url).await?;
-        }
         background_tasks.push(tokio::spawn(runtime_hint_supervisor(
             Arc::clone(&state.runtime),
             store.clone(),

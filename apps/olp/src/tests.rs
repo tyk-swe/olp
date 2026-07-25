@@ -35,8 +35,8 @@ use super::{
     observability::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label},
     request_admission::{
         HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,
-        HTTP_INFERENCE_RESERVATION_HOLD, HTTP_INFERENCE_RUNTIME, InferenceReservation,
-        JsonBodyReadError, LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody,
+        HTTP_INFERENCE_RESERVATION_HOLD, InferenceReservation, JsonBodyReadError,
+        LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody,
         enforce_request_limits, estimate_http_json_request_tokens, http_inference_principal,
         read_json_body, validate_json_depth, validate_multipart_boundary,
     },
@@ -1419,28 +1419,25 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     ) = HTTP_INFERENCE_PRINCIPAL
         .scope(
             principal,
-            HTTP_INFERENCE_RUNTIME.scope(
-                Arc::clone(&pinned),
-                HTTP_INFERENCE_METADATA_CLAIMED.scope(
-                    Arc::clone(&metadata_claimed),
-                    HTTP_INFERENCE_LIMITS_RESERVED.scope(
-                        2_000,
-                        HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
-                            let task = spawn_http_inference_task(&spawn_state, async move {
-                                claim_http_inference_metadata();
-                                let principal = http_inference_principal()
-                                    .expect("the detached task inherits the admitted principal");
-                                (
-                                    pin_inference_runtime(&child_state).generation.id,
-                                    principal.runtime().generation.id,
-                                    principal.surface(),
-                                    http_inference_reserved_tokens(),
-                                    HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
-                                )
-                            });
-                            task.await.unwrap()
-                        }),
-                    ),
+            HTTP_INFERENCE_METADATA_CLAIMED.scope(
+                Arc::clone(&metadata_claimed),
+                HTTP_INFERENCE_LIMITS_RESERVED.scope(
+                    2_000,
+                    HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
+                        let task = spawn_http_inference_task(&spawn_state, async move {
+                            claim_http_inference_metadata();
+                            let principal = http_inference_principal()
+                                .expect("the detached task inherits the admitted principal");
+                            (
+                                pin_inference_runtime(&child_state).generation.id,
+                                principal.runtime().generation.id,
+                                principal.surface(),
+                                http_inference_reserved_tokens(),
+                                HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
+                            )
+                        });
+                        task.await.unwrap()
+                    }),
                 ),
             ),
         )

@@ -28,11 +28,6 @@ before installation. The defaults are:
 | Master key | `olp-master-key` | `key` |
 | Authentication HMAC key | `olp-auth-hmac-key` | `key` |
 
-Existing installations that still use `olp-key-hash-key` must copy those exact
-bytes to the new Secret and update the chart values before upgrading. Never
-generate a replacement. Follow the byte-preserving procedure in the
-[upgrade runbook](operations.md#naming-migration-prerequisites).
-
 For a new installation, also create a 32-byte base64 bootstrap token Secret
 and set `config.bootstrapTokenSecretName` and `config.bootstrapTokenSecretKey`.
 Helm mounts it only into control pods; it is required until the first owner has

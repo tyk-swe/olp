@@ -57,14 +57,7 @@ const MAX_URI_BYTES: usize = 8 * 1024;
 pub(crate) struct FirstOwnerSetupAuthorized;
 
 tokio::task_local! {
-    /// The immutable generation selected by the inference HTTP boundary. Every
-    /// downstream authentication, route, capability, and transport decision
-    /// must use this same bundle for the lifetime of the request.
-    pub(super) static HTTP_INFERENCE_RUNTIME: Arc<RuntimeBundle>;
-
     /// The sole verified API-key identity for an admitted inference request.
-    /// It contains no plaintext credential and is propagated into detached
-    /// request work together with the pinned runtime generation.
     pub(super) static HTTP_INFERENCE_PRINCIPAL: InferencePrincipal;
 
     /// Set by the canonical pipeline once it owns metadata completion for an
@@ -85,7 +78,6 @@ tokio::task_local! {
 pub(crate) fn pin_inference_runtime(state: &GatewayState) -> Arc<RuntimeBundle> {
     HTTP_INFERENCE_PRINCIPAL
         .try_with(|principal| Arc::clone(principal.runtime()))
-        .or_else(|_| HTTP_INFERENCE_RUNTIME.try_with(Arc::clone))
         .unwrap_or_else(|_| state.runtime.pin())
 }
 
@@ -108,7 +100,6 @@ pub(crate) fn claim_http_inference_metadata() {
 
 #[derive(Clone)]
 struct HttpInferenceTaskContext {
-    runtime: Arc<RuntimeBundle>,
     principal: Option<InferencePrincipal>,
     metadata_claimed: Option<Arc<AtomicBool>>,
     reserved_tokens: Option<i64>,
@@ -116,9 +107,8 @@ struct HttpInferenceTaskContext {
 }
 
 impl HttpInferenceTaskContext {
-    fn capture(state: &GatewayState) -> Self {
+    fn capture() -> Self {
         Self {
-            runtime: pin_inference_runtime(state),
             principal: HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok(),
             metadata_claimed: HTTP_INFERENCE_METADATA_CLAIMED.try_with(Arc::clone).ok(),
             reserved_tokens: http_inference_reserved_tokens(),
@@ -146,19 +136,19 @@ impl HttpInferenceTaskContext {
         if let Some(principal) = self.principal {
             future = Box::pin(HTTP_INFERENCE_PRINCIPAL.scope(principal, future));
         }
-        HTTP_INFERENCE_RUNTIME.scope(self.runtime, future).await
+        future.await
     }
 }
 
 pub(crate) fn spawn_http_inference_task<F, T>(
-    state: &GatewayState,
+    _state: &GatewayState,
     future: F,
 ) -> tokio::task::JoinHandle<T>
 where
     F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
-    let context = HttpInferenceTaskContext::capture(state);
+    let context = HttpInferenceTaskContext::capture();
     tokio::spawn(context.scope(future))
 }
 
@@ -657,12 +647,10 @@ async fn run_request_with_reservation(
         };
     let response = match (principal, metadata_claimed.as_ref()) {
         (Some(principal), Some(claimed)) => {
-            let runtime = Arc::clone(principal.runtime());
             HTTP_INFERENCE_METADATA_CLAIMED
                 .scope(
                     Arc::clone(claimed),
-                    HTTP_INFERENCE_PRINCIPAL
-                        .scope(principal, HTTP_INFERENCE_RUNTIME.scope(runtime, run)),
+                    HTTP_INFERENCE_PRINCIPAL.scope(principal, run),
                 )
                 .await
         }

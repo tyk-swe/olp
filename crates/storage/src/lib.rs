@@ -73,7 +73,7 @@ pub use store::{
 };
 pub use valkey::{
     REQUEST_METADATA_STREAM, RuntimeHintPublisher, RuntimeHintSubscriber, ValkeyAdapterError,
-    preflight_request_metadata_stream_upgrade, run_request_metadata_consumer,
+    run_request_metadata_consumer,
 };
 
 /// Truncates a query result fetched with `limit + 1` and derives the cursor
