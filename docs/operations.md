@@ -118,36 +118,6 @@ OIDC redirects or provider credentials.
 
 ## Upgrade
 
-### Naming migration prerequisites
-
-This release deliberately removes the previous deployment-setting names. Before
-starting the candidate, update `OLP_PORT` to `OLP_HOST_PORT`,
-`OLP_KEY_HASH_KEY_FILE` to `OLP_AUTH_HMAC_KEY_FILE`, and
-`OLP_BACKUP_USAGE_CHECKPOINT_MAX_AGE_SECONDS` to
-`OLP_BACKUP_REQUEST_METADATA_CHECKPOINT_MAX_AGE_SECONDS`. Keep the existing
-authentication HMAC key bytes; replacing them invalidates API keys and
-bootstrap-token digests. For Compose, move
-`deploy/secrets/olp_key_hash_key` to `deploy/secrets/olp_auth_hmac_key` and
-update `OLP_PUBLIC_ORIGIN` if the host port changed.
-
-For Helm, update `config.keyHashSecretName` and `config.keyHashSecretKey` to
-`config.authHmacKeySecretName` and `config.authHmacKeySecretKey`, and rename
-monitoring values from `usage*` to `requestMetadata*`. Copy the existing Secret
-without exposing or regenerating its data before applying the new values:
-
-```console
-kubectl --namespace "$NAMESPACE" get secret olp-key-hash-key -o json \
-  | jq 'del(.metadata.creationTimestamp, .metadata.resourceVersion, .metadata.uid) \
-        | .metadata.name = "olp-auth-hmac-key"' \
-  | kubectl --namespace "$NAMESPACE" apply -f -
-test "$(kubectl --namespace "$NAMESPACE" get secret olp-key-hash-key -o jsonpath='{.data.key}' | sha256sum)" = \
-     "$(kubectl --namespace "$NAMESPACE" get secret olp-auth-hmac-key -o jsonpath='{.data.key}' | sha256sum)"
-```
-
-Do not delete the old Secret until the candidate workloads are healthy and the
-rollback decision point has passed. The application does not accept old
-deployment-setting names as aliases.
-
 1. Verify the immutable OCI digest and any signature, provenance, SBOM, and
    vulnerability information required by the deployment process.
 2. Enter a maintenance window. Stop inference admission at the edge and freeze
