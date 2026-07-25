@@ -28,6 +28,7 @@ use crate::{
 
 mod limits;
 mod multipart;
+mod public;
 mod validation;
 
 use limits::{
@@ -43,6 +44,10 @@ pub(super) use limits::{
 };
 pub(super) use multipart::{MultipartAdmissionState, validate_multipart_boundary};
 pub(crate) use multipart::{MultipartRequestAdmission, MultipartRouteAdmission};
+pub(crate) use public::{
+    DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS, DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
+    MAX_ADMISSION_CAPACITY, PublicAdmission, PublicAdmissionMiddleware, admit_public_request,
+};
 pub(super) use validation::{JsonBodyReadError, read_json_body, validate_json_depth};
 
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;

@@ -2,7 +2,13 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{PublicOrigin, TrustedProxyCidr};
+use crate::{
+    PublicOrigin, TrustedProxyCidr,
+    request_admission::{
+        DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS, DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
+        MAX_ADMISSION_CAPACITY,
+    },
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "olp", version, about = "OpenLLMProxy")]
@@ -82,6 +88,22 @@ pub(super) struct ServeArgs {
     /// Maximum simultaneously admitted TCP connections per HTTP listener.
     #[arg(long, env = "OLP_HTTP_MAX_CONNECTIONS", default_value_t = 1024)]
     pub(super) http_max_connections: usize,
+    /// Maximum inference requests admitted process-wide until response completion.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS",
+        default_value_t = DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS,
+        value_parser = parse_admission_capacity
+    )]
+    pub(super) http_max_in_flight_inference_requests: usize,
+    /// Reserved management requests admitted process-wide until response completion.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS",
+        default_value_t = DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
+        value_parser = parse_admission_capacity
+    )]
+    pub(super) http_max_in_flight_management_requests: usize,
     #[arg(
         long,
         env = "OLP_PUBLIC_ORIGIN",
@@ -121,6 +143,18 @@ pub(super) struct ServeArgs {
     /// contains paths, never credential values.
     #[arg(long, env = "OLP_CONNECTOR_CONFIG_FILE")]
     pub(super) connector_config_file: Option<PathBuf>,
+}
+
+fn parse_admission_capacity(value: &str) -> Result<usize, String> {
+    let capacity = value
+        .parse::<usize>()
+        .map_err(|_| "admission capacity must be an integer".to_owned())?;
+    if !(1..=MAX_ADMISSION_CAPACITY).contains(&capacity) {
+        return Err(format!(
+            "admission capacity must be between 1 and {MAX_ADMISSION_CAPACITY}"
+        ));
+    }
+    Ok(capacity)
 }
 
 #[derive(Clone, Debug, Args)]

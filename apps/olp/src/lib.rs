@@ -121,6 +121,7 @@ pub struct ApiState {
     media_reconciliation_gaps: Arc<AtomicU64>,
     pub media_spool: Arc<dyn MediaSpool>,
     multipart_admission: MultipartAdmissionState,
+    public_admission: request_admission::PublicAdmission,
     pub transports: TransportRegistry,
     certification_probe_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
     pub public_origin: PublicOrigin,
@@ -180,6 +181,7 @@ impl ApiState {
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
             media_spool,
             multipart_admission,
+            public_admission: request_admission::PublicAdmission::default(),
             transports: TransportRegistry::default(),
             certification_probe_connectors: Default::default(),
             public_origin: PublicOrigin::parse(public_origin.as_ref())
@@ -202,6 +204,17 @@ impl ApiState {
     /// is never retained by the HTTP state.
     pub fn set_bootstrap_token_digest(&mut self, digest: [u8; 32]) {
         self.bootstrap_token_digest = Arc::new(AsyncRwLock::new(Some(Zeroizing::new(digest))));
+    }
+
+    pub(crate) fn set_public_admission_limits(
+        &mut self,
+        max_in_flight_inference_requests: usize,
+        max_in_flight_management_requests: usize,
+    ) {
+        self.public_admission = request_admission::PublicAdmission::new(
+            max_in_flight_inference_requests,
+            max_in_flight_management_requests,
+        );
     }
 
     /// Installs a prebuilt OpenAI connector for certification and connectivity probes.

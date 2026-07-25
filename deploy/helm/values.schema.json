@@ -153,11 +153,13 @@
     },
     "serverComponent": {
       "type": "object",
-      "required": ["enabled", "replicas", "httpMaxConnections", "service", "podDisruptionBudget", "resources", "topologySpread"],
+      "required": ["enabled", "replicas", "httpMaxConnections", "httpMaxInFlightInferenceRequests", "httpMaxInFlightManagementRequests", "service", "podDisruptionBudget", "resources", "topologySpread"],
       "properties": {
         "enabled": { "type": "boolean" },
         "replicas": { "type": "integer", "minimum": 0 },
         "httpMaxConnections": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "httpMaxInFlightInferenceRequests": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "httpMaxInFlightManagementRequests": { "type": "integer", "minimum": 1, "maximum": 1000000 },
         "resources": { "type": "object" },
         "topologySpread": {
           "type": "object",

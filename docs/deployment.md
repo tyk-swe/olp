@@ -123,6 +123,25 @@ largest expected per-pod stream count with room for unary requests. The chart's
 gateway default is 16,384 connections per pod; the control-plane default
 remains 1,024.
 
+### Request admission capacity
+
+`gateway.httpMaxInFlightInferenceRequests` and
+`gateway.httpMaxInFlightManagementRequests` (and the corresponding `control`
+values) bound process-local public HTTP request work independently of TCP
+connections. The inference and management pools do not borrow from each other,
+so inference saturation cannot consume the management reserve in `all` mode.
+A permit is retained until the complete response body reaches EOF, fails, or is
+dropped; long-lived streaming responses therefore count for their full
+lifetime. Full pools reject immediately with HTTP 503 and `Retry-After: 1`
+instead of creating a waiting queue.
+
+The defaults are 256 inference requests and 32 management requests per process.
+They are conservative relative to the 1,024 default connection cap and leave a
+fixed management reserve while allowing substantially more request parallelism
+than the default 20-connection database pool. Size these values from pod CPU,
+memory, provider connection limits, and expected streaming duration; increasing
+the TCP cap alone does not increase admitted request work.
+
 ## Install and verify
 
 Render and review the exact digest before applying:

@@ -163,6 +163,26 @@ fn server_cli_parses_bootstrap_and_trusted_proxy_configuration() {
         PathBuf::from("/run/secrets/bootstrap")
     );
     assert_eq!(args.trusted_proxy_cidrs.len(), 2);
+    assert_eq!(args.http_max_in_flight_inference_requests, 256);
+    assert_eq!(args.http_max_in_flight_management_requests, 32);
+}
+
+#[test]
+fn server_cli_rejects_invalid_admission_capacities() {
+    for (flag, value) in [
+        ("--http-max-in-flight-inference-requests", "0"),
+        ("--http-max-in-flight-management-requests", "1000001"),
+    ] {
+        let result = Cli::try_parse_from([
+            "olp",
+            "control",
+            "--database-url",
+            "postgres://example/olp",
+            flag,
+            value,
+        ]);
+        assert!(result.is_err(), "{flag}={value} must be rejected");
+    }
 }
 
 #[test]

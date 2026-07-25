@@ -24,7 +24,7 @@ use crate::{
     TransportRegistry, TrustedProxyCidr,
     circuit::CircuitBreaker,
     observability::{ObservabilityCache, cached_readiness_from_snapshot},
-    request_admission::MultipartAdmissionState,
+    request_admission::{MultipartAdmissionState, PublicAdmission},
 };
 
 /// Inference and request-boundary capabilities shared by gateway endpoints.
@@ -39,6 +39,7 @@ pub struct GatewayState {
     pub(crate) circuits: CircuitBreaker,
     pub(crate) media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
+    pub(crate) public_admission: PublicAdmission,
     pub(crate) transports: TransportRegistry,
     pub(crate) public_origin: PublicOrigin,
     trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
@@ -393,6 +394,7 @@ impl ApiState {
             circuits: self.circuits.clone(),
             media_spool: Arc::clone(&self.media_spool),
             multipart_admission: self.multipart_admission.clone(),
+            public_admission: self.public_admission.clone(),
             transports: self.transports.clone(),
             public_origin: self.public_origin.clone(),
             trusted_proxy_cidrs: Arc::clone(&self.trusted_proxy_cidrs),

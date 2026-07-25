@@ -68,6 +68,10 @@ spec:
               value: "0.0.0.0:9090"
             - name: OLP_HTTP_MAX_CONNECTIONS
               value: {{ $component.httpMaxConnections | quote }}
+            - name: OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS
+              value: {{ $component.httpMaxInFlightInferenceRequests | quote }}
+            - name: OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS
+              value: {{ $component.httpMaxInFlightManagementRequests | quote }}
             - name: OLP_PUBLIC_ORIGIN
               value: {{ $root.Values.config.publicOrigin | quote }}
             - name: OLP_LOCAL_LOGIN_ENABLED

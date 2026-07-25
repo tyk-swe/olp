@@ -49,6 +49,10 @@ gateway:
   # Sized for high streaming concurrency with headroom for unary traffic.
   # Lower this for smaller deployments.
   httpMaxConnections: 16384
+  # Process-local request work is bounded separately from TCP connections.
+  # The management value is reserved and is not borrowable by inference.
+  httpMaxInFlightInferenceRequests: 256
+  httpMaxInFlightManagementRequests: 32
   service:
     enabled: true
     type: ClusterIP
@@ -70,6 +74,10 @@ control:
   enabled: true
   replicas: 1
   httpMaxConnections: 1024
+  # The inference pool is unused in control-only mode but remains explicit so
+  # switching this component to combined mode cannot erase the reserve.
+  httpMaxInFlightInferenceRequests: 256
+  httpMaxInFlightManagementRequests: 32
   service:
     enabled: true
     type: ClusterIP

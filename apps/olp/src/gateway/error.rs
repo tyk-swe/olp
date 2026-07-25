@@ -128,6 +128,16 @@ impl InferenceError {
         }
     }
 
+    pub(crate) fn overloaded() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "request_admission_overloaded",
+            kind: "service_unavailable_error",
+            message: "The gateway is temporarily overloaded.".to_owned(),
+            retry_after: Some(Duration::from_secs(1)),
+        }
+    }
+
     pub(super) fn multipart_parser_timeout() -> Self {
         Self {
             status: StatusCode::REQUEST_TIMEOUT,

@@ -508,6 +508,7 @@ async fn metrics(
     if let Some(metrics) = metrics.body {
         body.push_str(&metrics);
     }
+    body.push_str(&state.public_admission.metrics());
     let mut response = (
         [(
             axum::http::header::CONTENT_TYPE,

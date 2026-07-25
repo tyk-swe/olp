@@ -52,6 +52,14 @@ observability exposure.
 7. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. The chart
    provides a 1-GiB process budget in a 2-GiB volume; do not use the 64-MiB
    general `/tmp` mount.
+8. Alert on sustained growth in
+   `olp_http_admission_rejections_total{surface=...}` and compare
+   `olp_http_admitted_requests` with `olp_http_admission_capacity`. Configure
+   the process-wide pools with
+   `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` (default 256) and
+   `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` (default 32). The pools are
+   independent, reject immediately when full, and retain permits through
+   streaming response completion or cancellation.
 
 ![Usage dashboard showing completeness, request volume, and cost](assets/screenshots/usage.png)
 

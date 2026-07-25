@@ -23,7 +23,9 @@ use tower_http::{
 
 use crate::{
     GatewayState, MAX_JSON_BODY_BYTES, ManagementState, ModeDependencies, Problem, gateway,
-    management_api, request_admission::enforce_request_limits, static_console,
+    management_api,
+    request_admission::{PublicAdmissionMiddleware, admit_public_request, enforce_request_limits},
+    static_console,
 };
 
 pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -97,6 +99,10 @@ fn compose_public_router(
 ) -> Router {
     let request_id = HeaderName::from_static("x-request-id");
     let public_origin_is_https = request_limit_state.public_origin.is_https();
+    let public_admission = PublicAdmissionMiddleware::new(
+        request_limit_state.public_admission.clone(),
+        gateway_state.is_some(),
+    );
     // The request boundary protects public authentication as well as
     // inference, so control-only mode uses the playground's validated gateway
     // capabilities without exposing gateway routes.
@@ -138,6 +144,20 @@ fn compose_public_router(
     }
 
     let router = router
+        .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
+        .layer(middleware::from_fn_with_state(
+            request_limit_state,
+            enforce_request_limits,
+        ))
+        .layer(middleware::from_fn(normalize_management_rejection))
+        // Admission stays inside the cheap public boundary so overload
+        // rejections keep request IDs, tracing, and hardened response headers,
+        // while still running before authentication, request-body decoding,
+        // storage, and transport work.
+        .layer(middleware::from_fn_with_state(
+            public_admission,
+            admit_public_request,
+        ))
         .layer(
             ServiceBuilder::new()
                 .layer(SetSensitiveRequestHeadersLayer::new(
@@ -173,13 +193,7 @@ fn compose_public_router(
                     HeaderName::from_static("content-security-policy"),
                     content_security_policy,
                 )),
-        )
-        .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
-        .layer(middleware::from_fn_with_state(
-            request_limit_state,
-            enforce_request_limits,
-        ))
-        .layer(middleware::from_fn(normalize_management_rejection));
+        );
     if public_origin_is_https {
         router.layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("strict-transport-security"),
@@ -337,7 +351,10 @@ async fn protocol_not_found(uri: Uri) -> Problem {
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{HeaderValue, Request, StatusCode, header},
+    };
     use tower::ServiceExt as _;
 
     use crate::ApiState;
@@ -378,6 +395,89 @@ mod tests {
                     "{mode:?} {origin}",
                 );
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn admission_overload_responses_keep_public_boundary_headers() {
+        for (mode, hold_uri, reject_uri, expected_content_type) in [
+            (
+                crate::ApiMode::Gateway,
+                "/openai/v1/models",
+                "/openai/v1/models",
+                "application/json",
+            ),
+            (
+                crate::ApiMode::Control,
+                "/metrics",
+                "/api/v1/sessions",
+                "application/problem+json",
+            ),
+        ] {
+            let mut state = ApiState::new(
+                mode,
+                None,
+                std::sync::Arc::new(crate::RuntimeManager::empty()),
+                "https://console.example.test",
+                std::path::PathBuf::from("missing-console"),
+            );
+            state.set_public_admission_limits(1, 1);
+            let router = match mode {
+                crate::ApiMode::Gateway => public_router(state.gateway_state_for_test()),
+                crate::ApiMode::Control => public_router(state.management_state_for_test()),
+                crate::ApiMode::All => unreachable!("all mode is not part of this test"),
+            };
+
+            let held_response = router
+                .clone()
+                .oneshot(Request::get(hold_uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let response = router
+                .oneshot(
+                    Request::get(reject_uri)
+                        .header("x-request-id", "test-request-id")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                response.headers().get("x-request-id").unwrap(),
+                HeaderValue::from_static("test-request-id"),
+                "{mode:?}",
+            );
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                expected_content_type,
+                "{mode:?}",
+            );
+            assert_eq!(
+                response.headers().get("x-content-type-options").unwrap(),
+                HeaderValue::from_static("nosniff"),
+                "{mode:?}",
+            );
+            assert_eq!(
+                response.headers().get("x-frame-options").unwrap(),
+                HeaderValue::from_static("DENY"),
+                "{mode:?}",
+            );
+            assert_eq!(
+                response.headers().get("referrer-policy").unwrap(),
+                HeaderValue::from_static("no-referrer"),
+                "{mode:?}",
+            );
+            assert_eq!(
+                response.headers().get("permissions-policy").unwrap(),
+                HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=()"),
+                "{mode:?}",
+            );
+            assert!(
+                response.headers().contains_key("content-security-policy"),
+                "{mode:?}",
+            );
+            drop(held_response);
         }
     }
 }
