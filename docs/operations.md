@@ -155,21 +155,7 @@ deployment-setting names as aliases.
 
 1. Verify the immutable OCI digest and any signature, provenance, SBOM, and
    vulnerability information required by the deployment process.
-2. Run `scripts/upgrade-rehearsal.sh` with a recent backup and candidate binary
-   against an isolated database. It restores and migrates twice, derives the
-   target versions from tracked migration files, and rejects an incomplete or
-   non-idempotent result. Point `OLP_VALKEY_URL` at a fresh isolated Valkey;
-   never use the active production Valkey because its legacy stream may still
-   be receiving traffic before the maintenance window. For a manual N-1 or
-   release rehearsal, set
-   `OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS` to the exact expected count. CI
-   builds its N-1 fixture from
-   `release-metadata.env`; after a release completes, release operators update
-   its `OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION` marker in a follow-up commit to
-   the highest migration shipped by that release. Do not advance the marker
-   while qualifying that release. For an N-1 fixture, restore the matching keys
-   and enable the candidate `doctor` smoke.
-3. Enter a maintenance window. Stop inference admission at the edge and freeze
+2. Enter a maintenance window. Stop inference admission at the edge and freeze
    every control mutation, including OIDC login/link initiation. Gracefully
    drain and scale every old inference-serving workload to zero first; verify
    there are no active requests and no media-reconciliation process left that
@@ -187,11 +173,11 @@ deployment-setting names as aliases.
    complete only through their existing ten-minute expiry; authenticated link
    flows keep their normal expiry. Users whose login flow expires must restart
    it after the candidate is ready.
-4. With admission and the worker still stopped, create the final PostgreSQL
+3. With admission and the worker still stopped, create the final PostgreSQL
    rollback backup using `OLP_BACKUP_TRAFFIC_QUIESCED=true` and snapshot mounted
    key files in the secret manager. This is the recovery point; a backup taken
    before quiescence is not a substitute.
-5. Run the Helm upgrade with a timeout of at least 20 minutes. Its pre-upgrade
+4. Run the Helm upgrade with a timeout of at least 20 minutes. Its pre-upgrade
    migration hook reads `config.valkeySecretName` and fails before changing the
    database unless the legacy stream is empty. The hook completes before Helm
    rolls the candidate control, worker, and gateway Deployments; those
@@ -204,7 +190,7 @@ deployment-setting names as aliases.
    its production replica count, wait for `kubectl rollout status`, and verify
    every running image digest. Preserve `maxUnavailable: 0`, the 10-second
    pre-stop delay, and five-minute termination grace period.
-6. Resume admission and OIDC initiation. For 30 minutes, verify readiness,
+5. Resume admission and OIDC initiation. For 30 minutes, verify readiness,
    zero request metadata backlog, generation convergence, usage completeness, provider
    probes, error rate, and added latency.
 
