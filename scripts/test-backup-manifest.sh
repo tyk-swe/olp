@@ -63,23 +63,4 @@ printf '%s  %s\n' "$checksum" "${backup##*/}" > "${backup}.sha256"
 printf 'tampered\n' >> "$backup"
 expect_invalid "backup contents"
 
-printf 'deterministic backup fixture\n' > "$backup"
-"$manifest_tool" convert-v2-to-v1 "$backup"
-[[ $("$manifest_tool" validate "$backup" v1) == $'42\t7' ]]
-if "$manifest_tool" validate "$backup" v2 >/dev/null 2>&1; then
-  echo "legacy fixture unexpectedly validated as v2" >&2
-  exit 1
-fi
-cp "$manifest" "$test_dir/valid-v1.json"
-jq '.usage_stream_drained = false' "$test_dir/valid-v1.json" > "$manifest"
-expect_invalid "legacy drained/quiesced relationship"
-
-jq '.usage_consumer_checked_at = "2026-07-21T12:00:01Z"' \
-  "$test_dir/valid-v1.json" > "$test_dir/historical-v1.json"
-cp "$test_dir/historical-v1.json" "$manifest"
-[[ $("$manifest_tool" validate "$backup" v1) == $'42\t7' ]]
-jq '.usage_consumer_checked_at = "not-a-timestamp"' \
-  "$test_dir/historical-v1.json" > "$manifest"
-expect_invalid "legacy malformed checkpoint timestamp"
-
 echo "backup manifest contract tests passed"

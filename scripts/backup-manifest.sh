@@ -5,13 +5,11 @@ usage() {
   cat >&2 <<'USAGE'
 usage:
   backup-manifest.sh create-v2 BACKUP CREATED_AT SERVER_VERSION MIGRATIONS GENERATION QUIESCED DRAINED CHECKED_AT_OR_NULL
-  backup-manifest.sh validate BACKUP [v1|v2]
-  backup-manifest.sh convert-v2-to-v1 BACKUP
+  backup-manifest.sh validate BACKUP [v2]
 
 create-v2 writes BACKUP.sha256 and BACKUP.manifest.json. validate checks the
 manifest, checksum sidecar, and backup as one contract and prints the expected
 migration count and runtime-generation ordinal separated by a tab.
-convert-v2-to-v1 rewrites a valid v2 manifest as the legacy v1 CI fixture.
 USAGE
 }
 
@@ -102,19 +100,6 @@ validate_manifest() {
          else
            $checked_at == null
          end);
-      def v1_contract:
-        exact_keys([
-          "format", "created_at", "database_server_version",
-          "successful_migrations", "runtime_generation_ordinal", "backup_file",
-          "sha256", "traffic_quiesced", "usage_stream_drained",
-          "usage_consumer_checked_at", "plaintext_secrets_included",
-          "encrypted_sensitive_records_included", "mounted_key_files_included"
-        ]) and
-        checkpoint_contract(
-          .usage_stream_drained;
-          .usage_consumer_checked_at;
-          false
-        );
       def v2_contract:
         exact_keys([
           "format", "created_at", "database_server_version",
@@ -130,15 +115,9 @@ validate_manifest() {
         );
       def manifest_contract:
         common_contract and
-        (if .format == "olp-v2-postgresql-custom-v1" then
-           v1_contract
-         elif .format == "olp-v2-postgresql-custom-v2" then
-           v2_contract
-         else
-           false
-         end) and
-        ($expected_format == "" or
-         .format == "olp-v2-postgresql-custom-" + $expected_format);
+        .format == "olp-v2-postgresql-custom-v2" and
+        v2_contract and
+        ($expected_format == "" or $expected_format == "v2");
       if manifest_contract then
         [.successful_migrations, .runtime_generation_ordinal] | @tsv
       else
@@ -212,28 +191,10 @@ case "$operation" in
   validate)
     [[ $# -eq 2 || $# -eq 3 ]] || { usage; exit 2; }
     expected_format=${3:-}
-    [[ -z $expected_format || $expected_format == v1 || $expected_format == v2 ]] || {
-      die "expected format must be v1 or v2"
+    [[ -z $expected_format || $expected_format == v2 ]] || {
+      die "expected format must be v2"
     }
     validate_manifest "$2" "${2}.sha256" "${2}.manifest.json" "$expected_format"
-    ;;
-  convert-v2-to-v1)
-    [[ $# -eq 2 ]] || { usage; exit 2; }
-    backup=$2
-    checksum_file="${backup}.sha256"
-    manifest_file="${backup}.manifest.json"
-    checksum=$(backup_checksum "$backup")
-    validate_manifest "$backup" "$checksum_file" "$manifest_file" v2 "$checksum" >/dev/null
-    manifest_temporary="${manifest_file}.partial.$$"
-    temporary_files+=("$manifest_temporary")
-    jq -e '
-      .format = "olp-v2-postgresql-custom-v1"
-      | .usage_stream_drained = .request_metadata_stream_drained
-      | .usage_consumer_checked_at = .request_metadata_consumer_checked_at
-      | del(.request_metadata_stream_drained, .request_metadata_consumer_checked_at)
-    ' "$manifest_file" > "$manifest_temporary"
-    validate_manifest "$backup" "$checksum_file" "$manifest_temporary" v1 "$checksum" >/dev/null
-    mv -- "$manifest_temporary" "$manifest_file"
     ;;
   --help|-h)
     usage

@@ -547,15 +547,10 @@ jobs:
           pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 18([.]|$)'
           pg_restore --version | grep -Eq '^pg_restore \(PostgreSQL\) 18([.]|$)'
           psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
-           -c 'CREATE DATABASE olp_restore' \
-            -c 'CREATE DATABASE olp_legacy_restore'
+           -c 'CREATE DATABASE olp_restore'
           backup=$(./scripts/backup.sh "$RUNNER_TEMP/olp-backups")
           ./scripts/backup-manifest.sh validate "$backup" v2 >/dev/null
           OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_restore \
-            ./scripts/restore-rehearsal.sh "$backup"
-          ./scripts/backup-manifest.sh convert-v2-to-v1 "$backup"
-          ./scripts/backup-manifest.sh validate "$backup" v1 >/dev/null
-          OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_legacy_restore \
             ./scripts/restore-rehearsal.sh "$backup"
 
   advisory-audits:
