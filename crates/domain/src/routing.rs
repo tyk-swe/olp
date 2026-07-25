@@ -325,43 +325,8 @@ pub struct RuntimeSnapshot {
 }
 
 impl RuntimeSnapshot {
-    /// Decodes an immutable runtime release written before the external OpenAI
-    /// naming change. Compatibility is intentionally limited to enum-bearing
-    /// snapshot fields; user-controlled names, models, and route values are not
-    /// rewritten.
     pub fn from_persisted_slice(payload: &[u8]) -> Result<Self, serde_json::Error> {
-        let mut value: serde_json::Value = serde_json::from_slice(payload)?;
-        if let Some(providers) = value
-            .get_mut("providers")
-            .and_then(serde_json::Value::as_object_mut)
-        {
-            for provider in providers.values_mut() {
-                if let Some(kind) = provider.get_mut("kind") {
-                    let replacement = match kind.as_str() {
-                        Some("open_ai") => Some("openai"),
-                        Some("azure_open_ai") => Some("azure_openai"),
-                        Some("open_ai_compatible") => Some("openai_compatible"),
-                        _ => None,
-                    };
-                    if let Some(replacement) = replacement {
-                        *kind = serde_json::Value::String(replacement.to_owned());
-                    }
-                }
-                if let Some(capabilities) = provider
-                    .get_mut("capabilities")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    for capability in capabilities {
-                        if let Some(surface) = capability.get_mut("surface")
-                            && surface.as_str() == Some("open_ai")
-                        {
-                            *surface = serde_json::Value::String("openai".to_owned());
-                        }
-                    }
-                }
-            }
-        }
-        serde_json::from_value(value)
+        serde_json::from_slice(payload)
     }
 
     pub fn validate(&self) -> Result<(), SnapshotValidationError> {
