@@ -12,6 +12,7 @@ keep durable records free of request content.
 - [Canonical endpoint and provider policy](#canonical-endpoint-and-provider-policy)
 - [Checked storage access](#checked-storage-access)
 - [Runtime publication](#runtime-publication)
+- [Distributed limit semantics](#distributed-limit-semantics)
 - [Capability certification](#capability-certification)
 - [Data-safety invariants](#data-safety-invariants)
 
@@ -98,6 +99,49 @@ Revision diffs are bounded to 2,000 models and 32,000 capability tuples per
 side. The database reads at most each limit plus one row, and the API returns an
 RFC 9457 `422` problem when a revision exceeds a limit. Full revisions remain
 available through the cursor-paginated model endpoint.
+
+## Distributed limit semantics
+
+Valkey server time is authoritative for distributed requests-per-minute (RPM),
+tokens-per-minute (TPM), and concurrency decisions. The atomic reservation
+script calls `TIME` and derives the UTC minute identity, time remaining in that
+minute, rate-state expiry, expired-lease cleanup, new lease scores, and
+`Retry-After` duration from that one result. Gateway process clocks are not an
+input, and obtaining time does not add a network round trip.
+
+RPM and TPM are fixed UTC-minute windows, not rolling windows or token buckets.
+The stable rate hash stores only `window`, `rpm`, and `tpm`; the script compares
+its server-derived window ID and replaces the three fields once at rollover.
+The hash expires at the fixed minute boundary, and requests within the same
+window do not move that logical deadline. Fixed windows permit boundary bursts:
+a key can use its full allowance just before a minute boundary and its next full
+allowance immediately afterward.
+
+The cluster-safe state for lookup ID `id` is:
+
+```text
+<namespace>:{id}:rate           hash(window, rpm, tpm)
+<namespace>:{id}:concurrency:v2 sorted set(lease ID -> server-time expiry ms)
+```
+
+Both keys have the same `{id}` Valkey Cluster hash tag, so the reservation
+script declares every key it accesses and keeps RPM, TPM, and concurrency
+admission atomic in one hash slot. A rejection does not consume any dimension.
+Malformed stored state and Valkey failures fail closed for hard-limited keys.
+Concurrency release remains idempotent, and abandoned leases expire according
+to Valkey time.
+
+This layout is a forward-only rollout. Earlier binaries used
+`<namespace>:{id}:rpm:<client-window>` and
+`<namespace>:{id}:tpm:<client-window>` plus
+`<namespace>:{id}:concurrency`. New binaries neither read, write, migrate, nor
+delete those keys; legacy state expires naturally. The versioned concurrency
+key also prevents a clock-skewed old process from deleting or rescoring a new
+lease. During mixed-version deployment, old and new binaries consequently
+enforce separate RPM, TPM, and concurrency pools. Each request remains
+fail-closed, but traffic split across versions can temporarily consume up to
+each pool's allowance. Complete the gateway rollout promptly and do not use an
+N-1 rollback as a steady state.
 
 ## Capability certification
 

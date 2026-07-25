@@ -1,11 +1,13 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{fmt, time::Duration};
 
-use redis::{AsyncCommands, Script, aio::ConnectionManager};
+use redis::{AsyncCommands, FromRedisValue, Script, aio::ConnectionManager};
 use thiserror::Error;
 use uuid::Uuid;
 
 const RESERVE_SCRIPT: &str = include_str!("../scripts/reserve_limits.lua");
 const RELEASE_SCRIPT: &str = include_str!("../scripts/release_concurrency.lua");
+const SCRIPT_RESPONSE_VERSION: i64 = 1;
+const FIXED_WINDOW_MS: i64 = 60_000;
 // Valkey executes Lua 5.1 scripts with IEEE-754 doubles. Keep every integer
 // involved in a comparison or sorted-set score exactly representable.
 const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
@@ -29,37 +31,17 @@ impl DistributedLimiter {
     }
 
     /// Performs the full reservation in one Valkey script. A hard-limited key
-    /// must treat any returned infrastructure error as fail-closed.
+    /// must treat any returned infrastructure or state error as fail-closed.
     pub async fn reserve(&self, request: LimitRequest<'_>) -> Result<LimitLease, LimitError> {
         request.validate()?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| LimitError::Clock)?;
-        let now_ms = i64::try_from(now.as_millis()).map_err(|_| LimitError::Clock)?;
-        if now_ms > MAX_LUA_INTEGER {
-            return Err(LimitError::Clock);
-        }
-        let window = now_ms / 60_000;
-        let window_ttl_ms = 60_000 - now_ms.rem_euclid(60_000);
-        let hash_tag = format!("{{{}}}", request.lookup_id);
-        let rpm_key = format!("{}:{}:rpm:{window}", self.namespace, hash_tag);
-        let tpm_key = format!("{}:{}:tpm:{window}", self.namespace, hash_tag);
-        let concurrency_key = format!("{}:{}:concurrency", self.namespace, hash_tag);
+        let keys = self.keys_for(request.lookup_id);
         let lease_id = Uuid::now_v7().to_string();
         let ttl_ms = duration_ms(request.lease_ttl)?;
-        if ttl_ms > MAX_LUA_INTEGER - now_ms {
-            return Err(LimitError::InvalidRequest(
-                "concurrency lease expiry is outside Valkey Lua's safe integer range",
-            ));
-        }
 
         let mut connection = self.connection.clone();
-        let response: (i64, String, i64) = Script::new(RESERVE_SCRIPT)
-            .key(rpm_key)
-            .key(tpm_key)
-            .key(&concurrency_key)
-            .arg(now_ms)
-            .arg(window_ttl_ms)
+        let raw_response: redis::Value = Script::new(RESERVE_SCRIPT)
+            .key(&keys.rate)
+            .key(&keys.concurrency)
             .arg(request.requests_per_minute.unwrap_or(0))
             .arg(request.tokens_per_minute.unwrap_or(0))
             .arg(request.requested_tokens)
@@ -69,27 +51,36 @@ impl DistributedLimiter {
             .invoke_async(&mut connection)
             .await?;
 
-        match (response.0, response.1.as_str()) {
-            (1, "ok") if response.2 == 0 => Ok(LimitLease {
-                lease_id,
-                concurrency_key,
-                has_concurrency_reservation: request.max_concurrency.is_some(),
+        match ReservationScriptResult::parse_value(&raw_response)? {
+            ReservationScriptResult::Granted {
+                window_id,
+                concurrency_expires_at_ms,
+            } if request.max_concurrency.is_some() == concurrency_expires_at_ms.is_some() => {
+                Ok(LimitLease {
+                    lease_id,
+                    _rate_key: keys.rate,
+                    concurrency_key: keys.concurrency,
+                    rate_window_id: window_id,
+                    reserved_tokens: request.requested_tokens,
+                    has_token_reservation: request.tokens_per_minute.is_some(),
+                    concurrency_expires_at_ms,
+                })
+            }
+            ReservationScriptResult::Granted { .. } => Err(LimitError::UnexpectedResponse),
+            ReservationScriptResult::Rejected {
+                dimension,
+                retry_after_ms,
+            } => Err(LimitError::Exceeded {
+                dimension,
+                retry_after: Duration::from_millis(retry_after_ms),
             }),
-            (0, "rpm" | "tpm" | "concurrency") if response.2 > 0 => Err(LimitError::Exceeded {
-                dimension: match response.1.as_str() {
-                    "rpm" => LimitDimension::Requests,
-                    "tpm" => LimitDimension::Tokens,
-                    "concurrency" => LimitDimension::Concurrency,
-                    _ => unreachable!("match arm accepts only known dimensions"),
-                },
-                retry_after: Duration::from_millis(response.2 as u64),
-            }),
-            _ => Err(LimitError::UnexpectedResponse),
+            ReservationScriptResult::MalformedState => Err(LimitError::MalformedState),
+            ReservationScriptResult::ScriptFailure => Err(LimitError::UnexpectedResponse),
         }
     }
 
     pub async fn release(&self, lease: &LimitLease) -> Result<(), LimitError> {
-        if !lease.has_concurrency_reservation {
+        if lease.concurrency_expires_at_ms.is_none() {
             return Ok(());
         }
         let mut connection = self.connection.clone();
@@ -109,6 +100,25 @@ impl DistributedLimiter {
         } else {
             Err(LimitError::UnexpectedResponse)
         }
+    }
+
+    fn keys_for(&self, lookup_id: &str) -> LimitKeys {
+        limit_keys(&self.namespace, lookup_id)
+    }
+}
+
+struct LimitKeys {
+    rate: String,
+    concurrency: String,
+}
+
+fn limit_keys(namespace: &str, lookup_id: &str) -> LimitKeys {
+    let prefix = format!("{namespace}:{{{lookup_id}}}");
+    LimitKeys {
+        rate: format!("{prefix}:rate"),
+        // Separating this from the legacy zset prevents an old binary with a
+        // skewed process clock from deleting or mis-scoring new leases.
+        concurrency: format!("{prefix}:concurrency:v2"),
     }
 }
 
@@ -176,11 +186,32 @@ impl LimitRequest<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LimitLease {
     lease_id: String,
     concurrency_key: String,
-    has_concurrency_reservation: bool,
+    // Retained as a foundation for future bounded token reconciliation; no
+    // reconciliation mutation is implemented here.
+    _rate_key: String,
+    rate_window_id: i64,
+    reserved_tokens: i64,
+    has_token_reservation: bool,
+    concurrency_expires_at_ms: Option<i64>,
+}
+
+impl fmt::Debug for LimitLease {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LimitLease")
+            .field("lease_id", &"[REDACTED]")
+            .field("rate_key", &"[REDACTED]")
+            .field("concurrency_key", &"[REDACTED]")
+            .field("rate_window_id", &self.rate_window_id)
+            .field("reserved_tokens", &self.reserved_tokens)
+            .field("has_token_reservation", &self.has_token_reservation)
+            .field("concurrency_expires_at_ms", &self.concurrency_expires_at_ms)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,8 +226,8 @@ pub enum LimitDimension {
 pub enum LimitError {
     #[error("Valkey limit service failed")]
     Service(#[from] redis::RedisError),
-    #[error("the system clock is before the Unix epoch")]
-    Clock,
+    #[error("Valkey distributed limit state is malformed")]
+    MalformedState,
     #[error("Valkey returned an unexpected response")]
     UnexpectedResponse,
     #[error("invalid distributed limit request: {0}")]
@@ -206,6 +237,82 @@ pub enum LimitError {
         dimension: LimitDimension,
         retry_after: Duration,
     },
+}
+
+enum ReservationScriptResult {
+    Granted {
+        window_id: i64,
+        concurrency_expires_at_ms: Option<i64>,
+    },
+    Rejected {
+        dimension: LimitDimension,
+        retry_after_ms: u64,
+    },
+    MalformedState,
+    ScriptFailure,
+}
+
+type RawReservationScriptResponse = (i64, i64, String, i64, i64, i64);
+
+impl ReservationScriptResult {
+    fn parse_value(value: &redis::Value) -> Result<Self, LimitError> {
+        let response = RawReservationScriptResponse::from_redis_value(value)
+            .map_err(|_| LimitError::UnexpectedResponse)?;
+        Self::parse(response)
+    }
+
+    fn parse(
+        (version, status, detail, retry_after_ms, window_id, lease_expiry_ms): RawReservationScriptResponse,
+    ) -> Result<Self, LimitError> {
+        if version != SCRIPT_RESPONSE_VERSION
+            || !(0..=MAX_LUA_INTEGER).contains(&window_id)
+            || !(0..=MAX_LUA_INTEGER).contains(&lease_expiry_ms)
+        {
+            return Err(LimitError::UnexpectedResponse);
+        }
+
+        match (status, detail.as_str()) {
+            (1, "ok") if retry_after_ms == 0 && window_id > 0 => Ok(Self::Granted {
+                window_id,
+                concurrency_expires_at_ms: (lease_expiry_ms > 0).then_some(lease_expiry_ms),
+            }),
+            (0, "rpm" | "tpm")
+                if (1..=FIXED_WINDOW_MS).contains(&retry_after_ms)
+                    && window_id > 0
+                    && lease_expiry_ms == 0 =>
+            {
+                Ok(Self::Rejected {
+                    dimension: if detail == "rpm" {
+                        LimitDimension::Requests
+                    } else {
+                        LimitDimension::Tokens
+                    },
+                    retry_after_ms: retry_after_ms as u64,
+                })
+            }
+            (0, "concurrency")
+                if (1..=MAX_LUA_INTEGER).contains(&retry_after_ms)
+                    && window_id > 0
+                    && lease_expiry_ms == 0 =>
+            {
+                Ok(Self::Rejected {
+                    dimension: LimitDimension::Concurrency,
+                    retry_after_ms: retry_after_ms as u64,
+                })
+            }
+            (-1, "malformed_rate_state" | "malformed_concurrency_state")
+                if retry_after_ms == 0 && window_id > 0 && lease_expiry_ms == 0 =>
+            {
+                Ok(Self::MalformedState)
+            }
+            (-1, "invalid_arguments" | "invalid_server_time")
+                if retry_after_ms == 0 && window_id == 0 && lease_expiry_ms == 0 =>
+            {
+                Ok(Self::ScriptFailure)
+            }
+            _ => Err(LimitError::UnexpectedResponse),
+        }
+    }
 }
 
 fn duration_ms(duration: Duration) -> Result<i64, LimitError> {
@@ -238,15 +345,24 @@ fn validate_namespace(namespace: &str) -> Result<(), LimitError> {
 mod tests {
     use super::*;
 
+    fn valid_request() -> LimitRequest<'static> {
+        LimitRequest {
+            lookup_id: "lookup_01",
+            requests_per_minute: Some(60),
+            tokens_per_minute: Some(1_000),
+            max_concurrency: Some(4),
+            requested_tokens: 1,
+            lease_ttl: Duration::from_secs(10),
+        }
+    }
+
     #[test]
     fn identifies_keys_that_must_fail_closed() {
         let unlimited = LimitRequest {
-            lookup_id: "lookup_01",
             requests_per_minute: None,
             tokens_per_minute: None,
             max_concurrency: None,
-            requested_tokens: 1,
-            lease_ttl: Duration::from_secs(10),
+            ..valid_request()
         };
         assert!(!unlimited.has_hard_limits());
 
@@ -261,14 +377,7 @@ mod tests {
 
     #[test]
     fn rejects_values_that_would_disable_or_bypass_hard_limits() {
-        let valid = LimitRequest {
-            lookup_id: "lookup_01",
-            requests_per_minute: Some(60),
-            tokens_per_minute: Some(1_000),
-            max_concurrency: Some(4),
-            requested_tokens: 1,
-            lease_ttl: Duration::from_secs(10),
-        };
+        let valid = valid_request();
         assert!(valid.validate().is_ok());
 
         for invalid in [
@@ -309,9 +418,76 @@ mod tests {
     }
 
     #[test]
+    fn stable_keys_share_one_cluster_hash_tag() {
+        let first = limit_keys("olp:v2:limits", "lookup_01");
+        let second = limit_keys("olp:v2:limits", "lookup_02");
+
+        assert_eq!(hash_tag(&first.rate), Some("lookup_01"));
+        assert_eq!(hash_tag(&first.concurrency), Some("lookup_01"));
+        assert_ne!(hash_tag(&first.rate), hash_tag(&second.rate));
+        assert!(!first.rate.contains(":rpm:"));
+        assert!(!first.rate.contains(":tpm:"));
+    }
+
+    #[test]
+    fn reservation_contract_uses_valkey_time_and_no_timestamp_argument() {
+        assert!(RESERVE_SCRIPT.contains("redis.call(\"TIME\")"));
+        assert!(RESERVE_SCRIPT.contains("#ARGV ~= 6"));
+        assert!(!RESERVE_SCRIPT.contains("ARGV: now_ms"));
+        assert!(!RESERVE_SCRIPT.contains("window_ttl_ms"));
+    }
+
+    #[test]
+    fn script_result_parser_rejects_malformed_responses() {
+        assert!(matches!(
+            ReservationScriptResult::parse_value(&redis::Value::Array(Vec::new())),
+            Err(LimitError::UnexpectedResponse)
+        ));
+        for response in [
+            (2, 1, "ok".to_owned(), 0, 1, 0),
+            (1, 1, "ok".to_owned(), 1, 1, 0),
+            (1, 0, "rpm".to_owned(), 0, 1, 0),
+            (1, 0, "rpm".to_owned(), 60_001, 1, 0),
+            (1, 0, "rpm".to_owned(), 1, 0, 0),
+            (1, 0, "rpm".to_owned(), 1, 1, 1),
+            (1, 0, "unknown".to_owned(), 1, 1, 0),
+            (1, -1, "malformed_rate_state".to_owned(), 1, 1, 0),
+        ] {
+            assert!(matches!(
+                ReservationScriptResult::parse(response),
+                Err(LimitError::UnexpectedResponse)
+            ));
+        }
+    }
+
+    #[test]
+    fn lease_debug_redacts_internal_identifiers() {
+        let lease = LimitLease {
+            lease_id: "private-lease".to_owned(),
+            _rate_key: "private-rate-key".to_owned(),
+            concurrency_key: "private-concurrency-key".to_owned(),
+            rate_window_id: 1,
+            reserved_tokens: 2,
+            has_token_reservation: true,
+            concurrency_expires_at_ms: Some(3),
+        };
+        let debug = format!("{lease:?}");
+        assert!(!debug.contains("private-lease"));
+        assert!(!debug.contains("private-rate-key"));
+        assert!(!debug.contains("private-concurrency-key"));
+        assert!(debug.contains("[REDACTED]"));
+    }
+
+    #[test]
     fn namespaces_cannot_override_the_redis_cluster_hash_tag() {
         assert!(validate_namespace("olp:v2:limits").is_ok());
         assert!(validate_namespace("olp:{shared}").is_err());
         assert!(validate_namespace("").is_err());
+    }
+
+    fn hash_tag(key: &str) -> Option<&str> {
+        let start = key.find('{')? + 1;
+        let end = key[start..].find('}')? + start;
+        (end > start).then_some(&key[start..end])
     }
 }

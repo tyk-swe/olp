@@ -228,7 +228,9 @@ readiness, and runtime generation before redirecting traffic.
   may continue. Restore Valkey and verify lease cleanup. During the partial
   outage `/health/ready` remains successful but reports `status: degraded` and
   `limits: unavailable`, allowing Kubernetes to route unlimited keys; alert on
-  dependency fields and metrics.
+  dependency fields and metrics. Valkey server time, rather than gateway
+  process time, is authoritative for fixed UTC-minute RPM/TPM windows,
+  `Retry-After`, and concurrency lease expiry.
 - **Request metadata persistence:** Continue inference only with explicit business
   acceptance of incomplete cost data. Preserve logs and Stream state, suspend
   retention, record the affected interval, and reconcile request, attempt,
