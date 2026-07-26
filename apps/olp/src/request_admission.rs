@@ -22,8 +22,7 @@ use olp_storage::{RequestMetadataEmitter, RequestMetadataEvent};
 
 use crate::{
     GatewayState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem,
-    RuntimeBundle, gateway, management_api, proxy::public_auth_source,
-    router::REQUEST_BODY_TIMEOUT,
+    gateway, management_api, proxy::public_auth_source, router::REQUEST_BODY_TIMEOUT,
 };
 
 mod limits;
@@ -73,12 +72,6 @@ tokio::task_local! {
     /// Keeps the HTTP concurrency reservation alive while request work is
     /// transferred to a detached inference task.
     pub(super) static HTTP_INFERENCE_RESERVATION_HOLD: InferenceReservation;
-}
-
-pub(crate) fn pin_inference_runtime(state: &GatewayState) -> Arc<RuntimeBundle> {
-    HTTP_INFERENCE_PRINCIPAL
-        .try_with(|principal| Arc::clone(principal.runtime()))
-        .unwrap_or_else(|_| state.runtime.pin())
 }
 
 #[cfg(test)]

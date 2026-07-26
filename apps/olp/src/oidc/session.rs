@@ -460,6 +460,15 @@ mod flow_tests {
     }
 
     #[test]
+    fn legacy_state_selects_fixed_cookie_names() {
+        let state = OidcCallbackState::parse("a".repeat(43)).unwrap();
+
+        assert_eq!(state.flow_id(), None);
+        assert_eq!(state.login_cookie_name(), LOGIN_FLOW_COOKIE);
+        assert_eq!(state.authenticated_cookie_name(), FLOW_COOKIE);
+    }
+
+    #[test]
     fn active_flow_bound_evicts_oldest_uuidv7_cookie_deterministically() {
         let mut ids = (0..MAX_ACTIVE_BROWSER_FLOWS + 2)
             .map(|_| OidcFlowId::generate())

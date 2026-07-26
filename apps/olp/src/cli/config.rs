@@ -64,9 +64,6 @@ pub(super) struct PersistenceArgs {
 pub(super) struct MigrateArgs {
     #[command(flatten)]
     pub(super) persistence: PersistenceArgs,
-    /// Test-only target used to construct an N-1 upgrade fixture.
-    #[arg(long, hide = true)]
-    pub(super) through_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Args)]

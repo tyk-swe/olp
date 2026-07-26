@@ -76,8 +76,6 @@ pub(crate) use observability::HealthResponse;
 pub(crate) use proxy::{public_auth_source_digest, public_auth_source_target_digests};
 #[cfg(test)]
 pub(crate) use request_admission::HTTP_INFERENCE_LIMITS_RESERVED;
-#[cfg(test)]
-pub(crate) use request_admission::pin_inference_runtime;
 pub(crate) use request_admission::{
     FirstOwnerSetupAuthorized, InferencePrincipal, MultipartRequestAdmission,
     MultipartRouteAdmission, claim_http_inference_metadata, http_inference_reserved_tokens,
