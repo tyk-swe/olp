@@ -216,7 +216,17 @@ async fn execute_operation(
             Ok(CompletedExecution { context, success })
         }
         Err(failure) => {
-            accounting.record_attempts(failure.attempts, None, None, false);
+            // An ambiguous transport failure marks the final attempt as having
+            // committed bytes upstream. Storage requires the request-level
+            // `committed` flag to equal the final attempt's, and rejects the
+            // event permanently when they disagree — dropping the request's
+            // attempt and usage records entirely. Derive it instead of assuming
+            // a failed request committed nothing.
+            let committed = failure
+                .attempts
+                .last()
+                .is_some_and(|attempt| attempt.committed);
+            accounting.record_attempts(failure.attempts, None, None, committed);
             accounting.finish(Some(&failure.error)).await;
             Err(failure.error)
         }
@@ -460,7 +470,7 @@ pub(super) async fn execute_routed_result_for_surface_inner(
         accounting.finish(Some(&failure)).await;
         return Err(failure);
     };
-    let usage = usage_from_result(&result);
+    let usage = usage_from_result(&result, context.operation_kind);
     accounting.replace_usage(usage.clone());
     accounting.release_lease().await;
     let _ = accounting.disarm();

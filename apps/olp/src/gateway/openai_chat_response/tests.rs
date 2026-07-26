@@ -852,3 +852,18 @@ fn source_extension_pointer_materializes_nested_arrays_without_loss() {
         true
     );
 }
+
+#[test]
+fn source_extension_pointer_rejects_out_of_range_array_index() {
+    // A provider controls `choice.index`/`tool_call.index`, so it controls this
+    // pointer segment. Materializing the array up to a hostile position would
+    // allocate until the process aborts; the encoder must refuse instead.
+    let mut value = json!({ "choices": [] });
+    assert!(set_json_pointer(&mut value, "/choices/4000000000/logprobs", Value::Null).is_err());
+    assert_eq!(value["choices"].as_array().map(Vec::len), Some(0));
+
+    // The same guard applies to the terminal segment, which fills with nulls.
+    let mut terminal = json!({ "choices": [] });
+    assert!(set_json_pointer(&mut terminal, "/choices/4000000000", Value::Null).is_err());
+    assert_eq!(terminal["choices"].as_array().map(Vec::len), Some(0));
+}

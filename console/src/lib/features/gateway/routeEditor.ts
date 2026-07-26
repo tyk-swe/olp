@@ -127,7 +127,10 @@ export function routeEligibilityWarnings(
   );
 }
 
-export function validateRouteEditor(values: RouteEditorValues): string | null {
+export function validateRouteEditor(
+  values: RouteEditorValues,
+  modelOptions?: RouteModelOption[]
+): string | null {
   const validSlug =
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(values.slug) &&
     !values.slug.includes('--');
@@ -146,6 +149,15 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
   ) {
     return 'Every target needs a positive priority, weight, and timeout.';
   }
+  // A model can stop being eligible while the editor is open (disabled, or its
+  // provider deactivated). Catch it here with a readable message instead of
+  // letting the request builder dereference a missing option and crash.
+  if (
+    modelOptions &&
+    values.targets.some((target) => !providerModel(target, modelOptions))
+  ) {
+    return 'A selected provider model is no longer eligible. Re-select the target before saving.';
+  }
   return null;
 }
 
@@ -159,7 +171,12 @@ export function buildCreateRouteDraftInput(
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
     targets: values.targets.map((target) => {
-      const model = providerModel(target, modelOptions)!;
+      const model = providerModel(target, modelOptions);
+      if (!model) {
+        throw new Error(
+          'A selected provider model is no longer eligible. Re-select the target before saving.'
+        );
+      }
       return {
         provider_id: model.providerId,
         provider_model: model.upstreamModel,

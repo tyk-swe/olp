@@ -57,6 +57,10 @@ pub struct ApiState {
     pub request_metadata: Option<RequestMetadataEmitter>,
     pub(crate) circuits: circuit::CircuitBreaker,
     pub(crate) media_reconciliation_gaps: Arc<AtomicU64>,
+    /// Gaps not yet resolved by a clean reconciliation pass. Drives the
+    /// readiness gate, which must reflect current state rather than the
+    /// process-lifetime total in `media_reconciliation_gaps`.
+    pub(crate) media_reconciliation_unresolved: Arc<AtomicU64>,
     pub media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: request_admission::PublicAdmission,
@@ -117,6 +121,7 @@ impl ApiState {
             request_metadata: None,
             circuits: circuit::CircuitBreaker::default(),
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
+            media_reconciliation_unresolved: Arc::new(AtomicU64::new(0)),
             media_spool,
             multipart_admission,
             public_admission: request_admission::PublicAdmission::default(),

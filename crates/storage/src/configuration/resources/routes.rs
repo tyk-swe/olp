@@ -18,7 +18,16 @@ impl PgStore {
         let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
         let mut items = Vec::with_capacity(ids.len());
         for id in ids {
-            items.push(self.get_route_draft(id).await?);
+            // The id scan and these hydrations run on separate pooled
+            // connections with no shared snapshot, so a row deleted in between
+            // must simply be absent from the page. Propagating `NotFound` would
+            // turn a list request into a 404 that returns none of the rows that
+            // are still perfectly readable.
+            match self.get_route_draft(id).await {
+                Ok(item) => items.push(item),
+                Err(ConfigurationError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(ConfigurationPage { items, next_cursor })
     }
@@ -413,7 +422,16 @@ impl PgStore {
         let ids = rows.into_iter().map(|row| row.id).collect::<Vec<_>>();
         let mut items = Vec::with_capacity(ids.len());
         for id in ids {
-            items.push(self.get_route(id).await?);
+            // The id scan and these hydrations run on separate pooled
+            // connections with no shared snapshot, so a row deleted in between
+            // must simply be absent from the page. Propagating `NotFound` would
+            // turn a list request into a 404 that returns none of the rows that
+            // are still perfectly readable.
+            match self.get_route(id).await {
+                Ok(item) => items.push(item),
+                Err(ConfigurationError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(ConfigurationPage { items, next_cursor })
     }
@@ -622,19 +640,29 @@ async fn draft_targets(
     pool: &sqlx::PgPool,
     id: Uuid,
 ) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
+    // The provider-revision lookup must not eliminate rows: `disable_provider`
+    // sets `providers.active_revision_id = NULL` without checking
+    // `route_draft_targets`, so an inner join silently hid stored targets. The
+    // console then read-modify-writes the draft and `replace_route_draft`
+    // destroys the invisible rows. Fall back to the provider's own columns.
     target_rows(
         sqlx::query_as!(
             RouteTargetRow,
-            "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
-                    prm.upstream_model AS provider_model, rdt.priority, rdt.weight, rdt.timeout_ms, rdt.position \
+            "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, \
+                    COALESCE(pr.name, p.name) AS \"provider_name!\", \
+                    COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", \
+                    rdt.priority, rdt.weight, rdt.timeout_ms, rdt.position \
              FROM route_draft_targets rdt \
              JOIN provider_models pm ON pm.id = rdt.provider_model_id \
              JOIN providers p ON p.id = pm.provider_id \
-             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+             LEFT JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+             LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
              WHERE rdt.route_draft_id = $1 ORDER BY rdt.position",
-        id).fetch_all(pool).await?
+            id
+        )
+        .fetch_all(pool)
+        .await?,
     )
 }
 
@@ -642,19 +670,27 @@ async fn revision_targets(
     pool: &sqlx::PgPool,
     id: Uuid,
 ) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
+    // Revisions are immutable history; an inner join here also falsified diffs,
+    // reporting `targets_removed` for targets that were never removed. See
+    // `draft_targets` for the same reasoning.
     target_rows(
         sqlx::query_as!(
             RouteTargetRow,
-            "SELECT rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
-                    prm.upstream_model AS provider_model, rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position \
+            "SELECT rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, \
+                    COALESCE(pr.name, p.name) AS \"provider_name!\", \
+                    COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", \
+                    rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position \
              FROM route_revision_targets rrt \
              JOIN provider_models pm ON pm.id = rrt.provider_model_id \
              JOIN providers p ON p.id = pm.provider_id \
-             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+             LEFT JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+             LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
              WHERE rrt.route_revision_id = $1 ORDER BY rrt.position",
-        id).fetch_all(pool).await?
+            id
+        )
+        .fetch_all(pool)
+        .await?,
     )
 }
 

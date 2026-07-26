@@ -396,6 +396,40 @@ impl PgStore {
         if uncovered_route_operation.is_some() {
             return Err(ConfigurationError::ProviderIncomplete);
         }
+        // The guard above only asks whether *some* target still covers each
+        // operation. A revision that disables a model can leave a route with
+        // fewer resolvable targets than its `max_attempts`, which
+        // `Route::validate` rejects during `compile_and_publish_runtime_*`
+        // — rolling the whole activation back with an opaque failure instead of
+        // a clear admission error. Count the targets that would survive under
+        // the candidate revision, mirroring the compiler's own filter
+        // (`prm.enabled`, provider active revision, provider not disabled).
+        let understaffed_route: Option<String> = sqlx::query_scalar!(
+            "SELECT r.slug AS \"value!\" \
+             FROM routes r \
+             JOIN LATERAL (SELECT id, max_attempts FROM route_revisions \
+                           WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true \
+             WHERE ( \
+               SELECT count(*) FROM route_revision_targets rt \
+               JOIN provider_models pm ON pm.id = rt.provider_model_id \
+               JOIN providers target_provider ON target_provider.id = pm.provider_id \
+               JOIN provider_revision_models prm \
+                 ON prm.source_provider_model_id = pm.id \
+                AND prm.provider_revision_id = CASE WHEN target_provider.id = $1 \
+                                                    THEN $2 \
+                                                    ELSE target_provider.active_revision_id END \
+                AND prm.enabled \
+               WHERE rt.route_revision_id = rr.id \
+                 AND target_provider.state <> 'disabled'::provider_state) < rr.max_attempts \
+             ORDER BY r.slug LIMIT 1",
+            provider_id,
+            revision_id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if understaffed_route.is_some() {
+            return Err(ConfigurationError::ProviderIncomplete);
+        }
         sqlx::query!(
             "UPDATE providers SET state = 'active'::provider_state, active_revision_id = $1, \
                     etag = $2, updated_at = now() WHERE id = $3 AND etag = $4",

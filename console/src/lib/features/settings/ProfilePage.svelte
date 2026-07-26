@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { logout } from '$lib/api/auth';
-  import { isEtagMismatch } from '$lib/api/http';
+  import { isEtagMismatch, problemMessage } from '$lib/api/http';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     acceptRemote,
@@ -70,6 +71,14 @@
   let passwordEnrollmentNeeded = $derived(
     identities.data ? !identities.data.has_local_password : false
   );
+  // A failed refetch keeps the cached profile but still reports `isError`. The
+  // full-page error branch may only run when nothing was ever loaded, otherwise
+  // a transient reload failure would hide a dirty form; report those inline.
+  const profileStaleError = $derived(
+    profile.isError && profile.data
+      ? problemMessage(profile.error, 'Your profile could not be reloaded.')
+      : ''
+  );
 
   $effect(() => {
     const value = profile.data;
@@ -86,7 +95,11 @@
     const purpose = parameters.get('reauthenticated');
     const resourceId = parameters.get('resource_id') ?? undefined;
     if (['password_enrollment', 'oidc_link', 'oidc_unlink'].includes(purpose ?? '')) {
-      window.history.replaceState(window.history.state, '', window.location.pathname);
+      // Use SvelteKit's replaceState so `page.url` stays in sync with the
+      // address bar. A raw window.history call leaves the router believing the
+      // callback query is still present, which can leak the reauthentication
+      // hint into a later `return_to`.
+      replaceState(resolve('/settings/profile'), {});
       // Callback query parameters are only a display hint. They must never
       // directly begin a link or unlink request, because another site can
       // navigate a signed-in browser to this URL.
@@ -338,6 +351,9 @@
 
   async function reloadProfile() {
     const result = await profile.refetch();
+    // A failed reload read nothing newer, so the conflict stays unresolved and
+    // the dirty form stays as it is. The query's error state drives the stale
+    // banner, which is the single place a failed read is reported.
     if (result.error) return;
     profileSync = beginReload(profileSync);
   }
@@ -363,8 +379,9 @@
 {#if message}<p class="success-message" role="status">{message}</p>{/if}
 <ConflictNotice notice={profileConcurrentNotice} onReload={reloadProfile} disabled={savingProfile} />
 
+{#if profileStaleError}<div class="inline-problem" role="alert">{profileStaleError} Your last loaded profile remains editable below. <button class="text-button" type="button" onclick={() => profile.refetch()}>Try again</button></div>{/if}
 {#if profile.isPending}<div class="loading-state" role="status">Loading your profile…</div>
-{:else if profile.isError}<div class="inline-problem" role="alert">Your profile is unavailable. <button class="text-button" onclick={() => profile.refetch()}>Try again</button></div>
+{:else if !profile.data}<div class="inline-problem" role="alert">Your profile is unavailable. <button class="text-button" onclick={() => profile.refetch()}>Try again</button></div>
 {:else if profile.data}
   <div class="profile-grid">
     <form class="card panel" onsubmit={saveProfile}>

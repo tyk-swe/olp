@@ -667,7 +667,12 @@ fn decode_response_function_call(
     let call_id = take_required_string(&mut object, "call_id", index)?;
     let name = take_required_string(&mut object, "name", index)?;
     let arguments = take_required_string(&mut object, "arguments", index)?;
-    let id = take_optional_string(&mut object, "id", index)?.unwrap_or_else(|| call_id.clone());
+    // The canonical tool id must be `call_id`: that is what the paired
+    // `function_call_output` item references, and what re-encoding emits as
+    // `call_id`. Preferring the item `id` (`fc_...`) desynchronizes the pair and
+    // the upstream rejects the request. `id` is deliberately left in `object` so
+    // `collect_object_extra` preserves it as `/input/{index}/id` for same-surface
+    // round trips.
     collect_object_extra(&format!("/input/{index}"), object, extensions);
     Ok(Message {
         role: MessageRole::Assistant,
@@ -675,7 +680,7 @@ fn decode_response_function_call(
         name: None,
         tool_call_id: None,
         tool_calls: vec![ToolCall {
-            id,
+            id: call_id,
             name,
             arguments,
         }],

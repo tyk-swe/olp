@@ -143,7 +143,16 @@ fn decode_candidate(
                     builder.push(CanonicalEventKind::ToolCallDelta {
                         output_index,
                         tool_index,
-                        id: part.function_call.id,
+                        // Gemini's public API omits `functionCall.id`, but every
+                        // cross-vendor client encoder requires one — without it
+                        // the Anthropic surface fails the request outright and
+                        // the OpenAI surface emits an unusable empty id.
+                        id: Some(part.function_call.id.unwrap_or_else(|| {
+                            format!(
+                                "{}{output_index}-{tool_index}",
+                                crate::gemini::dto::SYNTHETIC_TOOL_CALL_ID_PREFIX
+                            )
+                        })),
                         name: Some(part.function_call.name),
                         arguments_delta: serde_json::to_string(&part.function_call.args)
                             .map_err(ResponseError::Json)?,

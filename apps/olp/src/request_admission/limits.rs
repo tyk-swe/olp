@@ -383,7 +383,16 @@ pub(crate) fn estimate_http_json_request_tokens(
     } else {
         0
     };
-    i64::try_from(byte_estimate.max(embedding_token_floor)).unwrap_or(i64::MAX)
+    // `output`/`candidates` come straight from client JSON (`max_tokens`, `n`,
+    // `candidateCount`) with no upper bound, so this estimate can exceed the
+    // limiter's Lua-safe domain. Passing a larger value makes `LimitRequest`
+    // fail validation, which the caller reports as a fail-closed 503 plus an
+    // ERROR log — letting any key holder drive the gateway's 5xx rate. Clamp
+    // instead: a clamped estimate still exceeds any real token limit and yields
+    // a proper 429.
+    i64::try_from(byte_estimate.max(embedding_token_floor))
+        .unwrap_or(i64::MAX)
+        .min(LimitRequest::MAX_LUA_SAFE)
 }
 
 /// Probes only the `input` field of an embeddings request to estimate its

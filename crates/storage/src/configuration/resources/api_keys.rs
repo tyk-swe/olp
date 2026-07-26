@@ -18,7 +18,16 @@ impl PgStore {
         let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
         let mut items = Vec::with_capacity(ids.len());
         for id in ids {
-            items.push(self.get_api_key(id).await?);
+            // The id scan and these hydrations run on separate pooled
+            // connections with no shared snapshot, so a row deleted in between
+            // must simply be absent from the page. Propagating `NotFound` would
+            // turn a list request into a 404 that returns none of the rows that
+            // are still perfectly readable.
+            match self.get_api_key(id).await {
+                Ok(item) => items.push(item),
+                Err(ConfigurationError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(ConfigurationPage { items, next_cursor })
     }

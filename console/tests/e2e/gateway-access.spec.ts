@@ -960,7 +960,9 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
 
 test('failed route conflict reload preserves dirty fields until a successful reload', async ({ page }) => {
   await mockSession(page);
-  let failNextReload = false;
+  // Held across every read attempt, including the query client's retry, so the
+  // reload fails outright instead of succeeding on a retry the test cannot see.
+  let failReload = false;
   let current = {
     id: ids.draft,
     slug: 'default',
@@ -990,8 +992,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   });
   await page.route(`**/api/v1/route-drafts/${ids.draft}`, async (route) => {
     const request = route.request();
-    if (request.method() === 'GET' && failNextReload) {
-      failNextReload = false;
+    if (request.method() === 'GET' && failReload) {
       await route.fulfill({
         status: 503,
         json: { title: 'Route reload unavailable', status: 503 }
@@ -1004,7 +1005,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
         slug: 'remote-route',
         etag: '01980000-0000-7000-8000-000000000212'
       };
-      failNextReload = true;
+      failReload = true;
       await route.fulfill({
         status: 412,
         contentType: 'application/problem+json',
@@ -1025,10 +1026,12 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   await expect(page.getByRole('alert')).toContainText('This item changed elsewhere.');
 
   await page.getByRole('button', { name: 'Reload' }).click();
-  await expect.poll(() => failNextReload).toBe(false);
+  await expect(page.getByText('Route reload unavailable')).toBeVisible();
   await expect(page.getByLabel('Public model slug')).toHaveValue('local-route');
+  failReload = false;
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Public model slug')).toHaveValue('remote-route');
+  await expect(page.getByText('Route reload unavailable')).toBeHidden();
 });
 
 test('API key creation shows a secret once with SDK snippets on mobile', async ({ page }) => {

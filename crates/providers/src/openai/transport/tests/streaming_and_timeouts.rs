@@ -67,6 +67,42 @@ async fn raw_media_stream_is_bounded_ordered_and_terminal() {
 }
 
 #[tokio::test]
+async fn raw_media_stream_tolerates_a_terminal_event_and_done_in_one_chunk() {
+    // A provider may close with both a typed terminal event and the `[DONE]`
+    // sentinel. Split across chunks the sentinel is never read, but in a single
+    // write both frames decode in one batch — which must not turn a complete,
+    // well-formed response into a protocol error that discards the events
+    // already decoded ahead of it.
+    let body = concat!(
+        "event: image_generation.partial_image\n",
+        "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"YQ==\",\"partial_image_index\":0}\n\n",
+        "event: image_generation.completed\n",
+        "data: {\"type\":\"image_generation.completed\"}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let headers =
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+    let (base_url, _) = spawn_mock(MockResponse {
+        chunks: vec![(
+            Duration::ZERO,
+            [headers.as_slice(), body.as_bytes()].concat(),
+        )],
+    })
+    .await;
+    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let mut events = execute_events(&connector, image_request(true)).await;
+    let mut collected = Vec::new();
+    while let Some(event) = events.next().await {
+        collected.push(event.expect("a complete media stream must not fail"));
+    }
+    assert_eq!(collected.len(), 3);
+    assert!(matches!(
+        collected.last().map(|event| &event.kind),
+        Some(CanonicalEventKind::Done)
+    ));
+}
+
+#[tokio::test]
 async fn decodes_fragmented_streaming_chat_and_usage() {
     let sse = concat!(
         "data: {\"id\":\"chatcmpl-2\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"snow ☃\"},\"finish_reason\":null}]}\n\n",

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.slug AS \"value!\" FROM routes r JOIN LATERAL (SELECT id, max_attempts FROM route_revisions WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true WHERE ( SELECT count(*) FROM route_revision_targets rt JOIN provider_models pm ON pm.id = rt.provider_model_id JOIN providers target_provider ON target_provider.id = pm.provider_id JOIN provider_revision_models prm ON prm.source_provider_model_id = pm.id AND prm.provider_revision_id = CASE WHEN target_provider.id = $1 THEN $2 ELSE target_provider.active_revision_id END AND prm.enabled WHERE rt.route_revision_id = rr.id AND target_provider.state <> 'disabled'::provider_state) < rr.max_attempts ORDER BY r.slug LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "routes",
+            "name": "slug"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6a858892e7aa941e24fb824c6e98b0a7bf886e161874a89c00738090e13be0f4"
+}

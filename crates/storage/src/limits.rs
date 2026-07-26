@@ -159,6 +159,16 @@ pub struct LimitRequest<'a> {
 }
 
 impl LimitRequest<'_> {
+    /// Largest value the limiter accepts for `requested_tokens` and for each
+    /// configured limit.
+    ///
+    /// The Valkey scripts do integer arithmetic in Lua, whose numbers are IEEE
+    /// doubles, so anything above 2^53-1 cannot round-trip exactly. Callers that
+    /// derive a value from client input must clamp to this bound; passing a
+    /// larger one is rejected by [`LimitRequest::validate`] as an invalid
+    /// request rather than treated as an exceeded limit.
+    pub const MAX_LUA_SAFE: i64 = MAX_LUA_INTEGER;
+
     pub fn has_hard_limits(&self) -> bool {
         self.requests_per_minute.is_some()
             || self.tokens_per_minute.is_some()

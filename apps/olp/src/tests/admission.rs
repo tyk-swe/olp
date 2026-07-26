@@ -239,6 +239,24 @@ fn raw_json_tpm_estimate_includes_requested_output_and_candidates() {
 }
 
 #[test]
+fn raw_json_tpm_estimate_stays_within_the_limiter_domain() {
+    // `max_tokens`/`n` are unbounded in the raw body — the u32 wire types are
+    // only enforced later, inside the handler. An estimate above the limiter's
+    // Lua-safe domain fails `LimitRequest::validate`, which the caller reports
+    // as a fail-closed 503, so any key holder could drive the 5xx rate.
+    for body in [
+        br#"{"max_tokens":10000000000000000,"messages":[]}"#.as_slice(),
+        br#"{"max_tokens":4294967295,"n":2097153,"messages":[]}"#.as_slice(),
+    ] {
+        let estimate = estimate_http_json_request_tokens(TokenEstimate::Generation, body);
+        assert!(
+            (0..=olp_storage::LimitRequest::MAX_LUA_SAFE).contains(&estimate),
+            "estimate {estimate} escapes the limiter's accepted domain"
+        );
+    }
+}
+
+#[test]
 fn raw_json_tpm_estimate_counts_compact_embedding_token_arrays() {
     let flat = serde_json::json!({
         "model": "default",

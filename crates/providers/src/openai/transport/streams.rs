@@ -420,6 +420,9 @@ pub(super) struct RawSseEventStream {
     sequence: u64,
     committed: bool,
     terminal: bool,
+    /// Surfaced only after `queued` drains, so a protocol violation late in a
+    /// batch does not discard the events decoded before it.
+    pending_error: Option<TransportError>,
 }
 
 impl RawSseEventStream {
@@ -431,12 +434,22 @@ impl RawSseEventStream {
             sequence: 0,
             committed: false,
             terminal: false,
+            pending_error: None,
         }
     }
 
     fn queue_frames(&mut self, frames: Vec<SseFrame>) -> Result<(), TransportError> {
         for frame in frames {
             if self.terminal {
+                // Providers legitimately close with a typed terminal event
+                // (`*.done`/`*.failed`) *and* the `[DONE]` sentinel. Split
+                // across two chunks the sentinel is never read; in a single
+                // chunk both arrive in one batch. Ignoring the redundant
+                // sentinel keeps an identical byte stream from succeeding or
+                // failing based only on how the upstream framed its writes.
+                if frame.data.trim() == "[DONE]" {
+                    continue;
+                }
                 return Err(self.protocol_error("OpenAI sent media events after completion"));
             }
             if frame.data.trim() == "[DONE]" {
@@ -497,6 +510,9 @@ impl Stream for RawSseEventStream {
                 self.committed = true;
                 return Poll::Ready(Some(Ok(event)));
             }
+            if let Some(error) = self.pending_error.take() {
+                return Poll::Ready(Some(Err(error)));
+            }
             if self.terminal {
                 return Poll::Ready(None);
             }
@@ -513,7 +529,10 @@ impl Stream for RawSseEventStream {
                     };
                     if let Err(error) = self.queue_frames(frames) {
                         self.terminal = true;
-                        return Poll::Ready(Some(Err(error)));
+                        self.pending_error = Some(error);
+                        // Loop back so events decoded earlier in this same batch
+                        // reach the consumer before the error does.
+                        continue;
                     }
                 }
                 Poll::Ready(Some(Err(mut error))) => {

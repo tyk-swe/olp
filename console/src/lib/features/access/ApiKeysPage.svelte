@@ -6,7 +6,7 @@
   import NavIcon from '$lib/components/NavIcon.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { ApiProblem } from '$lib/api/http';
+  import { problemMessage } from '$lib/api/http';
   import { popCursor, pushCursor } from '$lib/api/pagination';
   import { dateTimeLocalValue } from '$lib/features/operations/format';
   import {
@@ -67,9 +67,7 @@
   });
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error ? error.message : 'The control API could not complete the request.';
+    return problemMessage(error, 'The control API could not complete the request.');
   }
 
   function toggle(list: string[], value: string, checked: boolean) {

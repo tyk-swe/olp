@@ -215,7 +215,12 @@ impl AnthropicMessagesClientStreamEncoder {
                         "type": "message_delta",
                         "delta": {"stop_reason": finish_reason(&reason), "stop_sequence": null},
                         "usage": {
-                            "input_tokens": self.usage.input_tokens,
+                            // Canonical `input_tokens` is cache-inclusive, but the
+                            // Anthropic wire contract excludes cache reads from it.
+                            // Emit them disjointly, matching the unary encoder, or
+                            // SDKs that total the fields double-count the cache.
+                            "input_tokens": self.usage.input_tokens
+                                .saturating_sub(self.usage.cached_input_tokens.unwrap_or(0)),
                             "output_tokens": self.usage.output_tokens,
                             "cache_read_input_tokens": self.usage.cached_input_tokens
                         }
@@ -289,7 +294,10 @@ impl AnthropicMessagesClientStreamEncoder {
                     "stop_reason": null,
                     "stop_sequence": null,
                     "usage": {
-                        "input_tokens": self.usage.input_tokens,
+                        // See the `message_delta` block: cache reads are reported
+                        // separately from `input_tokens` on the Anthropic wire.
+                        "input_tokens": self.usage.input_tokens
+                            .saturating_sub(self.usage.cached_input_tokens.unwrap_or(0)),
                         "output_tokens": 0,
                         "cache_read_input_tokens": self.usage.cached_input_tokens
                     }

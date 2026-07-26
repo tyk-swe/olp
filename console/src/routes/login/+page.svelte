@@ -8,7 +8,7 @@
     login,
     type AuthenticationCapabilities
   } from '$lib/api/auth';
-  import { ApiProblem } from '$lib/api/http';
+  import { problemMessage } from '$lib/api/http';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import { relativeReturnTo } from '$lib/auth/relativeReturnTo';
   import SetupFrame from '$lib/features/setup/SetupFrame.svelte';
@@ -23,6 +23,7 @@
     oidc_login_enabled: false
   });
   let message = $state('');
+  let capabilitiesFailed = $state(false);
   const publicAuthController = new AbortController();
 
   function destination() {
@@ -31,14 +32,6 @@
 
   function oidcHref() {
     return `/api/v1/oidc/login?return_to=${encodeURIComponent(destination())}`;
-  }
-
-  function problemMessage(error: unknown, fallback: string) {
-    return error instanceof ApiProblem
-      ? (error.problem.detail ?? error.problem.title)
-      : error instanceof Error
-        ? error.message
-        : fallback;
   }
 
   async function submit(event: SubmitEvent) {
@@ -81,19 +74,28 @@
     }
   }
 
-  onMount(() => {
+  // Both sign-in buttons stay disabled until capabilities load, so a failed
+  // probe used to leave the page an unrecoverable dead end with no way to retry
+  // short of a manual reload.
+  function loadCapabilities() {
+    capabilitiesLoading = true;
+    message = '';
     void authenticationCapabilities(publicAuthController.signal)
       .then((value) => {
         capabilities = value;
+        capabilitiesFailed = false;
       })
       .catch((error: unknown) => {
         if (publicAuthController.signal.aborted) return;
+        capabilitiesFailed = true;
         message = problemMessage(error, 'Sign-in options could not be loaded.');
       })
       .finally(() => {
         if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
       });
-  });
+  }
+
+  onMount(loadCapabilities);
 
   onDestroy(() => {
     publicAuthController.abort();
@@ -110,7 +112,7 @@
     <p>Choose an authentication method enabled for this installation.</p>
   </div>
 
-  {#if message}<div class="form-alert" role="alert">{message}</div>{/if}
+  {#if message}<div class="form-alert" role="alert">{message}{#if capabilitiesFailed} <button class="text-button" type="button" onclick={loadCapabilities} disabled={capabilitiesLoading}>{capabilitiesLoading ? 'Retrying…' : 'Try again'}</button>{/if}</div>{/if}
 
   {#if capabilitiesLoading}
     <p class="capabilities-status" role="status">Loading sign-in options…</p>

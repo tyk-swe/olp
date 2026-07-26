@@ -13,7 +13,15 @@ use super::{CreateApiKeyRequest, UpdateApiKeyRequest};
 
 const MAX_NAME_CHARACTERS: usize = 100;
 const MAX_U32_DATABASE_LIMIT: u32 = i32::MAX as u32;
-const MAX_U64_DATABASE_LIMIT: u64 = i64::MAX as u64;
+/// `tokens_per_minute` reaches the distributed limiter, whose Valkey scripts do
+/// integer arithmetic in Lua (IEEE doubles). A larger value is accepted here and
+/// stored, then rejected by `LimitRequest::validate` on every single request —
+/// making the key permanently unusable with a 503 and no signal pointing at the
+/// configuration. Reject it at configuration time with a 422 instead.
+///
+/// `requests_per_minute` and `max_concurrency` need no such clamp: their
+/// `i32::MAX` ceiling is already well below the Lua-safe bound.
+const MAX_U64_DATABASE_LIMIT: u64 = olp_storage::LimitRequest::MAX_LUA_SAFE as u64;
 
 pub(super) struct RawApiKeyPolicy<'a> {
     name: &'a str,
@@ -443,7 +451,7 @@ mod tests {
         );
         assert_eq!(
             create_problem.errors["tokens_per_minute"],
-            ["Use a limit no greater than 9223372036854775807 or null."]
+            ["Use a limit no greater than 9007199254740991 or null."]
         );
         assert_eq!(
             create_problem.errors["max_concurrency"],

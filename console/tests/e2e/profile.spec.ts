@@ -238,7 +238,9 @@ test('stale profile save reloads the remote version and retries with its ETag', 
     etag: '01980000-0000-7000-8000-000000000320'
   };
   const saveEtags: Array<string | undefined> = [];
-  let failNextReload = false;
+  // Held across every read attempt, including the query client's retry, so the
+  // reload fails outright instead of succeeding on a retry the test cannot see.
+  let failReload = false;
 
   await page.route('**/api/v1/sessions/current', async (route) =>
     route.fulfill({
@@ -255,8 +257,7 @@ test('stale profile save reloads the remote version and retries with its ETag', 
   );
   await page.route('**/api/v1/profile', async (route) => {
     const request = route.request();
-    if (request.method() === 'GET' && failNextReload) {
-      failNextReload = false;
+    if (request.method() === 'GET' && failReload) {
       await route.fulfill({
         status: 503,
         json: { title: 'Profile reload unavailable', status: 503 }
@@ -271,7 +272,7 @@ test('stale profile save reloads the remote version and retries with its ETag', 
           display_name: 'Remote operator',
           etag: '01980000-0000-7000-8000-000000000321'
         };
-        failNextReload = true;
+        failReload = true;
         await route.fulfill({
           status: 412,
           contentType: 'application/problem+json',
@@ -310,10 +311,12 @@ test('stale profile save reloads the remote version and retries with its ETag', 
   ).toEqual([]);
 
   await page.getByRole('button', { name: 'Reload' }).click();
-  await expect.poll(() => failNextReload).toBe(false);
+  await expect(page.getByText('Profile reload unavailable')).toBeVisible();
   await expect(page.getByLabel('Display name')).toHaveValue('Local edit');
+  failReload = false;
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Display name')).toHaveValue('Remote operator');
+  await expect(page.getByText('Profile reload unavailable')).toBeHidden();
   await page.getByLabel('Display name').fill('Merged operator');
   await page.getByRole('button', { name: 'Save profile' }).click();
   await expect(page.getByText('Profile updated.')).toBeVisible();

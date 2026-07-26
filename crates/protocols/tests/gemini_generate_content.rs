@@ -478,3 +478,55 @@ fn native_gemini_stream_losslessly_preserves_safety_and_grounding_metadata() {
     );
     assert!(output.get("promptFeedback").is_some());
 }
+
+#[test]
+fn function_calls_without_an_upstream_id_stay_usable_across_surfaces() {
+    // Gemini's public generateContent API does not populate `functionCall.id`,
+    // but the Anthropic and OpenAI client encoders require an identifier — the
+    // Anthropic surface failed the whole request without one.
+    let wire: GenerateContentResponse = serde_json::from_value(json!({
+        "responseId": "resp-1",
+        "modelVersion": "gemini-upstream",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [
+                {"functionCall": {"name": "weather", "args": {"city": "Paris"}}}
+            ]},
+            "finishReason": "STOP"
+        }]
+    }))
+    .unwrap();
+    let events = decode_generate_content_response(wire).unwrap();
+    let id = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            CanonicalEventKind::ToolCallDelta { id, .. } => id.clone(),
+            _ => None,
+        })
+        .expect("a tool call must carry an identifier for cross-vendor encoders");
+    assert!(!id.is_empty());
+
+    // ...and the synthesized id must never reach Gemini: re-encoding a tool
+    // result that references it omits the field, exactly as the upstream sent it.
+    let request = json!({
+        "contents": [
+            {"role": "model", "parts": [{"functionCall": {"name": "weather", "args": {}}}]},
+            {"role": "user", "parts": [{"functionResponse": {
+                "name": "weather", "response": {"c": 21}
+            }}]}
+        ]
+    });
+    let wire: GenerateContentRequest = serde_json::from_value(request).unwrap();
+    let Operation::Generation(canonical) =
+        decode_generate_content_request("default", wire, false).unwrap()
+    else {
+        panic!("wrong operation")
+    };
+    let encoded =
+        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    let call = &encoded["contents"][0]["parts"][0]["functionCall"];
+    assert!(
+        call.get("id").is_none(),
+        "a synthesized id must not be sent upstream: {call}"
+    );
+}

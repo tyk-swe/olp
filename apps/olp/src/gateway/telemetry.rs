@@ -324,7 +324,10 @@ impl Drop for RequestAccountingGuard {
     }
 }
 
-pub(super) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
+pub(super) fn usage_from_result(
+    result: &CanonicalResult,
+    operation: OperationKind,
+) -> UsageCapture {
     let (usage, media_units) = match result {
         CanonicalResult::Embeddings(result) => (result.usage, None),
         CanonicalResult::Images(result) => (result.usage, Decimal::from_usize(result.images.len())),
@@ -332,7 +335,12 @@ pub(super) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
             None,
             result.duration_seconds.and_then(Decimal::from_f64_retain),
         ),
-        CanonicalResult::VideoJob(result) => (
+        // A video's duration is billable once, when the job is created. The same
+        // `VideoJob` result shape comes back from every status poll — client
+        // `GET /v1/videos/{id}`, list refreshes, and the reconciliation
+        // supervisor's ~5s polling — so counting it per result would re-bill the
+        // duration once per poll and inflate usage totals for a single video.
+        CanonicalResult::VideoJob(result) if operation == OperationKind::VideoCreate => (
             None,
             result
                 .seconds
@@ -389,6 +397,11 @@ pub(crate) struct UsageCapture {
 impl UsageCapture {
     pub(crate) fn actual_tokens(&self) -> Option<i64> {
         self.input_tokens?.checked_add(self.output_tokens?)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn media_units(&self) -> Option<Decimal> {
+        self.media_units
     }
 
     pub(crate) fn observe(&mut self, event: &CanonicalEvent) {

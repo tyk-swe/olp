@@ -40,13 +40,15 @@
   let pricingCursor = $state<string | undefined>();
   let pricingHistory = $state<Array<string | undefined>>([]);
 
+  // `values` is a sparse overlay holding only the rows the operator has edited;
+  // every input falls back to the server's `setting.value`. Hydrating it from
+  // inside the queryFn overwrote *every* row on each fetch, so saving one
+  // setting — or any background refetch, which the 5s staleTime plus
+  // refetch-on-focus makes routine — silently discarded unsaved edits to the
+  // others while reporting success.
   const settings = createQuery(() => ({
     queryKey: ['settings'],
-    queryFn: async () => {
-      const data = await listSettings();
-      values = Object.fromEntries(data.map((setting) => [setting.key, setting.value]));
-      return data;
-    }
+    queryFn: () => listSettings()
   }));
 
   const providerKinds = createQuery(() => ({
@@ -92,6 +94,11 @@
     try {
       await updateSetting(setting, values[setting.key] ?? '');
       status = `${settingLabel(setting.key)} saved.`;
+      // Drop only the saved key so this row falls back to the refreshed server
+      // value while every other pending edit survives the refetch.
+      values = Object.fromEntries(
+        Object.entries(values).filter(([key]) => key !== setting.key)
+      );
       await settings.refetch();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'The setting could not be saved.';

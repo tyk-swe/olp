@@ -279,6 +279,16 @@ pub(crate) fn aggregate_chat_completion_response(
     Ok(response)
 }
 
+/// Highest array position a provider extension pointer may address.
+///
+/// Pointer segments are built from provider-supplied `choice.index` and
+/// `tool_call.index` values (`u32`), and the array branches below materialize
+/// every element up to the requested position. Without a ceiling a single chunk
+/// carrying `{"index": 4000000000, "logprobs": null}` would allocate billions of
+/// `Value`s and abort the process. Real fan-out (`n`, parallel tool calls) stays
+/// far below this bound, so exceeding it is a protocol error, surfaced as a 502.
+const MAX_POINTER_ARRAY_INDEX: usize = 1_024;
+
 fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) -> Result<(), ()> {
     if !pointer.starts_with('/') || pointer.len() > 1_024 {
         return Err(());
@@ -300,6 +310,9 @@ fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) -> Result<(),
                 }
                 Value::Array(array) => {
                     let position: usize = segment.parse().map_err(|_| ())?;
+                    if position > MAX_POINTER_ARRAY_INDEX {
+                        return Err(());
+                    }
                     while array.len() <= position {
                         array.push(Value::Null);
                     }
@@ -322,6 +335,9 @@ fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) -> Result<(),
             }),
             Value::Array(array) => {
                 let position: usize = segment.parse().map_err(|_| ())?;
+                if position > MAX_POINTER_ARRAY_INDEX {
+                    return Err(());
+                }
                 while array.len() <= position {
                     let mut next_value = if next_is_index {
                         Value::Array(Vec::new())

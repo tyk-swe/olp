@@ -1,8 +1,8 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use olp_domain::{
-    CanonicalEventKind, GenerationParameters, GenerationRequest, ImageOperation, MediaArtifact,
-    MediaHandle, MediaSource, Message, MessageRole, Operation, RouteSlug, SourceExtensions,
-    Surface, VideoOperation, validate_event_sequence,
+    CanonicalEvent, CanonicalEventKind, GenerationParameters, GenerationRequest, ImageOperation,
+    MediaArtifact, MediaHandle, MediaSource, Message, MessageRole, Operation, RouteSlug,
+    SourceExtensions, Surface, VideoOperation, validate_event_sequence,
 };
 use olp_protocols::openai::{
     BoundedMediaPart, EmbeddingRequest, EmbeddingResponse, ImageStreamOperation,
@@ -84,6 +84,48 @@ fn responses_request_round_trips_supported_semantics_and_extensions() {
 }
 
 #[test]
+fn responses_tool_round_trip_keeps_call_and_output_ids_paired() {
+    // The OpenAI SDK replays a tool turn by appending the whole output item, so
+    // the function_call carries both `id` (fc_...) and `call_id` (call_...),
+    // while the function_call_output references only `call_id`. Decoding must
+    // canonicalize on `call_id` or the re-encoded pair no longer matches and the
+    // upstream rejects the request.
+    let wire: ResponseCreateRequest = serde_json::from_value(json!({
+        "model": "team-responses",
+        "input": [
+            {
+                "type": "function_call",
+                "id": "fc_abc",
+                "call_id": "call_abc",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_abc",
+                "output": "ok"
+            }
+        ]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) = decode_response_create(wire).unwrap() else {
+        panic!("wrong operation")
+    };
+    assert_eq!(canonical.messages[0].tool_calls[0].id, "call_abc");
+    assert_eq!(
+        canonical.messages[1].tool_call_id.as_deref(),
+        Some("call_abc")
+    );
+    // The item id survives as an extension for same-surface round trips.
+    assert_eq!(canonical.extensions.values["/input/0/id"], "fc_abc");
+
+    let encoded = encode_response_create(&canonical, "gpt-upstream").unwrap();
+    let encoded = serde_json::to_value(encoded).unwrap();
+    assert_eq!(encoded["input"][0]["call_id"], "call_abc");
+    assert_eq!(encoded["input"][1]["call_id"], "call_abc");
+}
+
+#[test]
 fn responses_rejects_stateful_and_unspooled_media_semantics() {
     let stateful: ResponseCreateRequest = serde_json::from_value(json!({
         "model": "default",
@@ -140,6 +182,61 @@ fn responses_preserves_builtin_tools_only_for_same_protocol() {
             .ensure_representable_on(Surface::Gemini)
             .is_err()
     );
+}
+
+#[test]
+fn responses_stream_announces_the_real_tool_call_id_and_name() {
+    // Clients are documented to build tool calls from the streamed item
+    // lifecycle. Announcing a synthetic `call_0`/`function` makes them invoke
+    // the wrong tool and echo an id the upstream never issued.
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1_800_000_000);
+    let mut frames = Vec::new();
+    frames.extend(
+        encoder
+            .push(CanonicalEvent::new(
+                0,
+                CanonicalEventKind::ToolCallDelta {
+                    output_index: 0,
+                    tool_index: 0,
+                    id: Some("call_5678".to_owned()),
+                    name: Some("get_weather".to_owned()),
+                    arguments_delta: "{\"city\":".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    // A follow-up delta carries no id (the decoder deliberately omits it so the
+    // real call_id is not clobbered) and must still report the announced one.
+    frames.extend(
+        encoder
+            .push(CanonicalEvent::new(
+                1,
+                CanonicalEventKind::ToolCallDelta {
+                    output_index: 0,
+                    tool_index: 0,
+                    id: None,
+                    name: None,
+                    arguments_delta: "\"Paris\"}".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+
+    let added = frames
+        .iter()
+        .find(|frame| frame.event.as_deref() == Some("response.output_item.added"))
+        .expect("a tool call must announce its output item");
+    let added: serde_json::Value = serde_json::from_str(&added.data).unwrap();
+    assert_eq!(added["item"]["call_id"], "call_5678");
+    assert_eq!(added["item"]["name"], "get_weather");
+
+    for frame in frames
+        .iter()
+        .filter(|frame| frame.event.as_deref() == Some("response.function_call_arguments.delta"))
+    {
+        let delta: serde_json::Value = serde_json::from_str(&frame.data).unwrap();
+        assert_eq!(delta["item_id"], "call_5678");
+    }
 }
 
 #[test]

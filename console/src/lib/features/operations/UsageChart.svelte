@@ -5,6 +5,14 @@
 
   let { points, title = 'Requests over time' }: { points: UsagePoint[]; title?: string } = $props();
   const data = $derived(points.map((point) => ({ ...point, time: new Date(point.bucket) })));
+
+  // An hourly granularity over a year yields 8,784 buckets. Rendering one row
+  // each — every row running two Intl formatters — blocks the main thread long
+  // enough to hang the tab, so cap the accessible detail table and say what was
+  // truncated. The chart itself still plots every point.
+  const MAX_TABLE_ROWS = 500;
+  const tableRows = $derived(points.slice(0, MAX_TABLE_ROWS));
+  const truncatedRows = $derived(points.length - tableRows.length);
 </script>
 
 <figure class="usage-chart" aria-labelledby="usage-chart-title" aria-describedby="usage-chart-description">
@@ -32,12 +40,15 @@
           <caption class="sr-only">Exact usage values shown in the time-series chart</caption>
           <thead><tr><th scope="col">Bucket</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Status</th></tr></thead>
           <tbody>
-            {#each points as point (point.bucket)}
+            {#each tableRows as point (point.bucket)}
               <tr><td>{formatDate(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency ?? 'USD')}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
             {/each}
           </tbody>
         </table>
       </div>
+      {#if truncatedRows > 0}
+        <p class="table-note">Showing the first {tableRows.length} of {points.length} buckets. Narrow the range or use a coarser granularity to see the rest.</p>
+      {/if}
     </details>
   {/if}
 </figure>
@@ -46,6 +57,7 @@
   .usage-chart { margin: 1rem 0 0; padding: 1.25rem; border: 1px solid var(--border); border-radius: 0.5rem; background: var(--surface); box-shadow: var(--shadow-sm); }
   figcaption { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
   h2 { margin: 0; font-size: 1.05rem; }
+  .table-note { margin: .5rem 0 0; color: var(--foreground-muted); font-size: .75rem; }
   figcaption p { margin: 0.25rem 0 0; color: var(--foreground-muted); font-size: 0.78rem; }
   .legend { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--foreground-muted); font-size: 0.75rem; }
   .legend span { width: 1rem; height: 0.2rem; border-radius: 1rem; background: var(--accent); }

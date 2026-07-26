@@ -2,7 +2,7 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { ApiProblem } from '$lib/api/http';
+  import { problemMessage } from '$lib/api/http';
   import { invalidateProviderSummaries } from './providerCache';
   import {
     getProvider,
@@ -37,9 +37,7 @@
   const providerCount = $derived(new Set(inventory.map((entry) => entry.provider_id)).size);
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error ? error.message : 'The model inventory could not be loaded.';
+    return problemMessage(error, 'The model inventory could not be loaded.');
   }
 
   async function toggle(entry: ProviderModelInventory, enabled: boolean) {
@@ -55,6 +53,10 @@
       ]);
     } catch (error) {
       errorMessage = message(error);
+      // `checked` is a one-way binding on server data, so the click has already
+      // flipped the DOM element. Without re-reading server truth the row keeps
+      // advertising an eligibility that was never persisted.
+      await models.refetch();
     } finally {
       busyModel = '';
     }
@@ -101,7 +103,10 @@
 {:else if inventory.length === 0}
   <section class="card empty-state"><div><h2>No models discovered</h2><p>Run a provider probe and capability review first.</p><a class="button button-primary" href={resolve('/providers')}>Open providers</a></div></section>
 {:else if filtered.length === 0}
-  <section class="card empty-state"><div><h2>No matching models</h2><p>Clear the search or select another client surface.</p><button class="button button-secondary" type="button" onclick={() => { search = ''; surface = 'all'; }}>Clear filters</button></div></section>
+  <!-- The search and surface filters run client-side over the current page
+       only, so a model on a later page would otherwise be reported as
+       non-existent. The pagination nav below stays mounted either way. -->
+  <section class="card empty-state"><div><h2>No matching models on this page</h2><p>The filters apply to the {inventory.length} models loaded on this page. Continue to the next page to keep searching, or clear the filters.</p><button class="button button-secondary" type="button" onclick={() => { search = ''; surface = 'all'; }}>Clear filters</button></div></section>
 {:else}
   <div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Provider</th><th>Capability tuples / provenance</th><th>Route eligibility</th></tr></thead><tbody>
     {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}

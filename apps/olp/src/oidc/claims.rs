@@ -98,10 +98,23 @@ pub(super) fn validate_id_token(
     }
     let subject = bounded_claim(&claims, "sub", 255)?.ok_or_else(invalid_id_token)?;
     let email = bounded_claim(&claims, &configuration.email_claim, 254)?;
-    let email_verified = claims
-        .get("email_verified")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    // Per OIDC Core, `email_verified` attests the `email` claim and nothing
+    // else. When an operator points `email_claim` at a different claim — e.g.
+    // `preferred_username`, which several IdPs document as mutable and
+    // end-user settable — the IdP's `email_verified` says nothing about the
+    // value consumed here. Binding the two would let a user pick an identifier
+    // matching a privileged email role mapping and inherit its role.
+    let email_verified = if configuration.email_claim == "email" {
+        claims
+            .get("email_verified")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    } else {
+        claims
+            .get(format!("{}_verified", configuration.email_claim))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
     let display_name = bounded_claim(&claims, "name", 100)?;
     let groups = match claims.get(&configuration.groups_claim) {
         None => Vec::new(),

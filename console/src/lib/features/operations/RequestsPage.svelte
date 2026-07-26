@@ -184,8 +184,18 @@
     <div class="loading-state" role="status">Loading request metadata…</div>
   {:else if requests.isError}
     <div class="inline-problem" role="alert">Request metadata is unavailable. <button class="text-button" onclick={() => requests.refetch()}>Try again</button></div>
-  {:else if requests.data?.data.length === 0}
+  {:else if requests.data?.data.length === 0 && listState.cursors.length === 0}
     <div class="card empty-state"><div><strong>No matching requests</strong><p>Adjust the filters or send traffic through an active route.</p></div></div>
+  {:else if requests.data?.data.length === 0}
+    <!-- A later page can come back empty when rows age out between requests.
+         Keep the pagination nav mounted or Previous disappears and the operator
+         is stranded on a blank page with no way back. -->
+    <div class="card empty-state"><div><strong>No requests on this page</strong><p>Records may have been removed since the previous page was loaded.</p></div></div>
+    <nav class="pagination" aria-label="Request pages">
+      <button class="button button-secondary" type="button" onclick={previousPage} disabled={listState.cursors.length === 0}>Previous</button>
+      <span>Page {listState.cursors.length + 1}</span>
+      <button class="button button-secondary" type="button" onclick={nextPage} disabled={!requests.data?.next_cursor}>Next</button>
+    </nav>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="table-shell desktop-results" tabindex="0" role="region" aria-label="Request results">

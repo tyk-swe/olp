@@ -245,7 +245,13 @@ pub(super) async fn chat_completions(
             true,
         ),
         Err(failure) => {
-            accounting.record_attempts(failure.attempts.clone(), None, None, false);
+            // Must agree with the final attempt's `committed` flag; see the
+            // matching comment in execution.rs.
+            let committed = failure
+                .attempts
+                .last()
+                .is_some_and(|attempt| attempt.committed);
+            accounting.record_attempts(failure.attempts.clone(), None, None, committed);
         }
     }
     request_media.cleanup().await;

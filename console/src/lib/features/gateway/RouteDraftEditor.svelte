@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import { isEtagMismatch, problemMessage } from '$lib/api/http';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     beginReload,
@@ -110,10 +110,23 @@
   );
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error ? error.message : 'The control API could not complete the request.';
+    return problemMessage(error, 'The control API could not complete the request.');
   }
+
+  // A failed refetch leaves the cached page in place but still reports
+  // `isError`. Only a query with no cached data at all may replace the editor;
+  // otherwise a transient reload failure would hide a dirty form behind a
+  // full-page error, so report those inline and keep the editor mounted.
+  const draftMissing = $derived(!isNew && !draft.data);
+  const modelsMissing = $derived(!providerModels.data);
+  const blockingError = $derived(draftMissing ? draft.error : providerModels.error);
+  const staleError = $derived(
+    !isNew && draft.isError && draft.data
+      ? message(draft.error)
+      : providerModels.isError && providerModels.data
+        ? message(providerModels.error)
+        : ''
+  );
 
   async function run(label: string, action: () => Promise<void>) {
     busy = label;
@@ -136,6 +149,9 @@
 
   async function reload() {
     const result = await draft.refetch();
+    // A failed reload read nothing newer, so the conflict stays unresolved and
+    // the dirty form stays as it is. The query's error state drives the stale
+    // banner, which is the single place a failed read is reported.
     if (result.error) return;
     sync = beginReload(sync);
   }
@@ -161,7 +177,7 @@
 
   async function create(event: SubmitEvent) {
     event.preventDefault();
-    const issue = validateRouteEditor(editorValues);
+    const issue = validateRouteEditor(editorValues, modelOptions);
     if (issue) { errorMessage = issue; return; }
     await run('save', async () => {
       const id = await createRouteDraft(buildCreateRouteDraftInput(editorValues, modelOptions));
@@ -172,7 +188,7 @@
   }
 
   async function save(current: RouteDraft) {
-    const issue = validateRouteEditor(editorValues);
+    const issue = validateRouteEditor(editorValues, modelOptions);
     if (issue) { errorMessage = issue; return; }
     await run('save', async () => {
       if (!sync.snapshotEtag) throw new Error('Reload the draft before saving.');
@@ -248,10 +264,11 @@
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 <ConflictNotice notice={concurrentNotice} onReload={reload} disabled={Boolean(busy)} />
+{#if staleError}<div class="inline-problem" role="alert">{staleError} The last loaded draft remains editable below. <button class="button button-secondary" type="button" onclick={() => { draft.refetch(); providerModels.refetch(); }}>Retry</button></div>{/if}
 {#if (!isNew && draft.isPending) || providerModels.isPending}
   <div class="loading-state" role="status">Loading Route Studio…</div>
-{:else if (!isNew && draft.isError) || providerModels.isError}
-  <div class="inline-problem" role="alert">{message(draft.error ?? providerModels.error)} <button class="button button-secondary" type="button" onclick={() => { draft.refetch(); providerModels.refetch(); }}>Retry</button></div>
+{:else if draftMissing || modelsMissing}
+  <div class="inline-problem" role="alert">{message(blockingError)} <button class="button button-secondary" type="button" onclick={() => { draft.refetch(); providerModels.refetch(); }}>Retry</button></div>
 {:else}
   <form class="studio" onsubmit={isNew ? create : (event) => { event.preventDefault(); if (draft.data) save(draft.data); }}>
     <div class="studio-main">

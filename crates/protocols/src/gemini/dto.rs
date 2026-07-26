@@ -138,6 +138,21 @@ pub struct FunctionCallPart {
     pub extra: BTreeMap<String, Value>,
 }
 
+/// Prefix for tool-call identifiers this gateway synthesizes when a Gemini
+/// response omits `functionCall.id`.
+///
+/// Gemini's public `generateContent` API does not populate that field, but the
+/// Anthropic and OpenAI client encoders require an identifier and fail the whole
+/// request without one. Synthesizing a deterministic id keeps cross-vendor tool
+/// calls working; recognizing this prefix on every Gemini-bound path strips it
+/// again so those wire bytes stay identical to what the upstream sent.
+pub(crate) const SYNTHETIC_TOOL_CALL_ID_PREFIX: &str = "olp-gemini-call-";
+
+/// Returns the id unless this gateway synthesized it.
+pub(crate) fn upstream_tool_call_id(id: Option<String>) -> Option<String> {
+    id.filter(|value| !value.starts_with(SYNTHETIC_TOOL_CALL_ID_PREFIX))
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCall {

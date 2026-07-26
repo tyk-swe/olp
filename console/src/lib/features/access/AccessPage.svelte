@@ -7,7 +7,7 @@
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import { isEtagMismatch, problemMessage } from '$lib/api/http';
   import {
     beginReload,
     conflictNotice,
@@ -127,9 +127,7 @@
   });
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error ? error.message : 'The control API could not complete the request.';
+    return problemMessage(error, 'The control API could not complete the request.');
   }
 
   async function run(label: string, action: () => Promise<void>) {
@@ -164,6 +162,10 @@
       } : current);
       notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
     });
+    // The `<select>` is a one-way binding on server data, so the browser has
+    // already moved it to `role`. When the update is rejected the row would keep
+    // displaying a role that was never applied, so re-read server truth.
+    if (errorMessage) await users.refetch();
   }
 
   async function changeActive(user: User) {

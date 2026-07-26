@@ -131,10 +131,16 @@ pub async fn reconcile_media_jobs_once(
         .await;
     let completed =
         u16::try_from(outcomes.iter().filter(|value| **value).count()).unwrap_or(u16::MAX);
+    let failed = claimed.saturating_sub(completed);
+    if failed == 0 {
+        // Everything claimed this pass reconciled cleanly, so any earlier
+        // transient gap is resolved and must stop holding readiness down.
+        state.clear_media_reconciliation_gaps();
+    }
     Ok(MediaReconciliationPass {
         claimed,
         completed,
-        failed: claimed.saturating_sub(completed),
+        failed,
     })
 }
 
@@ -381,7 +387,12 @@ async fn execute_media_reconciliation_result(
                 None,
                 Some(failure.error.status.as_u16()),
                 Some(failure.error.code.to_owned()),
-                false,
+                // Must agree with the final attempt's `committed` flag; see the
+                // matching comment in execution.rs.
+                failure
+                    .attempts
+                    .last()
+                    .is_some_and(|attempt| attempt.committed),
                 &UsageCapture::default(),
                 Surface::OpenAi,
                 operation_kind,
@@ -425,7 +436,7 @@ async fn execute_media_reconciliation_result(
         Some(StatusCode::OK.as_u16()),
         None,
         true,
-        &usage_from_result(&result),
+        &usage_from_result(&result, operation_kind),
         Surface::OpenAi,
         operation_kind,
     );

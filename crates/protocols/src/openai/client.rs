@@ -227,7 +227,9 @@ pub struct OpenAiResponsesStreamEncoder {
     events: Vec<CanonicalEvent>,
     collected_event_bytes: usize,
     emitted_outputs: BTreeSet<u32>,
-    tool_outputs: BTreeSet<u32>,
+    /// Announced tool output index -> the `call_id` published for it, so every
+    /// argument delta reports the same identifier the item was announced with.
+    tool_outputs: BTreeMap<u32, String>,
     done: bool,
 }
 
@@ -258,7 +260,7 @@ impl OpenAiResponsesStreamEncoder {
             events: Vec::new(),
             collected_event_bytes: 0,
             emitted_outputs: BTreeSet::new(),
-            tool_outputs: BTreeSet::new(),
+            tool_outputs: BTreeMap::new(),
             done: false,
         }
     }
@@ -309,14 +311,14 @@ impl OpenAiResponsesStreamEncoder {
             }
             CanonicalEventKind::MessageStart { .. } => {}
             CanonicalEventKind::TextDelta { output_index, text } => {
-                self.ensure_stream_output(*output_index, false, &mut frames)?;
+                self.ensure_stream_output(*output_index, false, None, None, &mut frames)?;
                 frames.push(response_sse_frame(
                     "response.output_text.delta",
                     json!({"output_index": output_index, "content_index": 0, "delta": text}),
                 )?);
             }
             CanonicalEventKind::RefusalDelta { output_index, text } => {
-                self.ensure_stream_output(*output_index, false, &mut frames)?;
+                self.ensure_stream_output(*output_index, false, None, None, &mut frames)?;
                 frames.push(response_sse_frame(
                     "response.refusal.delta",
                     json!({"output_index": output_index, "content_index": 0, "delta": text}),
@@ -329,12 +331,19 @@ impl OpenAiResponsesStreamEncoder {
                 arguments_delta,
                 ..
             } => {
-                self.ensure_stream_output(*output_index, true, &mut frames)?;
+                self.ensure_stream_output(
+                    *output_index,
+                    true,
+                    id.as_deref(),
+                    name.as_deref(),
+                    &mut frames,
+                )?;
+                let item_id = self.tool_outputs.get(output_index).cloned();
                 frames.push(response_sse_frame(
                     "response.function_call_arguments.delta",
                     json!({
                         "output_index": output_index,
-                        "item_id": id,
+                        "item_id": item_id,
                         "name": name,
                         "delta": arguments_delta
                     }),
@@ -343,14 +352,16 @@ impl OpenAiResponsesStreamEncoder {
             CanonicalEventKind::Finish { output_index, .. } => {
                 self.ensure_stream_output(
                     *output_index,
-                    self.tool_outputs.contains(output_index),
+                    self.tool_outputs.contains_key(output_index),
+                    None,
+                    None,
                     &mut frames,
                 )?;
                 frames.push(response_sse_frame(
                     "response.output_item.done",
                     json!({
                         "output_index": output_index,
-                        "item": {"type": if self.tool_outputs.contains(output_index) {"function_call"} else {"message"}}
+                        "item": {"type": if self.tool_outputs.contains_key(output_index) {"function_call"} else {"message"}}
                     }),
                 )?);
             }
@@ -401,14 +412,27 @@ impl OpenAiResponsesStreamEncoder {
         &mut self,
         output_index: u32,
         tool: bool,
+        tool_id: Option<&str>,
+        tool_name: Option<&str>,
         frames: &mut Vec<SseFrame>,
     ) -> Result<(), OpenAiClientEncodeError> {
         if tool {
-            self.tool_outputs.insert(output_index);
+            // The canonical event carries the upstream's real identifiers.
+            // Announcing synthetic ones makes clients that build the tool call
+            // from the streamed item lifecycle invoke the wrong tool and echo a
+            // `call_id` the upstream never issued; the real name previously only
+            // reappeared in the final `response.completed` payload.
+            let call_id = tool_id.map_or_else(|| format!("call_{output_index}"), str::to_owned);
+            self.tool_outputs.entry(output_index).or_insert(call_id);
         }
         if self.emitted_outputs.insert(output_index) {
             let item = if tool {
-                json!({"type": "function_call", "call_id": format!("call_{output_index}"), "name": "function", "arguments": ""})
+                json!({
+                    "type": "function_call",
+                    "call_id": self.tool_outputs.get(&output_index),
+                    "name": tool_name.unwrap_or("function"),
+                    "arguments": ""
+                })
             } else {
                 json!({"type": "message", "role": "assistant", "status": "in_progress", "content": []})
             };

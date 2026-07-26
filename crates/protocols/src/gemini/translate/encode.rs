@@ -136,9 +136,17 @@ fn encode_content(
             .clone()
             .ok_or(EncodeError::MissingToolCallId)?;
         let response = match message.content.as_slice() {
-            [ContentPart::Text { text }] => {
-                serde_json::from_str(text).unwrap_or_else(|_| json!({ "result": text }))
-            }
+            // Gemini's `FunctionResponse.response` is a `google.protobuf.Struct`,
+            // which accepts only a JSON object. A tool output that happens to
+            // parse as a scalar or array (`72`, `[1,2]`, `true`) must still be
+            // wrapped, otherwise the upstream rejects it with 400
+            // INVALID_ARGUMENT — while a non-JSON output like `72 degrees`
+            // already took the wrapped path and succeeded.
+            [ContentPart::Text { text }] => match serde_json::from_str::<Value>(text) {
+                Ok(value @ Value::Object(_)) => value,
+                Ok(value) => json!({ "result": value }),
+                Err(_) => json!({ "result": text }),
+            },
             [] => Value::Object(Default::default()),
             _ => return Err(EncodeError::UnsupportedToolResultContent),
         };
@@ -148,7 +156,8 @@ fn encode_content(
                 function_response: FunctionResponse {
                     name,
                     response,
-                    id: Some(id),
+                    // A synthesized id must not be echoed back upstream either.
+                    id: crate::gemini::dto::upstream_tool_call_id(Some(id)),
                     extra: BTreeMap::new(),
                 },
                 extra: BTreeMap::new(),
@@ -240,7 +249,8 @@ fn encode_content(
                         source,
                     }
                 })?,
-                id: Some(call.id.clone()),
+                // Never send an id this gateway invented back to Gemini.
+                id: crate::gemini::dto::upstream_tool_call_id(Some(call.id.clone())),
                 extra: BTreeMap::new(),
             },
             extra: BTreeMap::new(),

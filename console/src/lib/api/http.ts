@@ -92,3 +92,35 @@ const BARE_UUID_ETAG =
 export function serializeIfMatch(value: string): string {
   return BARE_UUID_ETAG.test(value) ? `"${value}"` : value;
 }
+
+/**
+ * First message per field from a validation problem's `errors` map.
+ *
+ * The server's `Problem::validation` always sets the same generic title and
+ * detail ("One or more fields are invalid."), so `errors` holds the only
+ * actionable text. Returns an empty object for non-validation failures.
+ */
+export function problemFieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiProblem) || !error.problem.errors) return {};
+  const flattened: Record<string, string> = {};
+  for (const [field, messages] of Object.entries(error.problem.errors)) {
+    if (messages[0]) flattened[field] = messages[0];
+  }
+  return flattened;
+}
+
+/**
+ * Human-readable text for a failed request, including any field-level reasons.
+ *
+ * Without the `errors` map an operator only ever sees "One or more fields are
+ * invalid." with no indication of which field or why.
+ */
+export function problemMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiProblem)) {
+    return error instanceof Error ? error.message : fallback;
+  }
+  const base = error.problem.detail ?? error.problem.title;
+  const fields = Object.entries(problemFieldErrors(error));
+  if (!fields.length) return base;
+  return `${base} ${fields.map(([field, message]) => `${field}: ${message}`).join(' ')}`;
+}

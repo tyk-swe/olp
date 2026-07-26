@@ -273,3 +273,43 @@ async fn failed_multipart_validation_removes_staged_files() {
     .await
     .expect("multipart error cleanup must remove the staged file promptly");
 }
+
+#[test]
+fn video_duration_is_billed_once_at_creation_not_on_every_poll() {
+    let job = olp_domain::VideoJobResult {
+        id: "video_1".to_owned(),
+        model: Some("sora".to_owned()),
+        status: olp_domain::VideoStatus::Completed,
+        progress_percent: None,
+        created_at: None,
+        completed_at: None,
+        expires_at: None,
+        prompt: None,
+        seconds: Some("8".to_owned()),
+        size: None,
+        error: None,
+        extensions: Default::default(),
+    };
+    let result = CanonicalResult::VideoJob(job);
+
+    // The creating operation bills the duration once.
+    let created = super::super::telemetry::usage_from_result(&result, OperationKind::VideoCreate);
+    assert_eq!(created.media_units(), Some(rust_decimal::Decimal::from(8)));
+
+    // Status polls return the identical result shape — the reconciliation
+    // supervisor re-reads it every ~5s, and clients poll it directly. Counting
+    // media units there would re-bill the video once per poll.
+    for operation in [
+        OperationKind::VideoGet,
+        OperationKind::VideoList,
+        OperationKind::VideoDelete,
+        OperationKind::VideoContent,
+    ] {
+        let polled = super::super::telemetry::usage_from_result(&result, operation);
+        assert_eq!(
+            polled.media_units(),
+            None,
+            "{operation:?} must not re-bill the video duration"
+        );
+    }
+}

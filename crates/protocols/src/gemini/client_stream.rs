@@ -140,7 +140,13 @@ impl GeminiGenerateContentClientStreamEncoder {
                     let args = serde_json::from_str::<Value>(&tool.arguments)
                         .map_err(|_| ClientStreamEncodeError::Tool)?;
                     parts.push(json!({
-                        "functionCall": {"id": tool.id, "name": name, "args": args}
+                        // Strip synthesized ids so a Gemini-surface stream matches
+                        // the upstream's own wire bytes.
+                        "functionCall": {
+                            "id": crate::gemini::dto::upstream_tool_call_id(tool.id),
+                            "name": name,
+                            "args": args
+                        }
                     }));
                 }
                 frames.push(self.response_frame(json!({

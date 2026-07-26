@@ -407,10 +407,14 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
     // traffic too.
     let degraded_limits = state.mode.serves_gateway() && hard_limits_present && !limits_healthy;
     let media_reconciliation_gaps = state.media_reconciliation_gap_count();
+    // Readiness must reflect current state. `media_reconciliation_gaps` is a
+    // process-lifetime counter that is never decremented, so gating on it left
+    // the instance permanently "degraded" after a single transient error even
+    // once the next pass reconciled everything cleanly.
     let degraded_media = media_reconciliation
         .as_ref()
         .is_some_and(|summary| summary.stale > 0 || summary.failed > 0 || summary.unbound > 0)
-        || media_reconciliation_gaps > 0;
+        || state.unresolved_media_reconciliation_gaps() > 0;
     let local_request_metadata_complete = state
         .request_metadata
         .as_ref()

@@ -181,10 +181,12 @@ impl OpenAiResponsesStreamDecoder {
                     CanonicalEventKind::ToolCallDelta {
                         output_index,
                         tool_index: 0,
-                        id: value
-                            .get("item_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
+                        // `item_id` is the output item's id (`fc_...`), not the
+                        // tool call id (`call_...`) a client must echo back.
+                        // `response.output_item.added` already carried the real
+                        // `call_id`; emitting `None` here keeps it, because
+                        // aggregation overwrites the id on every `Some`.
+                        id: None,
                         name: None,
                         arguments_delta: stream_string(value, "delta")?,
                     },
@@ -419,5 +421,35 @@ mod tests {
             .expect("failed response event must emit a canonical error");
         assert_eq!(error.class, ErrorClass::RateLimit);
         assert!(error.retryable);
+    }
+
+    #[test]
+    fn argument_deltas_preserve_the_call_id_from_the_added_output_item() {
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder
+            .push(
+                concat!(
+                    "data: {\"type\":\"response.output_item.added\",\"output_index\":0,",
+                    "\"item\":{\"id\":\"fc_1\",\"call_id\":\"call_1\",\"type\":\"function_call\",",
+                    "\"name\":\"get_weather\",\"arguments\":\"\"}}\n\n",
+                    "data: {\"type\":\"response.function_call_arguments.delta\",",
+                    "\"output_index\":0,\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\"}\n\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+
+        let ids = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                CanonicalEventKind::ToolCallDelta { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        // The item id (`fc_1`) must never be published as the tool call id:
+        // aggregation takes the last `Some`, so a later `fc_1` would clobber the
+        // `call_1` a client has to echo back.
+        assert_eq!(ids, vec![Some("call_1".to_owned()), None]);
     }
 }

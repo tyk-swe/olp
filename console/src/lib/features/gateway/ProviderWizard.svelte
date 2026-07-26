@@ -10,7 +10,7 @@
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
   } from './providerCache';
-  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import { isEtagMismatch, problemMessage } from '$lib/api/http';
   import {
     activateProvider,
     certifyProviderModel,
@@ -102,11 +102,7 @@
   });
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error
-        ? error.message
-        : 'The control API could not complete the request.';
+    return problemMessage(error, 'The control API could not complete the request.');
   }
 
   async function run(label: string, action: () => Promise<void>): Promise<boolean> {

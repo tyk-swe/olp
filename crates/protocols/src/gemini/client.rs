@@ -52,7 +52,9 @@ pub fn encode_generate_content_response(
                 function_call: FunctionCall {
                     name,
                     args,
-                    id: tool.id,
+                    // Strip synthesized ids so a Gemini-surface response is
+                    // byte-identical to the upstream's.
+                    id: crate::gemini::dto::upstream_tool_call_id(tool.id),
                     extra: BTreeMap::new(),
                 },
                 extra: BTreeMap::new(),

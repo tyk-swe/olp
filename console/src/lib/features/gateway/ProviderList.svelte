@@ -3,7 +3,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { ApiProblem } from '$lib/api/http';
+  import { problemMessage } from '$lib/api/http';
   import { listProviderPage } from '$lib/api/management/providers';
   import { providerStatus } from './providerEditor';
 
@@ -24,11 +24,7 @@
   }));
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error
-        ? error.message
-        : 'The control API could not complete the request.';
+    return problemMessage(error, 'The control API could not complete the request.');
   }
 
   function nextProviderPage() {

@@ -45,6 +45,9 @@ pub struct GatewayState {
     trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     bootstrap_token_digest: Arc<tokio::sync::RwLock<Option<zeroize::Zeroizing<[u8; 32]>>>>,
     media_reconciliation_gaps: Arc<AtomicU64>,
+    /// Gaps not yet resolved by a clean reconciliation pass; see
+    /// [`GatewayState::clear_media_reconciliation_gaps`].
+    media_reconciliation_unresolved: Arc<AtomicU64>,
 }
 
 impl GatewayState {
@@ -109,15 +112,29 @@ impl GatewayState {
     }
 
     pub(crate) fn record_media_reconciliation_gap(&self) {
-        let _ = self.media_reconciliation_gaps.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |value| Some(value.saturating_add(1)),
-        );
+        for counter in [
+            &self.media_reconciliation_gaps,
+            &self.media_reconciliation_unresolved,
+        ] {
+            let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                Some(value.saturating_add(1))
+            });
+        }
+    }
+
+    /// Clears the readiness gauge after a reconciliation pass that resolved
+    /// every claimed job. The lifetime total stays monotonic for Prometheus.
+    pub(crate) fn clear_media_reconciliation_gaps(&self) {
+        self.media_reconciliation_unresolved
+            .store(0, Ordering::Relaxed);
     }
 
     pub(crate) fn media_reconciliation_gap_count(&self) -> u64 {
         self.media_reconciliation_gaps.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn unresolved_media_reconciliation_gaps(&self) -> u64 {
+        self.media_reconciliation_unresolved.load(Ordering::Relaxed)
     }
 }
 
@@ -405,6 +422,7 @@ impl ApiState {
             trusted_proxy_cidrs: Arc::clone(&self.trusted_proxy_cidrs),
             bootstrap_token_digest: Arc::clone(&self.bootstrap_token_digest),
             media_reconciliation_gaps: Arc::clone(&self.media_reconciliation_gaps),
+            media_reconciliation_unresolved: Arc::clone(&self.media_reconciliation_unresolved),
         };
         let management = ManagementState {
             gateway: gateway.clone(),
