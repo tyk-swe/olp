@@ -24,15 +24,10 @@ use crate::{
         prevent_sensitive_response_caching,
     },
     request_cookies::{
-        LEGACY_OIDC_FLOW_COOKIE, LEGACY_OIDC_LOGIN_FLOW_COOKIE, OIDC_LINK_FLOW_COOKIE_PREFIX,
-        OIDC_LOGIN_FLOW_COOKIE_PREFIX, RequestCookies,
+        OIDC_LINK_FLOW_COOKIE_PREFIX, OIDC_LOGIN_FLOW_COOKIE_PREFIX, RequestCookies,
     },
 };
 
-/// Fixed names are recognized only so stale pre-upgrade cookies can be
-/// rejected and expired deterministically.
-pub(super) const FLOW_COOKIE: &str = LEGACY_OIDC_FLOW_COOKIE;
-pub(super) const LOGIN_FLOW_COOKIE: &str = LEGACY_OIDC_LOGIN_FLOW_COOKIE;
 pub(super) const LOGIN_FLOW_COOKIE_VERSION: u8 = 2;
 pub(super) const FLOW_TTL: Duration = Duration::minutes(10);
 pub(super) const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
@@ -72,18 +67,12 @@ impl fmt::Display for OidcFlowId {
 }
 
 pub(super) struct OidcCallbackState {
-    flow_id: Option<OidcFlowId>,
+    flow_id: OidcFlowId,
     secret: Zeroizing<String>,
 }
 
 impl OidcCallbackState {
     pub(super) fn parse(value: String) -> Result<Self, Problem> {
-        if valid_binding_token(&value) {
-            return Ok(Self {
-                flow_id: None,
-                secret: Zeroizing::new(value),
-            });
-        }
         let Some((flow_id, secret)) = value.split_once('.') else {
             return Err(super::error::invalid_callback());
         };
@@ -92,7 +81,7 @@ impl OidcCallbackState {
         }
         let flow_id = OidcFlowId::parse(flow_id).ok_or_else(super::error::invalid_callback)?;
         Ok(Self {
-            flow_id: Some(flow_id),
+            flow_id,
             secret: Zeroizing::new(secret.to_owned()),
         })
     }
@@ -103,7 +92,7 @@ impl OidcCallbackState {
     }
 
     #[must_use]
-    pub(super) const fn flow_id(&self) -> Option<OidcFlowId> {
+    pub(super) const fn flow_id(&self) -> OidcFlowId {
         self.flow_id
     }
 
@@ -114,18 +103,12 @@ impl OidcCallbackState {
 
     #[must_use]
     pub(super) fn login_cookie_name(&self) -> String {
-        self.flow_id.map_or_else(
-            || LOGIN_FLOW_COOKIE.to_owned(),
-            |flow_id| flow_cookie_name(OidcFlowPurpose::Login, flow_id),
-        )
+        flow_cookie_name(OidcFlowPurpose::Login, self.flow_id)
     }
 
     #[must_use]
     pub(super) fn authenticated_cookie_name(&self) -> String {
-        self.flow_id.map_or_else(
-            || FLOW_COOKIE.to_owned(),
-            |flow_id| flow_cookie_name(OidcFlowPurpose::Link, flow_id),
-        )
+        flow_cookie_name(OidcFlowPurpose::Link, self.flow_id)
     }
 }
 
@@ -307,9 +290,7 @@ pub(super) fn consume_login_flow_cookie(
         || !valid_binding_token(&payload.nonce)
         || !valid_binding_token(&payload.pkce_verifier)
         || !constant_time_eq(payload.state.as_bytes(), callback_state.secret().as_bytes())
-        || callback_state
-            .flow_id()
-            .is_some_and(|flow_id| flow_id.as_uuid() != payload.flow_id)
+        || callback_state.flow_id().as_uuid() != payload.flow_id
     {
         return Err(invalid_login_flow_cookie());
     }
@@ -410,11 +391,6 @@ pub(super) fn flow_cookie_evictions(headers: &HeaderMap) -> Result<Vec<String>, 
             }
         }
     }
-    for legacy in [LOGIN_FLOW_COOKIE, FLOW_COOKIE] {
-        if cookies.get(legacy).is_some() {
-            active.push((None, legacy.to_owned()));
-        }
-    }
     active.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     let overflow = active
         .len()
@@ -449,7 +425,7 @@ mod flow_tests {
         let flow_id = OidcFlowId::generate();
         let encoded = OidcCallbackState::encode(flow_id, &"a".repeat(43));
         let state = OidcCallbackState::parse(encoded).unwrap();
-        assert_eq!(state.flow_id(), Some(flow_id));
+        assert_eq!(state.flow_id(), flow_id);
         assert_eq!(state.secret(), "a".repeat(43).as_str());
         assert_ne!(state.login_cookie_name(), state.authenticated_cookie_name());
         assert!(state.login_cookie_name().ends_with(&flow_id.to_string()));
