@@ -71,6 +71,26 @@ pub(super) struct MigrateArgs {
     pub(super) through_version: Option<i64>,
 }
 
+/// Filesystem assets shared verbatim between the serve modes and `doctor`,
+/// so the doctor validates exactly what the server will load.
+#[derive(Clone, Debug, Args)]
+pub(super) struct RuntimeAssetArgs {
+    #[arg(long, env = "OLP_CONSOLE_DIR", default_value = "console/build")]
+    pub(super) console_dir: PathBuf,
+    #[arg(long, env = "OLP_MEDIA_SPOOL_DIR")]
+    pub(super) media_spool_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        env = "OLP_MEDIA_SPOOL_CAPACITY_BYTES",
+        default_value_t = 1_073_741_824_u64
+    )]
+    pub(super) media_spool_capacity_bytes: u64,
+    /// JSON file mapping runtime provider IDs to credential files. The JSON
+    /// contains paths, never credential values.
+    #[arg(long, env = "OLP_CONNECTOR_CONFIG_FILE")]
+    pub(super) connector_config_file: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, Args)]
 pub(super) struct ServeArgs {
     #[command(flatten)]
@@ -120,16 +140,8 @@ pub(super) struct ServeArgs {
         action = clap::ArgAction::Set
     )]
     pub(super) local_login_enabled: bool,
-    #[arg(long, env = "OLP_CONSOLE_DIR", default_value = "console/build")]
-    pub(super) console_dir: PathBuf,
-    #[arg(long, env = "OLP_MEDIA_SPOOL_DIR")]
-    pub(super) media_spool_dir: Option<PathBuf>,
-    #[arg(
-        long,
-        env = "OLP_MEDIA_SPOOL_CAPACITY_BYTES",
-        default_value_t = 1_073_741_824_u64
-    )]
-    pub(super) media_spool_capacity_bytes: u64,
+    #[command(flatten)]
+    pub(super) assets: RuntimeAssetArgs,
     #[arg(long, env = "OLP_AUTH_HMAC_KEY_FILE")]
     pub(super) auth_hmac_key_file: Option<PathBuf>,
     /// Base64-encoded one-time setup token, mounted only in control-plane pods.
@@ -147,10 +159,6 @@ pub(super) struct ServeArgs {
     pub(super) trusted_proxy_cidrs: TrustedProxyCidrs,
     #[arg(long, env = "OLP_MASTER_KEY_FILE")]
     pub(super) master_key_file: Option<PathBuf>,
-    /// JSON file mapping runtime provider IDs to credential files. The JSON
-    /// contains paths, never credential values.
-    #[arg(long, env = "OLP_CONNECTOR_CONFIG_FILE")]
-    pub(super) connector_config_file: Option<PathBuf>,
 }
 
 fn parse_admission_capacity(value: &str) -> Result<usize, String> {
@@ -169,22 +177,12 @@ fn parse_admission_capacity(value: &str) -> Result<usize, String> {
 pub(super) struct DoctorArgs {
     #[command(flatten)]
     pub(super) persistence: PersistenceArgs,
-    #[arg(long, env = "OLP_CONSOLE_DIR", default_value = "console/build")]
-    pub(super) console_dir: PathBuf,
-    #[arg(long, env = "OLP_MEDIA_SPOOL_DIR")]
-    pub(super) media_spool_dir: Option<PathBuf>,
-    #[arg(
-        long,
-        env = "OLP_MEDIA_SPOOL_CAPACITY_BYTES",
-        default_value_t = 1_073_741_824_u64
-    )]
-    pub(super) media_spool_capacity_bytes: u64,
+    #[command(flatten)]
+    pub(super) assets: RuntimeAssetArgs,
     #[arg(long, env = "OLP_MASTER_KEY_FILE")]
     pub(super) master_key_file: PathBuf,
     #[arg(long, env = "OLP_AUTH_HMAC_KEY_FILE")]
     pub(super) auth_hmac_key_file: PathBuf,
-    #[arg(long, env = "OLP_CONNECTOR_CONFIG_FILE")]
-    pub(super) connector_config_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Args)]

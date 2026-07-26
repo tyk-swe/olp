@@ -53,16 +53,17 @@ pub(super) async fn serve(
     let store = connect_store(&args.database).await?;
     let runtime = Arc::new(RuntimeManager::empty());
     let media_spool_dir = args
+        .assets
         .media_spool_dir
         .clone()
         .unwrap_or_else(std::env::temp_dir);
-    let media_spool = create_media_spool(&media_spool_dir, args.media_spool_capacity_bytes)?;
+    let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     let mut state = ApiState::new_with_media_spool(
         mode,
         Some(store.clone()),
         runtime,
         args.public_origin.as_str(),
-        args.console_dir,
+        args.assets.console_dir,
         media_spool,
     );
     state.set_public_admission_limits(
@@ -111,7 +112,7 @@ pub(super) async fn serve(
         check_secret_permissions(path).await?;
         state.master_key = Some(Arc::new(load_master_key(path).await?));
     }
-    if let Some(path) = &args.connector_config_file {
+    if let Some(path) = &args.assets.connector_config_file {
         register_mounted_connectors(path, &state.transports).await?;
     }
     match activate_latest_runtime(
