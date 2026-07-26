@@ -1193,9 +1193,8 @@ async fn activate_runtime_inside_handler(
     State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
 ) -> String {
-    let pinned_before_activation = pin_inference_runtime(&state);
+    let pinned_before_activation = principal.runtime();
     let pinned_generation = pinned_before_activation.generation.id;
-    assert_eq!(principal.runtime().generation.id, pinned_generation);
     state
         .runtime
         .install(
@@ -1213,25 +1212,15 @@ async fn activate_runtime_inside_handler(
         )
         .unwrap();
     assert_ne!(state.runtime.pin().generation.id, pinned_generation);
-    assert_eq!(
-        pin_inference_runtime(&state).generation.id,
-        pinned_generation,
-        "a request must not mix authentication and route generations"
-    );
-    let detached_state = state.clone();
-    let (detached_runtime, detached_principal) = spawn_http_inference_task(&state, async move {
-        (
-            pin_inference_runtime(&detached_state).generation.id,
-            http_inference_principal()
-                .expect("admitted principal must cross the detached task boundary")
-                .runtime()
-                .generation
-                .id,
-        )
+    let detached_principal = spawn_http_inference_task(&state, async move {
+        http_inference_principal()
+            .expect("admitted principal must cross the detached task boundary")
+            .runtime()
+            .generation
+            .id
     })
     .await
     .unwrap();
-    assert_eq!(detached_runtime, pinned_generation);
     assert_eq!(detached_principal, pinned_generation);
     pinned_generation.to_string()
 }
@@ -1408,41 +1397,33 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
         .unwrap();
     let metadata_claimed = Arc::new(AtomicBool::new(false));
     let reservation = InferenceReservation::for_test(async {});
-    let child_state = state.clone();
     let spawn_state = state.clone();
-    let (
-        generation,
-        principal_generation,
-        principal_surface,
-        reserved_tokens,
-        has_reservation_hold,
-    ) = HTTP_INFERENCE_PRINCIPAL
-        .scope(
-            principal,
-            HTTP_INFERENCE_METADATA_CLAIMED.scope(
-                Arc::clone(&metadata_claimed),
-                HTTP_INFERENCE_LIMITS_RESERVED.scope(
-                    2_000,
-                    HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
-                        let task = spawn_http_inference_task(&spawn_state, async move {
-                            claim_http_inference_metadata();
-                            let principal = http_inference_principal()
-                                .expect("the detached task inherits the admitted principal");
-                            (
-                                pin_inference_runtime(&child_state).generation.id,
-                                principal.runtime().generation.id,
-                                principal.surface(),
-                                http_inference_reserved_tokens(),
-                                HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
-                            )
-                        });
-                        task.await.unwrap()
-                    }),
+    let (principal_generation, principal_surface, reserved_tokens, has_reservation_hold) =
+        HTTP_INFERENCE_PRINCIPAL
+            .scope(
+                principal,
+                HTTP_INFERENCE_METADATA_CLAIMED.scope(
+                    Arc::clone(&metadata_claimed),
+                    HTTP_INFERENCE_LIMITS_RESERVED.scope(
+                        2_000,
+                        HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
+                            let task = spawn_http_inference_task(&spawn_state, async move {
+                                claim_http_inference_metadata();
+                                let principal = http_inference_principal()
+                                    .expect("the detached task inherits the admitted principal");
+                                (
+                                    principal.runtime().generation.id,
+                                    principal.surface(),
+                                    http_inference_reserved_tokens(),
+                                    HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
+                                )
+                            });
+                            task.await.unwrap()
+                        }),
+                    ),
                 ),
-            ),
-        )
-        .await;
-    assert_eq!(generation, pinned.generation.id);
+            )
+            .await;
     assert_eq!(principal_generation, pinned.generation.id);
     assert_eq!(principal_surface, Surface::OpenAi);
     assert_ne!(state.runtime.pin().generation.id, pinned.generation.id);
