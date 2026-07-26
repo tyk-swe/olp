@@ -70,6 +70,8 @@ jobs:
           shellcheck "${scripts[@]}"
       - name: Verify backup manifest contract
         run: scripts/test-backup-manifest.sh
+      - name: Verify repository validation helper contract
+        run: scripts/test-repository-validation.sh
       - name: Verify request metadata loss recorder contract
         run: |
           scripts/record-request-metadata-stream-loss.sh --help 2>&1 \

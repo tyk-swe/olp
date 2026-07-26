@@ -17,6 +17,13 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
+`pnpm dev` serves the UI only: there is no API proxy in `vite.config.ts`, so
+`/api/v1` requests have nowhere to go and API-backed pages stay in their
+error/empty states. For full-stack work, build the console (`pnpm build`) and
+run the Rust binary, which serves the build output — for example the Compose
+quick start in the root README, or `cargo run -p olp -- all` with
+`OLP_CONSOLE_DIR` pointing at `console/build`.
+
 ## Commands
 
 | Command | Purpose |

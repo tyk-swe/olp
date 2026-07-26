@@ -117,6 +117,7 @@ after UI changes with `pnpm --dir console screenshots`.
 | Document | Contents |
 |---|---|
 | [Architecture](docs/architecture.md) | Component boundaries, runtime publication, capability certification, data-safety invariants |
+| [Configuration](docs/configuration.md) | Runtime `OLP_*` environment variables, file-based secrets, test-only flags |
 | [Deployment](docs/deployment.md) | Helm-based production deployment, secrets, edge routing, readiness |
 | [Operations](docs/operations.md) | SLOs, monitoring, backup and restore, upgrades, incident response |
 | [Security policy](SECURITY.md) | Supported versions and vulnerability reporting |
@@ -124,19 +125,19 @@ after UI changes with `pnpm --dir console screenshots`.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture boundaries,
-source-of-truth ownership, and the full validation matrix. Use Rust 1.97.0,
-Node.js 24 or newer, pnpm 11, and ripgrep. The Compose stack supplies
-PostgreSQL 18 and Valkey 9.1. Install the locked console dependencies, then run
-the standard checks:
+source-of-truth ownership, toolchain prerequisites, and the full validation
+matrix. Use Rust 1.97.0, Node.js 24 or newer, pnpm 11, and ripgrep. The
+Compose stack supplies PostgreSQL 18 and Valkey 9.1. Then run the standard
+checks:
 
 ```bash
-pnpm --dir console install --frozen-lockfile
-./scripts/check-boundaries.sh
-cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
-pnpm --dir console verify
+make console-install
+make check
 ```
+
+`make help` lists every task (tests, coverage, database-backed suites,
+contract regeneration); each target is a thin wrapper around the same
+commands CI runs.
 
 ## Security
 
