@@ -5,7 +5,6 @@ set -euo pipefail
 # supplied material is preserved, including a versioned master-key keyring.
 secrets_dir=${OLP_COMPOSE_SECRETS_DIR:-deploy/secrets}
 bootstrap_retired_marker="$secrets_dir/.olp_bootstrap_retired"
-auth_hmac_key="$secrets_dir/olp_auth_hmac_key"
 
 command -v openssl >/dev/null || {
   echo "openssl is required to prepare Compose secrets" >&2
