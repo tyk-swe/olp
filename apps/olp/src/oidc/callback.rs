@@ -23,9 +23,9 @@ use super::error::{
 };
 use super::helpers::{callback_url, network_policy, oauth_form_component, require_master_key};
 use super::session::{
-    CallbackFlow, CallbackSecret, FlowSecretPayload, OidcCallbackState, RECENT_AUTH_TTL,
-    append_cookie, authenticated_redirect, clear_flow_cookie, consume_login_flow_cookie,
-    reauthenticated_redirect,
+    CallbackFlow, CallbackSecret, FLOW_COOKIE, FlowSecretPayload, LOGIN_FLOW_COOKIE,
+    OidcCallbackState, RECENT_AUTH_TTL, append_cookie, authenticated_redirect, clear_flow_cookie,
+    consume_login_flow_cookie, reauthenticated_redirect,
 };
 use crate::{
     ManagementState, Problem,
@@ -136,6 +136,13 @@ fn callback_cookie_names(
             if name == "state" {
                 add_callback_state_cookie_names(&mut names, cookies, Some(value.as_ref()));
             }
+        }
+    }
+    // Fixed names remain identifiable even when query extraction fails, so
+    // stale pre-upgrade browser state is deterministically expired.
+    for name in [LOGIN_FLOW_COOKIE, FLOW_COOKIE] {
+        if cookies.get(name).is_some() && !names.iter().any(|existing| existing == name) {
+            names.push(name.to_owned());
         }
     }
     names
@@ -419,7 +426,9 @@ async fn consume_callback_flow(
     // Persisted authenticated flows must match the protected flow ID and exact
     // current session in one row-locked transaction. A mismatch rejects
     // session B without consuming session A's still-valid flow or cookie.
-    let flow_id = callback_state.flow_id();
+    let flow_id = callback_state
+        .flow_id()
+        .ok_or_else(super::error::invalid_callback)?;
     let principal = require_read_session(state, headers).await?;
     let store = state.store();
     let flow = store

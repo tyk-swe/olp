@@ -5,6 +5,8 @@ use crate::Problem;
 pub(crate) const SESSION_COOKIE: &str = "__Host-olp_session";
 pub(crate) const CSRF_COOKIE: &str = "__Host-olp_csrf";
 pub(crate) const RECENT_AUTH_COOKIE: &str = "__Host-olp_recent_auth";
+pub(crate) const LEGACY_OIDC_FLOW_COOKIE: &str = "__Host-olp_oidc_flow";
+pub(crate) const LEGACY_OIDC_LOGIN_FLOW_COOKIE: &str = "__Host-olp_oidc_login_flow";
 pub(crate) const OIDC_LOGIN_FLOW_COOKIE_PREFIX: &str = "__Host-olp_oidc_login_";
 pub(crate) const OIDC_LINK_FLOW_COOKIE_PREFIX: &str = "__Host-olp_oidc_link_";
 
@@ -118,8 +120,14 @@ fn valid_cookie_value(value: &[u8]) -> bool {
 }
 
 fn security_sensitive(name: &str) -> bool {
-    matches!(name, SESSION_COOKIE | CSRF_COOKIE | RECENT_AUTH_COOKIE)
-        || name.starts_with(OIDC_LOGIN_FLOW_COOKIE_PREFIX)
+    matches!(
+        name,
+        SESSION_COOKIE
+            | CSRF_COOKIE
+            | RECENT_AUTH_COOKIE
+            | LEGACY_OIDC_FLOW_COOKIE
+            | LEGACY_OIDC_LOGIN_FLOW_COOKIE
+    ) || name.starts_with(OIDC_LOGIN_FLOW_COOKIE_PREFIX)
         || name.starts_with(OIDC_LINK_FLOW_COOKIE_PREFIX)
 }
 

@@ -14,8 +14,9 @@ use super::claims::{bounded_claim, validate_id_token};
 use super::configuration::{OidcSecret, default_email_claim, default_groups_claim, default_scopes};
 use super::helpers::optional_if_match;
 use super::session::{
-    FLOW_TTL, LOGIN_FLOW_COOKIE_VERSION, LoginFlowCookiePayload, OidcCallbackState, OidcFlowId,
-    consume_login_flow_cookie, flow_cookie_name, seal_login_flow_cookie,
+    FLOW_TTL, LOGIN_FLOW_COOKIE, LOGIN_FLOW_COOKIE_VERSION, LoginFlowCookiePayload,
+    OidcCallbackState, OidcFlowId, consume_login_flow_cookie, flow_cookie_name,
+    seal_login_flow_cookie,
 };
 
 // Public test fixture used only to exercise the verifier.
@@ -259,6 +260,35 @@ fn expired_or_tampered_stateless_login_cookie_is_rejected() {
         let aliased = encoded.replacen("v2.", alias, 1);
         assert!(consume_login_flow_cookie(&state, &aliased, &callback_state).is_err());
     }
+}
+
+#[tokio::test]
+async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
+    let state = ManagementState::new(
+        crate::ApiMode::Control,
+        None,
+        std::sync::Arc::new(crate::RuntimeManager::empty()),
+        "https://console.example.test",
+        std::path::PathBuf::from("missing-console"),
+    );
+    let response = crate::router::management_router_for_test(state)
+        .oneshot(
+            axum::http::Request::get("/api/v1/oidc/callback?code=one&code=two")
+                .header(header::COOKIE, format!("{LOGIN_FLOW_COOKIE}=opaque"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .any(|value| value.starts_with(&format!("{LOGIN_FLOW_COOKIE}=;")))
+    );
 }
 
 #[tokio::test]
