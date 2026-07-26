@@ -231,6 +231,7 @@ fn decode_blocks(
                 tool_extensions.push((index, block.extra));
                 tool_calls.push(ToolCall {
                     id: block.id,
+                    id_is_synthetic: false,
                     name: block.name,
                     arguments: serde_json::to_string(&block.input).map_err(DecodeError::Json)?,
                 });

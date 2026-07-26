@@ -393,6 +393,7 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
                 output_index: 0,
                 tool_index: 0,
                 id: Some("call-1".into()),
+                id_is_synthetic: false,
                 name: Some("lookup".into()),
                 arguments_delta: "{\"city\":".into(),
             },
@@ -403,6 +404,7 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
                 output_index: 0,
                 tool_index: 0,
                 id: None,
+                id_is_synthetic: false,
                 name: None,
                 arguments_delta: "\"Paris\"}".into(),
             },
@@ -517,11 +519,14 @@ fn function_calls_without_an_upstream_id_stay_usable_across_surfaces() {
         ]
     });
     let wire: GenerateContentRequest = serde_json::from_value(request).unwrap();
-    let Operation::Generation(canonical) =
+    let Operation::Generation(mut canonical) =
         decode_generate_content_request("default", wire, false).unwrap()
     else {
         panic!("wrong operation")
     };
+    canonical.messages[0].tool_calls[0].id.clone_from(&id);
+    canonical.messages[0].tool_calls[0].id_is_synthetic = true;
+    canonical.messages[1].tool_call_id = Some(id);
     let encoded =
         serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
     let call = &encoded["contents"][0]["parts"][0]["functionCall"];
@@ -529,4 +534,24 @@ fn function_calls_without_an_upstream_id_stay_usable_across_surfaces() {
         call.get("id").is_none(),
         "a synthesized id must not be sent upstream: {call}"
     );
+}
+
+#[test]
+fn upstream_ids_that_share_the_synthetic_prefix_are_preserved() {
+    let id = "olp-gemini-call-upstream-owned";
+    let wire: GenerateContentRequest = serde_json::from_value(json!({
+        "contents": [{"role": "model", "parts": [{"functionCall": {
+            "id": id, "name": "weather", "args": {}
+        }}]}]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) =
+        decode_generate_content_request("default", wire, false).unwrap()
+    else {
+        panic!("wrong operation")
+    };
+    assert!(!canonical.messages[0].tool_calls[0].id_is_synthetic);
+    let encoded =
+        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    assert_eq!(encoded["contents"][0]["parts"][0]["functionCall"]["id"], id);
 }

@@ -50,6 +50,7 @@ impl OpenAiChatCompletionStreamEncoder {
                 id,
                 name,
                 arguments_delta,
+                ..
             } => self.chunk(
                 vec![json!({
                     "index": output_index,
@@ -183,6 +184,7 @@ pub(crate) fn aggregate_chat_completion_response(
                 id,
                 name,
                 arguments_delta,
+                ..
             } => {
                 let tool = choices
                     .entry(*output_index)

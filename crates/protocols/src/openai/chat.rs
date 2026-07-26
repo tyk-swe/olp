@@ -385,6 +385,7 @@ fn decode_message(
             }
             Ok(ToolCall {
                 id: call.id,
+                id_is_synthetic: false,
                 name: call.function.name,
                 arguments: call.function.arguments,
             })

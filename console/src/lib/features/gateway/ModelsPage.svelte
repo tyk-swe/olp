@@ -56,7 +56,8 @@
       // `checked` is a one-way binding on server data, so the click has already
       // flipped the DOM element. Without re-reading server truth the row keeps
       // advertising an eligibility that was never persisted.
-      await models.refetch();
+      const recovery = await models.refetch();
+      if (recovery.error) errorMessage = message(recovery.error);
     } finally {
       busyModel = '';
     }

@@ -165,7 +165,10 @@
     // The `<select>` is a one-way binding on server data, so the browser has
     // already moved it to `role`. When the update is rejected the row would keep
     // displaying a role that was never applied, so re-read server truth.
-    if (errorMessage) await users.refetch();
+    if (errorMessage) {
+      const recovery = await users.refetch();
+      if (recovery.error) errorMessage = message(recovery.error);
+    }
   }
 
   async function changeActive(user: User) {

@@ -681,6 +681,7 @@ fn decode_response_function_call(
         tool_call_id: None,
         tool_calls: vec![ToolCall {
             id: call_id,
+            id_is_synthetic: false,
             name,
             arguments,
         }],

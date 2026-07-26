@@ -26,6 +26,7 @@ pub(crate) struct AggregatedOutput {
 #[derive(Default)]
 pub(crate) struct AggregatedTool {
     pub id: Option<String>,
+    pub id_is_synthetic: bool,
     pub name: Option<String>,
     pub arguments: String,
 }
@@ -104,6 +105,7 @@ pub(crate) fn aggregate_generation(
                 output_index,
                 tool_index,
                 id,
+                id_is_synthetic,
                 name,
                 arguments_delta,
             } => {
@@ -116,6 +118,7 @@ pub(crate) fn aggregate_generation(
                     .or_default();
                 if id.is_some() {
                     tool.id.clone_from(id);
+                    tool.id_is_synthetic = *id_is_synthetic;
                 }
                 if name.is_some() {
                     tool.name.clone_from(name);

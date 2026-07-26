@@ -36,6 +36,7 @@ pub struct GeminiGenerateContentClientStreamEncoder {
 #[derive(Debug, Default)]
 struct ToolState {
     id: Option<String>,
+    id_is_synthetic: bool,
     name: Option<String>,
     arguments: String,
 }
@@ -91,6 +92,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                 output_index,
                 tool_index,
                 id,
+                id_is_synthetic,
                 name,
                 arguments_delta,
             } => {
@@ -100,6 +102,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                         return Err(ClientStreamEncodeError::Tool);
                     }
                     tool.id = Some(id);
+                    tool.id_is_synthetic = id_is_synthetic;
                 }
                 if let Some(name) = name {
                     if tool.name.as_ref().is_some_and(|existing| existing != &name) {
@@ -139,15 +142,13 @@ impl GeminiGenerateContentClientStreamEncoder {
                     let name = tool.name.ok_or(ClientStreamEncodeError::Tool)?;
                     let args = serde_json::from_str::<Value>(&tool.arguments)
                         .map_err(|_| ClientStreamEncodeError::Tool)?;
-                    parts.push(json!({
-                        // Strip synthesized ids so a Gemini-surface stream matches
-                        // the upstream's own wire bytes.
-                        "functionCall": {
-                            "id": crate::gemini::dto::upstream_tool_call_id(tool.id),
-                            "name": name,
-                            "args": args
-                        }
-                    }));
+                    let mut function_call = json!({"name": name, "args": args});
+                    if let Some(id) =
+                        crate::gemini::dto::upstream_tool_call_id(tool.id, tool.id_is_synthetic)
+                    {
+                        function_call["id"] = Value::String(id);
+                    }
+                    parts.push(json!({"functionCall": function_call}));
                 }
                 frames.push(self.response_frame(json!({
                     "candidates": [{

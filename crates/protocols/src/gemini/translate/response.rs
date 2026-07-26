@@ -130,6 +130,8 @@ fn decode_candidate(
                     });
                 }
                 Part::FunctionCall(part) => {
+                    let upstream_id = part.function_call.id.filter(|id| !id.is_empty());
+                    let id_is_synthetic = upstream_id.is_none();
                     collect_extra(
                         &format!("{prefix}/content/parts/{part_index}"),
                         &part.extra,
@@ -147,12 +149,13 @@ fn decode_candidate(
                         // cross-vendor client encoder requires one — without it
                         // the Anthropic surface fails the request outright and
                         // the OpenAI surface emits an unusable empty id.
-                        id: Some(part.function_call.id.unwrap_or_else(|| {
+                        id: Some(upstream_id.unwrap_or_else(|| {
                             format!(
                                 "{}{output_index}-{tool_index}",
                                 crate::gemini::dto::SYNTHETIC_TOOL_CALL_ID_PREFIX
                             )
                         })),
+                        id_is_synthetic,
                         name: Some(part.function_call.name),
                         arguments_delta: serde_json::to_string(&part.function_call.args)
                             .map_err(ResponseError::Json)?,

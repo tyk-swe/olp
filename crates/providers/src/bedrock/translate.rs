@@ -331,6 +331,7 @@ pub(crate) fn decode_converse(
                     output_index: 0,
                     tool_index,
                     id: Some(tool.tool_use_id),
+                    id_is_synthetic: false,
                     name: Some(tool.name),
                     arguments_delta: serde_json::to_string(&arguments).map_err(|_| {
                         protocol_body_error("Bedrock tool input cannot be serialized")
@@ -558,6 +559,7 @@ mod tests {
         let mut user_tool_request = request();
         user_tool_request.messages[0].tool_calls.push(ToolCall {
             id: "call-1".to_owned(),
+            id_is_synthetic: false,
             name: "weather".to_owned(),
             arguments: "{}".to_owned(),
         });
@@ -574,6 +576,7 @@ mod tests {
             tool_call_id: None,
             tool_calls: vec![ToolCall {
                 id: "call-1".to_owned(),
+                id_is_synthetic: false,
                 name: "weather".to_owned(),
                 arguments: "{\"city\":\"Paris\"}".to_owned(),
             }],

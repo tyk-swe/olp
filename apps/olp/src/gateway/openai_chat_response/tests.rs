@@ -255,6 +255,7 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             CanonicalEvent::new(
                 2,
                 CanonicalEventKind::ToolCallDelta {
+                    id_is_synthetic: false,
                     output_index: 0,
                     tool_index: 0,
                     id: Some("call_weather".to_owned()),
@@ -282,6 +283,7 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             CanonicalEvent::new(
                 3,
                 CanonicalEventKind::ToolCallDelta {
+                    id_is_synthetic: false,
                     output_index: 0,
                     tool_index: 0,
                     id: None,
@@ -309,6 +311,7 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             CanonicalEvent::new(
                 4,
                 CanonicalEventKind::ToolCallDelta {
+                    id_is_synthetic: false,
                     output_index: 0,
                     tool_index: 1,
                     id: Some("call_lookup".to_owned()),
@@ -552,6 +555,7 @@ fn unary_aggregation_preserves_openai_json() {
         CanonicalEvent::new(
             5,
             CanonicalEventKind::ToolCallDelta {
+                id_is_synthetic: false,
                 output_index: 0,
                 tool_index: 0,
                 id: Some("call_123".to_owned()),
@@ -682,6 +686,7 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
         CanonicalEvent::new(
             6,
             CanonicalEventKind::ToolCallDelta {
+                id_is_synthetic: false,
                 output_index: 0,
                 tool_index: 1,
                 id: Some("call_lookup".to_owned()),
@@ -692,6 +697,7 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
         CanonicalEvent::new(
             7,
             CanonicalEventKind::ToolCallDelta {
+                id_is_synthetic: false,
                 output_index: 0,
                 tool_index: 0,
                 id: Some("call_weather".to_owned()),
@@ -702,6 +708,7 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
         CanonicalEvent::new(
             8,
             CanonicalEventKind::ToolCallDelta {
+                id_is_synthetic: false,
                 output_index: 0,
                 tool_index: 0,
                 id: None,
@@ -712,6 +719,7 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
         CanonicalEvent::new(
             9,
             CanonicalEventKind::ToolCallDelta {
+                id_is_synthetic: false,
                 output_index: 1,
                 tool_index: 0,
                 id: Some("call_search".to_owned()),

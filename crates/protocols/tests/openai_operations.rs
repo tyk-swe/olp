@@ -196,6 +196,7 @@ fn responses_stream_announces_the_real_tool_call_id_and_name() {
             .push(CanonicalEvent::new(
                 0,
                 CanonicalEventKind::ToolCallDelta {
+                    id_is_synthetic: false,
                     output_index: 0,
                     tool_index: 0,
                     id: Some("call_5678".to_owned()),
@@ -212,6 +213,7 @@ fn responses_stream_announces_the_real_tool_call_id_and_name() {
             .push(CanonicalEvent::new(
                 1,
                 CanonicalEventKind::ToolCallDelta {
+                    id_is_synthetic: false,
                     output_index: 0,
                     tool_index: 0,
                     id: None,
@@ -228,6 +230,7 @@ fn responses_stream_announces_the_real_tool_call_id_and_name() {
         .expect("a tool call must announce its output item");
     let added: serde_json::Value = serde_json::from_str(&added.data).unwrap();
     assert_eq!(added["item"]["call_id"], "call_5678");
+    assert_eq!(added["item"]["id"], "fc_0");
     assert_eq!(added["item"]["name"], "get_weather");
 
     for frame in frames
@@ -235,7 +238,7 @@ fn responses_stream_announces_the_real_tool_call_id_and_name() {
         .filter(|frame| frame.event.as_deref() == Some("response.function_call_arguments.delta"))
     {
         let delta: serde_json::Value = serde_json::from_str(&frame.data).unwrap();
-        assert_eq!(delta["item_id"], "call_5678");
+        assert_eq!(delta["item_id"], added["item"]["id"]);
     }
 }
 

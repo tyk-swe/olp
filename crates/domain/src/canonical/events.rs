@@ -40,6 +40,8 @@ pub enum CanonicalEventKind {
         output_index: u32,
         tool_index: u32,
         id: Option<String>,
+        #[serde(default)]
+        id_is_synthetic: bool,
         name: Option<String>,
         arguments_delta: String,
     },

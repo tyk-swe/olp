@@ -94,12 +94,12 @@
     try {
       await updateSetting(setting, values[setting.key] ?? '');
       status = `${settingLabel(setting.key)} saved.`;
-      // Drop only the saved key so this row falls back to the refreshed server
-      // value while every other pending edit survives the refetch.
+      await settings.refetch();
+      // Drop only the saved key after the refreshed server value is available.
+      // A failed refresh retains this overlay and every other pending edit.
       values = Object.fromEntries(
         Object.entries(values).filter(([key]) => key !== setting.key)
       );
-      await settings.refetch();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'The setting could not be saved.';
     } finally {

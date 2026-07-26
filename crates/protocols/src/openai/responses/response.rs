@@ -235,6 +235,7 @@ fn decode_response_output_item(
                 output_index,
                 tool_index: 0,
                 id,
+                id_is_synthetic: false,
                 name,
                 arguments_delta,
             });

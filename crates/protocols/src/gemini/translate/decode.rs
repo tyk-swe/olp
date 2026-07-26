@@ -285,16 +285,20 @@ fn decode_content(
                     &part.function_call.extra,
                     &mut extensions,
                 );
-                let id = match part.function_call.id {
-                    Some(id) => id,
+                let (id, id_is_synthetic) = match part.function_call.id {
+                    Some(id) => (id, false),
                     None => {
                         extensions
                             .insert(format!("/parts/{part_index}/functionCall/id"), Value::Null);
-                        format!("gemini-call-{source_index}-{}", tool_calls.len())
+                        (
+                            format!("gemini-call-{source_index}-{}", tool_calls.len()),
+                            true,
+                        )
                     }
                 };
                 tool_calls.push(ToolCall {
                     id,
+                    id_is_synthetic,
                     name: part.function_call.name,
                     arguments: serde_json::to_string(&part.function_call.args)
                         .map_err(DecodeError::Json)?,

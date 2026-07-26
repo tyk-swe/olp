@@ -137,6 +137,7 @@ impl AnthropicMessagesClientStreamEncoder {
                 output_index,
                 tool_index,
                 id,
+                id_is_synthetic: _,
                 name,
                 arguments_delta,
             } => {

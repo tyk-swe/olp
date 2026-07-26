@@ -144,13 +144,13 @@ pub struct FunctionCallPart {
 /// Gemini's public `generateContent` API does not populate that field, but the
 /// Anthropic and OpenAI client encoders require an identifier and fail the whole
 /// request without one. Synthesizing a deterministic id keeps cross-vendor tool
-/// calls working; recognizing this prefix on every Gemini-bound path strips it
-/// again so those wire bytes stay identical to what the upstream sent.
+/// calls working. Canonical translation records the identifier's provenance so
+/// Gemini-bound paths can omit only ids the gateway actually generated.
 pub(crate) const SYNTHETIC_TOOL_CALL_ID_PREFIX: &str = "olp-gemini-call-";
 
-/// Returns the id unless this gateway synthesized it.
-pub(crate) fn upstream_tool_call_id(id: Option<String>) -> Option<String> {
-    id.filter(|value| !value.starts_with(SYNTHETIC_TOOL_CALL_ID_PREFIX))
+/// Returns the id unless canonical translation marked it as synthesized.
+pub(crate) fn upstream_tool_call_id(id: Option<String>, synthesized: bool) -> Option<String> {
+    (!synthesized).then_some(id).flatten()
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -230,6 +230,7 @@ pub struct OpenAiResponsesStreamEncoder {
     /// Announced tool output index -> the `call_id` published for it, so every
     /// argument delta reports the same identifier the item was announced with.
     tool_outputs: BTreeMap<u32, String>,
+    tool_output_items: BTreeMap<u32, String>,
     done: bool,
 }
 
@@ -261,6 +262,7 @@ impl OpenAiResponsesStreamEncoder {
             collected_event_bytes: 0,
             emitted_outputs: BTreeSet::new(),
             tool_outputs: BTreeMap::new(),
+            tool_output_items: BTreeMap::new(),
             done: false,
         }
     }
@@ -338,7 +340,7 @@ impl OpenAiResponsesStreamEncoder {
                     name.as_deref(),
                     &mut frames,
                 )?;
-                let item_id = self.tool_outputs.get(output_index).cloned();
+                let item_id = self.tool_output_items.get(output_index).cloned();
                 frames.push(response_sse_frame(
                     "response.function_call_arguments.delta",
                     json!({
@@ -424,11 +426,15 @@ impl OpenAiResponsesStreamEncoder {
             // reappeared in the final `response.completed` payload.
             let call_id = tool_id.map_or_else(|| format!("call_{output_index}"), str::to_owned);
             self.tool_outputs.entry(output_index).or_insert(call_id);
+            self.tool_output_items
+                .entry(output_index)
+                .or_insert_with(|| format!("fc_{output_index}"));
         }
         if self.emitted_outputs.insert(output_index) {
             let item = if tool {
                 json!({
                     "type": "function_call",
+                    "id": self.tool_output_items.get(&output_index),
                     "call_id": self.tool_outputs.get(&output_index),
                     "name": tool_name.unwrap_or("function"),
                     "arguments": ""

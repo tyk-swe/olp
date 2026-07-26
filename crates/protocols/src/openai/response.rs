@@ -132,6 +132,7 @@ pub fn decode_chat_completion_response(
                     .try_into()
                     .map_err(|_| OpenAiResponseError::TooManyToolCalls)?,
                 id: Some(call.id),
+                id_is_synthetic: false,
                 name: Some(call.function.name),
                 arguments_delta: call.function.arguments,
             });
@@ -434,6 +435,7 @@ impl OpenAiChatStreamDecoder {
                         output_index: choice.index,
                         tool_index: tool.index,
                         id: tool.id,
+                        id_is_synthetic: false,
                         name: tool
                             .function
                             .as_ref()

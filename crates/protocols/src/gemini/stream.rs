@@ -166,6 +166,7 @@ impl GeminiGenerateContentStreamDecoder {
                         CanonicalEventKind::ToolCallDelta {
                             output_index,
                             id,
+                            id_is_synthetic,
                             name,
                             arguments_delta,
                             ..
@@ -182,6 +183,7 @@ impl GeminiGenerateContentStreamDecoder {
                                     output_index,
                                     tool_index: current,
                                     id,
+                                    id_is_synthetic,
                                     name,
                                     arguments_delta,
                                 },

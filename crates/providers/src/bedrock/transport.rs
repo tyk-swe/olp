@@ -329,6 +329,7 @@ fn map_stream_event(
                         output_index: 0,
                         tool_index,
                         id: Some(tool.tool_use_id),
+                        id_is_synthetic: false,
                         name: Some(tool.name),
                         arguments_delta: String::new(),
                     }])
@@ -355,6 +356,7 @@ fn map_stream_event(
                             )
                         })?,
                         id: None,
+                        id_is_synthetic: false,
                         name: None,
                         arguments_delta: tool.input,
                     }])

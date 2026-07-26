@@ -189,6 +189,8 @@ pub struct ToolDefinition {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ToolCall {
     pub id: String,
+    #[serde(default)]
+    pub id_is_synthetic: bool,
     pub name: String,
     pub arguments: String,
 }

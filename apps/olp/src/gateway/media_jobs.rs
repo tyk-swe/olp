@@ -132,7 +132,7 @@ pub async fn reconcile_media_jobs_once(
     let completed =
         u16::try_from(outcomes.iter().filter(|value| **value).count()).unwrap_or(u16::MAX);
     let failed = claimed.saturating_sub(completed);
-    if failed == 0 {
+    if claimed > 0 && failed == 0 {
         // Everything claimed this pass reconciled cleanly, so any earlier
         // transient gap is resolved and must stop holding readiness down.
         state.clear_media_reconciliation_gaps();

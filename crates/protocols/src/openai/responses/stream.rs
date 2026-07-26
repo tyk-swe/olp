@@ -141,6 +141,7 @@ impl OpenAiResponsesStreamDecoder {
                                 .or_else(|| item.get("id"))
                                 .and_then(Value::as_str)
                                 .map(str::to_owned),
+                            id_is_synthetic: false,
                             name: item.get("name").and_then(Value::as_str).map(str::to_owned),
                             arguments_delta: item
                                 .get("arguments")
@@ -187,6 +188,7 @@ impl OpenAiResponsesStreamDecoder {
                         // `call_id`; emitting `None` here keeps it, because
                         // aggregation overwrites the id on every `Some`.
                         id: None,
+                        id_is_synthetic: false,
                         name: None,
                         arguments_delta: stream_string(value, "delta")?,
                     },

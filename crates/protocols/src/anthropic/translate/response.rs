@@ -48,6 +48,7 @@ pub fn decode_messages_response(
                     output_index: 0,
                     tool_index,
                     id: Some(block.id),
+                    id_is_synthetic: false,
                     name: Some(block.name),
                     arguments_delta: serde_json::to_string(&block.input)
                         .map_err(ResponseError::Json)?,

@@ -552,7 +552,8 @@ impl Stream for RawSseEventStream {
                     };
                     if let Err(error) = self.queue_frames(frames) {
                         self.terminal = true;
-                        return Poll::Ready(Some(Err(error)));
+                        self.pending_error = Some(error);
+                        continue;
                     }
                     if !self.terminal {
                         self.terminal = true;

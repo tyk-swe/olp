@@ -25,6 +25,13 @@ pub fn encode_generate_content_request(
     }
     let mut system_parts = Vec::new();
     let mut contents = Vec::new();
+    let synthetic_tool_ids = request
+        .messages
+        .iter()
+        .flat_map(|message| &message.tool_calls)
+        .filter(|call| call.id_is_synthetic)
+        .map(|call| call.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
     let mut conversation_started = false;
     for message in &request.messages {
         match message.role {
@@ -53,7 +60,12 @@ pub fn encode_generate_content_request(
             _ => {
                 conversation_started = true;
                 let index = contents.len();
-                contents.push(encode_content(message, index, &request.extensions.values)?);
+                contents.push(encode_content(
+                    message,
+                    index,
+                    &request.extensions.values,
+                    &synthetic_tool_ids,
+                )?);
             }
         }
     }
@@ -128,6 +140,7 @@ fn encode_content(
     message: &CanonicalMessage,
     content_index: usize,
     extensions: &BTreeMap<String, Value>,
+    synthetic_tool_ids: &std::collections::BTreeSet<&str>,
 ) -> Result<Content, EncodeError> {
     if message.role == MessageRole::Tool {
         let name = message.name.clone().ok_or(EncodeError::MissingToolName)?;
@@ -157,7 +170,10 @@ fn encode_content(
                     name,
                     response,
                     // A synthesized id must not be echoed back upstream either.
-                    id: crate::gemini::dto::upstream_tool_call_id(Some(id)),
+                    id: crate::gemini::dto::upstream_tool_call_id(
+                        Some(id.clone()),
+                        synthetic_tool_ids.contains(id.as_str()),
+                    ),
                     extra: BTreeMap::new(),
                 },
                 extra: BTreeMap::new(),
@@ -250,7 +266,10 @@ fn encode_content(
                     }
                 })?,
                 // Never send an id this gateway invented back to Gemini.
-                id: crate::gemini::dto::upstream_tool_call_id(Some(call.id.clone())),
+                id: crate::gemini::dto::upstream_tool_call_id(
+                    Some(call.id.clone()),
+                    call.id_is_synthetic,
+                ),
                 extra: BTreeMap::new(),
             },
             extra: BTreeMap::new(),

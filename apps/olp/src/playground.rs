@@ -217,6 +217,7 @@ async fn execute_playground(
                 id,
                 name,
                 arguments_delta,
+                ..
             } if output_index == 0 => {
                 let call = tool_calls.entry((output_index, tool_index)).or_default();
                 if id.is_some() {
@@ -242,6 +243,7 @@ async fn execute_playground(
                 id: call.id.ok_or_else(|| {
                     provider_problem("The provider returned a tool call without an ID.")
                 })?,
+                id_is_synthetic: false,
                 name: call.name.ok_or_else(|| {
                     provider_problem("The provider returned a tool call without a name.")
                 })?,
