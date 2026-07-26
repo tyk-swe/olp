@@ -31,8 +31,7 @@ const ORIGIN: &str = "https://olp.configuration.test";
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_secrets() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = common::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let mut state = ApiState::new(

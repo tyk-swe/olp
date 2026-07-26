@@ -5,11 +5,12 @@ use olp_domain::{ApiKeyScope, RuntimeSnapshot};
 use olp_storage::{InstallationSetupInput, PgStore, SessionMaterial};
 use uuid::Uuid;
 
+mod support;
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn fallback_uses_current_keys_and_release_exact_provider_transport_config() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let (owner, _) = store

@@ -10,11 +10,12 @@ use serde_json::json;
 use sqlx::Executor as _;
 use uuid::Uuid;
 
+mod support;
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn remaining_management_mutations_exactly_replay_without_double_execution() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 8).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store

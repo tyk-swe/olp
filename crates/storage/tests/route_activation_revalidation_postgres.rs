@@ -1,20 +1,18 @@
-#[path = "support/route_fixtures.rs"]
-mod route_fixtures;
+mod support;
 
 use olp_storage::{
     ConfigurationError, InstallationSetupInput, PgStore, RuntimeCompileError, SessionMaterial,
 };
-use route_fixtures::{
+use sqlx::{PgPool, Row};
+use support::route_fixtures::{
     DraftFixture, LIFECYCLE_OPERATIONS, ProviderFixture, insert_provider, insert_provider_revision,
 };
-use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn activation_revalidates_current_revisions_and_preserves_live_media_targets() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let (owner, _) = store

@@ -8,11 +8,12 @@ use olp_storage::{
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+mod support;
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let owner_session = SessionMaterial::generate();
