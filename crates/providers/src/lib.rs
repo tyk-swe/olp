@@ -1,27 +1,15 @@
 //! Provider-facing infrastructure: AI transports, discovery and certification,
 //! OIDC HTTP, and the shared outbound-network security policy.
 
-#[cfg(not(any(test, feature = "test-util")))]
-#[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
-mod anthropic;
-#[cfg(any(test, feature = "test-util"))]
 pub mod anthropic;
 #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod azure_openai;
 #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod bedrock;
 mod factory;
-#[cfg(not(any(test, feature = "test-util")))]
-#[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
-mod gemini;
-#[cfg(any(test, feature = "test-util"))]
 pub mod gemini;
 mod http_egress;
 mod oidc;
-#[cfg(not(any(test, feature = "test-util")))]
-#[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
-mod openai;
-#[cfg(any(test, feature = "test-util"))]
 pub mod openai;
 mod transport_common;
 mod transport_io;
