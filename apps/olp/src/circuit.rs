@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -83,6 +83,13 @@ impl CircuitBreaker {
             .lock()
             .expect("circuit state lock poisoned")
             .remove(&target);
+    }
+
+    pub(crate) fn retain_targets(&self, live: &BTreeSet<TargetId>) {
+        self.inner
+            .lock()
+            .expect("circuit state lock poisoned")
+            .retain(|target, _| live.contains(target));
     }
 
     pub(crate) fn record_failure(&self, target: TargetId, class: AttemptFailureClass) {
@@ -184,5 +191,29 @@ mod tests {
             breaker.record_failure(target, class);
             assert!(breaker.try_acquire(target));
         }
+    }
+
+    #[test]
+    fn removes_state_for_targets_absent_from_the_installed_generation() {
+        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let retained = TargetId::new();
+        let removed = TargetId::new();
+        breaker.record_failure(retained, AttemptFailureClass::Connect);
+        breaker.record_failure(removed, AttemptFailureClass::Connect);
+        assert_eq!(breaker.open_count(), 2);
+
+        breaker.retain_targets(&BTreeSet::from([retained]));
+
+        assert_eq!(breaker.open_count(), 1);
+        assert!(!breaker.is_selectable(retained));
+        assert!(breaker.is_selectable(removed));
+        assert_eq!(
+            breaker
+                .inner
+                .lock()
+                .expect("circuit state lock poisoned")
+                .len(),
+            1
+        );
     }
 }

@@ -3,6 +3,15 @@
     type CapabilityDeclaration,
     type ProviderModel
   } from '$lib/api/management/providers';
+  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import {
+    beginReload,
+    conflictNotice,
+    initialConcurrentEdit,
+    markDirty,
+    markSaved,
+    reconcile
+  } from '$lib/forms/concurrentEdit';
 
   let {
     model,
@@ -10,6 +19,8 @@
     optionsPending = false,
     optionsError = false,
     disabled = false,
+    reloadVersion = 0,
+    providerEtag,
     onSave
   }: {
     model: ProviderModel;
@@ -17,23 +28,45 @@
     optionsPending?: boolean;
     optionsError?: boolean;
     disabled?: boolean;
-    onSave: (enabled: boolean, capabilities: CapabilityDeclaration[]) => Promise<void>;
+    reloadVersion?: number;
+    providerEtag: string;
+    onSave: (
+      enabled: boolean,
+      capabilities: CapabilityDeclaration[],
+      providerEtag: string
+    ) => Promise<boolean>;
   } = $props();
 
   const operations = $derived([...new Set(options.map((option) => option.operation))]);
 
   let enabled = $state(false);
   let capabilities = $state<CapabilityDeclaration[]>([]);
-  let initialized = $state('');
+  let sync = $state(initialConcurrentEdit());
   let localError = $state('');
+  let observedReloadVersion = $state(0);
+  let hydratedProviderEtag = $state('');
+  const concurrentNotice = $derived(conflictNotice(sync));
+
+  function signature(value: ProviderModel, etag: string) {
+    return `${etag}:${value.id}:${value.enabled}:${value.capabilities.map((item) => `${item.operation}/${item.surface}/${item.mode}/${item.source}`).join(',')}`;
+  }
 
   $effect(() => {
-    const signature = `${model.id}:${model.enabled}:${model.capabilities.map((item) => `${item.operation}/${item.surface}/${item.mode}/${item.source}`).join(',')}`;
-    if (signature === initialized) return;
-    initialized = signature;
+    if (reloadVersion !== observedReloadVersion) {
+      observedReloadVersion = reloadVersion;
+      sync = beginReload(sync);
+    }
+    const next = reconcile(sync, signature(model, providerEtag));
+    if (next.state !== sync) sync = next.state;
+    if (!next.hydrate) return;
+    hydratedProviderEtag = providerEtag;
     enabled = model.enabled;
     capabilities = model.capabilities.map(({ operation, surface, mode }) => ({ operation, surface, mode }));
   });
+
+  function touch() {
+    sync = markDirty(sync);
+  }
 
   function surfacesFor(operation: string) {
     return [...new Set(options.filter((option) => option.operation === operation).map((option) => option.surface))];
@@ -50,6 +83,7 @@
     if (!capability) return;
     capabilities = [...capabilities, capability];
     localError = '';
+    touch();
   }
 
   function update(index: number, field: keyof CapabilityDeclaration, value: string) {
@@ -70,11 +104,13 @@
       }
       return updated;
     });
+    touch();
   }
 
   function remove(index: number) {
     capabilities = capabilities.filter((_, itemIndex) => itemIndex !== index);
     if (!capabilities.length) enabled = false;
+    touch();
   }
 
   async function save() {
@@ -88,13 +124,23 @@
       localError = 'Remove duplicate capability tuples.';
       return;
     }
-    await onSave(enabled, capabilities);
+    if (await onSave(enabled, capabilities, hydratedProviderEtag)) {
+      // The parent refetched during onSave, so the props now carry the
+      // post-save provider state; adopt it as the next save's baseline so a
+      // second consecutive save does not send the stale ETag.
+      hydratedProviderEtag = providerEtag;
+      sync = markSaved(sync, signature(model, providerEtag));
+    }
+  }
+
+  function reload() {
+    sync = beginReload(sync);
   }
 </script>
 
 <div class="review">
   <div class="review-heading">
-    <label class="enable"><input type="checkbox" bind:checked={enabled} disabled={disabled} /> Eligible for routes</label>
+    <label class="enable"><input type="checkbox" bind:checked={enabled} onchange={touch} disabled={disabled} /> Eligible for routes</label>
     <button class="button button-secondary" type="button" onclick={addCapability} disabled={disabled || !options.length}>Add capability</button>
   </div>
   {#if optionsPending}<p class="empty">Loading supported capability options…</p>{:else if optionsError}<p class="error" role="alert">Supported capability options could not be loaded.</p>{/if}
@@ -117,6 +163,7 @@
     </div>
   {/if}
   {#if localError}<p class="error" role="alert">{localError}</p>{/if}
+  <ConflictNotice notice={concurrentNotice} onReload={reload} {disabled} />
   <div class="review-footer">
     <span>Options are owned by the server. Operator-reviewed tuples are stored with declared provenance.</span>
     <button class="button button-secondary" type="button" onclick={save} disabled={disabled}>Save capability review</button>

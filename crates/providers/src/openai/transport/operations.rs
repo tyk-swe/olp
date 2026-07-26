@@ -49,6 +49,8 @@ impl OpenAiConnector {
         }
         validate_transport_mode(&request)?;
 
+        // This dispatcher owns the operation narrowing contract used by each
+        // operation module's infallible destructuring below.
         match &request.operation {
             Operation::Generation(_) => generation::execute(self, request).await,
             Operation::Images(_) => images::execute(self, request).await,

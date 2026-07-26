@@ -17,6 +17,7 @@ pub(super) async fn execute_speech(
     connector: &OpenAiConnector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
+    // The operation dispatcher routes only speech requests here.
     let Operation::Speech(operation) = &request.operation else {
         unreachable!("checked by caller")
     };
@@ -62,6 +63,7 @@ pub(super) async fn execute_transcription(
     connector: &OpenAiConnector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
+    // The operation dispatcher routes only transcription requests here.
     let Operation::Transcription(operation) = &request.operation else {
         unreachable!("checked by caller")
     };

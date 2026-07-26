@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod health_probe;
 mod startup;
 mod validation;
 
@@ -12,6 +13,7 @@ use tracing_subscriber::EnvFilter;
 use self::{
     commands::{doctor, internal_pre_stop, master_key_command, migrate, run_worker},
     config::{Cli, Command},
+    health_probe::health_probe,
     startup::serve,
 };
 
@@ -44,6 +46,7 @@ async fn run() -> AppResult<()> {
         Command::Migrate(args) => migrate(args).await,
         Command::Doctor(args) => doctor(args).await,
         Command::MasterKey(args) => master_key_command(args).await,
+        Command::HealthProbe => health_probe().await,
         Command::InternalPreStop(args) => internal_pre_stop(args).await,
     }
 }

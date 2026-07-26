@@ -33,10 +33,9 @@ use super::{
         RoutedEventExecution, RoutedUnaryResult, execute_event_operation, execute_unary_result,
         incompatible_result,
     },
-    limits::{CleanupMediaStream, release_limits},
+    limits::CleanupMediaStream,
     multipart::{media_spool_error, parse_multipart},
     openai_http::error_sse as openai_error_sse,
-    telemetry::{UsageCapture, emit_event_execution_metadata},
 };
 
 pub(super) async fn embeddings(
@@ -50,6 +49,7 @@ pub(super) async fn embeddings(
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Embeddings(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("embeddings"));
     };
     let response = encode_embedding_response(
@@ -57,8 +57,9 @@ pub(super) async fn embeddings(
         executed.route_slug.as_str(),
         encoding_format.as_deref(),
     )
-    .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()))?;
-    executed.mark_success();
+    .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
+    executed.mark_outcome(&response);
+    let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }
 
@@ -72,6 +73,7 @@ pub(super) async fn moderations(
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Moderation(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("moderation"));
     };
     let response = encode_moderation_response(
@@ -79,8 +81,9 @@ pub(super) async fn moderations(
         executed.route_slug.as_str(),
         &format!("modr-{}", executed.request_id),
     )
-    .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()))?;
-    executed.mark_success();
+    .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
+    executed.mark_outcome(&response);
+    let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }
 
@@ -97,10 +100,11 @@ pub(super) async fn image_generations(
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await?;
-        return Ok(raw_media_streaming_response(state, execution));
+        return Ok(raw_media_streaming_response(execution));
     }
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Images(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("image generation"));
     };
     let outcome = streaming_image_json_response(Arc::clone(&state.media_spool), result).await;
@@ -143,7 +147,7 @@ pub(super) async fn image_edits(
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await?;
-        return Ok(raw_media_streaming_response(state, execution));
+        return Ok(raw_media_streaming_response(execution));
     }
     encode_executed_images(
         &state,
@@ -186,6 +190,7 @@ async fn encode_executed_images(
     mut executed: RoutedUnaryResult,
 ) -> Result<Response, InferenceError> {
     let CanonicalResult::Images(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("image"));
     };
     let outcome = streaming_image_json_response(Arc::clone(&state.media_spool), result).await;
@@ -206,10 +211,11 @@ pub(super) async fn speech(
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await?;
-        return Ok(raw_media_streaming_response(state, execution));
+        return Ok(raw_media_streaming_response(execution));
     }
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Speech(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("speech"));
     };
     let outcome = async {
@@ -314,10 +320,11 @@ pub(super) async fn transcriptions(
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await?;
-        return Ok(raw_media_streaming_response(state, execution));
+        return Ok(raw_media_streaming_response(execution));
     }
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Transcription(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("transcription"));
     };
     let outcome = if matches!(response_format.as_deref(), Some("text" | "srt" | "vtt")) {
@@ -342,15 +349,15 @@ pub(super) async fn transcriptions(
     outcome
 }
 
-fn raw_media_streaming_response(
-    state: GatewayState,
-    mut execution: RoutedEventExecution,
-) -> Response {
+fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
+        let mut accounting = execution
+            .accounting
+            .take()
+            .expect("routed event execution owns request accounting");
         let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
         let mut next = Some(Ok(execution.first.clone()));
-        let mut usage = UsageCapture::default();
         let mut failure = None;
         let mut terminal = None;
         while let Some(item) = next {
@@ -361,8 +368,8 @@ fn raw_media_streaming_response(
                     break;
                 }
             };
-            usage.observe(&event);
-            usage.observe_openai_media_event(&event);
+            accounting.usage_mut().observe(&event);
+            accounting.usage_mut().observe_openai_media_event(&event);
             match raw_media_event_bytes(event) {
                 Ok(Some(bytes)) => {
                     if let Err(error) = writer.send_or_fail(bytes, execution.deadline).await {
@@ -401,8 +408,7 @@ fn raw_media_streaming_response(
         writer.finish_stream(terminal, &mut failure, |error| {
             TerminalFrames::one(openai_error_sse(error))
         });
-        emit_event_execution_metadata(&state, &execution, &usage, failure.as_ref());
-        release_limits(&state, execution.lease.as_ref()).await;
+        accounting.finish(failure.as_ref()).await;
     });
     response
 }

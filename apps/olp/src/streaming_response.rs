@@ -9,13 +9,7 @@ use futures::{StreamExt, stream};
 use olp_domain::{CanonicalEvent, CanonicalEventKind};
 use olp_protocols::sse::{SseEncodeError, SseFrame, encode_frame};
 
-use crate::{
-    GatewayState,
-    gateway::{
-        InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata,
-        release_limits,
-    },
-};
+use crate::gateway::{InferenceError, RoutedEventExecution};
 
 pub(crate) fn encode_sse_frame(frame: &SseFrame) -> Result<Bytes, SseEncodeError> {
     encode_frame(frame).map(Bytes::from)
@@ -215,7 +209,6 @@ pub(crate) trait ProtocolStreamEncoder: Send + 'static {
 }
 
 pub(crate) fn protocol_streaming_response<E>(
-    state: GatewayState,
     mut execution: RoutedEventExecution,
     mut encoder: E,
 ) -> Response
@@ -224,9 +217,12 @@ where
 {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
+        let mut accounting = execution
+            .accounting
+            .take()
+            .expect("routed event execution owns request accounting");
         let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
         let mut next = Some(Ok(execution.first.clone()));
-        let mut usage = UsageCapture::default();
         let mut failure = None;
         let mut terminal = None;
         while let Some(item) = next {
@@ -237,7 +233,7 @@ where
                     break;
                 }
             };
-            usage.observe(&event);
+            accounting.usage_mut().observe(&event);
             let is_done = matches!(event.kind, CanonicalEventKind::Done);
             let canonical_failure = match &event.kind {
                 CanonicalEventKind::Error { error } => Some(InferenceError::from_canonical(error)),
@@ -292,8 +288,7 @@ where
             TerminalFrames::one(encoder.encode_error(error))
         });
         drop(events);
-        emit_event_execution_metadata(&state, &execution, &usage, failure.as_ref());
-        release_limits(&state, execution.lease.as_ref()).await;
+        accounting.finish(failure.as_ref()).await;
     });
     response
 }

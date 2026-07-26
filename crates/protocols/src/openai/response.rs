@@ -558,15 +558,16 @@ fn canonical_error(error: OpenAiWireError) -> CanonicalError {
         value => value.to_string(),
     });
     let kind = error.kind.unwrap_or_default();
-    let (class, retryable) = if kind.contains("rate_limit") {
-        (ErrorClass::RateLimit, true)
-    } else if kind.contains("authentication") {
-        (ErrorClass::Authentication, false)
-    } else if kind.contains("invalid_request") {
-        (ErrorClass::InvalidRequest, false)
-    } else {
-        (ErrorClass::Upstream, false)
-    };
+    let (class, retryable) =
+        if crate::openai::error_signals_rate_limit(provider_code.as_deref(), Some(&kind)) {
+            (ErrorClass::RateLimit, true)
+        } else if kind.contains("authentication") {
+            (ErrorClass::Authentication, false)
+        } else if kind.contains("invalid_request") {
+            (ErrorClass::InvalidRequest, false)
+        } else {
+            (ErrorClass::Upstream, false)
+        };
     CanonicalError {
         class,
         message: error.message,

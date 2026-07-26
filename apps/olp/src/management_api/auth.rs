@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, net::SocketAddr};
+use std::{collections::BTreeMap, fmt, net::SocketAddr, sync::LazyLock};
 
 use axum::{
     Json,
@@ -24,9 +24,19 @@ use crate::{
     request_cookies::{CSRF_COOKIE, SESSION_COOKIE},
 };
 
-pub(super) const PASSWORD_WORK_CONCURRENCY: usize = 4;
 pub(super) const INVALID_LOGIN_RATE_LIMIT_TARGET: &str = "<invalid-local-login-target>";
-static PASSWORD_WORK: Semaphore = Semaphore::const_new(PASSWORD_WORK_CONCURRENCY);
+static PASSWORD_WORK: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(password_work_concurrency()));
+
+pub(super) fn password_work_concurrency() -> usize {
+    // The upper bound caps memory pinned by unauthenticated Argon2 hashing
+    // (each permit holds the full Argon2 working set); scaling with cores
+    // must not turn many-core hosts into a pre-auth memory-exhaustion vector.
+    std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get().div_ceil(2))
+        .unwrap_or(4)
+        .clamp(4, 8)
+}
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct AuthenticationCapabilities {

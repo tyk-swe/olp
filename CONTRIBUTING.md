@@ -35,6 +35,8 @@ and third-party Actions and container images pinned.
   uses `query!`, `query_as!`, or `query_scalar!`; dynamic filters use
   `QueryBuilder::build_query_as` with a cohesive `FromRow` model. Manual
   string-key `Row::get`/`try_get` decoding is not allowed.
+- `release-metadata.env` records the migration included in the last completed
+  release and is the CI upgrade-rehearsal baseline.
 - Helm defaults, schema, and templates in `deploy/helm/` change together.
 
 ### Change maps

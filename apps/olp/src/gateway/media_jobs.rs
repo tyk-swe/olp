@@ -21,7 +21,7 @@ use crate::{
 use super::{
     error::InferenceError,
     execution::{RequiredTarget, authorize_principal, execute_routed_result},
-    failover::{ExecutionOutput, execute_with_failover},
+    failover::{ExecutionOutput, FailoverContext, execute_with_failover},
     telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event, usage_from_result},
 };
 
@@ -348,7 +348,13 @@ async fn execute_media_reconciliation_result(
         .get(&route_slug)
         .ok_or("media_job_route_invalid")?;
     let execution = execute_with_failover(
-        &snapshot,
+        FailoverContext {
+            runtime: &snapshot,
+            overall_timeout: route.overall_timeout.as_duration(),
+            media_spool: state.media_spool.clone(),
+            circuits: &state.circuits,
+            on_attempt_started: None,
+        },
         attempts,
         RequestMetadata {
             request_id,
@@ -357,9 +363,6 @@ async fn execute_media_reconciliation_result(
             mode: TransportMode::Unary,
         },
         operation,
-        route.overall_timeout.as_duration(),
-        state.media_spool.clone(),
-        &state.circuits,
     )
     .await;
     let success = match execution {
@@ -460,10 +463,17 @@ pub(super) async fn refresh_video_list_record(
     };
     let result = match executed.result.as_ref() {
         CanonicalResult::VideoJob(result) => result.clone(),
-        _ => return record,
+        _ => {
+            executed.mark_provider_protocol_failure();
+            return record;
+        }
     };
-    let Ok(state_update) = media_job_state(&result.status) else {
-        return record;
+    let state_update = match media_job_state(&result.status) {
+        Ok(state_update) => state_update,
+        Err(failure) => {
+            executed.mark_failure(&failure);
+            return record;
+        }
     };
     let update = MediaJobUpdate {
         state: state_update,

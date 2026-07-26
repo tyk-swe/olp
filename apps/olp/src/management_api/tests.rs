@@ -21,9 +21,9 @@ use super::{
         AcceptInvitationRequest, INVALID_INVITATION_RATE_LIMIT_TARGET, invitation_rate_limit_target,
     },
     auth::{
-        INVALID_LOGIN_RATE_LIMIT_TARGET, LoginRequest, PASSWORD_WORK_CONCURRENCY, SetupRequest,
-        acquire_password_work, csrf_recovery_cas_failure_response, local_login_rate_limit_target,
-        logout, spawn_password_work, validate_setup,
+        INVALID_LOGIN_RATE_LIMIT_TARGET, LoginRequest, SetupRequest, acquire_password_work,
+        csrf_recovery_cas_failure_response, local_login_rate_limit_target, logout,
+        password_work_concurrency, spawn_password_work, validate_setup,
     },
     common::{
         RuntimeGenerationResponse, WriteOnlySecret, append_session_cookies, enforce_origin,
@@ -108,7 +108,7 @@ async fn unauthenticated_password_work_remains_bounded_after_request_cancellatio
         .unwrap();
     drop(task);
 
-    let permits = (1..PASSWORD_WORK_CONCURRENCY)
+    let permits = (1..password_work_concurrency())
         .map(|_| acquire_password_work().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(acquire_password_work().unwrap_err().status, 429);

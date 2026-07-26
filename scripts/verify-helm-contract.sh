@@ -36,6 +36,27 @@ done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+legacy_secrets="$work/legacy-compose-secrets"
+install -d -m 700 "$legacy_secrets"
+printf 'legacy-key-fixture\n' > "$legacy_secrets/olp_key_hash_key"
+chmod 600 "$legacy_secrets/olp_key_hash_key"
+legacy_auth_hmac_key_checksum=$(sha256sum "$legacy_secrets/olp_key_hash_key")
+if OLP_COMPOSE_SECRETS_DIR="$legacy_secrets" \
+  "$compose_secret_helper" >"$work/legacy-compose-error" 2>&1; then
+  echo "Compose secret preparation replaced a legacy authentication HMAC key" >&2
+  exit 1
+fi
+[[ $(sha256sum "$legacy_secrets/olp_key_hash_key") == "$legacy_auth_hmac_key_checksum" && \
+  ! -e "$legacy_secrets/olp_auth_hmac_key" && \
+  ! -e "$legacy_secrets/olp_master_key" ]] || {
+  echo "Compose legacy authentication HMAC key guard changed secret files" >&2
+  exit 1
+}
+grep -Fq 'move or securely copy the existing bytes' "$work/legacy-compose-error" || {
+  echo "Compose legacy authentication HMAC key guard is not actionable" >&2
+  exit 1
+}
+
 OLP_COMPOSE_SECRETS_DIR="$work/compose-secrets" "$compose_secret_helper" >/dev/null
 for secret in olp_master_key olp_auth_hmac_key olp_bootstrap_token; do
   [[ -f "$work/compose-secrets/$secret" ]] || {

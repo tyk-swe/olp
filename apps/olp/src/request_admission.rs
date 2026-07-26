@@ -38,9 +38,8 @@ use multipart::preauthorize_multipart;
 use validation::{is_json_content_type, payload_too_large, request_body_timeout};
 
 pub(crate) use limits::InferencePrincipal;
-pub(super) use limits::{
-    InferenceReservation, ReleaseReservationBody, estimate_http_json_request_tokens,
-};
+pub(crate) use limits::InferenceReservation;
+pub(super) use limits::{ReleaseReservationBody, estimate_http_json_request_tokens};
 pub(super) use multipart::{MultipartAdmissionState, validate_multipart_boundary};
 pub(crate) use multipart::{MultipartRequestAdmission, MultipartRouteAdmission};
 pub(crate) use public::{
@@ -82,6 +81,12 @@ pub(crate) fn http_inference_principal() -> Option<InferencePrincipal> {
 pub(crate) fn http_inference_reserved_tokens() -> Option<i64> {
     HTTP_INFERENCE_LIMITS_RESERVED
         .try_with(|tokens| *tokens)
+        .ok()
+}
+
+pub(crate) fn http_inference_reservation() -> Option<InferenceReservation> {
+    HTTP_INFERENCE_RESERVATION_HOLD
+        .try_with(InferenceReservation::clone)
         .ok()
 }
 

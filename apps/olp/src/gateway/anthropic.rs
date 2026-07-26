@@ -64,7 +64,7 @@ pub(super) async fn messages(
             execution.route_slug.as_str(),
             format!("msg_{}", execution.request_id.simple()),
         ));
-        return Ok(protocol_streaming_response(state, execution, encoder));
+        return Ok(protocol_streaming_response(execution, encoder));
     }
     let completed = collect_event_execution(&state, execution)
         .await
@@ -117,17 +117,22 @@ pub(super) async fn count_tokens(
     .await
     .map_err(ProtocolError::anthropic)?;
     let CanonicalResult::TokenCount(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(ProtocolError::upstream(
             Surface::Anthropic,
             "The provider returned an incompatible token-count result.",
         ));
     };
-    let response = encode_count_tokens_result(result).map_err(|error| {
-        ProtocolError::upstream(
-            Surface::Anthropic,
-            format!("The token-count result is not representable: {error}"),
-        )
-    })?;
+    let response = match encode_count_tokens_result(result) {
+        Ok(response) => response,
+        Err(error) => {
+            executed.mark_provider_protocol_failure();
+            return Err(ProtocolError::upstream(
+                Surface::Anthropic,
+                format!("The token-count result is not representable: {error}"),
+            ));
+        }
+    };
     executed.mark_success();
     Ok((StatusCode::OK, Json(response)).into_response())
 }

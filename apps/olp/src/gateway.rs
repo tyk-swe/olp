@@ -29,7 +29,6 @@ pub(crate) use execution::{
     execute_event_operation_for_surface, execute_routed_result_for_surface,
     execute_session_generation, release_model_limits, reserve_model_limits,
 };
-pub(crate) use limits::release_limits;
 pub use media_jobs::reconcile_media_jobs_once;
 pub(crate) use protocol_error::{inference_error_response, problem_response};
 pub(crate) use telemetry::{UsageCapture, emit_event_execution_metadata};

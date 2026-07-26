@@ -17,6 +17,7 @@ pub(super) async fn execute(
     connector: &OpenAiConnector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
+    // The operation dispatcher routes only image requests into this module.
     let Operation::Images(operation) = &request.operation else {
         unreachable!("checked by caller")
     };
@@ -62,6 +63,7 @@ async fn execute_multipart(
         .media
         .as_ref()
         .ok_or_else(|| protocol_body_error("OpenAI image uploads require a bounded media spool"))?;
+    // The operation dispatcher routes only image requests into this module.
     let Operation::Images(operation) = &request.operation else {
         unreachable!("checked by caller")
     };
@@ -124,6 +126,7 @@ async fn execute_multipart(
             form = add_extra_fields(form, wire.extra);
             path = "images/variations";
         }
+        // The outer image dispatcher sends generation through the JSON path.
         olp_domain::ImageOperation::Generation(_) => {
             unreachable!("generation uses JSON transport")
         }

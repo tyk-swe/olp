@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::{
     GatewayState, InferencePrincipal,
-    event_completion::collect_provider_events,
+    event_completion::collect_event_execution,
     json_media::{admit_openai_response_input_tokens, admit_openai_responses, cleanup_admitted},
     streaming_response::{
         ProtocolStreamEncoder, encode_server_sse_frame, encode_sse_frame,
@@ -29,9 +29,7 @@ use super::{
         RoutedEventExecution, authorize_principal, execute_event_operation, execute_unary_result,
         incompatible_result,
     },
-    limits::release_limits,
     openai_http::unix_seconds,
-    telemetry::{UsageCapture, emit_event_execution_metadata},
 };
 
 pub(super) async fn responses(
@@ -64,7 +62,7 @@ pub(super) async fn responses(
     };
     let execution = execute_event_operation(&state, &principal, operation, mode).await?;
     if streaming {
-        Ok(responses_streaming_response(state, execution))
+        Ok(responses_streaming_response(execution))
     } else {
         responses_unary_response(&state, execution).await
     }
@@ -72,54 +70,31 @@ pub(super) async fn responses(
 
 async fn responses_unary_response(
     state: &GatewayState,
-    mut execution: RoutedEventExecution,
+    execution: RoutedEventExecution,
 ) -> Result<Response, InferenceError> {
-    let events = collect_provider_events(
-        execution.first.clone(),
-        &mut execution.events,
-        execution.deadline,
-    )
-    .await;
-    let (events, failure) = match events {
-        Ok(events) => (events, None),
-        Err(failure) => (Vec::new(), Some(failure)),
-    };
-    if let Some(failure) = failure {
-        emit_event_execution_metadata(state, &execution, &UsageCapture::default(), Some(&failure));
-        release_limits(state, execution.lease.as_ref()).await;
-        return Err(failure);
-    }
-    let mut usage = UsageCapture::default();
-    for event in &events {
-        usage.observe(event);
-    }
+    let mut completed = collect_event_execution(state, execution).await?;
     let response = encode_response_object(
-        &events,
-        execution.route_slug.as_str(),
-        &format!("resp_{}", execution.request_id.simple()),
+        &completed.events,
+        completed.route_slug.as_str(),
+        &format!("resp_{}", completed.request_id.simple()),
     )
     .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
     match response {
         Ok(response) => {
-            emit_event_execution_metadata(state, &execution, &usage, None);
-            release_limits(state, execution.lease.as_ref()).await;
+            completed.mark_success();
             Ok((StatusCode::OK, Json(response)).into_response())
         }
-        Err(failure) => {
-            emit_event_execution_metadata(state, &execution, &usage, Some(&failure));
-            release_limits(state, execution.lease.as_ref()).await;
-            Err(failure)
-        }
+        Err(failure) => Err(failure),
     }
 }
 
-fn responses_streaming_response(state: GatewayState, execution: RoutedEventExecution) -> Response {
+fn responses_streaming_response(execution: RoutedEventExecution) -> Response {
     let encoder = OpenAiResponsesHttpStreamEncoder(OpenAiResponsesStreamEncoder::new(
         execution.route_slug.as_str(),
         format!("resp_{}", execution.request_id.simple()),
         unix_seconds(),
     ));
-    protocol_streaming_response(state, execution, encoder)
+    protocol_streaming_response(execution, encoder)
 }
 
 struct OpenAiResponsesHttpStreamEncoder(OpenAiResponsesStreamEncoder);
@@ -178,11 +153,12 @@ pub(super) async fn response_input_tokens(
     // its first suspension and removes the handles after transport completes.
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::TokenCount(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(incompatible_result("token count"));
     };
-    let response = encode_response_input_tokens_result(result).map_err(|error| {
-        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
-    })?;
-    executed.mark_success();
+    let response = encode_response_input_tokens_result(result)
+        .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
+    executed.mark_outcome(&response);
+    let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }

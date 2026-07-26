@@ -1,8 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { logout } from '$lib/api/auth';
+  import { isEtagMismatch } from '$lib/api/http';
+  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import {
+    acceptRemote,
+    beginReload,
+    conflictNotice,
+    initialConcurrentEdit,
+    markConflict,
+    markDirty,
+    markSaved,
+    reconcile
+  } from '$lib/forms/concurrentEdit';
   import {
     beginOidcLink,
     beginOidcReauthentication,
@@ -45,21 +57,29 @@
   let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
   let sessionCursor = $state<string | undefined>();
   let sessionHistory = $state<string[]>([]);
+  let profileSync = $state(initialConcurrentEdit());
+  const profileConcurrentNotice = $derived(conflictNotice(profileSync));
+  const queryClient = useQueryClient();
 
   const profile = createQuery(() => ({
     queryKey: ['profile'],
-    queryFn: async () => {
-      const data = await getProfile();
-      displayName = data.display_name;
-      displayNameError = '';
-      return data;
-    }
+    queryFn: getProfile
   }));
   const sessions = createQuery(() => ({ queryKey: ['profile-sessions', sessionCursor], queryFn: () => listSessions(sessionCursor) }));
   const identities = createQuery(() => ({ queryKey: ['profile-oidc-identities'], queryFn: listOidcIdentities }));
   let passwordEnrollmentNeeded = $derived(
     identities.data ? !identities.data.has_local_password : false
   );
+
+  $effect(() => {
+    const value = profile.data;
+    if (!value) return;
+    const next = reconcile(profileSync, value.etag);
+    if (next.state !== profileSync) profileSync = next.state;
+    if (!next.hydrate) return;
+    displayName = value.display_name;
+    displayNameError = '';
+  });
 
   onMount(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -137,7 +157,7 @@
       await unlinkOidcIdentity(action.resourceId);
       pendingIdentityAction = undefined;
       message = 'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
-      await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
+      await Promise.all([refetchProfile(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
       identityError = cause instanceof Error ? cause.message : 'The security operation could not be completed.';
     } finally {
@@ -172,6 +192,7 @@
 
   function changeDisplayName(value: string) {
     displayName = value;
+    profileSync = markDirty(profileSync);
     try {
       validateDisplayName(value);
       displayNameError = '';
@@ -194,11 +215,17 @@
     profileError = message = '';
     savingProfile = true;
     try {
-      await updateProfile(profile.data, { display_name: normalizedDisplayName });
+      if (!profileSync.snapshotEtag) throw new Error('Reload your profile before saving.');
+      const updated = await updateProfile(
+        { ...profile.data, etag: profileSync.snapshotEtag },
+        { display_name: normalizedDisplayName }
+      );
+      profileSync = markSaved(profileSync, updated.etag);
+      queryClient.setQueryData(['profile'], updated);
       message = 'Profile updated.';
-      await profile.refetch();
     } catch (cause) {
-      profileError = cause instanceof Error ? cause.message : 'The profile could not be updated.';
+      if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
+      else profileError = cause instanceof Error ? cause.message : 'The profile could not be updated.';
     } finally {
       savingProfile = false;
     }
@@ -216,29 +243,40 @@
     }
     let enrollmentSubmitted = false;
     try {
+      if (!profileSync.snapshotEtag) throw new Error('Reload your profile before saving.');
+      const snapshot = { ...profile.data, etag: profileSync.snapshotEtag };
       const next = passwordEnrollmentNeeded
         ? validateNewPassword(newPassword, confirmPassword)
         : validatePassword(currentPassword, newPassword, confirmPassword);
+      let updated;
       if (passwordEnrollmentNeeded) {
         enrollmentSubmitted = true;
-        await enrollPassword(profile.data, { new_password: next });
+        updated = await enrollPassword(snapshot, { new_password: next });
       } else {
-        await changePassword(profile.data, { current_password: currentPassword, new_password: next });
+        updated = await changePassword(snapshot, {
+          current_password: currentPassword,
+          new_password: next
+        });
       }
+      profileSync = acceptRemote(profileSync, updated.etag);
+      queryClient.setQueryData(['profile'], updated);
       currentPassword = newPassword = confirmPassword = '';
       clearEnrollmentGrant();
       message = passwordEnrollmentNeeded
         ? 'Local password added. All previous sessions were revoked and this browser was rotated.'
         : 'Password changed. All previous sessions were revoked and this browser was rotated.';
-      await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
+      await Promise.all([refetchProfile(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
       if (enrollmentSubmitted) clearEnrollmentGrant();
-      passwordError =
-        cause instanceof Error
-          ? cause.message
-          : passwordEnrollmentNeeded
-            ? 'The local password could not be added.'
-            : 'The password could not be changed.';
+      if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
+      else {
+        passwordError =
+          cause instanceof Error
+            ? cause.message
+            : passwordEnrollmentNeeded
+              ? 'The local password could not be added.'
+              : 'The password could not be changed.';
+      }
     } finally {
       savingPassword = false;
     }
@@ -285,12 +323,22 @@
       if (!(await acquireRecentAuthentication('oidc_unlink', id))) return;
       await unlinkOidcIdentity(id);
       message = 'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
-      await Promise.all([profile.refetch(), sessions.refetch(), identities.refetch()]);
+      await Promise.all([refetchProfile(), sessions.refetch(), identities.refetch()]);
     } catch (cause) {
       identityError = cause instanceof Error ? cause.message : 'The OIDC identity could not be unlinked.';
     } finally {
       identityBusy = '';
     }
+  }
+
+  async function refetchProfile() {
+    const result = await profile.refetch();
+    if (result.data) profileSync = acceptRemote(profileSync, result.data.etag);
+  }
+
+  async function reloadProfile() {
+    profileSync = beginReload(profileSync);
+    await profile.refetch();
   }
 
   function nextSessions() {
@@ -312,6 +360,7 @@
 <div class="page-header"><div><p class="eyebrow">Account</p><h1 class="page-title">Personal profile</h1><p class="page-description">Manage your display name, local password, and signed-in browser sessions.</p></div><a class="button button-secondary" href={resolve('/settings')}>Installation settings</a></div>
 
 {#if message}<p class="success-message" role="status">{message}</p>{/if}
+<ConflictNotice notice={profileConcurrentNotice} onReload={reloadProfile} disabled={savingProfile} />
 
 {#if profile.isPending}<div class="loading-state" role="status">Loading your profile…</div>
 {:else if profile.isError}<div class="inline-problem" role="alert">Your profile is unavailable. <button class="text-button" onclick={() => profile.refetch()}>Try again</button></div>

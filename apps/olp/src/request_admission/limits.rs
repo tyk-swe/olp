@@ -21,6 +21,12 @@ type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 struct InferenceReservationInner {
     release: Mutex<Option<ReleaseFuture>>,
+    reconcile: Mutex<Option<DistributedReconciliation>>,
+}
+
+struct DistributedReconciliation {
+    limiter: Arc<DistributedLimiter>,
+    lease: LimitLease,
 }
 
 #[derive(Clone)]
@@ -30,6 +36,10 @@ pub(crate) struct InferenceReservation {
 
 impl InferenceReservation {
     fn distributed(limiter: Arc<DistributedLimiter>, lease: LimitLease) -> Self {
+        let reconcile = DistributedReconciliation {
+            limiter: Arc::clone(&limiter),
+            lease: lease.clone(),
+        };
         Self {
             inner: Arc::new(InferenceReservationInner {
                 release: Mutex::new(Some(Box::pin(async move {
@@ -43,6 +53,7 @@ impl InferenceReservation {
                         Err(_) => tracing::warn!("timed out releasing HTTP concurrency lease"),
                     }
                 }))),
+                reconcile: Mutex::new(Some(reconcile)),
             }),
         }
     }
@@ -52,7 +63,32 @@ impl InferenceReservation {
         Self {
             inner: Arc::new(InferenceReservationInner {
                 release: Mutex::new(Some(Box::pin(release))),
+                reconcile: Mutex::new(None),
             }),
+        }
+    }
+
+    pub(crate) async fn reconcile(&self, actual_tokens: i64) {
+        let reconcile = self
+            .inner
+            .reconcile
+            .lock()
+            .expect("HTTP reservation reconciliation mutex is not poisoned")
+            .take();
+        let Some(reconcile) = reconcile else {
+            return;
+        };
+        match tokio::time::timeout(
+            Duration::from_millis(250),
+            reconcile.limiter.reconcile(&reconcile.lease, actual_tokens),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "failed to reconcile HTTP token reservation");
+            }
+            Err(_) => tracing::warn!("timed out reconciling HTTP token reservation"),
         }
     }
 

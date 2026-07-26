@@ -53,6 +53,7 @@ pub fn decode_count_tokens_request(
             ..GenerateContentRequest::default()
         },
     };
+    // The generateContent decoder's public contract always produces generation.
     let Operation::Generation(generation) =
         decode_generate_content_request(route_model, generation, false)?
     else {

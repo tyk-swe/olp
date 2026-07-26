@@ -103,6 +103,11 @@ impl GatewayState {
             .any(|cidr| cidr.contains(peer))
     }
 
+    #[must_use]
+    pub(crate) fn trusted_proxies_configured(&self) -> bool {
+        !self.trusted_proxy_cidrs.is_empty()
+    }
+
     pub(crate) fn record_media_reconciliation_gap(&self) {
         let _ = self.media_reconciliation_gaps.fetch_update(
             Ordering::Relaxed,

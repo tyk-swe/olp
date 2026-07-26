@@ -6,7 +6,17 @@
   import { authLifecycle } from '$lib/auth/lifecycle';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { ApiProblem } from '$lib/api/http';
+  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import {
+    beginReload,
+    conflictNotice,
+    initialConcurrentEdit,
+    markConflict,
+    markDirty,
+    markSaved,
+    reconcile
+  } from '$lib/forms/concurrentEdit';
   import {
     createInvitation,
     listInvitationPage,
@@ -57,7 +67,7 @@
   let inviteRole = $state('developer');
   let invitationSecret = $state<InvitationSecret | null>(null);
   let copied = $state(false);
-  let oidcInitialized = $state('pending');
+  let oidcSync = $state(initialConcurrentEdit());
   let oidcDiscoveryUrl = $state('');
   let oidcIssuer = $state('');
   let oidcClientId = $state('');
@@ -70,6 +80,7 @@
   let oidcEmailMappings = $state('');
   let oidcGroupMappings = $state('');
   let previousSessionUser = $state('');
+  const oidcConcurrentNotice = $derived(conflictNotice(oidcSync));
 
   $effect(() => {
     if (selectedSessionUser === previousSessionUser) return;
@@ -79,10 +90,25 @@
   });
 
   $effect(() => {
-    if (!oidc.isFetched || oidcInitialized !== 'pending') return;
+    if (!oidc.isFetched) return;
     const value = oidc.data;
-    oidcInitialized = value?.etag ?? 'new';
-    if (!value) return;
+    const next = reconcile(oidcSync, value?.etag ?? 'new');
+    if (next.state !== oidcSync) oidcSync = next.state;
+    if (!next.hydrate) return;
+    oidcClientSecret = '';
+    if (!value) {
+      oidcDiscoveryUrl = '';
+      oidcIssuer = '';
+      oidcClientId = '';
+      oidcEnabled = false;
+      oidcScopes = 'openid profile email';
+      oidcEmailClaim = 'email';
+      oidcGroupsClaim = 'groups';
+      oidcDefaultRole = 'viewer';
+      oidcEmailMappings = '';
+      oidcGroupMappings = '';
+      return;
+    }
     oidcDiscoveryUrl = value.discovery_url;
     oidcIssuer = value.issuer;
     oidcClientId = value.client_id;
@@ -108,7 +134,23 @@
 
   async function run(label: string, action: () => Promise<void>) {
     busy = label; errorMessage = ''; notice = '';
-    try { await action(); } catch (error) { errorMessage = message(error); } finally { busy = ''; }
+    try {
+      await action();
+    } catch (error) {
+      if (label === 'oidc-save' && isEtagMismatch(error)) oidcSync = markConflict(oidcSync);
+      else errorMessage = message(error);
+    } finally {
+      busy = '';
+    }
+  }
+
+  function touchOidc() {
+    oidcSync = markDirty(oidcSync);
+  }
+
+  async function reloadOidc() {
+    oidcSync = beginReload(oidcSync);
+    await oidc.refetch();
   }
 
   async function changeRole(user: User, role: string) {
@@ -198,10 +240,14 @@
         email_role_mappings: parseMappings(oidcEmailMappings),
         group_role_mappings: parseMappings(oidcGroupMappings)
       };
-      const updated = await putOidcConfiguration(input, oidc.data?.etag);
+      const etag = oidcSync.snapshotEtag;
+      const updated = await putOidcConfiguration(
+        input,
+        etag && etag !== 'new' ? etag : undefined
+      );
       oidcClientSecret = '';
+      oidcSync = markSaved(oidcSync, updated.etag);
       queryClient.setQueryData(['oidc-configuration'], updated);
-      oidcInitialized = updated.etag;
       notice = updated.enabled ? 'OIDC configuration validated and enabled.' : 'OIDC configuration saved but disabled.';
     });
   }
@@ -297,7 +343,8 @@
   {#if sessions.isPending}<div class="loading-state" role="status">Loading sessions…</div>{:else if sessions.isError}<div class="inline-problem" role="alert">{message(sessions.error)}</div>{:else if !sessions.data?.items.length && sessionHistory.length === 0}<section class="card empty-state"><p>No active sessions in this view.</p></section>{:else}<div class="table-shell"><table class="data-table"><thead><tr><th>Session ID</th><th>Status</th><th>Created</th><th>Last seen</th><th>Expires</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each sessions.data?.items ?? [] as session (session.id)}<tr><td><code>{session.id}</code></td><td><span class:accent={session.current} class="badge">{session.current ? 'current' : 'active'}</span></td><td>{new Date(session.created_at).toLocaleString()}</td><td>{new Date(session.last_seen_at).toLocaleString()}</td><td>{new Date(session.expires_at).toLocaleString()}</td><td><button class="button button-secondary danger-button" type="button" onclick={() => removeSession(session.id, session.current)} disabled={Boolean(busy)}>{session.current ? 'Sign out' : 'Revoke'}</button></td></tr>{/each}</tbody></table></div><CursorPagination page={sessionHistory.length + 1} hasPrevious={sessionHistory.length > 0} hasNext={Boolean(sessions.data?.nextCursor)} onPrevious={previousSessionPage} onNext={nextSessionPage} label="Session pages" />{/if}
 {:else}
   {#if oidc.isPending}<div class="loading-state" role="status">Loading OIDC configuration…</div>{:else if oidc.isError}<div class="inline-problem" role="alert">{message(oidc.error)} <button class="button button-secondary" type="button" onclick={() => oidc.refetch()}>Retry</button></div>{:else}
-    <form class="oidc-grid" onsubmit={saveOidc}>
+    <ConflictNotice notice={oidcConcurrentNotice} onReload={reloadOidc} disabled={Boolean(busy)} />
+    <form class="oidc-grid" onsubmit={saveOidc} oninput={touchOidc} onchange={touchOidc}>
       <section class="card oidc-form" aria-labelledby="oidc-heading"><div class="section-heading"><div><p class="eyebrow">Single identity provider</p><h2 id="oidc-heading">OIDC Authorization Code + PKCE</h2></div><label class="enabled"><input type="checkbox" bind:checked={oidcEnabled} /> Enabled</label></div><p class="muted">Discovery metadata is validated server-side and must match the issuer configured with your identity provider. Every flow uses PKCE, state, and nonce; identities require explicit linking.</p><div class="form-grid"><div class="form-field full"><label for="oidc-issuer">Expected issuer</label><input id="oidc-issuer" type="url" bind:value={oidcIssuer} placeholder="https://id.example.com" required /></div><div class="form-field full"><label for="discovery-url">Discovery URL</label><input id="discovery-url" type="url" bind:value={oidcDiscoveryUrl} placeholder="https://id.example.com/.well-known/openid-configuration" required /></div><div class="form-field"><label for="client-id">Client ID</label><input id="client-id" autocomplete="off" bind:value={oidcClientId} required /></div><div class="form-field"><label for="client-secret">Client secret</label><input id="client-secret" type="password" autocomplete="new-password" bind:value={oidcClientSecret} placeholder={oidc.data?.has_client_secret ? 'Leave blank to keep current secret' : 'Write-only secret'} /></div><div class="form-field full"><label for="oidc-scopes">Scopes</label><input id="oidc-scopes" bind:value={oidcScopes} /></div><div class="form-field"><label for="email-claim">Email claim</label><input id="email-claim" bind:value={oidcEmailClaim} /></div><div class="form-field"><label for="groups-claim">Groups claim</label><input id="groups-claim" bind:value={oidcGroupsClaim} /></div><div class="form-field"><label for="default-role">Default role</label><select id="default-role" bind:value={oidcDefaultRole}><option value="">No default (mapping required)</option>{#each roles as role (role)}<option value={role}>{role}</option>{/each}</select></div></div></section>
       <section class="card mapping-form" aria-labelledby="mapping-heading"><p class="eyebrow">Authorization mapping</p><h2 id="mapping-heading">Claims to fixed roles</h2><p class="muted">One mapping per line in <code>claim-value=role</code> form. Email mappings take precedence over group mappings and the default.</p><div class="form-field"><label for="email-mappings">Email mappings</label><textarea id="email-mappings" bind:value={oidcEmailMappings} placeholder="owner@example.com=owner"></textarea></div><div class="form-field"><label for="group-mappings">Group mappings</label><textarea id="group-mappings" bind:value={oidcGroupMappings} placeholder="platform-team=operator"></textarea></div><div class="oidc-actions"><button class="button button-secondary" type="button" onclick={linkIdentity} disabled={!oidc.data?.enabled || Boolean(busy)}>{busy === 'oidc-link' ? 'Redirecting…' : 'Link my identity'}</button><button class="button button-primary" type="submit" disabled={Boolean(busy)}>{busy === 'oidc-save' ? 'Validating…' : 'Save and validate'}</button></div></section>
     </form>

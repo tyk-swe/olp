@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
 
 use futures::future::select_all;
 use olp_storage::{
@@ -82,7 +82,7 @@ pub(super) async fn serve(
         check_secret_permissions(path).await?;
         state.auth_hmac_key = Some(Arc::new(load_auth_hmac_key(path).await?));
     }
-    state.set_trusted_proxy_cidrs(args.trusted_proxy_cidrs.clone());
+    state.set_trusted_proxy_cidrs(args.trusted_proxy_cidrs.0.clone());
     let setup_required = if mode.serves_control() {
         store.setup_required().await?
     } else {
@@ -118,6 +118,7 @@ pub(super) async fn serve(
         &state.runtime,
         &store,
         &state.transports,
+        &state.circuits,
         state.master_key.as_deref(),
     )
     .await
@@ -139,6 +140,7 @@ pub(super) async fn serve(
         Arc::clone(&state.runtime),
         store.clone(),
         state.transports.clone(),
+        state.circuits.clone(),
         state.master_key.clone(),
         background_shutdown_receiver.clone(),
     ));
@@ -147,6 +149,7 @@ pub(super) async fn serve(
             Arc::clone(&state.runtime),
             store.clone(),
             state.transports.clone(),
+            state.circuits.clone(),
             state.master_key.clone(),
             url.clone(),
             background_shutdown_receiver.clone(),
@@ -425,6 +428,7 @@ async fn runtime_hint_supervisor(
     runtime: Arc<RuntimeManager>,
     store: PgStore,
     transports: TransportRegistry,
+    circuits: crate::circuit::CircuitBreaker,
     master_key: Option<Arc<MasterKey>>,
     valkey_url: String,
     mut shutdown: watch::Receiver<bool>,
@@ -450,6 +454,7 @@ async fn runtime_hint_supervisor(
                             &runtime,
                             &store,
                             &transports,
+                            &circuits,
                             master_key.as_deref(),
                         )
                         .await
@@ -488,6 +493,7 @@ fn spawn_runtime_poller(
     runtime: Arc<RuntimeManager>,
     store: PgStore,
     transports: TransportRegistry,
+    circuits: crate::circuit::CircuitBreaker,
     master_key: Option<Arc<MasterKey>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
@@ -497,7 +503,13 @@ fn spawn_runtime_poller(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match activate_latest_runtime(&runtime, &store, &transports, master_key.as_deref())
+                    match activate_latest_runtime(
+                        &runtime,
+                        &store,
+                        &transports,
+                        &circuits,
+                        master_key.as_deref(),
+                    )
                         .await
                     {
                         Ok(true) => {
@@ -612,6 +624,7 @@ async fn activate_latest_runtime(
     runtime: &RuntimeManager,
     store: &PgStore,
     transports: &TransportRegistry,
+    circuits: &crate::circuit::CircuitBreaker,
     master_key: Option<&MasterKey>,
 ) -> AppResult<bool> {
     let releases = store
@@ -647,8 +660,16 @@ async fn activate_latest_runtime(
             continue;
         }
         candidate_transports.retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
+        let live_targets = snapshot
+            .routes
+            .values()
+            .flat_map(|route| route.targets.iter().map(|target| target.id))
+            .collect::<BTreeSet<_>>();
         match runtime.install(snapshot, candidate_transports) {
             Ok(installed) => {
+                if installed {
+                    circuits.retain_targets(&live_targets);
+                }
                 if !rejected.is_empty() {
                     warn!(
                         rejected = ?rejected,

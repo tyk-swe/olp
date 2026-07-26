@@ -267,8 +267,14 @@ async fn complete_video_create(
             };
             let compensation_confirmed = if cleanup_intent_persisted {
                 let mut cleanup = decode_video_delete(upstream_job_id.clone());
-                set_video_route(&mut cleanup, executed.route_slug.as_str())?;
-                mark_missing_delete_as_success(&mut cleanup)?;
+                if let Err(failure) = set_video_route(&mut cleanup, executed.route_slug.as_str()) {
+                    executed.mark_failure(&failure);
+                    return Err(failure);
+                }
+                if let Err(failure) = mark_missing_delete_as_success(&mut cleanup) {
+                    executed.mark_failure(&failure);
+                    return Err(failure);
+                }
                 let mut compensation = execute_routed_result(
                     &state,
                     &principal,
@@ -326,10 +332,10 @@ async fn complete_video_create(
     };
     result.id = record.id.to_string();
     result.model = Some(executed.route_slug.to_string());
-    let response = encode_video_object(&result, executed.route_slug.as_str()).map_err(|error| {
-        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
-    })?;
-    executed.mark_success();
+    let response = encode_video_object(&result, executed.route_slug.as_str())
+        .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
+    executed.mark_outcome(&response);
+    let response = response?;
     Ok((StatusCode::CREATED, Json(response)).into_response())
 }
 
@@ -436,10 +442,20 @@ pub(super) async fn video_get(
     debug_assert_eq!(executed.api_key_id, key.id.as_uuid());
     let mut result = match executed.result.as_ref() {
         CanonicalResult::VideoJob(result) => result.clone(),
-        _ => return Err(incompatible_result("video status")),
+        _ => {
+            executed.mark_provider_protocol_failure();
+            return Err(incompatible_result("video status"));
+        }
+    };
+    let state_update = match media_job_state(&result.status) {
+        Ok(state) => state,
+        Err(failure) => {
+            executed.mark_failure(&failure);
+            return Err(failure);
+        }
     };
     let update = MediaJobUpdate {
-        state: media_job_state(&result.status)?,
+        state: state_update,
         progress_percent: result.progress_percent,
         content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
         expires_at: result
@@ -451,17 +467,20 @@ pub(super) async fn video_get(
             .map(|error| format!("{:?}", error.class).to_lowercase()),
         last_polled_at: Utc::now(),
     };
-    let updated = state
-        .store()
-        .refresh_media_job(record.id, update)
-        .await
-        .map_err(media_job_error)?;
+    let updated = match state.store().refresh_media_job(record.id, update).await {
+        Ok(updated) => updated,
+        Err(error) => {
+            let failure = media_job_error(error);
+            executed.mark_failure(&failure);
+            return Err(failure);
+        }
+    };
     result.id = updated.id.to_string();
     result.model = Some(updated.route_slug.clone());
-    let response = encode_video_object(&result, &updated.route_slug).map_err(|error| {
-        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
-    })?;
-    executed.mark_success();
+    let response = encode_video_object(&result, &updated.route_slug)
+        .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
+    executed.mark_outcome(&response);
+    let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }
 
@@ -493,9 +512,18 @@ pub(super) async fn video_content(
     .await?;
     let result = match executed.result.as_ref() {
         CanonicalResult::VideoContent(result) => result.clone(),
-        _ => return Err(incompatible_result("video content")),
+        _ => {
+            executed.mark_provider_protocol_failure();
+            return Err(incompatible_result("video content"));
+        }
     };
-    let opened = open_response_media(&state, &result.media.handle).await?;
+    let opened = match open_response_media(&state, &result.media.handle).await {
+        Ok(opened) => opened,
+        Err(failure) => {
+            executed.mark_failure(&failure);
+            return Err(failure);
+        }
+    };
     let cleanup = CleanupMediaStream::new(
         opened.bytes,
         state.media_spool.clone(),
@@ -503,26 +531,36 @@ pub(super) async fn video_content(
     );
     let mut response = Response::new(Body::from_stream(cleanup));
     if let Some(content_type) = opened.artifact.content_type {
-        response.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_str(&content_type).map_err(|_| {
-                InferenceError::bad_gateway(
+        let content_type = match HeaderValue::from_str(&content_type) {
+            Ok(content_type) => content_type,
+            Err(_) => {
+                let failure = InferenceError::bad_gateway(
                     "provider_protocol_error",
                     "The provider returned an invalid video content type.",
-                )
-            })?,
-        );
+                );
+                executed.mark_failure(&failure);
+                return Err(failure);
+            }
+        };
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
     }
     if let Some(length) = opened.artifact.content_length {
-        response.headers_mut().insert(
-            header::CONTENT_LENGTH,
-            HeaderValue::from_str(&length.to_string()).map_err(|_| {
-                InferenceError::bad_gateway(
+        let content_length = match HeaderValue::from_str(&length.to_string()) {
+            Ok(content_length) => content_length,
+            Err(_) => {
+                let failure = InferenceError::bad_gateway(
                     "provider_protocol_error",
                     "The provider returned an invalid video length.",
-                )
-            })?,
-        );
+                );
+                executed.mark_failure(&failure);
+                return Err(failure);
+            }
+        };
+        response
+            .headers_mut()
+            .insert(header::CONTENT_LENGTH, content_length);
     }
     executed.mark_success();
     Ok(response)
@@ -571,7 +609,10 @@ pub(super) async fn video_delete(
     .await?;
     let mut result = match executed.result.as_ref() {
         CanonicalResult::VideoDelete(result) => result.clone(),
-        _ => return Err(incompatible_result("video deletion")),
+        _ => {
+            executed.mark_provider_protocol_failure();
+            return Err(incompatible_result("video deletion"));
+        }
     };
     if !result.deleted {
         let failure = InferenceError::bad_gateway(
@@ -581,9 +622,14 @@ pub(super) async fn video_delete(
         executed.mark_failure(&failure);
         return Err(failure);
     }
-    let finalized = media_job_deletion_finalized(state.store(), record.id)
-        .await
-        .map_err(media_job_error)?;
+    let finalized = match media_job_deletion_finalized(state.store(), record.id).await {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            let failure = media_job_error(error);
+            executed.mark_failure(&failure);
+            return Err(failure);
+        }
+    };
     if !finalized {
         state.record_media_reconciliation_gap();
         let failure = InferenceError::unavailable("media_job_delete_reconciliation_pending");
@@ -591,9 +637,9 @@ pub(super) async fn video_delete(
         return Err(failure);
     }
     result.id = record.id.to_string();
-    let response = encode_video_delete_response(&result).map_err(|error| {
-        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
-    })?;
-    executed.mark_success();
+    let response = encode_video_delete_response(&result)
+        .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
+    executed.mark_outcome(&response);
+    let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }

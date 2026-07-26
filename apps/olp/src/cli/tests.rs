@@ -108,6 +108,12 @@ fn master_key_cli_exposes_status_dry_run_and_retirement_guards() {
     ));
 }
 
+#[test]
+fn health_probe_cli_is_shell_free_and_requires_no_configuration() {
+    let cli = Cli::try_parse_from(["olp", "health-probe"]).unwrap();
+    assert!(matches!(cli.command, Command::HealthProbe));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn secret_files_reject_world_access_but_accept_owner_only_permissions() {
@@ -165,6 +171,23 @@ fn server_cli_parses_bootstrap_and_trusted_proxy_configuration() {
     assert_eq!(args.trusted_proxy_cidrs.len(), 2);
     assert_eq!(args.http_max_in_flight_inference_requests, 256);
     assert_eq!(args.http_max_in_flight_management_requests, 32);
+}
+
+#[test]
+fn server_cli_accepts_an_empty_trusted_proxy_list() {
+    let cli = Cli::try_parse_from([
+        "olp",
+        "control",
+        "--database-url",
+        "postgres://example/olp",
+        "--trusted-proxy-cidrs",
+        "",
+    ])
+    .unwrap();
+    let Command::Control(args) = cli.command else {
+        panic!("expected control command");
+    };
+    assert!(args.trusted_proxy_cidrs.is_empty());
 }
 
 #[test]

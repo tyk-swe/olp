@@ -1,5 +1,7 @@
 const LOGIN_LOOP_PATHS = ['/login', '/api/v1/oidc/login', '/api/v1/oidc/callback'] as const;
 const MAX_RELATIVE_RETURN_TO_BYTES = 2_048;
+// The control ranges are intentional input-validation boundaries.
+// eslint-disable-next-line no-control-regex
 const CONTROL_OR_BACKSLASH = /[\\\u0000-\u001f\u007f-\u009f]/u;
 const INVALID_PERCENT_ENCODING = /%(?![0-9a-fA-F]{2})/u;
 

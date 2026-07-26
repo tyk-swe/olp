@@ -243,21 +243,27 @@ impl OpenAiResponsesStreamDecoder {
                     .and_then(|response| response.get("error"))
                     .or_else(|| value.get("error"))
                     .unwrap_or(value);
+                let provider_code = error.get("code").and_then(Value::as_str).map(str::to_owned);
+                let retryable = crate::openai::error_signals_rate_limit(
+                    provider_code.as_deref(),
+                    error.get("type").and_then(Value::as_str),
+                );
                 self.emit(
                     events,
                     CanonicalEventKind::Error {
                         error: CanonicalError {
-                            class: ErrorClass::Upstream,
+                            class: if retryable {
+                                ErrorClass::RateLimit
+                            } else {
+                                ErrorClass::Upstream
+                            },
                             message: error
                                 .get("message")
                                 .and_then(Value::as_str)
                                 .unwrap_or("OpenAI Responses stream failed")
                                 .to_owned(),
-                            provider_code: error
-                                .get("code")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                            retryable: false,
+                            provider_code,
+                            retryable,
                         },
                     },
                 );
@@ -383,4 +389,35 @@ fn stream_string(value: &Value, field: &'static str) -> Result<String, Responses
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| ResponsesCodecError::InvalidResponse(field.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streamed_rate_limit_error_is_retryable() {
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder
+            .push(
+                concat!(
+                    "event: response.failed\n",
+                    "data: {\"type\":\"response.failed\",\"response\":{\"error\":",
+                    "{\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\",",
+                    "\"message\":\"slow down\"}}}\n\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+
+        let error = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                CanonicalEventKind::Error { error } => Some(error),
+                _ => None,
+            })
+            .expect("failed response event must emit a canonical error");
+        assert_eq!(error.class, ErrorClass::RateLimit);
+        assert!(error.retryable);
+    }
 }

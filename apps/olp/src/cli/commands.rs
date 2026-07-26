@@ -30,8 +30,19 @@ pub(super) async fn internal_pre_stop(args: InternalPreStopArgs) -> AppResult<()
 
 pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
     let store = connect_store(&args.persistence.database).await?;
-    store.migrate().await?;
-    info!("PostgreSQL migrations are current");
+    if let Some(target) = args.through_version {
+        if std::env::var("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS").as_deref() != Ok("test-only") {
+            return Err(std::io::Error::other(
+                "partial migration targets are restricted to test fixtures",
+            )
+            .into());
+        }
+        olp_storage::MIGRATOR.run_to(target, store.pool()).await?;
+        info!(target, "PostgreSQL migrations reached test target");
+    } else {
+        store.migrate().await?;
+        info!("PostgreSQL migrations are current");
+    }
     Ok(())
 }
 

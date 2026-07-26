@@ -16,11 +16,11 @@ use crate::{
 
 use super::{
     error::InferenceError,
-    failover::{ExecutionOutput, ExecutionSuccess, execute_with_failover},
+    failover::{ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover},
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     telemetry::{
-        UnaryRequestMetadataFinalizer, UsageCapture, elapsed_ms, emit_request_metadata_event,
-        usage_from_result,
+        RequestAccountingGuard, UnaryRequestMetadataFinalizer, UsageCapture, elapsed_ms,
+        emit_request_metadata_event, usage_from_result,
     },
 };
 
@@ -28,7 +28,7 @@ pub(crate) struct RoutedEventExecution {
     pub(crate) first: CanonicalEvent,
     pub(crate) events: olp_domain::ProviderEventStream,
     pub(crate) deadline: tokio::time::Instant,
-    pub(crate) lease: Option<LimitLease>,
+    pub(crate) accounting: Option<RequestAccountingGuard>,
     pub(super) generation_id: uuid::Uuid,
     pub(super) api_key_id: uuid::Uuid,
     pub request_id: uuid::Uuid,
@@ -119,7 +119,7 @@ async fn execute_operation(
             .saturating_add(Duration::from_secs(30)),
     )
     .await?;
-    let context = ExecutionContext {
+    let mut context = ExecutionContext {
         generation_id: principal.runtime().generation.id.as_uuid(),
         api_key_id: principal.key().id.as_uuid(),
         request_id,
@@ -154,7 +154,7 @@ async fn execute_operation(
                 error
             };
             emit_early_failure(state, &context, &[], &failure);
-            release_limits(state, context.lease.as_ref()).await;
+            release_limits(state, context.lease.as_ref(), None).await;
             return Err(failure);
         }
     };
@@ -163,26 +163,61 @@ async fn execute_operation(
         .routes
         .get(&context.route_slug)
         .expect("attempt selection returned a known route");
-    let execution = execute_with_failover(
-        principal.runtime(),
-        attempts,
-        RequestMetadata {
-            request_id: context.request_id,
-            operation: context.operation_kind,
-            surface: principal.surface(),
-            mode,
-        },
-        operation,
-        route.overall_timeout.as_duration(),
-        state.media_spool.clone(),
-        &state.circuits,
-    )
-    .await;
+    let mut accounting = RequestAccountingGuard::new(
+        state,
+        context.generation_id,
+        context.api_key_id,
+        context.request_id.as_uuid(),
+        context.route_slug.clone(),
+        context.request_started_at,
+        context.request_started,
+        context.surface,
+        context.operation_kind,
+        context.lease.take(),
+    );
+    let execution = {
+        let mut record_attempt_started =
+            |completed: &[RequestAttemptMetadata],
+             attempt: &olp_domain::AttemptPlan,
+             ordinal: u16,
+             started_at: chrono::DateTime<chrono::Utc>,
+             started: tokio::time::Instant| {
+                accounting.record_attempt_started(
+                    completed,
+                    ordinal,
+                    attempt.provider_id.as_uuid(),
+                    &attempt.upstream_model,
+                    started_at,
+                    started,
+                );
+            };
+        execute_with_failover(
+            FailoverContext {
+                runtime: principal.runtime(),
+                overall_timeout: route.overall_timeout.as_duration(),
+                media_spool: state.media_spool.clone(),
+                circuits: &state.circuits,
+                on_attempt_started: Some(&mut record_attempt_started),
+            },
+            attempts,
+            RequestMetadata {
+                request_id: context.request_id,
+                operation: context.operation_kind,
+                surface: principal.surface(),
+                mode,
+            },
+            operation,
+        )
+        .await
+    };
     match execution {
-        Ok(success) => Ok(CompletedExecution { context, success }),
+        Ok(success) => {
+            context.lease = accounting.disarm();
+            Ok(CompletedExecution { context, success })
+        }
         Err(failure) => {
-            emit_early_failure(state, &context, &failure.attempts, &failure.error);
-            release_limits(state, context.lease.as_ref()).await;
+            accounting.record_attempts(failure.attempts, None, None, false);
+            accounting.finish(Some(&failure.error)).await;
             Err(failure.error)
         }
     }
@@ -244,25 +279,45 @@ pub(super) async fn execute_event_operation_for_surface_inner(
     operation: Operation,
     mode: TransportMode,
 ) -> Result<RoutedEventExecution, InferenceError> {
-    let CompletedExecution { context, success } =
-        execute_operation(state, principal, operation, mode, None).await?;
+    let CompletedExecution {
+        mut context,
+        success,
+    } = execute_operation(state, principal, operation, mode, None).await?;
     let ExecutionSuccess {
         output,
         deadline,
         attempts,
         attempt_started,
     } = success;
-    let ExecutionOutput::Events { first, events } = output else {
-        release_limits(state, context.lease.as_ref()).await;
-        return Err(incompatible_result("generation"));
-    };
-    crate::claim_http_inference_metadata();
     let first_byte_ms = elapsed_ms(context.request_started.elapsed());
+    let mut accounting = RequestAccountingGuard::new(
+        state,
+        context.generation_id,
+        context.api_key_id,
+        context.request_id.as_uuid(),
+        context.route_slug.clone(),
+        context.request_started_at,
+        context.request_started,
+        context.surface,
+        context.operation_kind,
+        context.lease.take(),
+    );
+    accounting.record_attempts(
+        attempts.clone(),
+        Some(attempt_started),
+        Some(first_byte_ms),
+        true,
+    );
+    let ExecutionOutput::Events { first, events } = output else {
+        let failure = incompatible_result("generation");
+        accounting.finish(Some(&failure)).await;
+        return Err(failure);
+    };
     Ok(RoutedEventExecution {
         first,
         events,
         deadline,
-        lease: context.lease,
+        accounting: Some(accounting),
         generation_id: context.generation_id,
         api_key_id: context.api_key_id,
         request_id: context.request_id.as_uuid(),
@@ -300,6 +355,13 @@ impl RoutedUnaryResult {
         }
     }
 
+    pub(crate) fn mark_provider_protocol_failure(&mut self) {
+        self.mark_failure(&InferenceError::bad_gateway(
+            "provider_protocol_error",
+            "The provider result was not representable on the client protocol.",
+        ));
+    }
+
     pub(super) fn mark_outcome<T>(&mut self, outcome: &Result<T, InferenceError>) {
         match outcome {
             Ok(_) => self.mark_success(),
@@ -313,10 +375,7 @@ impl Drop for RoutedUnaryResult {
         let Some(finalizer) = self.request_metadata_finalizer.take() else {
             return;
         };
-        let failure = InferenceError::bad_gateway(
-            "provider_protocol_error",
-            "The provider result was not representable on the client protocol.",
-        );
+        let failure = InferenceError::client_cancelled();
         finalizer.finalize(Some(&failure));
     }
 }
@@ -364,43 +423,47 @@ pub(super) async fn execute_routed_result_for_surface_inner(
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    let CompletedExecution { context, success } =
-        execute_operation(state, principal, operation, mode, required_target).await?;
+    let CompletedExecution {
+        mut context,
+        success,
+    } = execute_operation(state, principal, operation, mode, required_target).await?;
     let ExecutionSuccess {
         output,
         attempts,
         attempt_started,
         ..
     } = success;
+    let first_byte_ms = elapsed_ms(context.request_started.elapsed());
+    let mut accounting = RequestAccountingGuard::new(
+        state,
+        context.generation_id,
+        context.api_key_id,
+        context.request_id.as_uuid(),
+        context.route_slug.clone(),
+        context.request_started_at,
+        context.request_started,
+        context.surface,
+        context.operation_kind,
+        context.lease.take(),
+    );
+    accounting.record_attempts(
+        attempts.clone(),
+        Some(attempt_started),
+        Some(first_byte_ms),
+        true,
+    );
     let ExecutionOutput::Result(result) = output else {
         let failure = InferenceError::bad_gateway(
             "provider_protocol_error",
             "The provider returned an event stream for a unary result operation.",
         );
-        emit_request_metadata_event(
-            state,
-            context.generation_id,
-            context.api_key_id,
-            context.request_id.as_uuid(),
-            &context.route_slug,
-            &attempts,
-            context.request_started_at,
-            context.request_started,
-            Some(attempt_started),
-            Some(elapsed_ms(context.request_started.elapsed())),
-            Some(failure.status.as_u16()),
-            Some(failure.code.to_owned()),
-            true,
-            &UsageCapture::default(),
-            context.surface,
-            context.operation_kind,
-        );
-        release_limits(state, context.lease.as_ref()).await;
+        accounting.finish(Some(&failure)).await;
         return Err(failure);
     };
     let usage = usage_from_result(&result);
-    let first_byte_ms = elapsed_ms(context.request_started.elapsed());
-    release_limits(state, context.lease.as_ref()).await;
+    accounting.replace_usage(usage.clone());
+    accounting.release_lease().await;
+    let _ = accounting.disarm();
     let final_attempt = attempts
         .last()
         .expect("a successful execution has one provider attempt");
@@ -456,7 +519,7 @@ pub(crate) async fn reserve_model_limits(
 }
 
 pub(crate) async fn release_model_limits(state: &GatewayState, lease: Option<&LimitLease>) {
-    release_limits(state, lease).await;
+    release_limits(state, lease, None).await;
 }
 
 pub(crate) struct SessionGenerationExecution {
@@ -515,7 +578,13 @@ async fn execute_session_generation_inner(
         .expect("attempt selection returned a known route");
     let started = tokio::time::Instant::now();
     let execution = execute_with_failover(
-        &snapshot,
+        FailoverContext {
+            runtime: &snapshot,
+            overall_timeout: route.overall_timeout.as_duration(),
+            media_spool: state.media_spool.clone(),
+            circuits: &state.circuits,
+            on_attempt_started: None,
+        },
         attempts,
         RequestMetadata {
             request_id,
@@ -524,9 +593,6 @@ async fn execute_session_generation_inner(
             mode: TransportMode::Unary,
         },
         operation,
-        route.overall_timeout.as_duration(),
-        state.media_spool.clone(),
-        &state.circuits,
     )
     .await;
     let success = execution.map_err(|failure| failure.error)?;

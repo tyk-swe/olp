@@ -4,12 +4,13 @@
   import { onDestroy } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import CapabilityReview from './CapabilityReview.svelte';
   import {
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
   } from './providerCache';
-  import { ApiProblem } from '$lib/api/http';
+  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
   import {
     activateProvider,
     certifyProviderModel,
@@ -72,6 +73,8 @@
   let errorMessage = $state('');
   let notice = $state('');
   let certificationResults = $state<Record<string, CapabilityCertification>>({});
+  let wizardConflict = $state(false);
+  let wizardModelReloadVersion = $state(0);
 
   const selectedSpec = $derived(
     providerKinds.data?.find((candidate) => candidate.kind === draft?.kind)
@@ -106,14 +109,17 @@
         : 'The control API could not complete the request.';
   }
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(label: string, action: () => Promise<void>): Promise<boolean> {
     busy = label;
     errorMessage = '';
     notice = '';
     try {
       await action();
+      return true;
     } catch (error) {
-      errorMessage = message(error);
+      if (wizardProvider && isEtagMismatch(error)) wizardConflict = true;
+      else errorMessage = message(error);
+      return false;
     } finally {
       busy = '';
     }
@@ -121,6 +127,31 @@
 
   function clearCertificationResults() {
     certificationResults = {};
+  }
+
+  async function refetchWizardModels() {
+    const result = await wizardModels.refetch();
+    if (result.error) throw result.error;
+    if (!result.data) throw new Error('The provider model reload returned no data.');
+    return result.data;
+  }
+
+  async function reloadWizard() {
+    if (!wizardProvider) return;
+    busy = 'reload';
+    errorMessage = '';
+    notice = '';
+    try {
+      const reloadedProvider = await getProvider(wizardProvider.id);
+      await refetchWizardModels();
+      wizardProvider = reloadedProvider;
+      wizardModelReloadVersion += 1;
+      wizardConflict = false;
+    } catch (error) {
+      errorMessage = message(error);
+    } finally {
+      busy = '';
+    }
   }
 
   function nextWizardModelPage() {
@@ -177,11 +208,11 @@
             : 'The upstream returned no models. Verify its identity and cloud context, then retry discovery.'
         );
       }
-      wizardProvider = discovered;
       clearCertificationResults();
       wizardModelCursor = undefined;
       wizardModelHistory = [];
-      await wizardModels.refetch();
+      await refetchWizardModels();
+      wizardProvider = discovered;
       wizardStep = 4;
       await invalidateProviderModelConsumers(queryClient);
     });
@@ -195,12 +226,13 @@
       return;
     }
     await run('declare-models', async () => {
-      wizardProvider = await declareProviderModels(wizardProvider!, names);
+      const declared = await declareProviderModels(wizardProvider!, names);
       clearCertificationResults();
       manualModelNames = '';
       wizardModelCursor = undefined;
       wizardModelHistory = [];
-      await wizardModels.refetch();
+      await refetchWizardModels();
+      wizardProvider = declared;
       wizardStep = 4;
       await invalidateProviderModelConsumers(queryClient);
     });
@@ -209,13 +241,20 @@
   async function reviewWizardModel(
     modelId: string,
     enabled: boolean,
-    capabilities: CapabilityDeclaration[]
-  ) {
-    if (!wizardProvider) return;
-    await run(`model-${modelId}`, async () => {
-      wizardProvider = await setProviderModel(wizardProvider!, modelId, enabled, capabilities);
+    capabilities: CapabilityDeclaration[],
+    providerEtag: string
+  ): Promise<boolean> {
+    if (!wizardProvider) return false;
+    return run(`model-${modelId}`, async () => {
+      const updated = await setProviderModel(
+        { ...wizardProvider!, etag: providerEtag },
+        modelId,
+        enabled,
+        capabilities
+      );
       clearCertificationResults();
-      await wizardModels.refetch();
+      await refetchWizardModels();
+      wizardProvider = updated;
       await invalidateProviderModelConsumers(queryClient);
       notice = 'Capability review saved with declared provenance.';
     });
@@ -226,8 +265,9 @@
     await run(`certify-${modelId}`, async () => {
       const result = await certifyProviderModel(wizardProvider!, modelId);
       certificationResults = { ...certificationResults, [modelId]: result };
-      wizardProvider = await getProvider(wizardProvider!.id);
-      await wizardModels.refetch();
+      const updated = await getProvider(wizardProvider!.id);
+      await refetchWizardModels();
+      wizardProvider = updated;
       await invalidateProviderModelConsumers(queryClient);
       probe = null;
       notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
@@ -278,6 +318,7 @@
 
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+<ConflictNotice notice={wizardConflict ? 'conflict' : null} onReload={reloadWizard} disabled={Boolean(busy)} />
 
 {#if wizardStep === 1 && providerKinds.isPending}
   <div class="card stage" role="status">Loading provider capabilities…</div>
@@ -324,13 +365,13 @@
     <button class="button button-primary" type="button" onclick={discoverWizardProvider} disabled={Boolean(busy)}>{busy === 'discover' ? 'Discovering…' : 'Discover upstream models'}</button>
     {#if wizardProvider?.kind === 'openai_compatible'}<details class="manual-fallback"><summary>Endpoint has no model-list API?</summary><p>Declare identifiers manually. They remain disabled and capability-empty until you complete the same review.</p><div class="form-field"><label for="manual-models-wizard">Upstream model identifiers</label><textarea id="manual-models-wizard" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={declareWizardModels} disabled={Boolean(busy)}>{busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
   </section>
-{:else if wizardStep === 4}
+{:else if wizardStep === 4 && wizardProvider}
   <section class="card stage wide" aria-labelledby="capability-heading">
     <p class="eyebrow">Capability review</p><h2 id="capability-heading">Review model capabilities</h2>
     <p>Operator review is recorded as <code>declared</code>. Every native and compatible capability tuple must receive server-owned certification for this exact draft.</p>
     <div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead><tbody>
       {#each wizardModels.data?.items ?? [] as model (model.id)}
-        <tr><td><strong>{model.display_name}</strong><br /><code>{model.upstream_model}</code></td><td><CapabilityReview {model} options={capabilityOptions.data?.capabilities ?? []} optionsPending={capabilityOptions.isPending} optionsError={capabilityOptions.isError} disabled={Boolean(busy)} onSave={(enabled, capabilities) => reviewWizardModel(model.id, enabled, capabilities)} /><div class="certification-action"><button class="button button-secondary" type="button" onclick={() => certifyWizardModel(model.id)} disabled={Boolean(busy) || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>{#if certificationResults[model.id]}{@const result = certificationResults[model.id]}<span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span>{/if}</div></td></tr>
+        <tr><td><strong>{model.display_name}</strong><br /><code>{model.upstream_model}</code></td><td><CapabilityReview {model} providerEtag={wizardProvider.etag} options={capabilityOptions.data?.capabilities ?? []} optionsPending={capabilityOptions.isPending} optionsError={capabilityOptions.isError} disabled={Boolean(busy)} reloadVersion={wizardModelReloadVersion} onSave={(enabled, capabilities, providerEtag) => reviewWizardModel(model.id, enabled, capabilities, providerEtag)} /><div class="certification-action"><button class="button button-secondary" type="button" onclick={() => certifyWizardModel(model.id)} disabled={Boolean(busy) || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>{#if certificationResults[model.id]}{@const result = certificationResults[model.id]}<span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span>{/if}</div></td></tr>
       {/each}
     </tbody></table></div>
     <CursorPagination page={wizardModelHistory.length + 1} hasPrevious={wizardModelHistory.length > 0} hasNext={Boolean(wizardModels.data?.nextCursor)} onPrevious={previousWizardModelPage} onNext={nextWizardModelPage} label="Provider wizard model pages" />

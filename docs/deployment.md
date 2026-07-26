@@ -28,6 +28,11 @@ before installation. The defaults are:
 | Master key | `olp-master-key` | `key` |
 | Authentication HMAC key | `olp-auth-hmac-key` | `key` |
 
+Existing installations that still use `olp-key-hash-key` must copy those exact
+bytes to the new Secret and update the chart values before upgrading. Never
+generate a replacement. Follow the byte-preserving procedure in the
+[upgrade runbook](operations.md#naming-migration-prerequisites).
+
 For a new installation, also create a 32-byte base64 bootstrap token Secret
 and set `config.bootstrapTokenSecretName` and `config.bootstrapTokenSecretKey`.
 Helm mounts it only into control pods; it is required until the first owner has
@@ -86,6 +91,13 @@ gateway and control Services are enabled. It also refuses to render an Ingress
 without `config.trustedProxyCidrs`: public login, invitation, and OIDC limits
 use the connection peer unless that peer is explicitly trusted to supply
 `X-Forwarded-For`.
+
+Compose follows the same fail-safe default through `OLP_TRUSTED_PROXY_CIDRS`.
+Leave it empty for direct deployments. Behind a reverse proxy, set it to the
+comma-separated CIDRs of only the proxy peers that append a trustworthy
+`X-Forwarded-For` chain. Forwarding headers received while the setting is empty
+are ignored and produce a rate-limited warning so a missing trust boundary is
+visible without allowing clients to spoof admission identities.
 
 For Gateway API, a service mesh, or an external Ingress, leave
 `ingress.enabled: false` and reproduce the table above. Preserve the Host,

@@ -2,7 +2,18 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { ApiProblem } from '$lib/api/http';
+  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import {
+    beginReload,
+    conflictNotice,
+    initialConcurrentEdit,
+    markConflict,
+    markDirty,
+    markSaved,
+    reconcile,
+    acceptRemote
+  } from '$lib/forms/concurrentEdit';
   import {
     activateRoute,
     createRouteDraft,
@@ -51,7 +62,7 @@
   let overallTimeoutMs = $state(120000);
   let maxAttempts = $state(2);
   let targets = $state<EditableTarget[]>([]);
-  let initialized = $state('');
+  let sync = $state(initialConcurrentEdit());
   let busy = $state('');
   let errorMessage = $state('');
   let notice = $state('');
@@ -63,11 +74,14 @@
   let activation = $state<RouteActivation | null>(null);
   let validated = $state(false);
   const editorValues = $derived({ slug, operations, overallTimeoutMs, maxAttempts, targets });
+  const concurrentNotice = $derived(conflictNotice(sync));
 
   $effect(() => {
     const current = draft.data;
-    if (!current || initialized === current.etag) return;
-    initialized = current.etag;
+    if (!current) return;
+    const next = reconcile(sync, current.etag);
+    if (next.state !== sync) sync = next.state;
+    if (!next.hydrate) return;
     slug = current.slug;
     operations = [...current.operations];
     overallTimeoutMs = current.overall_timeout_ms;
@@ -105,26 +119,43 @@
     busy = label;
     errorMessage = '';
     notice = '';
-    try { await action(); } catch (error) { errorMessage = message(error); } finally { busy = ''; }
+    try {
+      await action();
+    } catch (error) {
+      if (isEtagMismatch(error)) sync = markConflict(sync);
+      else errorMessage = message(error);
+    } finally {
+      busy = '';
+    }
+  }
+
+  function touch() {
+    sync = markDirty(sync);
+    validated = false;
+  }
+
+  async function reload() {
+    sync = beginReload(sync);
+    await draft.refetch();
   }
 
   function toggleOperation(operation: string, checked: boolean) {
     operations = checked
       ? [...new Set([...operations, operation])]
       : operations.filter((item) => item !== operation);
-    validated = false;
+    touch();
   }
 
   function addTarget() {
     const firstUnused = modelOptions.find((option) => !targets.some((target) => target.providerModelId === option.id)) ?? modelOptions[0];
     if (!firstUnused) return;
     targets = [...targets, { providerModelId: firstUnused.id, priority: 1, weight: 100, timeoutMs: 60000 }];
-    validated = false;
+    touch();
   }
 
   function removeTarget(index: number) {
     targets = targets.filter((_, targetIndex) => targetIndex !== index);
-    validated = false;
+    touch();
   }
 
   async function create(event: SubmitEvent) {
@@ -143,11 +174,13 @@
     const issue = validateRouteEditor(editorValues);
     if (issue) { errorMessage = issue; return; }
     await run('save', async () => {
+      if (!sync.snapshotEtag) throw new Error('Reload the draft before saving.');
       const updated = await replaceRouteDraft(
         current.id,
-        current.etag,
+        sync.snapshotEtag,
         buildReplaceRouteDraftInput(editorValues)
       );
+      sync = markSaved(sync, updated.etag);
       queryClient.setQueryData(['route-draft', current.id], updated);
       validated = false;
       notice = 'Draft saved. Simulate and validate before activation.';
@@ -169,6 +202,7 @@
   async function validate(current: RouteDraft) {
     await run('validate', async () => {
       const validation = await validateRoute(current);
+      sync = acceptRemote(sync, validation.etag);
       queryClient.setQueryData<RouteDraft>(['route-draft', current.id], {
         ...current,
         state: validation.state,
@@ -212,6 +246,7 @@
 </div>
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+<ConflictNotice notice={concurrentNotice} onReload={reload} disabled={Boolean(busy)} />
 {#if (!isNew && draft.isPending) || providerModels.isPending}
   <div class="loading-state" role="status">Loading Route Studio…</div>
 {:else if (!isNew && draft.isError) || providerModels.isError}
@@ -219,7 +254,7 @@
 {:else}
   <form class="studio" onsubmit={isNew ? create : (event) => { event.preventDefault(); if (draft.data) save(draft.data); }}>
     <div class="studio-main">
-      <section class="card editor" aria-labelledby="route-contract-heading"><p class="eyebrow">Public contract</p><h2 id="route-contract-heading">Slug and operations</h2><div class="form-grid"><div class="form-field full"><label for="route-slug">Public model slug</label><input id="route-slug" autocomplete="off" bind:value={slug} oninput={() => validated = false} /><small>Clients send this value as their model. Direct provider/model addressing is unavailable.</small></div><fieldset class="form-field full operations"><legend>Supported operations</legend>{#each operationOptions as option (option[0])}<label><input type="checkbox" checked={operations.includes(option[0])} onchange={(event) => toggleOperation(option[0], event.currentTarget.checked)} /> {option[1]}</label>{/each}</fieldset></div></section>
+      <section class="card editor" aria-labelledby="route-contract-heading"><p class="eyebrow">Public contract</p><h2 id="route-contract-heading">Slug and operations</h2><div class="form-grid"><div class="form-field full"><label for="route-slug">Public model slug</label><input id="route-slug" autocomplete="off" bind:value={slug} oninput={touch} /><small>Clients send this value as their model. Direct provider/model addressing is unavailable.</small></div><fieldset class="form-field full operations"><legend>Supported operations</legend>{#each operationOptions as option (option[0])}<label><input type="checkbox" checked={operations.includes(option[0])} onchange={(event) => toggleOperation(option[0], event.currentTarget.checked)} /> {option[1]}</label>{/each}</fieldset></div></section>
       <section class="card editor" aria-labelledby="targets-heading"><div class="section-heading"><div><p class="eyebrow">Attempt order</p><h2 id="targets-heading">Eligible targets</h2></div><button class="button button-secondary" type="button" onclick={addTarget} disabled={!modelOptions.length}>Add target</button></div>
         {#if !modelOptions.length}<div class="empty-state compact"><p>No enabled models are available. <a href={resolve('/models')}>Review model eligibility</a>.</p></div>{/if}
         <ol class="targets">
@@ -227,10 +262,10 @@
             <li>
               <span class="target-number" aria-hidden="true">{index + 1}</span>
               <div class="target-fields">
-                <div class="form-field model-select"><label for={`target-model-${index}`}>Provider model</label><select id={`target-model-${index}`} bind:value={target.providerModelId} onchange={() => validated = false}>{#each modelOptions as option (option.id)}<option value={option.id}>{option.label}</option>{/each}</select></div>
-                <div class="form-field"><label for={`priority-${index}`}>Priority</label><input id={`priority-${index}`} type="number" min="1" max="100" bind:value={target.priority} oninput={() => validated = false} /></div>
-                <div class="form-field"><label for={`weight-${index}`}>Weight</label><input id={`weight-${index}`} type="number" min="1" max="10000" bind:value={target.weight} oninput={() => validated = false} /></div>
-                <div class="form-field"><label for={`timeout-${index}`}>Attempt timeout (ms)</label><input id={`timeout-${index}`} type="number" min="100" bind:value={target.timeoutMs} oninput={() => validated = false} /></div>
+                <div class="form-field model-select"><label for={`target-model-${index}`}>Provider model</label><select id={`target-model-${index}`} bind:value={target.providerModelId} onchange={touch}>{#each modelOptions as option (option.id)}<option value={option.id}>{option.label}</option>{/each}</select></div>
+                <div class="form-field"><label for={`priority-${index}`}>Priority</label><input id={`priority-${index}`} type="number" min="1" max="100" bind:value={target.priority} oninput={touch} /></div>
+                <div class="form-field"><label for={`weight-${index}`}>Weight</label><input id={`weight-${index}`} type="number" min="1" max="10000" bind:value={target.weight} oninput={touch} /></div>
+                <div class="form-field"><label for={`timeout-${index}`}>Attempt timeout (ms)</label><input id={`timeout-${index}`} type="number" min="100" bind:value={target.timeoutMs} oninput={touch} /></div>
               </div>
               <button class="remove-target" type="button" aria-label={`Remove target ${index + 1}`} onclick={() => removeTarget(index)}>×</button>
               <div class:warning={missingTargetOperations(target, modelOptions, operations).length > 0} class="target-eligibility">
@@ -246,7 +281,7 @@
         </ol>
         {#if routeEligibilityWarnings.length}<div class="eligibility-warning" role="status"><strong>Route eligibility is incomplete.</strong><span>No selected target has a certified tuple for: {routeEligibilityWarnings.join(', ')}.</span></div>{/if}
       </section>
-      <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" bind:value={overallTimeoutMs} oninput={() => validated = false} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" bind:value={maxAttempts} oninput={() => validated = false} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
+      <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" bind:value={overallTimeoutMs} oninput={touch} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" bind:value={maxAttempts} oninput={touch} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
     </div>
     <aside class="card publish-panel" aria-labelledby="publish-heading"><p class="eyebrow">Draft controls</p><h2 id="publish-heading">Test before activation</h2><p>Saving changes invalidates prior validation.</p><button class="button button-secondary" type="submit" disabled={Boolean(busy)}>{busy === 'save' ? 'Saving…' : isNew ? 'Create draft' : 'Save draft'}</button>
       {#if !isNew && draft.data}

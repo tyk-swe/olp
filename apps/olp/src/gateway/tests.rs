@@ -20,10 +20,11 @@ use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalError, CanonicalEvent, CanonicalEventKind,
     CanonicalResult, Capability, CredentialVersionId, DurationMs, ErrorClass,
-    EventSequenceValidator, FinishReason, MediaHandle, MediaSpool, MessageRole, Operation,
-    OperationKind, Provider, ProviderEventStream, ProviderId, ProviderKind, ProviderOutput,
-    ProviderRequest, ProviderTransport, Route, RouteId, RouteSlug, RuntimeGeneration,
-    RuntimeGenerationId, RuntimeSnapshot, Surface, Target, TargetId, TransportError, TransportMode,
+    EventSequenceValidator, FinishReason, ImageGenerationRequest, ImageOperation, MediaHandle,
+    MediaSpool, MessageRole, Operation, OperationKind, Provider, ProviderEventStream, ProviderId,
+    ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, RequestId, RequestMetadata,
+    Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot,
+    SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode, select_attempts,
 };
 use olp_protocols::openai::{
     ChatCompletionRequest, ResponseInputTokensRequest, decode_chat_completion,
@@ -39,7 +40,10 @@ use super::{
         RequiredTarget, execute_event_operation_for_surface_inner,
         execute_routed_result_for_surface_inner,
     },
-    failover::{EventStream, circuit_accounted_event_stream, validated_event_stream},
+    failover::{
+        EventStream, FailoverContext, circuit_accounted_event_stream, execute_with_failover,
+        validated_event_stream,
+    },
     limits::reserve_limits,
     media_jobs::{media_job_state, valid_upstream_media_job_id},
     multipart::MultipartFormData,
@@ -204,6 +208,27 @@ struct StaticResultTransport {
 
 struct PendingTransport;
 
+struct NotifyingPendingTransport {
+    started: Arc<tokio::sync::Notify>,
+}
+
+#[derive(Clone)]
+struct FirstEventPendingTransport {
+    calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct CountingFiniteTransport {
+    calls: Arc<AtomicUsize>,
+    events: Vec<CanonicalEvent>,
+}
+
+#[derive(Clone)]
+struct CollectingPendingTransport {
+    reached_pending: Arc<tokio::sync::Notify>,
+    events: Vec<CanonicalEvent>,
+}
+
 #[derive(Default)]
 struct CountingAdmissionSpool {
     puts: AtomicUsize,
@@ -236,6 +261,11 @@ impl olp_domain::MediaSpool for CountingAdmissionSpool {
 struct RecordingSpool {
     inner: Arc<dyn MediaSpool>,
     handles: Mutex<Vec<MediaHandle>>,
+}
+
+struct BlockingRemoveSpool {
+    inner: Arc<dyn MediaSpool>,
+    remove_started: Arc<tokio::sync::Notify>,
 }
 
 impl RecordingSpool {
@@ -282,6 +312,37 @@ impl MediaSpool for RecordingSpool {
     }
 }
 
+impl MediaSpool for BlockingRemoveSpool {
+    fn capacity_bytes(&self) -> Option<u64> {
+        self.inner.capacity_bytes()
+    }
+
+    fn put<'a>(
+        &'a self,
+        upload: olp_domain::MediaUpload,
+    ) -> BoxFuture<'a, Result<olp_domain::MediaArtifact, olp_domain::MediaSpoolError>> {
+        self.inner.put(upload)
+    }
+
+    fn open<'a>(
+        &'a self,
+        handle: &'a MediaHandle,
+    ) -> BoxFuture<'a, Result<olp_domain::OpenedMedia, olp_domain::MediaSpoolError>> {
+        self.inner.open(handle)
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _handle: &'a MediaHandle,
+    ) -> BoxFuture<'a, Result<(), olp_domain::MediaSpoolError>> {
+        let remove_started = self.remove_started.clone();
+        Box::pin(async move {
+            remove_started.notify_one();
+            std::future::pending().await
+        })
+    }
+}
+
 struct CapturingPendingTransport {
     captured: tokio::sync::mpsc::UnboundedSender<MediaHandle>,
 }
@@ -292,6 +353,64 @@ impl ProviderTransport for PendingTransport {
         _request: ProviderRequest,
     ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(std::future::pending())
+    }
+}
+
+impl ProviderTransport for NotifyingPendingTransport {
+    fn execute<'a>(
+        &'a self,
+        _request: ProviderRequest,
+    ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+        self.started.notify_one();
+        Box::pin(std::future::pending())
+    }
+}
+
+impl ProviderTransport for FirstEventPendingTransport {
+    fn execute<'a>(
+        &'a self,
+        _request: ProviderRequest,
+    ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(ProviderOutput::Events(
+                Box::pin(stream::pending()) as ProviderEventStream
+            ))
+        })
+    }
+}
+
+impl ProviderTransport for CountingFiniteTransport {
+    fn execute<'a>(
+        &'a self,
+        _request: ProviderRequest,
+    ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let events = self.events.clone();
+        Box::pin(async move {
+            Ok(ProviderOutput::Events(Box::pin(stream::iter(
+                events.into_iter().map(Ok),
+            ))))
+        })
+    }
+}
+
+impl ProviderTransport for CollectingPendingTransport {
+    fn execute<'a>(
+        &'a self,
+        _request: ProviderRequest,
+    ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+        let events = self.events.clone();
+        let reached_pending = self.reached_pending.clone();
+        Box::pin(async move {
+            let pending = stream::once(async move {
+                reached_pending.notify_one();
+                std::future::pending::<Result<CanonicalEvent, TransportError>>().await
+            });
+            Ok(ProviderOutput::Events(Box::pin(
+                stream::iter(events.into_iter().map(Ok)).chain(pending),
+            )))
+        })
     }
 }
 
@@ -530,6 +649,254 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
     })
     .await
     .expect("request media guard must schedule cleanup when its future is dropped");
+}
+
+#[tokio::test]
+async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
+    let reached_pending = Arc::new(tokio::sync::Notify::new());
+    install_transport(
+        &state,
+        Arc::new(CollectingPendingTransport {
+            reached_pending: reached_pending.clone(),
+            events: vec![
+                CanonicalEvent::new(
+                    0,
+                    CanonicalEventKind::ResponseStart {
+                        response_id: Some("chatcmpl-cancelled".to_owned()),
+                        provider_model: Some("upstream-model".to_owned()),
+                    },
+                ),
+                CanonicalEvent::new(
+                    1,
+                    CanonicalEventKind::Usage {
+                        usage: olp_domain::Usage {
+                            input_tokens: 7,
+                            output_tokens: 3,
+                            total_tokens: 10,
+                            cached_input_tokens: Some(2),
+                            reasoning_tokens: None,
+                        },
+                    },
+                ),
+            ],
+        }),
+    );
+    let state_for_task = state.clone();
+    let task = tokio::spawn(async move {
+        post_json(
+            &state_for_task,
+            &key,
+            "/openai/v1/chat/completions",
+            r#"{"model":"default","messages":[{"role":"user","content":"hi"}]}"#,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), reached_pending.notified())
+        .await
+        .expect("unary collection must consume the usage event before stalling");
+    task.abort();
+    let _ = task.await;
+
+    let event = tokio::time::timeout(Duration::from_secs(1), request_metadata.recv_next())
+        .await
+        .expect("cancellation must emit request metadata")
+        .expect("metadata channel must remain open");
+    assert_eq!(event.status_code, None);
+    assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
+    assert_eq!(event.input_tokens, Some(7));
+    assert_eq!(event.output_tokens, Some(3));
+    assert_eq!(event.cached_input_tokens, Some(2));
+    assert!(event.usage_complete);
+    assert!(event.committed);
+}
+
+#[tokio::test]
+async fn cancelling_during_transport_wait_records_the_active_attempt() {
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
+    let started = Arc::new(tokio::sync::Notify::new());
+    install_transport(
+        &state,
+        Arc::new(NotifyingPendingTransport {
+            started: started.clone(),
+        }),
+    );
+    let state_for_task = state.clone();
+    let task = tokio::spawn(async move {
+        post_json(
+            &state_for_task,
+            &key,
+            "/openai/v1/chat/completions",
+            r#"{"model":"default","messages":[{"role":"user","content":"hi"}]}"#,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .expect("request must start its provider attempt");
+    task.abort();
+    let _ = task.await;
+
+    let event = tokio::time::timeout(Duration::from_secs(1), request_metadata.recv_next())
+        .await
+        .expect("cancellation must emit request metadata")
+        .expect("metadata channel must remain open");
+    assert_eq!(event.status_code, None);
+    assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
+    assert_eq!(event.attempts.len(), 1);
+    assert_eq!(event.attempts[0].ordinal, 1);
+    assert_eq!(event.attempts[0].upstream_model, "upstream-model");
+    assert_eq!(event.attempts[0].error_class.as_deref(), Some("cancelled"));
+    assert_eq!(event.attempts[0].status_code, None);
+    assert!(!event.attempts[0].committed);
+}
+
+#[tokio::test]
+async fn cancelling_media_cleanup_preserves_the_completed_attempt_outcome() {
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
+    let remove_started = Arc::new(tokio::sync::Notify::new());
+    state.media_spool = Arc::new(BlockingRemoveSpool {
+        inner: crate::media_spool::FileMediaSpool::create().unwrap(),
+        remove_started: remove_started.clone(),
+    });
+    install_transport(
+        &state,
+        Arc::new(FiniteStaticTransport {
+            events: generation_stream_events("completed"),
+        }),
+    );
+
+    let state_for_task = state.clone();
+    let task = tokio::spawn(async move {
+        post_json(
+            &state_for_task,
+            &key,
+            "/openai/v1/chat/completions",
+            r#"{"model":"default","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"aGk=","format":"wav"}}]}]}"#,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), remove_started.notified())
+        .await
+        .expect("media cleanup must begin after the provider attempt completes");
+    task.abort();
+    let _ = task.await;
+
+    let event = tokio::time::timeout(Duration::from_secs(1), request_metadata.recv_next())
+        .await
+        .expect("cancellation during cleanup must emit request metadata")
+        .expect("metadata channel must remain open");
+    assert_eq!(event.status_code, None);
+    assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
+    assert_eq!(event.attempts.len(), 1);
+    assert_eq!(event.attempts[0].status_code, Some(StatusCode::OK.as_u16()));
+    assert_eq!(event.attempts[0].error_class, None);
+    assert!(event.attempts[0].committed);
+}
+
+#[tokio::test]
+async fn cancelling_shared_event_collection_preserves_partial_usage() {
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
+    let reached_pending = Arc::new(tokio::sync::Notify::new());
+    install_transport(
+        &state,
+        Arc::new(CollectingPendingTransport {
+            reached_pending: reached_pending.clone(),
+            events: vec![
+                CanonicalEvent::new(
+                    0,
+                    CanonicalEventKind::ResponseStart {
+                        response_id: Some("resp_cancelled".to_owned()),
+                        provider_model: Some("upstream-model".to_owned()),
+                    },
+                ),
+                CanonicalEvent::new(
+                    1,
+                    CanonicalEventKind::Usage {
+                        usage: olp_domain::Usage {
+                            input_tokens: 11,
+                            output_tokens: 5,
+                            total_tokens: 16,
+                            cached_input_tokens: None,
+                            reasoning_tokens: None,
+                        },
+                    },
+                ),
+            ],
+        }),
+    );
+    let state_for_task = state.clone();
+    let task = tokio::spawn(async move {
+        post_json(
+            &state_for_task,
+            &key,
+            "/openai/v1/responses",
+            r#"{"model":"default","input":"hi"}"#,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), reached_pending.notified())
+        .await
+        .expect("shared event collection must consume usage before stalling");
+    task.abort();
+    let _ = task.await;
+
+    let event = tokio::time::timeout(Duration::from_secs(1), request_metadata.recv_next())
+        .await
+        .expect("cancellation must emit request metadata")
+        .expect("metadata channel must remain open");
+    assert_eq!(event.status_code, None);
+    assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
+    assert_eq!(event.input_tokens, Some(11));
+    assert_eq!(event.output_tokens, Some(5));
+    assert!(event.usage_complete);
+    assert!(event.committed);
+}
+
+#[tokio::test]
+async fn dropping_completed_unary_result_records_client_cancellation() {
+    let (mut state, _) = test_state(false);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
+    install_result(
+        &state,
+        OperationKind::TokenCount,
+        CanonicalResult::TokenCount(olp_domain::TokenCountResult {
+            input_tokens: 4,
+            extensions: SourceExtensions::default(),
+        }),
+    );
+    let request: ResponseInputTokensRequest = serde_json::from_value(json!({
+        "model": "default",
+        "input": "hello"
+    }))
+    .unwrap();
+    let operation = decode_response_input_tokens(request).unwrap();
+    let principal = test_principal(&state, Surface::OpenAi);
+    let result = execute_routed_result_for_surface_inner(
+        &state,
+        &principal,
+        operation,
+        TransportMode::Unary,
+        None,
+    )
+    .await
+    .unwrap();
+    drop(result);
+
+    let event = request_metadata.recv_next().await.unwrap();
+    assert_eq!(event.status_code, None);
+    assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
+    assert_eq!(event.input_tokens, Some(4));
+    assert!(event.usage_complete);
 }
 
 impl ProviderTransport for StaticResultTransport {
@@ -876,6 +1243,234 @@ fn install_event_stream(
         .runtime
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
+}
+
+fn install_two_target_streams(
+    state: &GatewayState,
+    operation: OperationKind,
+    first: Arc<dyn ProviderTransport>,
+    second: Arc<dyn ProviderTransport>,
+) -> (Arc<crate::RuntimeBundle>, Vec<olp_domain::AttemptPlan>) {
+    let pinned = state.runtime.pin();
+    let first_provider_id = *pinned.providers.keys().next().unwrap();
+    let second_provider_id = ProviderId::new();
+    let mut providers = pinned.providers.clone();
+    let capability = BTreeSet::from([Capability::new(
+        "upstream-model",
+        operation,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    )]);
+    providers.get_mut(&first_provider_id).unwrap().capabilities = capability.clone();
+    let mut second_provider = providers[&first_provider_id].clone();
+    second_provider.id = second_provider_id;
+    second_provider.name = "mock-openai-failover".to_owned();
+    second_provider.capabilities = capability;
+    providers.insert(second_provider_id, second_provider);
+
+    let route_slug = RouteSlug::parse("default").unwrap();
+    let mut routes = pinned.routes.clone();
+    let route = routes.get_mut(&route_slug).unwrap();
+    route.operations = BTreeSet::from([operation]);
+    route.max_attempts = NonZeroU16::new(2).unwrap();
+    route.targets[0].timeout = DurationMs::new(20);
+    route.targets.push(Target {
+        id: TargetId::new(),
+        routing_id: None,
+        provider_id: second_provider_id,
+        upstream_model: "upstream-model".to_owned(),
+        priority: 1,
+        weight: NonZeroU32::new(1).unwrap(),
+        timeout: DurationMs::new(100),
+    });
+    let snapshot = RuntimeSnapshot {
+        generation: RuntimeGeneration {
+            id: RuntimeGenerationId::new(),
+            ordinal: pinned.generation.ordinal + 1,
+            activated_at: Utc::now(),
+        },
+        providers,
+        routes,
+        api_keys: pinned.api_keys.clone(),
+    };
+    state
+        .runtime
+        .install(
+            snapshot,
+            BTreeMap::from([(first_provider_id, first), (second_provider_id, second)]),
+        )
+        .unwrap();
+    let runtime = state.runtime.pin();
+    let attempts = select_attempts(
+        &runtime,
+        &route_slug,
+        operation,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+        b"failover-test",
+    )
+    .unwrap();
+    (runtime, attempts)
+}
+
+fn streaming_generation_operation() -> Operation {
+    let request: ChatCompletionRequest = serde_json::from_value(json!({
+        "model": "default",
+        "messages": [{"role": "user", "content": "hello"}],
+        "stream": true
+    }))
+    .unwrap();
+    decode_chat_completion(request).unwrap()
+}
+
+fn streaming_image_generation_operation() -> Operation {
+    Operation::Images(ImageOperation::Generation(ImageGenerationRequest {
+        route: RouteSlug::parse("default").unwrap(),
+        prompt: "draw a test".to_owned(),
+        count: Some(1),
+        size: None,
+        stream: true,
+        extensions: SourceExtensions::default(),
+    }))
+}
+
+fn streaming_request_metadata(operation: OperationKind) -> RequestMetadata {
+    RequestMetadata {
+        request_id: RequestId::new(),
+        operation,
+        surface: Surface::OpenAi,
+        mode: TransportMode::Streaming,
+    }
+}
+
+#[tokio::test]
+async fn first_event_timeout_obeys_media_ambiguity_policy() {
+    let (media_state, _) = test_state(true);
+    let media_first_calls = Arc::new(AtomicUsize::new(0));
+    let media_second_calls = Arc::new(AtomicUsize::new(0));
+    let (runtime, attempts) = install_two_target_streams(
+        &media_state,
+        OperationKind::ImageGeneration,
+        Arc::new(FirstEventPendingTransport {
+            calls: media_first_calls.clone(),
+        }),
+        Arc::new(CountingFiniteTransport {
+            calls: media_second_calls.clone(),
+            events: Vec::new(),
+        }),
+    );
+    let failure = match execute_with_failover(
+        FailoverContext {
+            runtime: &runtime,
+            overall_timeout: Duration::from_millis(200),
+            media_spool: media_state.media_spool.clone(),
+            circuits: &crate::circuit::CircuitBreaker::default(),
+            on_attempt_started: None,
+        },
+        attempts,
+        streaming_request_metadata(OperationKind::ImageGeneration),
+        streaming_image_generation_operation(),
+    )
+    .await
+    {
+        Ok(_) => panic!("a committed media timeout must be terminal"),
+        Err(failure) => failure,
+    };
+    assert_eq!(failure.error.code, "ambiguous_upstream_result");
+    assert_eq!(failure.attempts.len(), 1);
+    assert!(failure.attempts[0].committed);
+    assert_eq!(media_first_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(media_second_calls.load(Ordering::SeqCst), 0);
+
+    let (generation_state, _) = test_state(true);
+    let generation_second_calls = Arc::new(AtomicUsize::new(0));
+    let (runtime, attempts) = install_two_target_streams(
+        &generation_state,
+        OperationKind::Generation,
+        Arc::new(FirstEventPendingTransport {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+        Arc::new(CountingFiniteTransport {
+            calls: generation_second_calls.clone(),
+            events: generation_stream_events("retried"),
+        }),
+    );
+    let success = match execute_with_failover(
+        FailoverContext {
+            runtime: &runtime,
+            overall_timeout: Duration::from_millis(200),
+            media_spool: generation_state.media_spool.clone(),
+            circuits: &crate::circuit::CircuitBreaker::default(),
+            on_attempt_started: None,
+        },
+        attempts,
+        streaming_request_metadata(OperationKind::Generation),
+        streaming_generation_operation(),
+    )
+    .await
+    {
+        Ok(success) => success,
+        Err(_) => {
+            panic!("generation keeps availability-first failover after a first-event timeout")
+        }
+    };
+    assert_eq!(success.attempts.len(), 2);
+    assert_eq!(generation_second_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn retryable_first_canonical_error_fails_over_before_commit() {
+    let (state, _) = test_state(true);
+    let second_calls = Arc::new(AtomicUsize::new(0));
+    let (runtime, attempts) = install_two_target_streams(
+        &state,
+        OperationKind::Generation,
+        Arc::new(CountingFiniteTransport {
+            calls: Arc::new(AtomicUsize::new(0)),
+            events: vec![
+                CanonicalEvent::new(
+                    0,
+                    CanonicalEventKind::Error {
+                        error: CanonicalError {
+                            class: ErrorClass::RateLimit,
+                            message: "provider throttled the request".to_owned(),
+                            provider_code: Some("rate_limit".to_owned()),
+                            retryable: true,
+                        },
+                    },
+                ),
+                CanonicalEvent::new(1, CanonicalEventKind::Done),
+            ],
+        }),
+        Arc::new(CountingFiniteTransport {
+            calls: second_calls.clone(),
+            events: generation_stream_events("recovered"),
+        }),
+    );
+    let success = match execute_with_failover(
+        FailoverContext {
+            runtime: &runtime,
+            overall_timeout: Duration::from_millis(200),
+            media_spool: state.media_spool.clone(),
+            circuits: &crate::circuit::CircuitBreaker::default(),
+            on_attempt_started: None,
+        },
+        attempts,
+        streaming_request_metadata(OperationKind::Generation),
+        streaming_generation_operation(),
+    )
+    .await
+    {
+        Ok(success) => success,
+        Err(_) => panic!("retryable pre-commit canonical error must use the next target"),
+    };
+    assert_eq!(success.attempts.len(), 2);
+    assert_eq!(
+        success.attempts[0].error_class.as_deref(),
+        Some("rate_limit")
+    );
+    assert!(!success.attempts[0].committed);
+    assert_eq!(second_calls.load(Ordering::SeqCst), 1);
 }
 
 fn generation_stream_events(text: &str) -> Vec<CanonicalEvent> {

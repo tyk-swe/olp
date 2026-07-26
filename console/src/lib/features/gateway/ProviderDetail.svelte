@@ -3,12 +3,23 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import CapabilityReview from './CapabilityReview.svelte';
   import {
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
   } from './providerCache';
-  import { ApiProblem } from '$lib/api/http';
+  import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import {
+    acceptRemote,
+    beginReload,
+    conflictNotice,
+    initialConcurrentEdit,
+    markConflict,
+    markDirty,
+    markSaved,
+    reconcile
+  } from '$lib/forms/concurrentEdit';
   import {
     activateProvider,
     certifyProviderModel,
@@ -53,6 +64,11 @@
 
   let { providerId }: { providerId: string } = $props();
 
+  type CoordinatedModelPage = {
+    page: Awaited<ReturnType<typeof listProviderModelPage>>;
+    provider: Provider;
+  };
+
   const queryClient = useQueryClient();
   const provider = createQuery(() => ({
     queryKey: ['provider', providerId],
@@ -74,10 +90,13 @@
   let detailModelCursor = $state<string | undefined>();
   let detailModelHistory = $state<Array<string | undefined>>([]);
   const detailModels = createQuery(() => ({
-    queryKey: ['provider-model-page', providerId, detailModelCursor ?? 'first'],
-    queryFn: ({ signal }) => listProviderModelPage(providerId, detailModelCursor, signal),
-    enabled: Boolean(providerId)
+    queryKey: detailModelPageKey(provider.data, detailModelCursor),
+    queryFn: ({ signal }) => fetchDetailModelPage(provider.data!, detailModelCursor, signal),
+    enabled: Boolean(provider.data),
+    placeholderData: (previous: CoordinatedModelPage | undefined) => previous
   }));
+  let retainedModelPage = $state<CoordinatedModelPage>();
+  const visibleModelPage = $derived(detailModels.data ?? retainedModelPage);
   const credentials = createQuery(() => ({
     queryKey: ['provider-credentials', providerId],
     queryFn: ({ signal }) => listProviderCredentials(providerId, signal),
@@ -105,12 +124,14 @@
     deployment: '',
     authMode: 'api_key'
   });
-  let detailInitialized = $state('');
+  let sync = $state(initialConcurrentEdit());
   let credentialValue = $state('');
   let certificationResults = $state<Record<string, CapabilityCertification>>({});
   let revisionFrom = $state('');
   let revisionTo = $state('');
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
+  let capabilityReloadVersion = $state(0);
+  const concurrentNotice = $derived(conflictNotice(sync));
 
   $effect(() => {
     const items = revisions.data?.items ?? [];
@@ -120,9 +141,15 @@
 
   $effect(() => {
     const value = provider.data;
-    if (!value || !providerSpec || detailInitialized === value.etag) return;
-    detailInitialized = value.etag;
+    if (!value || !providerSpec) return;
+    const next = reconcile(sync, value.etag);
+    if (next.state !== sync) sync = next.state;
+    if (!next.hydrate) return;
     editValues = providerEditValues(value, providerSpec);
+  });
+
+  $effect(() => {
+    if (detailModels.data) retainedModelPage = detailModels.data;
   });
 
   onDestroy(() => {
@@ -137,13 +164,64 @@
         : 'The control API could not complete the request.';
   }
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(label: string, action: () => Promise<void>): Promise<boolean> {
     busy = label;
     errorMessage = '';
     notice = '';
     try {
       await action();
+      return true;
     } catch (error) {
+      if (isEtagMismatch(error)) sync = markConflict(sync);
+      else errorMessage = message(error);
+      return false;
+    } finally {
+      busy = '';
+    }
+  }
+
+  function touch() {
+    sync = markDirty(sync);
+  }
+
+  function acceptProvider(updated: Provider) {
+    sync = acceptRemote(sync, updated.etag);
+    queryClient.setQueryData(['provider', updated.id], updated);
+  }
+
+  async function refetchProvider() {
+    const result = await provider.refetch();
+    if (result.error) throw result.error;
+    if (!result.data) throw new Error('The provider reload returned no data.');
+    sync = acceptRemote(sync, result.data.etag);
+  }
+
+  async function reload() {
+    if (busy) return;
+    busy = 'reload';
+    errorMessage = '';
+    notice = '';
+    const beforeReload = sync;
+    sync = beginReload(sync);
+    try {
+      const reloadedProvider = await getProvider(providerId);
+      const coordinated = await fetchDetailModelPage(
+        reloadedProvider,
+        detailModelCursor
+      );
+      cacheDetailModelPage(coordinated, detailModelCursor);
+      const next = reconcile(sync, reloadedProvider.etag);
+      sync = next.state;
+      if (next.hydrate && providerSpec) {
+        editValues = providerEditValues(reloadedProvider, providerSpec);
+      }
+      queryClient.setQueryData(['provider', reloadedProvider.id], reloadedProvider);
+      capabilityReloadVersion += 1;
+    } catch (error) {
+      // A failed reload is not an edit conflict: restore the previous state so
+      // the armed reload flag cannot make a later background refetch discard
+      // dirty edits, and report the transport problem instead.
+      sync = beforeReload;
       errorMessage = message(error);
     } finally {
       busy = '';
@@ -154,30 +232,57 @@
     certificationResults = {};
   }
 
-  async function resetDetailModels(providerId: string) {
-    detailModelCursor = undefined;
-    detailModelHistory = [];
+  function detailModelPageKey(
+    providerSnapshot: Provider | undefined,
+    cursor: string | undefined
+  ) {
+    return [
+      'provider-model-page',
+      providerSnapshot?.id ?? providerId,
+      cursor ?? 'first',
+      providerSnapshot?.etag ?? 'unversioned'
+    ] as const;
+  }
+
+  async function fetchDetailModelPage(
+    providerSnapshot: Provider,
+    cursor: string | undefined,
+    signal?: AbortSignal
+  ): Promise<CoordinatedModelPage> {
+    return {
+      page: await listProviderModelPage(providerSnapshot.id, cursor, signal),
+      provider: providerSnapshot
+    };
+  }
+
+  function cacheDetailModelPage(
+    coordinated: CoordinatedModelPage,
+    cursor: string | undefined
+  ) {
+    queryClient.setQueryData(
+      detailModelPageKey(coordinated.provider, cursor),
+      coordinated
+    );
+  }
+
+  async function installProviderWithModels(updated: Provider, resetToFirstPage: boolean) {
+    const cursor = resetToFirstPage ? undefined : detailModelCursor;
+    const coordinated = await fetchDetailModelPage(updated, cursor);
+    cacheDetailModelPage(coordinated, cursor);
+    if (resetToFirstPage) {
+      detailModelCursor = undefined;
+      detailModelHistory = [];
+    }
+    acceptProvider(updated);
     await Promise.all([
       queryClient.invalidateQueries({
-        queryKey: ['provider-model-page', providerId],
-        refetchType: 'none'
+        queryKey: ['provider-model-page', updated.id],
+        refetchType: 'none',
+        predicate: (query) =>
+          query.queryKey[3] !== updated.etag
       }),
       invalidateProviderModelConsumers(queryClient)
     ]);
-    await queryClient.refetchQueries({
-      queryKey: ['provider-model-page', providerId, 'first'],
-      exact: true,
-      type: 'all'
-    });
-  }
-
-  async function refreshCurrentDetailModelPage(providerId: string) {
-    const queryKey = ['provider-model-page', providerId, detailModelCursor ?? 'first'];
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey, exact: true, refetchType: 'none' }),
-      invalidateProviderModelConsumers(queryClient)
-    ]);
-    await queryClient.refetchQueries({ queryKey, exact: true, type: 'all' });
   }
 
   function nextRevisionPage() {
@@ -197,7 +302,7 @@
   }
 
   function nextDetailModelPage() {
-    const next = detailModels.data?.nextCursor;
+    const next = detailModels.data?.page.nextCursor;
     if (!next) return;
     detailModelHistory = [...detailModelHistory, detailModelCursor];
     detailModelCursor = next;
@@ -219,10 +324,9 @@
     if (!confirm(`Restore provider revision ${revision} as a new draft? The current credential remains selected.`)) return;
     await run('revision-restore', async () => {
       const restored = await restoreProviderRevision(current, revisionId);
-      queryClient.setQueryData(['provider', providerId], restored);
       clearCertificationResults();
       revisionDiff = null;
-      await resetDetailModels(current.id);
+      await installProviderWithModels(restored, true);
       await invalidateProviderSummaries(queryClient);
       notice = `Revision ${revision} restored as a new draft. Current credential selection was preserved; test and certify before activation.`;
     });
@@ -231,14 +335,15 @@
   async function saveProvider(current: Provider) {
     if (!providerSpec) return;
     await run('save', async () => {
+      if (!sync.snapshotEtag) throw new Error('Reload the provider before saving.');
       const updated = await updateProvider(
         current.id,
-        current.etag,
+        sync.snapshotEtag,
         buildUpdateProviderInput(editValues, providerSpec)
       );
-      queryClient.setQueryData(['provider', current.id], updated);
+      sync = markSaved(sync, updated.etag);
       clearCertificationResults();
-      await resetDetailModels(current.id);
+      await installProviderWithModels(updated, true);
       await invalidateProviderSummaries(queryClient);
       notice = 'Provider draft settings saved.';
     });
@@ -249,7 +354,7 @@
       probe = await probeProvider(current);
       if (!probe.succeeded) throw new Error(probe.detail);
       const updated = await getProvider(current.id);
-      queryClient.setQueryData(['provider', current.id], updated);
+      acceptProvider(updated);
       await invalidateProviderSummaries(queryClient);
       notice = `Connection succeeded: ${probe.detail}`;
     });
@@ -258,9 +363,8 @@
   async function discoverDetail(current: Provider) {
     await run('detail-discover', async () => {
       const updated = await discoverProviderModels(current);
-      queryClient.setQueryData(['provider', current.id], updated);
       clearCertificationResults();
-      await resetDetailModels(current.id);
+      await installProviderWithModels(updated, true);
       await invalidateProviderSummaries(queryClient);
       notice = `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} reviewed.`;
     });
@@ -275,9 +379,8 @@
     await run('detail-declare', async () => {
       const updated = await declareProviderModels(current, names);
       manualModelNames = '';
-      queryClient.setQueryData(['provider', current.id], updated);
       clearCertificationResults();
-      await resetDetailModels(current.id);
+      await installProviderWithModels(updated, true);
       await invalidateProviderSummaries(queryClient);
       notice = `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`;
     });
@@ -289,11 +392,10 @@
     enabled: boolean,
     capabilities: CapabilityDeclaration[]
   ) {
-    await run(`model-${modelId}`, async () => {
+    return run(`model-${modelId}`, async () => {
       const updated = await setProviderModel(current, modelId, enabled, capabilities);
-      queryClient.setQueryData(['provider', current.id], updated);
       clearCertificationResults();
-      await refreshCurrentDetailModelPage(current.id);
+      await installProviderWithModels(updated, false);
       await invalidateProviderSummaries(queryClient);
       notice = 'Capability review saved with declared provenance.';
     });
@@ -304,8 +406,7 @@
       const result = await certifyProviderModel(current, modelId);
       certificationResults = { ...certificationResults, [modelId]: result };
       const updated = await getProvider(current.id);
-      queryClient.setQueryData(['provider', current.id], updated);
-      await refreshCurrentDetailModelPage(current.id);
+      await installProviderWithModels(updated, false);
       probe = null;
       await invalidateProviderSummaries(queryClient);
       notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
@@ -315,7 +416,7 @@
   async function activateDetail(current: Provider) {
     await run('detail-activate', async () => {
       const generation = await activateProvider(current);
-      await Promise.all([provider.refetch(), credentials.refetch()]);
+      await Promise.all([refetchProvider(), credentials.refetch()]);
       await Promise.all([
         invalidateProviderSummaries(queryClient),
         invalidateProviderModelConsumers(queryClient),
@@ -331,9 +432,9 @@
     await run('rotate-credential', async () => {
       await rotateProviderCredential(current, credentialValue);
       credentialValue = '';
-      await Promise.all([provider.refetch(), credentials.refetch()]);
+      const [updated] = await Promise.all([getProvider(current.id), credentials.refetch()]);
       clearCertificationResults();
-      await resetDetailModels(current.id);
+      await installProviderWithModels(updated, true);
       await invalidateProviderSummaries(queryClient);
       notice = 'Credential version staged. Test and activate the provider to publish it; the current runtime credential remains live until then.';
     });
@@ -343,7 +444,7 @@
     if (!confirm(`Revoke credential version ${credential.version}?`)) return;
     await run(`revoke-${credential.id}`, async () => {
       await revokeProviderCredential(current, credential.id);
-      await Promise.all([provider.refetch(), credentials.refetch()]);
+      await Promise.all([refetchProvider(), credentials.refetch()]);
       clearCertificationResults();
       await invalidateProviderSummaries(queryClient);
       notice = `Credential version ${credential.version} revoked.`;
@@ -358,25 +459,29 @@
 
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+<ConflictNotice notice={concurrentNotice} onReload={reload} disabled={Boolean(busy)} />
 {#if providerKinds.isError}<div class="inline-problem" role="alert">Provider capabilities could not be loaded. Configuration editing is unavailable until a retry succeeds. <button class="button button-secondary" type="button" onclick={() => providerKinds.refetch()}>Retry</button></div>{/if}
-{#if provider.isPending}
+{#if provider.isError && provider.data}
+  <div class="inline-problem" role="alert">{message(provider.error)} The last loaded provider remains available below. <button class="button button-secondary" type="button" onclick={() => provider.refetch()}>Retry</button></div>
+{/if}
+{#if provider.isPending && !provider.data}
   <div class="loading-state" role="status">Loading provider…</div>
-{:else if provider.isError}
+{:else if !provider.data}
   <div class="inline-problem" role="alert">{message(provider.error)} <button class="button button-secondary" type="button" onclick={() => provider.refetch()}>Retry</button></div>
-{:else if provider.data}
+{:else}
   {@const current = provider.data}
   {#if current.pending_activation}<div class="pending-banner" role="status"><strong>Revision {current.active_revision} remains live.</strong><span>Draft configuration and the draft-selected credential are not serving traffic. Test, certify, and activate to replace the runtime revision atomically.</span></div>{/if}
   <div class="detail-grid">
     <section class="card editor" aria-labelledby="configuration-heading">
       <div class="section-heading"><div><p class="eyebrow">Configuration</p><h2 id="configuration-heading">Connector context</h2></div><span class:success={current.active_revision != null && !current.pending_activation} class:warning={current.pending_activation} class="badge">{providerStatus(current)}</span></div>
       <div class="form-grid">
-        <div class="form-field"><label for="detail-name">Name</label><input id="detail-name" bind:value={editValues.name} /></div>
+        <div class="form-field"><label for="detail-name">Name</label><input id="detail-name" bind:value={editValues.name} oninput={touch} /></div>
         <div class="form-field"><label for="detail-auth">Authentication</label><input id="detail-auth" value={editValues.authMode} disabled /><small>Identity mode is immutable.</small></div>
-        {#if providerSpec && hasCustomEndpoint(providerSpec)}<div class="form-field full"><label for="detail-endpoint">Endpoint</label><input id="detail-endpoint" bind:value={editValues.endpoint} /></div>{/if}
-        {#if providerSpec && hasApiVersion(providerSpec)}<div class="form-field"><label for="detail-version">API version</label><input id="detail-version" bind:value={editValues.apiVersion} /></div>{/if}
-        {#if providerSpec && hasCloudRegion(providerSpec)}<div class="form-field"><label for="detail-region">Cloud region</label><input id="detail-region" bind:value={editValues.cloudRegion} /></div>{/if}
-        {#if providerSpec && hasCloudProject(providerSpec)}<div class="form-field"><label for="detail-project">Cloud project</label><input id="detail-project" bind:value={editValues.cloudProject} /></div>{/if}
-        {#if providerSpec && hasDeployment(providerSpec)}<div class="form-field"><label for="detail-deployment">Cloud deployment</label><input id="detail-deployment" bind:value={editValues.deployment} /></div>{/if}
+        {#if providerSpec && hasCustomEndpoint(providerSpec)}<div class="form-field full"><label for="detail-endpoint">Endpoint</label><input id="detail-endpoint" bind:value={editValues.endpoint} oninput={touch} /></div>{/if}
+        {#if providerSpec && hasApiVersion(providerSpec)}<div class="form-field"><label for="detail-version">API version</label><input id="detail-version" bind:value={editValues.apiVersion} oninput={touch} /></div>{/if}
+        {#if providerSpec && hasCloudRegion(providerSpec)}<div class="form-field"><label for="detail-region">Cloud region</label><input id="detail-region" bind:value={editValues.cloudRegion} oninput={touch} /></div>{/if}
+        {#if providerSpec && hasCloudProject(providerSpec)}<div class="form-field"><label for="detail-project">Cloud project</label><input id="detail-project" bind:value={editValues.cloudProject} oninput={touch} /></div>{/if}
+        {#if providerSpec && hasDeployment(providerSpec)}<div class="form-field"><label for="detail-deployment">Cloud deployment</label><input id="detail-deployment" bind:value={editValues.deployment} oninput={touch} /></div>{/if}
       </div>
       <ol class="activation-checklist compact" aria-label="Provider activation requirements"><li class:complete={capabilitiesCertified(current)}>{capabilitiesCertified(current) ? '✓' : '1'} Capabilities certified</li><li class:complete={probeReady(current)}>{probeReady(current) ? '✓' : '2'} Completed draft tested</li></ol>
       <div class="form-actions"><button class="button button-secondary" type="button" onclick={() => saveProvider(current)} disabled={Boolean(busy) || !providerSpec}>Save draft</button><button class="button button-secondary" type="button" onclick={() => testDetail(current)} disabled={Boolean(busy) || current.state !== 'draft' || !capabilitiesCertified(current)}>{busy === 'detail-probe' ? 'Testing completed draft…' : 'Test completed draft'}</button><button class="button button-primary" type="button" onclick={() => activateDetail(current)} disabled={Boolean(busy) || !activationReady(current)}>Activate changes</button></div>
@@ -392,7 +497,49 @@
     <div class="section-heading"><div><p class="eyebrow">Discovery</p><h2 id="models-heading">Models and capabilities</h2></div><a class="button button-secondary" href={resolve('/models')}>Inventory view</a></div>
     <div class="discovery-row"><p class="muted">Refresh the inventory from the upstream model-list API. Existing capability certification is reconciled server-side.</p><button class="button button-secondary" type="button" onclick={() => discoverDetail(current)} disabled={Boolean(busy)}>{busy === 'detail-discover' ? 'Discovering…' : 'Run upstream discovery'}</button></div>
     {#if current.kind === 'openai_compatible'}<details class="manual-fallback"><summary>Manual model identifiers</summary><p>Use only if this compatible endpoint has no list API. Models remain disabled until capability review.</p><div class="form-field"><label for="manual-models-detail">Upstream model identifiers</label><textarea id="manual-models-detail" bind:value={manualModelNames} placeholder="model-a&#10;model-b"></textarea></div><button class="button button-secondary" type="button" onclick={() => declareDetailModels(current)} disabled={Boolean(busy)}>{busy === 'detail-declare' ? 'Adding…' : 'Add identifiers for review'}</button></details>{/if}
-    {#if current.model_count === 0}<div class="empty-state"><p>No models have been discovered.</p></div>{:else if detailModels.isPending}<div class="loading-state" role="status">Loading models…</div>{:else if detailModels.isError}<div class="inline-problem" role="alert">{message(detailModels.error)} <button class="button button-secondary" type="button" onclick={() => detailModels.refetch()}>Retry</button></div>{:else}<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead><tbody>{#each detailModels.data?.items ?? [] as model (model.id)}<tr><td><strong>{model.display_name}</strong><br /><code>{model.upstream_model}</code></td><td><CapabilityReview {model} options={capabilityOptions.data?.capabilities ?? []} optionsPending={capabilityOptions.isPending} optionsError={capabilityOptions.isError} disabled={Boolean(busy)} onSave={(enabled, capabilities) => reviewDetailModel(current, model.id, enabled, capabilities)} /><div class="certification-action"><button class="button button-secondary" type="button" onclick={() => certifyDetailModel(current, model.id)} disabled={Boolean(busy) || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>{#if certificationResults[model.id]}{@const result = certificationResults[model.id]}<span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span><ul class="certification-results">{#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li><code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}</li>{/each}</ul>{/if}</div></td></tr>{/each}</tbody></table></div><CursorPagination page={detailModelHistory.length + 1} hasPrevious={detailModelHistory.length > 0} hasNext={Boolean(detailModels.data?.nextCursor)} onPrevious={previousDetailModelPage} onNext={nextDetailModelPage} label="Provider model pages" />{/if}
+    {#if detailModels.isError}
+      <div class="inline-problem" role="alert">{message(detailModels.error)} The last loaded model page remains available below. <button class="button button-secondary" type="button" onclick={() => detailModels.refetch()}>Retry</button></div>
+    {/if}
+    {#if current.model_count === 0}
+      <div class="empty-state"><p>No models have been discovered.</p></div>
+    {:else if detailModels.isPending && !visibleModelPage}
+      <div class="loading-state" role="status">Loading models…</div>
+    {:else if visibleModelPage}
+      {@const modelPage = visibleModelPage}
+      <div class="table-shell">
+        <table class="data-table">
+          <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead>
+          <tbody>
+            {#each modelPage.page.items as model (model.id)}
+              <tr>
+                <td><strong>{model.display_name}</strong><br /><code>{model.upstream_model}</code></td>
+                <td>
+                  <CapabilityReview
+                    {model}
+                    providerEtag={modelPage.provider.etag}
+                    options={capabilityOptions.data?.capabilities ?? []}
+                    optionsPending={capabilityOptions.isPending}
+                    optionsError={capabilityOptions.isError}
+                    disabled={Boolean(busy)}
+                    reloadVersion={capabilityReloadVersion}
+                    onSave={(enabled, capabilities, providerEtag) => reviewDetailModel({ ...modelPage.provider, etag: providerEtag }, model.id, enabled, capabilities)}
+                  />
+                  <div class="certification-action">
+                    <button class="button button-secondary" type="button" onclick={() => certifyDetailModel(modelPage.provider, model.id)} disabled={Boolean(busy) || !model.capabilities.length}>{busy === `certify-${model.id}` ? 'Server-certifying…' : 'Server-certify capabilities'}</button>
+                    {#if certificationResults[model.id]}
+                      {@const result = certificationResults[model.id]}
+                      <span class:success={result.status === 'succeeded'} class:warning={result.status !== 'succeeded'}>{result.certified_count}/{result.attempted_count} certified</span>
+                      <ul class="certification-results">{#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li><code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}</li>{/each}</ul>
+                    {/if}
+                  </div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <CursorPagination page={detailModelHistory.length + 1} hasPrevious={detailModelHistory.length > 0} hasNext={Boolean(modelPage.page.nextCursor)} onPrevious={previousDetailModelPage} onNext={nextDetailModelPage} label="Provider model pages" />
+    {/if}
     {#if !activationReady(current)}<p class="audit-note">Every native and compatible tuple requires fresh server-owned certification. After the last change or certification, run the completed-draft connection test before activation.</p>{/if}
   </section>
   <section class="card editor revisions" aria-labelledby="provider-revisions-heading">

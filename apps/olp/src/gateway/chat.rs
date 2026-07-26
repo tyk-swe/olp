@@ -14,10 +14,11 @@ use olp_domain::{
     Surface, TransportMode, authorize_api_key,
 };
 use olp_protocols::openai::{ChatCompletionRequest, decode_chat_completion};
-use olp_storage::{LimitLease, RequestAttemptMetadata};
+use olp_storage::RequestAttemptMetadata;
 
 use crate::{
     GatewayState, InferencePrincipal,
+    event_completion::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collected_event_bytes},
     json_media::{admit_openai_chat, cleanup_admitted},
     semantic_validation::select_representable_attempts_filtered,
     streaming_response::{TerminalFrames, sse_stream},
@@ -25,11 +26,13 @@ use crate::{
 
 use super::{
     error::InferenceError,
-    failover::{EventStream, ExecutionOutput, ExecutionSuccess, execute_with_failover},
+    failover::{
+        EventStream, ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover,
+    },
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     openai_chat_response::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response},
     openai_http::error_sse as openai_error_sse,
-    telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event},
+    telemetry::{RequestAccountingGuard, UsageCapture, elapsed_ms, emit_request_metadata_event},
 };
 
 pub(super) async fn chat_completions(
@@ -134,7 +137,7 @@ pub(super) async fn chat_completions(
     } else {
         TransportMode::Unary
     };
-    let lease = reserve_limits(
+    let mut lease = reserve_limits(
         &state,
         key,
         &operation,
@@ -176,7 +179,7 @@ pub(super) async fn chat_completions(
                 Surface::OpenAi,
                 OperationKind::Generation,
             );
-            release_limits(&state, lease.as_ref()).await;
+            release_limits(&state, lease.as_ref(), None).await;
             return Err(failure);
         }
     };
@@ -184,6 +187,18 @@ pub(super) async fn chat_completions(
         .routes
         .get(&route_slug)
         .expect("attempt selection returned a known route");
+    let mut accounting = RequestAccountingGuard::new(
+        &state,
+        snapshot.generation.id.as_uuid(),
+        key.id.as_uuid(),
+        request_id.as_uuid(),
+        route_slug.clone(),
+        request_started_at,
+        request_started,
+        Surface::OpenAi,
+        OperationKind::Generation,
+        lease.take(),
+    );
 
     let metadata = RequestMetadata {
         request_id,
@@ -191,127 +206,109 @@ pub(super) async fn chat_completions(
         surface: Surface::OpenAi,
         mode,
     };
-    let execution = execute_with_failover(
-        &snapshot,
-        attempts,
-        metadata,
-        operation,
-        route.overall_timeout.as_duration(),
-        state.media_spool.clone(),
-        &state.circuits,
-    )
-    .await;
+    let execution = {
+        let mut record_attempt_started =
+            |completed: &[RequestAttemptMetadata],
+             attempt: &olp_domain::AttemptPlan,
+             ordinal: u16,
+             started_at: chrono::DateTime<chrono::Utc>,
+             started: tokio::time::Instant| {
+                accounting.record_attempt_started(
+                    completed,
+                    ordinal,
+                    attempt.provider_id.as_uuid(),
+                    &attempt.upstream_model,
+                    started_at,
+                    started,
+                );
+            };
+        execute_with_failover(
+            FailoverContext {
+                runtime: &snapshot,
+                overall_timeout: route.overall_timeout.as_duration(),
+                media_spool: state.media_spool.clone(),
+                circuits: &state.circuits,
+                on_attempt_started: Some(&mut record_attempt_started),
+            },
+            attempts,
+            metadata,
+            operation,
+        )
+        .await
+    };
+    let first_byte_ms = elapsed_ms(request_started.elapsed());
+    match &execution {
+        Ok(success) => accounting.record_attempts(
+            success.attempts.clone(),
+            Some(success.attempt_started),
+            Some(first_byte_ms),
+            true,
+        ),
+        Err(failure) => {
+            accounting.record_attempts(failure.attempts.clone(), None, None, false);
+        }
+    }
     request_media.cleanup().await;
     let ExecutionSuccess {
-        output,
-        deadline,
-        attempts,
-        attempt_started,
+        output, deadline, ..
     } = match execution {
         Ok(execution) => execution,
         Err(failure) => {
-            let status = failure.error.status.as_u16();
-            let code = failure.error.code.to_owned();
-            emit_request_metadata_event(
-                &state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &route_slug,
-                &failure.attempts,
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(status),
-                Some(code),
-                false,
-                &UsageCapture::default(),
-                Surface::OpenAi,
-                OperationKind::Generation,
-            );
-            release_limits(&state, lease.as_ref()).await;
+            accounting.finish(Some(&failure.error)).await;
             return Err(failure.error);
         }
     };
-    let first_byte_ms = elapsed_ms(request_started.elapsed());
     let ExecutionOutput::Events { first, events } = output else {
-        release_limits(&state, lease.as_ref()).await;
-        return Err(InferenceError::bad_gateway(
+        let failure = InferenceError::bad_gateway(
             "provider_protocol_error",
             "The provider returned an incompatible unary result.",
-        ));
+        );
+        accounting.finish(Some(&failure)).await;
+        return Err(failure);
     };
 
     if streaming {
         crate::claim_http_inference_metadata();
         Ok(streaming_response(
-            state,
-            snapshot.generation.id.as_uuid(),
-            key.id.as_uuid(),
             request_id.as_uuid(),
             route_slug,
             first,
             events,
-            lease,
             deadline,
-            request_started_at,
-            request_started,
-            first_byte_ms,
-            attempts,
-            attempt_started,
+            accounting,
         ))
     } else {
-        let result = unary_response(
-            &state,
-            snapshot.generation.id.as_uuid(),
-            key.id.as_uuid(),
+        unary_response(
             request_id.as_uuid(),
             &route_slug,
             first,
             events,
             deadline,
-            request_started_at,
-            request_started,
-            first_byte_ms,
-            &attempts,
-            attempt_started,
+            accounting,
         )
-        .await;
-        release_limits(&state, lease.as_ref()).await;
-        result
+        .await
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn streaming_response(
-    state: GatewayState,
-    generation_id: uuid::Uuid,
-    api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
     route_slug: RouteSlug,
     first: CanonicalEvent,
     mut events: EventStream,
-    lease: Option<LimitLease>,
     deadline: tokio::time::Instant,
-    request_started_at: chrono::DateTime<Utc>,
-    request_started: tokio::time::Instant,
-    first_byte_ms: u64,
-    attempts: Vec<RequestAttemptMetadata>,
-    attempt_started: tokio::time::Instant,
+    mut accounting: RequestAccountingGuard,
 ) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut encoder = OpenAiChatCompletionStreamEncoder::new(request_id, route_slug.as_str());
         let mut next = Some(Ok(first));
-        let mut usage = UsageCapture::default();
         let mut failure = None;
         let mut terminal = None;
         'provider: while let Some(item) = next {
             match item {
                 Ok(event) => {
                     let is_done = matches!(event.kind, CanonicalEventKind::Done);
-                    usage.observe(&event);
+                    accounting.usage_mut().observe(&event);
                     let canonical_failure = match &event.kind {
                         CanonicalEventKind::Error { error } => {
                             Some(InferenceError::from_canonical(error))
@@ -372,78 +369,36 @@ fn streaming_response(
                 Bytes::from_static(b"data: [DONE]\n\n"),
             ])
         });
-        let status_code = failure
-            .as_ref()
-            .map_or(Some(StatusCode::OK.as_u16()), |error| {
-                (error.code != "client_cancelled").then_some(error.status.as_u16())
-            });
-        let error_class = failure.as_ref().map(|error| error.code.to_owned());
-        emit_request_metadata_event(
-            &state,
-            generation_id,
-            api_key_id,
-            request_id,
-            &route_slug,
-            &attempts,
-            request_started_at,
-            request_started,
-            Some(attempt_started),
-            Some(first_byte_ms),
-            status_code,
-            error_class,
-            true,
-            &usage,
-            Surface::OpenAi,
-            OperationKind::Generation,
-        );
-        release_limits(&state, lease.as_ref()).await;
+        accounting.finish(failure.as_ref()).await;
     });
     response
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn unary_response(
-    state: &GatewayState,
-    generation_id: uuid::Uuid,
-    api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
     route_slug: &RouteSlug,
     first: CanonicalEvent,
     mut events: EventStream,
     deadline: tokio::time::Instant,
-    request_started_at: chrono::DateTime<Utc>,
-    request_started: tokio::time::Instant,
-    first_byte_ms: u64,
-    attempts: &[RequestAttemptMetadata],
-    attempt_started: tokio::time::Instant,
+    mut accounting: RequestAccountingGuard,
 ) -> Result<Response, InferenceError> {
+    let mut collected_bytes =
+        match collected_event_bytes(0, &first, MAX_COLLECTED_CANONICAL_EVENT_BYTES) {
+            Ok(collected_bytes) => collected_bytes,
+            Err(failure) => {
+                accounting.finish(Some(&failure)).await;
+                return Err(failure);
+            }
+        };
     let mut collected = vec![first];
-    let mut usage = UsageCapture::default();
-    usage.observe(&collected[0]);
+    accounting.usage_mut().observe(&collected[0]);
     if !matches!(collected[0].kind, CanonicalEventKind::Done) {
         loop {
             let item = match tokio::time::timeout_at(deadline, events.next()).await {
                 Ok(item) => item,
                 Err(_) => {
                     let failure = InferenceError::timeout();
-                    emit_request_metadata_event(
-                        state,
-                        generation_id,
-                        api_key_id,
-                        request_id,
-                        route_slug,
-                        attempts,
-                        request_started_at,
-                        request_started,
-                        Some(attempt_started),
-                        Some(first_byte_ms),
-                        Some(failure.status.as_u16()),
-                        Some(failure.code.to_owned()),
-                        true,
-                        &usage,
-                        Surface::OpenAi,
-                        OperationKind::Generation,
-                    );
+                    accounting.finish(Some(&failure)).await;
                     return Err(failure);
                 }
             };
@@ -454,29 +409,23 @@ async fn unary_response(
                 Ok(event) => event,
                 Err(error) => {
                     let failure = InferenceError::from_transport(error);
-                    emit_request_metadata_event(
-                        state,
-                        generation_id,
-                        api_key_id,
-                        request_id,
-                        route_slug,
-                        attempts,
-                        request_started_at,
-                        request_started,
-                        Some(attempt_started),
-                        Some(first_byte_ms),
-                        Some(failure.status.as_u16()),
-                        Some(failure.code.to_owned()),
-                        true,
-                        &usage,
-                        Surface::OpenAi,
-                        OperationKind::Generation,
-                    );
+                    accounting.finish(Some(&failure)).await;
                     return Err(failure);
                 }
             };
             let terminal = matches!(event.kind, CanonicalEventKind::Done);
-            usage.observe(&event);
+            accounting.usage_mut().observe(&event);
+            collected_bytes = match collected_event_bytes(
+                collected_bytes,
+                &event,
+                MAX_COLLECTED_CANONICAL_EVENT_BYTES,
+            ) {
+                Ok(collected_bytes) => collected_bytes,
+                Err(failure) => {
+                    accounting.finish(Some(&failure)).await;
+                    return Err(failure);
+                }
+            };
             collected.push(event);
             if terminal {
                 break;
@@ -491,68 +440,17 @@ async fn unary_response(
             "provider_protocol_error",
             "The provider response ended without a terminal event.",
         );
-        emit_request_metadata_event(
-            state,
-            generation_id,
-            api_key_id,
-            request_id,
-            route_slug,
-            attempts,
-            request_started_at,
-            request_started,
-            Some(attempt_started),
-            Some(first_byte_ms),
-            Some(failure.status.as_u16()),
-            Some(failure.code.to_owned()),
-            true,
-            &usage,
-            Surface::OpenAi,
-            OperationKind::Generation,
-        );
+        accounting.finish(Some(&failure)).await;
         return Err(failure);
     }
     let response =
         match aggregate_chat_completion_response(request_id, route_slug.as_str(), &collected) {
             Ok(response) => response,
             Err(failure) => {
-                emit_request_metadata_event(
-                    state,
-                    generation_id,
-                    api_key_id,
-                    request_id,
-                    route_slug,
-                    attempts,
-                    request_started_at,
-                    request_started,
-                    Some(attempt_started),
-                    Some(first_byte_ms),
-                    Some(failure.status.as_u16()),
-                    Some(failure.code.to_owned()),
-                    true,
-                    &usage,
-                    Surface::OpenAi,
-                    OperationKind::Generation,
-                );
+                accounting.finish(Some(&failure)).await;
                 return Err(failure);
             }
         };
-    emit_request_metadata_event(
-        state,
-        generation_id,
-        api_key_id,
-        request_id,
-        route_slug,
-        attempts,
-        request_started_at,
-        request_started,
-        Some(attempt_started),
-        Some(first_byte_ms),
-        Some(StatusCode::OK.as_u16()),
-        None,
-        true,
-        &usage,
-        Surface::OpenAi,
-        OperationKind::Generation,
-    );
+    accounting.finish(None).await;
     Ok((StatusCode::OK, Json(response)).into_response())
 }

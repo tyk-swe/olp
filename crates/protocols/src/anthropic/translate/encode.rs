@@ -184,6 +184,7 @@ fn encode_message(
             extra: BTreeMap::new(),
         });
     }
+    // System messages and tool results are consumed by the branches above.
     let role = match message.role {
         MessageRole::User => Role::User,
         MessageRole::Assistant => Role::Assistant,

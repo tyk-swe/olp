@@ -388,6 +388,7 @@ fn encode_response_message(
     }
 
     if !message.content.is_empty() {
+        // Tool outputs are emitted by the early return above.
         let role = match message.role {
             MessageRole::System => "system",
             MessageRole::Developer => "developer",

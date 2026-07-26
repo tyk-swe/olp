@@ -4,6 +4,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use arc_swap::ArcSwapOption;
+
 use crate::gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken};
 use crate::http_egress::pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool};
 use futures::StreamExt;
@@ -85,7 +87,8 @@ struct CachedToken {
 pub(crate) struct ServiceAccountTokenProvider {
     credential: Arc<ServiceAccountCredential>,
     endpoint: OAuthEndpoint,
-    cache: Mutex<Option<CachedToken>>,
+    cache: ArcSwapOption<CachedToken>,
+    refresh_lock: Mutex<()>,
 }
 
 impl ServiceAccountTokenProvider {
@@ -111,7 +114,8 @@ impl ServiceAccountTokenProvider {
         Ok(Self {
             credential: Arc::new(credential),
             endpoint,
-            cache: Mutex::new(None),
+            cache: ArcSwapOption::empty(),
+            refresh_lock: Mutex::new(()),
         })
     }
 
@@ -183,6 +187,15 @@ impl ServiceAccountTokenProvider {
             refresh_at: token_refresh_deadline(response.expires_in)?,
         })
     }
+
+    fn cached_token(&self) -> Result<Option<SecretBearerToken>, BearerTokenError> {
+        self.cache
+            .load()
+            .as_ref()
+            .filter(|token| token.refresh_at > Instant::now())
+            .map(|token| SecretBearerToken::new(token.value.as_str().to_owned()))
+            .transpose()
+    }
 }
 
 fn token_refresh_deadline(expires_in: u64) -> Result<Instant, BearerTokenError> {
@@ -205,16 +218,16 @@ impl BearerTokenProvider for ServiceAccountTokenProvider {
         &'a self,
     ) -> olp_domain::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
         Box::pin(async move {
-            let mut cache = self.cache.lock().await;
-            if let Some(token) = cache
-                .as_ref()
-                .filter(|token| token.refresh_at > Instant::now())
-            {
-                return SecretBearerToken::new(token.value.as_str().to_owned());
+            if let Some(token) = self.cached_token()? {
+                return Ok(token);
             }
-            let refreshed = self.refresh().await?;
+            let _refresh = self.refresh_lock.lock().await;
+            if let Some(token) = self.cached_token()? {
+                return Ok(token);
+            }
+            let refreshed = Arc::new(self.refresh().await?);
             let value = SecretBearerToken::new(refreshed.value.as_str().to_owned())?;
-            *cache = Some(refreshed);
+            self.cache.store(Some(refreshed));
             Ok(value)
         })
     }

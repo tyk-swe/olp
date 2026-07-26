@@ -78,8 +78,8 @@ pub(crate) use proxy::{public_auth_source_digest, public_auth_source_target_dige
 pub(crate) use request_admission::HTTP_INFERENCE_LIMITS_RESERVED;
 pub(crate) use request_admission::{
     FirstOwnerSetupAuthorized, InferencePrincipal, MultipartRequestAdmission,
-    MultipartRouteAdmission, claim_http_inference_metadata, http_inference_reserved_tokens,
-    spawn_http_inference_task,
+    MultipartRouteAdmission, claim_http_inference_metadata, http_inference_reservation,
+    http_inference_reserved_tokens, spawn_http_inference_task,
 };
 
 pub(crate) const MAX_JSON_BODY_BYTES: usize = 2 * 1024 * 1024;

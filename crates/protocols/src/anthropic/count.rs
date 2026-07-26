@@ -57,6 +57,7 @@ pub fn decode_count_tokens_request(
         stream: false,
         extra: request.extra,
     };
+    // The Messages decoder's public contract always produces generation.
     let Operation::Generation(generation) = decode_messages_request(generation)? else {
         unreachable!("Anthropic Messages decoding always returns generation")
     };

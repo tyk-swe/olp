@@ -162,6 +162,7 @@ fn encode_content(
     if message.tool_call_id.is_some() {
         return Err(EncodeError::UnexpectedToolCallId);
     }
+    // System instructions and tool responses are consumed by the branches above.
     let role = match message.role {
         MessageRole::User => "user",
         MessageRole::Assistant => "model",

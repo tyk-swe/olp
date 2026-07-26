@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 const RESERVE_SCRIPT: &str = include_str!("../scripts/reserve_limits.lua");
 const RELEASE_SCRIPT: &str = include_str!("../scripts/release_concurrency.lua");
+const RECONCILE_SCRIPT: &str = include_str!("../scripts/reconcile_limits.lua");
 const SCRIPT_RESPONSE_VERSION: i64 = 1;
 const FIXED_WINDOW_MS: i64 = 60_000;
 // Valkey executes Lua 5.1 scripts with IEEE-754 doubles. Keep every integer
@@ -58,7 +59,7 @@ impl DistributedLimiter {
             } if request.max_concurrency.is_some() == concurrency_expires_at_ms.is_some() => {
                 Ok(LimitLease {
                     lease_id,
-                    _rate_key: keys.rate,
+                    rate_key: keys.rate,
                     concurrency_key: keys.concurrency,
                     rate_window_id: window_id,
                     reserved_tokens: request.requested_tokens,
@@ -87,6 +88,33 @@ impl DistributedLimiter {
         let _: i64 = Script::new(RELEASE_SCRIPT)
             .key(&lease.concurrency_key)
             .arg(&lease.lease_id)
+            .invoke_async(&mut connection)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn reconcile(
+        &self,
+        lease: &LimitLease,
+        actual_tokens: i64,
+    ) -> Result<(), LimitError> {
+        if !lease.has_token_reservation {
+            return Ok(());
+        }
+        if !(0..=MAX_LUA_INTEGER).contains(&actual_tokens) {
+            return Err(LimitError::InvalidRequest(
+                "actual_tokens must be a non-negative Lua-safe integer",
+            ));
+        }
+        let refund = lease.reserved_tokens.saturating_sub(actual_tokens).max(0);
+        if refund == 0 {
+            return Ok(());
+        }
+        let mut connection = self.connection.clone();
+        let _: i64 = Script::new(RECONCILE_SCRIPT)
+            .key(&lease.rate_key)
+            .arg(lease.rate_window_id)
+            .arg(refund)
             .invoke_async(&mut connection)
             .await?;
         Ok(())
@@ -188,9 +216,7 @@ impl LimitRequest<'_> {
 pub struct LimitLease {
     lease_id: String,
     concurrency_key: String,
-    // Retained as a foundation for future bounded token reconciliation; no
-    // reconciliation mutation is implemented here.
-    _rate_key: String,
+    rate_key: String,
     rate_window_id: i64,
     reserved_tokens: i64,
     has_token_reservation: bool,
@@ -462,7 +488,7 @@ mod tests {
     fn lease_debug_redacts_internal_identifiers() {
         let lease = LimitLease {
             lease_id: "private-lease".to_owned(),
-            _rate_key: "private-rate-key".to_owned(),
+            rate_key: "private-rate-key".to_owned(),
             concurrency_key: "private-concurrency-key".to_owned(),
             rate_window_id: 1,
             reserved_tokens: 2,

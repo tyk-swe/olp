@@ -106,7 +106,7 @@ pub(super) async fn action(
             execution.route_slug.as_str(),
             execution.request_id.to_string(),
         ));
-        return Ok(protocol_streaming_response(state, execution, encoder));
+        return Ok(protocol_streaming_response(execution, encoder));
     }
     if let Some(model) = resource.strip_suffix(":countTokens") {
         let mut request: CountTokensRequest = serde_json::from_value(value).map_err(|error| {
@@ -160,17 +160,22 @@ fn unary_response(mut completed: CompletedEventExecution) -> Result<Response, Pr
 
 fn count_result(mut executed: RoutedUnaryResult) -> Result<Response, ProtocolError> {
     let CanonicalResult::TokenCount(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
         return Err(ProtocolError::upstream(
             Surface::Gemini,
             "The provider returned an incompatible token-count result.",
         ));
     };
-    let response = encode_count_tokens_result(result).map_err(|error| {
-        ProtocolError::upstream(
-            Surface::Gemini,
-            format!("The token-count result is not representable: {error}"),
-        )
-    })?;
+    let response = match encode_count_tokens_result(result) {
+        Ok(response) => response,
+        Err(error) => {
+            executed.mark_provider_protocol_failure();
+            return Err(ProtocolError::upstream(
+                Surface::Gemini,
+                format!("The token-count result is not representable: {error}"),
+            ));
+        }
+    };
     executed.mark_success();
     Ok((StatusCode::OK, Json(response)).into_response())
 }

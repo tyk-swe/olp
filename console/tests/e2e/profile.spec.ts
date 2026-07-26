@@ -224,3 +224,160 @@ test('OIDC-only profile enrolls a local password before unlinking', async ({ pag
   await expect(page.getByRole('button', { name: 'Unlink' })).toBeEnabled();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
+
+test('stale profile save reloads the remote version and retries with its ETag', async ({ page }) => {
+  const userId = '01980000-0000-7000-8000-000000000301';
+  let current = {
+    id: userId,
+    email: 'owner@example.com',
+    display_name: 'Ada Owner',
+    role: 'owner',
+    active: true,
+    created_at: '2026-07-01T12:00:00Z',
+    updated_at: '2026-07-12T12:00:00Z',
+    etag: '01980000-0000-7000-8000-000000000320'
+  };
+  const saveEtags: Array<string | undefined> = [];
+
+  await page.route('**/api/v1/sessions/current', async (route) =>
+    route.fulfill({
+      json: {
+        user: {
+          id: userId,
+          email: current.email,
+          display_name: current.display_name,
+          role: current.role
+        },
+        csrf_token: 'csrf-test-token'
+      }
+    })
+  );
+  await page.route('**/api/v1/profile', async (route) => {
+    const request = route.request();
+    if (request.method() === 'PATCH') {
+      saveEtags.push((await request.allHeaders())['if-match']);
+      if (saveEtags.length === 1) {
+        current = {
+          ...current,
+          display_name: 'Remote operator',
+          etag: '01980000-0000-7000-8000-000000000321'
+        };
+        await route.fulfill({
+          status: 412,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            type: 'https://openllmproxy.dev/problems/etag_mismatch',
+            title: 'The item changed elsewhere',
+            status: 412,
+            detail: 'Reload before saving again.'
+          })
+        });
+        return;
+      }
+      current = {
+        ...current,
+        display_name: (request.postDataJSON() as { display_name: string }).display_name,
+        etag: '01980000-0000-7000-8000-000000000322'
+      };
+    }
+    await route.fulfill({ json: current });
+  });
+  await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
+    route.fulfill({ json: { data: [], next_cursor: null } })
+  );
+  await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
+    route.fulfill({
+      json: { data: [], has_local_password: true, linking_available: true }
+    })
+  );
+
+  await page.goto('/settings/profile');
+  await page.getByLabel('Display name').fill('Local edit');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.getByRole('alert')).toContainText('This item changed elsewhere.');
+  expect(
+    (await new AxeBuilder({ page }).include('.concurrent-notice').analyze()).violations
+  ).toEqual([]);
+
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Display name')).toHaveValue('Remote operator');
+  await page.getByLabel('Display name').fill('Merged operator');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.getByText('Profile updated.')).toBeVisible();
+  expect(saveEtags).toEqual([
+    '"01980000-0000-7000-8000-000000000320"',
+    '"01980000-0000-7000-8000-000000000321"'
+  ]);
+});
+
+test('background profile refresh announces drift without clobbering dirty input', async ({ page }) => {
+  const userId = '01980000-0000-7000-8000-000000000401';
+  let current = {
+    id: userId,
+    email: 'owner@example.com',
+    display_name: 'Ada Owner',
+    role: 'owner',
+    active: true,
+    created_at: '2026-07-01T12:00:00Z',
+    updated_at: '2026-07-12T12:00:00Z',
+    etag: '01980000-0000-7000-8000-000000000420'
+  };
+  let profileReads = 0;
+
+  await page.route('**/api/v1/sessions/current', async (route) =>
+    route.fulfill({
+      json: {
+        user: {
+          id: userId,
+          email: current.email,
+          display_name: current.display_name,
+          role: current.role
+        },
+        csrf_token: 'csrf-test-token'
+      }
+    })
+  );
+  await page.route('**/api/v1/profile', async (route) => {
+    profileReads += 1;
+    await route.fulfill({ json: current });
+  });
+  await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
+    route.fulfill({ json: { data: [], next_cursor: null } })
+  );
+  await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
+    route.fulfill({
+      json: { data: [], has_local_password: true, linking_available: true }
+    })
+  );
+
+  await page.clock.install();
+  await page.goto('/settings/profile');
+  await page.getByLabel('Display name').fill('Unsaved local edit');
+  current = {
+    ...current,
+    display_name: 'Remote operator',
+    etag: '01980000-0000-7000-8000-000000000421'
+  };
+  await page.clock.fastForward(5_001);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden'
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible'
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  await expect.poll(() => profileReads).toBeGreaterThan(1);
+  await expect(page.getByLabel('Display name')).toHaveValue('Unsaved local edit');
+  await expect(page.getByRole('status').filter({ hasText: 'A newer version is available.' })).toBeVisible();
+  expect(
+    (await new AxeBuilder({ page }).include('.concurrent-notice').analyze()).violations
+  ).toEqual([]);
+});

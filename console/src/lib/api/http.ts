@@ -19,6 +19,16 @@ export class ApiProblem extends Error {
   }
 }
 
+export const ETAG_MISMATCH_TYPE = 'https://openllmproxy.dev/problems/etag_mismatch';
+
+export function isEtagMismatch(error: unknown): error is ApiProblem {
+  return (
+    error instanceof ApiProblem &&
+    error.problem.status === 412 &&
+    error.problem.type === ETAG_MISMATCH_TYPE
+  );
+}
+
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }

@@ -130,25 +130,55 @@ pub(super) struct ExecutionFailure {
     pub(super) attempts: Vec<RequestAttemptMetadata>,
 }
 
+type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &AttemptPlan, u16, chrono::DateTime<Utc>, tokio::time::Instant)
+    + Send
+    + 'a;
+
+pub(super) struct FailoverContext<'a> {
+    pub(super) runtime: &'a crate::RuntimeBundle,
+    pub(super) overall_timeout: Duration,
+    pub(super) media_spool: Arc<dyn MediaSpool>,
+    pub(super) circuits: &'a crate::circuit::CircuitBreaker,
+    pub(super) on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
+}
+
 pub(super) async fn execute_with_failover(
-    runtime: &crate::RuntimeBundle,
+    context: FailoverContext<'_>,
     attempts: Vec<AttemptPlan>,
     metadata: RequestMetadata,
     operation: Operation,
-    overall_timeout: Duration,
-    media_spool: Arc<dyn MediaSpool>,
-    circuits: &crate::circuit::CircuitBreaker,
 ) -> Result<ExecutionSuccess, ExecutionFailure> {
+    let FailoverContext {
+        runtime,
+        overall_timeout,
+        media_spool,
+        circuits,
+        mut on_attempt_started,
+    } = context;
     let deadline = tokio::time::Instant::now() + overall_timeout;
     let mut last_error = None;
+    // A retryable canonical provider error, with the trace count at the time
+    // it was recorded. When no later attempt runs, the client receives the
+    // provider's own error instead of a synthesized transport failure.
+    let mut last_canonical_error: Option<(usize, olp_domain::CanonicalError)> = None;
     let mut traces = Vec::with_capacity(attempts.len());
-    for attempt in attempts {
+    let attempt_count = attempts.len();
+    for (attempt_index, attempt) in attempts.into_iter().enumerate() {
         if !circuits.try_acquire(attempt.target_id) {
             continue;
         }
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
+        if let Some(observer) = on_attempt_started.as_mut() {
+            observer(
+                &traces,
+                &attempt,
+                ordinal,
+                attempt_started_at,
+                attempt_started,
+            );
+        }
         let attempt_deadline = deadline.min(attempt_started + attempt.timeout.as_duration());
         let Some(transport) = runtime.transport(attempt.provider_id) else {
             let error = TransportError {
@@ -184,19 +214,8 @@ pub(super) async fn execute_with_failover(
         let output =
             match tokio::time::timeout(remaining, transport.execute(provider_request)).await {
                 Ok(Ok(events)) => events,
-                Ok(Err(error)) if error.allows_failover() => {
-                    traces.push(failed_attempt(
-                        &attempt,
-                        ordinal,
-                        attempt_started_at,
-                        attempt_started,
-                        &error,
-                    ));
-                    circuits.record_failure(attempt.target_id, error.class);
-                    last_error = Some(error);
-                    continue;
-                }
                 Ok(Err(error)) => {
+                    let error = reclassify_ambiguous_timeout(error, operation.kind());
                     traces.push(failed_attempt(
                         &attempt,
                         ordinal,
@@ -205,6 +224,10 @@ pub(super) async fn execute_with_failover(
                         &error,
                     ));
                     circuits.record_failure(attempt.target_id, error.class);
+                    if error.allows_failover() {
+                        last_error = Some(error);
+                        continue;
+                    }
                     return Err(ExecutionFailure {
                         error: InferenceError::from_transport(error),
                         attempts: traces,
@@ -261,19 +284,8 @@ pub(super) async fn execute_with_failover(
         let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
         let first = match tokio::time::timeout(remaining, events.next()).await {
             Ok(Some(Ok(event))) => event,
-            Ok(Some(Err(error))) if error.allows_failover() => {
-                traces.push(failed_attempt(
-                    &attempt,
-                    ordinal,
-                    attempt_started_at,
-                    attempt_started,
-                    &error,
-                ));
-                circuits.record_failure(attempt.target_id, error.class);
-                last_error = Some(error);
-                continue;
-            }
             Ok(Some(Err(error))) => {
+                let error = reclassify_ambiguous_timeout(error, operation.kind());
                 traces.push(failed_attempt(
                     &attempt,
                     ordinal,
@@ -282,6 +294,10 @@ pub(super) async fn execute_with_failover(
                     &error,
                 ));
                 circuits.record_failure(attempt.target_id, error.class);
+                if error.allows_failover() {
+                    last_error = Some(error);
+                    continue;
+                }
                 return Err(ExecutionFailure {
                     error: InferenceError::from_transport(error),
                     attempts: traces,
@@ -311,10 +327,15 @@ pub(super) async fn execute_with_failover(
                 });
             }
             Err(_) => {
+                let ambiguous = operation_timeout_is_ambiguous(operation.kind());
                 let error = TransportError {
                     phase: olp_domain::TransportPhase::FirstByte,
-                    class: AttemptFailureClass::Timeout,
-                    response_committed: false,
+                    class: if ambiguous {
+                        AttemptFailureClass::Ambiguous
+                    } else {
+                        AttemptFailureClass::Timeout
+                    },
+                    response_committed: ambiguous,
                     message: "route deadline elapsed before a canonical event".to_owned(),
                 };
                 traces.push(failed_attempt(
@@ -325,8 +346,14 @@ pub(super) async fn execute_with_failover(
                     &error,
                 ));
                 circuits.record_failure(attempt.target_id, error.class);
-                last_error = Some(error);
-                continue;
+                if error.allows_failover() {
+                    last_error = Some(error);
+                    continue;
+                }
+                return Err(ExecutionFailure {
+                    error: InferenceError::from_transport(error),
+                    attempts: traces,
+                });
             }
         };
         let mut event_sequence = EventSequenceValidator::new();
@@ -346,6 +373,28 @@ pub(super) async fn execute_with_failover(
             });
         }
         let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
+            if error.retryable
+                && attempt_index + 1 < attempt_count
+                && let Some(class) = canonical_error_circuit_class(error.class)
+            {
+                let transport_error = TransportError {
+                    phase: olp_domain::TransportPhase::FirstByte,
+                    class,
+                    response_committed: false,
+                    message: error.message.clone(),
+                };
+                traces.push(failed_attempt(
+                    &attempt,
+                    ordinal,
+                    attempt_started_at,
+                    attempt_started,
+                    &transport_error,
+                ));
+                circuits.record_failure(attempt.target_id, class);
+                last_error = Some(transport_error);
+                last_canonical_error = Some((traces.len(), error.clone()));
+                continue;
+            }
             if let Some(class) = canonical_error_circuit_class(error.class) {
                 circuits.record_failure(attempt.target_id, class);
             }
@@ -376,12 +425,35 @@ pub(super) async fn execute_with_failover(
         });
     }
     Err(ExecutionFailure {
-        error: last_error.map_or_else(
-            || InferenceError::unavailable("no_eligible_provider"),
-            InferenceError::from_transport,
-        ),
+        error: match last_canonical_error {
+            Some((failed_at, canonical)) if failed_at == traces.len() => {
+                InferenceError::from_canonical(&canonical)
+            }
+            _ => last_error.map_or_else(
+                || InferenceError::unavailable("no_eligible_provider"),
+                InferenceError::from_transport,
+            ),
+        },
         attempts: traces,
     })
+}
+
+/// A timeout the transport reports after the request may have reached the
+/// provider is ambiguous for side-effecting operations: the upstream may have
+/// executed (and billed) the work, so failing over could duplicate it.
+/// Connect-phase timeouts never reached the provider and remain retryable.
+fn reclassify_ambiguous_timeout(
+    mut error: TransportError,
+    operation: OperationKind,
+) -> TransportError {
+    if operation_timeout_is_ambiguous(operation)
+        && matches!(error.class, AttemptFailureClass::Timeout)
+        && !matches!(error.phase, olp_domain::TransportPhase::Connect)
+    {
+        error.class = AttemptFailureClass::Ambiguous;
+        error.response_committed = true;
+    }
+    error
 }
 
 const fn operation_timeout_is_ambiguous(operation: OperationKind) -> bool {

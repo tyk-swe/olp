@@ -1,5 +1,8 @@
 name: CI
 
+# Pull requests and merge queues run the required tier, including advisory
+# audits and amd64 image validation. Cross-browser, HA, arm64, upgrade, and
+# bounded fuzz campaigns remain in the post-merge/scheduled/manual full tier.
 on:
   merge_group:
   pull_request:
@@ -104,8 +107,11 @@ jobs:
       - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
         with:
           cache-on-failure: true
+          workspaces: |
+            .
+            fuzz
       - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
-        with: { tool: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7" }
+        with: { tool: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-fuzz@0.13.2" }
       - name: Install boundary-check dependencies
         run: |
           sudo apt-get update
@@ -120,6 +126,14 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Compile fuzz targets
         run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+      - name: Install the fuzzing toolchain
+        run: rustup toolchain install nightly-2026-05-15 --profile minimal
+      - name: Replay fuzz regression corpora
+        working-directory: fuzz
+        run: |
+          for target in sse_decoder protocol_json media_metadata multipart_parser; do
+            cargo +nightly-2026-05-15 fuzz run "$target" "corpus/$target" -- -runs=0
+          done
       - name: Run workspace doctests
         run: cargo test --locked --workspace --all-features --doc
       - name: Run workspace coverage
@@ -445,6 +459,7 @@ jobs:
       - postgres-integration
       - console-integration
       - production-image
+      - advisory-audits
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -601,15 +616,73 @@ jobs:
           pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 18([.]|$)'
           pg_restore --version | grep -Eq '^pg_restore \(PostgreSQL\) 18([.]|$)'
           psql postgres://olp:olp@localhost:5432/postgres -v ON_ERROR_STOP=1 \
-           -c 'CREATE DATABASE olp_restore'
+           -c 'CREATE DATABASE olp_restore' \
+            -c 'CREATE DATABASE olp_legacy_restore' \
+            -c 'CREATE DATABASE olp_upgrade' \
+            -c 'CREATE DATABASE olp_previous'
           backup=$(./scripts/backup.sh "$RUNNER_TEMP/olp-backups")
           ./scripts/backup-manifest.sh validate "$backup" v2 >/dev/null
           OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_restore \
             ./scripts/restore-rehearsal.sh "$backup"
+          ./scripts/backup-manifest.sh convert-v2-to-v1 "$backup"
+          ./scripts/backup-manifest.sh validate "$backup" v1 >/dev/null
+          OLP_RESTORE_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_legacy_restore \
+            ./scripts/restore-rehearsal.sh "$backup"
+          metadata_file=release-metadata.env
+          [[ -f $metadata_file ]] || {
+            echo "required release metadata file is missing: $metadata_file" >&2
+            exit 1
+          }
+          previous_migration=''
+          metadata_assignments=0
+          while IFS= read -r line || [[ -n $line ]]; do
+            [[ $line =~ ^[[:space:]]*($|#) ]] && continue
+            if [[ $line =~ ^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=([0-9]{4})$ ]]; then
+              previous_migration=${BASH_REMATCH[1]}
+              ((metadata_assignments += 1))
+              continue
+            fi
+            echo 'release metadata contains an unsupported line' >&2
+            exit 1
+          done < "$metadata_file"
+          (( metadata_assignments == 1 )) || {
+            echo 'release metadata must contain exactly one OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=NNNN assignment' >&2
+            exit 1
+          }
+          previous_version=$((10#$previous_migration))
+          OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
+            OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS=test-only \
+            target/debug/olp migrate --through-version "$previous_version"
+          psql postgres://olp:olp@localhost:5432/olp_previous -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO usage_consumer_health \
+                  (singleton, pending_events, lag_events, checked_at) \
+                VALUES (true, 0, 0, now()) \
+                ON CONFLICT (singleton) DO UPDATE SET \
+                  pending_events = 0, lag_events = 0, checked_at = now()"
+          previous_backup=$(OLP_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_previous \
+            OLP_BACKUP_TRAFFIC_QUIESCED=true \
+            ./scripts/backup.sh "$RUNNER_TEMP/olp-previous-backups")
+          ./scripts/backup-manifest.sh validate "$previous_backup" v1 >/dev/null
+          doctor_root=$(mktemp -d)
+          mkdir -p "$doctor_root/console" "$doctor_root/media"
+          printf '<!doctype html><html></html>\n' > "$doctor_root/console/index.html"
+          openssl rand -base64 32 > "$doctor_root/master-key"
+          openssl rand -base64 32 > "$doctor_root/auth-hmac-key"
+          chmod 600 "$doctor_root/master-key" "$doctor_root/auth-hmac-key"
+          OLP_REHEARSAL_DATABASE_URL=postgres://olp:olp@localhost:5432/olp_upgrade \
+            OLP_REHEARSAL_CONFIRM=destroy-target \
+            OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION="$previous_migration" \
+            OLP_REHEARSAL_RUN_DOCTOR=true \
+            OLP_BIN=target/debug/olp \
+            OLP_VALKEY_URL=redis://localhost:6379 \
+            OLP_MASTER_KEY_FILE="$doctor_root/master-key" \
+            OLP_AUTH_HMAC_KEY_FILE="$doctor_root/auth-hmac-key" \
+            OLP_CONSOLE_DIR="$doctor_root/console" \
+            OLP_MEDIA_SPOOL_DIR="$doctor_root/media" \
+            ./scripts/upgrade-rehearsal.sh "$previous_backup"
 
   advisory-audits:
     name: Advisory audits
-    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -639,6 +712,30 @@ jobs:
         run: pnpm --dir console audit --audit-level high
       - name: Audit SDK smoke advisories
         run: pnpm --dir tests/sdk-smoke audit --prod --audit-level high
+
+  fuzz:
+    name: Fuzz / bounded campaign
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: nightly-2026-05-15 }
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          cache-on-failure: true
+          workspaces: fuzz
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
+        with: { tool: "cargo-fuzz@0.13.2" }
+      - name: Run every seeded fuzz target for two minutes
+        working-directory: fuzz
+        run: |
+          for target in sse_decoder protocol_json media_metadata multipart_parser; do
+            cargo +nightly-2026-05-15 fuzz run "$target" "corpus/$target" -- -max_total_time=120
+          done
 
   image-arm64:
     name: Image / arm64
@@ -711,6 +808,7 @@ jobs:
       - ha
       - upgrade-rehearsal
       - advisory-audits
+      - fuzz
       - production-image
       - image-arm64
     runs-on: ubuntu-24.04

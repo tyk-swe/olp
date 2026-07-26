@@ -1,9 +1,19 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use bytes::Bytes;
+use futures::{StreamExt, stream};
+use http::StatusCode;
 use olp_domain::{
-    AttemptPlan, DurationMs, GenerationParameters, GenerationRequest, Message as CoreMessage,
-    MessageRole, OperationKind, ProviderId, RequestId, RequestMetadata, RouteId, RouteSlug,
-    RuntimeGenerationId, SourceExtensions, TargetId, TokenCountRequest,
+    AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
+    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaSpool,
+    Message as CoreMessage, MessageRole, Operation, OperationKind, ProviderId, ProviderKind,
+    ProviderOutput, ProviderRequest, ProviderTransport, RequestId, RequestMetadata, RouteId,
+    RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId, TokenCountRequest,
+    TokenCountResult, TransportMode,
+};
+use olp_protocols::anthropic::{
+    ANTHROPIC_COUNT_REQUEST_EXTENSION, ContentBlock, ImageBlock,
+    MediaSource as AnthropicMediaSource, Message, MessageContent, Role,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -12,7 +22,8 @@ use tokio::{
 };
 
 use super::*;
-use crate::anthropic::ConnectorTimeouts;
+use crate::anthropic::transport::media::hydrate_anthropic_messages;
+use crate::anthropic::{AnthropicApiKey, ConnectorConfig, ConnectorTimeouts};
 
 struct MockResponse {
     chunks: Vec<(Duration, Vec<u8>)>,

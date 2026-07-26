@@ -18,6 +18,18 @@ The generated files are ignored by Git and are not copied into the application
 image. Compose runs OpenLLMProxy as `1000:1000` by default; set `OLP_UID` and
 `OLP_GID` to the host user's IDs when necessary.
 
+Existing installations must preserve the authentication HMAC key bytes. Before
+running the helper after an upgrade, rename the legacy file without changing its
+contents:
+
+```sh
+mv deploy/secrets/olp_key_hash_key deploy/secrets/olp_auth_hmac_key
+```
+
+The helper refuses to generate `olp_auth_hmac_key` while the legacy filename is
+present, because replacing this key would invalidate persisted authentication
+digests.
+
 ## Bootstrap token lifecycle
 
 `olp_bootstrap_token` is a one-time first-owner setup token. A new installation

@@ -5,14 +5,20 @@ use chrono::Utc;
 use olp_domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
 };
-use olp_storage::{RequestAttemptMetadata, RequestMetadataEvent};
+use olp_storage::{LimitLease, RequestAttemptMetadata, RequestMetadataEvent};
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
 use serde_json::Value;
 use tracing::error;
 
-use crate::GatewayState;
+use crate::{GatewayState, request_admission::InferenceReservation};
 
-use super::{error::InferenceError, execution::RoutedEventExecution};
+use super::{error::InferenceError, execution::RoutedEventExecution, limits::release_limits};
+
+pub(super) fn outcome_status_code(failure: Option<&InferenceError>) -> Option<u16> {
+    failure.map_or(Some(StatusCode::OK.as_u16()), |error| {
+        (error.code != "client_cancelled").then_some(error.status.as_u16())
+    })
+}
 
 pub(crate) fn emit_event_execution_metadata(
     state: &GatewayState,
@@ -31,11 +37,7 @@ pub(crate) fn emit_event_execution_metadata(
         execution.request_started,
         Some(execution.attempt_started),
         Some(execution.first_byte_ms),
-        Some(
-            failure
-                .map_or(StatusCode::OK, |error| error.status)
-                .as_u16(),
-        ),
+        outcome_status_code(failure),
         failure.map(|error| error.code.to_owned()),
         true,
         usage,
@@ -73,17 +75,252 @@ impl UnaryRequestMetadataFinalizer {
             self.request_started,
             Some(self.attempt_started),
             Some(self.first_byte_ms),
-            Some(
-                failure
-                    .map_or(StatusCode::OK, |error| error.status)
-                    .as_u16(),
-            ),
+            outcome_status_code(failure),
             failure.map(|error| error.code.to_owned()),
             true,
             &self.usage,
             self.surface,
             self.operation,
         );
+    }
+}
+
+pub(crate) struct RequestAccountingGuard {
+    state: GatewayState,
+    generation_id: uuid::Uuid,
+    api_key_id: uuid::Uuid,
+    request_id: uuid::Uuid,
+    route_slug: RouteSlug,
+    attempts: Vec<RequestAttemptMetadata>,
+    request_started_at: chrono::DateTime<Utc>,
+    request_started: tokio::time::Instant,
+    attempt_started: Option<tokio::time::Instant>,
+    first_byte_ms: Option<u64>,
+    committed: bool,
+    usage: UsageCapture,
+    surface: Surface,
+    operation: OperationKind,
+    lease: Option<LimitLease>,
+    http_reservation: Option<InferenceReservation>,
+    http_reserved_tokens: Option<i64>,
+    active_attempt: Option<ActiveRequestAttempt>,
+    armed: bool,
+}
+
+struct ActiveRequestAttempt {
+    ordinal: u16,
+    provider_id: uuid::Uuid,
+    upstream_model: String,
+    started_at: chrono::DateTime<Utc>,
+    started: tokio::time::Instant,
+}
+
+struct LimitCleanup {
+    state: GatewayState,
+    delta_lease: Option<LimitLease>,
+    http_reservation: Option<InferenceReservation>,
+    http_reserved_tokens: Option<i64>,
+    actual_tokens: Option<i64>,
+}
+
+impl LimitCleanup {
+    async fn run(self) {
+        let (http_actual, delta_actual) =
+            split_actual_tokens(self.actual_tokens, self.http_reserved_tokens);
+        if let (Some(reservation), Some(actual)) = (self.http_reservation, http_actual) {
+            reservation.reconcile(actual).await;
+        }
+        release_limits(&self.state, self.delta_lease.as_ref(), delta_actual).await;
+    }
+}
+
+fn split_actual_tokens(
+    actual_tokens: Option<i64>,
+    http_reserved_tokens: Option<i64>,
+) -> (Option<i64>, Option<i64>) {
+    match (actual_tokens, http_reserved_tokens) {
+        (Some(actual), Some(http_reserved)) => (
+            Some(actual.min(http_reserved)),
+            Some(actual.saturating_sub(http_reserved).max(0)),
+        ),
+        (Some(actual), None) => (None, Some(actual)),
+        (None, _) => (None, None),
+    }
+}
+
+impl RequestAccountingGuard {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
+        state: &GatewayState,
+        generation_id: uuid::Uuid,
+        api_key_id: uuid::Uuid,
+        request_id: uuid::Uuid,
+        route_slug: RouteSlug,
+        request_started_at: chrono::DateTime<Utc>,
+        request_started: tokio::time::Instant,
+        surface: Surface,
+        operation: OperationKind,
+        lease: Option<LimitLease>,
+    ) -> Self {
+        crate::claim_http_inference_metadata();
+        Self {
+            state: state.clone(),
+            generation_id,
+            api_key_id,
+            request_id,
+            route_slug,
+            attempts: Vec::new(),
+            request_started_at,
+            request_started,
+            attempt_started: None,
+            first_byte_ms: None,
+            committed: false,
+            usage: UsageCapture::default(),
+            surface,
+            operation,
+            lease,
+            http_reservation: crate::http_inference_reservation(),
+            http_reserved_tokens: crate::http_inference_reserved_tokens(),
+            active_attempt: None,
+            armed: true,
+        }
+    }
+
+    pub(super) fn record_attempt_started(
+        &mut self,
+        completed: &[RequestAttemptMetadata],
+        ordinal: u16,
+        provider_id: uuid::Uuid,
+        upstream_model: &str,
+        started_at: chrono::DateTime<Utc>,
+        started: tokio::time::Instant,
+    ) {
+        self.attempts = completed.to_vec();
+        self.active_attempt = Some(ActiveRequestAttempt {
+            ordinal,
+            provider_id,
+            upstream_model: upstream_model.to_owned(),
+            started_at,
+            started,
+        });
+    }
+
+    pub(super) fn record_attempts(
+        &mut self,
+        attempts: Vec<RequestAttemptMetadata>,
+        attempt_started: Option<tokio::time::Instant>,
+        first_byte_ms: Option<u64>,
+        committed: bool,
+    ) {
+        self.attempts = attempts;
+        self.active_attempt = None;
+        self.attempt_started = attempt_started;
+        self.first_byte_ms = first_byte_ms;
+        self.committed = committed;
+    }
+
+    pub(crate) fn usage_mut(&mut self) -> &mut UsageCapture {
+        &mut self.usage
+    }
+
+    pub(super) fn replace_usage(&mut self, usage: UsageCapture) {
+        self.usage = usage;
+    }
+
+    pub(crate) async fn release_lease(&mut self) {
+        let Some(cleanup) = self.take_limit_cleanup() else {
+            return;
+        };
+        let task = tokio::spawn(cleanup.run());
+        if let Err(error) = task.await {
+            tracing::warn!(%error, "request limit cleanup task failed");
+        }
+    }
+
+    pub(crate) async fn finish(mut self, failure: Option<&InferenceError>) {
+        self.release_lease().await;
+        self.emit(failure, true);
+        self.armed = false;
+    }
+
+    pub(crate) fn disarm(mut self) -> Option<LimitLease> {
+        self.armed = false;
+        self.lease.take()
+    }
+
+    fn take_limit_cleanup(&mut self) -> Option<LimitCleanup> {
+        let delta_lease = self.lease.take();
+        let http_reservation = self.http_reservation.take();
+        if delta_lease.is_none() && http_reservation.is_none() {
+            return None;
+        }
+        Some(LimitCleanup {
+            state: self.state.clone(),
+            delta_lease,
+            http_reservation,
+            http_reserved_tokens: self.http_reserved_tokens,
+            actual_tokens: self.usage.actual_tokens(),
+        })
+    }
+
+    fn emit(&self, failure: Option<&InferenceError>, finalize_attempt: bool) {
+        let mut attempts = self.attempts.clone();
+        if let Some(active) = &self.active_attempt {
+            attempts.push(RequestAttemptMetadata {
+                id: uuid::Uuid::now_v7(),
+                ordinal: active.ordinal,
+                provider_id: active.provider_id,
+                upstream_model: active.upstream_model.clone(),
+                started_at: active.started_at,
+                completed_at: Utc::now(),
+                status_code: None,
+                error_class: Some("cancelled".to_owned()),
+                committed: false,
+                latency_ms: elapsed_ms(active.started.elapsed()),
+                first_byte_ms: None,
+            });
+        }
+        emit_request_metadata_event(
+            &self.state,
+            self.generation_id,
+            self.api_key_id,
+            self.request_id,
+            &self.route_slug,
+            &attempts,
+            self.request_started_at,
+            self.request_started,
+            finalize_attempt.then_some(self.attempt_started).flatten(),
+            self.first_byte_ms,
+            outcome_status_code(failure),
+            failure.map(|error| error.code.to_owned()),
+            self.committed,
+            &self.usage,
+            self.surface,
+            self.operation,
+        );
+    }
+}
+
+impl Drop for RequestAccountingGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let failure = InferenceError::client_cancelled();
+        // A completed provider attempt already has its own terminal outcome.
+        // Client cancellation after that point must not overwrite it.
+        self.emit(Some(&failure), false);
+        let Some(cleanup) = self.take_limit_cleanup() else {
+            return;
+        };
+        // Mirrors request_admission::spawn_release_future: a guard dropped
+        // outside a Tokio runtime (e.g. during runtime teardown) must not
+        // panic in Drop; the lease TTL then reclaims the reservation.
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(cleanup.run());
+        } else {
+            tracing::warn!("request limit cleanup skipped outside a Tokio runtime");
+        }
     }
 }
 
@@ -139,7 +376,7 @@ pub(super) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct UsageCapture {
     observed: bool,
     complete: bool,
@@ -150,6 +387,10 @@ pub(crate) struct UsageCapture {
 }
 
 impl UsageCapture {
+    pub(crate) fn actual_tokens(&self) -> Option<i64> {
+        self.input_tokens?.checked_add(self.output_tokens?)
+    }
+
     pub(crate) fn observe(&mut self, event: &CanonicalEvent) {
         let CanonicalEventKind::Usage { usage } = &event.kind else {
             return;
@@ -275,4 +516,23 @@ pub(super) fn emit_request_metadata_event(
 
 pub(super) fn elapsed_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_actual_tokens;
+
+    #[test]
+    fn actual_tokens_are_split_across_http_and_delta_reservations() {
+        assert_eq!(
+            split_actual_tokens(Some(40), Some(100)),
+            (Some(40), Some(0))
+        );
+        assert_eq!(
+            split_actual_tokens(Some(130), Some(100)),
+            (Some(100), Some(30))
+        );
+        assert_eq!(split_actual_tokens(Some(40), None), (None, Some(40)));
+        assert_eq!(split_actual_tokens(None, Some(100)), (None, None));
+    }
 }

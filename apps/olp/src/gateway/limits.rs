@@ -196,8 +196,24 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
         .sum()
 }
 
-pub(crate) async fn release_limits(state: &GatewayState, lease: Option<&LimitLease>) {
+pub(crate) async fn release_limits(
+    state: &GatewayState,
+    lease: Option<&LimitLease>,
+    actual_tokens: Option<i64>,
+) {
     if let (Some(limiter), Some(lease)) = (state.limiter.current(), lease) {
+        if let Some(actual_tokens) = actual_tokens {
+            match tokio::time::timeout(
+                Duration::from_millis(250),
+                limiter.reconcile(lease, actual_tokens),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => warn!(%error, "failed to reconcile token reservation"),
+                Err(_) => warn!("timed out reconciling token reservation"),
+            }
+        }
         match tokio::time::timeout(Duration::from_millis(250), limiter.release(lease)).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => warn!(%error, "failed to release concurrency lease"),

@@ -3,21 +3,25 @@ use olp_domain::{CanonicalEvent, CanonicalEventKind, ProviderEventStream, RouteS
 
 use crate::{
     GatewayState,
-    gateway::{
-        InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata,
-        release_limits,
-    },
+    gateway::{InferenceError, RoutedEventExecution, UsageCapture, emit_event_execution_metadata},
 };
 
-const MAX_COLLECTED_CANONICAL_EVENT_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_COLLECTED_CANONICAL_EVENT_BYTES: usize = 16 * 1024 * 1024;
 
 pub(crate) async fn collect_provider_events(
     first: CanonicalEvent,
     events: &mut ProviderEventStream,
     deadline: tokio::time::Instant,
 ) -> Result<Vec<CanonicalEvent>, InferenceError> {
-    collect_provider_events_with_limit(first, events, deadline, MAX_COLLECTED_CANONICAL_EVENT_BYTES)
-        .await
+    let mut usage = UsageCapture::default();
+    collect_provider_events_with_limit(
+        first,
+        events,
+        deadline,
+        MAX_COLLECTED_CANONICAL_EVENT_BYTES,
+        &mut usage,
+    )
+    .await
 }
 
 async fn collect_provider_events_with_limit(
@@ -25,7 +29,9 @@ async fn collect_provider_events_with_limit(
     events: &mut ProviderEventStream,
     deadline: tokio::time::Instant,
     maximum_bytes: usize,
+    usage: &mut UsageCapture,
 ) -> Result<Vec<CanonicalEvent>, InferenceError> {
+    usage.observe(&first);
     if let CanonicalEventKind::Error { error } = &first.kind {
         return Err(InferenceError::from_canonical(error));
     }
@@ -40,6 +46,7 @@ async fn collect_provider_events_with_limit(
             .map_err(|_| InferenceError::timeout())?;
         match next {
             Some(Ok(event)) => {
+                usage.observe(&event);
                 if let CanonicalEventKind::Error { error } = &event.kind {
                     return Err(InferenceError::from_canonical(error));
                 }
@@ -58,7 +65,7 @@ async fn collect_provider_events_with_limit(
     Ok(collected)
 }
 
-fn collected_event_bytes(
+pub(crate) fn collected_event_bytes(
     current: usize,
     event: &CanonicalEvent,
     maximum: usize,
@@ -128,30 +135,28 @@ pub(crate) async fn collect_event_execution(
     state: &GatewayState,
     mut execution: RoutedEventExecution,
 ) -> Result<CompletedEventExecution, InferenceError> {
-    let result = collect_provider_events(
+    let mut accounting = execution
+        .accounting
+        .take()
+        .expect("routed event execution owns request accounting");
+    let result = collect_provider_events_with_limit(
         execution.first.clone(),
         &mut execution.events,
         execution.deadline,
+        MAX_COLLECTED_CANONICAL_EVENT_BYTES,
+        accounting.usage_mut(),
     )
     .await;
     let events = match result {
         Ok(events) => events,
         Err(failure) => {
-            emit_event_execution_metadata(
-                state,
-                &execution,
-                &UsageCapture::default(),
-                Some(&failure),
-            );
-            release_limits(state, execution.lease.as_ref()).await;
+            accounting.finish(Some(&failure)).await;
             return Err(failure);
         }
     };
-    let mut usage = UsageCapture::default();
-    for event in &events {
-        usage.observe(event);
-    }
-    release_limits(state, execution.lease.as_ref()).await;
+    accounting.release_lease().await;
+    let usage = std::mem::take(accounting.usage_mut());
+    let _ = accounting.disarm();
     Ok(CompletedEventExecution {
         events,
         route_slug: execution.route_slug.clone(),
@@ -172,7 +177,7 @@ mod tests {
     use futures::stream;
     use olp_domain::{CanonicalEvent, CanonicalEventKind, ProviderEventStream};
 
-    use super::collect_provider_events_with_limit;
+    use super::{UsageCapture, collect_provider_events_with_limit};
 
     #[tokio::test]
     async fn unary_event_collection_has_an_aggregate_byte_limit() {
@@ -194,6 +199,7 @@ mod tests {
             &mut events,
             tokio::time::Instant::now() + Duration::from_secs(1),
             maximum,
+            &mut UsageCapture::default(),
         )
         .await
         .unwrap_err();

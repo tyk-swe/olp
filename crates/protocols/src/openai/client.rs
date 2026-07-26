@@ -225,6 +225,7 @@ pub struct OpenAiResponsesStreamEncoder {
     created_at: i64,
     next_sequence: u64,
     events: Vec<CanonicalEvent>,
+    collected_event_bytes: usize,
     emitted_outputs: BTreeSet<u32>,
     tool_outputs: BTreeSet<u32>,
     done: bool,
@@ -235,6 +236,7 @@ impl std::fmt::Debug for OpenAiResponsesStreamEncoder {
         formatter
             .debug_struct("OpenAiResponsesStreamEncoder")
             .field("next_sequence", &self.next_sequence)
+            .field("collected_event_bytes", &self.collected_event_bytes)
             .field("emitted_output_count", &self.emitted_outputs.len())
             .field("done", &self.done)
             .finish_non_exhaustive()
@@ -254,6 +256,7 @@ impl OpenAiResponsesStreamEncoder {
             created_at,
             next_sequence: 0,
             events: Vec::new(),
+            collected_event_bytes: 0,
             emitted_outputs: BTreeSet::new(),
             tool_outputs: BTreeSet::new(),
             done: false,
@@ -273,6 +276,15 @@ impl OpenAiResponsesStreamEncoder {
                 actual: event.sequence,
             });
         }
+        // Keep this aligned with the unary collection ceiling in
+        // apps/olp/src/event_completion.rs.
+        const MAX_COLLECTED_CANONICAL_EVENT_BYTES: usize = 16 * 1024 * 1024;
+        let event_bytes = serde_json::to_vec(&event)?.len();
+        self.collected_event_bytes = self
+            .collected_event_bytes
+            .checked_add(event_bytes)
+            .filter(|total| *total <= MAX_COLLECTED_CANONICAL_EVENT_BYTES)
+            .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)?;
         self.next_sequence = self.next_sequence.saturating_add(1);
         let mut frames = Vec::new();
         match &event.kind {
@@ -494,6 +506,30 @@ pub enum OpenAiClientEncodeError {
     DataAfterDone,
     #[error("OpenAI stream payload must be an object")]
     InvalidStreamPayload,
+    #[error("canonical event history exceeded the Responses stream encoder limit")]
+    EventHistoryTooLarge,
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_stream_encoder_rejects_oversized_event_history() {
+        let mut encoder = OpenAiResponsesStreamEncoder::new("route", "response", 0);
+        let event = CanonicalEvent::new(
+            0,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "x".repeat(16 * 1024 * 1024),
+            },
+        );
+
+        assert!(matches!(
+            encoder.push(event),
+            Err(OpenAiClientEncodeError::EventHistoryTooLarge)
+        ));
+    }
 }

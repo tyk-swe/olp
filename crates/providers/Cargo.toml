@@ -11,6 +11,7 @@ repository.workspace = true
 test-util = []
 
 [dependencies]
+arc-swap.workspace = true
 aws-config = { version = "1.10.0", default-features = false, features = [
     "behavior-version-latest",
     "credentials-process",

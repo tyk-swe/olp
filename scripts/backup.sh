@@ -52,6 +52,18 @@ migration_count=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --tuples-on
   --command='SELECT count(*) FROM _sqlx_migrations WHERE success' | tr -d '[:space:]')
 latest_generation=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
   --command='SELECT COALESCE(max(sequence), 0) FROM runtime_generations' | tr -d '[:space:]')
+request_metadata_schema=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc \
+  --tuples-only --no-align --command="
+    SELECT CASE
+      WHEN to_regclass('public.request_metadata_consumer_health') IS NOT NULL THEN 'current'
+      WHEN to_regclass('public.usage_consumer_health') IS NOT NULL THEN 'legacy'
+      ELSE 'missing'
+    END
+  " | tr -d '[:space:]')
+[[ $request_metadata_schema == current || $request_metadata_schema == legacy ]] || {
+  echo "request metadata consumer health schema is unavailable" >&2
+  exit 1
+}
 
 traffic_quiesced=${OLP_BACKUP_TRAFFIC_QUIESCED:-false}
 case "$traffic_quiesced" in
@@ -66,13 +78,18 @@ if [[ $traffic_quiesced == true ]]; then
     echo "OLP_BACKUP_REQUEST_METADATA_CHECKPOINT_MAX_AGE_SECONDS must be a positive integer" >&2
     exit 2
   }
+  if [[ $request_metadata_schema == current ]]; then
+    consumer_health_table=request_metadata_consumer_health
+  else
+    consumer_health_table=usage_consumer_health
+  fi
   checkpoint=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc \
     --tuples-only --no-align --field-separator='|' --command="
       SELECT pending_events,
              lag_events,
              to_char(checked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
              greatest(0, floor(extract(epoch FROM now() - checked_at)))::bigint
-        FROM request_metadata_consumer_health
+        FROM ${consumer_health_table}
        WHERE singleton
     " | tr -d '[:space:]')
   [[ -n $checkpoint ]] || {
@@ -115,5 +132,8 @@ created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 "$manifest_tool" create-v2 "$backup_path" "$created_at" "$server_version" \
   "$migration_count" "$latest_generation" "$traffic_quiesced" \
   "$request_metadata_stream_drained" "$request_metadata_consumer_checked_at"
+if [[ $request_metadata_schema == legacy ]]; then
+  "$manifest_tool" convert-v2-to-v1 "$backup_path"
+fi
 
 echo "$backup_path"

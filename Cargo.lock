@@ -2348,6 +2348,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
@@ -2407,6 +2408,7 @@ dependencies = [
 name = "olp-providers"
 version = "2.0.0"
 dependencies = [
+ "arc-swap",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-bedrock",

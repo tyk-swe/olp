@@ -1,6 +1,10 @@
+import js from '@eslint/js';
 import tsParser from '@typescript-eslint/parser';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
+import tseslint from 'typescript-eslint';
+
+const tsFiles = ['**/*.{ts,tsx}'];
 
 export default [
   {
@@ -16,7 +20,15 @@ export default [
   },
   ...svelte.configs['flat/recommended'],
   {
-    files: ['**/*.{ts,tsx}'],
+    ...js.configs.recommended,
+    files: tsFiles
+  },
+  ...tseslint.configs.recommended.map((config) => ({
+    ...config,
+    files: tsFiles
+  })),
+  {
+    files: tsFiles,
     languageOptions: {
       parser: tsParser,
       parserOptions: { sourceType: 'module' },

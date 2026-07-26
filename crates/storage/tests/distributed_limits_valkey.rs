@@ -366,6 +366,87 @@ async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
 
 #[tokio::test]
 #[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+async fn token_reconciliation_refunds_only_unused_reservation() {
+    let namespace = namespace("token_refund");
+    let lookup_id = "lookup_01";
+    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let mut connection = connection().await;
+    settle_in_minute(&mut connection).await;
+    let (rate_key, _) = keys(&namespace, lookup_id);
+
+    let lease = limiter
+        .reserve(LimitRequest {
+            requests_per_minute: Some(10),
+            tokens_per_minute: Some(100),
+            max_concurrency: None,
+            requested_tokens: 8,
+            ..request(lookup_id)
+        })
+        .await
+        .unwrap();
+    limiter.reconcile(&lease, 3).await.unwrap();
+    let state = rate_state(&mut connection, &rate_key).await;
+    assert_eq!(state["rpm"], 1);
+    assert_eq!(state["tpm"], 3);
+
+    let lease = limiter
+        .reserve(LimitRequest {
+            requests_per_minute: Some(10),
+            tokens_per_minute: Some(100),
+            max_concurrency: None,
+            requested_tokens: 4,
+            ..request(lookup_id)
+        })
+        .await
+        .unwrap();
+    limiter.reconcile(&lease, 7).await.unwrap();
+    let state = rate_state(&mut connection, &rate_key).await;
+    assert_eq!(state["rpm"], 2);
+    assert_eq!(state["tpm"], 7);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+async fn token_reconciliation_does_not_touch_a_new_window() {
+    let namespace = namespace("token_refund_window");
+    let lookup_id = "lookup_01";
+    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let mut connection = connection().await;
+    settle_in_minute(&mut connection).await;
+    let (rate_key, _) = keys(&namespace, lookup_id);
+
+    let lease = limiter
+        .reserve(LimitRequest {
+            requests_per_minute: Some(10),
+            tokens_per_minute: Some(100),
+            max_concurrency: None,
+            requested_tokens: 8,
+            ..request(lookup_id)
+        })
+        .await
+        .unwrap();
+    let reservation_window = rate_state(&mut connection, &rate_key).await["window"];
+    let _: () = redis::pipe()
+        .hset(&rate_key, "window", reservation_window + 1)
+        .hset(&rate_key, "rpm", 1)
+        .hset(&rate_key, "tpm", 11)
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+
+    limiter.reconcile(&lease, 0).await.unwrap();
+    let state = rate_state(&mut connection, &rate_key).await;
+    assert_eq!(state["window"], reservation_window + 1);
+    assert_eq!(state["rpm"], 1);
+    assert_eq!(state["tpm"], 11);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
 async fn concurrency_rejection_consumes_neither_requests_nor_tokens() {
     let namespace = namespace("concurrency_atomic");
     let lookup_id = "lookup_01";

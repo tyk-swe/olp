@@ -33,6 +33,8 @@ pub(super) enum Command {
     Doctor(DoctorArgs),
     /// Inspect, re-encrypt, and verify retirement of master-key versions.
     MasterKey(MasterKeyArgs),
+    /// Check the loopback readiness endpoint and exit successfully only when ready.
+    HealthProbe,
     /// Internal shell-free Kubernetes pre-stop delay.
     #[command(hide = true)]
     InternalPreStop(InternalPreStopArgs),
@@ -64,6 +66,9 @@ pub(super) struct PersistenceArgs {
 pub(super) struct MigrateArgs {
     #[command(flatten)]
     pub(super) persistence: PersistenceArgs,
+    /// Test-only target used to construct an N-1 upgrade fixture.
+    #[arg(long, hide = true)]
+    pub(super) through_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -131,9 +136,15 @@ pub(super) struct ServeArgs {
     #[arg(long, env = "OLP_BOOTSTRAP_TOKEN_FILE")]
     pub(super) bootstrap_token_file: Option<PathBuf>,
     /// Comma-separated CIDRs for reverse proxies allowed to supply
-    /// X-Forwarded-For for unauthenticated authentication admission.
-    #[arg(long, env = "OLP_TRUSTED_PROXY_CIDRS", value_delimiter = ',')]
-    pub(super) trusted_proxy_cidrs: Vec<TrustedProxyCidr>,
+    /// X-Forwarded-For for unauthenticated authentication admission. An empty
+    /// value (the shipped default) means forwarding headers are ignored.
+    #[arg(
+        long,
+        env = "OLP_TRUSTED_PROXY_CIDRS",
+        default_value = "",
+        hide_default_value = true
+    )]
+    pub(super) trusted_proxy_cidrs: TrustedProxyCidrs,
     #[arg(long, env = "OLP_MASTER_KEY_FILE")]
     pub(super) master_key_file: Option<PathBuf>,
     /// JSON file mapping runtime provider IDs to credential files. The JSON
@@ -208,4 +219,32 @@ pub(super) enum MasterKeyAction {
         #[arg(long, default_value_t = 100)]
         batch_size: u16,
     },
+}
+
+/// Comma-separated trusted-proxy CIDR list. Unlike a bare `Vec` with clap's
+/// `value_delimiter`, an empty value (the shipped `OLP_TRUSTED_PROXY_CIDRS=`
+/// default) parses to an empty list instead of failing startup.
+#[derive(Clone, Debug, Default)]
+pub(super) struct TrustedProxyCidrs(pub(super) Vec<TrustedProxyCidr>);
+
+impl std::ops::Deref for TrustedProxyCidrs {
+    type Target = [TrustedProxyCidr];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for TrustedProxyCidrs {
+    type Err = crate::TrustedProxyCidrParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(TrustedProxyCidr::from_str)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Self)
+    }
 }

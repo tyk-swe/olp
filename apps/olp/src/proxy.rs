@@ -4,13 +4,20 @@ use std::{
     error::Error as StdError,
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use axum::http::{HeaderMap, HeaderName};
 use olp_storage::AuthHmacKey;
 
 use crate::{GatewayState, Problem};
+
+const UNCONFIGURED_PROXY_WARNING_INTERVAL_SECONDS: u64 = 60;
+static LAST_UNCONFIGURED_PROXY_WARNING: AtomicU64 = AtomicU64::new(0);
 
 /// A CIDR range whose peer addresses are allowed to provide a forwarding
 /// chain for public-auth source attribution. Direct clients never control the
@@ -77,6 +84,9 @@ pub fn public_auth_source(
         .map(|address| address.ip())
         .ok_or_else(|| Problem::service_unavailable("client_address_unavailable"))?;
     if !state.peer_is_trusted_proxy(peer) {
+        if !state.trusted_proxies_configured() && headers.contains_key("x-forwarded-for") {
+            warn_unconfigured_forwarded_for(peer);
+        }
         // A direct client cannot influence admission by spoofing a forwarding
         // header; only its connected peer address is authoritative.
         return Ok(peer.to_string());
@@ -116,6 +126,40 @@ pub fn public_auth_source(
         })
 }
 
+fn warn_unconfigured_forwarded_for(peer: IpAddr) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .max(1);
+    if claim_warning_slot(&LAST_UNCONFIGURED_PROXY_WARNING, now) {
+        tracing::warn!(
+            %peer,
+            "ignored X-Forwarded-For because OLP_TRUSTED_PROXY_CIDRS is empty"
+        );
+    }
+}
+
+fn claim_warning_slot(last_warning: &AtomicU64, now: u64) -> bool {
+    let mut previous = last_warning.load(Ordering::Relaxed);
+    loop {
+        if previous != 0
+            && now.saturating_sub(previous) < UNCONFIGURED_PROXY_WARNING_INTERVAL_SECONDS
+        {
+            return false;
+        }
+        match last_warning.compare_exchange_weak(
+            previous,
+            now,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return true,
+            Err(observed) => previous = observed,
+        }
+    }
+}
+
 fn resolve_auth_source<'a>(
     state: &'a GatewayState,
     headers: &HeaderMap,
@@ -146,4 +190,19 @@ pub(crate) fn public_auth_source_target_digests(
         auth_hmac_key.public_auth_source_digest(&source),
         auth_hmac_key.public_auth_source_target_digest(&source, target),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU64;
+
+    use super::claim_warning_slot;
+
+    #[test]
+    fn unconfigured_proxy_warning_is_rate_limited() {
+        let last_warning = AtomicU64::new(0);
+        assert!(claim_warning_slot(&last_warning, 100));
+        assert!(!claim_warning_slot(&last_warning, 159));
+        assert!(claim_warning_slot(&last_warning, 160));
+    }
 }

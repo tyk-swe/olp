@@ -105,12 +105,20 @@ pub fn decode_response_object(
     }
     if let Some(error) = response.error {
         collect_extra("/error", &error.extra, &mut extensions);
+        let retryable = crate::openai::error_signals_rate_limit(
+            Some(&error.code),
+            error.extra.get("type").and_then(Value::as_str),
+        );
         builder.push(CanonicalEventKind::Error {
             error: CanonicalError {
-                class: ErrorClass::Upstream,
+                class: if retryable {
+                    ErrorClass::RateLimit
+                } else {
+                    ErrorClass::Upstream
+                },
                 message: error.message,
                 provider_code: Some(error.code),
-                retryable: false,
+                retryable,
             },
         });
     }
@@ -121,6 +129,42 @@ pub fn decode_response_object(
     }
     builder.push(CanonicalEventKind::Done);
     Ok(builder.events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_rate_limit_error_is_retryable() {
+        let events = decode_response_object(ResponseObject {
+            id: "resp_test".to_owned(),
+            object: "response".to_owned(),
+            created_at: 1,
+            status: "failed".to_owned(),
+            model: "gpt-test".to_owned(),
+            output: Vec::new(),
+            usage: None,
+            error: Some(ResponseErrorBody {
+                code: "rate_limit_exceeded".to_owned(),
+                message: "slow down".to_owned(),
+                extra: BTreeMap::new(),
+            }),
+            incomplete_details: None,
+            extra: BTreeMap::new(),
+        })
+        .unwrap();
+
+        let error = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                CanonicalEventKind::Error { error } => Some(error),
+                _ => None,
+            })
+            .expect("failed response must emit a canonical error");
+        assert_eq!(error.class, ErrorClass::RateLimit);
+        assert!(error.retryable);
+    }
 }
 
 fn decode_response_output_item(

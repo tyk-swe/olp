@@ -1,10 +1,16 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use bytes::Bytes;
+use futures::{StreamExt, stream};
+use http::StatusCode;
 use olp_domain::{
-    AttemptPlan, CanonicalEventKind, DurationMs, GenerationParameters, GenerationRequest, Message,
-    MessageRole, OperationKind, ProviderId, RequestId, RequestMetadata, RouteId, RouteSlug,
-    RuntimeGenerationId, SourceExtensions, TargetId, TokenCountRequest,
+    AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
+    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaSpool, Message,
+    MessageRole, Operation, OperationKind, ProviderId, ProviderKind, ProviderOutput,
+    ProviderRequest, ProviderTransport, RequestId, RequestMetadata, RouteId, RouteSlug,
+    RuntimeGenerationId, SourceExtensions, Surface, TargetId, TokenCountRequest, TransportMode,
 };
+use olp_protocols::gemini::{Content, GEMINI_COUNT_REQUEST_EXTENSION, Part};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -12,7 +18,8 @@ use tokio::{
 };
 
 use super::*;
-use crate::gemini::ConnectorTimeouts;
+use crate::gemini::transport::media::hydrate_gemini_contents;
+use crate::gemini::{ConnectorConfig, ConnectorTimeouts, GeminiApiKey};
 
 struct MockResponse {
     chunks: Vec<(Duration, Vec<u8>)>,
