@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(cargo tree:*)",
+      "Bash(./scripts/check-boundaries.sh)",
+      "Bash(./scripts/check-storage-sqlx.sh)",
+      "Bash(scripts/check-release-version.sh)",
+      "Bash(scripts/check-supply-chain-pins.sh)",
+      "Bash(scripts/verify-helm-contract.sh:*)",
+      "Bash(scripts/test-backup-manifest.sh)",
+      "Bash(scripts/test-repository-validation.sh)",
+      "Bash(pnpm --dir console install --frozen-lockfile)",
+      "Bash(pnpm --dir console verify)",
+      "Bash(pnpm --dir console test:*)",
+      "Bash(pnpm --dir console check)",
+      "Bash(shellcheck:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(rg:*)"
+    ]
+  }
+}

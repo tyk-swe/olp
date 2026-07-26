@@ -7,6 +7,7 @@
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { ApiProblem } from '$lib/api/http';
+  import { popCursor, pushCursor } from '$lib/api/pagination';
   import { dateTimeLocalValue } from '$lib/features/operations/format';
   import {
     createApiKey,
@@ -247,13 +248,11 @@
   function nextKeyPage() {
     const next = keys.data?.nextCursor;
     if (!next) return;
-    listState.history = [...listState.history, listState.cursor];
-    listState.cursor = next;
+    pushCursor(listState, next);
   }
 
   function previousKeyPage() {
-    listState.cursor = listState.history.at(-1);
-    listState.history = listState.history.slice(0, -1);
+    popCursor(listState);
   }
 </script>
 

@@ -70,6 +70,8 @@ jobs:
           shellcheck "${scripts[@]}"
       - name: Verify backup manifest contract
         run: scripts/test-backup-manifest.sh
+      - name: Verify repository validation helper contract
+        run: scripts/test-repository-validation.sh
       - name: Verify request metadata loss recorder contract
         run: |
           scripts/record-request-metadata-stream-loss.sh --help 2>&1 \
@@ -100,18 +102,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.97.0"
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-        with:
-          cache-on-failure: true
-          workspaces: |
+          cache-workspaces: |
             .
             fuzz
-      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
-        with: { tool: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-fuzz@0.13.2" }
+          tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-fuzz@0.13.2"
       - name: Install boundary-check dependencies
         run: |
           sudo apt-get update
@@ -162,15 +159,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
-      - name: Install locked console dependencies
-        run: pnpm install --frozen-lockfile
+          install-dirs: console
       - name: Verify console
         run: pnpm verify
 
@@ -186,15 +177,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
-      - name: Install locked console dependencies
-        run: pnpm install --frozen-lockfile
+          install-dirs: console
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Run Storybook interaction and accessibility tests
@@ -225,15 +210,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
-      - name: Install locked console dependencies
-        run: pnpm install --frozen-lockfile
+          install-dirs: console
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Run Chromium end-to-end tests
@@ -260,20 +239,11 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
           cache-dependency-path: tests/sdk-smoke/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: "1.97.0" }
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-        with:
-          cache-on-failure: true
-      - name: Install locked official SDK smoke clients
-        run: pnpm --dir tests/sdk-smoke install --frozen-lockfile
+          install-dirs: tests/sdk-smoke
+      - uses: ./.github/actions/setup-rust
       - name: Smoke official OpenAI, Anthropic, and Google GenAI SDKs
         run: ./tests/sdk-smoke/run.sh
 
@@ -304,13 +274,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: "1.97.0" }
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+      - uses: ./.github/actions/setup-rust
         with:
-          cache-on-failure: true
-      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
-        with: { tool: "sqlx-cli@0.9.0" }
+          tools: "sqlx-cli@0.9.0"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Verify checked SQLx metadata
@@ -356,20 +322,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: "1.97.0" }
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-        with:
-          cache-on-failure: true
-      - name: Install locked console dependencies
-        run: pnpm --dir console install --frozen-lockfile
+          install-dirs: console
+      - uses: ./.github/actions/setup-rust
       - name: Install Chromium
         run: pnpm --dir console exec playwright install --with-deps chromium
       - name: Build the Rust console host
@@ -496,15 +452,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
-      - name: Install locked console dependencies
-        run: pnpm install --frozen-lockfile
+          install-dirs: console
       - name: Install ${{ matrix.browser }}
         run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
       - name: Run ${{ matrix.label }} end-to-end tests
@@ -543,11 +493,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: "1.97.0" }
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-        with:
-          cache-on-failure: true
+      - uses: ./.github/actions/setup-rust
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Build the HA binary
@@ -598,11 +544,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: "1.97.0" }
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-        with:
-          cache-on-failure: true
+      - uses: ./.github/actions/setup-rust
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Build and migrate the current release
@@ -689,23 +631,16 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with: { version: 11.10.0 }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
           cache-dependency-path: |
             console/pnpm-lock.yaml
             tests/sdk-smoke/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: "1.97.0" }
-      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
-        with: { tool: "cargo-audit@0.22.2" }
-      - name: Install locked JavaScript dependencies
-        run: |
-          pnpm --dir console install --frozen-lockfile
-          pnpm --dir tests/sdk-smoke install --frozen-lockfile
+          install-dirs: console tests/sdk-smoke
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache: "false"
+          tools: "cargo-audit@0.22.2"
       - name: Audit Cargo advisories
         run: cargo audit --deny warnings
       - name: Audit console advisories
@@ -722,14 +657,11 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with: { toolchain: nightly-2026-05-15 }
-      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+      - uses: ./.github/actions/setup-rust
         with:
-          cache-on-failure: true
-          workspaces: fuzz
-      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
-        with: { tool: "cargo-fuzz@0.13.2" }
+          toolchain: nightly-2026-05-15
+          cache-workspaces: fuzz
+          tools: "cargo-fuzz@0.13.2"
       - name: Run every seeded fuzz target for two minutes
         working-directory: fuzz
         run: |

@@ -7,11 +7,12 @@ use olp_storage::{
 };
 use uuid::Uuid;
 
+mod support;
+
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn local_identity_lifecycle_is_transactional_and_audited() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty test database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
 

@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiProblem } from './http';
-import { listUserPage } from './management/access';
-import { listApiKeyPage } from './management/api-keys';
-import { getOidcConfiguration } from './management/oidc';
-import { listProviderPage, listProviders } from './management/providers';
-import { listRouteDraftPage } from './management/routes';
-import { collectCursorPages } from './management/shared';
-import { captureRequests, jsonResponse } from './test/requestCapture';
+import { ApiProblem } from '../http';
+import { listUserPage } from './access';
+import { listApiKeyPage } from './api-keys';
+import { getOidcConfiguration } from './oidc';
+import { listProviderPage, listProviders } from './providers';
+import { listRouteDraftPage } from './routes';
+import { collectCursorPages } from './shared';
+import { captureRequests, jsonResponse } from '../test/requestCapture';
 
 afterEach(() => {
   vi.unstubAllGlobals();

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { setContext } from 'svelte';
+  import { emptyCursorHistory } from '$lib/api/pagination';
   import {
     routeListStateContext,
     type RouteListState
@@ -7,10 +8,8 @@
 
   let { children } = $props();
   const listState = $state<RouteListState>({
-    draftCursor: undefined,
-    draftHistory: [],
-    routeCursor: undefined,
-    routeHistory: []
+    draft: emptyCursorHistory(),
+    route: emptyCursorHistory()
   });
 
   setContext(routeListStateContext, listState);

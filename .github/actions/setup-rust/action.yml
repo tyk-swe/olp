@@ -1,0 +1,38 @@
+name: Setup Rust
+description: >-
+  Pinned Rust toolchain, cargo build cache, and optional cargo tools. Keep the
+  action SHAs below in lockstep with scripts/check-supply-chain-pins.sh.
+
+inputs:
+  toolchain:
+    description: Rust toolchain to install
+    default: "1.97.0"
+  components:
+    description: Comma-separated rustup components
+    default: ""
+  cache:
+    description: Whether to restore/save the cargo cache
+    default: "true"
+  cache-workspaces:
+    description: Newline-separated workspaces for the cargo cache
+    default: "."
+  tools:
+    description: Comma-separated tool@version list for taiki-e/install-action
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+    - if: ${{ inputs.cache == 'true' }}
+      uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+      with:
+        cache-on-failure: true
+        workspaces: ${{ inputs.cache-workspaces }}
+    - if: ${{ inputs.tools != '' }}
+      uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
+      with:
+        tool: ${{ inputs.tools }}

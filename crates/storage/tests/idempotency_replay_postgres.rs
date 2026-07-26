@@ -8,11 +8,12 @@ use olp_storage::{
 use serde_json::{Value, json};
 use sqlx::Executor as _;
 
+mod support;
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 8).await.unwrap();
     store.migrate().await.unwrap();
     let owner = store

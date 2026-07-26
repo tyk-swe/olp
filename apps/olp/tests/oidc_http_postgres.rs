@@ -64,10 +64,9 @@ struct MockIdp {
 }
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty test database");
+    let database_url = common::test_database_url();
     let store = PgStore::connect(&database_url, 8).await.unwrap();
     store.migrate().await.unwrap();
     let (idp, _idp_task) = spawn_mock_idp().await;

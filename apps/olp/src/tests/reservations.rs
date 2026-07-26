@@ -1,0 +1,244 @@
+use super::*;
+
+async fn activate_runtime_inside_handler(
+    State(state): State<GatewayState>,
+    Extension(principal): Extension<InferencePrincipal>,
+) -> String {
+    let pinned_before_activation = principal.runtime();
+    let pinned_generation = pinned_before_activation.generation.id;
+    state
+        .runtime
+        .install(
+            RuntimeSnapshot {
+                generation: RuntimeGeneration {
+                    id: RuntimeGenerationId::new(),
+                    ordinal: pinned_before_activation.generation.ordinal + 1,
+                    activated_at: chrono::Utc::now(),
+                },
+                providers: pinned_before_activation.providers.clone(),
+                routes: pinned_before_activation.routes.clone(),
+                api_keys: pinned_before_activation.api_keys.clone(),
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    assert_ne!(state.runtime.pin().generation.id, pinned_generation);
+    let detached_principal = spawn_http_inference_task(&state, async move {
+        http_inference_principal()
+            .expect("admitted principal must cross the detached task boundary")
+            .runtime()
+            .generation
+            .id
+    })
+    .await
+    .unwrap();
+    assert_eq!(detached_principal, pinned_generation);
+    pinned_generation.to_string()
+}
+
+#[tokio::test]
+async fn inference_http_boundary_pins_one_generation_across_activation() {
+    let (state, key) = inference_state(false);
+    let state = state.gateway_state_for_test();
+    let original_generation = state.runtime.pin().generation.id;
+    let app = Router::new()
+        .route(
+            "/openai/test-generation-pin",
+            get(activate_runtime_inside_handler),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            enforce_request_limits,
+        ))
+        .with_state(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/openai/test-generation-pin")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(body.as_ref(), original_generation.to_string().as_bytes());
+    assert_ne!(state.runtime.pin().generation.id, original_generation);
+}
+
+#[tokio::test]
+async fn response_completion_and_drop_release_the_http_concurrency_reservation() {
+    for consume in [true, false] {
+        let released = Arc::new(AtomicBool::new(false));
+        let release_signal = released.clone();
+        let body = Body::new(ReleaseReservationBody {
+            inner: Body::from("response"),
+            reservation: InferenceReservation::for_test(async move {
+                release_signal.store(true, Ordering::Release);
+            }),
+        });
+        if consume {
+            body.collect().await.unwrap();
+        } else {
+            drop(body);
+        }
+        tokio::task::yield_now().await;
+        assert!(
+            released.load(Ordering::Acquire),
+            "reservation was not released when consume={consume}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn concurrent_final_reservation_drops_release_once() {
+    let released = Arc::new(AtomicBool::new(false));
+    let release_signal = Arc::clone(&released);
+    let reservation = InferenceReservation::for_test(async move {
+        release_signal.store(true, Ordering::Release);
+    });
+    let left = reservation.clone();
+    let right = reservation.clone();
+    drop(reservation);
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let left_task = tokio::spawn({
+        let barrier = Arc::clone(&barrier);
+        async move {
+            barrier.wait().await;
+            drop(left);
+        }
+    });
+    let right_task = tokio::spawn(async move {
+        barrier.wait().await;
+        drop(right);
+    });
+    left_task.await.unwrap();
+    right_task.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !released.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the final reservation drop must schedule its release");
+}
+
+#[tokio::test]
+async fn detached_inference_task_holds_the_http_reservation_after_request_cancellation() {
+    let released = Arc::new(AtomicBool::new(false));
+    let release_signal = Arc::clone(&released);
+    let reservation = InferenceReservation::for_test(async move {
+        release_signal.store(true, Ordering::Release);
+    });
+    let runtime = Arc::new(RuntimeManager::empty());
+    let state = ApiState::new(
+        ApiMode::Gateway,
+        None,
+        runtime,
+        "https://olp.example.test",
+        PathBuf::from("missing-console"),
+    );
+    let state = state.gateway_state_for_test();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release_child = Arc::new(tokio::sync::Notify::new());
+    let (completed_sender, completed) = tokio::sync::oneshot::channel();
+    let started_wait = started.notified();
+    let outer = tokio::spawn({
+        let state = state.clone();
+        let reservation = reservation.clone();
+        let started = Arc::clone(&started);
+        let release_child = Arc::clone(&release_child);
+        async move {
+            HTTP_INFERENCE_RESERVATION_HOLD
+                .scope(reservation, async move {
+                    let _task = spawn_http_inference_task(&state, async move {
+                        started.notify_one();
+                        release_child.notified().await;
+                        let _ = completed_sender.send(());
+                    });
+                    futures::future::pending::<()>().await;
+                })
+                .await;
+        }
+    });
+    drop(reservation);
+    started_wait.await;
+    outer.abort();
+    let _ = outer.await;
+    assert!(
+        !released.load(Ordering::Acquire),
+        "the detached task must retain the reservation after outer cancellation"
+    );
+
+    release_child.notify_one();
+    completed.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !released.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the final detached reservation owner must release the lease");
+}
+
+#[tokio::test]
+async fn spawned_inference_task_inherits_the_http_execution_context() {
+    let (state, _) = inference_state(false);
+    let state = state.gateway_state_for_test();
+    let pinned = state.runtime.pin();
+    let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
+    let principal =
+        InferencePrincipal::for_test(Arc::clone(&pinned), lookup_id.clone(), Surface::OpenAi);
+    state
+        .runtime
+        .install(
+            RuntimeSnapshot {
+                generation: RuntimeGeneration {
+                    id: RuntimeGenerationId::new(),
+                    ordinal: pinned.generation.ordinal + 1,
+                    activated_at: chrono::Utc::now(),
+                },
+                providers: pinned.providers.clone(),
+                routes: pinned.routes.clone(),
+                api_keys: pinned.api_keys.clone(),
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    let metadata_claimed = Arc::new(AtomicBool::new(false));
+    let reservation = InferenceReservation::for_test(async {});
+    let spawn_state = state.clone();
+    let (principal_generation, principal_surface, reserved_tokens, has_reservation_hold) =
+        HTTP_INFERENCE_PRINCIPAL
+            .scope(
+                principal,
+                HTTP_INFERENCE_METADATA_CLAIMED.scope(
+                    Arc::clone(&metadata_claimed),
+                    HTTP_INFERENCE_LIMITS_RESERVED.scope(
+                        2_000,
+                        HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
+                            let task = spawn_http_inference_task(&spawn_state, async move {
+                                claim_http_inference_metadata();
+                                let principal = http_inference_principal()
+                                    .expect("the detached task inherits the admitted principal");
+                                (
+                                    principal.runtime().generation.id,
+                                    principal.surface(),
+                                    http_inference_reserved_tokens(),
+                                    HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
+                                )
+                            });
+                            task.await.unwrap()
+                        }),
+                    ),
+                ),
+            )
+            .await;
+    assert_eq!(principal_generation, pinned.generation.id);
+    assert_eq!(principal_surface, Surface::OpenAi);
+    assert_ne!(state.runtime.pin().generation.id, pinned.generation.id);
+    assert_eq!(reserved_tokens, Some(2_000));
+    assert!(has_reservation_hold);
+    assert!(metadata_claimed.load(Ordering::Acquire));
+}

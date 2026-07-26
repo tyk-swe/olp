@@ -209,7 +209,8 @@ unique indexes, and alert on table growth or cleanup lag. During a request
 metadata delivery incident, restore or reconcile the Stream within seven days
 and do not extend the window by suspending database maintenance.
 
-Migrations are forward-only. Once migrations 0022-0024 apply, an N-1 binary
+Migrations are forward-only. Once any migration beyond the last released
+baseline (recorded in `release-metadata.env`) applies, an N-1 binary
 rollback is unsupported: its runtime, usage-maintenance, and OIDC writes fail
 closed. Restore the final pre-upgrade database and mounted keys to a
 replacement cluster with fresh Valkey. Verify migration state, workloads,

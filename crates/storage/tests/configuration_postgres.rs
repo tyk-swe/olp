@@ -26,6 +26,8 @@ impl<T> ExpectExecuted<T> for IdempotencyOutcome<T> {
     }
 }
 
+mod support;
+
 fn test_replay<'a>(master_key: &'a MasterKey, seed: &str) -> ReplayableIdempotency<'a> {
     ReplayableIdempotency::new(idempotency_fingerprint(&seed).unwrap(), master_key)
 }
@@ -46,8 +48,7 @@ async fn provider_models(store: &PgStore, provider_id: Uuid) -> Vec<ProviderMode
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let session = SessionMaterial::generate();

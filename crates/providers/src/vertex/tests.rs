@@ -164,7 +164,7 @@ async fn service_account_uses_hardened_token_exchange_and_cached_token() {
         "type": "service_account",
         "project_id": "test-project",
         "private_key_id": "test-key",
-        "private_key": include_str!("testdata/private_key.pem"),
+        "private_key": include_str!("../../testdata/vertex/test_only_private_key.pem"),
         "client_email": "test@test-project.iam.gserviceaccount.com",
         "token_uri": format!("{token_origin}/token")
     });

@@ -2,6 +2,9 @@ node_modules/
 __pycache__/
 *.py[cod]
 /target/
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/coverage/
 /console/build/
 /console/node_modules/
 /console/.svelte-kit/
@@ -19,6 +22,12 @@ __pycache__/
 /test-results/
 /blob-report/
 
+/backups/
+lcov.info
+*.profraw
+*.profdata
+/coverage/
+
 .DS_Store
 Thumbs.db
 .idea/
@@ -27,3 +36,4 @@ Thumbs.db
 *.swo
 *.tsbuildinfo
 /.codex/runtime/
+/.claude/settings.local.json

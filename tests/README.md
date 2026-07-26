@@ -1,7 +1,8 @@
 # Conformance and compatibility tests
 
 This directory contains the framework-independent conformance corpus, the
-official SDK smoke test, and pointers to the fuzz targets.
+official SDK smoke test, the high-availability proof, and pointers to the
+fuzz targets.
 
 ## Conformance harness and corpus
 
@@ -33,6 +34,14 @@ Node.js 24 or newer and pnpm 11 are required:
 pnpm --dir tests/sdk-smoke install --frozen-lockfile
 ./tests/sdk-smoke/run.sh
 ```
+
+## High-availability proof
+
+`ha/two-gateway.sh` runs two gateway processes against one PostgreSQL and one
+Valkey, with toxiproxy injecting partitions, and asserts failover behavior.
+It is driven by the `OLP_HA_*` environment variables (see the script header)
+and runs only in CI's full tier (push/schedule/dispatch), not on pull
+requests.
 
 ## Fuzz targets
 

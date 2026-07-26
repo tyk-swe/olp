@@ -1,3 +1,8 @@
+//! Build tooling, not a usage example: an in-memory OpenLLMProxy fixture
+//! server built by `tests/sdk-smoke/run.sh` (via `cargo build --example
+//! sdk_smoke_fixture`) so the official OpenAI/Anthropic/Gemini SDKs can be
+//! exercised without PostgreSQL, Valkey, or live providers.
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     env,

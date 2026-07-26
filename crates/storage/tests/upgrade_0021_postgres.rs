@@ -2,11 +2,12 @@ use chrono::{Duration, Utc};
 use olp_storage::{MIGRATOR, PgStore};
 use uuid::Uuid;
 
+mod support;
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fenced() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database");
+    let database_url = support::test_database_url();
     let store = PgStore::connect(&database_url, 3).await.unwrap();
     MIGRATOR.run_to(21, store.pool()).await.unwrap();
 

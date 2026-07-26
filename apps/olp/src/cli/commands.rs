@@ -416,7 +416,7 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
     check_secret_permissions(&args.master_key_file).await?;
     checks.insert("secret_files".into(), json!({ "ok": true }));
 
-    if let Some(path) = &args.connector_config_file {
+    if let Some(path) = &args.assets.connector_config_file {
         let registry = TransportRegistry::default();
         register_mounted_connectors(path, &registry).await?;
         checks.insert(
@@ -425,25 +425,26 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
         );
     }
 
-    if !args.console_dir.join("index.html").is_file() {
+    if !args.assets.console_dir.join("index.html").is_file() {
         return Err(std::io::Error::other(format!(
             "console index is missing at {}",
-            args.console_dir.join("index.html").display()
+            args.assets.console_dir.join("index.html").display()
         ))
         .into());
     }
     checks.insert("console".into(), json!({ "ok": true }));
     let media_spool_dir = args
+        .assets
         .media_spool_dir
         .as_deref()
         .map_or_else(std::env::temp_dir, Path::to_path_buf);
-    let media_spool = create_media_spool(&media_spool_dir, args.media_spool_capacity_bytes)?;
+    let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     drop(media_spool);
     checks.insert(
         "media_spool".into(),
         json!({
             "ok": true,
-            "capacity_bytes": args.media_spool_capacity_bytes,
+            "capacity_bytes": args.assets.media_spool_capacity_bytes,
         }),
     );
     println!(

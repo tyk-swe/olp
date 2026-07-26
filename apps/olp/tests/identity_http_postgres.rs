@@ -18,10 +18,9 @@ use common::{BOOTSTRAP_TOKEN, configure_bootstrap};
 const ORIGIN: &str = "https://olp.example.test";
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
-    let database_url = std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty test database");
+    let database_url = common::test_database_url();
     let store = PgStore::connect(&database_url, 5).await.unwrap();
     store.migrate().await.unwrap();
     let mut state = ApiState::new(
