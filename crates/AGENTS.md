@@ -16,6 +16,14 @@
   `storage/migrations/`. Query metadata lives in `/.sqlx` —
   regenerate with `make sqlx-prepare` after query/schema changes.
 
+The per-provider trees in `protocols` and `providers` mirror each other in
+file shape (`translate/`, `transport/`) on purpose. Cross-provider helpers
+already live in `providers/src/transport_common.rs` and `transport_io.rs`;
+what remains per-provider (endpoint URL policy, error-body mapping, stream
+decoding) diverges in behavior — do not blind-merge files that merely look
+alike, and add new shared logic to `transport_common` rather than copying
+it into a provider tree.
+
 Conventions:
 
 - The `test-util` cargo feature exposes internals to tests; prefer it over
