@@ -190,18 +190,6 @@ pub struct CapabilityKey {
     pub mode: TransportMode,
 }
 
-impl CapabilityKey {
-    #[must_use]
-    pub fn without_provider(&self) -> Capability {
-        Capability {
-            model: self.model.clone(),
-            operation: self.operation,
-            surface: self.surface,
-            mode: self.mode,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Provider {
     pub id: ProviderId,
