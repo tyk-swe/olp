@@ -6,6 +6,7 @@
     getMediaJob,
     listMediaJobs
   } from '$lib/api/operations';
+  import { popCursor, pushCursor } from '$lib/api/pagination';
   import { formatDate } from './format';
   import type { MediaJobListState } from './mediaJobListState';
 
@@ -54,13 +55,11 @@
   function next() {
     const value = jobs.data?.next_cursor ?? undefined;
     if (!value) return;
-    listState.history = [...listState.history, listState.cursor];
-    listState.cursor = value;
+    pushCursor(listState, value);
   }
 
   function previous() {
-    listState.cursor = listState.history.at(-1);
-    listState.history = listState.history.slice(0, -1);
+    popCursor(listState);
   }
 
   function tone(value: string) {

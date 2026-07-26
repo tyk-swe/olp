@@ -1,8 +1,8 @@
 <script lang="ts">
-  import CursorPagination from './CursorPagination.svelte';
-  import SecretDialog from './SecretDialog.svelte';
-  import SegmentedRadioGroup from './SegmentedRadioGroup.svelte';
-  import ThemeToggle from './ThemeToggle.svelte';
+  import CursorPagination from '../CursorPagination.svelte';
+  import SecretDialog from '../SecretDialog.svelte';
+  import SegmentedRadioGroup from '../SegmentedRadioGroup.svelte';
+  import ThemeToggle from '../ThemeToggle.svelte';
 
   let selected = $state('text');
   let page = $state(1);

@@ -2,6 +2,28 @@ import { ApiProblem } from './http';
 
 export type CursorPage<T> = { items: T[]; nextCursor: string | null };
 
+/// Back/forward cursor pagination state shared by the list pages. `history`
+/// holds the cursor of every previous page (undefined = first page) so the
+/// "previous" control can pop back without a server round-trip.
+export type CursorHistory = {
+  cursor: string | undefined;
+  history: Array<string | undefined>;
+};
+
+export function emptyCursorHistory(): CursorHistory {
+  return { cursor: undefined, history: [] };
+}
+
+export function pushCursor(state: CursorHistory, next: string | undefined) {
+  state.history = [...state.history, state.cursor];
+  state.cursor = next;
+}
+
+export function popCursor(state: CursorHistory) {
+  state.cursor = state.history.at(-1);
+  state.history = state.history.slice(0, -1);
+}
+
 const MAX_COLLECTED_ITEMS = 10_000;
 
 export async function collectCursorPages<T>(
