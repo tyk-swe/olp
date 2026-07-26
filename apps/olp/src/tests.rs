@@ -4,9 +4,14 @@ use std::{
     net::SocketAddr,
     num::NonZeroU32,
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
+
+use olp_storage::{AuthHmacKey, RequestMetadataEmitter};
 
 use axum::{
     Router,
