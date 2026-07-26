@@ -958,6 +958,79 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   await expect(page.getByRole('link', { name: 'View revision history' })).toHaveAttribute('href', `/routes/${ids.route}/revisions`);
 });
 
+test('failed route conflict reload preserves dirty fields until a successful reload', async ({ page }) => {
+  await mockSession(page);
+  let failNextReload = false;
+  let current = {
+    id: ids.draft,
+    slug: 'default',
+    state: 'draft',
+    overall_timeout_ms: 120000,
+    max_attempts: 1,
+    etag: '01980000-0000-7000-8000-000000000211',
+    based_on_revision_id: null,
+    operations: ['generation'],
+    targets: [{ id: ids.target, provider_model_id: ids.model, provider_id: ids.provider, provider_name: 'production-openai', provider_model: 'gpt-5.4', priority: 1, weight: 100, timeout_ms: 60000, position: 0 }],
+    created_at: now,
+    updated_at: now
+  };
+
+  await page.route('**/api/v1/provider-models**', async (route) => {
+    await route.fulfill({
+      json: {
+        items: [{
+          provider_id: ids.provider,
+          provider_name: 'production-openai',
+          provider_kind: 'openai',
+          model: certifiedModelRecord
+        }],
+        next_cursor: null
+      }
+    });
+  });
+  await page.route(`**/api/v1/route-drafts/${ids.draft}`, async (route) => {
+    const request = route.request();
+    if (request.method() === 'GET' && failNextReload) {
+      failNextReload = false;
+      await route.fulfill({
+        status: 503,
+        json: { title: 'Route reload unavailable', status: 503 }
+      });
+      return;
+    }
+    if (request.method() === 'PUT') {
+      current = {
+        ...current,
+        slug: 'remote-route',
+        etag: '01980000-0000-7000-8000-000000000212'
+      };
+      failNextReload = true;
+      await route.fulfill({
+        status: 412,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'https://openllmproxy.dev/problems/etag_mismatch',
+          title: 'The route changed elsewhere',
+          status: 412
+        })
+      });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(`/routes/${ids.draft}`);
+  await page.getByLabel('Public model slug').fill('local-route');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByRole('alert')).toContainText('This item changed elsewhere.');
+
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect.poll(() => failNextReload).toBe(false);
+  await expect(page.getByLabel('Public model slug')).toHaveValue('local-route');
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Public model slug')).toHaveValue('remote-route');
+});
+
 test('API key creation shows a secret once with SDK snippets on mobile', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
   await mockSession(page);
@@ -1285,6 +1358,76 @@ test('new OIDC configuration leaves the sentinel state and versions later saves'
     undefined,
     '"01980000-0000-7000-8000-000000000451"'
   ]);
+});
+
+test('failed OIDC conflict reload preserves edits and write-only secret', async ({ page }) => {
+  await mockSession(page);
+  let failNextReload = false;
+  let current = {
+    id: ids.oidc,
+    discovery_url: 'https://id.example.test/.well-known/openid-configuration',
+    issuer: 'https://id.example.test',
+    client_id: 'remote-client',
+    has_client_secret: true,
+    enabled: true,
+    scopes: ['openid', 'profile', 'email'],
+    email_claim: 'email',
+    groups_claim: 'groups',
+    default_role: 'viewer',
+    email_role_mappings: [],
+    group_role_mappings: [],
+    etag: '01980000-0000-7000-8000-000000000461'
+  };
+
+  await page.route('**/api/v1/users**', async (route) => {
+    await route.fulfill({ json: { data: [], next_cursor: null } });
+  });
+  await page.route('**/api/v1/oidc/configuration', async (route) => {
+    const request = route.request();
+    if (request.method() === 'GET' && failNextReload) {
+      failNextReload = false;
+      await route.fulfill({
+        status: 503,
+        json: { title: 'OIDC reload unavailable', status: 503 }
+      });
+      return;
+    }
+    if (request.method() === 'PUT') {
+      current = {
+        ...current,
+        client_id: 'remote-client-v2',
+        etag: '01980000-0000-7000-8000-000000000462'
+      };
+      failNextReload = true;
+      await route.fulfill({
+        status: 412,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'https://openllmproxy.dev/problems/etag_mismatch',
+          title: 'The OIDC configuration changed elsewhere',
+          status: 412
+        })
+      });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto('/access');
+  await page.getByRole('button', { name: 'OIDC' }).click();
+  await page.getByLabel('Client ID').fill('local-client');
+  await page.getByLabel('Client secret').fill('local-write-only-secret');
+  await page.getByRole('button', { name: 'Save and validate' }).click();
+  await expect(page.getByRole('alert')).toContainText('This item changed elsewhere.');
+
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByText('OIDC reload unavailable')).toBeVisible();
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByLabel('Client ID')).toHaveValue('local-client');
+  await expect(page.getByLabel('Client secret')).toHaveValue('local-write-only-secret');
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Client ID')).toHaveValue('remote-client-v2');
+  await expect(page.getByLabel('Client secret')).toHaveValue('');
 });
 
 test('provider discovery advances its ETag without dropping dirty connector edits', async ({ page }) => {

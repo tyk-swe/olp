@@ -135,8 +135,9 @@
   }
 
   async function reload() {
+    const result = await draft.refetch();
+    if (result.error) return;
     sync = beginReload(sync);
-    await draft.refetch();
   }
 
   function toggleOperation(operation: string, checked: boolean) {

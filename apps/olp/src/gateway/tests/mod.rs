@@ -42,7 +42,7 @@ use super::{
     },
     failover::{
         EventStream, FailoverContext, circuit_accounted_event_stream, execute_with_failover,
-        validated_event_stream,
+        reclassify_ambiguous_transport_failure, validated_event_stream,
     },
     limits::reserve_limits,
     media_jobs::{media_job_state, valid_upstream_media_job_id},

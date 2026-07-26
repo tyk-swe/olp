@@ -38,10 +38,37 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     )
     .await;
     let initial_targets = store.get_route_draft(draft.id).await.unwrap().targets;
-    let replacement_etag = store
+    let unchanged_etag = store
         .replace_route_draft(
             draft.id,
             draft.etag,
+            &ReplaceRouteDraftInput {
+                slug: "simulation".to_owned(),
+                operations: vec!["video_get".parse().unwrap()],
+                overall_timeout_ms: 31_000,
+                max_attempts: 2,
+                targets: vec![
+                    (primary.model_id, 0, 1, 20_000),
+                    (fallback.model_id, 0, 1, 20_000),
+                ],
+            },
+            actor,
+        )
+        .await
+        .unwrap();
+    let unchanged_targets = store.get_route_draft(draft.id).await.unwrap().targets;
+    assert_eq!(initial_targets.len(), unchanged_targets.len());
+    assert!(
+        initial_targets
+            .iter()
+            .zip(&unchanged_targets)
+            .all(|(old, new)| old.id != new.id && old.routing_id == new.routing_id)
+    );
+
+    let replacement_etag = store
+        .replace_route_draft(
+            draft.id,
+            unchanged_etag,
             &ReplaceRouteDraftInput {
                 slug: "simulation".to_owned(),
                 operations: vec!["video_get".parse().unwrap()],

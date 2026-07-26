@@ -215,7 +215,7 @@ pub(super) async fn execute_with_failover(
             match tokio::time::timeout(remaining, transport.execute(provider_request)).await {
                 Ok(Ok(events)) => events,
                 Ok(Err(error)) => {
-                    let error = reclassify_ambiguous_timeout(error, operation.kind());
+                    let error = reclassify_ambiguous_transport_failure(error, operation.kind());
                     traces.push(failed_attempt(
                         &attempt,
                         ordinal,
@@ -234,17 +234,15 @@ pub(super) async fn execute_with_failover(
                     });
                 }
                 Err(_) => {
-                    let ambiguous = operation_timeout_is_ambiguous(operation.kind());
-                    let error = TransportError {
-                        phase: olp_domain::TransportPhase::FirstByte,
-                        class: if ambiguous {
-                            AttemptFailureClass::Ambiguous
-                        } else {
-                            AttemptFailureClass::Timeout
+                    let error = reclassify_ambiguous_transport_failure(
+                        TransportError {
+                            phase: olp_domain::TransportPhase::FirstByte,
+                            class: AttemptFailureClass::Timeout,
+                            response_committed: false,
+                            message: "route deadline elapsed before provider response".to_owned(),
                         },
-                        response_committed: ambiguous,
-                        message: "route deadline elapsed before provider response".to_owned(),
-                    };
+                        operation.kind(),
+                    );
                     traces.push(failed_attempt(
                         &attempt,
                         ordinal,
@@ -285,7 +283,7 @@ pub(super) async fn execute_with_failover(
         let first = match tokio::time::timeout(remaining, events.next()).await {
             Ok(Some(Ok(event))) => event,
             Ok(Some(Err(error))) => {
-                let error = reclassify_ambiguous_timeout(error, operation.kind());
+                let error = reclassify_ambiguous_transport_failure(error, operation.kind());
                 traces.push(failed_attempt(
                     &attempt,
                     ordinal,
@@ -327,17 +325,15 @@ pub(super) async fn execute_with_failover(
                 });
             }
             Err(_) => {
-                let ambiguous = operation_timeout_is_ambiguous(operation.kind());
-                let error = TransportError {
-                    phase: olp_domain::TransportPhase::FirstByte,
-                    class: if ambiguous {
-                        AttemptFailureClass::Ambiguous
-                    } else {
-                        AttemptFailureClass::Timeout
+                let error = reclassify_ambiguous_transport_failure(
+                    TransportError {
+                        phase: olp_domain::TransportPhase::FirstByte,
+                        class: AttemptFailureClass::Timeout,
+                        response_committed: false,
+                        message: "route deadline elapsed before a canonical event".to_owned(),
                     },
-                    response_committed: ambiguous,
-                    message: "route deadline elapsed before a canonical event".to_owned(),
-                };
+                    operation.kind(),
+                );
                 traces.push(failed_attempt(
                     &attempt,
                     ordinal,
@@ -438,16 +434,19 @@ pub(super) async fn execute_with_failover(
     })
 }
 
-/// A timeout the transport reports after the request may have reached the
-/// provider is ambiguous for side-effecting operations: the upstream may have
-/// executed (and billed) the work, so failing over could duplicate it.
-/// Connect-phase timeouts never reached the provider and remain retryable.
-fn reclassify_ambiguous_timeout(
+/// A transport failure after the request may have reached the provider is
+/// ambiguous for side-effecting operations: the upstream may have executed
+/// (and billed) the work, so failing over could duplicate it. Failures during
+/// the connection phase remain retryable.
+pub(super) fn reclassify_ambiguous_transport_failure(
     mut error: TransportError,
     operation: OperationKind,
 ) -> TransportError {
-    if operation_timeout_is_ambiguous(operation)
-        && matches!(error.class, AttemptFailureClass::Timeout)
+    if operation_is_side_effecting(operation)
+        && matches!(
+            error.class,
+            AttemptFailureClass::Connect | AttemptFailureClass::Timeout
+        )
         && !matches!(error.phase, olp_domain::TransportPhase::Connect)
     {
         error.class = AttemptFailureClass::Ambiguous;
@@ -456,7 +455,7 @@ fn reclassify_ambiguous_timeout(
     error
 }
 
-const fn operation_timeout_is_ambiguous(operation: OperationKind) -> bool {
+const fn operation_is_side_effecting(operation: OperationKind) -> bool {
     matches!(
         operation,
         OperationKind::ImageGeneration

@@ -226,6 +226,40 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
     assert_eq!(generation_second_calls.load(Ordering::SeqCst), 1);
 }
 
+#[test]
+fn post_connect_failure_obeys_media_ambiguity_policy() {
+    let failure = TransportError {
+        phase: olp_domain::TransportPhase::FirstByte,
+        class: AttemptFailureClass::Connect,
+        response_committed: false,
+        message: "connection closed before response headers".to_owned(),
+    };
+
+    let media =
+        reclassify_ambiguous_transport_failure(failure.clone(), OperationKind::ImageGeneration);
+    assert_eq!(media.class, AttemptFailureClass::Ambiguous);
+    assert!(media.response_committed);
+    assert!(!media.allows_failover());
+
+    let generation = reclassify_ambiguous_transport_failure(failure, OperationKind::Generation);
+    assert_eq!(generation.class, AttemptFailureClass::Connect);
+    assert!(!generation.response_committed);
+    assert!(generation.allows_failover());
+
+    let connect = reclassify_ambiguous_transport_failure(
+        TransportError {
+            phase: olp_domain::TransportPhase::Connect,
+            class: AttemptFailureClass::Connect,
+            response_committed: false,
+            message: "connection failed".to_owned(),
+        },
+        OperationKind::ImageGeneration,
+    );
+    assert_eq!(connect.class, AttemptFailureClass::Connect);
+    assert!(!connect.response_committed);
+    assert!(connect.allows_failover());
+}
+
 #[tokio::test]
 async fn retryable_first_canonical_error_fails_over_before_commit() {
     let (state, _) = test_state(true);

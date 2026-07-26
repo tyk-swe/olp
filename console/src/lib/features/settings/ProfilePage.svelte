@@ -337,8 +337,9 @@
   }
 
   async function reloadProfile() {
+    const result = await profile.refetch();
+    if (result.error) return;
     profileSync = beginReload(profileSync);
-    await profile.refetch();
   }
 
   function nextSessions() {

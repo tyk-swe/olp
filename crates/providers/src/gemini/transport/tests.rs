@@ -236,7 +236,7 @@ fn preserved_count_tokens_body_keeps_nested_semantics_and_rebinds_model() {
             }),
         )]),
     );
-    let wire = encode_count_tokens(count, "gemini-private").unwrap();
+    let wire = encode_count_tokens(count, "models/gemini-private").unwrap();
     let wire = serde_json::to_value(wire).unwrap();
     assert_eq!(
         wire["generateContentRequest"]["model"],

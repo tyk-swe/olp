@@ -571,7 +571,10 @@ pub(super) fn encode_count_tokens(
             ))
         })?;
         if let Some(generation) = &mut wire.generate_content_request {
-            generation.model = Some(format!("models/{upstream_model}"));
+            let model = upstream_model
+                .strip_prefix("models/")
+                .unwrap_or(upstream_model);
+            generation.model = Some(format!("models/{model}"));
         }
         validate_count_tokens_request(&wire).map_err(|error| {
             protocol_error(format!(

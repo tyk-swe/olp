@@ -238,6 +238,7 @@ test('stale profile save reloads the remote version and retries with its ETag', 
     etag: '01980000-0000-7000-8000-000000000320'
   };
   const saveEtags: Array<string | undefined> = [];
+  let failNextReload = false;
 
   await page.route('**/api/v1/sessions/current', async (route) =>
     route.fulfill({
@@ -254,6 +255,14 @@ test('stale profile save reloads the remote version and retries with its ETag', 
   );
   await page.route('**/api/v1/profile', async (route) => {
     const request = route.request();
+    if (request.method() === 'GET' && failNextReload) {
+      failNextReload = false;
+      await route.fulfill({
+        status: 503,
+        json: { title: 'Profile reload unavailable', status: 503 }
+      });
+      return;
+    }
     if (request.method() === 'PATCH') {
       saveEtags.push((await request.allHeaders())['if-match']);
       if (saveEtags.length === 1) {
@@ -262,6 +271,7 @@ test('stale profile save reloads the remote version and retries with its ETag', 
           display_name: 'Remote operator',
           etag: '01980000-0000-7000-8000-000000000321'
         };
+        failNextReload = true;
         await route.fulfill({
           status: 412,
           contentType: 'application/problem+json',
@@ -299,6 +309,9 @@ test('stale profile save reloads the remote version and retries with its ETag', 
     (await new AxeBuilder({ page }).include('.concurrent-notice').analyze()).violations
   ).toEqual([]);
 
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect.poll(() => failNextReload).toBe(false);
+  await expect(page.getByLabel('Display name')).toHaveValue('Local edit');
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Display name')).toHaveValue('Remote operator');
   await page.getByLabel('Display name').fill('Merged operator');

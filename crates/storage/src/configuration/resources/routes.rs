@@ -111,6 +111,13 @@ impl PgStore {
                 ConfigurationError::NotFound
             });
         }
+        let previous_targets = sqlx::query!(
+            "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
+             FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
+            draft_id
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
         sqlx::query!(
             "DELETE FROM route_draft_operations WHERE route_draft_id = $1",
             draft_id
@@ -135,6 +142,8 @@ impl PgStore {
         for (position, (provider_model_id, priority, weight, timeout_ms)) in
             input.targets.iter().enumerate()
         {
+            let position = i32::try_from(position)
+                .map_err(|_| ConfigurationError::Invalid("too many targets".to_owned()))?;
             let enabled: bool = sqlx::query_scalar!(
                 "SELECT EXISTS (SELECT 1 FROM providers p \
                  JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
@@ -148,12 +157,21 @@ impl PgStore {
                     "provider model {provider_model_id} is not active"
                 )));
             }
+            let routing_id = previous_targets
+                .iter()
+                .find(|target| {
+                    target.position == position
+                        && target.provider_model_id == *provider_model_id
+                        && target.priority == *priority
+                        && target.weight == *weight
+                        && target.timeout_ms == *timeout_ms
+                })
+                .map_or_else(Uuid::now_v7, |target| target.routing_id);
             sqlx::query!(
                 "INSERT INTO route_draft_targets \
-                 (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            Uuid::now_v7(), Uuid::now_v7(), draft_id, provider_model_id, priority, weight, timeout_ms, i32::try_from(position)
-                    .map_err(|_| ConfigurationError::Invalid("too many targets".to_owned()))?,)
+                  (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            Uuid::now_v7(), routing_id, draft_id, provider_model_id, priority, weight, timeout_ms, position)
             .execute(&mut *transaction)
             .await?;
         }

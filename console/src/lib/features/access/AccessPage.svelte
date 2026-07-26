@@ -149,8 +149,9 @@
   }
 
   async function reloadOidc() {
+    const result = await oidc.refetch();
+    if (result.error) return;
     oidcSync = beginReload(oidcSync);
-    await oidc.refetch();
   }
 
   async function changeRole(user: User, role: string) {
