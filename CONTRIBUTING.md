@@ -13,11 +13,12 @@ integration work.
 ### Toolchain
 
 The standard gate (`make check`) needs ripgrep (for
-`scripts/check-boundaries.sh`). Matching CI's full validation additionally
-needs, with the versions CI pins:
+`scripts/check-boundaries.sh`) and cargo-nextest
+(`cargo install --locked cargo-nextest@0.9.140` — the `make test` runner).
+Matching CI's full validation additionally needs, with the versions CI pins:
 
-- `cargo install --locked cargo-nextest@0.9.140 cargo-llvm-cov@0.8.7` — the
-  coverage gate (`make coverage`).
+- `cargo install --locked cargo-llvm-cov@0.8.7` — the coverage gate
+  (`make coverage`, which also runs through nextest).
 - `cargo install --locked sqlx-cli@0.9.0` — regenerating `.sqlx/` metadata
   (`make sqlx-prepare`).
 - `cargo install --locked cargo-fuzz@0.13.2` plus
@@ -97,7 +98,7 @@ which expands to:
 ./scripts/check-storage-sqlx.sh
 cargo fmt --all --check
 SQLX_OFFLINE=true cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-SQLX_OFFLINE=true cargo test --locked --workspace --all-features
+SQLX_OFFLINE=true cargo nextest run --locked --workspace --all-features
 pnpm --dir console verify
 scripts/check-release-version.sh
 scripts/check-supply-chain-pins.sh
@@ -109,6 +110,16 @@ locally with `make coverage` before pushing test-sensitive changes. The
 workspace deliberately has zero doctests (nextest and llvm-cov do not run
 them); if you add one, restore a `cargo test --doc` gate in the Makefile
 and CI.
+
+Dev builds use `debug = "line-tables-only"` (workspace `[profile.dev]`):
+backtraces keep file:line information, but debuggers lose variable and type
+detail. For an interactive debugging session, override it locally in
+`~/.cargo/config.toml`:
+
+```toml
+[profile.dev]
+debug = 2
+```
 
 CI runs in two tiers: pull requests and merge queues run the required tier
 (quality, Rust, console, SDK compatibility, database integration, amd64
