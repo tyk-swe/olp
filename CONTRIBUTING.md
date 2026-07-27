@@ -104,9 +104,11 @@ scripts/check-supply-chain-pins.sh
 ```
 
 Note that CI's Rust test gate is stricter than plain `cargo test`: it runs
-`cargo llvm-cov nextest` with a **51% line-coverage floor**, plus a separate
-doctest pass. Reproduce it locally with `make coverage` and `make doctest`
-before pushing test-sensitive changes.
+`cargo llvm-cov nextest` with a **51% line-coverage floor**. Reproduce it
+locally with `make coverage` before pushing test-sensitive changes. The
+workspace deliberately has zero doctests (nextest and llvm-cov do not run
+them); if you add one, restore a `cargo test --doc` gate in the Makefile
+and CI.
 
 CI runs in two tiers: pull requests and merge queues run the required tier
 (quality, Rust, console, SDK compatibility, database integration, amd64

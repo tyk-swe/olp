@@ -135,14 +135,10 @@ jobs:
           for target in sse_decoder protocol_json media_metadata multipart_parser; do
             cargo +nightly-2026-05-15 fuzz run --target "$triple" "$target" "corpus/$target" -- -runs=0
           done
-      - name: Run workspace doctests
-        run: cargo test --locked --workspace --all-features --doc
       - name: Run workspace coverage
         run: |
-          cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --locked --workspace --all-features --no-report
-          cargo llvm-cov report --lcov --output-path lcov.info
-          cargo llvm-cov report --fail-under-lines 51
+          cargo llvm-cov nextest --locked --workspace --all-features \
+            --lcov --output-path lcov.info --fail-under-lines 51
       - name: Upload Rust coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() && !cancelled() }}
