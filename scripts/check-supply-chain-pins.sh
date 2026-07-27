@@ -60,10 +60,22 @@ dockerfile_bases_matched=
 checked_rg_capture dockerfile_bases dockerfile_bases_matched \
   "scan Dockerfile base images" "$dockerfile" '^FROM ' "$dockerfile"
 if (( dockerfile_bases_matched )); then
+  # FROM lines referencing a previously defined build stage are internal
+  # aliases, not registry pulls; only external images need digest pins. The
+  # base is checked against stages registered by EARLIER lines before this
+  # line's own alias is recorded, so `FROM ubuntu AS ubuntu` cannot exempt
+  # itself.
+  declare -A dockerfile_stages=()
   while IFS= read -r entry; do
-    if [[ ! $entry =~ @sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+[[:alnum:]_-]+)?$ ]]; then
+    base=${entry#FROM }
+    base=${base%% *}
+    if [[ -z ${dockerfile_stages[$base]:-} ]] &&
+      [[ ! $entry =~ @sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+[[:alnum:]_-]+)?$ ]]; then
       echo "Dockerfile base is not pinned to an immutable digest: $entry" >&2
       failed=true
+    fi
+    if [[ $entry =~ [[:space:]]AS[[:space:]]+([[:alnum:]_-]+)$ ]]; then
+      dockerfile_stages[${BASH_REMATCH[1]}]=1
     fi
   done <<< "$dockerfile_bases"
 fi

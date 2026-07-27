@@ -10,10 +10,30 @@ RUN --mount=type=cache,id=olp-pnpm,target=/pnpm/store,sharing=locked \
 COPY console/ ./
 RUN pnpm build
 
-FROM rust:1.97-bookworm@sha256:7d0723df719e7f213b69dc7c8c595985c3f4b060cfbee4f7bc0e347a86fe3b6a AS rust-build
-ENV CARGO_INCREMENTAL=0 \
-    SQLX_OFFLINE=true
+# cargo-chef splits the release build into a dependency layer keyed only on
+# the manifests (recipe.json) and a source layer, so BuildKit's gha cache
+# reuses the expensive dependency compilation across source-only changes.
+# Cache mounts alone cannot do this: `cache-to: type=gha` exports layers,
+# not mount contents.
+FROM rust:1.97-bookworm@sha256:7d0723df719e7f213b69dc7c8c595985c3f4b060cfbee4f7bc0e347a86fe3b6a AS chef
+ENV CARGO_INCREMENTAL=0
+RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    cargo install cargo-chef --locked --version 0.1.77
 WORKDIR /src
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
+COPY .sqlx ./.sqlx
+COPY apps ./apps
+COPY crates ./crates
+COPY tests/conformance ./tests/conformance
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS rust-build
+ENV SQLX_OFFLINE=true
+COPY --from=planner /src/recipe.json recipe.json
+RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    cargo chef cook --locked --release --recipe-path recipe.json --package olp
 COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
 COPY .sqlx ./.sqlx
 COPY apps ./apps
