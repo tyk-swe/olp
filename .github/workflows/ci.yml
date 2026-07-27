@@ -92,13 +92,12 @@ jobs:
           command: check
           command-arguments: bans licenses sources
 
-  rust:
-    name: Rust
+  lint:
+    name: Rust / lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
     env:
       SQLX_OFFLINE: "true"
-      NEXTEST_PROFILE: ci
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -106,10 +105,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
-          cache-workspaces: |
-            .
-            fuzz
-          tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-fuzz@0.13.2"
+          cache-shared-key: lint
       - name: Install boundary-check dependencies
         run: |
           sudo apt-get update
@@ -122,20 +118,22 @@ jobs:
         run: cargo fmt --all --check
       - name: Run Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: Compile fuzz targets
-        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
-      - name: Install the fuzzing toolchain
-        run: rustup toolchain install nightly-2026-05-15 --profile minimal
-      - name: Replay fuzz regression corpora
-        working-directory: fuzz
-        run: |
-          # cargo-fuzz defaults --target to the triple it was itself built for,
-          # and cargo-binstall serves a musl prebuilt; sanitizers cannot link
-          # against a static libc. Always fuzz for the host triple instead.
-          triple="$(rustc -vV | sed -n 's/^host: //p')"
-          for target in sse_decoder protocol_json media_metadata multipart_parser; do
-            cargo +nightly-2026-05-15 fuzz run --target "$triple" "$target" "corpus/$target" -- -runs=0
-          done
+
+  coverage:
+    name: Rust / coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      SQLX_OFFLINE: "true"
+      NEXTEST_PROFILE: ci
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7"
+          cache-shared-key: coverage
       - name: Run workspace coverage
         run: |
           cargo llvm-cov nextest --locked --workspace --all-features \
@@ -148,6 +146,48 @@ jobs:
           path: lcov.info
           if-no-files-found: ignore
           retention-days: 7
+
+  fuzz-replay:
+    name: Rust / fuzz replay
+    runs-on: ubuntu-24.04
+    # A cold sanitizer build is ~11min; replaying the seeded corpora is fast.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Derive the pinned fuzz toolchain
+        id: fuzz-toolchain
+        # The Makefile's FUZZ_TOOLCHAIN is the source of truth for the pin;
+        # keying the shared cache on it keeps a nightly bump from restoring
+        # stale sanitizer artifacts into an immutable cache entry forever.
+        run: |
+          toolchain="$(sed -n 's/^FUZZ_TOOLCHAIN := //p' Makefile)"
+          [[ -n "$toolchain" ]]
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-workspaces: fuzz
+          tools: "cargo-fuzz@0.13.2"
+          cache-shared-key: fuzz-${{ steps.fuzz-toolchain.outputs.toolchain }}
+      - name: Compile fuzz targets
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+      - name: Install the fuzzing toolchain
+        run: rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+        env:
+          FUZZ_TOOLCHAIN: ${{ steps.fuzz-toolchain.outputs.toolchain }}
+      - name: Replay fuzz regression corpora
+        working-directory: fuzz
+        env:
+          FUZZ_TOOLCHAIN: ${{ steps.fuzz-toolchain.outputs.toolchain }}
+        run: |
+          # cargo-fuzz defaults --target to the triple it was itself built for,
+          # and cargo-binstall serves a musl prebuilt; sanitizers cannot link
+          # against a static libc. Always fuzz for the host triple instead.
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          for target in sse_decoder protocol_json media_metadata multipart_parser; do
+            cargo "+$FUZZ_TOOLCHAIN" fuzz run --target "$triple" "$target" "corpus/$target" -- -runs=0
+          done
 
   console:
     name: Console / static
@@ -245,6 +285,9 @@ jobs:
           cache-dependency-path: tests/sdk-smoke/pnpm-lock.yaml
           install-dirs: tests/sdk-smoke
       - uses: ./.github/actions/setup-rust
+        with:
+          cache-shared-key: workspace-debug
+          cache-save: "false"
       - name: Smoke official OpenAI, Anthropic, and Google GenAI SDKs
         run: ./tests/sdk-smoke/run.sh
 
@@ -278,6 +321,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           tools: "sqlx-cli@0.9.0"
+          # Sole writer of the workspace-debug cache; the other consumers
+          # (sdk-compatibility, console-integration, ha, upgrade-rehearsal)
+          # restore it read-only. This job builds the --all-features superset.
+          cache-shared-key: workspace-debug
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Verify checked SQLx metadata
@@ -327,6 +374,9 @@ jobs:
         with:
           install-dirs: console
       - uses: ./.github/actions/setup-rust
+        with:
+          cache-shared-key: workspace-debug
+          cache-save: "false"
       - name: Install Chromium
         run: pnpm --dir console exec playwright install --with-deps chromium
       - name: Build the Rust console host
@@ -408,7 +458,9 @@ jobs:
     if: ${{ always() }}
     needs:
       - quality
-      - rust
+      - lint
+      - coverage
+      - fuzz-replay
       - console
       - console-storybook
       - console-chromium
@@ -495,6 +547,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          cache-shared-key: workspace-debug
+          cache-save: "false"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Build the HA binary
@@ -546,6 +601,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          cache-shared-key: workspace-debug
+          cache-save: "false"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Build and migrate the current release
@@ -660,19 +718,34 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Derive the pinned fuzz toolchain
+        id: fuzz-toolchain
+        # See the fuzz-replay job: the Makefile pin keys the shared cache.
+        run: |
+          toolchain="$(sed -n 's/^FUZZ_TOOLCHAIN := //p' Makefile)"
+          [[ -n "$toolchain" ]]
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-rust
         with:
-          toolchain: nightly-2026-05-15
           cache-workspaces: fuzz
           tools: "cargo-fuzz@0.13.2"
+          # Restores the sanitizer build the PR-tier fuzz-replay job saves.
+          cache-shared-key: fuzz-${{ steps.fuzz-toolchain.outputs.toolchain }}
+          cache-save: "false"
+      - name: Install the fuzzing toolchain
+        run: rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+        env:
+          FUZZ_TOOLCHAIN: ${{ steps.fuzz-toolchain.outputs.toolchain }}
       - name: Run every seeded fuzz target for two minutes
         working-directory: fuzz
+        env:
+          FUZZ_TOOLCHAIN: ${{ steps.fuzz-toolchain.outputs.toolchain }}
         run: |
-          # See the Rust job: cargo-fuzz's default target follows its own build
-          # triple (musl), which sanitizers cannot link against.
+          # See the fuzz-replay job: cargo-fuzz's default target follows its
+          # own build triple (musl), which sanitizers cannot link against.
           triple="$(rustc -vV | sed -n 's/^host: //p')"
           for target in sse_decoder protocol_json media_metadata multipart_parser; do
-            cargo +nightly-2026-05-15 fuzz run --target "$triple" "$target" "corpus/$target" -- -max_total_time=120
+            cargo "+$FUZZ_TOOLCHAIN" fuzz run --target "$triple" "$target" "corpus/$target" -- -max_total_time=120
           done
 
   image-arm64:
@@ -734,7 +807,9 @@ jobs:
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     needs:
       - quality
-      - rust
+      - lint
+      - coverage
+      - fuzz-replay
       - console
       - console-storybook
       - console-chromium

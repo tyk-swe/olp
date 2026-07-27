@@ -122,9 +122,10 @@ debug = 2
 ```
 
 CI runs in two tiers: pull requests and merge queues run the required tier
-(quality, Rust, console, SDK compatibility, database integration, amd64
-image). Cross-browser, HA, arm64, upgrade-rehearsal, and bounded fuzz
-campaigns run only on push, schedule, or manual dispatch.
+(quality, Rust lint/coverage/fuzz-replay, console, SDK compatibility,
+database integration, amd64 image). Cross-browser, HA, arm64,
+upgrade-rehearsal, and bounded fuzz campaigns run only on push, schedule,
+or manual dispatch.
 
 ### Database test environment
 
