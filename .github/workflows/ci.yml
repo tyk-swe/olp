@@ -135,8 +135,10 @@ jobs:
           tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7"
           cache-shared-key: coverage
       - name: Run workspace coverage
+        # test_support only executes under db-test; see the Makefile note.
         run: |
           cargo llvm-cov nextest --locked --workspace --all-features \
+            --ignore-filename-regex 'src/test_support\.rs' \
             --lcov --output-path lcov.info --fail-under-lines 51
       - name: Upload Rust coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
