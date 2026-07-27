@@ -2,19 +2,16 @@ use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
     AcceptInvitation, IdempotencyOutcome, IdempotencyResponse, IdentityError,
-    InstallationSetupInput, MasterKey, NewInvitation, PgStore, ReplayableIdempotency,
-    SessionMaterial, hash_password, idempotency_fingerprint,
+    InstallationSetupInput, MasterKey, NewInvitation, ReplayableIdempotency, SessionMaterial,
+    hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
-
-mod support;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn local_identity_lifecycle_is_transactional_and_audited() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("identity").await;
+    let store = db.store(5).await;
 
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store

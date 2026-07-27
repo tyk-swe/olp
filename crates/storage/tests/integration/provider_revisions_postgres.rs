@@ -8,14 +8,11 @@ use olp_storage::{
 };
 use uuid::Uuid;
 
-mod support;
-
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn staged_provider_changes_do_not_leak_until_reactivation() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("provider_revisions").await;
+    let store = db.store(5).await;
     let (owner, _) = store
         .setup_installation_with_session(
             InstallationSetupInput {

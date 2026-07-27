@@ -1,13 +1,12 @@
-use olp_storage::{MIGRATOR, PgStore};
+use olp_storage::MIGRATOR;
 use uuid::Uuid;
-
-mod support;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn request_metadata_schema_rename_preserves_legacy_rows() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 3).await.unwrap();
+    let db =
+        olp_storage::test_support::TestDb::create_empty("request_metadata_naming_upgrade").await;
+    let store = db.store(3).await;
     MIGRATOR.run_to(27, store.pool()).await.unwrap();
 
     let gap_id = Uuid::now_v7();

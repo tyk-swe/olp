@@ -2,20 +2,17 @@ use chrono::{Duration, Utc};
 use olp_domain::{ApiKeyLimits, ApiKeyScope, Role};
 use olp_storage::{
     AccessError, AuthHmacKey, ConfigurationError, IdempotencyOutcome, IdempotencyResponse,
-    IdentityError, InstallationSetupInput, MasterKey, NewApiKeyRecord, NewInvitation, PgStore,
+    IdentityError, InstallationSetupInput, MasterKey, NewApiKeyRecord, NewInvitation,
     ReplayableIdempotency, RotateApiKeyInput, hash_password, idempotency_fingerprint,
 };
 use serde_json::{Value, json};
 use sqlx::Executor as _;
 
-mod support;
-
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 8).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("idempotency_replay").await;
+    let store = db.store(8).await;
     let owner = store
         .setup_installation(InstallationSetupInput {
             installation_name: "Idempotency replay integration".to_owned(),

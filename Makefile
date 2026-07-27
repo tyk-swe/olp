@@ -75,8 +75,8 @@ sqlx-prepare: ## Regenerate .sqlx/ metadata against a migrated development datab
 sqlx-check: ## Verify .sqlx/ metadata is fresh (CI: postgres-integration job)
 	cargo sqlx prepare --workspace --check -- --all-targets --all-features
 
-db-test: ## PostgreSQL/Valkey integration tests; needs OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX
-	./scripts/run-postgres-tests.sh
+db-test: ## PostgreSQL/Valkey integration tests via nextest; needs OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX; extra args via ARGS
+	./scripts/run-postgres-tests.sh $(ARGS)
 
 release-version: ## Require consistent release metadata
 	scripts/check-release-version.sh

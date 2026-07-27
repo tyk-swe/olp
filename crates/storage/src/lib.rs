@@ -17,6 +17,8 @@ mod request_metadata;
 mod runtime_compiler;
 mod security;
 mod store;
+#[cfg(feature = "test-util")]
+pub mod test_support;
 mod usage;
 mod valkey;
 

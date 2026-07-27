@@ -20,13 +20,12 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode,
     VideoContentResult, VideoDeleteResult, VideoJobResult, VideoOperation, VideoStatus,
 };
-use olp_storage::{AuthHmacKey, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore};
+use olp_storage::{AuthHmacKey, MediaJobState, MediaJobUpdate, NewMediaJobReservation};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-mod common;
-use common::{BOOTSTRAP_TOKEN, configure_bootstrap};
+use crate::common::{BOOTSTRAP_TOKEN, configure_bootstrap};
 
 const ORIGIN: &str = "https://olp.example.test";
 
@@ -136,9 +135,8 @@ fn video_job(id: &str, status: VideoStatus) -> VideoJobResult {
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn media_job_management_views_are_session_authorized_and_metadata_only() {
-    let database_url = common::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("media_jobs_http").await;
+    let store = db.store(5).await;
     let mut state = ApiState::new(
         ApiMode::Control,
         Some(store.clone()),

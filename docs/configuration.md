@@ -58,9 +58,11 @@ Both require the exact value `test-only` and exist solely for test harnesses:
 These configure test/ops scripts, not the server process:
 
 - `OLP_TEST_DATABASE_ADMIN_URL`, `OLP_TEST_DATABASE_URL_PREFIX`,
-  `OLP_TEST_DATABASE_OWNER`, `OLP_POSTGRES_TEST_TIMEOUT_SECONDS`,
-  `OLP_POSTGRES_TEST_FILTER` — `scripts/run-postgres-tests.sh` (`make
-  db-test`); see CONTRIBUTING.md for a copy-paste example.
+  `OLP_TEST_DATABASE_OWNER`, `OLP_VALKEY_URL` (optional) —
+  `scripts/run-postgres-tests.sh` (`make db-test`); see CONTRIBUTING.md for
+  a copy-paste example. Timeouts come from the nextest `db` profile
+  (`.config/nextest.toml`); subset selection is a pass-through nextest
+  filter, e.g. `make db-test ARGS="-E 'test(upgrade_0021)'"`.
 - `OLP_CONSOLE_E2E_*` — console↔Rust integration suite
   (`console/README.md`).
 - `OLP_HA_*` — two-gateway HA proof (`tests/ha/two-gateway.sh`, full CI tier
