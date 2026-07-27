@@ -7,6 +7,10 @@ SHELL := bash
 
 FUZZ_TOOLCHAIN := nightly-2026-05-15
 FUZZ_TARGETS := sse_decoder protocol_json media_metadata multipart_parser
+# cargo-fuzz defaults `--target` to the triple it was itself built for, and the
+# prebuilt binaries cargo-binstall serves are musl. A sanitizer build cannot
+# link against a static libc, so always fuzz for the host triple instead.
+FUZZ_TRIPLE := $(shell rustc -vV | sed -n 's/^host: //p')
 
 .DEFAULT_GOAL := help
 
@@ -97,7 +101,7 @@ fuzz-check: ## Compile fuzz targets (stable toolchain)
 
 fuzz-replay: ## Replay fuzz regression corpora (needs the pinned nightly + cargo-fuzz)
 	cd fuzz && for target in $(FUZZ_TARGETS); do \
-		cargo +$(FUZZ_TOOLCHAIN) fuzz run "$$target" "corpus/$$target" -- -runs=0; \
+		cargo +$(FUZZ_TOOLCHAIN) fuzz run --target $(FUZZ_TRIPLE) "$$target" "corpus/$$target" -- -runs=0; \
 	done
 
 sdk-smoke: ## Official OpenAI/Anthropic/Gemini SDK smoke tests against a local build
