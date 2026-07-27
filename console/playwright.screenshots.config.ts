@@ -18,7 +18,9 @@ export default defineConfig({
   reporter: 'list',
   expect: { timeout: 15_000 },
   use: {
-    baseURL: 'http://127.0.0.1:4175',
+    // 4178: distinct from the integration config's gateway (4175) so the
+    // suites cannot collide or silently reuse each other's servers.
+    baseURL: 'http://127.0.0.1:4178',
     trace: 'off'
   },
   projects: [
@@ -35,8 +37,8 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: 'pnpm dev --host 127.0.0.1 --port 4175',
-    url: 'http://127.0.0.1:4175',
+    command: 'pnpm dev --host 127.0.0.1 --port 4178 --strictPort',
+    url: 'http://127.0.0.1:4178',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
   }

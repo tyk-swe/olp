@@ -23,6 +23,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:integration": "pnpm build && playwright test --config playwright.integration.config.ts",
+    "test:integration:prebuilt": "playwright test --config playwright.integration.config.ts",
     "screenshots": "playwright test --config playwright.screenshots.config.ts",
     "storybook": "storybook dev -p 6006",
     "test:storybook": "storybook build && playwright test --config playwright.storybook.config.ts",
