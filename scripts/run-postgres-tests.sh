@@ -102,7 +102,7 @@ for entry in "${tests[@]}"; do
     unset OLP_DATABASE_URL
     export OLP_TEST_DATABASE_URL="${OLP_TEST_DATABASE_URL_PREFIX%/}/${database}"
     timeout --kill-after=30s "${timeout_seconds}s" \
-      cargo test --locked -p "$package" --test "$test_name" -- \
+      cargo test --locked --all-features -p "$package" --test "$test_name" -- \
         --include-ignored --test-threads=1
   )
 

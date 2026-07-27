@@ -10,11 +10,11 @@ FUZZ_TARGETS := sse_decoder protocol_json media_metadata multipart_parser
 # cargo-fuzz defaults `--target` to the triple it was itself built for, and the
 # prebuilt binaries cargo-binstall serves are musl. A sanitizer build cannot
 # link against a static libc, so always fuzz for the host triple instead.
-FUZZ_TRIPLE := $(shell rustc -vV | sed -n 's/^host: //p')
+FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check boundaries storage-sqlx fmt fmt-fix clippy test doctest \
+.PHONY: help check boundaries storage-sqlx fmt fmt-fix clippy test \
 	coverage console-install console-verify console-e2e console-storybook \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
@@ -41,16 +41,14 @@ fmt-fix: ## Apply Rust formatting
 clippy: ## Clippy with -D warnings, offline sqlx metadata
 	SQLX_OFFLINE=true cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+# The workspace deliberately has zero doctests; nextest and llvm-cov do not
+# run them. If you add one, restore a `cargo test --doc` gate here and in CI.
 test: ## Workspace unit tests (postgres-backed tests stay #[ignore]d; see db-test)
 	SQLX_OFFLINE=true cargo test --locked --workspace --all-features
 
-doctest: ## Workspace doctests (CI runs these separately from coverage)
-	SQLX_OFFLINE=true cargo test --locked --workspace --all-features --doc
-
 coverage: ## CI's real Rust test gate: llvm-cov nextest with the 51% line floor
-	SQLX_OFFLINE=true cargo llvm-cov clean --workspace
-	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features --no-report
-	SQLX_OFFLINE=true cargo llvm-cov report --fail-under-lines 51
+	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features \
+		--lcov --output-path lcov.info --fail-under-lines 51
 
 console-install: ## Install locked console dependencies
 	pnpm --dir console install --frozen-lockfile
