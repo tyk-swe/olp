@@ -527,10 +527,3 @@ export class AuthenticationLifecycle {
 }
 
 export const authLifecycle = new AuthenticationLifecycle();
-export const authenticatedQueryKey = <T extends readonly unknown[]>(key: T): T => key;
-
-export const authLifecycleTesting = {
-  isAuthenticationEndpoint,
-  isSessionValidationEndpoint,
-  isCurrentSessionDeletion
-};

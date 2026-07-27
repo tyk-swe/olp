@@ -63,7 +63,7 @@ function apiProblem(error: unknown, response: Response): ApiProblem {
   });
 }
 
-export function throwApiProblem(error: unknown, response: Response): never {
+function throwApiProblem(error: unknown, response: Response): never {
   throw apiProblem(error, response);
 }
 

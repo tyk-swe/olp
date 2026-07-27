@@ -11,7 +11,6 @@ export type MediaJob = components['schemas']['MediaJobItem'];
 export type Setting = components['schemas']['SettingResponse'];
 export type PricingRevision = components['schemas']['PricingRevisionResponse'];
 export type UsagePoint = components['schemas']['UsagePointResponse'];
-export type UsageBreakdownItem = components['schemas']['UsageBreakdownItem'];
 export type RequestMetadataGatewayEpoch =
   components['schemas']['RequestMetadataGatewayEpochResponse'];
 export type RequestMetadataEpochAcknowledgement =

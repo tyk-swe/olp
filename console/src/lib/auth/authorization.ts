@@ -1,9 +1,9 @@
 import { getContext, setContext } from 'svelte';
 
-export const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
+const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
 export type FixedRole = (typeof FIXED_ROLE_VALUES)[number];
 
-export const CAPABILITY_VALUES = [
+const CAPABILITY_VALUES = [
   'configuration.read',
   'providers.manage',
   'routes.manage',
@@ -57,11 +57,11 @@ export function isFixedRole(value: unknown): value is FixedRole {
   return typeof value === 'string' && FIXED_ROLES.has(value);
 }
 
-export function capabilitiesForRole(role: FixedRole | null | undefined): ReadonlySet<Capability> {
+function capabilitiesForRole(role: FixedRole | null | undefined): ReadonlySet<Capability> {
   return role ? ROLE_CAPABILITIES[role] : new Set<Capability>();
 }
 
-export function roleHasCapability(
+function roleHasCapability(
   role: FixedRole | null | undefined,
   capability: Capability
 ): boolean {
