@@ -11,7 +11,7 @@ root=$(cd "$script_dir/.." && pwd)
 # shellcheck source=scripts/lib/repository-validation.sh
 source "$script_dir/lib/repository-validation.sh"
 
-for required_executable in rg awk sed dirname; do
+for required_executable in rg awk sed dirname jq; do
   validation_require_executable "$required_executable"
 done
 for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm"; do
@@ -36,7 +36,10 @@ workspace_version=$(awk '
     exit
   }
 ' "$root/Cargo.toml")
-console_version=$(sed -nE 's/^  "version": "([^"]+)",$/\1/p' "$root/console/package.json")
+# jq: JSON parsing must not depend on indentation. The workspace TOML above
+# stays awk-parsed because this script also runs in CI's quality job, which
+# has jq but no cargo for `cargo metadata`.
+console_version=$(jq -r '.version // empty' "$root/console/package.json")
 chart_version=$(sed -nE 's/^version: "?([^"[:space:]]+)"?$/\1/p' "$root/deploy/helm/Chart.yaml")
 chart_app_version=$(sed -nE 's/^appVersion: "?([^"[:space:]]+)"?$/\1/p' "$root/deploy/helm/Chart.yaml")
 image_version=$(sed -nE 's/^ARG OLP_VERSION=([^[:space:]]+)$/\1/p' "$root/deploy/Dockerfile")

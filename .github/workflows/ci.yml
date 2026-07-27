@@ -64,10 +64,7 @@ jobs:
           dockerfile: deploy/Dockerfile
           failure-threshold: warning
       - name: Shellcheck every tracked shell script
-        run: |
-          mapfile -d '' scripts < <(git ls-files -z -- '*.sh')
-          (( ${#scripts[@]} > 0 ))
-          shellcheck "${scripts[@]}"
+        run: make shellcheck
       - name: Verify backup manifest contract
         run: scripts/test-backup-manifest.sh
       - name: Verify repository validation helper contract

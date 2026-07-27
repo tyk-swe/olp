@@ -22,18 +22,21 @@ forbidden_row_patterns=(
   '\.get::<[^>]+,\s*_>\s*\(\s*"'
 )
 
+# One rg pass over the tree with every pattern; -e flags OR-combine.
+forbidden_pattern_args=()
 for pattern in "${forbidden_row_patterns[@]}"; do
-  forbidden_rows=
-  forbidden_rows_matched=
-  checked_rg_capture forbidden_rows forbidden_rows_matched \
-    "scan forbidden SQLx row decoding" "$storage_root" \
-    --pcre2 --line-number --glob '*.rs' "$pattern" "$storage_root"
-  if (( forbidden_rows_matched )); then
-    printf '%s\n' "$forbidden_rows"
-    echo "production storage must decode SQL rows through checked records or typed FromRow models" >&2
-    exit 1
-  fi
+  forbidden_pattern_args+=(-e "$pattern")
 done
+forbidden_rows=
+forbidden_rows_matched=
+checked_rg_capture forbidden_rows forbidden_rows_matched \
+  "scan forbidden SQLx row decoding" "$storage_root" \
+  --pcre2 --line-number --glob '*.rs' "${forbidden_pattern_args[@]}" "$storage_root"
+if (( forbidden_rows_matched )); then
+  printf '%s\n' "$forbidden_rows"
+  echo "production storage must decode SQL rows through checked records or typed FromRow models" >&2
+  exit 1
+fi
 
 # Runtime SQL construction remains available for SQL whose identity is truly
 # dynamic, but each production use must be reviewed and entered here with its

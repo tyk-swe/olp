@@ -72,10 +72,9 @@ trap 'exit 143' TERM
   cargo build --locked -p olp --example sdk_smoke_fixture
 )
 
-target_dir=${CARGO_TARGET_DIR:-target}
-if [[ $target_dir != /* ]]; then
-  target_dir="$repo_dir/$target_dir"
-fi
+# shellcheck source=scripts/lib/cargo-target-dir.sh
+source "$repo_dir/scripts/lib/cargo-target-dir.sh"
+target_dir=$(cargo_target_dir "$repo_dir")
 fixture_bin="$target_dir/debug/examples/sdk_smoke_fixture"
 [[ -x $fixture_bin ]] || {
   echo "SDK smoke fixture binary is missing after compilation: $fixture_bin" >&2

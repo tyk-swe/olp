@@ -133,7 +133,33 @@ if (( path_dependencies_matched )); then
 fi
 
 metadata="$(cargo metadata --locked --no-deps --format-version 1)"
-actual_packages="$(jq -r '.packages[].name' <<<"$metadata" | sort)"
+# One jq pass emits every fact the checks below need as tagged TSV rows:
+#   package <name>
+#   dag <package> <comma-joined non-dev path dependencies>
+#   dependency <package> <dependency>
+metadata_rows=
+if metadata_rows=$(jq -r '
+  (.packages[] | ["package", .name] | @tsv),
+  (.packages[]
+    | select(.name != "olp-conformance")
+    | .name as $package
+    | ([.dependencies[] | select(.path != null and .kind != "dev") | .name]
+       | unique | sort | join(",")) as $dependencies
+    | ["dag", $package, $dependencies] | @tsv),
+  (.packages[] as $package
+    | $package.dependencies[]
+    | select(.kind != "dev")
+    | ["dependency", $package.name, .name] | @tsv)
+' <<<"$metadata"); then
+  :
+else
+  status=$?
+  printf '%s: producer failed: operation=read workspace metadata path=%s exit=%d\n' \
+    "$(validation_script_name)" "cargo metadata" "$status" >&2
+  exit "$status"
+fi
+
+actual_packages="$(awk -F'\t' '$1 == "package" { print $2 }' <<<"$metadata_rows" | sort)"
 expected_packages="$(printf '%s\n' \
   olp olp-conformance olp-domain olp-protocols olp-providers olp-storage | sort)"
 if [[ "$actual_packages" != "$expected_packages" ]]; then
@@ -142,13 +168,7 @@ if [[ "$actual_packages" != "$expected_packages" ]]; then
   violations=1
 fi
 
-actual_dag="$(jq -r '
-  .packages[]
-  | select(.name != "olp-conformance")
-  | .name as $package
-  | ([.dependencies[] | select(.path != null and .kind != "dev") | .name] | unique | sort | join(",")) as $dependencies
-  | "\($package)\t\($dependencies)"
-' <<<"$metadata" | sort)"
+actual_dag="$(awk -F'\t' '$1 == "dag" { print $2 "\t" $3 }' <<<"$metadata_rows" | sort)"
 expected_dag="$(printf '%s\n' \
   $'olp\tolp-domain,olp-protocols,olp-providers,olp-storage' \
   $'olp-domain\t' \
@@ -161,21 +181,7 @@ if [[ "$actual_dag" != "$expected_dag" ]]; then
   violations=1
 fi
 
-dependency_rows=
-if dependency_rows=$(jq -r '
-  .packages[] as $package
-  | $package.dependencies[]
-  | select(.kind != "dev")
-  | [$package.name, .name]
-  | @tsv
-' <<<"$metadata"); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=read workspace dependencies path=%s exit=%d\n' \
-    "$(validation_script_name)" "cargo metadata" "$status" >&2
-  exit "$status"
-fi
+dependency_rows="$(awk -F'\t' '$1 == "dependency" { print $2 "\t" $3 }' <<<"$metadata_rows")"
 if [[ -n $dependency_rows ]]; then
   while IFS=$'\t' read -r package dependency; do
     case "$dependency" in
