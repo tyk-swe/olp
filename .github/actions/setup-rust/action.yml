@@ -16,6 +16,15 @@ inputs:
   cache-workspaces:
     description: Newline-separated workspaces for the cargo cache
     default: "."
+  cache-shared-key:
+    description: >-
+      rust-cache shared-key. Jobs passing the same value restore one shared
+      cache instead of a per-job one; designate exactly one of them as the
+      writer (cache-save "true") because GitHub cache entries are immutable.
+    default: ""
+  cache-save:
+    description: Whether this job saves (writes) the cargo cache on a miss
+    default: "true"
   tools:
     description: Comma-separated tool@version list for taiki-e/install-action
     default: ""
@@ -32,6 +41,8 @@ runs:
       with:
         cache-on-failure: true
         workspaces: ${{ inputs.cache-workspaces }}
+        shared-key: ${{ inputs.cache-shared-key }}
+        save-if: ${{ inputs.cache-save }}
     - if: ${{ inputs.tools != '' }}
       uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2
       with:
