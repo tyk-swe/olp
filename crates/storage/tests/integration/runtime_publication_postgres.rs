@@ -3,20 +3,17 @@ use std::time::Duration;
 use olp_domain::{ApiKeyLimits, ApiKeyScope, RuntimeSnapshot};
 use olp_storage::{
     AuthHmacKey, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
-    NewApiKeyRecord, PgStore, ReplayableIdempotency, hash_password, idempotency_fingerprint,
+    NewApiKeyRecord, ReplayableIdempotency, hash_password, idempotency_fingerprint,
 };
 use uuid::Uuid;
-
-mod support;
 
 const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("runtime_publication").await;
+    let store = db.store(5).await;
     let owner = store
         .setup_installation(InstallationSetupInput {
             installation_name: "Runtime publication integration".to_owned(),

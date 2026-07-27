@@ -1,18 +1,15 @@
 use chrono::{Duration, Utc};
 use olp_storage::{
     ConfigurationError, InstallationSetupInput, MediaJobError, MediaJobFilters, MediaJobLifecycle,
-    MediaJobOrder, MediaJobState, MediaJobUpdate, NewMediaJobReservation, PgStore, hash_password,
+    MediaJobOrder, MediaJobState, MediaJobUpdate, NewMediaJobReservation, hash_password,
 };
 use uuid::Uuid;
-
-mod support;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("media_jobs").await;
+    let store = db.store(5).await;
     let owner = store
         .setup_installation(InstallationSetupInput {
             installation_name: "Media jobs integration".to_owned(),

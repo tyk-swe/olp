@@ -130,14 +130,22 @@ or manual dispatch.
 ### Database test environment
 
 `./scripts/run-postgres-tests.sh` (or `make db-test`) runs the `#[ignore]`d
-PostgreSQL/Valkey integration tests against PostgreSQL 18 and requires:
+PostgreSQL/Valkey integration tests through nextest (profile `db` in
+`.config/nextest.toml`) against PostgreSQL 18 and requires:
 
 - `OLP_TEST_DATABASE_ADMIN_URL` — maintenance database URL with rights to
-  create and drop per-test databases.
+  create and drop per-test databases. Every test creates its own
+  `olp_test_{run}_*` database via `olp_storage::test_support::TestDb`;
+  names carry a per-run token, so the script's leftover sweep only ever
+  touches databases of its own run.
 - `OLP_TEST_DATABASE_URL_PREFIX` — connection prefix **without** a trailing
   database name; each test appends its own database.
-- `OLP_TEST_DATABASE_OWNER` (optional, default `olp`) and
-  `OLP_POSTGRES_TEST_TIMEOUT_SECONDS` (optional, default 900).
+- `OLP_TEST_DATABASE_OWNER` (optional, default `olp`).
+- `OLP_VALKEY_URL` (optional) — an isolated Valkey; without it the
+  `distributed_limits_valkey` suite is skipped with a warning.
+
+Per-test timeouts live in the nextest `db` profile. To run a subset, pass a
+nextest filterset through, e.g. `make db-test ARGS="-E 'test(upgrade_0021)'"`.
 
 With the Compose stack from the README quick start running and the default
 `olp` password:

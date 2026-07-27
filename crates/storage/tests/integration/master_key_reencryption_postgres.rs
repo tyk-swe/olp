@@ -8,14 +8,11 @@ use olp_storage::{
 use sqlx::Row;
 use uuid::Uuid;
 
-mod support;
-
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("master_key_reencryption").await;
+    let store = db.store(5).await;
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store
         .setup_installation_with_session(

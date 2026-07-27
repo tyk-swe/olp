@@ -1,14 +1,12 @@
 use chrono::{Duration, Timelike, Utc};
-use olp_storage::{MIGRATOR, PgStore, RequestMetadataConsumerState, UsageFilters};
+use olp_storage::{MIGRATOR, RequestMetadataConsumerState, UsageFilters};
 use uuid::Uuid;
-
-mod support;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 2).await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_empty("usage_surface_upgrade").await;
+    let store = db.store(2).await;
     MIGRATOR.run_to(9, store.pool()).await.unwrap();
 
     let owner_id = Uuid::now_v7();

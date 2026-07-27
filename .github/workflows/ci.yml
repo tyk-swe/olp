@@ -320,7 +320,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          tools: "sqlx-cli@0.9.0"
+          tools: "sqlx-cli@0.9.0,cargo-nextest@0.9.140"
           # Sole writer of the workspace-debug cache; the other consumers
           # (sdk-compatibility, console-integration, ha, upgrade-rehearsal)
           # restore it read-only. This job builds the --all-features superset.
@@ -333,7 +333,7 @@ jobs:
         run: |
           cargo sqlx migrate run --source crates/storage/migrations
           cargo sqlx prepare --workspace --check -- --all-targets --all-features
-      - name: Run isolated PostgreSQL repository and HTTP suites
+      - name: Run isolated PostgreSQL and Valkey integration suites
         run: ./scripts/run-postgres-tests.sh
 
   console-integration:

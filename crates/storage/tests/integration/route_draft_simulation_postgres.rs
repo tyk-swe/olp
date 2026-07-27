@@ -1,19 +1,16 @@
-mod support;
-
+use crate::support::route_fixtures::{DraftFixture, insert_provider};
 use olp_domain::{
     OperationKind, RouteSlug, RuntimeSnapshot, Surface, TransportMode, select_attempts,
 };
-use olp_storage::{InstallationSetupInput, PgStore, ReplaceRouteDraftInput, SessionMaterial};
+use olp_storage::{InstallationSetupInput, ReplaceRouteDraftInput, SessionMaterial};
 use sqlx::{PgPool, Row};
-use support::route_fixtures::{DraftFixture, insert_provider};
 use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn route_draft_simulation_matches_activated_runtime_attempts() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("route_draft_simulation").await;
+    let store = db.store(5).await;
     let (owner, _) = store
         .setup_installation_with_session(
             InstallationSetupInput {

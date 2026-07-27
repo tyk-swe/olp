@@ -6,7 +6,7 @@ use redis::{AsyncCommands, aio::MultiplexedConnection};
 use uuid::Uuid;
 
 const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
-const RESERVE_SCRIPT: &str = include_str!("../scripts/reserve_limits.lua");
+const RESERVE_SCRIPT: &str = include_str!("../../scripts/reserve_limits.lua");
 
 fn valkey_url() -> String {
     std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must point to an isolated test Valkey")

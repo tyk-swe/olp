@@ -17,7 +17,7 @@ islands with their own lockfiles: `console/` (pnpm), `tests/sdk-smoke/` (pnpm),
 | Rust format / lint | `make fmt` (`fmt-fix`), `make clippy` |
 | Rust unit tests | `make test` |
 | CI's real Rust gate | `make coverage` — llvm-cov nextest with a **51% line floor**. Plain `cargo test` is not what CI enforces. The workspace has zero doctests by policy; if you add one, restore a `cargo test --doc` gate. |
-| Postgres/Valkey integration tests | `make db-test` — requires `OLP_TEST_DATABASE_ADMIN_URL` and `OLP_TEST_DATABASE_URL_PREFIX` (see CONTRIBUTING.md) |
+| Postgres/Valkey integration tests | `make db-test` — requires `OLP_TEST_DATABASE_ADMIN_URL` and `OLP_TEST_DATABASE_URL_PREFIX`, optional `OLP_VALKEY_URL` (see CONTRIBUTING.md) |
 | Console | `make console-install`, `make console-verify`, `make console-e2e` |
 | Regenerate contracts | `make openapi`, `make sqlx-prepare`, `make screenshots` |
 
@@ -68,8 +68,10 @@ dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
 ## Testing model
 
 - Rust unit tests live in `src/**/tests.rs` modules next to the code.
-- `tests/*_postgres.rs` integration tests are `#[ignore]`d by default and run
-  via `make db-test` against PostgreSQL 18 (plus one Valkey test).
+- The `#[ignore]`d PostgreSQL/Valkey suites live in the consolidated
+  `tests/integration/` binaries of `crates/storage` and `apps/olp` and run
+  via `make db-test` (nextest, one database per test from
+  `olp_storage::test_support`) against PostgreSQL 18 and Valkey.
 - `tests/conformance` replays the fixture corpus in `tests/fixtures/`.
 - Console: Vitest colocated `*.test.ts`, Playwright suites under
   `console/tests/`, Storybook a11y. `fuzz/` needs nightly (see Makefile).

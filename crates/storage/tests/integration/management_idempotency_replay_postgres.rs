@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use olp_domain::{OperationKind, ProviderKind};
 use olp_storage::{
     ConfigurationError, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
-    NewProviderDraft, NewRouteDraft, NewRouteTarget, OperationsError, PgStore, PriceInput,
+    NewProviderDraft, NewRouteDraft, NewRouteTarget, OperationsError, PriceInput,
     ReplayableIdempotency, RotateCredentialInput, credential_aad, hash_password,
     idempotency_fingerprint,
 };
@@ -10,14 +10,12 @@ use serde_json::json;
 use sqlx::Executor as _;
 use uuid::Uuid;
 
-mod support;
-
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn remaining_management_mutations_exactly_replay_without_double_execution() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 8).await.unwrap();
-    store.migrate().await.unwrap();
+    let db =
+        olp_storage::test_support::TestDb::create_migrated("management_idempotency_replay").await;
+    let store = db.store(8).await;
     let owner = store
         .setup_installation(InstallationSetupInput {
             installation_name: "Management replay integration".to_owned(),

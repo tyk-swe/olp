@@ -1,14 +1,12 @@
 use chrono::{Duration, Utc};
-use olp_storage::{MIGRATOR, PgStore};
+use olp_storage::MIGRATOR;
 use uuid::Uuid;
-
-mod support;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fenced() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 3).await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_empty("upgrade_0021").await;
+    let store = db.store(3).await;
     MIGRATOR.run_to(21, store.pool()).await.unwrap();
 
     let owner_id = Uuid::now_v7();

@@ -7,22 +7,20 @@ use axum::{
 };
 use http_body_util::BodyExt as _;
 use olp::{ApiMode, ApiState, RuntimeManager, public_router};
-use olp_storage::{MasterKey, PgStore};
+use olp_storage::MasterKey;
 use serde_json::{Value, json};
 use sqlx::Row as _;
 use tower::ServiceExt as _;
 
-mod common;
-use common::{BOOTSTRAP_TOKEN, configure_bootstrap};
+use crate::common::{BOOTSTRAP_TOKEN, configure_bootstrap};
 
 const ORIGIN: &str = "https://olp.example.test";
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
-    let database_url = common::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("identity_http").await;
+    let store = db.store(5).await;
     let mut state = ApiState::new(
         ApiMode::Control,
         Some(store.clone()),

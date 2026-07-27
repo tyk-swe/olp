@@ -2,20 +2,17 @@ use chrono::{Duration, Utc};
 use olp_domain::Role;
 use olp_storage::{
     CompleteOidcLogin, InstallationSetupInput, MasterKey, NewOidcFlow, OidcError, OidcFlowPurpose,
-    PgStore, RecentAuthMaterial, RecentAuthPurpose, SessionMaterial, SessionSecurityContext,
+    RecentAuthMaterial, RecentAuthPurpose, SessionMaterial, SessionSecurityContext,
     UpsertOidcConfiguration, hash_password, oidc_client_secret_aad, oidc_flow_payload_aad,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-mod support;
-
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 5).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("oidc_flow").await;
+    let store = db.store(5).await;
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store
         .setup_installation_with_session(

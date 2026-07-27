@@ -5,6 +5,17 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# Test-only helpers (per-test database provisioning). Never enabled by
+# production dependents; the repository gates build with --all-features.
+test-util = []
+
+# The integration binary uses olp_storage::test_support, so it only builds
+# when the feature is on; a plain `cargo test -p olp-storage` skips it.
+[[test]]
+name = "integration"
+required-features = ["test-util"]
+
 [dependencies]
 aes-gcm.workspace = true
 argon2.workspace = true

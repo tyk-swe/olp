@@ -15,7 +15,7 @@ use chrono::Utc;
 use http_body_util::BodyExt as _;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use olp::{ApiMode, ApiState, RuntimeManager, public_router};
-use olp_storage::{MasterKey, PgStore};
+use olp_storage::MasterKey;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::{net::TcpListener, sync::Mutex};
@@ -23,8 +23,7 @@ use tower::ServiceExt as _;
 use url::Url;
 use uuid::Uuid;
 
-mod common;
-use common::{BOOTSTRAP_TOKEN, configure_bootstrap};
+use crate::common::{BOOTSTRAP_TOKEN, configure_bootstrap};
 
 const ORIGIN: &str = "https://olp.example.test";
 const CLIENT_ID: &str = "olp-client";
@@ -66,9 +65,8 @@ struct MockIdp {
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
-    let database_url = common::test_database_url();
-    let store = PgStore::connect(&database_url, 8).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("oidc_http").await;
+    let store = db.store(8).await;
     let (idp, _idp_task) = spawn_mock_idp().await;
 
     let mut api_state = ApiState::new(

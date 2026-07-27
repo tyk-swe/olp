@@ -1,14 +1,12 @@
 use chrono::{Duration, Utc};
-use olp_storage::{PersistenceError, PgStore, RequestMetadataConsumerState};
-
-mod support;
+use olp_storage::{PersistenceError, RequestMetadataConsumerState};
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
-    let database_url = support::test_database_url();
-    let store = PgStore::connect(&database_url, 3).await.unwrap();
-    store.migrate().await.unwrap();
+    let db = olp_storage::test_support::TestDb::create_migrated("request_metadata_consumer_health")
+        .await;
+    let store = db.store(3).await;
 
     assert!(
         store

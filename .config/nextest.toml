@@ -1,6 +1,7 @@
 # Workspace nextest configuration.
 #   default — local `make test`
 #   ci      — CI runs (NEXTEST_PROFILE=ci): keep going past failures
+#   db      — scripts/run-postgres-tests.sh PostgreSQL/Valkey suites
 
 [profile.default]
 fail-fast = true
@@ -8,3 +9,13 @@ fail-fast = true
 [profile.ci]
 fail-fast = false
 failure-output = "immediate-final"
+
+[profile.db]
+fail-fast = false
+retries = 0
+# Each test owns a database pool plus a debug-mode Argon2 workload; bound
+# the fan-out instead of scaling with host cores.
+test-threads = 4
+# Replaces the old shell-level `timeout 900`: report a test as slow after
+# 2 minutes and kill it after 5 periods (10 minutes).
+slow-timeout = { period = "120s", terminate-after = 5 }
