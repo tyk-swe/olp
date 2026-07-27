@@ -128,8 +128,12 @@ jobs:
       - name: Replay fuzz regression corpora
         working-directory: fuzz
         run: |
+          # cargo-fuzz defaults --target to the triple it was itself built for,
+          # and cargo-binstall serves a musl prebuilt; sanitizers cannot link
+          # against a static libc. Always fuzz for the host triple instead.
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
           for target in sse_decoder protocol_json media_metadata multipart_parser; do
-            cargo +nightly-2026-05-15 fuzz run "$target" "corpus/$target" -- -runs=0
+            cargo +nightly-2026-05-15 fuzz run --target "$triple" "$target" "corpus/$target" -- -runs=0
           done
       - name: Run workspace doctests
         run: cargo test --locked --workspace --all-features --doc
@@ -665,8 +669,11 @@ jobs:
       - name: Run every seeded fuzz target for two minutes
         working-directory: fuzz
         run: |
+          # See the Rust job: cargo-fuzz's default target follows its own build
+          # triple (musl), which sanitizers cannot link against.
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
           for target in sse_decoder protocol_json media_metadata multipart_parser; do
-            cargo +nightly-2026-05-15 fuzz run "$target" "corpus/$target" -- -max_total_time=120
+            cargo +nightly-2026-05-15 fuzz run --target "$triple" "$target" "corpus/$target" -- -max_total_time=120
           done
 
   image-arm64:
