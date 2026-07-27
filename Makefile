@@ -43,8 +43,8 @@ clippy: ## Clippy with -D warnings, offline sqlx metadata
 
 # The workspace deliberately has zero doctests; nextest and llvm-cov do not
 # run them. If you add one, restore a `cargo test --doc` gate here and in CI.
-test: ## Workspace unit tests (postgres-backed tests stay #[ignore]d; see db-test)
-	SQLX_OFFLINE=true cargo test --locked --workspace --all-features
+test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d; see db-test)
+	SQLX_OFFLINE=true cargo nextest run --locked --workspace --all-features
 
 coverage: ## CI's real Rust test gate: llvm-cov nextest with the 51% line floor
 	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features \

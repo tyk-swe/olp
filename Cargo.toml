@@ -91,3 +91,22 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 undocumented_unsafe_blocks = "deny"
+
+[profile.dev]
+# Full DWARF made each integration test binary hundreds of MB and dominated
+# link time; line tables keep file:line backtraces. For debugger sessions
+# needing variable info, override in ~/.cargo/config.toml ([profile.dev]
+# debug = 2) — see CONTRIBUTING.md.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# Debug-mode Argon2id (m=19456, t=2; crates/storage/src/security.rs) runs
+# dozens of times across the DB suites; keep hot crypto crates optimized.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
