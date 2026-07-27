@@ -5,10 +5,9 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 console_dir=$(cd -- "$script_dir/../.." && pwd)
 repo_dir=$(cd -- "$console_dir/.." && pwd)
 
-target_dir=${CARGO_TARGET_DIR:-target}
-if [[ $target_dir != /* ]]; then
-  target_dir="$repo_dir/$target_dir"
-fi
+# shellcheck source=scripts/lib/cargo-target-dir.sh
+source "$repo_dir/scripts/lib/cargo-target-dir.sh"
+target_dir=$(cargo_target_dir "$repo_dir")
 olp_bin=${OLP_CONSOLE_E2E_BIN:-$target_dir/debug/olp}
 if [[ $olp_bin != /* ]]; then
   olp_bin="$repo_dir/$olp_bin"

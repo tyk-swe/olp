@@ -18,7 +18,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	coverage console-install console-verify console-e2e console-storybook \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay fuzz-campaign sdk-smoke
+	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -101,7 +101,9 @@ script-selftest: ## Self-tests for the backup manifest and repository-validation
 	scripts/test-repository-validation.sh
 
 shellcheck: ## Shellcheck every tracked shell script
-	git ls-files -z -- '*.sh' | xargs -0 shellcheck
+	@scripts=$$(git ls-files -- '*.sh'); \
+	if [[ -z $$scripts ]]; then echo "no tracked shell scripts were found" >&2; exit 1; fi; \
+	git ls-files -z -- '*.sh' | xargs -0 shellcheck && echo "shellcheck passed"
 
 fuzz-check: ## Compile fuzz targets (stable toolchain)
 	cargo check --locked --manifest-path fuzz/Cargo.toml --bins
@@ -119,5 +121,8 @@ fuzz-campaign: ## Bounded fuzz campaign: each seeded target for FUZZ_MAX_TOTAL_T
 		cargo +$(FUZZ_TOOLCHAIN) fuzz run --target $(FUZZ_TRIPLE) "$$target" "corpus/$$target" -- -max_total_time=$(FUZZ_MAX_TOTAL_TIME); \
 	done
 
-sdk-smoke: ## Official OpenAI/Anthropic/Gemini SDK smoke tests against a local build
+sdk-smoke-install: ## Install locked SDK smoke-test dependencies
+	pnpm --dir tests/sdk-smoke install --frozen-lockfile
+
+sdk-smoke: sdk-smoke-install ## Official OpenAI/Anthropic/Gemini SDK smoke tests against a local build
 	./tests/sdk-smoke/run.sh
