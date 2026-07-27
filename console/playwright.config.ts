@@ -19,7 +19,11 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } }
   ],
   webServer: {
-    command: 'pnpm dev --host 127.0.0.1 --port 4174',
+    // CI serves the prebuilt adapter-static bundle (the console job's build
+    // artifact) so browsers test what ships; local runs keep the dev server.
+    command: process.env.CI
+      ? 'pnpm exec vite preview --config vite.console-preview.config.ts --host 127.0.0.1 --port 4174 --strictPort'
+      : 'pnpm dev --host 127.0.0.1 --port 4174 --strictPort',
     url: 'http://127.0.0.1:4174',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000

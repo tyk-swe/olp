@@ -18,13 +18,18 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	coverage console-install console-verify console-e2e console-storybook \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay sdk-smoke
+	fuzz-replay fuzz-campaign sdk-smoke
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*##[ ]*"} {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
 
-check: boundaries storage-sqlx fmt clippy test console-verify release-version supply-chain ## Full PR gate (CI required tier, minus DB/image jobs)
+# Every required-tier gate that needs only the standard toolchain. CI
+# additionally enforces the coverage floor (make coverage), the DB/Valkey
+# suites (make db-test), the fuzz replay (make fuzz-replay), sdk-smoke,
+# storybook/e2e browsers, image builds, helm-verify (needs helm + docker
+# compose), and the actionlint/hadolint/cargo-deny quality steps.
+check: boundaries storage-sqlx shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Local PR gate (standard-toolchain required-tier checks)
 
 boundaries: ## Enforce crate boundaries and dependency ownership (needs ripgrep)
 	./scripts/check-boundaries.sh
@@ -101,9 +106,17 @@ shellcheck: ## Shellcheck every tracked shell script
 fuzz-check: ## Compile fuzz targets (stable toolchain)
 	cargo check --locked --manifest-path fuzz/Cargo.toml --bins
 
-fuzz-replay: ## Replay fuzz regression corpora (needs the pinned nightly + cargo-fuzz)
+fuzz-replay: ## Replay fuzz regression corpora (installs the pinned nightly; needs cargo-fuzz)
+	rustup toolchain install $(FUZZ_TOOLCHAIN) --profile minimal
 	cd fuzz && for target in $(FUZZ_TARGETS); do \
 		cargo +$(FUZZ_TOOLCHAIN) fuzz run --target $(FUZZ_TRIPLE) "$$target" "corpus/$$target" -- -runs=0; \
+	done
+
+FUZZ_MAX_TOTAL_TIME ?= 120
+fuzz-campaign: ## Bounded fuzz campaign: each seeded target for FUZZ_MAX_TOTAL_TIME seconds
+	rustup toolchain install $(FUZZ_TOOLCHAIN) --profile minimal
+	cd fuzz && for target in $(FUZZ_TARGETS); do \
+		cargo +$(FUZZ_TOOLCHAIN) fuzz run --target $(FUZZ_TRIPLE) "$$target" "corpus/$$target" -- -max_total_time=$(FUZZ_MAX_TOTAL_TIME); \
 	done
 
 sdk-smoke: ## Official OpenAI/Anthropic/Gemini SDK smoke tests against a local build
