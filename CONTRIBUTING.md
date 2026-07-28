@@ -107,6 +107,14 @@ workspace deliberately has zero doctests (nextest and llvm-cov do not run
 them); if you add one, restore a `cargo test --doc` gate in the Makefile and
 CI.
 
+The end-to-end journey suite (`make e2e`, `tests/e2e`) drives the real
+`olp all` binary against PostgreSQL, Valkey, and a loopback mock upstream.
+Its assertions encode the documented contract and are **drift-gated**, not
+pass-gated: failures listed in `tests/e2e/known-failures.txt` are documented
+product bugs and expected; anything else — a new failure, or a listed test
+that now passes — fails CI. If your change fixes a listed bug, prune its
+manifest entry in the same PR; never weaken an assertion to make it pass.
+
 Dev builds use `debug = "line-tables-only"` (workspace `[profile.dev]`):
 backtraces keep file:line information, but debuggers lose variable and type
 detail. For interactive debugging, override locally in

@@ -2396,6 +2396,7 @@ name = "olp-e2e"
 version = "2.0.0"
 dependencies = [
  "axum",
+ "base64",
  "bytes",
  "futures",
  "rand 0.9.5",
