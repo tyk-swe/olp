@@ -61,8 +61,7 @@ fn frame_from(data: &[u8]) -> SseFrame {
     let (event_bytes, rest) = data.split_at(third);
     let (id_bytes, data_bytes) = rest.split_at(third.min(rest.len()));
     SseFrame {
-        event: (!event_bytes.is_empty())
-            .then(|| String::from_utf8_lossy(event_bytes).into_owned()),
+        event: (!event_bytes.is_empty()).then(|| String::from_utf8_lossy(event_bytes).into_owned()),
         id: (!id_bytes.is_empty()).then(|| String::from_utf8_lossy(id_bytes).into_owned()),
         data: String::from_utf8_lossy(data_bytes).into_owned(),
         retry_ms: data.first().map(|value| u64::from(*value)),

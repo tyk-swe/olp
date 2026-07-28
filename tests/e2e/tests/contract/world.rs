@@ -164,7 +164,8 @@ impl Management {
     }
 
     pub async fn get(&self, path: &str) -> Result<MgmtResponse, String> {
-        self.send(reqwest::Method::GET, path, None, None, None).await
+        self.send(reqwest::Method::GET, path, None, None, None)
+            .await
     }
 
     pub async fn post(&self, path: &str, body: Value) -> Result<MgmtResponse, String> {
@@ -232,7 +233,11 @@ impl World {
     /// Stops the server and releases the per-run database. Returns the tail of
     /// its stderr. Idempotent, so a second call is harmless.
     pub async fn shutdown(&self) -> String {
-        let server = self.server.lock().expect("world lock is not poisoned").take();
+        let server = self
+            .server
+            .lock()
+            .expect("world lock is not poisoned")
+            .take();
         match server {
             Some(server) => server.shutdown().await,
             None => String::new(),
@@ -522,30 +527,79 @@ async fn configure_route(
     provider_id: &str,
     model_id: &str,
 ) -> Result<(), String> {
-    let key = management.next_idempotency_key();
+    // Routes are drafts-first: `/api/v1/routes` is read-only and a route comes
+    // into being by creating a draft and activating it. Field names and the
+    // required set come from CreateRouteDraftRequest and RouteTargetRequest in
+    // openapi/management.json.
     let created = management
-        .expect(
+        .send(
             reqwest::Method::POST,
-            "/api/v1/routes",
+            "/api/v1/route-drafts",
             Some(json!({
-                "name": route,
-                "targets": [{"provider_id": provider_id, "model_id": model_id, "weight": 1}]
+                "slug": route,
+                "operations": ["generation"],
+                "overall_timeout_ms": 30_000,
+                // Bounded by the target count, so a single-target route may
+                // attempt exactly once.
+                "max_attempts": 1,
+                "targets": [{
+                    "provider_id": provider_id,
+                    "provider_model": model_id,
+                    "priority": 0,
+                    "weight": 1,
+                    "timeout_ms": 30_000
+                }]
             })),
-            Some(&key),
             None,
-            201,
+            None,
         )
         .await?;
-    let etag = created.require_etag("route create")?;
-    management
-        .expect(
+    if !(200..300).contains(&created.status) {
+        return Err(format!(
+            "POST /api/v1/route-drafts returned {}: {}",
+            created.status, created.body
+        ));
+    }
+
+    let draft_id = ["id", "draft_id"]
+        .iter()
+        .find_map(|key| created.body.get(*key).and_then(Value::as_str))
+        .ok_or_else(|| format!("route draft carries no id: {}", created.body))?
+        .to_owned();
+    let etag = created.require_etag("route draft create")?;
+
+    // A draft must be validated before it can be activated.
+    let validated = management
+        .send(
             reqwest::Method::POST,
-            &format!("/api/v1/routes/{route}/activate"),
+            &format!("/api/v1/route-drafts/{draft_id}/validate"),
             None,
             None,
             Some(&etag),
-            200,
         )
         .await?;
+    if !(200..300).contains(&validated.status) {
+        return Err(format!(
+            "POST /api/v1/route-drafts/{draft_id}/validate returned {}: {}",
+            validated.status, validated.body
+        ));
+    }
+    let etag = validated.etag().unwrap_or(etag);
+
+    let activated = management
+        .send(
+            reqwest::Method::POST,
+            &format!("/api/v1/route-drafts/{draft_id}/activate"),
+            None,
+            None,
+            Some(&etag),
+        )
+        .await?;
+    if !(200..300).contains(&activated.status) {
+        return Err(format!(
+            "POST /api/v1/route-drafts/{draft_id}/activate returned {}: {}",
+            activated.status, activated.body
+        ));
+    }
     Ok(())
 }

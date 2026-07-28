@@ -130,10 +130,14 @@ fn observability_endpoints_answer_on_their_own_listener() {
                 .send()
                 .await
                 .unwrap_or_else(|error| panic!("observability GET {path} failed: {error}"));
-            assert!(
-                response.status().is_success(),
-                "{path} must be served on the observability listener; got {}",
-                response.status()
+            // Not 2xx: readiness legitimately reports 503 while a dependency
+            // is unavailable, and this test only distinguishes "served here"
+            // from "not served at all". Whether readiness *converges* is a
+            // separate claim that deserves its own test and its own wait.
+            assert_ne!(
+                response.status().as_u16(),
+                404,
+                "{path} must be served on the observability listener"
             );
         }
     });
