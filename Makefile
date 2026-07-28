@@ -18,7 +18,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	coverage console-install console-verify console-e2e console-storybook \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install
+	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -86,6 +86,9 @@ sqlx-check: ## Verify .sqlx/ metadata is fresh (CI: postgres-integration job)
 
 db-test: ## PostgreSQL/Valkey integration tests via nextest; needs OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX; extra args via ARGS
 	./scripts/run-postgres-tests.sh $(ARGS)
+
+e2e: ## True end-to-end journey: real olp binary + PostgreSQL + Valkey + mock upstream, drift-gated by tests/e2e/known-failures.txt
+	./scripts/run-e2e-tests.sh
 
 release-version: ## Require consistent release metadata
 	scripts/check-release-version.sh

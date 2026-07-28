@@ -14,11 +14,13 @@ use crate::openai::{
 use crate::vertex::VertexConnector;
 
 use super::certification::CapabilityCertificationEvidence;
+#[cfg(any(test, feature = "test-util"))]
+use super::configuration::validate_connector_configuration_with_policy;
 use super::configuration::{
     BedrockAuthMode, BorrowedCredential, ConnectorConfiguration, CredentialKind, ProviderConfig,
-    ProviderCredential, ProviderError, VertexAuthMode, bytes_credential, connector_configuration,
-    credential_kind, no_credential, text_credential, validate_connector_configuration,
-    validate_provider_credential,
+    ProviderCredential, ProviderError, VertexAuthMode, bytes_credential,
+    connector_configuration_with_policy, credential_kind, no_credential, text_credential,
+    validate_connector_configuration, validate_provider_credential,
 };
 
 /// Single assembly entrypoint for runtime transport, discovery, probes, and
@@ -46,6 +48,41 @@ impl ProviderFactory {
         config: ProviderConfig,
         credential: ProviderCredential,
     ) -> Result<ProviderFacade, ProviderError> {
+        Self::create_with_policy(config, credential, false).await
+    }
+
+    /// Test-build-only assembly that accepts plain-HTTP and non-public
+    /// provider endpoints. Release binaries never compile these variants.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn create_with_unsafe_test_endpoints(
+        config: ProviderConfig,
+        credential: ProviderCredential,
+    ) -> Result<ProviderFacade, ProviderError> {
+        Self::create_with_policy(config, credential, true).await
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn validate_with_unsafe_test_endpoints(
+        config: &ProviderConfig,
+    ) -> Result<(), ProviderError> {
+        validate_connector_configuration_with_policy(config.spec(), true)
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn transport_with_unsafe_test_endpoints(
+        config: ProviderConfig,
+        credential: ProviderCredential,
+    ) -> Result<Arc<dyn ProviderTransport>, ProviderError> {
+        Self::create_with_unsafe_test_endpoints(config, credential)
+            .await
+            .map(ProviderFacade::into_transport)
+    }
+
+    async fn create_with_policy(
+        config: ProviderConfig,
+        credential: ProviderCredential,
+        allow_unsafe_test_targets: bool,
+    ) -> Result<ProviderFacade, ProviderError> {
         let expected = Self::credential_kind(&config)?;
         let supplied = match &credential {
             ProviderCredential::None => CredentialKind::None,
@@ -65,7 +102,7 @@ impl ProviderFactory {
             }
             ProviderCredential::AwsStatic(value) => BorrowedCredential::Bytes(value.as_slice()),
         };
-        build_connector(config.spec(), borrowed)
+        build_connector(config.spec(), borrowed, allow_unsafe_test_targets)
             .await
             .map(|inner| ProviderFacade { inner })
     }
@@ -146,9 +183,10 @@ impl ConcreteProvider {
 async fn build_connector(
     spec: super::configuration::ConnectorSpec<'_>,
     credential: BorrowedCredential<'_>,
+    allow_unsafe_test_targets: bool,
 ) -> Result<ConcreteProvider, ProviderError> {
     let kind = spec.kind;
-    let connector = match connector_configuration(spec)? {
+    let connector = match connector_configuration_with_policy(spec, allow_unsafe_test_targets)? {
         ConnectorConfiguration::OpenAi(configuration) => {
             let key = OpenAiApiKey::new(
                 text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),

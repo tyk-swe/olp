@@ -141,7 +141,7 @@ metadata_rows=
 if metadata_rows=$(jq -r '
   (.packages[] | ["package", .name] | @tsv),
   (.packages[]
-    | select(.name != "olp-conformance")
+    | select(.name != "olp-conformance" and .name != "olp-e2e")
     | .name as $package
     | ([.dependencies[] | select(.path != null and .kind != "dev") | .name]
        | unique | sort | join(",")) as $dependencies
@@ -161,9 +161,9 @@ fi
 
 actual_packages="$(awk -F'\t' '$1 == "package" { print $2 }' <<<"$metadata_rows" | sort)"
 expected_packages="$(printf '%s\n' \
-  olp olp-conformance olp-domain olp-protocols olp-providers olp-storage | sort)"
+  olp olp-conformance olp-domain olp-e2e olp-protocols olp-providers olp-storage | sort)"
 if [[ "$actual_packages" != "$expected_packages" ]]; then
-  echo "workspace packages do not match the five production crates plus the conformance harness:" >&2
+  echo "workspace packages do not match the five production crates plus the conformance and e2e harnesses:" >&2
   printf '%s\n' "$actual_packages" >&2
   violations=1
 fi

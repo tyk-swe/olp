@@ -1,0 +1,24 @@
+[package]
+name = "olp-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Every dependency is a dev-dependency: the crate is an empty library anchor
+# whose only content is the end-to-end journey test binary, and dev-only
+# edges keep it out of the production dependency DAG contract.
+[dev-dependencies]
+axum.workspace = true
+bytes.workspace = true
+futures.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

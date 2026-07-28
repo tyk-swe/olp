@@ -1,0 +1,9 @@
+# Known-failing e2e journey tests: one libtest path per line, optionally
+# followed by a `# summary` of the verified product bug it documents.
+#
+# Contract for this file (enforced by scripts/run-e2e-tests.sh):
+#   - every listed test is EXPECTED to fail; the suite stays honestly red;
+#   - a failure not listed here fails CI (new regression);
+#   - a listed test that passes fails CI (the fix landed - prune the entry).
+# Never weaken a test assertion to shrink this file; assertions encode the
+# documented contract, this file records where the product violates it.
