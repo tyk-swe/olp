@@ -1,25 +1,18 @@
 # Production deployment
 
-This document covers production deployment with the bundled Helm chart:
-required infrastructure and secrets, edge routing rules, installation, and the
-checks that must pass before the deployment receives traffic.
-
-## Contents
-
-- [Prerequisites and secrets](#prerequisites-and-secrets)
-- [Edge routing](#edge-routing)
-- [Install and verify](#install-and-verify)
-- [Readiness checks](#readiness-checks)
+Production deployment with the bundled Helm chart: required infrastructure
+and secrets, edge routing, installation, and the checks that must pass
+before the deployment receives traffic.
 
 ## Prerequisites and secrets
 
-The Helm chart requires Kubernetes 1.27 or newer, PostgreSQL 18, and durable
-Valkey 9.1. It runs one immutable image in `gateway`, `control`, `worker`, and
-migration modes. Pin an approved image by `image.digest`; do not use a mutable
-development tag. Commands below run from the repository root.
+The chart requires Kubernetes 1.27 or newer, PostgreSQL 18, and durable
+Valkey 9.1. It runs one immutable image in `gateway`, `control`, `worker`,
+and migration modes. Pin an approved image by `image.digest`, never a
+mutable development tag. Commands below run from the repository root.
 
-Create the four long-lived Kubernetes Secrets selected by `config.*SecretName`
-before installation. The defaults are:
+Create the four long-lived Kubernetes Secrets selected by
+`config.*SecretName` before installation. The defaults are:
 
 | Purpose | Secret | Key |
 |---|---|---|
@@ -28,15 +21,16 @@ before installation. The defaults are:
 | Master key | `olp-master-key` | `key` |
 | Authentication HMAC key | `olp-auth-hmac-key` | `key` |
 
-Existing installations that still use `olp-key-hash-key` must copy those exact
-bytes to the new Secret and update the chart values before upgrading. Never
-generate a replacement. Follow the byte-preserving procedure in the
+Installations still using `olp-key-hash-key` must copy those exact bytes to
+the new Secret and update the chart values before upgrading — never generate
+a replacement. Follow the byte-preserving procedure in the
 [upgrade runbook](operations.md#naming-migration-prerequisites).
 
 For a new installation, also create a 32-byte base64 bootstrap token Secret
-and set `config.bootstrapTokenSecretName` and `config.bootstrapTokenSecretKey`.
-Helm mounts it only into control pods; it is required until the first owner has
-been created and is never exposed to gateway pods.
+and set `config.bootstrapTokenSecretName` and
+`config.bootstrapTokenSecretKey`. Helm mounts it only into control pods; it
+is required until the first owner exists and is never exposed to gateway
+pods.
 
 Keep secret values out of values files and shell history. Override names and
 keys through `config` when required; `deploy/helm/values.yaml` documents the
@@ -44,8 +38,9 @@ fields and `values.schema.json` validates them.
 
 ## Edge routing
 
-The console and management API share an origin; vendor SDK traffic terminates
-at gateway pods. The optional Ingress preserves paths and applies this routing:
+The console and management API share an origin; vendor SDK traffic
+terminates at gateway pods. The optional Ingress preserves paths and applies
+this routing:
 
 | Prefix | Service |
 |---|---|
@@ -83,71 +78,62 @@ ingress:
     secretName: olp-tls
 ```
 
-`config.publicOrigin` and `ingress.host` must identify the same trusted origin.
-Set `config.localLoginEnabled: false` only after OIDC login is configured and
-verified; the public capability endpoint then removes the password form.
-The chart has no gateway catch-all and refuses to render the Ingress unless the
-gateway and control Services are enabled. It also refuses to render an Ingress
-without `config.trustedProxyCidrs`: public login, invitation, and OIDC limits
+`config.publicOrigin` and `ingress.host` must identify the same trusted
+origin. Set `config.localLoginEnabled: false` only after OIDC login is
+configured and verified; the public capability endpoint then removes the
+password form. The chart has no gateway catch-all and refuses to render the
+Ingress unless the gateway and control Services are enabled and
+`config.trustedProxyCidrs` is set: public login, invitation, and OIDC limits
 use the connection peer unless that peer is explicitly trusted to supply
 `X-Forwarded-For`.
 
-Compose follows the same fail-safe default through `OLP_TRUSTED_PROXY_CIDRS`.
-Leave it empty for direct deployments. Behind a reverse proxy, set it to the
-comma-separated CIDRs of only the proxy peers that append a trustworthy
-`X-Forwarded-For` chain. Forwarding headers received while the setting is empty
-are ignored and produce a rate-limited warning so a missing trust boundary is
-visible without allowing clients to spoof admission identities.
+Compose applies the same fail-safe default through
+`OLP_TRUSTED_PROXY_CIDRS`. Leave it empty for direct deployments; behind a
+reverse proxy, set it to the CIDRs of only the proxy peers that append a
+trustworthy `X-Forwarded-For` chain. Forwarding headers received while the
+setting is empty are ignored with a rate-limited warning, so a missing trust
+boundary is visible without letting clients spoof admission identities.
 
 For Gateway API, a service mesh, or an external Ingress, leave
 `ingress.enabled: false` and reproduce the table above. Preserve the Host,
-scheme, path, streaming behavior, and client disconnects. Do not strip the
-vendor or `/api` prefixes. Disable buffering for SSE and set request-size and
-idle-timeout limits no lower than the application's bounded limits and longest
-approved route deadline.
+scheme, path, streaming behavior, and client disconnects; do not strip the
+vendor or `/api` prefixes. Disable buffering for SSE, and set request-size
+and idle-timeout limits no lower than the application's bounded limits and
+longest approved route deadline.
 
 ### Observability listener
 
-Observability is a separate listener. `OLP_OBSERVABILITY_LISTEN_ADDR` defaults
-to `127.0.0.1:9090` and exposes only `/health/live`, `/health/ready`, and
-`/metrics`; the public listener returns 404 for all three paths. The chart
-binds it to the pod network and creates internal ClusterIP
-`*-observability` Services on port 9090. Kubelet probes use the matching
-container port and optional ServiceMonitors select those Services; the bundled
-Ingress intentionally has no health or metrics route.
+Observability is a separate listener. `OLP_OBSERVABILITY_LISTEN_ADDR`
+defaults to `127.0.0.1:9090` and exposes only `/health/live`,
+`/health/ready`, and `/metrics`; the public listener returns 404 for all
+three. The chart binds it to the pod network and creates internal ClusterIP
+`*-observability` Services on port 9090; kubelet probes use the matching
+container port, optional ServiceMonitors select those Services, and the
+bundled Ingress intentionally has no health or metrics route.
 
-The chart does not install a generic NetworkPolicy because the correct policy
+The chart installs no generic NetworkPolicy because the correct policy
 depends on the kubelet, Prometheus, and CNI topology. Restrict access to the
-internal observability Services with an installation-specific policy when your
-network policy provider supports it.
+observability Services with an installation-specific policy.
 
-### Connection capacity
+### Capacity
 
-`gateway.httpMaxConnections` and `control.httpMaxConnections` configure the
-per-pod public-listener connection caps. Each proxied HTTP/1.1 SSE stream holds
-one connection permit for its lifetime, so size the gateway value above the
-largest expected per-pod stream count with room for unary requests. The chart's
-gateway default is 16,384 connections per pod; the control-plane default
-remains 1,024.
-
-### Request admission capacity
+`gateway.httpMaxConnections` and `control.httpMaxConnections` set the
+per-pod public-listener TCP caps (defaults 16,384 and 1,024). Each proxied
+HTTP/1.1 SSE stream holds one connection permit for its lifetime, so size
+the gateway value above the largest expected per-pod stream count with room
+for unary requests.
 
 `gateway.httpMaxInFlightInferenceRequests` and
 `gateway.httpMaxInFlightManagementRequests` (and the corresponding `control`
-values) bound process-local public HTTP request work independently of TCP
-connections. The inference and management pools do not borrow from each other,
-so inference saturation cannot consume the management reserve in `all` mode.
-A permit is retained until the complete response body reaches EOF, fails, or is
-dropped; long-lived streaming responses therefore count for their full
-lifetime. Full pools reject immediately with HTTP 503 and `Retry-After: 1`
-instead of creating a waiting queue.
-
-The defaults are 256 inference requests and 32 management requests per process.
-They are conservative relative to the 1,024 default connection cap and leave a
-fixed management reserve while allowing substantially more request parallelism
-than the default 20-connection database pool. Size these values from pod CPU,
-memory, provider connection limits, and expected streaming duration; increasing
-the TCP cap alone does not increase admitted request work.
+values) bound process-local request work independently of TCP connections —
+defaults 256 and 32. The pools do not borrow from each other, so inference
+saturation cannot consume the management reserve in `all` mode. A permit is
+held until the complete response body reaches EOF, fails, or is dropped, so
+streaming responses count for their full lifetime; full pools reject
+immediately with HTTP 503 and `Retry-After: 1` instead of queueing. Size
+these values from pod CPU, memory, provider connection limits, and expected
+streaming duration — raising the TCP cap alone does not increase admitted
+request work.
 
 ## Install and verify
 
@@ -180,14 +166,13 @@ helm upgrade --install olp \
 ```
 
 The explicit timeout covers the chart's ten-minute migration deadline plus a
-five-minute graceful pod drain and rollout headroom. Do not lower it below
-those configured bounds.
+five-minute graceful pod drain and rollout headroom; do not lower it below
+those bounds.
 
 ## Readiness checks
 
-Before issuing a proxy key or routing a client, require a successful migration
-Job, ready pods, runtime-generation convergence, and—when monitoring is
-enabled—healthy gateway and control ServiceMonitor targets.
-
-Once the deployment is serving, continue with the monitoring, backup, and
-upgrade procedures in the [operations runbook](operations.md).
+Before issuing a proxy key or routing a client, require a successful
+migration Job, ready pods, runtime-generation convergence, and — when
+monitoring is enabled — healthy gateway and control ServiceMonitor targets.
+Once serving, continue with the monitoring, backup, and upgrade procedures
+in the [operations runbook](operations.md).

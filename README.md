@@ -5,10 +5,10 @@
 [![Release](https://img.shields.io/github/v/release/tyk-swe/olp)](https://github.com/tyk-swe/olp/releases)
 
 OpenLLMProxy is a self-hosted AI gateway and control plane. It exposes
-OpenAI-, Anthropic-, and Gemini-compatible APIs and routes requests to OpenAI,
-Anthropic, Gemini, Vertex AI, Azure OpenAI, AWS Bedrock, and certified
-OpenAI-compatible providers — behind one stable endpoint, one key inventory,
-and one audit trail.
+OpenAI-, Anthropic-, and Gemini-compatible APIs and routes requests to
+OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, AWS Bedrock, and
+certified OpenAI-compatible providers — behind one stable endpoint, one key
+inventory, and one audit trail.
 
 ![OpenLLMProxy console — overview dashboard](docs/assets/screenshots/overview.png)
 
@@ -18,17 +18,19 @@ and one audit trail.
   GenAI SDKs at one base URL. Clients address routes by a stable public slug;
   direct provider/model addressing is intentionally unavailable.
 - **Deterministic routing** — Explicit provider-model targets with priority
-  groups, weighted selection, bounded failover, and pre-activation simulation.
-- **Capability certification** — Models are activated only after bounded live
+  groups, weighted selection, bounded failover, and pre-activation
+  simulation.
+- **Capability certification** — Models activate only after bounded live
   probes certify each provider/model/operation tuple against the production
   connector.
-- **Immutable runtime generations** — Configuration is compiled, digested, and
-  published atomically; in-flight streams never cross a generation boundary.
+- **Immutable runtime generations** — Configuration is compiled, digested,
+  and published atomically; in-flight streams never cross a generation
+  boundary.
 - **Usage and cost accounting** — Requests, attempts, and usage facts store
   operational metadata only — never prompts, outputs, tool data, or uploads.
-- **Scoped access control** — Installation-scoped proxy keys with route allowlists,
-  expiry, and distributed hard rate limits; full audit stream of every
-  administrative change.
+- **Scoped access control** — Installation-scoped proxy keys with route
+  allowlists, expiry, and distributed hard rate limits; a full audit stream
+  of every administrative change.
 - **Production operations** — Private health and metrics listener, Prometheus
   rules, Grafana dashboard, backup/restore and upgrade rehearsal tooling.
 
@@ -36,20 +38,19 @@ and one audit trail.
 
 **Prerequisites:** Docker with Compose support and OpenSSL.
 
-Create the local environment. The helper generates any missing local secrets,
-including the one-time bootstrap token, without replacing existing keys:
-
 ```bash
 cp .env.example .env
 ./scripts/prepare-compose-secrets.sh
 ```
 
-Compose runs OpenLLMProxy as UID and GID `1000` by default. If either differs
-from the output of `id -u` and `id -g` for your host user, update `OLP_UID` and
-`OLP_GID` in `.env` so the container can read the mode-`0600` secret files.
-If you change `POSTGRES_PASSWORD`, set `POSTGRES_PASSWORD_URL_ENCODED` to the
-RFC 3986 percent-encoded form of the same password. PostgreSQL receives the raw
-value, while `OLP_DATABASE_URL` derives from the encoded value.
+The helper generates any missing local secrets, including the one-time
+bootstrap token, without replacing existing keys. Compose runs OpenLLMProxy
+as UID/GID `1000`; if your host user differs (`id -u`, `id -g`), set
+`OLP_UID` and `OLP_GID` in `.env` so the container can read the mode-`0600`
+secret files. If you change `POSTGRES_PASSWORD`, set
+`POSTGRES_PASSWORD_URL_ENCODED` to its RFC 3986 percent-encoded form:
+PostgreSQL receives the raw value, while `OLP_DATABASE_URL` derives from the
+encoded one.
 
 Start a new installation with the bootstrap overlay and the root environment
 file explicitly selected:
@@ -59,22 +60,21 @@ docker compose --env-file .env \
   -f deploy/compose.yaml -f deploy/compose.bootstrap.yaml up --build -d
 ```
 
-With the default `.env`, open the console at `http://localhost:8080`. On the
-first visit, paste the one-time value from `deploy/secrets/olp_bootstrap_token`
-into the setup form before creating the installation owner. The application
-clears its in-memory copy after successful setup. Once you have verified the
-owner account, recreate the application from the base configuration and only
-then retire the token:
+Open the console at `http://localhost:8080` and, on first visit, paste the
+one-time value from `deploy/secrets/olp_bootstrap_token` into the setup form
+before creating the installation owner; the application clears its in-memory
+copy after setup. Once the owner account is verified, recreate the
+application from the base configuration and only then retire the token:
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
 ./scripts/retire-compose-bootstrap-secret.sh
 ```
 
-Use `deploy/compose.yaml` alone for every subsequent restart or upgrade. It has
-no bootstrap-secret reference, so container recreation remains valid after the
-file is removed. Compose applies database migrations before startup and stores
-PostgreSQL and Valkey data in named volumes.
+Use `deploy/compose.yaml` alone for every later restart or upgrade; it has no
+bootstrap-secret reference, so container recreation stays valid after the
+file is removed. Compose applies database migrations before startup and
+stores PostgreSQL and Valkey data in named volumes.
 
 ## Interfaces
 
@@ -91,15 +91,14 @@ All public interfaces share one origin — `http://localhost:8080` by default:
 
 Liveness, readiness, and metrics are private observability endpoints on
 `OLP_OBSERVABILITY_LISTEN_ADDR` (default `127.0.0.1:9090`): `/health/live`,
-`/health/ready`, and `/metrics`. The Compose stack starts this listener but
-does not publish port 9090 to the host; public requests for these paths return
-404.
+`/health/ready`, and `/metrics`. Compose starts this listener without
+publishing port 9090 to the host; public requests for these paths return 404.
 
 ## Console
 
 The console is the control-plane interface for providers, routes, keys, and
-operations. It is served as static assets by the same process — no separate
-frontend deployment is required.
+operations, served as static assets by the same process — no separate
+frontend deployment.
 
 | Providers | API Keys |
 |---|---|
@@ -109,8 +108,8 @@ frontend deployment is required.
 | **Usage** | |
 | ![Usage](docs/assets/screenshots/usage.png) | |
 
-Screenshots are generated from deterministic fixtures and can be regenerated
-after UI changes with `pnpm --dir console screenshots`.
+Screenshots are generated from deterministic fixtures; regenerate after UI
+changes with `pnpm --dir console screenshots`.
 
 ## Documentation
 
@@ -125,8 +124,8 @@ after UI changes with `pnpm --dir console screenshots`.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture boundaries,
-source-of-truth ownership, toolchain prerequisites, and the full validation
-matrix. Use Rust 1.97.0, Node.js 24 or newer, pnpm 11, and ripgrep. The
+source-of-truth ownership, toolchain prerequisites, and the validation
+matrix. Use Rust 1.97.0, Node.js 24 or newer, pnpm 11, and ripgrep; the
 Compose stack supplies PostgreSQL 18 and Valkey 9.1. Then run the standard
 checks:
 
@@ -142,7 +141,7 @@ commands CI runs.
 ## Security
 
 Report suspected vulnerabilities privately to `support@mail.tyk.sh`. See
-[SECURITY.md](SECURITY.md) for the supported release lines and reporting
+[SECURITY.md](SECURITY.md) for supported release lines and reporting
 guidelines.
 
 ## License

@@ -1,12 +1,8 @@
 # OpenLLMProxy console
 
-The console is a client-only SvelteKit application served by OpenLLMProxy. Its
-static build is written to `build/` with `index.html` as the SPA fallback.
-
-## Requirements
-
-- Node.js 24 or newer
-- pnpm 11
+The console is a client-only SvelteKit application served by OpenLLMProxy.
+Its static build is written to `build/` with `index.html` as the SPA
+fallback. Requires Node.js 24 or newer and pnpm 11.
 
 ## Getting started
 
@@ -38,7 +34,7 @@ quick start in the root README, or `cargo run -p olp -- all` with
 
 Management requests go through the generated `openapi-fetch` client. After
 changing `../openapi/management.json`, run `pnpm api:generate`;
-`pnpm api:check` verifies that the checked-in TypeScript schema is current.
+`pnpm api:check` verifies the checked-in TypeScript schema is current.
 
 ## Integration tests
 
@@ -51,7 +47,7 @@ prebuilt `olp` executable to skip the harness build.
 
 ## Documentation screenshots
 
-The screenshots published in the root [README](../README.md) and under
-[`../docs/`](../docs/) are captured by `tests/screenshots/` against mocked API
-responses — no backend is required. Run `pnpm screenshots` and commit the
+The screenshots in the root [README](../README.md) and under
+[`../docs/`](../docs/) are captured by `tests/screenshots/` against mocked
+API responses — no backend required. Run `pnpm screenshots` and commit the
 updated PNGs whenever the UI changes visibly.
