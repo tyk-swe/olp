@@ -109,6 +109,11 @@ impl Endpoint {
         Self::parse_with_policy(value, true).expect("local test endpoint must be a valid HTTP URL")
     }
 
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn parse_with_unsafe_test_target(value: &str) -> Result<Self, EndpointError> {
+        Self::parse_with_policy(value, true)
+    }
+
     pub(crate) fn resource_url(&self, path: &str) -> Result<Url, EndpointError> {
         if path.starts_with('/') || path.contains("..") || path.contains(['\\', '?', '#']) {
             return Err(EndpointError::InvalidResourcePath);

@@ -8,7 +8,7 @@ use olp_domain::{
     ProviderAuthMode, ProviderConfiguration, ProviderKind, provider_kind_spec,
     validate_provider_configuration,
 };
-use olp_providers::{ProviderError, ProviderFactory};
+use olp_providers::ProviderError;
 use olp_storage::{
     IdempotencyOutcome, IdempotencyResponse, NewProviderDraft, ReplayableIdempotency,
     credential_aad, idempotency_fingerprint, idempotency_secret_digest,
@@ -251,7 +251,7 @@ pub(crate) async fn create_provider(
             .map(|credential| credential.expose().as_bytes()),
     )
     .map_err(|error| provider_connector_validation(kind, error))?;
-    let transport = ProviderFactory::transport(config, credential)
+    let transport = crate::provider_adapter::factory_transport(config, credential)
         .await
         .map_err(|error| provider_connector_validation(kind, error))?;
     let connector_available = true;

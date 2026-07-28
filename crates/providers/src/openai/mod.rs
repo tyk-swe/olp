@@ -85,6 +85,16 @@ impl ConnectorConfig {
         })
     }
 
+    /// Accepts plain-HTTP and non-public targets. Exists only for test
+    /// builds; release binaries never compile this constructor.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn with_base_url_unsafe_test_target(base_url: &str) -> Result<Self, ConnectorBuildError> {
+        Ok(Self {
+            endpoint: Endpoint::parse_with_unsafe_test_target(base_url)?,
+            ..Self::default()
+        })
+    }
+
     pub fn with_timeouts(
         mut self,
         timeouts: ConnectorTimeouts,

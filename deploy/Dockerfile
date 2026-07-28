@@ -27,6 +27,7 @@ COPY .sqlx ./.sqlx
 COPY apps ./apps
 COPY crates ./crates
 COPY tests/conformance ./tests/conformance
+COPY tests/e2e ./tests/e2e
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS rust-build
@@ -42,6 +43,7 @@ COPY crates ./crates
 # Copy the conformance crate manifest/source required for that resolution, but
 # keep SDK, HA, and generated test artifacts out of the production build.
 COPY tests/conformance ./tests/conformance
+COPY tests/e2e ./tests/e2e
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release -p olp
 

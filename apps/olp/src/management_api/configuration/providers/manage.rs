@@ -8,7 +8,6 @@ use chrono::{DateTime, Utc};
 use olp_domain::{
     ProviderAuthMode, ProviderConfiguration, ProviderKind, validate_provider_configuration,
 };
-use olp_providers::ProviderFactory;
 use olp_storage::{ProviderRecord, UpdateProvider};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -384,7 +383,8 @@ fn validate_provider_update(
         probe_model: provider.probe_model.as_deref(),
     })
     .map_err(|error| validation("provider", &error.to_string()))?;
-    ProviderFactory::validate(&config).map_err(|error| validation("provider", &error.to_string()))
+    crate::provider_adapter::factory_validate(&config)
+        .map_err(|error| validation("provider", &error.to_string()))
 }
 
 #[derive(Debug, Serialize, ToSchema)]

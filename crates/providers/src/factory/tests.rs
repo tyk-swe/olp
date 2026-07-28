@@ -288,3 +288,51 @@ async fn native_certification_executes_the_exact_model_and_tuple() {
         Err(CompatibleCapabilityCertificationError::Unsupported)
     ));
 }
+
+#[test]
+fn strict_factory_rejects_loopback_endpoints_that_unsafe_test_variants_accept() {
+    let compat = ProviderConfig::OpenAiCompatible {
+        endpoint: "http://127.0.0.1:9/v1".to_owned(),
+    };
+    assert!(ProviderFactory::validate(&compat).is_err());
+    ProviderFactory::validate_with_unsafe_test_endpoints(&compat).unwrap();
+
+    let azure = ProviderConfig::AzureOpenAi {
+        endpoint: "http://127.0.0.1:9".to_owned(),
+        deployment: "deployment".to_owned(),
+        api_version: "2024-10-21".to_owned(),
+    };
+    assert!(ProviderFactory::validate(&azure).is_err());
+    ProviderFactory::validate_with_unsafe_test_endpoints(&azure).unwrap();
+}
+
+#[tokio::test]
+async fn unsafe_test_variants_assemble_loopback_transports_without_network_io() {
+    let compat = ProviderConfig::OpenAiCompatible {
+        endpoint: "http://127.0.0.1:9/v1".to_owned(),
+    };
+    let credential = ProviderCredential::ApiKey(Zeroizing::new("sk-test".to_owned()));
+    assert!(
+        ProviderFactory::create(
+            compat.clone(),
+            ProviderCredential::ApiKey(Zeroizing::new("sk-test".to_owned()))
+        )
+        .await
+        .is_err()
+    );
+    ProviderFactory::transport_with_unsafe_test_endpoints(compat, credential)
+        .await
+        .unwrap();
+
+    let azure = ProviderConfig::AzureOpenAi {
+        endpoint: "http://127.0.0.1:9".to_owned(),
+        deployment: "deployment".to_owned(),
+        api_version: "2024-10-21".to_owned(),
+    };
+    ProviderFactory::transport_with_unsafe_test_endpoints(
+        azure,
+        ProviderCredential::ApiKey(Zeroizing::new("azure-secret".to_owned())),
+    )
+    .await
+    .unwrap();
+}
