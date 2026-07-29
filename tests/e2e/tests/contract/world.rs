@@ -163,6 +163,47 @@ impl Management {
         read_response(response).await
     }
 
+    /// Sends a management request with exactly the headers given and no others.
+    ///
+    /// `send` supplies the session cookie, the CSRF token, `Origin` and an
+    /// idempotency key because almost every call needs them. The documented
+    /// failure modes are precisely the cases where one of those is absent or
+    /// wrong, so they need a builder that adds nothing on the caller's behalf.
+    pub async fn raw(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> Result<MgmtResponse, String> {
+        let mut request = self
+            .http
+            .request(method.clone(), format!("{}{path}", self.origin));
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("{method} {path} failed: {error}"))?;
+        read_response(response).await
+    }
+
+    pub fn cookie(&self) -> &str {
+        &self.cookie
+    }
+
+    pub fn csrf(&self) -> &str {
+        &self.csrf
+    }
+
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
     pub async fn get(&self, path: &str) -> Result<MgmtResponse, String> {
         self.send(reqwest::Method::GET, path, None, None, None)
             .await
@@ -217,6 +258,7 @@ pub struct World {
     pub public_origin: String,
     pub observability_base: String,
     pub setup_token: String,
+    pub database_url: String,
     pub mock: MockUpstream,
     pub management: Management,
     pub http: reqwest::Client,
@@ -225,9 +267,172 @@ pub struct World {
     pub azure_provider: String,
 }
 
+/// A gateway response kept whole: assertions need the status line, the headers
+/// and the raw body, and a body that failed to parse must stay readable in the
+/// failure message rather than becoming `null`.
+pub struct GatewayResponse {
+    pub status: u16,
+    pub headers: HeaderMap,
+    pub text: String,
+}
+
+impl GatewayResponse {
+    pub fn header(&self, name: &str) -> Option<String> {
+        self.headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    }
+
+    pub fn json(&self) -> Value {
+        serde_json::from_str(&self.text).unwrap_or(Value::Null)
+    }
+}
+
 impl World {
     pub fn origin(&self) -> &str {
         &self.public_origin
+    }
+
+    /// Posts to a gateway surface with a bearer credential.
+    pub async fn gateway_post(
+        &self,
+        path: &str,
+        body: Value,
+        credential: &str,
+    ) -> Result<GatewayResponse, String> {
+        self.gateway_send(
+            reqwest::Method::POST,
+            path,
+            Some(body),
+            &[(
+                reqwest::header::AUTHORIZATION.as_str(),
+                &format!("Bearer {credential}"),
+            )],
+        )
+        .await
+    }
+
+    /// Posts to a gateway surface with whatever credential headers the caller
+    /// names, so a test can pin the header each vendor dialect documents
+    /// (`Authorization`, `x-api-key`, `x-goog-api-key`) or send none at all.
+    pub async fn gateway_send(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> Result<GatewayResponse, String> {
+        let mut request = self
+            .http
+            .request(method.clone(), format!("{}{path}", self.public_origin));
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("{method} {path} failed: {error}"))?;
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("failed to read the {method} {path} body: {error}"))?;
+        Ok(GatewayResponse {
+            status,
+            headers,
+            text,
+        })
+    }
+
+    /// Issues an API key and waits until the gateway serves it.
+    ///
+    /// `overrides` is merged into the create body, so a test can pin the limit
+    /// fields `CreateApiKeyRequest` documents without restating the rest.
+    pub async fn issue_key(&self, name: &str, overrides: Value) -> Result<IssuedKey, String> {
+        let mut body = json!({
+            "name": name,
+            "scopes": ["inference", "models_read"],
+            "allowed_routes": [OPENAI_ROUTE, CROSS_ROUTE]
+        });
+        if let Some(fields) = overrides.as_object() {
+            for (key, value) in fields {
+                body[key] = value.clone();
+            }
+        }
+
+        let created = self
+            .management
+            .expect(
+                reqwest::Method::POST,
+                "/api/v1/api-keys",
+                Some(body),
+                None,
+                None,
+                201,
+            )
+            .await?;
+        let secret = created.body["secret"]
+            .as_str()
+            .ok_or_else(|| format!("api key response lacks secret: {}", created.body))?
+            .to_owned();
+        let id = created.body["id"]
+            .as_str()
+            .ok_or_else(|| format!("api key response lacks id: {}", created.body))?
+            .to_owned();
+        await_key(&self.http, &self.public_origin, &secret).await?;
+        Ok(IssuedKey { id, secret })
+    }
+
+    /// Waits until the request log holds `expected` rows for `api_key_id`.
+    ///
+    /// Metadata ingestion is asynchronous — the gateway emits a terminal
+    /// envelope and the worker persists it — so a count read immediately after
+    /// a response is a race. This waits for the expected count and then *keeps
+    /// waiting briefly*, so a duplicate row still fails the caller's exact
+    /// assertion instead of being read before it lands.
+    pub async fn await_request_rows(
+        &self,
+        api_key_id: &str,
+        filter: &str,
+        expected: usize,
+    ) -> Result<Vec<Value>, String> {
+        // Issuing a key costs one gateway request of its own — the convergence
+        // poll against the model listing — and that request is logged like any
+        // other. `filter` narrows the query to the traffic the caller made, so
+        // the count can stay exact instead of becoming a lower bound.
+        let path = format!("/api/v1/requests?api_key_id={api_key_id}&limit=200{filter}");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let response = self.management.get(&path).await?;
+            if response.status != 200 {
+                return Err(format!(
+                    "GET {path} returned {}: {}",
+                    response.status, response.body
+                ));
+            }
+            let rows = response.body["data"].as_array().cloned().ok_or_else(|| {
+                format!("request listing carries no data array: {}", response.body)
+            })?;
+            if rows.len() >= expected {
+                tokio::time::sleep(Duration::from_millis(750)).await;
+                let settled = self.management.get(&path).await?;
+                return settled.body["data"].as_array().cloned().ok_or_else(|| {
+                    format!("request listing carries no data array: {}", settled.body)
+                });
+            }
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "only {} of {expected} request rows were persisted within 30s",
+                    rows.len()
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
     }
 
     /// Stops the server and releases the per-run database. Returns the tail of
@@ -332,31 +537,13 @@ pub async fn bootstrap() -> Result<World, String> {
 
     // The key exists only inside the activated runtime generation, so wait for
     // the gateway to converge before handing the fixture to any test.
-    let models_url = format!("{}/openai/v1/models", server.public_origin);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let status = http
-            .get(&models_url)
-            .bearer_auth(&secret)
-            .send()
-            .await
-            .map_err(|error| format!("gateway convergence poll failed: {error}"))?
-            .status();
-        if status.is_success() {
-            break;
-        }
-        if Instant::now() > deadline {
-            return Err(format!(
-                "gateway never accepted the new API key (last status {status})"
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
+    await_key(&http, &server.public_origin, &secret).await?;
 
     Ok(World {
         public_origin: server.public_origin.clone(),
         observability_base: server.observability_base.clone(),
         setup_token: server.setup_token.clone(),
+        database_url: server.database_url.clone(),
         server: Mutex::new(Some(server)),
         mock,
         management,
@@ -365,6 +552,40 @@ pub async fn bootstrap() -> Result<World, String> {
         compat_provider,
         azure_provider,
     })
+}
+
+pub struct IssuedKey {
+    pub id: String,
+    pub secret: String,
+}
+
+/// Blocks until the gateway accepts `secret`.
+///
+/// A newly published key exists only inside a runtime generation the gateways
+/// have not yet loaded; `docs/architecture.md` "Runtime publication" makes that
+/// propagation explicit, so waiting for it is part of using the API, not a
+/// workaround for flakiness.
+async fn await_key(http: &reqwest::Client, origin: &str, secret: &str) -> Result<(), String> {
+    let models_url = format!("{origin}/openai/v1/models");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = http
+            .get(&models_url)
+            .bearer_auth(secret)
+            .send()
+            .await
+            .map_err(|error| format!("gateway convergence poll failed: {error}"))?
+            .status();
+        if status.is_success() {
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            return Err(format!(
+                "gateway never accepted the new API key (last status {status})"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// Drives one provider from draft to active and returns its id.

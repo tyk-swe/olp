@@ -107,13 +107,22 @@ workspace deliberately has zero doctests (nextest and llvm-cov do not run
 them); if you add one, restore a `cargo test --doc` gate in the Makefile and
 CI.
 
-The end-to-end journey suite (`make e2e`, `tests/e2e`) drives the real
+The end-to-end contract suite (`make e2e`, `tests/e2e`) drives the real
 `olp all` binary against PostgreSQL, Valkey, and a loopback mock upstream.
-Its assertions encode the documented contract and are **drift-gated**, not
-pass-gated: failures listed in `tests/e2e/known-failures.txt` are documented
-product bugs and expected; anything else — a new failure, or a listed test
-that now passes — fails CI. If your change fixes a listed bug, prune its
-manifest entry in the same PR; never weaken an assertion to make it pass.
+Every assertion in it is derived from a document — `README.md`, `docs/*.md`,
+or `openapi/management.json` — and cites the clause it enforces. It is
+**pass-gated**: any failure fails CI, and there is no expected-failure
+manifest. A failure means the product and its documentation disagree; resolve
+it by fixing one of them, never by weakening the assertion. Contract
+violations the suite currently catches are written up in
+[`docs/known-defects.md`](docs/known-defects.md), each entry paired with the
+test that fails on it, and an entry is deleted by the PR that fixes it.
+
+The suite needs an isolated PostgreSQL **and an isolated Valkey**: the
+request-metadata stream key is a fixed global name, so a second `olp` worker
+on the same Valkey consumes this installation's telemetry and the request log
+silently stays empty. Without `OLP_E2E_VALKEY_URL` the harness picks a random
+logical database to keep concurrent local runs apart.
 
 Dev builds use `debug = "line-tables-only"` (workspace `[profile.dev]`):
 backtraces keep file:line information, but debuggers lose variable and type

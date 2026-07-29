@@ -20,6 +20,10 @@ pub struct Server {
     pub observability_base: String,
     /// Base64 setup token exactly as written to the bootstrap token file.
     pub setup_token: String,
+    /// Connection URL for this run's database, so assertions about durable
+    /// state can read the tables directly rather than through the API that
+    /// wrote them.
+    pub database_url: String,
     admin_url: String,
     database_name: String,
     run_dir: PathBuf,
@@ -30,8 +34,27 @@ pub fn admin_url() -> String {
         .unwrap_or_else(|_| "postgres://olp_test:olp_test@localhost:5433/postgres".to_owned())
 }
 
+/// The Valkey this run may use exclusively.
+///
+/// `docs/operations.md` requires each installation to have "an isolated
+/// database and a fresh isolated Valkey", because the request-metadata stream
+/// key is a fixed global name: any other worker attached to the same keyspace
+/// consumes and acknowledges this installation's envelopes, and its telemetry
+/// simply never arrives. Sharing one Valkey therefore does not degrade the
+/// suite, it silently empties the request log.
+///
+/// An explicit `OLP_E2E_VALKEY_URL` is honoured verbatim — CI gives the job a
+/// Valkey service of its own. Otherwise a random logical database keeps
+/// concurrent or abandoned local runs out of each other's keyspace. Database 0
+/// is left alone because it is what every other tool on a developer machine
+/// reaches for by default.
 pub fn valkey_url() -> String {
-    std::env::var("OLP_E2E_VALKEY_URL").unwrap_or_else(|_| "redis://localhost:6379".to_owned())
+    std::env::var("OLP_E2E_VALKEY_URL").unwrap_or_else(|_| {
+        let mut byte = [0_u8; 1];
+        rand::rng().fill_bytes(&mut byte);
+        let database = 1 + u16::from(byte[0]) % 15;
+        format!("redis://localhost:6379/{database}")
+    })
 }
 
 fn binary() -> Result<PathBuf, String> {
@@ -207,6 +230,7 @@ impl Server {
             public_origin,
             observability_base,
             setup_token,
+            database_url: database,
             admin_url: admin,
             database_name,
             run_dir,
@@ -249,6 +273,21 @@ impl Server {
 
     /// SIGTERM, bounded wait, then SIGKILL as a last resort.
     pub async fn shutdown(mut self) -> String {
+        self.terminate().await;
+        if std::env::var("OLP_E2E_KEEP_DB").as_deref() == Ok("1") {
+            eprintln!(
+                "OLP_E2E_KEEP_DB=1: keeping database {} and run dir {}",
+                self.database_name,
+                self.run_dir.display()
+            );
+        } else {
+            drop_database(&self.admin_url, &self.database_name).await;
+            std::fs::remove_dir_all(&self.run_dir).ok();
+        }
+        self.stderr_tail()
+    }
+
+    async fn terminate(&mut self) {
         let pid = self.child.id().to_string();
         Command::new("kill").args(["-TERM", &pid]).status().ok();
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -264,16 +303,21 @@ impl Server {
                 Err(_) => break,
             }
         }
-        if std::env::var("OLP_E2E_KEEP_DB").as_deref() == Ok("1") {
-            eprintln!(
-                "OLP_E2E_KEEP_DB=1: keeping database {} and run dir {}",
-                self.database_name,
-                self.run_dir.display()
-            );
-        } else {
-            drop_database(&self.admin_url, &self.database_name).await;
-            std::fs::remove_dir_all(&self.run_dir).ok();
+    }
+}
+
+/// Last-resort cleanup for the paths `shutdown` never reaches.
+///
+/// A panicking assertion, a `--exact` filter that excludes the teardown test,
+/// or an interrupted run all leave the server running otherwise. An abandoned
+/// `olp all` is not merely untidy: its worker stays attached to the Valkey
+/// request-metadata stream and consumes the *next* run's envelopes, which
+/// shows up as an empty request log rather than as an error.
+impl Drop for Server {
+    fn drop(&mut self) {
+        if matches!(self.child.try_wait(), Ok(None)) {
+            self.child.kill().ok();
+            self.child.wait().ok();
         }
-        self.stderr_tail()
     }
 }

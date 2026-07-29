@@ -25,6 +25,14 @@ pub const COMPAT_CREDENTIAL: &str = "sk-e2e-compat";
 pub const AZURE_CREDENTIAL: &str = "azure-e2e-secret";
 /// Marker in the user text that switches the mock to the CR-fidelity reply.
 pub const CR_MARKER: &str = "CR_FIDELITY";
+/// Marker that makes the upstream answer 200 with no `usage` object at all —
+/// the "missing upstream usage" case `docs/architecture.md` pins.
+pub const NO_USAGE_MARKER: &str = "OMIT_USAGE";
+/// Marker that makes the upstream answer 429 with a `Retry-After`, so the
+/// gateway's own translation of that status can be observed.
+pub const RATE_LIMITED_MARKER: &str = "UPSTREAM_429";
+/// `Retry-After` seconds the mock sends with its 429.
+pub const RETRY_AFTER_SECONDS: &str = "37";
 /// Reply text for ordinary calls.
 pub const PLAIN_TEXT: &str = "Hello, world";
 pub const PLAIN_DELTAS: [&str; 3] = ["Hello", ", ", "world"];
@@ -43,7 +51,22 @@ pub struct RecordedRequest {
     pub query: Option<String>,
     pub authorization: Option<String>,
     pub api_key_header: Option<String>,
+    /// Every header, lowercased, in arrival order. The two credential fields
+    /// above are conveniences over this list, not a filter applied before it:
+    /// an assertion about what the product forwards upstream can only be made
+    /// against the complete set.
+    pub headers: Vec<(String, String)>,
     pub body: Value,
+}
+
+impl RecordedRequest {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.as_str())
+    }
 }
 
 #[derive(Clone, Default)]
@@ -79,6 +102,21 @@ impl MockUpstream {
         self.state.requests.lock().unwrap().clone()
     }
 
+    /// The number of requests seen so far.
+    ///
+    /// Paired with [`Self::since`], this lets a test assert an *exact* upstream
+    /// call count for its own request without the shared bootstrap traffic —
+    /// probes, discovery, certification — inflating the total. `>=` assertions
+    /// pass under a duplicate-send bug; these do not.
+    pub fn checkpoint(&self) -> usize {
+        self.state.requests.lock().unwrap().len()
+    }
+
+    /// Requests recorded after `checkpoint`.
+    pub fn since(&self, checkpoint: usize) -> Vec<RecordedRequest> {
+        self.state.requests.lock().unwrap()[checkpoint..].to_vec()
+    }
+
     pub fn unexpected(&self) -> Vec<String> {
         self.state.unexpected.lock().unwrap().clone()
     }
@@ -90,6 +128,16 @@ async fn dispatch(State(state): State<MockState>, request: Request) -> Response 
     let query = request.uri().query().map(str::to_owned);
     let authorization = header_string(&request, header::AUTHORIZATION.as_str());
     let api_key_header = header_string(&request, "api-key");
+    let headers = request
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_ascii_lowercase(),
+                String::from_utf8_lossy(value.as_bytes()).into_owned(),
+            )
+        })
+        .collect();
     let body_bytes = axum::body::to_bytes(request.into_body(), 1 << 20)
         .await
         .unwrap_or_else(|_| Bytes::new());
@@ -101,6 +149,7 @@ async fn dispatch(State(state): State<MockState>, request: Request) -> Response 
         query: query.clone(),
         authorization,
         api_key_header,
+        headers,
         body: body.clone(),
     });
 
@@ -149,12 +198,41 @@ fn reply_deltas(body: &Value) -> (&'static str, Vec<&'static str>) {
 }
 
 fn body_contains_marker(value: &Value) -> bool {
+    contains(value, CR_MARKER)
+}
+
+/// Whether any string anywhere in the request body contains `marker`.
+///
+/// The search is structural rather than a substring match on the serialised
+/// body, so a marker only counts when the product actually carried it through
+/// as text — not when it happens to appear in a field name or an escape.
+fn contains(value: &Value, marker: &str) -> bool {
     match value {
-        Value::String(text) => text.contains(CR_MARKER),
-        Value::Array(items) => items.iter().any(body_contains_marker),
-        Value::Object(map) => map.values().any(body_contains_marker),
+        Value::String(text) => text.contains(marker),
+        Value::Array(items) => items.iter().any(|item| contains(item, marker)),
+        Value::Object(map) => map.values().any(|item| contains(item, marker)),
         _ => false,
     }
+}
+
+/// A 429 carrying `Retry-After`, exactly as a rate-limited upstream sends it.
+fn rate_limited() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [
+            (header::RETRY_AFTER, RETRY_AFTER_SECONDS),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        serde_json::to_string(&json!({
+            "error": {
+                "message": "Rate limit reached",
+                "type": "rate_limit_error",
+                "code": "rate_limit_exceeded"
+            }
+        }))
+        .unwrap_or_default(),
+    )
+        .into_response()
 }
 
 fn is_stream(body: &Value) -> bool {
@@ -170,9 +248,13 @@ fn usage_chat() -> Value {
 }
 
 fn chat_response(body: &Value, model: &str) -> Response {
+    if contains(body, RATE_LIMITED_MARKER) {
+        return rate_limited();
+    }
     let (text, deltas) = reply_deltas(body);
+    let usage = (!contains(body, NO_USAGE_MARKER)).then(usage_chat);
     if !is_stream(body) {
-        return axum::Json(json!({
+        let mut payload = json!({
             "id": "chatcmpl-e2e",
             "object": "chat.completion",
             "created": 1,
@@ -181,10 +263,12 @@ fn chat_response(body: &Value, model: &str) -> Response {
                 "index": 0,
                 "message": {"role": "assistant", "content": text},
                 "finish_reason": "stop"
-            }],
-            "usage": usage_chat()
-        }))
-        .into_response();
+            }]
+        });
+        if let Some(usage) = usage {
+            payload["usage"] = usage;
+        }
+        return axum::Json(payload).into_response();
     }
 
     let mut frames = Vec::new();
@@ -192,12 +276,7 @@ fn chat_response(body: &Value, model: &str) -> Response {
     for delta in deltas {
         frames.push(chat_chunk(model, json!({"content": delta}), None, None));
     }
-    frames.push(chat_chunk(
-        model,
-        json!({}),
-        Some("stop"),
-        Some(usage_chat()),
-    ));
+    frames.push(chat_chunk(model, json!({}), Some("stop"), usage));
     sse_body(frames, true)
 }
 
@@ -220,6 +299,9 @@ fn chat_chunk(model: &str, delta: Value, finish: Option<&str>, usage: Option<Val
 }
 
 fn responses_response(body: &Value, model: &str) -> Response {
+    if contains(body, RATE_LIMITED_MARKER) {
+        return rate_limited();
+    }
     let (text, deltas) = reply_deltas(body);
     let usage = json!({
         "input_tokens": PROMPT_TOKENS,
