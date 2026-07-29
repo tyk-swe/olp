@@ -21,6 +21,11 @@ export default defineConfig({
   testDir: './tests/integration',
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results',
   fullyParallel: false,
+  // `fullyParallel: false` only serialises tests *within* a file; separate
+  // spec files still get separate workers. These specs share one real
+  // database and one installation, so they must run one at a time and in path
+  // order — the first-run setup journey can only be true once.
+  workers: 1,
   forbidOnly: true,
   // The test mutates a real database. Retrying against that same database
   // would no longer prove the first-run setup path and could mask a failure.
