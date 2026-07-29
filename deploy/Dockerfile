@@ -15,7 +15,7 @@ RUN pnpm build
 # reuses the expensive dependency compilation across source-only changes.
 # Cache mounts alone cannot do this: `cache-to: type=gha` exports layers,
 # not mount contents.
-FROM rust:1.97-bookworm@sha256:7d0723df719e7f213b69dc7c8c595985c3f4b060cfbee4f7bc0e347a86fe3b6a AS chef
+FROM rust:1.97-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa AS chef
 ENV CARGO_INCREMENTAL=0
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo install cargo-chef --locked --version 0.1.77
