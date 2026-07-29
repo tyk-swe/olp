@@ -92,3 +92,10 @@ dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
 Deeper rules: `CONTRIBUTING.md` (architecture rules, sources of truth, change
 maps, validation) and `docs/{architecture,configuration,deployment,operations}.md`.
 Subtree guides: `apps/olp/AGENTS.md`, `crates/AGENTS.md`, `console/AGENTS.md`.
+
+## Tool preference
+
+- Prefer built-in Read, Edit, Write tools for file operations.
+- Avoid shell-based file reading, searching, or editing when a built-in tool can perform the operation.
+- Avoid complex inline shell, heredocs, nested quoting, and multi-stage pipelines.
+- Keep tool output bounded; save full logs to a file and return only relevant diagnostics.
