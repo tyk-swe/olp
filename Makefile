@@ -90,7 +90,7 @@ db-test: ## PostgreSQL/Valkey integration tests via nextest; needs OLP_TEST_DATA
 	./scripts/run-postgres-tests.sh $(ARGS)
 
 e2e: ## End-to-end contract suite: real olp binary + PostgreSQL + Valkey + mock upstream; any contract violation fails
-	./scripts/run-e2e-tests.sh
+	./scripts/run-e2e-tests.sh $(ARGS)
 
 release-version: ## Require consistent release metadata
 	scripts/check-release-version.sh

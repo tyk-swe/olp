@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 # Every dependency is a dev-dependency: the crate is an empty library anchor
-# whose only content is the end-to-end journey test binary, and dev-only
+# whose only content is the end-to-end contract test target, and dev-only
 # edges keep it out of the production dependency DAG contract.
 [dev-dependencies]
 axum.workspace = true

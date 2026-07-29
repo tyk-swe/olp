@@ -244,7 +244,8 @@ async fn read_response(response: reqwest::Response) -> Result<MgmtResponse, Stri
         .bytes()
         .await
         .map_err(|error| format!("failed to read response body: {error}"))?;
-    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    let body = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
     Ok(MgmtResponse {
         status,
         headers,
@@ -706,18 +707,13 @@ pub async fn resolve_model_row(
         )
         .await?;
 
-    let rows = ["items", "data", "models"]
-        .iter()
-        .find_map(|key| listing.body.get(*key).and_then(Value::as_array))
-        .ok_or_else(|| format!("model listing carries no array of rows: {}", listing.body))?;
+    let rows = listing.body["items"]
+        .as_array()
+        .ok_or_else(|| format!("model listing carries no items array: {}", listing.body))?;
 
     let row = rows
         .iter()
-        .find(|row| {
-            ["model", "name", "model_id", "upstream_model"]
-                .iter()
-                .any(|key| row.get(*key).and_then(Value::as_str) == Some(model_name))
-        })
+        .find(|row| row["upstream_model"].as_str() == Some(model_name))
         .ok_or_else(|| format!("discovery did not surface {model_name}: {}", listing.body))?;
 
     row.get("id")
@@ -828,9 +824,10 @@ async fn configure_route(
         ));
     }
 
-    let draft_id = ["id", "draft_id"]
-        .iter()
-        .find_map(|key| created.body.get(*key).and_then(Value::as_str))
+    let draft_id = created
+        .body
+        .get("id")
+        .and_then(Value::as_str)
         .ok_or_else(|| format!("route draft carries no id: {}", created.body))?
         .to_owned();
     let etag = created.require_etag("route draft create")?;

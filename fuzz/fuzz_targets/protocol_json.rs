@@ -88,6 +88,26 @@ fuzz_target!(|data: &[u8]| {
     );
     roundtrip(
         data,
+        "openai::video_create_request",
+        |request| match openai::decode_video_create(request) {
+            Ok(Operation::Video(olp_domain::VideoOperation::Create(canonical))) => Some(canonical),
+            _ => None,
+        },
+        |canonical| {
+            openai::encode_video_create(canonical, UPSTREAM_MODEL, |handle| {
+                openai::BoundedMediaPart::new(
+                    handle.clone(),
+                    "fuzz.png",
+                    Some("image/png".into()),
+                    1,
+                    openai::DEFAULT_VIDEO_REFERENCE_LIMIT,
+                )
+                .map_err(|error| openai::VideoCodecError::Staging(error.to_string()))
+            })
+        },
+    );
+    roundtrip(
+        data,
         "openai::video_list_query",
         |query| match openai::decode_video_list(query) {
             Ok(Operation::Video(olp_domain::VideoOperation::List(canonical))) => Some(canonical),
@@ -195,6 +215,38 @@ fuzz_target!(|data: &[u8]| {
                 Ok(openai::OpenAiImagePayload::Base64Json("Zg==".into()))
             })
         },
+    );
+    roundtrip(
+        data,
+        "openai::image_stream_event",
+        |event| {
+            openai::decode_image_stream_event(event, |_| {
+                Ok(MediaHandle::new("fuzz-image-stream"))
+            })
+            .ok()
+        },
+        |canonical| {
+            openai::encode_image_stream_update(
+                canonical,
+                openai::ImageStreamOperation::Generation,
+                |_| Ok("Zg==".into()),
+            )
+        },
+    );
+    roundtrip(
+        data,
+        "openai::speech_stream_event",
+        |event| {
+            openai::decode_speech_stream_event(event, |_| {
+                Ok(MediaArtifact {
+                    handle: MediaHandle::new("fuzz-speech-stream"),
+                    content_type: Some("audio/mpeg".into()),
+                    content_length: None,
+                })
+            })
+            .ok()
+        },
+        |canonical| openai::encode_speech_stream_update(canonical, |_| Ok("Zg==".into())),
     );
     roundtrip(
         data,

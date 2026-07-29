@@ -92,7 +92,9 @@ async fn public_get(path: &str) -> (u16, String) {
 /// Narrows a request-log query to the inference route the telemetry
 /// assertions drive, excluding the model-listing call every newly issued key
 /// makes on its way to being served.
-const ROUTE_FILTER: &str = "&route=e2e-openai";
+fn route_filter() -> String {
+    format!("&route={}", world::OPENAI_ROUTE)
+}
 
 /// A usage window wide enough to hold the whole run and narrow enough for the
 /// documented bound.
@@ -995,7 +997,7 @@ fn no_durable_row_holds_prompt_text_or_a_credential() {
         // The record must exist before its absence of prompt text means
         // anything: scanning before ingestion would pass vacuously.
         world
-            .await_request_rows(&key.id, ROUTE_FILTER, 1)
+            .await_request_rows(&key.id, &route_filter(), 1)
             .await
             .expect("the request is logged");
 
@@ -1077,7 +1079,7 @@ fn every_request_is_recorded_exactly_once() {
         }
 
         let rows = world
-            .await_request_rows(&key.id, ROUTE_FILTER, CALLS)
+            .await_request_rows(&key.id, &route_filter(), CALLS)
             .await
             .expect("requests are logged");
         assert_eq!(
@@ -1189,7 +1191,7 @@ fn a_request_covered_by_a_pricing_revision_is_priced() {
         assert_eq!(response.status, 200, "chat completion: {}", response.text);
 
         let rows = world
-            .await_request_rows(&key.id, ROUTE_FILTER, 1)
+            .await_request_rows(&key.id, &route_filter(), 1)
             .await
             .expect("the request is logged");
         assert_eq!(rows.len(), 1, "expected one row, got {}", rows.len());
@@ -1255,7 +1257,7 @@ fn missing_upstream_usage_is_incomplete_and_unpriced_never_zero() {
         );
 
         let rows = world
-            .await_request_rows(&key.id, ROUTE_FILTER, 1)
+            .await_request_rows(&key.id, &route_filter(), 1)
             .await
             .expect("the request is logged");
         assert_eq!(rows.len(), 1, "expected one row, got {}", rows.len());
@@ -1271,17 +1273,13 @@ fn missing_upstream_usage_is_incomplete_and_unpriced_never_zero() {
             json!(true),
             "incomplete usage must be recorded unpriced: {row}"
         );
-        assert_ne!(
-            row["input_tokens"],
-            json!(0),
-            "missing usage was recorded as zero input tokens rather than \
-             absent: {row}"
+        assert!(
+            row.get("input_tokens").is_none_or(Value::is_null),
+            "missing usage must leave input tokens absent/null: {row}"
         );
-        assert_ne!(
-            row["output_tokens"],
-            json!(0),
-            "missing usage was recorded as zero output tokens rather than \
-             absent: {row}"
+        assert!(
+            row.get("output_tokens").is_none_or(Value::is_null),
+            "missing usage must leave output tokens absent/null: {row}"
         );
 
         let (start, end) = usage_window();

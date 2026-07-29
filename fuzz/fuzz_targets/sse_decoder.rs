@@ -12,9 +12,8 @@
 //!    those frames that could break out of their own field: a multiline
 //!    `event` or `id`, or a NUL in `id`. Accepting one lets an upstream value
 //!    forge event boundaries in a client's parser.
-//! 3. **Encode/decode fidelity.** Encoding one frame must decode back to at
-//!    most one frame — more than one means the encoder failed to neutralise a
-//!    delimiter — and that frame must carry the original fields with `data`
+//! 3. **Encode/decode fidelity.** Encoding one frame must decode back to
+//!    exactly one frame, carrying the original fields with `data`
 //!    line endings normalised, which is the documented CR handling.
 
 use std::mem::{Discriminant, discriminant};
@@ -64,7 +63,10 @@ fn frame_from(data: &[u8]) -> SseFrame {
         event: (!event_bytes.is_empty()).then(|| String::from_utf8_lossy(event_bytes).into_owned()),
         id: (!id_bytes.is_empty()).then(|| String::from_utf8_lossy(id_bytes).into_owned()),
         data: String::from_utf8_lossy(data_bytes).into_owned(),
-        retry_ms: data.first().map(|value| u64::from(*value)),
+        retry_ms: data
+            .first()
+            .filter(|value| **value != u8::MAX)
+            .map(|value| u64::from(*value)),
     }
 }
 
@@ -96,25 +98,21 @@ fn assert_encode_decode_fidelity(frame: &SseFrame) {
     let decoded = decode_chunked(&encoded, encoded.len().max(1), ROOMY_EVENT_LIMIT)
         .expect("the decoder must accept the encoder's own output");
 
-    assert!(
-        decoded.len() <= 1,
-        "encoding one frame decoded to {} frames — the encoder failed to \
-         neutralise an event delimiter: {frame:?}",
-        decoded.len()
+    assert_eq!(
+        decoded.len(),
+        1,
+        "encoding one frame must decode exactly once: {frame:?}"
     );
-
-    if let Some(actual) = decoded.first() {
-        let expected = SseFrame {
-            event: frame.event.clone(),
-            id: frame.id.clone(),
-            retry_ms: frame.retry_ms,
-            data: frame.data.replace("\r\n", "\n").replace('\r', "\n"),
-        };
-        assert_eq!(
-            *actual, expected,
-            "a frame did not survive an encode/decode round trip"
-        );
-    }
+    let expected = SseFrame {
+        event: frame.event.clone(),
+        id: frame.id.clone(),
+        retry_ms: frame.retry_ms,
+        data: frame.data.replace("\r\n", "\n").replace('\r', "\n"),
+    };
+    assert_eq!(
+        decoded[0], expected,
+        "a frame did not survive an encode/decode round trip"
+    );
 }
 
 fuzz_target!(|data: &[u8]| {

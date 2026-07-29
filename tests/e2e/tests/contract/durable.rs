@@ -35,13 +35,11 @@ async fn tables(connection: &mut PgConnection) -> Result<Vec<String>, String> {
 
 /// Searches every durable row for `needle`, returning one sighting per table.
 ///
-/// The whole row is cast to text and matched, so a value is found wherever it
-/// sits — a column, a JSON document, an array. Two things this deliberately
-/// cannot see, both stated rather than worked around: a needle stored inside
-/// `bytea` renders as a hex escape and will not match, and a needle stored
-/// encrypted will not match either. Both are acceptable: the invariant is
-/// about plaintext leaking into durable records, and an encrypted column is
-/// not that. So a clean result is evidence, not proof.
+/// Each row is converted to JSON and its individual string values are matched.
+/// This avoids PostgreSQL's composite-text escaping hiding commas, quotes, or
+/// backslashes in plaintext. A needle stored in `bytea` or encrypted data still
+/// will not match; both are acceptable exclusions because the invariant is
+/// specifically about plaintext leaking into durable records.
 pub async fn rows_containing(database_url: &str, needle: &str) -> Result<Vec<Sighting>, String> {
     let mut connection = PgConnection::connect(database_url)
         .await
@@ -52,8 +50,12 @@ pub async fn rows_containing(database_url: &str, needle: &str) -> Result<Vec<Sig
         // Table names come from information_schema and are already quoted by
         // quote_ident; the needle stays a bind parameter.
         let statement = format!(
-            "SELECT left(t::text, 400) AS sample FROM {table} AS t \
-             WHERE strpos(t::text, $1) > 0 LIMIT 1"
+            "SELECT left(string_values.json_value #>> '{{}}', 400) AS sample \
+             FROM {table} AS t \
+             CROSS JOIN LATERAL jsonb_path_query( \
+                 to_jsonb(t), '$.** ? (@.type() == \"string\")' \
+             ) AS string_values(json_value) \
+             WHERE strpos(string_values.json_value #>> '{{}}', $1) > 0 LIMIT 1"
         );
         let found = sqlx::query(sqlx::AssertSqlSafe(statement))
             .bind(needle)

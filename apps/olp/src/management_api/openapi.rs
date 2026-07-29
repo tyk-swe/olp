@@ -32,6 +32,7 @@ pub(super) fn complete_openapi_contract(document: utoipa::openapi::OpenApi) -> s
     );
 
     let public_operations = [
+        ("/api/v1/openapi.json", "get"),
         ("/api/v1/auth/capabilities", "get"),
         ("/api/v1/setup/status", "get"),
         ("/api/v1/setup", "post"),

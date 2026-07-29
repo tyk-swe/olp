@@ -46,7 +46,7 @@ test('API key secrets are shown once and the lifecycle converges against the rea
 
   // The mocked specs install their own cookie, so only this tier can show that
   // the server issues the `__Host-` contract the console depends on.
-  const session = (await context.cookies('http://localhost:4175')).filter((cookie) =>
+  const session = (await context.cookies(new URL(page.url()).origin)).filter((cookie) =>
     cookie.name.startsWith('__Host-')
   );
   expect(session.length).toBeGreaterThan(0);
@@ -83,9 +83,9 @@ test('API key secrets are shown once and the lifecycle converges against the rea
   await expect(page.getByText(keyName)).toBeVisible();
   await expectSecretGone(page, secret, 'the created secret');
 
-  const row = page.getByRole('listitem').filter({ hasText: keyName });
-  const scope = (await row.count()) > 0 ? row.first() : page;
-  await scope.getByRole('button', { name: 'Rotate' }).first().click();
+  const row = page.getByRole('row').filter({ hasText: keyName });
+  await expect(row).toHaveCount(1);
+  await row.getByRole('button', { name: 'Rotate' }).click();
   const rotated = page.getByRole('dialog', { name: 'Copy this secret now.' });
   await expect(rotated).toBeVisible();
   const rotatedSecret = await takeSecret(rotated);
@@ -97,8 +97,8 @@ test('API key secrets are shown once and the lifecycle converges against the rea
   await page.reload();
   await expectSecretGone(page, rotatedSecret, 'the rotated secret');
 
-  await scope.getByRole('button', { name: 'Revoke' }).first().click();
-  await expect(page.getByText('revoked', { exact: true }).first()).toBeVisible();
+  await row.getByRole('button', { name: 'Revoke' }).click();
+  await expect(row.getByText('revoked', { exact: true })).toBeVisible();
 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

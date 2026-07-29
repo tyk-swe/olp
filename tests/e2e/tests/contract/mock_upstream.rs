@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     Router,
-    body::Bytes,
     extract::{Request, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
@@ -138,9 +137,17 @@ async fn dispatch(State(state): State<MockState>, request: Request) -> Response 
             )
         })
         .collect();
-    let body_bytes = axum::body::to_bytes(request.into_body(), 1 << 20)
-        .await
-        .unwrap_or_else(|_| Bytes::new());
+    let body_bytes = match axum::body::to_bytes(request.into_body(), 1 << 20).await {
+        Ok(body) => body,
+        Err(error) => {
+            state
+                .unexpected
+                .lock()
+                .unwrap()
+                .push(format!("{method} {path}: unreadable body ({error})"));
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
+    };
     let body: Value = serde_json::from_slice(&body_bytes).unwrap_or(Value::Null);
 
     state.requests.lock().unwrap().push(RecordedRequest {
@@ -303,13 +310,15 @@ fn responses_response(body: &Value, model: &str) -> Response {
         return rate_limited();
     }
     let (text, deltas) = reply_deltas(body);
-    let usage = json!({
-        "input_tokens": PROMPT_TOKENS,
-        "output_tokens": COMPLETION_TOKENS,
-        "total_tokens": TOTAL_TOKENS
+    let usage = (!contains(body, NO_USAGE_MARKER)).then(|| {
+        json!({
+            "input_tokens": PROMPT_TOKENS,
+            "output_tokens": COMPLETION_TOKENS,
+            "total_tokens": TOTAL_TOKENS
+        })
     });
     if !is_stream(body) {
-        return axum::Json(json!({
+        let mut payload = json!({
             "id": "resp_e2e",
             "object": "response",
             "created_at": 1,
@@ -321,10 +330,12 @@ fn responses_response(body: &Value, model: &str) -> Response {
                 "role": "assistant",
                 "status": "completed",
                 "content": [{"type": "output_text", "text": text, "annotations": []}]
-            }],
-            "usage": usage
-        }))
-        .into_response();
+            }]
+        });
+        if let Some(usage) = usage {
+            payload["usage"] = usage;
+        }
+        return axum::Json(payload).into_response();
     }
 
     let mut frames = Vec::new();
@@ -338,10 +349,11 @@ fn responses_response(body: &Value, model: &str) -> Response {
             json!({"type": "response.output_text.delta", "output_index": 0, "delta": delta})
         ));
     }
-    frames.push(format!(
-        "event: response.completed\ndata: {}",
-        json!({"type": "response.completed", "response": {"usage": usage}})
-    ));
+    let mut completed = json!({"type": "response.completed", "response": {}});
+    if let Some(usage) = usage {
+        completed["response"]["usage"] = usage;
+    }
+    frames.push(format!("event: response.completed\ndata: {completed}"));
     sse_body(frames, false)
 }
 

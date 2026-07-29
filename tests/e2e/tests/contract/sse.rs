@@ -51,10 +51,10 @@ pub fn decode(bytes: &[u8]) -> Result<SseStream, String> {
             raw_since_dispatch.clear();
             continue;
         }
-        raw_since_dispatch.push(line.to_owned());
         if line.starts_with(':') {
             continue;
         }
+        raw_since_dispatch.push(line.to_owned());
         let (field, value) = match line.split_once(':') {
             Some((field, value)) => (field, value.strip_prefix(' ').unwrap_or(value)),
             None => (line, ""),
@@ -63,7 +63,9 @@ pub fn decode(bytes: &[u8]) -> Result<SseStream, String> {
             "event" => event_type = value.to_owned(),
             "data" => data_lines.push(value),
             "id" if !value.contains('\0') => id = Some(value.to_owned()),
-            "retry" => retry = Some(value.to_owned()),
+            "retry" if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
+                retry = Some(value.to_owned());
+            }
             _ => {}
         }
     }
