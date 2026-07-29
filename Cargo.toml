@@ -18,7 +18,7 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/olp"
 
 [workspace.dependencies]
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 arc-swap = "1"
 argon2 = "0.5"
 axum = { version = "0.8", features = ["http2", "json", "multipart", "tokio"] }
