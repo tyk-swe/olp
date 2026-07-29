@@ -510,6 +510,8 @@ pub async fn bootstrap() -> Result<World, String> {
     )
     .await?;
 
+    configure_pricing(&management).await?;
+
     let key = management.next_idempotency_key();
     let api_key = management
         .expect(
@@ -740,6 +742,50 @@ async fn reprobe(
         )
         .await?;
     Ok(probe.etag().unwrap_or(etag))
+}
+
+/// Puts a pricing revision in force for the mock's models.
+///
+/// Part of the fixture rather than of one test, because an installation with no
+/// pricing prices nothing, and in that installation every assertion about
+/// `unpriced` holds vacuously — a record hard-wired to "unpriced" would satisfy
+/// the missing-usage contract and no test would notice that nothing is ever
+/// priced. Every telemetry assertion is written against an installation that
+/// can price, which is also the one operators run.
+async fn configure_pricing(management: &Management) -> Result<(), String> {
+    // An hour ago, so the revision is already in force for the first request
+    // any test issues.
+    let effective_at = (chrono::Utc::now() - chrono::Duration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    let prices: Vec<Value> = [
+        ("openai_compatible", mock_upstream::MODEL),
+        ("azure_openai", mock_upstream::DEPLOYMENT),
+    ]
+    .into_iter()
+    .map(|(kind, model)| {
+        json!({
+            "provider_kind": kind,
+            "model": model,
+            "operation": "generation",
+            "currency": "USD",
+            "input_per_million": "1.00",
+            "output_per_million": "2.00"
+        })
+    })
+    .collect();
+
+    management
+        .expect(
+            reqwest::Method::POST,
+            "/api/v1/pricing/revisions",
+            Some(json!({"effective_at": effective_at, "prices": prices})),
+            None,
+            None,
+            201,
+        )
+        .await?;
+    Ok(())
 }
 
 async fn configure_route(

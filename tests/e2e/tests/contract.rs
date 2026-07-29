@@ -1161,6 +1161,66 @@ fn every_request_is_recorded_exactly_once() {
 
 #[test]
 #[ignore = "end-to-end; run via make e2e"]
+fn a_request_covered_by_a_pricing_revision_is_priced() {
+    // The control for the assertion below. docs/architecture.md "Data-safety
+    // invariants" says durable records carry "pricing provenance" and that
+    // "Missing upstream usage is incomplete and unpriced, never zero" — a claim
+    // about the *missing* case, which only means something if the present case
+    // differs. Without this test, `unpriced` hard-wired to `true` would satisfy
+    // the missing-usage assertion and nothing would notice that no request is
+    // ever priced.
+    runtime().block_on(async {
+        let world = world();
+        let key = world
+            .issue_key("priced probe", json!({}))
+            .await
+            .expect("dedicated key");
+        let response = world
+            .gateway_post(
+                "/openai/v1/chat/completions",
+                json!({
+                    "model": world::OPENAI_ROUTE,
+                    "messages": [{"role": "user", "content": nonce("priced")}]
+                }),
+                &key.secret,
+            )
+            .await
+            .expect("chat completion");
+        assert_eq!(response.status, 200, "chat completion: {}", response.text);
+
+        let rows = world
+            .await_request_rows(&key.id, ROUTE_FILTER, 1)
+            .await
+            .expect("the request is logged");
+        assert_eq!(rows.len(), 1, "expected one row, got {}", rows.len());
+        let row = &rows[0];
+
+        assert_eq!(
+            row["usage_complete"],
+            json!(true),
+            "the upstream reported complete usage: {row}"
+        );
+        assert_eq!(
+            row["unpriced"],
+            json!(false),
+            "usage arrived complete and a pricing revision covers this \
+             provider kind, model and operation, so the record must not be \
+             unpriced: {row}"
+        );
+        assert!(
+            row["estimated_cost"].is_string(),
+            "a priced request must carry its cost: {row}"
+        );
+        assert_eq!(
+            row["currency"],
+            json!("USD"),
+            "the record must carry the currency its price was quoted in: {row}"
+        );
+    });
+}
+
+#[test]
+#[ignore = "end-to-end; run via make e2e"]
 fn missing_upstream_usage_is_incomplete_and_unpriced_never_zero() {
     // docs/architecture.md "Data-safety invariants", verbatim: "Missing
     // upstream usage is incomplete and unpriced, never zero." A record that
