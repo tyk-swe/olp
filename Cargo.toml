@@ -61,7 +61,7 @@ sqlx = { version = "0.9", default-features = false, features = [
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["limit", "load-shed", "timeout", "util"] }
-tower-http = { version = "0.6", features = [
+tower-http = { version = "0.7", features = [
     "catch-panic",
     "compression-gzip",
     "cors",
