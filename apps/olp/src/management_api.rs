@@ -142,7 +142,12 @@ pub struct ManagementApiDoc;
 #[utoipa::path(
     get,
     path = "/api/v1/openapi.json",
-    responses((status = 200, description = "OpenAPI document for the management API"))
+    responses((
+        status = 200,
+        description = "OpenAPI document for the management API",
+        body = serde_json::Value,
+        content_type = "application/json"
+    ))
 )]
 async fn openapi() -> Json<serde_json::Value> {
     Json(management_openapi())

@@ -6943,6 +6943,11 @@
         "operationId": "openapi",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
             "description": "OpenAPI document for the management API"
           },
           "500": {

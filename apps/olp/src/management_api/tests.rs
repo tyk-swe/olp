@@ -393,7 +393,10 @@ fn create_draft_openapi_contract_requires_idempotency_and_documents_conflict() {
 fn openapi_document_includes_its_public_serving_endpoint() {
     let document = management_openapi();
     let get = &document["paths"]["/api/v1/openapi.json"]["get"];
-    assert!(get["responses"].get("200").is_some());
+    assert!(
+        get["responses"]["200"]["content"]["application/json"]["schema"].is_object(),
+        "the successful response must advertise an application/json body"
+    );
     assert_eq!(get["security"], serde_json::json!([]));
 }
 
