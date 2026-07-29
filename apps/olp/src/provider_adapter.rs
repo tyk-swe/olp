@@ -59,6 +59,50 @@ impl<'a> From<&'a RuntimeProviderConfiguration> for ProviderConfigFields<'a> {
     }
 }
 
+/// True only when a debug binary built with `test-util` opts in via
+/// `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS=test-only`. The E2E
+/// harness uses this to point providers at a loopback mock upstream; the
+/// branch is compiled out of release binaries, so no deployment setting can
+/// weaken the production HTTPS/SSRF endpoint policy.
+#[cfg(all(debug_assertions, feature = "test-util"))]
+pub(crate) fn insecure_provider_endpoints_for_tests() -> bool {
+    std::env::var("OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS").as_deref() == Ok("test-only")
+}
+
+/// Factory entry points below honor the test-only insecure-endpoint opt-in.
+/// Every application call site that assembles or validates a provider from
+/// stored configuration must go through them rather than `ProviderFactory`
+/// directly.
+pub(crate) async fn factory_create(
+    config: ProviderConfig,
+    credential: ProviderCredential,
+) -> Result<ProviderFacade, ProviderError> {
+    #[cfg(all(debug_assertions, feature = "test-util"))]
+    if insecure_provider_endpoints_for_tests() {
+        return ProviderFactory::create_with_unsafe_test_endpoints(config, credential).await;
+    }
+    ProviderFactory::create(config, credential).await
+}
+
+pub(crate) async fn factory_transport(
+    config: ProviderConfig,
+    credential: ProviderCredential,
+) -> Result<std::sync::Arc<dyn olp_domain::ProviderTransport>, ProviderError> {
+    #[cfg(all(debug_assertions, feature = "test-util"))]
+    if insecure_provider_endpoints_for_tests() {
+        return ProviderFactory::transport_with_unsafe_test_endpoints(config, credential).await;
+    }
+    ProviderFactory::transport(config, credential).await
+}
+
+pub(crate) fn factory_validate(config: &ProviderConfig) -> Result<(), ProviderError> {
+    #[cfg(all(debug_assertions, feature = "test-util"))]
+    if insecure_provider_endpoints_for_tests() {
+        return ProviderFactory::validate_with_unsafe_test_endpoints(config);
+    }
+    ProviderFactory::validate(config)
+}
+
 pub(crate) fn provider_config(
     fields: ProviderConfigFields<'_>,
 ) -> Result<ProviderConfig, ProviderError> {
@@ -182,7 +226,7 @@ pub(crate) async fn provider_connector(
         plaintext.as_ref().map(|plaintext| plaintext.as_slice()),
     )
     .map_err(|error| validation("provider", &error.to_string()))?;
-    ProviderFactory::create(config, credential)
+    factory_create(config, credential)
         .await
         .map_err(|error| validation("provider", &error.to_string()))
 }

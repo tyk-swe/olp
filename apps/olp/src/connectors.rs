@@ -199,7 +199,7 @@ pub(crate) async fn load_runtime_transports(
     for provider in store.runtime_provider_configurations(snapshot).await? {
         let config = runtime_provider_config(&provider, snapshot)?;
         let credential = runtime_provider_credential(&provider, &config, master_key)?;
-        let transport = ProviderFactory::transport(config, credential).await?;
+        let transport = crate::provider_adapter::factory_transport(config, credential).await?;
         transports.insert(provider.provider_id, transport);
     }
     Ok(())

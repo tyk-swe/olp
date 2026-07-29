@@ -2380,6 +2380,7 @@ dependencies = [
  "olp",
  "olp-domain",
  "olp-protocols",
+ "serde",
  "serde_json",
  "tokio",
 ]

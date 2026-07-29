@@ -6,7 +6,9 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 
 FUZZ_TOOLCHAIN := nightly-2026-05-15
-FUZZ_TARGETS := sse_decoder protocol_json media_metadata multipart_parser
+# Derived from fuzz/Cargo.toml rather than restated here, so a newly added
+# [[bin]] target cannot be silently skipped by the replay and campaign recipes.
+FUZZ_TARGETS := $(shell awk '/^\[\[bin\]\]/ { in_bin = 1; next } in_bin && $$1 == "name" { gsub(/"/, "", $$3); print $$3; in_bin = 0 }' fuzz/Cargo.toml)
 # cargo-fuzz defaults `--target` to the triple it was itself built for, and the
 # prebuilt binaries cargo-binstall serves are musl. A sanitizer build cannot
 # link against a static libc, so always fuzz for the host triple instead.
@@ -18,7 +20,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	coverage console-install console-verify console-e2e console-storybook \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install
+	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -86,6 +88,9 @@ sqlx-check: ## Verify .sqlx/ metadata is fresh (CI: postgres-integration job)
 
 db-test: ## PostgreSQL/Valkey integration tests via nextest; needs OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX; extra args via ARGS
 	./scripts/run-postgres-tests.sh $(ARGS)
+
+e2e: ## End-to-end contract suite: real olp binary + PostgreSQL + Valkey + mock upstream; any contract violation fails
+	./scripts/run-e2e-tests.sh $(ARGS)
 
 release-version: ## Require consistent release metadata
 	scripts/check-release-version.sh

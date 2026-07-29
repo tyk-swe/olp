@@ -350,7 +350,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         let pricing_revision_id: Option<Uuid> = pricing.pricing_revision_id;
-        let pricing_complete: bool = pricing.pricing_complete;
+        let pricing_complete: bool = pricing.pricing_complete && event.usage_complete;
         let estimated_cost: Option<rust_decimal::Decimal> = pricing.estimated_cost;
         let currency = pricing.currency.map(|value| value.trim().to_owned());
         let unpriced = !pricing_complete;

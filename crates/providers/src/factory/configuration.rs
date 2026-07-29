@@ -308,6 +308,14 @@ pub(super) fn validate_connector_configuration(
     connector_configuration(spec).map(|_| ())
 }
 
+#[cfg(any(test, feature = "test-util"))]
+pub(super) fn validate_connector_configuration_with_policy(
+    spec: ConnectorSpec<'_>,
+    allow_unsafe_test_targets: bool,
+) -> Result<(), ProviderError> {
+    connector_configuration_with_policy(spec, allow_unsafe_test_targets).map(|_| ())
+}
+
 /// Validates only a supplied credential. Callers retain their own encryption,
 /// decryption, and response-field mapping boundaries.
 pub(super) fn validate_connector_credential(
@@ -391,10 +399,17 @@ pub(super) enum BedrockAuthMode {
 pub(super) fn connector_configuration(
     spec: ConnectorSpec<'_>,
 ) -> Result<ConnectorConfiguration, ProviderError> {
+    connector_configuration_with_policy(spec, false)
+}
+
+pub(super) fn connector_configuration_with_policy(
+    spec: ConnectorSpec<'_>,
+    allow_unsafe_test_targets: bool,
+) -> Result<ConnectorConfiguration, ProviderError> {
     match spec.kind {
         ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => spec
             .endpoint
-            .map(OpenAiConnectorConfig::with_base_url)
+            .map(|endpoint| open_ai_configuration(endpoint, allow_unsafe_test_targets))
             .transpose()
             .map(|configuration| ConnectorConfiguration::OpenAi(configuration.unwrap_or_default()))
             .map_err(ProviderError::configuration),
@@ -474,15 +489,50 @@ pub(super) fn connector_configuration(
                 )));
             }
             Ok(ConnectorConfiguration::AzureOpenAi(Box::new(
-                AzureOpenAiConnectorConfig::new(
+                azure_open_ai_configuration(
                     endpoint,
-                    deployment.to_owned(),
-                    api_version.to_owned(),
+                    deployment,
+                    api_version,
+                    allow_unsafe_test_targets,
                 )
                 .map_err(ProviderError::configuration)?,
             )))
         }
     }
+}
+
+/// The unsafe-target constructors exist only in test builds; outside them the
+/// policy flag is compiled out and the strict parser is the only path.
+fn open_ai_configuration(
+    endpoint: &str,
+    allow_unsafe_test_targets: bool,
+) -> Result<OpenAiConnectorConfig, crate::openai::ConnectorBuildError> {
+    #[cfg(any(test, feature = "test-util"))]
+    if allow_unsafe_test_targets {
+        return OpenAiConnectorConfig::with_base_url_unsafe_test_target(endpoint);
+    }
+    #[cfg(not(any(test, feature = "test-util")))]
+    let _ = allow_unsafe_test_targets;
+    OpenAiConnectorConfig::with_base_url(endpoint)
+}
+
+fn azure_open_ai_configuration(
+    endpoint: &str,
+    deployment: &str,
+    api_version: &str,
+    allow_unsafe_test_targets: bool,
+) -> Result<AzureOpenAiConnectorConfig, crate::azure_openai::ConnectorBuildError> {
+    #[cfg(any(test, feature = "test-util"))]
+    if allow_unsafe_test_targets {
+        return AzureOpenAiConnectorConfig::new_unsafe_test_target(
+            endpoint,
+            deployment.to_owned(),
+            api_version.to_owned(),
+        );
+    }
+    #[cfg(not(any(test, feature = "test-util")))]
+    let _ = allow_unsafe_test_targets;
+    AzureOpenAiConnectorConfig::new(endpoint, deployment.to_owned(), api_version.to_owned())
 }
 
 fn vertex_configuration(spec: ConnectorSpec<'_>) -> Result<VertexConnectorConfig, ProviderError> {

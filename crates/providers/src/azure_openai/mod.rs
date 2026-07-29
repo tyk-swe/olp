@@ -41,14 +41,50 @@ impl ConnectorConfig {
         deployment: impl Into<String>,
         api_version: impl Into<String>,
     ) -> Result<Self, ConnectorBuildError> {
-        let resource_endpoint = validate_resource_endpoint(resource_endpoint, false)?;
+        Self::build(
+            resource_endpoint,
+            deployment,
+            api_version,
+            false,
+            OpenAiConnectorConfig::with_base_url,
+        )
+    }
+
+    /// Accepts plain-HTTP and non-public resource endpoints. Exists only for
+    /// test builds; release binaries never compile this constructor.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn new_unsafe_test_target(
+        resource_endpoint: &str,
+        deployment: impl Into<String>,
+        api_version: impl Into<String>,
+    ) -> Result<Self, ConnectorBuildError> {
+        Self::build(
+            resource_endpoint,
+            deployment,
+            api_version,
+            true,
+            OpenAiConnectorConfig::with_base_url_unsafe_test_target,
+        )
+    }
+
+    fn build(
+        resource_endpoint: &str,
+        deployment: impl Into<String>,
+        api_version: impl Into<String>,
+        allow_unsafe_endpoint: bool,
+        build_inner: impl FnOnce(
+            &str,
+        )
+            -> Result<OpenAiConnectorConfig, crate::openai::ConnectorBuildError>,
+    ) -> Result<Self, ConnectorBuildError> {
+        let resource_endpoint =
+            validate_resource_endpoint(resource_endpoint, allow_unsafe_endpoint)?;
         let deployment = deployment.into();
         validate_deployment(&deployment)?;
         let api_version = api_version.into();
         validate_api_version(&api_version)?;
         let base_url = deployment_base_url(&resource_endpoint, &deployment)?;
-        let inner = OpenAiConnectorConfig::with_base_url(base_url.as_str())?
-            .with_api_version(&api_version)?;
+        let inner = build_inner(base_url.as_str())?.with_api_version(&api_version)?;
         Ok(Self {
             inner,
             resource_endpoint,

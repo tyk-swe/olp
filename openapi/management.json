@@ -6938,6 +6938,33 @@
         ]
       }
     },
+    "/api/v1/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "OpenAPI document for the management API"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          }
+        },
+        "security": [],
+        "tags": []
+      }
+    },
     "/api/v1/playground": {
       "post": {
         "operationId": "execute_playground",

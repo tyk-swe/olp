@@ -2392,6 +2392,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "olp-e2e"
+version = "2.0.0"
+dependencies = [
+ "axum",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures",
+ "rand 0.9.5",
+ "reqwest",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "olp-protocols"
 version = "2.0.0"
 dependencies = [

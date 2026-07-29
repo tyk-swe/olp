@@ -318,7 +318,7 @@ jobs:
         with:
           tools: "sqlx-cli@0.9.0,cargo-nextest@0.9.140"
           # Sole writer of the workspace-debug cache; the other consumers
-          # (sdk-compatibility, console-integration, ha, upgrade-rehearsal)
+          # (sdk-compatibility, console-integration, e2e, ha, upgrade-rehearsal)
           # restore it read-only. This job builds the --all-features superset.
           cache-shared-key: workspace-debug
       - name: Install PostgreSQL 18 client tools
@@ -402,6 +402,41 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  e2e:
+    name: End-to-end contract
+    needs: postgres-integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    env:
+      OLP_E2E_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
+      OLP_E2E_VALKEY_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-shared-key: workspace-debug
+          cache-save: "false"
+      - name: Install PostgreSQL 18 client tools
+        run: ./scripts/ci/install-postgres-client.sh 18
+      - name: Run the end-to-end contract suite
+        run: make e2e
+
   production-image:
     name: Production image / amd64
     runs-on: ubuntu-24.04
@@ -469,6 +504,7 @@ jobs:
       - sdk-compatibility
       - postgres-integration
       - console-integration
+      - e2e
       - production-image
       - advisory-audits
     runs-on: ubuntu-24.04
