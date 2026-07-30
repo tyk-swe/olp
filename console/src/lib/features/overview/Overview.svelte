@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import SetupChecklist from '$lib/features/setup/SetupChecklist.svelte';
+  import { copyText } from '$lib/clipboard';
   import { listProviders } from '$lib/api/management/providers';
   import { listRoutes } from '$lib/api/management/routes';
   import { listRequests } from '$lib/api/operations';
@@ -12,6 +13,7 @@
   let { controlConnected = true }: { controlConnected?: boolean } = $props();
   let endpoint = $state('/openai/v1');
   let copied = $state(false);
+  let copyError = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const providers = createQuery(() => ({ queryKey: ['providers'], queryFn: listProviders }));
   const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: listRoutes }));
@@ -29,8 +31,14 @@
   });
 
   async function copyEndpoint() {
-    await navigator.clipboard.writeText(endpoint);
+    if (!(await copyText(endpoint))) {
+      copied = false;
+      copyError = 'Clipboard access is unavailable. Copy the URL manually.';
+      return;
+    }
+    copyError = '';
     copied = true;
+    if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => (copied = false), 1800);
   }
 </script>
@@ -75,6 +83,7 @@
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
+      {#if copyError}<p class="inline-problem" role="alert">{copyError}</p>{/if}
       <a href={resolve('/playground')}>Open the playground <NavIcon name="arrow" size={17} /></a>
     </section>
 

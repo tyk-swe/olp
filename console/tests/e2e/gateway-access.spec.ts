@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { denyClipboard, expect, failUnexpectedApiRequest, test, type Page } from '../playwright';
 
 import { mockProviderKinds } from './provider-capabilities';
 
@@ -143,6 +143,7 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
   let createHeaders: Record<string, string> = {};
   const probeEtags: string[] = [];
   let certificationEtag = '';
+  let certificationAttempts = 0;
 
   await page.route('**/api/v1/provider-kinds/openai/capabilities', async (route) => {
     await route.fulfill({
@@ -202,6 +203,19 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
     if (pathname.endsWith(`/models/${ids.model}/certify`)) {
       const headers = await request.allHeaders();
       certificationEtag = headers['if-match'];
+      certificationAttempts += 1;
+      if (certificationAttempts === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/problem+json',
+          json: {
+            title: 'Certification temporarily unavailable',
+            status: 503,
+            detail: 'Certification temporarily unavailable.'
+          }
+        });
+        return;
+      }
       const capabilities = (currentProvider.models[0].capabilities as Array<Record<string, unknown>>).map((capability) => ({
         ...capability,
         source: 'certified',
@@ -236,7 +250,7 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
       await route.fulfill({ json: { id: ids.provider, state: 'active', etag: currentProvider.etag, runtime_generation: { id: ids.generation, sequence: 2 } } });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404, detail: pathname } });
+    failUnexpectedApiRequest(route);
   });
 
   await emulateTwoHundredPercentZoom(page);
@@ -277,6 +291,8 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
   await expect(page.getByText('Capability review saved with declared provenance.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Activate provider' })).toBeDisabled();
   await page.getByRole('button', { name: 'Server-certify capabilities' }).click();
+  await expect(page.getByRole('alert')).toContainText('Certification temporarily unavailable.');
+  await page.getByRole('button', { name: 'Server-certify capabilities' }).click();
   await expect(page.getByText(/reviewed tuples passed server certification/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Activate provider' })).toBeDisabled();
   await page.getByRole('button', { name: 'Test completed draft' }).click();
@@ -285,9 +301,11 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
   await page.getByRole('button', { name: 'Activate provider' }).click();
   await expect(page.getByRole('heading', { name: 'Now build a stable route slug.' })).toBeVisible();
   await expect(page.getByText('Provider activated in runtime generation 2.')).toBeVisible();
+  expect(certificationAttempts).toBe(2);
   expect(certificationEtag).toBe('"01980000-0000-7000-8000-000000000111"');
   expect(probeEtags).toEqual([
     '"01980000-0000-7000-8000-000000000109"',
+    '"01980000-0000-7000-8000-000000000111"',
     '"01980000-0000-7000-8000-000000000112"'
   ]);
 });
@@ -309,6 +327,10 @@ test('native provider detail never round-trips its official endpoint as a custom
       await route.fulfill({ json: { items: currentProvider.models, next_cursor: null } });
       return;
     }
+    if (pathname.endsWith('/revisions')) {
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
     if (pathname === `/api/v1/providers/${ids.provider}` && request.method() === 'PATCH') {
       updateBody = request.postDataJSON();
       currentProvider = { ...currentProvider, state: 'draft', endpoint: null };
@@ -319,7 +341,7 @@ test('native provider detail never round-trips its official endpoint as a custom
       await route.fulfill({ json: currentProvider });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404 } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);
@@ -336,6 +358,121 @@ test('native provider detail never round-trips its official endpoint as a custom
     deployment: null,
     auth_mode: 'api_key'
   });
+});
+
+test('native provider detail probes the current draft before certification', async ({ page }) => {
+  await mockSession(page);
+  let currentProvider = providerRecord('draft', [modelRecord], {
+    etag: '01980000-0000-7000-8000-000000000120',
+    updated_at: '2026-07-12T12:20:00Z'
+  });
+  const mutationOrder: string[] = [];
+  let probeEtag = '';
+  let certificationEtag = '';
+
+  await page.route('**/api/v1/provider-kinds/openai/capabilities', async (route) => {
+    await route.fulfill({
+      json: {
+        provider_kind: 'openai',
+        capabilities: [
+          { operation: 'generation', surface: 'openai', mode: 'unary' },
+          { operation: 'generation', surface: 'openai', mode: 'streaming' }
+        ]
+      }
+    });
+  });
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === `/api/v1/providers/${ids.provider}/models` && request.method() === 'GET') {
+      await route.fulfill({ json: { items: currentProvider.models, next_cursor: null } });
+      return;
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [] } });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
+    if (pathname.endsWith('/probe') && request.method() === 'POST') {
+      mutationOrder.push('probe');
+      probeEtag = (await request.allHeaders())['if-match'];
+      currentProvider = {
+        ...currentProvider,
+        last_probe_at: '2026-07-12T12:21:00Z',
+        last_probe_status: 'succeeded',
+        last_probe_detail: 'Credentialed connector request succeeded.'
+      };
+      await route.fulfill({
+        json: {
+          provider_id: ids.provider,
+          succeeded: true,
+          checked_at: currentProvider.last_probe_at,
+          probe_type: 'connector_connectivity',
+          detail: currentProvider.last_probe_detail
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith(`/models/${ids.model}/certify`) && request.method() === 'POST') {
+      mutationOrder.push('certify');
+      certificationEtag = (await request.allHeaders())['if-match'];
+      if (!currentProvider.last_probe_at) {
+        await route.fulfill({
+          status: 422,
+          contentType: 'application/problem+json',
+          json: {
+            title: 'Invalid provider configuration',
+            status: 422,
+            detail:
+              'native capability certification requires a successful credentialed probe of the current provider draft'
+          }
+        });
+        return;
+      }
+      currentProvider = withProviderModels(currentProvider, [certifiedModelRecord], {
+        etag: '01980000-0000-7000-8000-000000000121',
+        updated_at: '2026-07-12T12:22:00Z',
+        last_probe_at: null,
+        last_probe_status: null,
+        last_probe_detail: null
+      });
+      await route.fulfill({
+        json: {
+          provider_id: ids.provider,
+          model_id: ids.model,
+          status: 'succeeded',
+          checked_at: '2026-07-12T12:22:00Z',
+          certified_count: 2,
+          attempted_count: 2,
+          results: certifiedModelRecord.capabilities.map((capability) => ({
+            ...capability,
+            succeeded: true,
+            error_code: null,
+            detail: 'Certified by server'
+          }))
+        }
+      });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}` && request.method() === 'GET') {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+  await expect(page.getByRole('heading', { name: 'Models and capabilities' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Test completed draft' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Server-certify capabilities' }).click();
+  await expect(page.getByText(/reviewed tuples passed server certification/)).toBeVisible();
+  await expect(page.getByText('2/2 certified', { exact: true })).toBeVisible();
+  expect(mutationOrder).toEqual(['probe', 'certify']);
+  expect(probeEtag).toBe('"01980000-0000-7000-8000-000000000120"');
+  expect(certificationEtag).toBe(probeEtag);
 });
 
 test('provider detail resets provider-wide model mutations and retains row-local model pages', async ({ page }) => {
@@ -517,7 +654,7 @@ test('provider detail resets provider-wide model mutations and retains row-local
       await route.fulfill({ json: currentProvider });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404, detail: pathname } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);
@@ -699,7 +836,7 @@ test('provider detail keeps the live revision and credential until a certified d
       await route.fulfill({ json: currentProvider });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404, detail: pathname } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);
@@ -773,10 +910,7 @@ test('provider inventory preserves its cursor through detail and wizard navigati
       await route.fulfill({ json: { items: [], next_cursor: null } });
       return;
     }
-    await route.fulfill({
-      status: 404,
-      json: { title: 'Not mocked', status: 404, detail: pathname }
-    });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto('/providers');
@@ -847,7 +981,7 @@ test('model inventory pages the global catalog and updates through provider ETag
       await route.fulfill({ json: providerRecord('draft', [{ ...certifiedModelRecord, enabled: firstEnabled }]) });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404, detail: pathname } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto('/models');
@@ -923,7 +1057,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
       await route.fulfill({ json: { route_id: ids.route, revision_id: ids.revision, revision: 1, runtime_generation: { id: ids.generation, sequence: 3 } } });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404, detail: pathname } });
+    failUnexpectedApiRequest(route);
   });
 
   await emulateTwoHundredPercentZoom(page);
@@ -1033,6 +1167,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
 
 test('API key creation shows a secret once with SDK snippets on mobile', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+  await denyClipboard(page);
   await mockSession(page);
   let createBody: Record<string, unknown> | undefined;
   let createHeaders: Record<string, string> = {};
@@ -1064,6 +1199,19 @@ test('API key creation shows a secret once with SDK snippets on mobile', async (
     expect(route.request().postDataJSON()).toMatchObject({ model: 'default' });
     await route.fulfill({ json: { id: 'msg_test', type: 'message', role: 'assistant', model: 'default', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } });
   });
+  await page.route('**/gemini/v1beta/models/default:generateContent', async (route) => {
+    expect(route.request().headers()['x-goog-api-key']).toBe('olp_secret_shown_once');
+    expect(route.request().postDataJSON()).toEqual({
+      contents: [{ role: 'user', parts: [{ text: 'Connection test' }] }],
+      generationConfig: { maxOutputTokens: 16 }
+    });
+    await route.fulfill({
+      json: {
+        candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 }
+      }
+    });
+  });
 
   await emulateTwoHundredPercentZoom(page);
   await page.goto('/api-keys/new');
@@ -1077,6 +1225,8 @@ test('API key creation shows a secret once with SDK snippets on mobile', async (
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('olp_secret_shown_once', { exact: true })).toBeVisible();
   await expect(dialog.getByText('base_url=')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Copy key' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Clipboard access is unavailable. Copy the value manually.');
   expect((await new AxeBuilder({ page }).include('.secret-dialog').analyze()).violations).toEqual([]);
   expect(createBody).toMatchObject({ name: 'mobile-app', allowed_routes: ['default'], requests_per_minute: 120, max_concurrency: 8 });
   expect(createHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
@@ -1089,6 +1239,8 @@ test('API key creation shows a secret once with SDK snippets on mobile', async (
   await dialog.getByRole('tab', { name: 'Gemini TS' }).click();
   await expect(dialog.getByRole('tabpanel')).toContainText('baseUrl: "http://127.0.0.1:4174/gemini"');
   await expect(dialog.getByRole('tabpanel')).toContainText('apiVersion: "v1beta"');
+  await dialog.getByRole('button', { name: 'Run connection test' }).click();
+  await expect(dialog.getByText('Gemini request succeeded through route default.')).toBeVisible();
   await dialog.getByRole('button', { name: 'I have saved the key' }).click();
   await expect(page).toHaveURL(/\/api-keys$/);
   await expect(page.getByText('olp_secret_shown_once')).toHaveCount(0);
@@ -1211,6 +1363,7 @@ test('route revision diff and restore-as-draft remain explicit', async ({ page }
 });
 
 test('access roles, one-time invitations, sessions, and OIDC are API-backed', async ({ page }) => {
+  await denyClipboard(page);
   await mockSession(page);
   const members = [
     { id: ids.user, email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner', active: true, etag: '01980000-0000-7000-8000-000000000411', created_at: now, updated_at: now },
@@ -1285,6 +1438,11 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   await page.getByRole('button', { name: 'Create invitation' }).click();
   const invitationDialog = page.getByRole('dialog', { name: 'Copy the invitation link now.' });
   await expect(invitationDialog.getByText('invite-token-shown-once')).toBeVisible();
+  await invitationDialog.getByRole('button', { name: 'Copy invitation link' }).click();
+  await expect(invitationDialog.getByRole('alert')).toContainText(
+    'Clipboard access is unavailable. Copy this invitation link manually.'
+  );
+  await expect(invitationDialog.getByText(/\/invitations\/accept#token=invite-token-shown-once$/)).toBeVisible();
   await invitationDialog.getByRole('button', { name: 'I have shared it' }).click();
   await expect(page.getByText('invite-token-shown-once')).toHaveCount(0);
 
@@ -1436,6 +1594,7 @@ test('provider discovery advances its ETag without dropping dirty connector edit
   let current = providerRecord('draft', [currentModel], {
     etag: '01980000-0000-7000-8000-000000000501'
   });
+  let discoveryEtag = '';
   let saveEtag = '';
 
   await page.route('**/api/v1/provider-kinds/openai/capabilities', async (route) => {
@@ -1453,9 +1612,7 @@ test('provider discovery advances its ETag without dropping dirty connector edit
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     if (pathname === `/api/v1/providers/${ids.provider}/discovery`) {
-      expect((await request.allHeaders())['if-match']).toBe(
-        '"01980000-0000-7000-8000-000000000501"'
-      );
+      discoveryEtag = (await request.allHeaders())['if-match'];
       current = {
         ...current,
         etag: '01980000-0000-7000-8000-000000000502'
@@ -1485,16 +1642,20 @@ test('provider discovery advances its ETag without dropping dirty connector edit
       await route.fulfill({ json: { items: [], next_cursor: null } });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404 } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);
   await page.getByLabel('Name').fill('local-provider-name');
   await page.getByLabel('Mode 1').selectOption('unary');
   await page.getByRole('button', { name: 'Run upstream discovery' }).click();
+  await expect(page.getByText('1 model reviewed.')).toBeVisible();
+  expect(discoveryEtag).toBe('"01980000-0000-7000-8000-000000000501"');
   await expect(page.getByLabel('Name')).toHaveValue('local-provider-name');
   await expect(page.getByLabel('Mode 1')).toHaveValue('unary');
-  await page.getByRole('button', { name: 'Save draft' }).click();
+  const saveDraft = page.getByRole('button', { name: 'Save draft' });
+  await expect(saveDraft).toBeEnabled();
+  await saveDraft.click();
   await expect(page.getByText('Provider draft settings saved.')).toBeVisible();
   expect(saveEtag).toBe('"01980000-0000-7000-8000-000000000502"');
 });
@@ -1575,7 +1736,7 @@ test('provider refetch failures keep dirty connector and capability forms mounte
       await route.fulfill({ json: { items: [], next_cursor: null } });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404 } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);
@@ -1664,7 +1825,7 @@ test('provider capability conflict reloads the row and retries from the remote E
       await route.fulfill({ json: { items: [], next_cursor: null } });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404 } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);
@@ -1772,7 +1933,7 @@ test('provider wizard recovers a capability save after an ETag conflict', async 
       await route.fulfill({ json: current });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404 } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto('/providers/new');

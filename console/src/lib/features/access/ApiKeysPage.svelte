@@ -7,6 +7,7 @@
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { ApiProblem } from '$lib/api/http';
+  import { copyText } from '$lib/clipboard';
   import { popCursor, pushCursor } from '$lib/api/pagination';
   import { dateTimeLocalValue } from '$lib/features/operations/format';
   import {
@@ -24,7 +25,7 @@
 
   let {
     isNew = false,
-    listState
+    listState = $bindable()
   }: {
     isNew?: boolean;
     listState: ApiKeyListState;
@@ -50,13 +51,14 @@
   let sdk = $state<'openai' | 'anthropic' | 'gemini'>('openai');
   let endpoint = $state('');
   let copied = $state('');
+  let copyError = $state('');
   let testState = $state<'idle' | 'running' | 'passed' | 'failed'>('idle');
   let testMessage = $state('');
   const sdkOptions = ['openai', 'anthropic', 'gemini'] as const;
   const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: listRoutes, enabled: isForm || secret !== null }));
 
   onMount(() => { endpoint = window.location.origin; });
-  onDestroy(() => { secret = null; copied = ''; });
+  onDestroy(() => { secret = null; copied = ''; copyError = ''; });
 
   const routeSlug = $derived(allowedRoutes[0] ?? routes.data?.[0]?.slug ?? 'default');
   const snippet = $derived.by(() => {
@@ -166,7 +168,12 @@
   }
 
   async function copy(value: string, label: string) {
-    await navigator.clipboard.writeText(value);
+    if (!(await copyText(value))) {
+      copied = '';
+      copyError = 'Clipboard access is unavailable. Copy the value manually.';
+      return;
+    }
+    copyError = '';
     copied = label;
     setTimeout(() => { if (copied === label) copied = ''; }, 1800);
   }
@@ -209,7 +216,10 @@
         response = await fetch(`${endpoint}/gemini/v1beta/models/${encodeURIComponent(routeSlug)}:generateContent`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-goog-api-key': secret.secret },
-          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Connection test' }] }] })
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'Connection test' }] }],
+            generationConfig: { maxOutputTokens: 16 }
+          })
         });
       } else {
         response = await fetch(`${endpoint}/openai/v1/responses`, {
@@ -240,6 +250,7 @@
   function dismissSecret() {
     secret = null;
     copied = '';
+    copyError = '';
     testState = 'idle';
     testMessage = '';
     if (isNew) void goto(resolve('/api-keys'));
@@ -263,6 +274,7 @@
     {#snippet children(close)}
       <span class="secret-icon" aria-hidden="true"><NavIcon name="key" size={26} /></span>
       <div class="secret-row"><code>{secret!.secret}</code><button class="button button-secondary" type="button" onclick={() => copy(secret!.secret, 'secret')}>{copied === 'secret' ? 'Copied' : 'Copy key'}</button></div>
+      {#if copyError}<div class="inline-problem" role="alert">{copyError}</div>{/if}
       <div class="snippet-heading"><div><strong>Test with a vendor SDK</strong><small>Route slugs are sent as the model.</small></div><div class="tabs" role="tablist" aria-label="SDK language">{#each sdkOptions as option, index (option)}<button id={`sdk-tab-${option}`} class:active={sdk === option} role="tab" aria-selected={sdk === option} aria-controls={`sdk-panel-${option}`} tabindex={sdk === option ? 0 : -1} type="button" onclick={() => selectSdk(option)} onkeydown={(event) => moveSdkTab(event, index)}>{option === 'openai' ? 'OpenAI Python' : option === 'anthropic' ? 'Anthropic TS' : 'Gemini TS'}</button>{/each}</div></div>
       <div id={`sdk-panel-${sdk}`} role="tabpanel" aria-labelledby={`sdk-tab-${sdk}`}>
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->

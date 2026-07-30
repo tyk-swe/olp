@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, failUnexpectedApiRequest, test, type Page } from '../playwright';
 
 import { mockProviderKinds } from './provider-capabilities';
 
@@ -124,7 +124,7 @@ test('provider studio compares redacted history and restores non-secret configur
       await route.fulfill({ json: current });
       return;
     }
-    await route.fulfill({ status: 404, json: { title: 'Not mocked', status: 404 } });
+    failUnexpectedApiRequest(route);
   });
 
   await page.goto(`/providers/${ids.provider}`);

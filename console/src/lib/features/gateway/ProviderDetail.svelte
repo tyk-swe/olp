@@ -49,6 +49,7 @@
     activationReady,
     buildUpdateProviderInput,
     capabilitiesCertified,
+    certificationPrerequisiteReady,
     hasApiVersion,
     hasCloudProject,
     hasCloudRegion,
@@ -403,6 +404,16 @@
 
   async function certifyDetailModel(current: Provider, modelId: string) {
     await run(`certify-${modelId}`, async () => {
+      if (!certificationPrerequisiteReady(current)) {
+        probe = await probeProvider(current);
+        if (!probe.succeeded) throw new Error(probe.detail);
+        current = {
+          ...current,
+          last_probe_at: probe.checked_at,
+          last_probe_status: 'succeeded',
+          last_probe_detail: probe.detail
+        };
+      }
       const result = await certifyProviderModel(current, modelId);
       certificationResults = { ...certificationResults, [modelId]: result };
       const updated = await getProvider(current.id);

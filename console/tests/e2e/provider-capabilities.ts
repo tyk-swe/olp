@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page } from '../playwright';
 
 const apiKeyAuth = [
   { mode: 'api_key', label: 'Stored API key', credential: 'required' }

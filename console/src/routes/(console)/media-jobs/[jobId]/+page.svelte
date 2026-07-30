@@ -7,7 +7,7 @@
     type MediaJobListState
   } from '$lib/features/operations/mediaJobListState';
 
-  const listState = getContext<MediaJobListState>(mediaJobListStateContext);
+  let listState = getContext<MediaJobListState>(mediaJobListStateContext);
 </script>
 
-<MediaJobsPage jobId={page.params.jobId} {listState} />
+<MediaJobsPage jobId={page.params.jobId} bind:listState />

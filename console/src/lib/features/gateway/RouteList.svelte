@@ -8,7 +8,7 @@
   import { popCursor, pushCursor } from '$lib/api/pagination';
   import type { RouteListState } from './routeListState';
 
-  let { listState }: { listState: RouteListState } = $props();
+  let { listState = $bindable() }: { listState: RouteListState } = $props();
 
   const drafts = createQuery(() => ({
     queryKey: ['route-draft-page', listState.draft.cursor ?? 'first'],

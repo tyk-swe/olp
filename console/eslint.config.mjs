@@ -44,5 +44,21 @@ export default [
     rules: {
       'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
     }
+  },
+  {
+    files: ['tests/e2e/**/*.ts', 'tests/integration/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              message: 'Import from ../playwright so browser runtime failures fail the test.'
+            }
+          ]
+        }
+      ]
+    }
   }
 ];

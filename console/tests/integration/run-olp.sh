@@ -16,7 +16,7 @@ fi
 if [[ -z ${OLP_CONSOLE_E2E_BIN:-} ]]; then
   (
     cd -- "$repo_dir"
-    cargo build --locked -p olp
+    cargo build --locked -p olp --features test-util
   )
 fi
 [[ -x $olp_bin ]] || {
@@ -25,5 +25,6 @@ fi
 }
 
 cd -- "$console_dir"
+node tests/integration/assert-empty-valkey.mjs
 "$olp_bin" migrate
-exec "$olp_bin" control
+exec "$olp_bin" all

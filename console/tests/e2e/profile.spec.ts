@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../playwright';
 
 test('profile updates identity, changes password, and revokes another session', async ({ page }) => {
   const userId = '01980000-0000-7000-8000-000000000001';
@@ -113,6 +113,7 @@ test('OIDC callback markers require explicit confirmation before beginning an id
   await page.goto('/settings/profile?reauthenticated=oidc_link');
 
   await expect(page.getByText('Identity verified. Confirm before linking your OIDC identity.')).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/profile$/);
   expect(linkStarts).toBe(0);
   await page.getByRole('button', { name: 'Confirm OIDC identity link' }).click();
   await expect(page).toHaveURL(/\/oidc-test-redirect$/);

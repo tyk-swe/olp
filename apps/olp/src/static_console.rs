@@ -6,7 +6,10 @@ use sha2::{Digest as _, Sha256};
 use tower_http::services::{ServeDir, ServeFile};
 
 const CSP_PREFIX: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'";
-const CSP_SUFFIX: &str = "; style-src 'self'";
+// SvelteKit creates its route announcer from a client-side template. Keep the
+// framework's exact visually-hidden style working without admitting arbitrary
+// style attributes or weakening the external stylesheet policy.
+const SVELTEKIT_ANNOUNCER_STYLE: &str = "position: absolute; left: 0; top: 0; clip: rect(0 0 0 0); clip-path: inset(50%); overflow: hidden; white-space: nowrap; width: 1px; height: 1px";
 
 /// Builds a strict CSP that admits only the exact inline bootstrap scripts in
 /// the generated console entry point. SvelteKit cannot externalize this
@@ -31,7 +34,13 @@ pub fn content_security_policy(console_dir: &Path) -> HeaderValue {
             remainder = &remainder[script_end + "</script>".len()..];
         }
     }
-    policy.push_str(CSP_SUFFIX);
+    let announcer_digest =
+        base64::engine::general_purpose::STANDARD.encode(Sha256::digest(SVELTEKIT_ANNOUNCER_STYLE));
+    write!(
+        policy,
+        "; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-{announcer_digest}'"
+    )
+    .expect("writing to a String cannot fail");
     HeaderValue::from_str(&policy).expect("generated console CSP must be a valid header")
 }
 
@@ -94,7 +103,11 @@ mod tests {
             assert!(policy.contains(&format!("'sha256-{digest}'")));
         }
         assert!(policy.contains("script-src 'self'"));
-        assert!(policy.ends_with("style-src 'self'"));
+        assert!(policy.contains("; style-src 'self';"));
+        assert!(policy.ends_with(
+            "style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='"
+        ));
+        assert!(!policy.contains("'unsafe-inline'"));
 
         std::fs::remove_dir_all(root).unwrap();
     }

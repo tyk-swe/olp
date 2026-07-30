@@ -7,7 +7,7 @@
     type RequestListState
   } from '$lib/features/operations/requestListState';
 
-  const listState = getContext<RequestListState>(requestListStateContext);
+  let listState = getContext<RequestListState>(requestListStateContext);
 </script>
 
-<RequestsPage requestId={page.params.requestId} {listState} />
+<RequestsPage requestId={page.params.requestId} bind:listState />

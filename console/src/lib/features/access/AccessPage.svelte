@@ -8,6 +8,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import { ApiProblem, isEtagMismatch } from '$lib/api/http';
+  import { copyText } from '$lib/clipboard';
   import {
     beginReload,
     conflictNotice,
@@ -67,6 +68,7 @@
   let inviteRole = $state('developer');
   let invitationSecret = $state<InvitationSecret | null>(null);
   let copied = $state(false);
+  let copyError = $state('');
   let oidcSync = $state(initialConcurrentEdit());
   let oidcDiscoveryUrl = $state('');
   let oidcIssuer = $state('');
@@ -270,12 +272,21 @@
     });
   }
 
-  async function copyInvitation() {
-    if (!invitationSecret) return;
+  function invitationLink() {
+    if (!invitationSecret) return '';
     // Keep the one-time token in the URL fragment so it is never sent in an
     // HTTP request, Referer header, or static-console access log.
-    const url = `${window.location.origin}/invitations/accept#token=${encodeURIComponent(invitationSecret.token)}`;
-    await navigator.clipboard.writeText(url);
+    return `${window.location.origin}/invitations/accept#token=${encodeURIComponent(invitationSecret.token)}`;
+  }
+
+  async function copyInvitation() {
+    if (!invitationSecret) return;
+    if (!(await copyText(invitationLink()))) {
+      copied = false;
+      copyError = 'Clipboard access is unavailable. Copy this invitation link manually.';
+      return;
+    }
+    copyError = '';
     copied = true;
   }
 
@@ -319,9 +330,9 @@
 <svelte:head><title>Access · OpenLLMProxy</title></svelte:head>
 
 {#if invitationSecret}
-  <SecretDialog eyebrow="Invitation created" title="Copy the invitation link now." description={`The token is displayed once and expires at ${new Date(invitationSecret.invitation.expires_at).toLocaleString()}.`} onClose={() => { invitationSecret = null; copied = false; }}>
+  <SecretDialog eyebrow="Invitation created" title="Copy the invitation link now." description={`The token is displayed once and expires at ${new Date(invitationSecret.invitation.expires_at).toLocaleString()}.`} onClose={() => { invitationSecret = null; copied = false; copyError = ''; }}>
     {#snippet children(close)}
-      <code class="invitation-token">{invitationSecret!.token}</code><div class="dialog-actions"><button class="button button-secondary" type="button" onclick={copyInvitation}>{copied ? 'Link copied' : 'Copy invitation link'}</button><button class="button button-primary" type="button" data-autofocus onclick={close}>I have shared it</button></div>
+      <code class="invitation-token">{invitationSecret!.token}</code>{#if copyError}<div class="inline-problem" role="alert">{copyError}</div><code class="invitation-token">{invitationLink()}</code>{/if}<div class="dialog-actions"><button class="button button-secondary" type="button" onclick={copyInvitation}>{copied ? 'Link copied' : 'Copy invitation link'}</button><button class="button button-primary" type="button" data-autofocus onclick={close}>I have shared it</button></div>
     {/snippet}
   </SecretDialog>
 {/if}

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../playwright';
 
 test('protected routes never render before authentication and return after login', async ({ page }) => {
   let authenticated = false;
@@ -191,4 +191,39 @@ test('OIDC initiation failures remain a recoverable login-page problem', async (
     'Single sign-on was disabled after this page loaded.'
   );
   await expect(page.getByLabel('Email')).toBeVisible();
+});
+
+test('theme controls remain usable when browser storage is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    const unavailable = () => {
+      throw new DOMException('Storage is disabled', 'SecurityError');
+    };
+    Object.defineProperties(Storage.prototype, {
+      getItem: { configurable: true, value: unavailable },
+      setItem: { configurable: true, value: unavailable }
+    });
+  });
+  await page.route('**/api/v1/sessions/current', async (route) => {
+    await route.fulfill({
+      json: {
+        user: {
+          id: '01980000-0000-7000-8000-000000000001',
+          email: 'owner@example.com',
+          display_name: 'Ada Owner',
+          role: 'owner'
+        },
+        csrf_token: 'csrf-auth-test'
+      }
+    });
+  });
+  await page.route('**/api/v1/providers*', async (route) => {
+    await route.fulfill({ json: { items: [], next_cursor: null } });
+  });
+
+  await page.goto('/providers');
+  const theme = page.getByRole('button', { name: 'Use dark theme' });
+  await expect(theme).toBeVisible();
+  await theme.click();
+  await expect(page.getByRole('button', { name: 'Use light theme' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });

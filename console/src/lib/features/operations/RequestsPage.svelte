@@ -10,7 +10,7 @@
 
   let {
     requestId = '',
-    listState
+    listState = $bindable()
   }: {
     requestId?: string;
     listState: RequestListState;

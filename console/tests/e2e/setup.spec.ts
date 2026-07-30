@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { denyClipboard, expect, test, type Page } from '../playwright';
 
 async function emulateTwoHundredPercentZoom(page: Page) {
   const viewport = page.viewportSize();
@@ -12,6 +12,7 @@ async function emulateTwoHundredPercentZoom(page: Page) {
 
 test('creates the first owner through the local setup contract', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+  await denyClipboard(page);
   let setupComplete = false;
   let submittedBody: unknown;
   let submittedHeaders: Record<string, string> = {};
@@ -79,6 +80,8 @@ test('creates the first owner through the local setup contract', async ({ page }
 
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('heading', { name: 'Bring your first model route online.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Copy OpenAI-compatible base URL' }).click();
+  await expect(page.getByRole('alert')).toContainText('Clipboard access is unavailable. Copy the URL manually.');
   const overviewAccessibility = await new AxeBuilder({ page }).analyze();
   expect(overviewAccessibility.violations).toEqual([]);
   expect(submittedBody).toEqual({

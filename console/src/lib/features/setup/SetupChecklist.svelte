@@ -56,7 +56,7 @@
   </div>
 
   <div class="progress" role="progressbar" aria-label="Installation setup" aria-valuemin="0" aria-valuemax="5" aria-valuenow={completeCount}>
-    <span style={`width: ${completeCount * 20}%`}></span>
+    <span class={`progress-${completeCount}`}></span>
   </div>
 
   {#if failed}
@@ -124,6 +124,13 @@
     border-radius: inherit;
     background: var(--accent);
   }
+
+  .progress-0 { width: 0; }
+  .progress-1 { width: 20%; }
+  .progress-2 { width: 40%; }
+  .progress-3 { width: 60%; }
+  .progress-4 { width: 80%; }
+  .progress-5 { width: 100%; }
 
   .check-error {
     margin-top: .75rem;
