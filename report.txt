@@ -18,13 +18,12 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 3. **E-016:** actual token usage above reservation is never charged.
 4. **A-002:** live media jobs can block emergency credential containment.
 5. **A-003:** restore rehearsal compares URL strings before destructive DDL.
-6. **A-004:** public login permits large Argon2 and audit-row amplification.
-7. **E-072 / E-073:** metadata ingestion is both unbounded and poisonable.
-8. **E-095 / E-096:** media jobs can lose their upstream identity or persist an unusable one.
-9. **A-005:** pricing can prefer a stale provider override over a newer revision.
-10. **A-006:** retention and rollup work runs in one unbounded transaction.
-11. **E-044:** image output lacks aggregate byte, count, and file-descriptor bounds.
-12. **E-080:** fixed pre-filter pagination can hide a valid last-known-good runtime.
+6. **E-072 / E-073:** metadata ingestion is both unbounded and poisonable.
+7. **E-095 / E-096:** media jobs can lose their upstream identity or persist an unusable one.
+8. **A-005:** pricing can prefer a stale provider override over a newer revision.
+9. **A-006:** retention and rollup work runs in one unbounded transaction.
+10. **E-044:** image output lacks aggregate byte, count, and file-descriptor bounds.
+11. **E-080:** fixed pre-filter pagination can hide a valid last-known-good runtime.
 
 ## Severity and confidence
 
@@ -54,11 +53,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Fix / gate:** compare connected server/database and installation identities, require a rehearsal sentinel, and test aliased URLs before any DDL. Prefer creating the scratch database internally.
 
-### A-004 — Distributed login abuse amplifies Argon2 work and durable audit writes
+### A-004 — Distributed login abuse amplifies durable audit writes
 
-**High · Reported confirmed; deployment-dependent** — `auth_admission.rs:7-12` permits 10,000 admitted attempts per minute globally; unknown accounts still perform Argon2id and every admitted failure is inserted into long-retained audit storage (`management_api/auth.rs:267-320`; `store/sessions.rs:60-78`).
+**Medium · Confirmed; deployment-dependent** — The global bucket permits 10,000 admitted attempts per minute across replicas, and admitted invalid or failed attempts create durable audit rows. A distributed attacker can therefore translate the admission allowance into sustained database writes. Password work is already bounded by a measured process-wide semaphore and the public management admission limit.
 
-**Fix / gate:** cap password work with a measured semaphore and lower global admission to sustainable capacity. Aggregate or sample anonymous failures and batch or partition their retention.
+**Evidence / review locus:** `crates/storage/src/identity/auth_admission.rs:7-12,65-105; apps/olp/src/management_api/auth.rs:28-39,267-320,639-655; crates/storage/src/store/sessions.rs:60-78`
+
+**Fix / gate:** lower global admission to sustainable audit-write capacity. Aggregate or sample anonymous failures and batch or partition their retention.
 
 ### A-005 — Pricing specificity is ordered before revision freshness
 
@@ -116,7 +117,7 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 ### A-014 — Secret changes neither roll pods nor reload long-lived keys
 
-**Medium · Reported confirmed for the chart** — Secret volumes in `deploy/helm/templates/workloads.yaml:31-41,140-174` have no rollout version/checksum, while the process loads master, HMAC, and bootstrap keys at startup.
+**Medium · Reported confirmed for the chart** — Secret references and volumes in `deploy/helm/templates/workloads.yaml:87-107,136-174` have no rollout version/checksum, while the process loads master, HMAC, and bootstrap keys at startup.
 
 **Fix / gate:** define an explicit immutable-secret/keyring rotation workflow that stages overlap, rolls pods, verifies readiness, and then retires old keys.
 
@@ -134,13 +135,15 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 ### A-017 — Extreme usage timestamps can panic and become a caught 500
 
-**Medium · Static edge case** — Usage queries accept `i64` timestamps before `DateTime::from_timestamp(...).expect(...)` and unchecked ceiling arithmetic in `storage/src/usage/query.rs:141-152`.
+**Medium · Static edge case** — Usage queries accept RFC 3339 `DateTime<Utc>` values. Valid extreme dates can still overflow hour-bucket conversion: the minimum edge can fail `DateTime::from_timestamp(...).expect(...)`, while the maximum edge can overflow the unchecked one-hour addition in `crates/storage/src/usage/query.rs:141-152`.
 
 **Fix / gate:** perform checked conversion and bounded date validation at the API boundary; return 400 for unrepresentable values.
 
 ### A-018 — Pricing uses request completion time
 
-**Medium · Policy ambiguity** — `request_metadata/ingestion.rs:341` receives the completion timestamp from gateway telemetry, so a long request crossing a price activation boundary is billed at the finish-time price.
+**Medium · Policy ambiguity** — Gateway telemetry assigns the completion timestamp, and pricing binds it as the observation time, so a long request crossing a price activation boundary is billed at the finish-time price.
+
+**Evidence / review locus:** `apps/olp/src/gateway/telemetry.rs:471-497; crates/storage/src/request_metadata/ingestion.rs:318-350`
 
 **Fix / gate:** normally snapshot at request start; if completion-time pricing is intentional, document and test it explicitly.
 
@@ -278,8 +281,7 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 # Disputed findings
 
-- **E-004:** one report says shutdown closes a metadata epoch from a pre-drain snapshot; another says a final checkpoint verifies both writer closure and zero pending work. Keep the inventory entry for reproduction, but do not file it as confirmed.
-- **E-053:** one report alleges ambiguous failover for image/audio/video operations; another cites explicit blocks and tests for those operations. The narrower ordinary-generation ambiguity is retained as A-020.
+- **E-053:** explicit blocks cover connected timeout failures, but static flow keeps an uncommitted HTTP 5xx failover-eligible. Retain the accepted-then-500 reproduction; the narrower ordinary-generation ambiguity remains A-020.
 
 # Edge-case inventory
 
@@ -301,21 +303,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Apply header/read/body establishment deadlines per stream and test slow headers plus incomplete bodies across 100 streams.
 
-### E-003 — Shutdown watch can miss an already-published state
+### E-004 — Detached stream finalizers can emit metadata after shutdown closes the epoch
 
-**Medium · Test required** — The listener waits on watch::Receiver::changed() without first inspecting borrow(). A receiver created after shutdown is published, or a scheduling race around subscription, may wait for a later change that never comes.
+**Medium · High confidence** — A streaming response can reach EOF while its detached producer still awaits limit cleanup before emitting request metadata. Listener drain can then finish and shutdown can close the writer and epoch from a currently graceful snapshot. A later emit sees the closed receiver and increments the dropped count after the loss reporter has exited.
 
-**Evidence / review locus:** `apps/olp/src/listener.rs:179-231,308-343`
+**Evidence / review locus:** `apps/olp/src/streaming_response.rs:287-291; apps/olp/src/gateway/telemetry.rs:230-243; apps/olp/src/cli/startup.rs:391-428; crates/storage/src/request_metadata/buffer.rs:34-53,238-247,354-371`
 
-**Mitigation / regression test:** Use borrow_and_update()/has_changed() or select on the current value. Add a deterministic Tokio test where shutdown is sent before the accept/connection task starts waiting.
-
-### E-004 — [Disputed] Shutdown accounting may close an epoch from a pre-drain snapshot
-
-**Disputed · Reproduction required** — One report says the loss reporter waits a fixed 100 ms instead of joining the request-metadata writer. Another says the final checkpoint verifies both writer closure and zero pending work, which may close the alleged race.
-
-**Evidence / review locus:** `apps/olp/src/cli/startup.rs:391-428`
-
-**Regression test:** Delay XADD beyond 100 ms, initiate shutdown, and verify whether epoch closure can precede writer completion. Change the shutdown protocol only if the test reproduces the inconsistency.
+**Mitigation / regression test:** Join detached response finalizers before closing request-metadata ingestion. Block limit cleanup after response EOF, initiate shutdown, release cleanup, and assert the late event is persisted or included in the closed epoch's loss accounting.
 
 ### E-005 — Only one background worker has terminal failure wired into runtime shutdown
 
@@ -349,13 +343,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Generate an internal ID unconditionally; preserve a validated external ID in a separate field with a small character/length policy.
 
-### E-009 — Body transport failures are flattened into HTTP 413
+### E-009 — Non-timeout body transport failures are flattened into HTTP 413
 
-**Medium · Confirmed** — to_bytes() errors, body timeouts, disconnects, and true size overflow all enter the same rejection path. Clients receive payload-too-large for failures that are actually timeout or transport errors.
+**Medium · Confirmed** — Explicit body deadline expiry maps to HTTP 408, but disconnects, other `to_bytes()` transport errors, and true size overflow still enter the same HTTP 413 rejection path.
 
 **Evidence / review locus:** `apps/olp/src/request_admission/validation.rs:57-65; apps/olp/src/request_admission.rs:416-428`
 
-**Mitigation / regression test:** Preserve typed body errors and map overflow to 413, deadline to 408/504, and disconnect/I/O to an appropriate transport response. Add each failure mode.
+**Mitigation / regression test:** Preserve typed body errors and map only overflow to 413; map disconnect/I/O to an appropriate transport response. Add each failure mode.
 
 ### E-010 — Equal outer and inner body deadlines create nondeterministic status mapping
 
@@ -455,9 +449,9 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Reject duplicates and reject requests carrying more than one credential mechanism unless a documented precedence rule requires it.
 
-### E-022 — Transfer-Encoding compatibility is stricter than real proxy chains
+### E-022 — Combined Transfer-Encoding lists are rejected
 
-**Low · High confidence** — Exact chunked-oriented validation can reject combined/case/OWS variants emitted by compliant intermediaries, or disagree with the HTTP server’s already-decoded body semantics.
+**Low · High confidence** — Validation accepts a single `chunked` token case-insensitively with surrounding OWS, but rejects combined/list forms that compliant intermediaries can emit or normalize differently from the HTTP server's already-decoded body semantics.
 
 **Evidence / review locus:** `apps/olp/src/request_admission.rs (transfer-encoding validation)`
 
@@ -543,9 +537,9 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Model provider-specific usage semantics, reject regressions, and aggregate deltas only when explicitly documented.
 
-### E-033 — Very long allowed-route sets increase admission database/CPU work
+### E-033 — Very long allowed-route sets increase admission CPU work
 
-**Low · High confidence** — Computing maximum timeout and authorization over a broad policy set makes every request sensitive to control-plane cardinality.
+**Low · High confidence** — Computing maximum timeout and authorization scans the in-memory runtime policy map, making every request's CPU work sensitive to control-plane cardinality.
 
 **Evidence / review locus:** `apps/olp/src/request_admission/limits.rs:286-315`
 
@@ -649,11 +643,11 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Wrap producer completion in an explicit terminal frame/trailer protocol and record failure in request outcome telemetry.
 
-### E-046 — Generated media MIME is trusted rather than sniffed
+### E-046 — Binary speech/video MIME is trusted rather than sniffed
 
-**Low · Confirmed** — Provider-declared media type controls output labeling. Mislabeled content can be served under an unsafe or misleading type.
+**Low · Confirmed** — A prefix-allowlisted provider media type controls binary speech and video output labeling. Mislabeled content within an allowed prefix can be served under an unsafe or misleading type.
 
-**Evidence / review locus:** `apps/olp/src/image_response.rs`
+**Evidence / review locus:** `crates/providers/src/openai/transport/operations/audio.rs:35-55; crates/providers/src/openai/transport/operations/video.rs:141-163; apps/olp/src/gateway/media.rs:225-241; apps/olp/src/gateway/videos.rs:520-547`
 
 **Mitigation / regression test:** Allowlist media types and validate magic bytes for locally spooled binary outputs; add nosniff.
 
@@ -665,14 +659,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Emit/record an explicit abnormal termination where protocol permits, and make accounting distinguish producer loss from normal EOF.
 
-### E-048 — Terminal frame cardinality is enforced with an assert in a detached task
-
-**Medium · Confirmed** — An encoder returning more than two terminal chunks panics outside ordinary request error handling. Final usage/accounting and terminal error emission may be skipped.
-
-**Evidence / review locus:** `apps/olp/src/streaming_response.rs:61-65,219-292`
-
-**Mitigation / regression test:** Return a typed error instead of asserting and contain every producer task with panic-to-outcome conversion.
-
 ### E-049 — Quiet SSE streams have no heartbeat
 
 **Medium · High confidence** — Load balancers and proxies with idle timeouts can close a valid stream while the provider is still working, especially for long reasoning or media operations.
@@ -681,13 +667,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Send configurable comment heartbeats below the shortest supported intermediary idle timeout.
 
-### E-050 — SSE responses omit anti-buffering/no-transform guidance
+### E-050 — SSE responses omit no-transform and proxy-buffering guidance
 
-**Low · Confirmed** — Some reverse proxies can buffer or transform event streams, producing bursty delivery and false first-byte/idle timeout behavior.
+**Low · Confirmed** — Responses already set `Cache-Control: no-cache`, but some reverse proxies can still buffer or transform event streams, producing bursty delivery and false first-byte/idle timeout behavior.
 
 **Evidence / review locus:** `apps/olp/src/streaming_response.rs:189-203`
 
-**Mitigation / regression test:** Set Cache-Control: no-cache, no-transform and deployment-specific buffering headers where appropriate; document proxy requirements.
+**Mitigation / regression test:** Add `no-transform` and deployment-specific buffering headers where appropriate; document proxy requirements.
 
 ### E-051 — Cancellation between file creation and ownership transfer has many cleanup states
 
@@ -707,9 +693,9 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 ## 4. Provider transport, failover, codecs, and SSE protocol edges
 
-### E-053 — [Disputed] Side-effecting media operations may fail over after ambiguous upstream execution
+### E-053 — [Disputed] Side-effecting media operations may fail over after an ambiguous HTTP error
 
-**Disputed · Reproduction required** — One report claims post-send failures can fail over image/audio/video operations. Another cites explicit ambiguous-retry blocks and behavior-preserving tests for those operations; its narrower ordinary-generation finding is retained as A-020.
+**Disputed · Reproduction required** — Connected timeout failures are reclassified as ambiguous and blocked from failover. An HTTP 5xx after a provider accepted work, however, maps to an uncommitted `UpstreamServer` failure that remains failover-eligible. If the provider created the job before returning 500, the gateway may send it to a second target.
 
 **Evidence / review locus:** `apps/olp/src/gateway/failover.rs:214-263,371-393,437-468; crates/domain/src/ports.rs:167-178`
 
@@ -731,13 +717,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Use a maintained address-classification library/table and test IANA special-purpose updates as part of dependency/release maintenance.
 
-### E-056 — Provider body attempt deadline is reported as idle timeout
+### E-056 — Unary provider body attempt deadline is reported as idle timeout
 
-**Medium · Confirmed** — After the first byte, expiry of the total attempt deadline maps to a body-idle error, obscuring whether bytes were flowing. Retry/failover policy and operator diagnosis can be wrong.
+**Medium · Confirmed** — In the unary bounded-body reader, expiry of the total attempt deadline maps to a body-idle error, obscuring whether bytes were flowing. The streaming `DeadlineByteStream` path already distinguishes absolute attempt expiry.
 
 **Evidence / review locus:** `crates/providers/src/transport_io.rs:214-229`
 
-**Mitigation / regression test:** Preserve separate absolute-attempt and inter-chunk-idle error variants throughout transport classification.
+**Mitigation / regression test:** Preserve separate absolute-attempt and inter-chunk-idle error variants in the unary reader and throughout transport classification.
 
 ### E-057 — Zero-length chunks affect first-byte and idle semantics
 
@@ -937,7 +923,7 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Medium · High confidence** — Publishing before marking delivered is at-least-once. A crash between the steps republishes, and multiple workers without a claim lease can race on the same row. Hints may be idempotent but can create reload storms.
 
-**Evidence / review locus:** `apps/olp/src/cli/commands.rs:231-245; crates/storage/src/store/runtime.rs:100-129`
+**Evidence / review locus:** `apps/olp/src/cli/commands.rs:231-245; crates/storage/src/store.rs:100-129`
 
 **Mitigation / regression test:** Use SKIP LOCKED/claim leases plus event IDs and de-duplicate subscribers; explicitly test crash-after-publish.
 
@@ -1103,14 +1089,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Use stored status by default, explicit refresh, smaller caps, and a total refresh budget.
 
-### E-102 — Malformed/absent provider expiry silently falls back to a local default
-
-**Low · High confidence** — If expires_at cannot be parsed, a local 30-day-style fallback can misrepresent provider retention and cleanup urgency.
-
-**Evidence / review locus:** `apps/olp/src/gateway/media_jobs.rs:220-266; apps/olp/src/gateway/videos.rs:218-219`
-
-**Mitigation / regression test:** Expose unknown expiry explicitly and retain the raw provider value for diagnosis.
-
 ### E-103 — Reservation/reconciliation state machine needs crash injection at every transition
 
 **Medium · High confidence** — The correctness contract spans reserve, create, attach ID, return, poll, delete intent, delete, and finalize. Every boundary has distinct duplicate/orphan behavior.
@@ -1137,14 +1115,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Evict expired/unknown server flows first and bind a clear maximum concurrent-login UX.
 
-### E-106 — Set-Cookie construction failure is silently ignored
-
-**Low · Confirmed** — append_cookie drops HeaderValue construction errors. A future value/domain/config change can produce a successful auth response without the expected cookie mutation.
-
-**Evidence / review locus:** `apps/olp/src/oidc/session.rs:435-438`
-
-**Mitigation / regression test:** Return a typed internal error and fail the operation rather than silently omitting a security-state cookie.
-
 ### E-107 — Logout reports success even when server-side revocation fails
 
 **Medium · Confirmed** — On database revoke failure, the browser cookie is cleared and 204 returned, but the session may remain valid if its cookie/token is replayed from another client or captured store.
@@ -1161,14 +1131,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Use a hash/indexed map while preserving explicit duplicate-security-cookie rejection.
 
-### E-109 — Email canonicalization does not model provider-specific aliases or full IDNA policy
-
-**Low · High confidence** — Trim/lowercase/basic syntax allows visually confusable Unicode/local-part variants and does not unify plus/dot aliases. Depending on product identity semantics, one human mailbox may obtain multiple accounts.
-
-**Evidence / review locus:** `crates/storage/src/identity/invitations.rs:327-338; apps/olp/src/management_api/auth.rs:635`
-
-**Mitigation / regression test:** Define whether identity is exact-address or verified-mailbox ownership; apply IDNA/confusable policy and rely on issuer subject where possible.
-
 ### E-110 — No-op role/access updates still revoke sessions
 
 **Medium · Confirmed** — Writing the same effective role/access state bumps the security version and invalidates sessions. Retried/idempotent operator automation can cause needless fleet-wide logouts.
@@ -1177,13 +1139,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Compare effective state first and only bump security version on an actual privilege change.
 
-### E-111 — Session validity around expiry differs under node clock skew
+### E-111 — Some expiry checks differ under node clock skew
 
-**Medium · High confidence** — Replicas using local time can disagree near expiration or idle boundaries, causing flapping 200/401 responses behind a load balancer.
+**Medium · High confidence** — Ordinary session validity uses PostgreSQL time, but API-key expiry, invitation acceptance, and CSRF-recovery edge checks use each node's application clock. Replicas can therefore disagree near those boundaries.
 
 **Evidence / review locus:** `apps/olp/src/management_api/auth.rs:359; crates/storage/src/identity/invitations.rs:222-247; apps/olp/src/request_admission/limits.rs:251-255`
 
-**Mitigation / regression test:** Use database/server-issued monotonic expiry decisions or strict clock-health gates with a documented skew allowance.
+**Mitigation / regression test:** Use database time for persisted validity decisions or strict clock-health gates with a documented skew allowance.
 
 ### E-112 — Secret-file validation permits group readability
 
@@ -1200,22 +1162,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 **Evidence / review locus:** `apps/olp/src/management_api/access.rs:789-824; crates/storage/src/identity/invitations.rs:210-239`
 
 **Mitigation / regression test:** Apply a cheap token format/MAC lookup first while preserving timing resistance for valid-looking tokens; retain strict rate limits.
-
-### E-114 — Origin comparison can be brittle around canonicalization
-
-**Low · High confidence** — Default ports, punycode, IPv6 textual forms, trailing dots, and scheme/host casing can make semantically identical origins compare differently—or custom parsing can normalize too much.
-
-**Evidence / review locus:** `apps/olp/src/management_api/common.rs:218-233`
-
-**Mitigation / regression test:** Parse as URL origin and compare canonical tuple; add hostile and equivalent-origin vectors.
-
-### E-115 — Management If-Match behavior needs duplicate and stale-generation race tests
-
-**Medium · High confidence** — Even after duplicate rejection, two operators can read the same version and race mutations across related resources where only one table/version is checked.
-
-**Evidence / review locus:** `apps/olp/src/management_api/common.rs:345-373`
-
-**Mitigation / regression test:** Use transaction-wide expected revision/generation and test cross-resource conflicts.
 
 ### E-116 — OIDC login availability depends on synchronous external network calls
 
@@ -1275,14 +1221,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Expose policy-selectable readiness gates and separate “can serve” from “meets durability/accounting SLO.”
 
-### E-123 — olp_ready metric reflects runtime readiness only
-
-**Medium · Confirmed** — Alerting based on olp_ready can miss a dead metadata consumer, stuck reconciliation, or degraded limiter while HTTP readiness remains green.
-
-**Evidence / review locus:** `apps/olp/src/observability.rs:473-507`
-
-**Mitigation / regression test:** Export component readiness/age/last-success metrics and define composite SLO alerts.
-
 ### E-124 — Liveness is unconditional
 
 **Low · Confirmed** — A process with a dead essential worker or wedged runtime can remain live forever, preventing restart.
@@ -1315,14 +1253,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Tag route class before admission and keep separate unknown/static/management metrics.
 
-### E-128 — Logs/metrics can explode cardinality from untrusted dimensions
-
-**Medium · High confidence** — Client request IDs, model/route/provider labels, and malformed identifiers can create high-cardinality telemetry if emitted without allowlisting or hashing.
-
-**Evidence / review locus:** `apps/olp/src/router.rs:318-329 and request/provider metadata paths`
-
-**Mitigation / regression test:** Audit every metric label versus log field; cap/hash untrusted values and use stable internal IDs for labels.
-
 ### E-129 — Broad CI does not exercise long wall-clock and crash persistence boundaries by default
 
 **Low · Confirmed** — The suite covers unit/integration/fuzz/HA/SDK/browser paths, but >5-minute streams, SIGKILL spool recovery, poison stream events, clock skew, and trickle endpoints require purpose-built tests.
@@ -1342,8 +1272,7 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 ## Regression-test matrix
 
 - **Connection retirement:** Start an HTTP/2 stream at connection age 4m59s and keep it valid beyond 6 minutes; verify policy does not truncate it unexpectedly.
-- **Watch shutdown race:** Publish shutdown before spawning the listener/connection waiter and prove it exits immediately.
-- **Disputed shutdown metadata drain:** Delay XADD for >100 ms, initiate shutdown, and determine whether the final checkpoint prevents epoch closure before writer completion.
+- **Late metadata emission:** Block stream limit cleanup after response EOF, initiate shutdown, then release it; prove the final request-metadata event is persisted or included in epoch loss accounting.
 - **Poison metadata event:** Inject negative media units, NUMERIC overflow, FK failure, and oversized payload; prove each is dead-lettered and the next entry persists.
 - **Valkey backlog:** Disable PostgreSQL while keeping Valkey healthy; verify bounded stream memory, oldest-age alerts, and explicit loss/degradation policy.
 - **Usage surcharge:** Return actual usage above both HTTP and parsed estimates; assert the shortfall is charged atomically.
@@ -1362,7 +1291,7 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 - **Spool SIGKILL:** Kill the process with open and closed spool files, restart, and prove safe stale-tree scavenging and accurate disk accounting.
 - **Image aggregate:** Return thousands of tiny images; enforce count, aggregate byte, and open-FD caps before response commitment.
 - **Detached producer panic:** Panic every streaming/image producer after headers and after partial output; telemetry must record abnormal termination.
-- **SSE conformance:** Cover BOM, CR, CRLF, LF, retry-only records, EOF without blank line, empty chunks, and terminal cardinality.
+- **SSE conformance:** Cover BOM, CR, CRLF, LF, retry-only records, EOF without blank line, and empty chunks.
 - **Cross-tab console:** Log out and log in as a different principal in another tab; no protected cache from the old principal may remain visible.
 - **Helm component matrix:** Render gateway-only, control-only, both, and neither-invalid configurations; alerts must reference only enabled components.
 
@@ -1372,15 +1301,15 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 - The metadata consumer’s stable group/consumer name is not itself a lost-pending bug: startup drains pending entries before new entries. The real risks are unbounded backlog and permanent poison entries.
 - Token accounting does include a second reservation after typed operation parsing. The finding is specifically actual provider usage above the **combined** reservation, not a missing parsed-operation reservation.
 - Production media spooling uses the private constructor; test-only/nonprivate construction should not be reported as the production default.
-- Several readiness/degraded-mode behaviors may be intentional product policy. They remain edge cases because the current metrics and Helm alerts do not make the weakened guarantees sufficiently explicit.
+- Several readiness/degraded-mode behaviors may be intentional product policy. They remain edge cases because the current Helm alerts do not make the weakened guarantees sufficiently explicit.
 
 ## Suggested repair order
 
 1. Make metadata ingestion non-blocking on permanent bad events and bound the Valkey backlog.
 2. Close the media-create identity durability gap and unify provider job-ID validation.
-3. Fix connection retirement, shutdown writer joining, and essential-worker supervision.
+3. Fix connection retirement, join detached stream finalizers before metadata-epoch closure, and supervise essential workers.
 4. Make accounting reconcile signed deltas and model unknown usage explicitly.
-5. Make ordinary-generation ambiguity policy explicit; change media failover only if E-053 is reproduced.
+5. Make ordinary-generation ambiguity policy explicit; block side-effecting media failover on HTTP 5xx if E-053 is reproduced.
 6. Page runtime LKG without a fixed pre-filter limit; replace UUID-only cursors.
 7. Bound high-cardinality control-plane and response paths (pricing, routes, image count/bytes/FDs).
 8. Add JWKS/token stale-if-error behavior, then harden duplicate headers, multipart grammar, console cross-tab state, and deployment alerts.
