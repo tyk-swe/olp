@@ -26,3 +26,12 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    # The console-build stage stays on the Node LTS line CI actually tests:
+    # .github/actions/setup-node-pnpm pins node-version 24 and both
+    # package.json files declare engines.node ">=24". Majors past 24 also drop
+    # the bundled corepack that stage's `corepack enable` depends on, so a
+    # major bump here is a deliberate, repo-wide change rather than a
+    # dependency refresh.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
