@@ -280,7 +280,7 @@ type RawReservationScriptResponse = (i64, i64, String, i64, i64, i64);
 
 impl ReservationScriptResult {
     fn parse_value(value: &redis::Value) -> Result<Self, LimitError> {
-        let response = RawReservationScriptResponse::from_redis_value(value)
+        let response = RawReservationScriptResponse::from_redis_value_ref(value)
             .map_err(|_| LimitError::UnexpectedResponse)?;
         Self::parse(response)
     }

@@ -144,7 +144,7 @@ pub async fn run_request_metadata_consumer(
             let payload = entry
                 .map
                 .get("event")
-                .and_then(|value| redis::from_redis_value::<String>(value).ok());
+                .and_then(|value| redis::from_redis_value_ref::<String>(value).ok());
             let event = payload
                 .as_deref()
                 .and_then(|payload| serde_json::from_str::<RequestMetadataEvent>(payload).ok());
@@ -254,6 +254,11 @@ async fn checkpoint_request_metadata_consumer_health(
             let count = u64::try_from(data.count)
                 .map_err(|_| ValkeyAdapterError::InvalidState("pending count overflow"))?;
             (count, Some(timestamp))
+        }
+        _ => {
+            return Err(ValkeyAdapterError::InvalidState(
+                "unrecognized pending stream reply",
+            ));
         }
     };
     let groups: StreamInfoGroupsReply = connection.xinfo_groups(REQUEST_METADATA_STREAM).await?;
