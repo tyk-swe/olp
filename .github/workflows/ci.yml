@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install lint dependencies
@@ -59,7 +59,7 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.3
-      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+      - uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
         with:
           dockerfile: deploy/Dockerfile
           failure-threshold: warning
@@ -83,7 +83,7 @@ jobs:
       - name: Verify Helm and Compose contracts
         run: scripts/verify-helm-contract.sh deploy/helm
       - name: Enforce dependency bans, licenses, and sources
-        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           manifest-path: Cargo.toml
           command: check
@@ -96,7 +96,7 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -124,7 +124,7 @@ jobs:
       SQLX_OFFLINE: "true"
       NEXTEST_PROFILE: ci
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -152,7 +152,7 @@ jobs:
     # A cold sanitizer build is ~11min; replaying the seeded corpora is fast.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Derive the pinned fuzz toolchain
@@ -182,7 +182,7 @@ jobs:
       run:
         working-directory: console
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -206,7 +206,7 @@ jobs:
       run:
         working-directory: console
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -239,7 +239,7 @@ jobs:
       run:
         working-directory: console
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -250,6 +250,12 @@ jobs:
         with:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
+      # This job takes the prebuilt console artifact instead of running a
+      # build, so nothing has generated .svelte-kit/tsconfig.json yet, and
+      # console/tsconfig.json extends it. Playwright resolves that extends
+      # chain when it loads the test files and fails hard if it dangles.
+      - name: Generate SvelteKit types
+        run: pnpm exec svelte-kit sync
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Run Chromium end-to-end tests
@@ -273,7 +279,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -311,7 +317,7 @@ jobs:
       OLP_TEST_DATABASE_OWNER: olp
       OLP_VALKEY_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -364,7 +370,7 @@ jobs:
       PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/integration
       PLAYWRIGHT_OUTPUT_DIR: test-results/integration
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -425,7 +431,7 @@ jobs:
       OLP_E2E_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
       OLP_E2E_VALKEY_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -442,7 +448,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -540,7 +546,7 @@ jobs:
       run:
         working-directory: console
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -551,6 +557,11 @@ jobs:
         with:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
+      # Same as Console / Chromium: the prebuilt artifact means
+      # .svelte-kit/tsconfig.json does not exist yet, and Playwright refuses
+      # to load tests whose tsconfig extends a missing file.
+      - name: Generate SvelteKit types
+        run: pnpm exec svelte-kit sync
       - name: Install ${{ matrix.browser }}
         run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
       - name: Run ${{ matrix.label }} end-to-end tests
@@ -586,7 +597,7 @@ jobs:
         image: ghcr.io/shopify/toxiproxy:2.12.0@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
         ports: ["8474:8474", "15432:15432"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -640,7 +651,7 @@ jobs:
       OLP_DATABASE_URL: postgres://olp:olp@localhost:5432/olp
       OLP_VALKEY_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -666,7 +677,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-node-pnpm
@@ -694,7 +705,7 @@ jobs:
     # of fuzzing, so the campaign needs well over 20min on an empty rust-cache.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Derive the pinned fuzz toolchain
@@ -720,7 +731,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0

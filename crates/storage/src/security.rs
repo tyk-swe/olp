@@ -6,7 +6,7 @@ use aes_gcm::{
 };
 use argon2::{
     Algorithm, Argon2, Params, Version,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
 use base64::{
     Engine as _,
@@ -26,6 +26,8 @@ const API_KEY_PREFIX: &str = "olp_v2_";
 const LOOKUP_BYTES: usize = 6;
 const SECRET_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
+/// `Salt::RECOMMENDED_LENGTH`, the length `SaltString::generate` also used.
+const SALT_BYTES: usize = 16;
 const BOOTSTRAP_TOKEN_DOMAIN: &[u8] = b"olp:v2:bootstrap-setup-token:v1";
 
 #[must_use]
@@ -155,7 +157,7 @@ impl MasterKey {
         rand::rng().fill_bytes(&mut nonce);
         let ciphertext = cipher
             .encrypt(
-                Nonce::from_slice(&nonce),
+                &Nonce::from(nonce),
                 Payload {
                     msg: plaintext,
                     aad,
@@ -183,7 +185,7 @@ impl MasterKey {
             Aes256Gcm::new_from_slice(bytes).map_err(|_| SecurityError::InvalidMasterKey)?;
         let plaintext = cipher
             .decrypt(
-                Nonce::from_slice(&encrypted.nonce),
+                &Nonce::from(encrypted.nonce),
                 Payload {
                     msg: &encrypted.ciphertext,
                     aad,
@@ -324,8 +326,8 @@ impl AuthHmacKey {
         if secret.len() != SECRET_BYTES {
             return Err(SecurityError::InvalidSecretFormat);
         }
-        let mut mac =
-            <HmacSha256 as Mac>::new_from_slice(&self.0).expect("HMAC accepts keys of every size");
+        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
+            .expect("HMAC accepts keys of every size");
         mac.update(API_KEY_PREFIX.as_bytes());
         mac.update(lookup_id.as_bytes());
         mac.update(&secret);
@@ -404,8 +406,8 @@ impl AuthHmacKey {
     }
 
     fn scoped_mac(&self, domain: &[u8], parts: &[&[u8]]) -> HmacSha256 {
-        let mut mac =
-            <HmacSha256 as Mac>::new_from_slice(&self.0).expect("HMAC accepts keys of every size");
+        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
+            .expect("HMAC accepts keys of every size");
         mac.update(domain);
         for part in parts {
             mac.update(&(part.len() as u64).to_be_bytes());
@@ -415,8 +417,8 @@ impl AuthHmacKey {
     }
 
     fn digest(&self, lookup_id: &str, secret: &[u8]) -> [u8; 32] {
-        let mut mac =
-            <HmacSha256 as Mac>::new_from_slice(&self.0).expect("HMAC accepts keys of every size");
+        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
+            .expect("HMAC accepts keys of every size");
         mac.update(API_KEY_PREFIX.as_bytes());
         mac.update(lookup_id.as_bytes());
         mac.update(secret);
@@ -617,7 +619,14 @@ impl fmt::Debug for SessionMaterial {
 pub fn hash_password(password: &str) -> Result<String, SecurityError> {
     let params = Params::new(19_456, 2, 1, Some(32)).map_err(|_| SecurityError::PasswordHash)?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let salt = SaltString::generate(&mut OsRng);
+    // argon2 0.5 re-exports rand_core 0.6, whose `OsRng` is only present when
+    // some other crate happens to enable its `getrandom` feature. Seeding from
+    // the same CSPRNG the rest of this module uses keeps the salt independent
+    // of that unification accident.
+    let mut salt_bytes = Zeroizing::new([0_u8; SALT_BYTES]);
+    rand::rng().fill_bytes(salt_bytes.as_mut());
+    let salt =
+        SaltString::encode_b64(salt_bytes.as_ref()).map_err(|_| SecurityError::PasswordHash)?;
     argon2
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())

@@ -15,7 +15,7 @@ RUN pnpm build
 # reuses the expensive dependency compilation across source-only changes.
 # Cache mounts alone cannot do this: `cache-to: type=gha` exports layers,
 # not mount contents.
-FROM rust:1.97-bookworm@sha256:7d0723df719e7f213b69dc7c8c595985c3f4b060cfbee4f7bc0e347a86fe3b6a AS chef
+FROM rust:1.97-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa AS chef
 ENV CARGO_INCREMENTAL=0
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo install cargo-chef --locked --version 0.1.77
@@ -47,7 +47,7 @@ COPY tests/e2e ./tests/e2e
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release -p olp
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:ce0d66bc0f64aae46e6a03add867b07f42cc7b8799c949c2e898057b7f75a151
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e
 ARG OLP_VERSION=2.0.0
 LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.title="OpenLLMProxy" \

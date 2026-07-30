@@ -15,7 +15,6 @@ skip = [
     { name = "getrandom", version = "0.2.17" },
     { name = "getrandom", version = "0.3.4" },
     { name = "hashbrown", version = "0.17.1" },
-    { name = "hmac", version = "0.13.0" },
     { name = "http", version = "0.2.12" },
     { name = "http-body", version = "0.4.6" },
     { name = "r-efi", version = "5.3.0" },
@@ -24,6 +23,9 @@ skip = [
     { name = "rand_core", version = "0.10.1" },
     { name = "sha2", version = "0.11.0" },
     { name = "syn", version = "3.0.3" },
+    # reqwest 0.13 still builds on tower-http 0.6 while apps/olp is on 0.7;
+    # drop this once reqwest releases against 0.7.
+    { name = "tower-http", version = "0.6.11" },
     { name = "untrusted", version = "0.7.1" },
     { name = "windows-sys", version = "0.52.0" },
 ]
@@ -35,6 +37,9 @@ allow = [
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    # Boost Software License (permissive, OSI/FSF approved) — not the
+    # source-available BUSL-1.1. Reached via redis 1 -> xxhash-rust.
+    "BSL-1.0",
     "CDLA-Permissive-2.0",
     "ISC",
     "MIT",

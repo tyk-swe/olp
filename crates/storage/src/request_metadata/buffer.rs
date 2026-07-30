@@ -176,7 +176,7 @@ impl RequestMetadataReceiver {
                 Err(error) => {
                     self.record_abandoned(1).await;
                     return Err(RedisError::from((
-                        redis::ErrorKind::TypeError,
+                        redis::ErrorKind::Client,
                         "request metadata event serialization failed",
                         error.to_string(),
                     )));
@@ -191,7 +191,7 @@ impl RequestMetadataReceiver {
                     match tokio::time::timeout(STREAM_WRITE_TIMEOUT, write).await {
                         Ok(result) => result,
                         Err(_) => Err(RedisError::from((
-                            redis::ErrorKind::IoError,
+                            redis::ErrorKind::Io,
                             "request metadata stream write timed out",
                         ))),
                     };
