@@ -1,0 +1,558 @@
+# OpenLLMProxy / OLP exhaustive static audit
+
+**Audited artifact:** `olp-main(11)(1).zip`  
+**Archive commit marker:** `e75ea6d6729f99f4339d37d4694a54596ec4b6a2`  
+**Audit date:** 2026-07-30  
+**Scope:** Rust services and libraries, SvelteKit console, PostgreSQL migrations and queries, Valkey integration, provider egress, authentication/authorization, media-job lifecycle, Helm/Compose deployment, operational scripts, and GitHub Actions CI.
+
+## Verdict
+
+This is a mature, unusually defensive codebase. The authentication, OIDC, egress, secret-encryption, idempotency, streaming, and SQLx boundaries are materially better than typical gateway projects. I did **not** find a credible unauthenticated account-takeover, plaintext-secret persistence, SSRF bypass, SQL injection, ordinary stream-frame loss, or trusted-proxy spoofing path in this revision.
+
+It is **not release-safe as a zero-downtime Helm upgrade**, however. The chart runs destructive/renaming migrations as a pre-upgrade hook while old pods are still serving. Migration `0028` is not backward-compatible with the schema expected by the previous released binary. The current “upgrade rehearsal” cannot detect this because it never runs the N−1 binary against the migrated schema.
+
+The next most important defects are forced termination of otherwise valid long-running HTTP/2 requests, a token-per-minute limiter that can undercharge real usage, incident-response deadlock around live asynchronous media jobs, an unsafe restore-rehearsal identity check, public-login CPU/database amplification, and unbounded growth of a Valkey Stream sharing the hard-limit infrastructure.
+
+### Finding count
+
+| Severity | Count |
+|---|---:|
+| Critical | 1 |
+| High | 7 |
+| Medium | 21 |
+| Low | 13 |
+| Informational / externally unverifiable | 1 |
+| **Total** | **43** |
+
+Severity reflects likely impact, exploitability, and operational preconditions. “Confirmed” means the behavior follows directly from the supplied source. “Conditional” means impact depends on deployment topology, traffic shape, or operator behavior; the underlying code property is still present.
+
+---
+
+# Release blockers and high-severity findings
+
+## OLP-001 — Critical — Helm pre-upgrade migration breaks the still-running N−1 deployment
+
+**Classification:** availability, release engineering, data-plane compatibility  
+**Confidence:** confirmed
+
+**Evidence**
+
+- `deploy/helm/templates/migration-job.yaml:1-16` declares the migration Job as `helm.sh/hook: pre-install,pre-upgrade`.
+- `deploy/helm/templates/workloads.yaml:20-27` uses a rolling Deployment with `maxUnavailable: 0` and `maxSurge: 1`, so old pods remain live after the pre-upgrade hook succeeds.
+- `release-metadata.env:1-3` says the previous released production schema stopped at migration `0021`.
+- `crates/storage/migrations/0028_naming_consistency.sql:1-75` renames a live column, PostgreSQL enum types, tables, indexes, constraints, functions, and triggers in place.
+- `crates/storage/migrations/0028_naming_consistency.sql:183-230` also rewrites persisted provider/surface naming.
+
+**Failure mode**
+
+Helm runs migrations `0022` through `0029` before it replaces an old pod. The N−1 binary was built against the schema at `0021`; it necessarily uses the old column/table/type/value names. Once `0028` commits, old control and gateway pods can fail queries while they continue receiving traffic. In-place `ALTER ... RENAME`, enum/value rewrites, and large updates also acquire locks and can pause active traffic.
+
+This defeats the chart’s apparent zero-downtime rolling strategy and can produce a mixed-version outage during every affected upgrade.
+
+**Required fix**
+
+Use expand/contract migrations across releases:
+
+1. Expand with additive columns/tables/types and compatibility triggers/views.
+2. Deploy a binary that reads/writes both schemas.
+3. Backfill and verify.
+4. Switch reads to the new schema.
+5. Remove old objects only in a later release after no N−1 pods can exist.
+
+If zero-downtime compatibility is intentionally unsupported, stop presenting this as a rolling upgrade: quiesce traffic, terminate old pods, migrate under an explicit maintenance window, then start the new version.
+
+**Regression gate**
+
+Run an actual released N−1 image against the prior schema; start sustained control and inference traffic; run the current migration image; keep N−1 traffic running after migration; then roll to N. Any N−1 query error or request interruption fails the gate.
+
+---
+
+## OLP-002 — High — Routine HTTP connection aging forcibly truncates valid requests and streams
+
+**Classification:** availability, accounting integrity  
+**Confidence:** confirmed
+
+**Evidence**
+
+- `apps/olp/src/listener.rs:40-41` fixes connection age at five minutes and drain timeout at thirty seconds.
+- `apps/olp/src/listener.rs:303-342` calls Hyper graceful shutdown at max age, then returns and drops the connection after thirty seconds whether active work completed or not.
+- `crates/storage/src/configuration/validation.rs:86-126` accepts any positive `i32` route timeout; there is no upper bound compatible with the listener.
+- `crates/storage/src/configuration/route_lifecycle.rs:68-75` therefore permits overall timeouts up to `i32::MAX` milliseconds, about 24.86 days.
+
+**Failure mode**
+
+An HTTP/2 request beginning near connection age 4:59 receives roughly thirty-one seconds before the socket is destroyed, even if its route allows minutes or hours. Long streaming generations, uploads, downloads, and provider calls can be cut before terminal metadata/accounting frames are emitted. The limit is based on connection birth, so identical requests have nondeterministic effective deadlines.
+
+**Required fix**
+
+Use HTTP/2 GOAWAY to reject new streams while allowing existing streams to finish. Do not apply the process-shutdown drain deadline to routine connection rotation. Alternatively enforce a route/request maximum strictly below the minimum remaining connection lifetime, though that wastes HTTP/2 connection reuse and remains timing-sensitive.
+
+---
+
+## OLP-003 — High — The “hard” token-per-minute limit is not a hard upper bound
+
+**Classification:** policy enforcement, cost control  
+**Confidence:** confirmed
+
+**Evidence**
+
+- `apps/olp/src/gateway/limits.rs:104-183` estimates tokens using character-based heuristics and reserves a default 4,096 output tokens when the request omits an output cap.
+- `apps/olp/src/request_admission/limits.rs:338-410` has the analogous raw-body estimate.
+- `apps/olp/src/gateway/limits.rs:12-58` can reserve an additional parsed-request delta.
+- `crates/storage/src/limits.rs:96-121` reconciles only a refund: `reserved_tokens - actual_tokens`, clamped at zero. It performs no debit when actual usage exceeds the reservation.
+- `apps/olp/src/gateway/telemetry.rs:118-149` reconciles both leases but cannot recover an under-reservation because the storage primitive only refunds.
+
+**Failure mode**
+
+A model can return more than 4,096 tokens when no cap is supplied, and character/byte heuristics can underestimate token-dense input. Every request can consume more real tokens than the limiter records. A caller can therefore exceed the configured TPM ceiling repeatedly without a limiter rejection.
+
+**Required fix**
+
+Implement an atomic positive reconciliation debit in the same fixed-window state. Define what happens when the post-response debit crosses the limit—record debt into the current/next window, reject further requests until repaid, or require conservative bounded reservations. For genuinely hard limits, require a model-specific output cap and use a tokenizer or a proven upper bound rather than `chars / 4`.
+
+---
+
+## OLP-004 — High — Live asynchronous media jobs can prevent credential containment during an incident
+
+**Classification:** incident response, credential lifecycle  
+**Confidence:** confirmed
+
+**Evidence**
+
+- `crates/storage/src/configuration/resources/credentials.rs:25-158` rotates a credential by creating draft state; runtime remains on the old revision until activation.
+- `crates/storage/src/configuration/provider_lifecycle.rs:324-367` rejects provider activation when a non-deleted media job refers to a different historical credential/revision.
+- `crates/storage/src/configuration/resources/credentials.rs:292-314` rejects revocation of a credential referenced by a live media job.
+- `crates/storage/src/configuration/resources/providers.rs:184-213` rejects disabling a provider with live media jobs.
+- `crates/storage/src/configuration/route_lifecycle.rs:416-470` similarly preserves route targets needed by jobs.
+- Media jobs may remain relevant for up to thirty days (`crates/storage/src/media_jobs/reconciliation.rs:64-72`).
+
+**Failure mode**
+
+When a provider credential is compromised or revoked upstream, an operator can be unable to activate the replacement, revoke the old credential, or disable the provider because one historical asynchronous job is still live. The safety rule protecting job reconciliation becomes an incident-containment deadlock.
+
+**Required fix**
+
+Separate “job may use its historical runtime snapshot” from “operator may contain compromised credentials.” Add an owner-only forced containment operation that atomically disables new traffic, tombstones/cancels affected jobs, publishes a safe runtime generation, and records a high-severity audit event. Credential rotation should permit old jobs to retain immutable metadata without requiring the old secret to remain active for all provider traffic.
+
+---
+
+## OLP-005 — High — Restore rehearsal can wipe production when two URLs alias the same database
+
+**Classification:** destructive operational safety  
+**Confidence:** confirmed
+
+**Evidence**
+
+- `scripts/restore-rehearsal.sh:18-25` refuses only when the destination URL string exactly equals `OLP_DATABASE_URL`.
+- `scripts/restore-rehearsal.sh:47-65` drops `public` with `CASCADE` when `--replace` is supplied.
+
+**Failure mode**
+
+The same PostgreSQL database can be represented by different host aliases, IPv4 versus IPv6, URI encoding, query parameter ordering, service DNS names, or proxy endpoints. The string guard passes even though both URLs resolve to the same database, after which the script irreversibly drops the application schema.
+
+**Required fix**
+
+Connect through both URLs and compare server identity, database OID/name, and installation identity. Require a destination sentinel created specifically by the rehearsal harness and a one-time confirmation token. Refuse replacement when the destination contains a production installation marker, regardless of URL spelling. Prefer creating and dropping a scratch database internally rather than accepting an arbitrary destination.
+
+---
+
+## OLP-006 — High — Distributed login abuse can force excessive Argon2 work and billions of audit rows
+
+**Classification:** unauthenticated denial of service, storage amplification  
+**Confidence:** confirmed; exploit rate depends on source diversity and edge controls
+
+**Evidence**
+
+- `crates/storage/src/identity/auth_admission.rs:7-12` allows 60 local-login attempts per source, five per source-target, and **10,000 per minute globally**.
+- `apps/olp/src/management_api/auth.rs:267-320` performs Argon2id even for an unknown account, then records every admitted failure.
+- `crates/storage/src/store/sessions.rs:60-78` inserts one retained `audit_events` row per failure.
+- `crates/storage/src/maintenance.rs:70-85,174-180` defaults audit retention to 365 days and later deletes old audit rows without batching.
+
+**Failure mode**
+
+A distributed attacker can drive up to 166 expensive password hashes and 166 database inserts per second. At the global ceiling that is 14.4 million audit rows per day and roughly 5.26 billion per year before retention. The CPU cost will likely cause an outage before the theoretical row count is reached.
+
+**Required fix**
+
+Set the global admission ceiling from measured Argon2 capacity, not row-allocation concerns. Add a separate bounded password-work semaphore, edge/WAF admission, exponential source penalties, and aggregate or sample anonymous failures rather than writing one durable row each. Partition audit data and delete/drop in bounded chunks.
+
+---
+
+## OLP-007 — High — Request-metadata Stream growth is unbounded and shares the hard-limit Valkey
+
+**Classification:** availability, durability architecture  
+**Confidence:** confirmed
+
+**Evidence**
+
+- `crates/storage/src/request_metadata/buffer.rs:185-203` uses `XADD <stream> * event <payload>` with no `MAXLEN` or other retention bound.
+- `crates/storage/src/valkey.rs:87-215` retries PostgreSQL persistence and only acknowledges/deletes after commit.
+- `deploy/compose.yaml:16,71-85` uses the same Valkey service for request metadata, distributed limits, and runtime signaling, without an explicit memory ceiling.
+
+**Failure mode**
+
+During a prolonged PostgreSQL outage, consumer fault, or poison-event loop, accepted metadata accumulates indefinitely in Valkey. Memory and AOF disk growth can take down the same dependency used for hard request limits and runtime coordination, expanding an accounting outage into a data-plane outage. The local 8,192-event queue does not bound events already appended to the Stream.
+
+**Required fix**
+
+Separate durable metadata transport from the hard-limit Valkey, or enforce a measured maximum length/bytes with explicit loss accounting and backpressure before the shared instance is exhausted. Add stream-byte and oldest-entry-age alerts, a dead-letter path for persistent failures, capacity-based admission, and tested outage/recovery limits.
+
+---
+
+# Medium-severity product, security, and operational findings
+
+## OLP-008 — Medium — Concurrency lease TTL is derived from every route the key can access
+
+**Confidence:** confirmed
+
+`apps/olp/src/request_admission/limits.rs:286-315` selects the maximum overall timeout across all routes authorized for an API key, rather than the route selected for this request. Route timeout can approach 24.86 days. A crash or failed best-effort release can therefore leave a concurrency slot occupied for weeks and block unrelated short requests for the same broadly authorized key.
+
+**Fix:** reserve after route resolution with the selected route’s deadline; cap route and lease TTLs; retry failed releases or run a bounded stale-lease reaper.
+
+## OLP-009 — Medium — Media spool files survive process crashes outside the new process’s accounting
+
+**Confidence:** confirmed
+
+`apps/olp/src/media_spool.rs:57-82` creates a unique `olp-media-<pid>-<uuid>` directory and initializes its byte counter to zero. Cleanup exists only in `Drop` at `apps/olp/src/media_spool.rs:375-378`; aborts, SIGKILL, OOM, and node failures skip it. Helm mounts an `emptyDir` at `deploy/helm/templates/workloads.yaml:148-182`, which survives a container restart in the same Pod. Repeated crashes can fill the 2 GiB volume while each new process believes its 1 GiB budget is unused.
+
+**Fix:** use a stable pod-scoped root, scan and delete or account for stale epochs on startup, monitor actual filesystem free space, and make reservations conditional on both logical and physical capacity.
+
+## OLP-010 — Medium — Reconciliation lease expires before allowed provider work
+
+**Confidence:** confirmed
+
+`crates/storage/src/media_jobs/reconciliation.rs:41-104` grants a fixed two-minute cross-replica claim. `apps/olp/src/gateway/media_jobs.rs:346-367` executes reconciliation under the route’s unconstrained overall timeout. A provider call can outlive the lease, allowing another replica to claim the same job and issue duplicate poll/delete work; the original worker may then fail its claim-ID checkpoint.
+
+**Fix:** renew the claim while work is active, or derive it from the selected route deadline plus margin and enforce a maximum. Use a generation/fencing token on every provider-side transition.
+
+## OLP-011 — Medium — Authenticated management responses lack a global `no-store` policy
+
+**Confidence:** confirmed; exploitability depends on intermediary caching
+
+The management router at `apps/olp/src/router.rs:123-132,146-205` has no global `Cache-Control: no-store, private` layer. Only selected auth/OIDC/idempotency paths explicitly prevent caching. Cookie-authenticated GET responses containing users, providers, audit data, keys’ metadata, and configuration can be cached by a misconfigured reverse proxy or client cache.
+
+**Fix:** apply `Cache-Control: no-store, private` to authenticated `/api/v1/**` responses by default, then explicitly opt safe public resources out.
+
+## OLP-012 — Medium — Logout reports success after server-side revocation fails
+
+**Confidence:** confirmed
+
+`apps/olp/src/management_api/auth.rs:444-465` logs a session-revocation failure but still expires the browser cookies and returns 204. A copied token remains valid until expiry while the user believes logout succeeded.
+
+**Fix:** clear local cookies but return an explicit 503/problem response when revocation was not persisted; retry through a durable revocation path. Document that “logout all” should increment a user security version.
+
+## OLP-013 — Medium — API-key HMAC key has no overlap/keyring rotation path
+
+**Confidence:** confirmed design debt
+
+`crates/storage/src/security.rs:285-427` models `AuthHmacKey` as one 32-byte key. API-key verification uses only that key; stored digests cannot be recomputed because plaintext keys are intentionally absent. Changing the secret immediately invalidates every API key and changes keyed public-auth/bootstrap identities. Unlike the master encryption key, there is no active-plus-retained keyring.
+
+**Fix:** version HMAC digests, retain bounded verify-only keys during rotation, and provide an audited reissue/deprecation workflow. Store the digest-key version with each API key.
+
+## OLP-014 — Medium — Management accepts TPM values that runtime always rejects
+
+**Confidence:** confirmed
+
+`apps/olp/src/management_api/configuration/api_keys/policy.rs:14-16,150-154,208-231,423-451` accepts `tokens_per_minute` through `i64::MAX` and tests that boundary. `crates/storage/src/limits.rs:11-15,180-200` rejects values above `2^53-1` because Valkey Lua uses IEEE-754 doubles. Such a validly persisted policy makes every hard-limited request fail closed with a limiter error/503.
+
+**Fix:** use one shared domain type and maximum for API validation, storage, runtime compilation, and Lua. Add an activation-time invariant test for all persisted limits.
+
+## OLP-015 — Medium — Retention maintenance performs unbounded deletes/rollups in one transaction
+
+**Confidence:** confirmed
+
+`crates/storage/src/maintenance.rs:46-63` opens one transaction and holds an advisory transaction lock. It then performs unbounded request deletion (`95-99`), usage deletion plus aggregation (`105-151`), audit deletion (`174-180`), and several other cleanup operations through roughly line 293. Only receipt deletion is explicitly batched. After an outage or at high volume, one pass can generate huge WAL, hold locks for a long time, create vacuum debt, time out, roll back all work, and retry the same load every minute.
+
+**Fix:** process each dataset in bounded keyset batches with separate commits; partition high-volume time-series tables and drop old partitions; expose rows/time/WAL budgets and continuation cursors.
+
+## OLP-016 — Medium — The partitioned `requests` table effectively has one ever-growing default partition
+
+**Confidence:** confirmed architecture debt
+
+`crates/storage/migrations/0001_initial.sql:297-320` declares range partitioning by `started_at` but creates only `requests_default`. No migration or runtime partition manager creates future partitions. All rows therefore accumulate in one physical table, retention uses row deletion, and later attaching a real partition may require validating/scanning the default partition.
+
+**Fix:** create monthly partitions ahead of time, monitor default-partition spill, and detach/drop expired partitions. Add startup/maintenance checks that required future partitions exist.
+
+## OLP-017 — Medium — Configuration list APIs perform bounded but expensive N+1 queries
+
+**Confidence:** confirmed
+
+- `crates/storage/src/configuration/resources/api_keys.rs:4-54`: list + base record + scopes + routes, `1 + 3N` round trips.
+- `crates/storage/src/configuration/resources/routes.rs:4-53`: route drafts, `1 + 3N`.
+- `crates/storage/src/configuration/resources/routes.rs:344-475`: route revisions, `1 + 3N`.
+- `crates/storage/src/configuration/resources/routes.rs:398-475`: activated routes, approximately `1 + 4N`.
+
+At the permitted page size of 100, one request can require roughly 301–401 database round trips, making control-plane latency and pool occupancy highly sensitive to network distance.
+
+**Fix:** fetch child rows for all IDs with `WHERE ... = ANY($1)`, group in memory, or use deliberate JSON/array aggregates. Add query-count assertions to endpoint tests.
+
+## OLP-018 — Medium — Common request/health filters lack supporting composite indexes
+
+**Confidence:** high-confidence scaling debt; confirm with production `EXPLAIN (ANALYZE, BUFFERS)`
+
+Request listing filters by API key, operation, status, and error class in `crates/storage/src/operations/requests.rs:98-128,198-227`, while `0001_initial.sql:318-320` provides only time and `(route_slug, started_at)` indexes. Provider health joins attempts by provider and time in `crates/storage/src/operations/health.rs:93-119`; attempts have only a request-ID index in `0001_initial.sql:343`.
+
+**Fix:** derive indexes from measured query plans, likely beginning with `(provider_id, started_at)` on attempts and time-leading composites for frequently selected request dimensions. Avoid adding every possible combination blindly.
+
+## OLP-019 — Medium — Privileged bulk configuration inputs have no item-count limits
+
+**Confidence:** confirmed; authenticated manager precondition
+
+`apps/olp/src/management_api/configuration/routes/create.rs:18-40` accepts unbounded operations and targets. `crates/storage/src/configuration/route_lifecycle.rs:80-145` inserts and resolves them one at a time in a transaction. `apps/olp/src/management_api/configuration/providers/models.rs:337-399` accepts unbounded model discovery, and `crates/storage/src/configuration/resources/models.rs:153-230` performs per-model and per-capability queries. The 2 MiB body cap still permits thousands of tiny objects and long pool-blocking transactions.
+
+**Fix:** set explicit `max_items`, reject excessive upstream discovery responses, batch inserts/upserts, and bound transaction duration/work.
+
+## OLP-020 — Medium — Readiness alert permanently fires for valid single-component installs
+
+**Confidence:** confirmed
+
+`deploy/helm/templates/monitoring.yaml:5-35` creates ServiceMonitors only for enabled components. The `OLPReadinessAbsent` rule at `54-60` unconditionally requires both gateway and control series and uses `absent_over_time`. The chart explicitly permits disabling either component. A gateway-only or control-only deployment therefore receives a permanent critical alert.
+
+**Fix:** template each component’s expression only when that component and service are enabled; add Helm contract tests for every enabled/disabled matrix.
+
+## OLP-021 — Medium — Secret updates neither restart pods nor reload long-lived keys
+
+**Confidence:** confirmed for the supplied chart; impact depends on secret operator behavior
+
+`deploy/helm/templates/workloads.yaml:31-41,140-174` mounts external master/HMAC/bootstrap Secrets but does not include a secret checksum or version annotation in the Pod template. The process loads these keys at startup. Updating Secret contents therefore does not roll pods, and Kubernetes projected-volume updates do not imply application reload.
+
+**Fix:** make rotation an explicit operator workflow: version immutable Secret names or inject checksum annotations, stage keyrings before rolling, verify readiness, then retire old keys. Do not blindly checksum an externally managed secret unless Helm can read it reliably.
+
+## OLP-022 — Medium — Display names and other operator-facing identifiers accept bidi/control/invisible Unicode
+
+**Confidence:** confirmed UI/audit-integrity issue
+
+Setup and invitation display-name validation trims and counts characters but does not reject Unicode controls (`apps/olp/src/management_api/auth.rs:592-620`, `apps/olp/src/management_api/access.rs:860-884`). Provider/API-key/model names follow similar length-only validation (`crates/storage/src/configuration/validation.rs:9-55`, `apps/olp/src/management_api/configuration/api_keys/policy.rs:89-100`). Email validation is also structurally weak in `crates/storage/src/identity/invitations.rs:327-332`.
+
+An operator can create visually reordered or invisible names that impersonate another user/provider in the UI and audit trail.
+
+**Fix:** centralize identifier normalization; reject C0/C1 controls, bidi overrides/isolates, line separators, and most zero-width format characters; preserve original values only where protocol compatibility requires them. Render stable IDs beside security-sensitive names.
+
+## OLP-023 — Medium — Half-open circuit breaker can admit overlapping probes
+
+**Confidence:** confirmed
+
+`apps/olp/src/circuit.rs:58-76` treats a half-open probe lease as stale after the circuit’s fixed open duration (thirty seconds), independent of whether the original provider attempt is still running. Route/attempt timeouts may be much longer. A slow probe can therefore be joined by another probe every thirty seconds, contrary to the “one probe” invariant.
+
+**Fix:** bind the half-open lease to the attempt deadline, renew it, and complete it with a fencing generation. Alternatively cap attempt timeout below the lease. Consider distributed circuit state if cross-replica amplification matters.
+
+## OLP-031 — Medium — Default control-plane deployment is a single disruption-sensitive replica
+
+**Confidence:** confirmed default configuration
+
+`deploy/helm/values.yaml:73-93` defaults control to one replica, disables its PDB, and disables topology spread. Node drain, eviction, rollout, or process failure makes login and all management operations unavailable.
+
+**Fix:** default production profiles to at least two control replicas with a PDB and topology spread; provide a clearly labeled single-node/dev profile separately.
+
+---
+
+# Low-severity defects and maintainability/hardening debt
+
+## OLP-024 — Low — Missing asset paths return `index.html` with HTTP 200
+
+`apps/olp/src/router.rs:123-133` installs a global SPA fallback. `apps/olp/src/static_console.rs:47-84` intentionally serves the SPA for a missing path. Missing `.js`, `.css`, source-map, or image URLs therefore return HTML/200, causing MIME errors, hiding deployment mistakes, and permitting bad cache entries.
+
+**Fix:** use SPA fallback only for navigation-like paths; return 404 for asset extensions and reserved directories.
+
+## OLP-025 — Low — CSP omits `form-action`
+
+`apps/olp/src/static_console.rs:8-44` builds a strong CSP but does not set `form-action`. That directive does not inherit from `default-src` in the way operators often assume.
+
+**Fix:** add `form-action 'self'` (or `'none'` if forms are not required) and a regression assertion.
+
+## OLP-026 — Low — Client-controlled request IDs can spoof correlation and inflate cardinality
+
+`apps/olp/src/router.rs:166-168,318-329` preserves a supplied request ID; the test at `439-448` locks in that behavior. Header parsing prevents CRLF injection, but arbitrary client values can collide with internal IDs or create high-cardinality traces/logs.
+
+**Fix:** generate an internal UUID unconditionally, validate and length-limit any client correlation ID, and store it in a separate field/header.
+
+## OLP-027 — Low — Duplicate singular security headers are not rejected consistently
+
+Authorization, Origin, CSRF, Idempotency-Key, and `If-Match` paths generally use `HeaderMap::get`, while repeated Cookie handling is explicitly hardened. A proxy and backend can disagree about first/last duplicate semantics, creating request-smuggling-adjacent policy ambiguity even without a demonstrated bypass in this code.
+
+**Fix:** reject duplicates for all semantically singular security headers at the outer boundary and test first/last/comma-joined variants.
+
+## OLP-028 — Low — Poisonable standard locks can turn one panic into persistent failures
+
+Transport registry, observability cache, reservation state, and circuit state use `std::sync::{Mutex,RwLock}` with `expect` in `apps/olp/src/state.rs:214-227`, `apps/olp/src/observability.rs:124-168`, `apps/olp/src/request_admission/limits.rs:71-134`, and `apps/olp/src/circuit.rs:44-145`. No panic-inside-lock path was proven, so this is debt rather than an active defect. If one occurs, later requests can repeatedly panic on poison.
+
+**Fix:** keep lock-held code trivial and non-panicking, recover explicitly from poison where safe, or use synchronization primitives whose failure model matches process-level panic recovery.
+
+## OLP-029 — Low — `ApiState::new` panics when the temporary spool cannot be created
+
+`apps/olp/src/state.rs:83-84` uses a panic-producing constructor path. Production startup appears to use explicit spool creation, but embedded/test callers can terminate the process for an ordinary filesystem/configuration error.
+
+**Fix:** return `Result<ApiState, StartupError>` and keep panic-only constructors under test helpers.
+
+## OLP-030 — Low — IPv6 public-egress admission depends on a hand-maintained positive allocation list
+
+`crates/providers/src/http_egress.rs:81-104` hard-codes IANA global-unicast allocations “as of 2026-07.” This is security-conservative, but newly allocated public ranges will be denied until code is released, creating a future availability failure.
+
+**Fix:** prefer a maintained special-purpose-range dataset/library, test it against a pinned IANA snapshot, and automate drift alerts. Continue blocking private/special ranges by negative policy.
+
+## OLP-032 — Low — Chart has no NetworkPolicy and exposes observability cluster-wide
+
+No NetworkPolicy template is present. `deploy/helm/templates/service.yaml:27-47` creates ClusterIP observability services. Any permitted workload in the cluster can reach those endpoints unless the cluster supplies external policy.
+
+**Fix:** offer opt-in/default-deny ingress and egress NetworkPolicies, allowing only ingress controllers, Prometheus, PostgreSQL, Valkey, DNS, and approved provider egress.
+
+## OLP-033 — Low — Gateway topology spread is best-effort rather than protective
+
+`deploy/helm/values.yaml:64-68` uses `whenUnsatisfiable: ScheduleAnyway`. Both default gateway replicas may co-locate on one node, weakening the apparent two-replica availability guarantee.
+
+**Fix:** use `DoNotSchedule` in a production profile or pair preferred spreading with required pod anti-affinity where the cluster size permits it.
+
+---
+
+# CI and release-pipeline findings
+
+## CI-001 — High — Upgrade rehearsal is not an N−1 compatibility rehearsal
+
+**Confidence:** confirmed
+
+`.github/workflows/ci.yml:642-684` builds only the current binary. `scripts/ci/run-upgrade-rehearsal.sh:49-100` and `scripts/upgrade-rehearsal.sh:139-175` use that same binary to create/migrate/verify prior-schema fixtures. They never run the previous released image concurrently after current migrations. This is why OLP-001 can pass CI.
+
+**Fix:** fetch/build the exact previous release identified by immutable metadata, start it against schema `0021`, run real traffic, execute the current migration, verify N−1 remains healthy, then roll N. Keep fixtures for every supported upgrade edge.
+
+## CI-002 — Medium — Final-image vulnerability scanning does not run on pull requests
+
+`.github/workflows/ci.yml:446-489` builds and smoke-tests amd64 on PRs, but SBOM generation and Trivy scanning are conditional on push/schedule/manual events. A Dockerfile/base-image/native-package change can merge without a final-image OS/package vulnerability gate.
+
+**Fix:** run the amd64 Trivy scan on PRs; retain scheduled rescans for newly disclosed CVEs. Cache the database to control latency.
+
+## CI-003 — Medium — Several compatibility and failure-mode gates run only after merge
+
+Firefox, WebKit, mobile Chromium (`ci.yml:526-582`), HA/Toxiproxy (`583-641`), upgrade rehearsal (`642-684`), bounded fuzzing (`711-737`), and arm64 image validation (`739-791`) run only on push/schedule/manual events. Regressions can therefore land on the protected branch and be discovered afterward.
+
+**Fix:** run affected full-tier jobs on PRs selected by path/risk labels, and require them for migration, transport, listener, Helm, browser, and architecture-sensitive changes. At minimum, make N−1 upgrade compatibility pre-merge.
+
+## CI-004 — Medium — Coverage gate is a coarse 51% global line threshold
+
+`.github/workflows/ci.yml:119-147` enforces only `--fail-under-lines 51` across the entire workspace. No branch/function/per-crate or security-critical-module floors exist. Large well-tested modules can mask complete loss of coverage in auth, limiter, migration, egress, or cancellation code.
+
+**Fix:** keep a global floor but add non-decreasing diff coverage and per-package/critical-path thresholds; report branch coverage. Do not optimize for an arbitrary high aggregate percentage.
+
+## CI-005 — Medium — Destructive restore safety is not tested against database aliases
+
+The backup-manifest self-test passes, but there is no test that two syntactically distinct URLs pointing at the same server/database are rejected before `DROP SCHEMA`. This leaves OLP-005 unguarded.
+
+**Fix:** add integration cases using hostname aliases and query variants, and make the script compare database identity rather than strings.
+
+## CI-006 — Low — SBOMs are ephemeral and no image signing/provenance workflow is present
+
+`.github/workflows/ci.yml:471-497,767-791` uploads SBOMs for seven days. The supplied artifact has no workflow that signs images, emits durable SLSA-style provenance, or attaches SBOMs to a release. An external release system may exist; it was not included.
+
+**Fix:** generate SBOM/provenance from the pushed digest, sign keylessly or with managed keys, verify signatures during deployment, and retain release artifacts for the release lifetime.
+
+## CI-007 — Low — One 813-line workflow duplicates substantial infrastructure setup
+
+`.github/workflows/ci.yml` contains all tiers, services, cache setup, image logic, and aggregation in one file. The custom setup actions help, but changes remain difficult to review and repeated service definitions can drift.
+
+**Fix:** split reusable workflows by Rust, console, integration, image, and release/upgrade concerns; keep one small required-gate orchestrator.
+
+## CI-008 — Low — `make shellcheck` cannot validate a source/release archive
+
+`Makefile:108-112` enumerates scripts with `git ls-files`. The supplied source archive has no `.git`, so the target fails even though every script is present. This weakens reproducible release-artifact validation.
+
+**Fix:** fall back to `find` when not in a worktree, while preserving tracked-file behavior in Git checkouts.
+
+## CI-009 — Informational — Repository-side SAST/dependency-review coverage cannot be established
+
+The artifact contains advisory audits and supply-chain pin checks, but no repository workflow for generalized SAST, secret scanning, or pull-request dependency review. GitHub organization/repository settings are outside the archive and may provide these controls.
+
+**Action:** document which controls are enforced externally and add an in-repository gate where external settings cannot be relied upon.
+
+## CI-010 — Low — Image scans explicitly ignore vulnerabilities without a published fix
+
+`.github/workflows/ci.yml:480-489,775-783` uses `ignore-unfixed: true`. This is a reasonable availability policy in many projects, but it means known high/critical vulnerabilities remain green until a fix exists, regardless of exploitability or compensating controls.
+
+**Fix:** keep the merge policy if desired, but publish the complete report, define an exception/SLA process, and separately fail on known-exploited or reachable vulnerabilities even when no vendor fix is available.
+
+---
+
+# Findings deliberately rejected after re-audit
+
+These were plausible from a shallow pass or from older revisions, but the supplied revision contains effective controls. They should **not** be filed as bugs without new evidence.
+
+1. **“First browser can claim initial ownership.”** Rejected. Setup is keyed by a one-time bootstrap token, exact-origin checked, and serialized with a PostgreSQL advisory transaction lock (`apps/olp/src/request_admission.rs:583-615`, `crates/storage/src/store/setup.rs:44-60`, `apps/olp/src/cli/startup.rs:93-116`).
+2. **Trusted-proxy/X-Forwarded-For spoofing.** Rejected. Direct clients cannot supply trusted forwarding identity, trusted chains are parsed strictly, and missing peer attribution fails closed.
+3. **OIDC account takeover through weak token checks.** Rejected. The implementation enforces asymmetric algorithms, unique `kid`, issuer, audience/`azp`, nonce, PKCE, `iat`/`exp`/`auth_time`, exact flow/session binding, one-shot consumption, DNS pinning, no redirects, and bounded bodies.
+4. **Ordinary streaming frames are dropped by a lossy channel.** Rejected. The stream path uses bounded backpressure and a separately ordered terminal tail (`apps/olp/src/streaming_response.rs:74-293`).
+5. **Cancellation universally leaks token/concurrency reservations.** Rejected. Detached cleanup/reconciliation paths and tests exist. OLP-003 is narrower: under-reservation is never positively debited.
+6. **Provider custom endpoints permit straightforward SSRF.** Rejected. HTTPS validation, userinfo/query/fragment restrictions, public DNS validation and pinning, disabled redirects/proxy/retries, periodic revalidation, bounded bodies, and disabled transparent compression are present.
+7. **Plaintext provider credentials are persisted.** Rejected. AES-GCM envelopes use AAD and a versioned master-key rotation model; bearer and session material use high entropy and appropriate keyed/constant-time verification.
+8. **Idempotency rows can remain permanently `in_progress`.** Rejected. Mutations claim and finalize within transaction boundaries; rollback removes incomplete claims.
+9. **Last active owner can be removed by a simple race.** Rejected. The invariant is enforced in atomic storage operations.
+10. **Route deletion automatically strands historical media jobs.** Rejected. The lifecycle deliberately preserves historical runtime/provider references. The real problem is the inverse containment deadlock in OLP-004.
+11. **Frontend contains direct HTML/eval/postMessage injection primitives.** Rejected. No `{@html}`, `innerHTML`, `eval`, or dangerous cross-window message handling was found in the supplied console source; `localStorage` use is limited to theme state.
+12. **Unsafe Rust is used in production.** Rejected. Workspace policy forbids unsafe code; textual “unsafe” hits are CSP strings/comments/test-only language rather than unsafe blocks.
+
+---
+
+# Positive controls worth preserving
+
+- Workspace-wide `unsafe_code = "forbid"` policy.
+- SQLx offline metadata discipline: the repository check validated 371 typed queries and 27 typed row models.
+- SHA/digest pinning for GitHub Actions and container services.
+- Strong OIDC state/nonce/PKCE/session binding and egress restrictions.
+- Keyed API-key verification, high-entropy bearer/session material, Argon2id passwords, constant-time verification, AES-GCM envelopes with AAD, and retained decrypt-only master-key versions.
+- Strict trusted-proxy parsing and fail-closed source attribution.
+- Exact-origin and CSRF enforcement for cookie-authenticated mutations.
+- Runtime-generation publication and transactional idempotency patterns.
+- Bounded provider response bodies, disabled transparent compression, no redirects/proxy/retries on protected egress clients.
+- Bounded stream backpressure with explicit terminal accounting.
+- Required PR tier already includes Rust formatting/Clippy, coverage, seeded fuzz replay, console checks, Chromium, SDK compatibility, PostgreSQL/Valkey integration, E2E, production-image smoke, and advisory audits.
+
+---
+
+# Verification performed
+
+## Executed successfully in the supplied environment
+
+- `scripts/check-release-version.sh` — release metadata consistent at `2.0.0`.
+- `scripts/check-supply-chain-pins.sh` — immutable supply-chain references verified.
+- `scripts/check-storage-sqlx.sh` — 371 queries and 27 typed row models passed policy.
+- `scripts/test-backup-manifest.sh` — contract tests passed.
+- `bash -n` over every shell script — passed.
+- Repository-wide structural/source review over 358 Rust files (~111k lines), 83 TypeScript files, 67 Svelte files, 29 migrations, deployment templates, scripts, and the 813-line CI workflow.
+
+## Not executable in this environment
+
+The audit container did not provide `rustc`, `cargo`, `pnpm`, Helm, Docker, ShellCheck, PostgreSQL, or Valkey, and external toolchain provisioning was unavailable. Therefore the following were not independently rerun:
+
+- Cargo build, Clippy, tests, nextest, fuzz targets, or llvm-cov.
+- Frontend typecheck/lint/unit/browser tests.
+- SQL integration, HA/Toxiproxy, SDK smoke, or E2E suites.
+- Helm schema/template rendering.
+- Container build, SBOM generation, and Trivy scan.
+- Live PostgreSQL `EXPLAIN`, lock, migration, restore-alias, and mixed-version tests.
+
+A configured CI file is evidence of intent, not proof that its current run is green. Findings above marked “confirmed” are based on direct source semantics rather than an assumed CI result.
+
+---
+
+# Recommended remediation order
+
+1. **Stop the release/upgrade path:** replace migration `0028` with expand/contract sequencing or declare and implement maintenance-mode upgrades; add true N−1 mixed-version CI.
+2. **Protect active requests:** remove the thirty-second forced close from routine HTTP/2 connection aging and add long-stream tests around the age boundary.
+3. **Make limits truthful:** implement positive token reconciliation; align policy maxima with Lua-safe values; make concurrency TTL route-specific.
+4. **Restore incident containment:** add forced provider/credential disable and job tombstoning that works while asynchronous jobs exist.
+5. **Harden unauthenticated resource admission:** cap Argon2 work, lower the global login ceiling, aggregate failure audits, and partition/batch retention.
+6. **Bound durable queues and spool state:** isolate/bound the request-metadata Stream and scavenge media spool epochs after crashes.
+7. **Fix destructive operations:** replace URL-string restore guards with database identity and sentinel verification.
+8. **Repair background/data scaling:** bounded maintenance transactions, real time partitions, batched configuration reads/writes, and measured indexes.
+9. **Close control/deployment gaps:** global no-store, truthful logout failure, HMAC keyring rotation, conditional alerts, secret rollout workflow, and control-plane HA defaults.
+10. **Move risk-selected full CI left:** image scan, N−1 upgrade, HA, browser, fuzz, and arm64 jobs on relevant pull requests.
+
+---
+
+# Minimal acceptance tests for the top defects
+
+1. **Mixed-version migration:** N−1 pods continuously perform login, user/config reads, route execution, metadata ingestion, and media reconciliation while N migrations run. Zero errors are allowed before N rollout.
+2. **Connection age:** open HTTP/2 at T=0; start a stream at T=4m59s lasting two minutes; verify complete body, terminal event, metadata event, lease release, and no protocol reset.
+3. **TPM:** reserve 4,096, report 8,192 actual, then prove the next request is rejected/deferred according to policy and total window accounting is at least 8,192.
+4. **Credential containment:** create a live thirty-day media job, mark its credential compromised, force-disable the provider, activate a replacement, and prove no new call can use the old secret.
+5. **Restore identity:** present two different URLs to the same DB and assert the script exits before any DDL; test DNS alias, IPv4/IPv6, parameter order, and proxy endpoint variants.
+6. **Login overload:** drive distributed unknown-account attempts at the configured edge rate and assert bounded password tasks, bounded audit writes, stable DB pool latency, and predictable 429s.
+7. **Metadata outage:** stop PostgreSQL for the documented maximum outage and prove Valkey memory/disk cannot exceed its reserved envelope or impair limiter operations.
+8. **Crash spool:** fill part of the spool, SIGKILL the process repeatedly, restart in the same Pod volume, and prove stale files are reclaimed/accounted before admission.
