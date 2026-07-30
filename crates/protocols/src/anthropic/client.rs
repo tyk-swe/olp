@@ -5,6 +5,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::client::{AggregateError, aggregate_generation};
+use crate::extensions::{PointerExtensionError, apply_response_extensions};
 
 use super::{ContentBlock, MessagesResponse, Role, TextBlock, ToolUseBlock, Usage};
 
@@ -105,61 +106,10 @@ fn apply_extensions(
     response: MessagesResponse,
     extensions: &BTreeMap<String, Value>,
 ) -> Result<MessagesResponse, ClientEncodeError> {
-    let mut value = serde_json::to_value(response).map_err(ClientEncodeError::Json)?;
-    let mut entries = extensions.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(pointer, _)| pointer_depth(pointer));
-    for (pointer, extension) in entries {
-        insert_pointer(&mut value, pointer, extension.clone())?;
-    }
-    serde_json::from_value(value).map_err(ClientEncodeError::Json)
-}
-
-fn insert_pointer(root: &mut Value, pointer: &str, value: Value) -> Result<(), ClientEncodeError> {
-    let segments = pointer
-        .strip_prefix('/')
-        .filter(|pointer| !pointer.is_empty())
-        .ok_or(ClientEncodeError::Extension)?
-        .split('/')
-        .map(|segment| segment.replace("~1", "/").replace("~0", "~"))
-        .collect::<Vec<_>>();
-    if segments.len() > 24 {
-        return Err(ClientEncodeError::Extension);
-    }
-    let (terminal, parents) = segments.split_last().ok_or(ClientEncodeError::Extension)?;
-    let mut current = root;
-    for segment in parents {
-        current = match current {
-            Value::Object(object) => object.get_mut(segment),
-            Value::Array(array) => segment
-                .parse::<usize>()
-                .ok()
-                .and_then(|index| array.get_mut(index)),
-            _ => None,
-        }
-        .ok_or(ClientEncodeError::Extension)?;
-    }
-    match current {
-        Value::Object(object) if !object.contains_key(terminal) => {
-            object.insert(terminal.clone(), value);
-            Ok(())
-        }
-        Value::Array(array) => {
-            let index = terminal
-                .parse::<usize>()
-                .map_err(|_| ClientEncodeError::Extension)?;
-            if index <= array.len() {
-                array.insert(index, value);
-                Ok(())
-            } else {
-                Err(ClientEncodeError::Extension)
-            }
-        }
-        _ => Err(ClientEncodeError::Extension),
-    }
-}
-
-fn pointer_depth(pointer: &str) -> usize {
-    pointer.bytes().filter(|byte| *byte == b'/').count()
+    apply_response_extensions(response, extensions).map_err(|error| match error {
+        PointerExtensionError::InvalidPath(_) => ClientEncodeError::Extension,
+        PointerExtensionError::Json(error) => ClientEncodeError::Json(error),
+    })
 }
 
 #[cfg(test)]

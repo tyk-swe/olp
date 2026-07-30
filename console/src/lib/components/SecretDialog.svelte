@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Dialog } from 'bits-ui';
   import { onMount, type Snippet } from 'svelte';
 
   let {
@@ -18,19 +17,16 @@
     onClose?: () => void;
   } = $props();
 
-  let dialogOpen = $state(true);
+  let dialog: HTMLDialogElement;
 
   onMount(() => {
     document.body.classList.add('secret-dialog-open');
+    dialog.showModal();
     return () => document.body.classList.remove('secret-dialog-open');
   });
 
   function close() {
-    dialogOpen = false;
-  }
-
-  function handleOpenChangeComplete(value: boolean) {
-    if (!value) onClose();
+    dialog.close();
   }
 
   function preventDismiss(event: Event) {
@@ -38,51 +34,44 @@
   }
 </script>
 
-<Dialog.Root bind:open={dialogOpen} onOpenChangeComplete={handleOpenChangeComplete}>
-  <Dialog.Portal>
-    <Dialog.Overlay class="secret-overlay" />
-    <Dialog.Content
-      class={`secret-dialog card${size === 'wide' ? ' wide' : ''}`}
-      trapFocus
-      preventScroll={false}
-      onEscapeKeydown={preventDismiss}
-      onInteractOutside={preventDismiss}
-    >
-      <p class="eyebrow">{eyebrow}</p>
-      <Dialog.Title level={2} class="dialog-title">{title}</Dialog.Title>
-      <Dialog.Description class="dialog-description">{description}</Dialog.Description>
-      {@render children(close)}
-    </Dialog.Content>
-  </Dialog.Portal>
-</Dialog.Root>
+<dialog
+  class="secret-dialog card"
+  class:wide={size === 'wide'}
+  bind:this={dialog}
+  aria-labelledby="secret-dialog-title"
+  aria-describedby="secret-dialog-description"
+  oncancel={preventDismiss}
+  onclose={() => onClose()}
+>
+  <p class="eyebrow">{eyebrow}</p>
+  <h2 id="secret-dialog-title" class="dialog-title">{title}</h2>
+  <p id="secret-dialog-description" class="dialog-description">{description}</p>
+  {@render children(close)}
+</dialog>
 
 <style>
   :global(body.secret-dialog-open) { overflow: hidden; }
 
-  :global(.secret-overlay) {
-    position: fixed;
-    z-index: 80;
-    inset: 0;
+  .secret-dialog::backdrop {
     background: rgb(11 17 30 / 62%);
     backdrop-filter: blur(4px);
   }
 
-  :global(.secret-dialog) {
+  .secret-dialog {
     position: fixed;
-    z-index: 81;
     top: 2rem;
-    left: 50%;
     width: min(calc(100% - 2rem), 38rem);
     max-height: calc(100dvh - 4rem);
+    margin: 0 auto;
     overflow-y: auto;
     padding: clamp(1.25rem, 4vw, 2rem);
+    color: var(--foreground);
     box-shadow: var(--shadow-md);
-    transform: translateX(-50%);
   }
 
-  :global(.secret-dialog.wide) { width: min(calc(100% - 2rem), 56rem); }
+  .secret-dialog.wide { width: min(calc(100% - 2rem), 56rem); }
 
-  :global(.dialog-title) {
+  .dialog-title {
     margin: 0;
     font-size: clamp(1.5rem, 4vw, 2rem);
     font-weight: 730;
@@ -90,13 +79,13 @@
     line-height: 1.15;
   }
 
-  :global(.dialog-description) { margin: .65rem 0 1rem; color: var(--foreground-muted); }
+  .dialog-description { margin: .65rem 0 1rem; color: var(--foreground-muted); }
 
   @media (max-width: 38rem) {
-    :global(.secret-dialog) { top: .75rem; max-height: calc(100dvh - 1.5rem); }
+    .secret-dialog { top: .75rem; max-height: calc(100dvh - 1.5rem); }
   }
 
   @media (forced-colors: active) {
-    :global(.secret-overlay) { background: Canvas; opacity: .85; }
+    .secret-dialog::backdrop { background: Canvas; opacity: .85; }
   }
 </style>

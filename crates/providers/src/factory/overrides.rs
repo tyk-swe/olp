@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::openai::OpenAiConnector;
 
-use super::assembly::{ConcreteConnector, ConcreteProvider, ProviderFacade};
+use super::assembly::{ConcreteConnector, ProviderFacade};
 
 #[derive(Clone, Default)]
 pub struct OpenAiConnectorOverrideRegistry {
@@ -33,10 +33,8 @@ impl OpenAiConnectorOverrideRegistry {
             .get(&provider_id)
             .cloned()
             .map(|connector| ProviderFacade {
-                inner: ConcreteProvider {
-                    kind,
-                    connector: ConcreteConnector::OpenAi(connector),
-                },
+                kind,
+                connector: ConcreteConnector::OpenAi(connector),
             })
     }
 }

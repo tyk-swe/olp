@@ -80,12 +80,12 @@ impl RouteSlug {
         }
 
         let bytes = value.as_bytes();
+        let is_alphanumeric = |byte: &u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
         let starts_and_ends_with_alphanumeric =
-            bytes.first().is_some_and(u8::is_ascii_lowercase_or_digit)
-                && bytes.last().is_some_and(u8::is_ascii_lowercase_or_digit);
+            bytes.first().is_some_and(is_alphanumeric) && bytes.last().is_some_and(is_alphanumeric);
         let valid_characters = bytes
             .iter()
-            .all(|byte| byte.is_ascii_lowercase_or_digit() || *byte == b'-');
+            .all(|byte| is_alphanumeric(byte) || *byte == b'-');
         let valid_separators = !value.contains("--");
 
         if !starts_and_ends_with_alphanumeric || !valid_characters || !valid_separators {
@@ -98,16 +98,6 @@ impl RouteSlug {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-trait AsciiSlugByte {
-    fn is_ascii_lowercase_or_digit(&self) -> bool;
-}
-
-impl AsciiSlugByte for u8 {
-    fn is_ascii_lowercase_or_digit(&self) -> bool {
-        self.is_ascii_lowercase() || self.is_ascii_digit()
     }
 }
 

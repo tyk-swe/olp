@@ -11,6 +11,7 @@ use super::super::extensions::collect_extra;
 use super::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::errors::ResponsesCodecError;
 use super::helpers::collect_object_extra;
+use crate::CanonicalEventBuilder as ResponsesEventBuilder;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct ResponseObject {
@@ -129,42 +130,6 @@ pub fn decode_response_object(
     }
     builder.push(CanonicalEventKind::Done);
     Ok(builder.events)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn response_rate_limit_error_is_retryable() {
-        let events = decode_response_object(ResponseObject {
-            id: "resp_test".to_owned(),
-            object: "response".to_owned(),
-            created_at: 1,
-            status: "failed".to_owned(),
-            model: "gpt-test".to_owned(),
-            output: Vec::new(),
-            usage: None,
-            error: Some(ResponseErrorBody {
-                code: "rate_limit_exceeded".to_owned(),
-                message: "slow down".to_owned(),
-                extra: BTreeMap::new(),
-            }),
-            incomplete_details: None,
-            extra: BTreeMap::new(),
-        })
-        .unwrap();
-
-        let error = events
-            .iter()
-            .find_map(|event| match &event.kind {
-                CanonicalEventKind::Error { error } => Some(error),
-                _ => None,
-            })
-            .expect("failed response must emit a canonical error");
-        assert_eq!(error.class, ErrorClass::RateLimit);
-        assert!(error.retryable);
-    }
 }
 
 fn decode_response_output_item(
@@ -294,14 +259,38 @@ fn collect_response_usage_extensions(
     }
 }
 
-#[derive(Default)]
-struct ResponsesEventBuilder {
-    events: Vec<CanonicalEvent>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl ResponsesEventBuilder {
-    fn push(&mut self, kind: CanonicalEventKind) {
-        let sequence = self.events.len().try_into().unwrap_or(u64::MAX);
-        self.events.push(CanonicalEvent::new(sequence, kind));
+    #[test]
+    fn response_rate_limit_error_is_retryable() {
+        let events = decode_response_object(ResponseObject {
+            id: "resp_test".to_owned(),
+            object: "response".to_owned(),
+            created_at: 1,
+            status: "failed".to_owned(),
+            model: "gpt-test".to_owned(),
+            output: Vec::new(),
+            usage: None,
+            error: Some(ResponseErrorBody {
+                code: "rate_limit_exceeded".to_owned(),
+                message: "slow down".to_owned(),
+                extra: BTreeMap::new(),
+            }),
+            incomplete_details: None,
+            extra: BTreeMap::new(),
+        })
+        .unwrap();
+
+        let error = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                CanonicalEventKind::Error { error } => Some(error),
+                _ => None,
+            })
+            .expect("failed response must emit a canonical error");
+        assert_eq!(error.class, ErrorClass::RateLimit);
+        assert!(error.retryable);
     }
 }

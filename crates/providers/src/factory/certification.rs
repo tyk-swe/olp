@@ -14,7 +14,7 @@ use crate::openai::{
     CompatibleCapability, CompatibleCapabilityCertificationError, NativeOpenAiCertificationEvidence,
 };
 
-use super::assembly::{ConcreteConnector, ConcreteProvider};
+use super::assembly::{ConcreteConnector, ProviderFacade};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityCertificationEvidence {
@@ -83,8 +83,8 @@ pub fn certifiable_capabilities(
         })
 }
 
-impl ConcreteProvider {
-    pub(super) async fn certify_capability(
+impl ProviderFacade {
+    pub async fn certify_capability(
         &self,
         upstream_model: &str,
         capability: CompatibleCapability,

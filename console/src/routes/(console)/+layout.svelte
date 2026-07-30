@@ -6,7 +6,6 @@
   import { currentSession, logout } from '$lib/api/auth';
   import { getSetupStatus } from '$lib/api/setup';
   import { authLifecycle, type AuthenticationSnapshot } from '$lib/auth/lifecycle';
-  import { currentRelativeDestination } from '$lib/auth/paths';
   import AppShell from '$lib/components/AppShell.svelte';
 
   let { children } = $props();
@@ -16,7 +15,7 @@
   let signingOut = $state(false);
 
   function loginDestination() {
-    const returnTo = currentRelativeDestination(page.url);
+    const returnTo = page.url.pathname + page.url.search + page.url.hash;
     return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}`;
   }
 

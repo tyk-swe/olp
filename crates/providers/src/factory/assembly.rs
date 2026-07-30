@@ -8,12 +8,9 @@ use crate::bedrock::{
     BedrockConnector, BedrockCredentials, StaticCredentials as BedrockStaticCredentials,
 };
 use crate::gemini::{GeminiApiKey, GeminiConnector};
-use crate::openai::{
-    CompatibleCapability, CompatibleCapabilityCertificationError, OpenAiApiKey, OpenAiConnector,
-};
+use crate::openai::{OpenAiApiKey, OpenAiConnector};
 use crate::vertex::VertexConnector;
 
-use super::certification::CapabilityCertificationEvidence;
 #[cfg(any(test, feature = "test-util"))]
 use super::configuration::validate_connector_configuration_with_policy;
 use super::configuration::{
@@ -102,9 +99,7 @@ impl ProviderFactory {
             }
             ProviderCredential::AwsStatic(value) => BorrowedCredential::Bytes(value.as_slice()),
         };
-        build_connector(config.spec(), borrowed, allow_unsafe_test_targets)
-            .await
-            .map(|inner| ProviderFacade { inner })
+        build_connector(config.spec(), borrowed, allow_unsafe_test_targets).await
     }
 
     pub async fn transport(
@@ -118,45 +113,12 @@ impl ProviderFactory {
 }
 
 pub struct ProviderFacade {
-    pub(super) inner: ConcreteProvider,
-}
-
-impl ProviderFacade {
-    pub fn into_transport(self) -> Arc<dyn ProviderTransport> {
-        self.inner.into_transport()
-    }
-
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, String> {
-        self.inner.discover_models().await
-    }
-
-    pub async fn certify_capability(
-        &self,
-        upstream_model: &str,
-        capability: CompatibleCapability,
-    ) -> Result<CapabilityCertificationEvidence, CompatibleCapabilityCertificationError> {
-        self.inner
-            .certify_capability(upstream_model, capability)
-            .await
-    }
-}
-
-pub(super) enum ConcreteConnector {
-    OpenAi(Arc<OpenAiConnector>),
-    Anthropic(Arc<AnthropicConnector>),
-    Gemini(Arc<GeminiConnector>),
-    Vertex(Arc<VertexConnector>),
-    Bedrock(Arc<BedrockConnector>),
-    AzureOpenAi(Arc<AzureOpenAiConnector>),
-}
-
-pub(super) struct ConcreteProvider {
     pub(super) kind: olp_domain::ProviderKind,
     pub(super) connector: ConcreteConnector,
 }
 
-impl ConcreteProvider {
-    fn into_transport(self) -> Arc<dyn ProviderTransport> {
+impl ProviderFacade {
+    pub fn into_transport(self) -> Arc<dyn ProviderTransport> {
         match self.connector {
             ConcreteConnector::OpenAi(connector) => connector,
             ConcreteConnector::Anthropic(connector) => connector,
@@ -167,7 +129,7 @@ impl ConcreteProvider {
         }
     }
 
-    async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, String> {
+    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, String> {
         let models = match &self.connector {
             ConcreteConnector::OpenAi(connector) => connector.discover_models().await,
             ConcreteConnector::Anthropic(connector) => connector.discover_models().await,
@@ -180,11 +142,20 @@ impl ConcreteProvider {
     }
 }
 
+pub(super) enum ConcreteConnector {
+    OpenAi(Arc<OpenAiConnector>),
+    Anthropic(Arc<AnthropicConnector>),
+    Gemini(Arc<GeminiConnector>),
+    Vertex(Arc<VertexConnector>),
+    Bedrock(Arc<BedrockConnector>),
+    AzureOpenAi(Arc<AzureOpenAiConnector>),
+}
+
 async fn build_connector(
     spec: super::configuration::ConnectorSpec<'_>,
     credential: BorrowedCredential<'_>,
     allow_unsafe_test_targets: bool,
-) -> Result<ConcreteProvider, ProviderError> {
+) -> Result<ProviderFacade, ProviderError> {
     let kind = spec.kind;
     let connector = match connector_configuration_with_policy(spec, allow_unsafe_test_targets)? {
         ConnectorConfiguration::OpenAi(configuration) => {
@@ -260,5 +231,5 @@ async fn build_connector(
             ConcreteConnector::AzureOpenAi(Arc::new(AzureOpenAiConnector::new(*configuration, key)))
         }
     };
-    Ok(ConcreteProvider { kind, connector })
+    Ok(ProviderFacade { kind, connector })
 }

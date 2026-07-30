@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use super::extensions::{collect_extra, unescape_json_pointer};
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ChatCompletionRequest {
     pub model: String,
@@ -508,27 +510,6 @@ fn decode_response_format(
             kind.to_owned(),
         )),
     }
-}
-
-fn collect_extra(
-    prefix: &str,
-    extra: &BTreeMap<String, Value>,
-    extensions: &mut BTreeMap<String, Value>,
-) {
-    for (key, value) in extra {
-        extensions.insert(
-            format!("{prefix}/{}", escape_json_pointer(key)),
-            value.clone(),
-        );
-    }
-}
-
-fn escape_json_pointer(value: &str) -> String {
-    value.replace('~', "~0").replace('/', "~1")
-}
-
-fn unescape_json_pointer(value: &str) -> String {
-    value.replace("~1", "/").replace("~0", "~")
 }
 
 pub fn encode_chat_completion(

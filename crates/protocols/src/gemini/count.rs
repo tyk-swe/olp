@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use olp_domain::{
     ContentPart, Operation, SourceExtensions, Surface, TokenCountRequest, TokenCountResult,
 };
-use serde_json::Value;
 use thiserror::Error;
+
+use crate::extensions::insert_flat_extension;
 
 use super::{
     CountTokensRequest, CountTokensResponse, GenerateContentRequest, Part,
@@ -109,21 +110,8 @@ pub fn encode_count_tokens_result(
     }
     let mut value = serde_json::json!({ "totalTokens": result.input_tokens });
     for (pointer, extension) in &result.extensions.values {
-        insert_extension(&mut value, pointer, extension.clone())?;
+        insert_flat_extension(&mut value, pointer, extension.clone())
+            .map_err(|_| CountEncodeError::Extension)?;
     }
     serde_json::from_value(value).map_err(CountEncodeError::Json)
-}
-
-fn insert_extension(root: &mut Value, pointer: &str, value: Value) -> Result<(), CountEncodeError> {
-    let key = pointer
-        .strip_prefix('/')
-        .filter(|key| !key.is_empty() && !key.contains('/'))
-        .map(|key| key.replace("~1", "/").replace("~0", "~"))
-        .ok_or(CountEncodeError::Extension)?;
-    let object = root.as_object_mut().ok_or(CountEncodeError::Extension)?;
-    if object.contains_key(&key) {
-        return Err(CountEncodeError::Extension);
-    }
-    object.insert(key, value);
-    Ok(())
 }

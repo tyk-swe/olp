@@ -1,11 +1,6 @@
-import * as v from 'valibot';
+import type { PlaygroundRequest } from '$lib/api/operations';
 
-const ToolsSchema = v.array(v.object({
-  name: v.pipe(v.string(), v.trim(), v.minLength(1)),
-  description: v.optional(v.string()),
-  input_schema: v.unknown()
-}));
-const JsonSchema = v.record(v.string(), v.unknown());
+type PlaygroundTool = NonNullable<PlaygroundRequest['tools']>[number];
 
 function parseJson(value: string): unknown {
   try {
@@ -17,9 +12,30 @@ function parseJson(value: string): unknown {
 
 export function parseTools(value: string) {
   if (!value.trim()) return undefined;
-  const result = v.safeParse(ToolsSchema, parseJson(value));
-  if (!result.success) throw new Error('Tools must be an array of name, description, and input_schema objects.');
-  return result.output;
+  const parsed = parseJson(value);
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (tool) =>
+        typeof tool === 'object' &&
+        tool !== null &&
+        typeof Reflect.get(tool, 'name') === 'string' &&
+        Reflect.get(tool, 'name').trim() !== '' &&
+        (Reflect.get(tool, 'description') === undefined ||
+          typeof Reflect.get(tool, 'description') === 'string') &&
+        Object.hasOwn(tool, 'input_schema')
+    )
+  ) {
+    throw new Error('Tools must be an array of name, description, and input_schema objects.');
+  }
+  return parsed.map((tool) => {
+    const source = tool as Record<string, unknown>;
+    return {
+      name: (source.name as string).trim(),
+      ...(source.description === undefined ? {} : { description: source.description as string }),
+      input_schema: source.input_schema
+    } satisfies PlaygroundTool;
+  });
 }
 
 export function parseResponseSchema(value: string): {
@@ -29,12 +45,14 @@ export function parseResponseSchema(value: string): {
   schema: Record<string, unknown>;
 } | undefined {
   if (!value.trim()) return undefined;
-  const result = v.safeParse(JsonSchema, parseJson(value));
-  if (!result.success) throw new Error('The response schema must be a JSON object.');
+  const schema = parseJson(value);
+  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) {
+    throw new Error('The response schema must be a JSON object.');
+  }
   return {
     type: 'json_schema',
     name: 'playground_response',
     strict: true,
-    schema: result.output
+    schema: schema as Record<string, unknown>
   };
 }

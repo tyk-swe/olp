@@ -8,6 +8,7 @@ use serde_json::Value;
 use super::super::dto::{Candidate, GenerateContentResponse, Part, UsageMetadata};
 use super::errors::ResponseError;
 use super::extensions::collect_extra;
+use crate::CanonicalEventBuilder as EventBuilder;
 
 pub fn decode_generate_content_response(
     response: GenerateContentResponse,
@@ -206,17 +207,5 @@ pub(crate) fn gemini_finish_reason(reason: &str) -> FinishReason {
         | "IMAGE_PROHIBITED_CONTENT" => FinishReason::ContentFilter,
         "MALFORMED_FUNCTION_CALL" | "UNEXPECTED_TOOL_CALL" => FinishReason::Error,
         other => FinishReason::Other(other.to_owned()),
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct EventBuilder {
-    pub(crate) events: Vec<CanonicalEvent>,
-}
-
-impl EventBuilder {
-    pub(crate) fn push(&mut self, kind: CanonicalEventKind) {
-        let sequence = self.events.len().try_into().unwrap_or(u64::MAX);
-        self.events.push(CanonicalEvent::new(sequence, kind));
     }
 }

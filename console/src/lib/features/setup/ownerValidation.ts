@@ -1,49 +1,29 @@
-import * as v from 'valibot';
-
-const ownerFormSchema = v.pipe(
-  v.object({
-    displayName: v.pipe(
-      v.string(),
-      v.trim(),
-      v.minLength(1, 'Enter your name.'),
-      v.maxLength(100, 'Use 100 characters or fewer.')
-    ),
-    email: v.pipe(
-      v.string(),
-      v.trim(),
-      v.minLength(1, 'Enter your email address.'),
-      v.email('Enter a valid email address.'),
-      v.maxLength(254, 'Use 254 characters or fewer.')
-    ),
-    password: v.pipe(
-      v.string(),
-      v.minLength(12, 'Use at least 12 characters.'),
-      v.maxLength(1024, 'Use 1,024 characters or fewer.')
-    ),
-    confirmPassword: v.string(),
-    setupToken: v.pipe(v.string(), v.minLength(1, 'Enter the setup token.'))
-  }),
-  v.forward(
-    v.partialCheck(
-      [['password'], ['confirmPassword']],
-      ({ password, confirmPassword }) => password === confirmPassword,
-      'Passwords do not match.'
-    ),
-    ['confirmPassword']
-  )
-);
-
-export type OwnerFormValues = v.InferInput<typeof ownerFormSchema>;
+export type OwnerFormValues = {
+  displayName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  setupToken: string;
+};
 export type OwnerFormErrors = Partial<Record<keyof OwnerFormValues, string>>;
 
 export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
-  const result = v.safeParse(ownerFormSchema, values, { abortPipeEarly: true });
-  if (result.success) return {};
-
   const errors: OwnerFormErrors = {};
-  for (const issue of result.issues) {
-    const path = v.getDotPath(issue) as keyof OwnerFormValues | null;
-    if (path && !errors[path]) errors[path] = issue.message;
+  const displayName = values.displayName.trim();
+  const email = values.email.trim();
+  if (!displayName) errors.displayName = 'Enter your name.';
+  else if (displayName.length > 100) errors.displayName = 'Use 100 characters or fewer.';
+  if (!email) errors.email = 'Enter your email address.';
+  // Client-side shape check only; the API remains the authoritative email validator.
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = 'Enter a valid email address.';
+  } else if (email.length > 254) errors.email = 'Use 254 characters or fewer.';
+  const passwordValid = values.password.length >= 12 && values.password.length <= 1024;
+  if (values.password.length < 12) errors.password = 'Use at least 12 characters.';
+  else if (values.password.length > 1024) errors.password = 'Use 1,024 characters or fewer.';
+  if (passwordValid && values.password !== values.confirmPassword) {
+    errors.confirmPassword = 'Passwords do not match.';
   }
+  if (!values.setupToken) errors.setupToken = 'Enter the setup token.';
   return errors;
 }

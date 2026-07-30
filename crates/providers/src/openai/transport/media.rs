@@ -296,23 +296,23 @@ pub(super) async fn spool_response_body(
     maximum_length: u64,
     idle_timeout: Duration,
 ) -> Result<MediaArtifact, TransportError> {
-    let source: ReqwestByteStream = Box::pin(response.response.bytes_stream());
     let failures = Arc::new(Mutex::new(None::<TransportError>));
     let failure_sink = Arc::clone(&failures);
-    let bytes = DeadlineByteStream::new(
-        source,
-        response.first_body_deadline,
-        idle_timeout,
-        response.attempt_deadline,
-    )
-    .map(move |item| {
-        item.map_err(|error| {
-            if let Ok(mut failure) = failure_sink.lock() {
-                *failure = Some(error);
-            }
-            MediaSpoolError::Unavailable
-        })
-    });
+    let bytes = RESPONSE_IO
+        .response_stream(
+            response.response,
+            response.first_body_deadline,
+            idle_timeout,
+            response.attempt_deadline,
+        )
+        .map(move |item| {
+            item.map_err(|error| {
+                if let Ok(mut failure) = failure_sink.lock() {
+                    *failure = Some(error);
+                }
+                MediaSpoolError::Unavailable
+            })
+        });
     match spool
         .put(MediaUpload {
             filename,

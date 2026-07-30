@@ -5,8 +5,7 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, stream};
 use olp_domain::{
     AttemptFailureClass, CanonicalEvent, CanonicalEventKind, ProviderEventStream, Surface,
     TransportError, TransportPhase,
@@ -18,13 +17,15 @@ use olp_protocols::{
     },
     sse::{SseDecoder, SseFrame},
 };
-use reqwest::{Response, header};
-use tokio::time::{Instant, Sleep, timeout};
+use reqwest::Response;
+use tokio::time::Instant;
 
 use super::{OpenAiConnector, errors::*};
+use crate::transport_io::{
+    CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream, ProviderResponseIo,
+};
 
-pub(super) type ReqwestByteStream =
-    Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>>;
+pub(super) const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("OpenAI");
 
 pub(super) struct DeadlineResponse {
     pub(super) response: Response,
@@ -58,21 +59,7 @@ pub(in crate::openai::transport) fn require_content_type(
     response: &Response,
     expected: &'static str,
 ) -> Result<(), TransportError> {
-    let valid = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected));
-    if valid {
-        return Ok(());
-    }
-    Err(transport_error(
-        TransportPhase::FirstByte,
-        AttemptFailureClass::Protocol,
-        false,
-        format!("OpenAI response must use content type {expected}"),
-    ))
+    RESPONSE_IO.require_content_type(response, expected)
 }
 
 impl OpenAiConnector {
@@ -80,9 +67,8 @@ impl OpenAiConnector {
         &self,
         response: DeadlineResponse,
     ) -> Result<ProviderEventStream, TransportError> {
-        let source: ReqwestByteStream = Box::pin(response.response.bytes_stream());
-        let bytes = DeadlineByteStream::new(
-            source,
+        let bytes = RESPONSE_IO.response_stream(
+            response.response,
             response.first_body_deadline,
             self.config.timeouts.idle,
             response.attempt_deadline,
@@ -101,14 +87,15 @@ impl OpenAiConnector {
         responses_endpoint: bool,
     ) -> Result<ProviderEventStream, TransportError> {
         require_content_type(&response, "application/json")?;
-        let body = read_bounded_body(
-            response,
-            first_byte_deadline,
-            attempt_deadline,
-            self.config.timeouts.idle,
-            self.config.max_response_bytes,
-        )
-        .await?;
+        let body = RESPONSE_IO
+            .read_bounded_body(
+                response,
+                first_byte_deadline,
+                attempt_deadline,
+                self.config.timeouts.idle,
+                self.config.max_response_bytes,
+            )
+            .await?;
         let events = if responses_endpoint {
             let response: ResponseObject = parse_wire("Responses", &body)?;
             decode_response_object(response)
@@ -129,9 +116,8 @@ impl OpenAiConnector {
         responses_endpoint: bool,
     ) -> Result<ProviderEventStream, TransportError> {
         require_content_type(&response, "text/event-stream")?;
-        let source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let bytes = DeadlineByteStream::new(
-            source,
+        let bytes = RESPONSE_IO.response_stream(
+            response,
             first_byte_deadline,
             self.config.timeouts.idle,
             attempt_deadline,
@@ -145,7 +131,11 @@ impl OpenAiConnector {
                 self.config.max_event_bytes,
             ))
         };
-        Ok(Box::pin(DecodedEventStream::new(bytes, decoder)))
+        Ok(Box::pin(DecodedEventStream::new(
+            RESPONSE_IO,
+            bytes,
+            decoder,
+        )))
     }
 }
 
@@ -156,55 +146,15 @@ pub(super) async fn read_bounded_body(
     idle_timeout: Duration,
     maximum: usize,
 ) -> Result<Vec<u8>, TransportError> {
-    let mut source = response.bytes_stream();
-    let mut output = Vec::new();
-    let mut first = true;
-    loop {
-        let wait = if first {
-            remaining_until(first_byte_deadline, attempt_deadline).ok_or_else(first_byte_timeout)?
-        } else {
-            bounded_duration(
-                idle_timeout,
-                remaining(attempt_deadline, TransportPhase::Body)?,
-            )
-        };
-        let next = timeout(wait, source.next()).await.map_err(|_| {
-            if first {
-                first_byte_timeout()
-            } else {
-                body_idle_timeout()
-            }
-        })?;
-        let Some(chunk) = next else {
-            break;
-        };
-        let chunk = chunk.map_err(|error| {
-            if first {
-                map_first_body_error(error)
-            } else {
-                map_body_error(error, false)
-            }
-        })?;
-        first = false;
-        if output.len().saturating_add(chunk.len()) > maximum {
-            return Err(transport_error(
-                TransportPhase::Body,
-                AttemptFailureClass::Protocol,
-                false,
-                format!("OpenAI response exceeded the {maximum} byte limit"),
-            ));
-        }
-        output.extend_from_slice(&chunk);
-    }
-    if first {
-        return Err(transport_error(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Protocol,
-            false,
-            "OpenAI response body was empty",
-        ));
-    }
-    Ok(output)
+    RESPONSE_IO
+        .read_bounded_body(
+            response,
+            first_byte_deadline,
+            attempt_deadline,
+            idle_timeout,
+            maximum,
+        )
+        .await
 }
 
 pub(super) async fn read_deadline_body(
@@ -212,139 +162,15 @@ pub(super) async fn read_deadline_body(
     idle_timeout: Duration,
     maximum: usize,
 ) -> Result<Vec<u8>, TransportError> {
-    read_bounded_body(
-        response.response,
-        response.first_body_deadline,
-        response.attempt_deadline,
-        idle_timeout,
-        maximum,
-    )
-    .await
-}
-
-pub(super) struct DeadlineByteStream {
-    source: ReqwestByteStream,
-    first: bool,
-    idle_timeout: Duration,
-    idle_sleep: Pin<Box<Sleep>>,
-    attempt_deadline: Instant,
-    terminal: bool,
-}
-
-impl DeadlineByteStream {
-    pub(super) fn new(
-        source: ReqwestByteStream,
-        first_body_deadline: Instant,
-        idle_timeout: Duration,
-        attempt_deadline: Instant,
-    ) -> Self {
-        let wake_at = bounded_instant(first_body_deadline, attempt_deadline);
-        Self {
-            source,
-            first: true,
+    RESPONSE_IO
+        .read_bounded_body(
+            response.response,
+            response.first_body_deadline,
+            response.attempt_deadline,
             idle_timeout,
-            idle_sleep: Box::pin(tokio::time::sleep_until(wake_at)),
-            attempt_deadline,
-            terminal: false,
-        }
-    }
-}
-
-impl Stream for DeadlineByteStream {
-    type Item = Result<Bytes, TransportError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.terminal {
-            return Poll::Ready(None);
-        }
-        if Instant::now() >= self.attempt_deadline {
-            self.terminal = true;
-            let error = if self.first {
-                first_byte_timeout()
-            } else {
-                attempt_body_timeout()
-            };
-            return Poll::Ready(Some(Err(error)));
-        }
-
-        match self.source.as_mut().poll_next(context) {
-            Poll::Ready(Some(Ok(chunk))) => {
-                self.first = false;
-                let wake_at =
-                    bounded_instant(Instant::now() + self.idle_timeout, self.attempt_deadline);
-                self.idle_sleep.as_mut().reset(wake_at);
-                return Poll::Ready(Some(Ok(chunk)));
-            }
-            Poll::Ready(Some(Err(error))) => {
-                self.terminal = true;
-                let error = if self.first {
-                    map_first_body_error(error)
-                } else {
-                    map_body_error(error, false)
-                };
-                return Poll::Ready(Some(Err(error)));
-            }
-            Poll::Ready(None) => {
-                self.terminal = true;
-                if self.first {
-                    return Poll::Ready(Some(Err(transport_error(
-                        TransportPhase::FirstByte,
-                        AttemptFailureClass::Protocol,
-                        false,
-                        "OpenAI response body was empty",
-                    ))));
-                }
-                return Poll::Ready(None);
-            }
-            Poll::Pending => {}
-        }
-
-        if self.idle_sleep.as_mut().poll(context).is_ready() {
-            self.terminal = true;
-            let error = if Instant::now() >= self.attempt_deadline {
-                if self.first {
-                    first_byte_timeout()
-                } else {
-                    attempt_body_timeout()
-                }
-            } else if self.first {
-                first_byte_timeout()
-            } else {
-                body_idle_timeout()
-            };
-            return Poll::Ready(Some(Err(error)));
-        }
-        Poll::Pending
-    }
-}
-
-pub(super) struct DecodedEventStream {
-    bytes: DeadlineByteStream,
-    decoder: OpenAiEventDecoder,
-    queued: VecDeque<CanonicalEvent>,
-    committed: bool,
-    terminal: bool,
-}
-
-impl DecodedEventStream {
-    pub(super) fn new(bytes: DeadlineByteStream, decoder: OpenAiEventDecoder) -> Self {
-        Self {
-            bytes,
-            decoder,
-            queued: VecDeque::new(),
-            committed: false,
-            terminal: false,
-        }
-    }
-
-    fn protocol_error(&self, message: impl Into<String>) -> TransportError {
-        transport_error(
-            TransportPhase::Body,
-            AttemptFailureClass::Protocol,
-            self.committed,
-            message,
+            maximum,
         )
-    }
+        .await
 }
 
 pub(super) enum OpenAiEventDecoder {
@@ -352,7 +178,9 @@ pub(super) enum OpenAiEventDecoder {
     Responses(OpenAiResponsesStreamDecoder),
 }
 
-impl OpenAiEventDecoder {
+impl CanonicalEventDecoder for OpenAiEventDecoder {
+    type Error = String;
+
     fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, String> {
         match self {
             Self::Chat(decoder) => decoder.push(bytes).map_err(|error| error.to_string()),
@@ -364,51 +192,6 @@ impl OpenAiEventDecoder {
         match self {
             Self::Chat(decoder) => decoder.finish().map_err(|error| error.to_string()),
             Self::Responses(decoder) => decoder.finish().map_err(|error| error.to_string()),
-        }
-    }
-}
-
-impl Stream for DecodedEventStream {
-    type Item = Result<CanonicalEvent, TransportError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            if let Some(event) = self.queued.pop_front() {
-                self.committed = true;
-                return Poll::Ready(Some(Ok(event)));
-            }
-            if self.terminal {
-                return Poll::Ready(None);
-            }
-
-            match Pin::new(&mut self.bytes).poll_next(context) {
-                Poll::Ready(Some(Ok(chunk))) => match self.decoder.push(&chunk) {
-                    Ok(events) => self.queued.extend(events),
-                    Err(error) => {
-                        self.terminal = true;
-                        return Poll::Ready(Some(Err(
-                            self.protocol_error(format!("invalid OpenAI event stream: {error}"))
-                        )));
-                    }
-                },
-                Poll::Ready(Some(Err(mut error))) => {
-                    self.terminal = true;
-                    error.response_committed = self.committed;
-                    return Poll::Ready(Some(Err(error)));
-                }
-                Poll::Ready(None) => {
-                    self.terminal = true;
-                    match self.decoder.finish() {
-                        Ok(events) => self.queued.extend(events),
-                        Err(error) => {
-                            return Poll::Ready(Some(Err(self.protocol_error(format!(
-                                "truncated OpenAI event stream: {error}"
-                            )))));
-                        }
-                    }
-                }
-                Poll::Pending => return Poll::Pending,
-            }
         }
     }
 }

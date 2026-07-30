@@ -1,46 +1,20 @@
 use std::{fmt, net::IpAddr, time::Duration};
 
-use crate::http_egress::{
-    is_public_ip,
-    pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool, literal_ip},
-};
 use reqwest::{Client, Url};
 use thiserror::Error;
 
+use crate::endpoint::{EndpointCore, EndpointCoreError};
+
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 256;
 
+#[derive(Clone)]
 pub(crate) struct Endpoint {
-    base_url: Url,
-    client_connect_timeout: Duration,
-    client_pool: PinnedClientPool,
-    #[cfg(any(test, feature = "test-util"))]
-    allow_unsafe_test_target: bool,
-}
-
-impl Clone for Endpoint {
-    fn clone(&self) -> Self {
-        Self {
-            base_url: self.base_url.clone(),
-            client_connect_timeout: self.client_connect_timeout,
-            client_pool: self.client_pool.clone(),
-            #[cfg(any(test, feature = "test-util"))]
-            allow_unsafe_test_target: self.allow_unsafe_test_target,
-        }
-    }
+    core: EndpointCore,
 }
 
 impl fmt::Debug for Endpoint {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Endpoint")
-            .field("scheme", &self.base_url.scheme())
-            .field("host", &self.base_url.host_str())
-            .field("port", &self.base_url.port())
-            .field("path", &"[REDACTED]")
-            .finish_non_exhaustive()
+        self.core.fmt(formatter)
     }
 }
 
@@ -56,42 +30,8 @@ impl Endpoint {
     }
 
     fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
-        let mut base_url =
-            Url::parse(value).map_err(|error| EndpointError::InvalidUrl(error.to_string()))?;
-        if base_url.scheme() != "https" && !allow_unsafe_target {
-            return Err(EndpointError::HttpsRequired);
-        }
-        if !matches!(base_url.scheme(), "http" | "https") {
-            return Err(EndpointError::UnsupportedScheme);
-        }
-        if !base_url.username().is_empty() || base_url.password().is_some() {
-            return Err(EndpointError::UserInfoForbidden);
-        }
-        if base_url.host().is_none() {
-            return Err(EndpointError::MissingHost);
-        }
-        if base_url.port() == Some(0) {
-            return Err(EndpointError::InvalidPort);
-        }
-        if base_url.query().is_some() || base_url.fragment().is_some() {
-            return Err(EndpointError::QueryOrFragmentForbidden);
-        }
-        if !base_url.path().ends_with('/') {
-            let normalized = format!("{}/", base_url.path());
-            base_url.set_path(&normalized);
-        }
-        if let Some(ip) = literal_ip(&base_url)
-            && !allow_unsafe_target
-            && !is_public_ip(ip)
-        {
-            return Err(EndpointError::ForbiddenAddress(ip));
-        }
         Ok(Self {
-            base_url,
-            client_connect_timeout: DEFAULT_CONNECT_TIMEOUT,
-            client_pool: PinnedClientPool::default(),
-            #[cfg(any(test, feature = "test-util"))]
-            allow_unsafe_test_target: allow_unsafe_target,
+            core: EndpointCore::parse(value, allow_unsafe_target)?,
         })
     }
 
@@ -122,13 +62,11 @@ impl Endpoint {
     }
 
     pub(crate) fn models_url(&self) -> Result<Url, EndpointError> {
-        self.base_url
-            .join("models")
-            .map_err(|error| EndpointError::InvalidUrl(error.to_string()))
+        self.core.join("models").map_err(EndpointError::from)
     }
 
     pub(crate) fn set_connect_timeout(&mut self, value: Duration) {
-        self.client_connect_timeout = value;
+        self.core.set_connect_timeout(value);
     }
 
     fn model_action_url(&self, upstream_model: &str, action: &str) -> Result<Url, EndpointError> {
@@ -144,7 +82,7 @@ impl Endpoint {
         {
             return Err(EndpointError::InvalidModelName);
         }
-        let mut url = self.base_url.clone();
+        let mut url = self.core.url().clone();
         {
             let mut path = url
                 .path_segments_mut()
@@ -165,37 +103,29 @@ impl Endpoint {
         &self,
         connect_timeout: Duration,
     ) -> Result<Client, EndpointError> {
-        #[cfg(any(test, feature = "test-util"))]
-        let allow_unsafe_target = self.allow_unsafe_test_target;
-        #[cfg(not(any(test, feature = "test-util")))]
-        let allow_unsafe_target = false;
-        self.client_pool
-            .client(
-                &self.base_url,
-                connect_timeout,
-                PinnedClientConfig {
-                    connect_timeout: self.client_connect_timeout,
-                    pool_idle_timeout: Some(POOL_IDLE_TIMEOUT),
-                    pool_max_idle_per_host: Some(MAX_IDLE_CONNECTIONS_PER_HOST),
-                    allow_unsafe_target,
-                    user_agent: "openllmproxy",
-                },
-            )
+        self.core
+            .pinned_client(connect_timeout)
             .await
             .map_err(EndpointError::from)
     }
 }
 
-impl From<PinnedClientError> for EndpointError {
-    fn from(error: PinnedClientError) -> Self {
+impl From<EndpointCoreError> for EndpointError {
+    fn from(error: EndpointCoreError) -> Self {
         match error {
-            PinnedClientError::MissingHost => Self::MissingHost,
-            PinnedClientError::MissingPort => Self::MissingPort,
-            PinnedClientError::DnsTimeout => Self::DnsTimeout,
-            PinnedClientError::DnsResolution(error) => Self::DnsResolution(error),
-            PinnedClientError::NoAddresses => Self::NoAddresses,
-            PinnedClientError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
-            PinnedClientError::ClientBuild(error) => Self::ClientBuild(error),
+            EndpointCoreError::HttpsRequired => Self::HttpsRequired,
+            EndpointCoreError::UnsupportedScheme => Self::UnsupportedScheme,
+            EndpointCoreError::UserInfoForbidden => Self::UserInfoForbidden,
+            EndpointCoreError::MissingHost => Self::MissingHost,
+            EndpointCoreError::MissingPort => Self::MissingPort,
+            EndpointCoreError::InvalidPort => Self::InvalidPort,
+            EndpointCoreError::QueryOrFragmentForbidden => Self::QueryOrFragmentForbidden,
+            EndpointCoreError::InvalidUrl(error) => Self::InvalidUrl(error),
+            EndpointCoreError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
+            EndpointCoreError::DnsTimeout => Self::DnsTimeout,
+            EndpointCoreError::DnsResolution(error) => Self::DnsResolution(error),
+            EndpointCoreError::NoAddresses => Self::NoAddresses,
+            EndpointCoreError::ClientBuild(error) => Self::ClientBuild(error),
         }
     }
 }

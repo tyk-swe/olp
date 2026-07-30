@@ -9,6 +9,7 @@ use serde_json::Value;
 use super::super::dto::{ContentBlock, MessagesResponse, Role};
 use super::errors::ResponseError;
 use super::extensions::{collect_extra, require_response_kind};
+use crate::CanonicalEventBuilder as EventBuilder;
 
 pub fn decode_messages_response(
     response: MessagesResponse,
@@ -118,17 +119,5 @@ pub(crate) fn anthropic_finish_reason(reason: &str) -> FinishReason {
         "tool_use" => FinishReason::ToolCalls,
         "refusal" => FinishReason::ContentFilter,
         other => FinishReason::Other(other.to_owned()),
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct EventBuilder {
-    pub(crate) events: Vec<CanonicalEvent>,
-}
-
-impl EventBuilder {
-    pub(crate) fn push(&mut self, kind: CanonicalEventKind) {
-        let sequence = self.events.len().try_into().unwrap_or(u64::MAX);
-        self.events.push(CanonicalEvent::new(sequence, kind));
     }
 }

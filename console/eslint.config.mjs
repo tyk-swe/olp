@@ -1,5 +1,4 @@
 import js from '@eslint/js';
-import tsParser from '@typescript-eslint/parser';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -30,7 +29,7 @@ export default [
   {
     files: tsFiles,
     languageOptions: {
-      parser: tsParser,
+      parser: tseslint.parser,
       parserOptions: { sourceType: 'module' },
       globals: { ...globals.browser, ...globals.node }
     }
@@ -39,7 +38,7 @@ export default [
     files: ['src/**/*.svelte'],
     languageOptions: {
       globals: globals.browser,
-      parserOptions: { parser: tsParser }
+      parserOptions: { parser: tseslint.parser }
     },
     rules: {
       'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]

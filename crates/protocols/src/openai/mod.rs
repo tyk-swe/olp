@@ -2,7 +2,7 @@ mod audio;
 mod chat;
 mod client;
 mod embeddings;
-mod extensions;
+use crate::extensions;
 mod images;
 mod media;
 mod models;

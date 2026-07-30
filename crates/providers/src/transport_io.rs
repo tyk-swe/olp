@@ -9,15 +9,18 @@
 use std::{
     collections::VecDeque,
     fmt,
+    future::ready,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, stream};
 use http::header;
-use olp_domain::{AttemptFailureClass, CanonicalEvent, TransportError, TransportPhase};
+use olp_domain::{
+    AttemptFailureClass, CanonicalEvent, ProviderEventStream, TransportError, TransportPhase,
+};
 use reqwest::Response;
 use tokio::time::{Instant, Sleep, timeout};
 
@@ -82,6 +85,38 @@ impl ProviderResponseIo {
         .await
     }
 
+    pub(crate) async fn decoded_event_stream<D>(
+        self,
+        response: Response,
+        first_byte_deadline: Instant,
+        attempt_deadline: Instant,
+        idle_timeout: Duration,
+        decoder: D,
+    ) -> Result<ProviderEventStream, TransportError>
+    where
+        D: CanonicalEventDecoder,
+    {
+        self.require_content_type(&response, "text/event-stream")?;
+        let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
+        let first_wait = self
+            .remaining_until(first_byte_deadline, attempt_deadline)
+            .ok_or_else(|| self.first_byte_timeout())?;
+        let first = timeout(first_wait, source.next())
+            .await
+            .map_err(|_| self.first_byte_timeout())?
+            .ok_or_else(|| {
+                self.protocol_error(
+                    TransportPhase::FirstByte,
+                    false,
+                    format!("{} stream ended before its first body byte", self.provider),
+                )
+            })?
+            .map_err(|error| self.map_first_body_error(error))?;
+        let source = Box::pin(stream::once(ready(Ok(first))).chain(source));
+        let bytes = self.after_first_byte_stream(source, idle_timeout, attempt_deadline);
+        Ok(Box::pin(DecodedEventStream::new(self, bytes, decoder)))
+    }
+
     /// Bounds a stream whose first byte has already been obtained by the
     /// caller. The source includes that buffered byte so downstream decoders
     /// observe it exactly once.
@@ -92,7 +127,24 @@ impl ProviderResponseIo {
         idle_timeout: Duration,
         attempt_deadline: Instant,
     ) -> DeadlineByteStream {
-        DeadlineByteStream::new(self, source, idle_timeout, attempt_deadline)
+        DeadlineByteStream::new(self, source, None, idle_timeout, attempt_deadline)
+    }
+
+    #[must_use]
+    pub(crate) fn response_stream(
+        self,
+        response: Response,
+        first_byte_deadline: Instant,
+        idle_timeout: Duration,
+        attempt_deadline: Instant,
+    ) -> DeadlineByteStream {
+        DeadlineByteStream::new(
+            self,
+            Box::pin(response.bytes_stream()),
+            Some(first_byte_deadline),
+            idle_timeout,
+            attempt_deadline,
+        )
     }
 
     pub(crate) fn first_byte_timeout(self) -> TransportError {
@@ -285,6 +337,7 @@ pub(crate) trait CanonicalEventDecoder: Send + Unpin + 'static {
 pub(crate) struct DeadlineByteStream {
     source: ReqwestByteStream,
     io: ProviderResponseIo,
+    first: bool,
     idle_timeout: Duration,
     idle_sleep: Pin<Box<Sleep>>,
     attempt_deadline: Instant,
@@ -295,16 +348,19 @@ impl DeadlineByteStream {
     fn new(
         io: ProviderResponseIo,
         source: ReqwestByteStream,
+        first_byte_deadline: Option<Instant>,
         idle_timeout: Duration,
         attempt_deadline: Instant,
     ) -> Self {
+        let wake = first_byte_deadline
+            .unwrap_or_else(|| Instant::now() + idle_timeout)
+            .min(attempt_deadline);
         Self {
             source,
             io,
+            first: first_byte_deadline.is_some(),
             idle_timeout,
-            idle_sleep: Box::pin(tokio::time::sleep_until(
-                (Instant::now() + idle_timeout).min(attempt_deadline),
-            )),
+            idle_sleep: Box::pin(tokio::time::sleep_until(wake)),
             attempt_deadline,
             terminal: false,
         }
@@ -320,27 +376,47 @@ impl Stream for DeadlineByteStream {
         }
         if Instant::now() >= self.attempt_deadline {
             self.terminal = true;
-            return Poll::Ready(Some(Err(self.io.attempt_body_timeout())));
+            let error = if self.first {
+                self.io.first_byte_timeout()
+            } else {
+                self.io.attempt_body_timeout()
+            };
+            return Poll::Ready(Some(Err(error)));
         }
         match self.source.as_mut().poll_next(context) {
             Poll::Ready(Some(Ok(chunk))) => {
+                self.first = false;
                 let wake = (Instant::now() + self.idle_timeout).min(self.attempt_deadline);
                 self.idle_sleep.as_mut().reset(wake);
                 return Poll::Ready(Some(Ok(chunk)));
             }
             Poll::Ready(Some(Err(error))) => {
                 self.terminal = true;
-                return Poll::Ready(Some(Err(self.io.map_body_error(error, false))));
+                let error = if self.first {
+                    self.io.map_first_body_error(error)
+                } else {
+                    self.io.map_body_error(error, false)
+                };
+                return Poll::Ready(Some(Err(error)));
             }
             Poll::Ready(None) => {
                 self.terminal = true;
+                if self.first {
+                    return Poll::Ready(Some(Err(self.io.protocol_error(
+                        TransportPhase::FirstByte,
+                        false,
+                        format!("{} response body was empty", self.io.provider),
+                    ))));
+                }
                 return Poll::Ready(None);
             }
             Poll::Pending => {}
         }
         if self.idle_sleep.as_mut().poll(context).is_ready() {
             self.terminal = true;
-            return Poll::Ready(Some(Err(if Instant::now() >= self.attempt_deadline {
+            return Poll::Ready(Some(Err(if self.first {
+                self.io.first_byte_timeout()
+            } else if Instant::now() >= self.attempt_deadline {
                 self.io.attempt_body_timeout()
             } else {
                 self.io.body_idle_timeout()
@@ -513,6 +589,18 @@ mod tests {
     #[tokio::test]
     async fn deadline_stream_enforces_idle_and_attempt_deadlines() {
         let io = ProviderResponseIo::new("Test");
+        let mut empty = DeadlineByteStream::new(
+            io,
+            source([]),
+            Some(Instant::now() + Duration::from_secs(1)),
+            Duration::from_secs(1),
+            Instant::now() + Duration::from_secs(1),
+        );
+        let empty_error = empty.next().await.unwrap().unwrap_err();
+        assert_eq!(empty_error.phase, TransportPhase::FirstByte);
+        assert_eq!(empty_error.class, AttemptFailureClass::Protocol);
+        assert_eq!(empty_error.message, "Test response body was empty");
+
         let first_then_pending = || {
             Box::pin(
                 stream::iter([Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"event"))])

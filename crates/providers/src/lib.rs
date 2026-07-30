@@ -6,6 +6,7 @@ pub mod anthropic;
 mod azure_openai;
 #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod bedrock;
+mod endpoint;
 mod factory;
 pub mod gemini;
 mod http_egress;

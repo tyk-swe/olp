@@ -9,6 +9,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::chat::{ChatRole, ChatToolCall};
+use super::extensions::collect_extra;
+use crate::CanonicalEventBuilder as EventBuilder;
 use crate::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -541,17 +543,6 @@ fn collect_usage_extensions(
     }
 }
 
-fn collect_extra(
-    prefix: &str,
-    extra: &BTreeMap<String, Value>,
-    extensions: &mut BTreeMap<String, Value>,
-) {
-    for (key, value) in extra {
-        let key = key.replace('~', "~0").replace('/', "~1");
-        extensions.insert(format!("{prefix}/{key}"), value.clone());
-    }
-}
-
 fn canonical_error(error: OpenAiWireError) -> CanonicalError {
     let provider_code = error.code.map(|code| match code {
         Value::String(value) => value,
@@ -573,18 +564,6 @@ fn canonical_error(error: OpenAiWireError) -> CanonicalError {
         message: error.message,
         provider_code,
         retryable,
-    }
-}
-
-#[derive(Default)]
-struct EventBuilder {
-    events: Vec<CanonicalEvent>,
-}
-
-impl EventBuilder {
-    fn push(&mut self, kind: CanonicalEventKind) {
-        let sequence = self.events.len().try_into().unwrap_or(u64::MAX);
-        self.events.push(CanonicalEvent::new(sequence, kind));
     }
 }
 

@@ -1,18 +1,11 @@
-use std::future::ready;
-
-use futures::{StreamExt, stream};
-use olp_domain::{
-    AttemptFailureClass, CanonicalEvent, ProviderEventStream, TransportError, TransportPhase,
-};
+use olp_domain::{CanonicalEvent, ProviderEventStream, TransportError};
 use olp_protocols::gemini::GeminiGenerateContentStreamDecoder;
 use reqwest::Response;
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 
-use crate::transport_io::{
-    CanonicalEventDecoder, DecodedEventStream, ProviderResponseIo, ReqwestByteStream,
-};
+use crate::transport_io::{CanonicalEventDecoder, ProviderResponseIo};
 
-use super::{errors::transport_error, operations::GeminiConnector};
+use super::operations::GeminiConnector;
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
 
@@ -36,37 +29,18 @@ impl GeminiConnector {
         attempt_deadline: Instant,
         preserve_raw_frames: bool,
     ) -> Result<ProviderEventStream, TransportError> {
-        RESPONSE_IO.require_content_type(&response, "text/event-stream")?;
-        let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let first_wait = RESPONSE_IO
-            .remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(|| RESPONSE_IO.first_byte_timeout())?;
-        let first = timeout(first_wait, source.next())
-            .await
-            .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-            .ok_or_else(|| {
-                transport_error(
-                    TransportPhase::FirstByte,
-                    AttemptFailureClass::Protocol,
-                    false,
-                    "Gemini stream ended before its first body byte",
-                )
-            })?
-            .map_err(|error| RESPONSE_IO.map_first_body_error(error))?;
-        let source = Box::pin(stream::once(ready(Ok(first))).chain(source));
-        let bytes = RESPONSE_IO.after_first_byte_stream(
-            source,
-            self.config.timeouts.idle,
-            attempt_deadline,
-        );
         let decoder = GeminiGenerateContentStreamDecoder::with_max_event_bytes_and_raw_passthrough(
             self.config.max_event_bytes,
             preserve_raw_frames,
         );
-        Ok(Box::pin(DecodedEventStream::new(
-            RESPONSE_IO,
-            bytes,
-            decoder,
-        )))
+        RESPONSE_IO
+            .decoded_event_stream(
+                response,
+                first_byte_deadline,
+                attempt_deadline,
+                self.config.timeouts.idle,
+                decoder,
+            )
+            .await
     }
 }
