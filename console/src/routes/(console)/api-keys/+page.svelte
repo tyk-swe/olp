@@ -6,7 +6,7 @@
     type ApiKeyListState
   } from '$lib/features/access/apiKeyListState';
 
-  const listState = getContext<ApiKeyListState>(apiKeyListStateContext);
+  let listState = getContext<ApiKeyListState>(apiKeyListStateContext);
 </script>
 
-<ApiKeysPage {listState} />
+<ApiKeysPage bind:listState />

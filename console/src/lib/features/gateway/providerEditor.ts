@@ -199,6 +199,12 @@ export function probeReady(current: ProviderReadiness | null | undefined): boole
   return Date.parse(current.last_probe_at) >= Date.parse(current.updated_at);
 }
 
+export function certificationPrerequisiteReady(
+  current: (ProviderReadiness & { kind: ProviderKind }) | null | undefined
+): boolean {
+  return current?.kind === 'openai_compatible' || probeReady(current);
+}
+
 export function capabilitiesCertified(current: ProviderReadiness | null | undefined): boolean {
   if (!current) return false;
   return (

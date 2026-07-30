@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '../playwright';
 
 const ids = {
   user: '01980000-0000-7000-8000-000000000001',

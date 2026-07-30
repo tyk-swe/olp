@@ -6,7 +6,7 @@
     type RouteListState
   } from '$lib/features/gateway/routeListState';
 
-  const listState = getContext<RouteListState>(routeListStateContext);
+  let listState = getContext<RouteListState>(routeListStateContext);
 </script>
 
-<RouteList {listState} />
+<RouteList bind:listState />

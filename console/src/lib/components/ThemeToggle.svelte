@@ -8,8 +8,12 @@
   let ready = $state(false);
 
   function preferredTheme(): Theme {
-    const saved = window.localStorage.getItem(storageKey);
-    if (saved === 'light' || saved === 'dark') return saved;
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {
+      // Storage can be blocked outright; fall back to the media query.
+    }
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
@@ -21,7 +25,11 @@
   function toggle() {
     const next = theme === 'dark' ? 'light' : 'dark';
     apply(next);
-    window.localStorage.setItem(storageKey, next);
+    try {
+      window.localStorage.setItem(storageKey, next);
+    } catch {
+      // Theme persistence is optional; keep the in-memory preference usable.
+    }
   }
 
   onMount(() => {

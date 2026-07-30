@@ -382,8 +382,8 @@ jobs:
       - name: Install Chromium
         run: pnpm --dir console exec playwright install --with-deps chromium
       - name: Build the Rust console host
-        run: cargo build --locked -p olp
-      - name: Run Rust-hosted console setup and session integration
+        run: cargo build --locked -p olp --features test-util
+      - name: Run complete Rust-hosted console integration
         run: |
           umask 077
           openssl rand -base64 32 > "$OLP_CONSOLE_E2E_MASTER_KEY_FILE"

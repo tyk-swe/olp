@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { logout } from '$lib/api/auth';
@@ -86,7 +87,7 @@
     const purpose = parameters.get('reauthenticated');
     const resourceId = parameters.get('resource_id') ?? undefined;
     if (['password_enrollment', 'oidc_link', 'oidc_unlink'].includes(purpose ?? '')) {
-      window.history.replaceState(window.history.state, '', window.location.pathname);
+      replaceState(resolve('/settings/profile'), {});
       // Callback query parameters are only a display hint. They must never
       // directly begin a link or unlink request, because another site can
       // navigate a signed-in browser to this URL.

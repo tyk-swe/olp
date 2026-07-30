@@ -12,7 +12,7 @@
 
   let {
     jobId = '',
-    listState
+    listState = $bindable()
   }: {
     jobId?: string;
     listState: MediaJobListState;

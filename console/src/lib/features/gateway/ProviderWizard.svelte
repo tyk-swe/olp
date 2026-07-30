@@ -33,6 +33,7 @@
     authOptionsFor,
     buildCreateProviderInput,
     capabilitiesCertified,
+    certificationPrerequisiteReady,
     createProviderDraft,
     hasApiVersion,
     hasCloudProject,
@@ -43,8 +44,8 @@
     probeReady,
     requiresCredential,
     requiresSeedModel,
-    validateProviderDraft
-    , type ProviderDraft
+    validateProviderDraft,
+    type ProviderDraft
   } from './providerEditor';
 
   const queryClient = useQueryClient();
@@ -263,6 +264,16 @@
   async function certifyWizardModel(modelId: string) {
     if (!wizardProvider) return;
     await run(`certify-${modelId}`, async () => {
+      if (!certificationPrerequisiteReady(wizardProvider!)) {
+        probe = await probeProvider(wizardProvider!);
+        if (!probe.succeeded) throw new Error(probe.detail);
+        wizardProvider = {
+          ...wizardProvider!,
+          last_probe_at: probe.checked_at,
+          last_probe_status: 'succeeded',
+          last_probe_detail: probe.detail
+        };
+      }
       const result = await certifyProviderModel(wizardProvider!, modelId);
       certificationResults = { ...certificationResults, [modelId]: result };
       const updated = await getProvider(wizardProvider!.id);

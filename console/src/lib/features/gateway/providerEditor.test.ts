@@ -6,6 +6,7 @@ import {
   buildCreateProviderInput,
   buildUpdateProviderInput,
   capabilitiesCertified,
+  certificationPrerequisiteReady,
   createProviderDraft,
   hasApiVersion,
   hasCloudProject,
@@ -208,6 +209,18 @@ describe('provider editor activation policy', () => {
     expect(activationReady({ ...readyDraft, certified_capability_count: 1 })).toBe(false);
     expect(activationReady({ ...readyDraft, last_probe_at: '2026-07-12T11:59:00Z' })).toBe(false);
     expect(activationReady({ ...readyDraft, state: 'active' })).toBe(false);
+  });
+
+  it('requires fresh catalog evidence only for native provider certification', () => {
+    const staleProbe = {
+      ...readyDraft,
+      kind: 'openai' as const,
+      last_probe_at: '2026-07-12T11:59:00Z'
+    };
+    expect(certificationPrerequisiteReady(staleProbe)).toBe(false);
+    expect(
+      certificationPrerequisiteReady({ ...staleProbe, kind: 'openai_compatible' })
+    ).toBe(true);
   });
 
   it('labels pending changes before active and draft states', () => {

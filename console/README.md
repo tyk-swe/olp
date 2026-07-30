@@ -38,12 +38,19 @@ changing `../openapi/management.json`, run `pnpm api:generate`;
 
 ## Integration tests
 
-`pnpm test:integration` exercises the production build through the Rust
-server. It requires a disposable PostgreSQL database in
-`OLP_CONSOLE_E2E_DATABASE_URL`, a reachable Valkey in `OLP_VALKEY_URL`, and
+`pnpm test:integration` exercises the production console build through the
+complete Rust control, gateway, and worker process. The browser configures a
+loopback Azure OpenAI provider and proves OpenAI, Anthropic, and Gemini
+inference plus persisted request telemetry. It requires a disposable PostgreSQL database in
+`OLP_CONSOLE_E2E_DATABASE_URL`, an isolated Valkey instance or logical database
+in `OLP_VALKEY_URL`, and
 `OLP_CONSOLE_E2E_MASTER_KEY_FILE`, `OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE`, and
 `OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE`. Set `OLP_CONSOLE_E2E_BIN` to a
-prebuilt `olp` executable to skip the harness build.
+prebuilt debug `olp` executable compiled with `--features test-util` to skip
+the harness build. That test-only feature permits the provider mock's loopback
+HTTP endpoint; release builds do not include the escape hatch. The harness
+refuses to start if the selected Valkey database already contains keys, because
+stale stream events would make telemetry assertions misleading.
 
 ## Documentation screenshots
 

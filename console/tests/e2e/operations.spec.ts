@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '../playwright';
 
 const requestId = '01980000-0000-7000-8000-000000000101';
 const generationId = '01980000-0000-7000-8000-000000000102';

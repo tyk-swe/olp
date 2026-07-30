@@ -4,6 +4,7 @@ const databaseUrl = process.env.OLP_CONSOLE_E2E_DATABASE_URL;
 const masterKeyFile = process.env.OLP_CONSOLE_E2E_MASTER_KEY_FILE;
 const authHmacKeyFile = process.env.OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE;
 const bootstrapTokenFile = process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE;
+const valkeyUrl = process.env.OLP_VALKEY_URL;
 if (!databaseUrl) {
   throw new Error('OLP_CONSOLE_E2E_DATABASE_URL is required for the Rust-hosted console integration');
 }
@@ -16,15 +17,17 @@ if (!authHmacKeyFile) {
 if (!bootstrapTokenFile) {
   throw new Error('OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE is required for first-run setup');
 }
+if (!valkeyUrl) {
+  throw new Error('OLP_VALKEY_URL is required for the complete gateway integration');
+}
 
 export default defineConfig({
   testDir: './tests/integration',
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results',
   fullyParallel: false,
-  // `fullyParallel: false` only serialises tests *within* a file; separate
-  // spec files still get separate workers. These specs share one real
-  // database and one installation, so they must run one at a time and in path
-  // order — the first-run setup journey can only be true once.
+  // One explicit serial suite owns the disposable database and installation.
+  // First-run setup is true exactly once, and retries against mutated state
+  // would no longer exercise the same journey.
   workers: 1,
   forbidOnly: true,
   // The test mutates a real database. Retrying against that same database
@@ -48,6 +51,12 @@ export default defineConfig({
       timeout: 10_000
     },
     {
+      command: 'node tests/integration/mock-azure-openai.mjs',
+      url: 'http://127.0.0.1:4178/health',
+      reuseExistingServer: false,
+      timeout: 10_000
+    },
+    {
       command: 'tests/integration/run-olp.sh',
       url: 'http://127.0.0.1:4177/health/live',
       reuseExistingServer: false,
@@ -62,7 +71,9 @@ export default defineConfig({
         OLP_MASTER_KEY_FILE: masterKeyFile,
         OLP_AUTH_HMAC_KEY_FILE: authHmacKeyFile,
         OLP_BOOTSTRAP_TOKEN_FILE: bootstrapTokenFile,
-        OLP_ALLOW_INSECURE_OIDC_FOR_TESTS: 'test-only'
+        OLP_VALKEY_URL: valkeyUrl,
+        OLP_ALLOW_INSECURE_OIDC_FOR_TESTS: 'test-only',
+        OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS: 'test-only'
       }
     }
   ]
