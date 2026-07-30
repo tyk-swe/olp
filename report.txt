@@ -1,42 +1,287 @@
-# OLP edge-case audit
+# OpenLLMProxy consolidated static audit
 
-**Repository:** `olp-main(11)(3)`  
-**Inventory:** 130 distinct edge cases  
-**Severity:** 0 critical, 12 high, 78 medium, 40 low  
-**Method:** repository-wide static source review of the Rust gateway/control plane, storage, providers/protocols, Svelte console, Helm deployment, tests, and CI.
+**Merged sources:** three independently generated reports formerly stored as `1.txt`, `2.txt`, and `3.txt`  
+**Merge date:** 2026-07-30  
+**Scope:** Rust gateway/control plane, storage, providers/protocols, Svelte console, Helm and Compose deployment, operational scripts, tests, and CI  
+**Revision note:** one source identified commit `e75ea6d6729f99f4339d37d4694a54596ec4b6a2`; the other two identified archive variants only. Verify that every source locator still applies before filing an issue.
 
-## Audit limits
+## Status and merge policy
 
-This is an exhaustive best-effort static inventory, not a proof that no other edge case exists. The environment did not contain the project Rust toolchain, and the console requires Node 24 while the available runtime is Node 22; therefore I did not claim compile/test/runtime confirmation. `Confirmed` means the control/data flow is directly present in source. `High confidence` means the behavior follows from the implementation but still benefits from an executable regression test. `Test required` and `Contract-dependent` findings are deliberately not presented as proven defects.
+This is a deduplicated static-analysis backlog, not runtime proof. Duplicate findings were collapsed by root cause, unique findings from the focused reports were added as `A-*`, and the broad edge-case inventory remains as `E-*`. Direct contradictions are marked disputed. Severity and confidence were inherited from the source reports and were not independently re-established during this merge.
 
-The codebase already contains unusually broad unit, PostgreSQL/Valkey integration, HA fault-injection, fuzz, protocol, SDK, browser, and deployment coverage. The gaps below cluster around long timing windows, crash boundaries, malicious-but-parseable provider output, distributed clock/order assumptions, and valid high-cardinality operator input.
+`Confirmed` means a source report considered the control/data flow direct. `High confidence` still needs an executable regression test. `Test required` and `Contract-dependent` are hypotheses, not proven defects. Validate each finding against the current tree before changing production behavior.
 
-## Fix first
+## Executive priority
 
-- **E-001 — Valid long-lived responses are terminated by connection age** (High, Confirmed). Every accepted connection is shut down after roughly 5 minutes plus a 30-second drain, regardless of a route/provider timeout. A valid long stream or download is truncated; an HTTP/2 stream opened late inherits only the connection’s remaining lifetime.
-- **E-004 — Shutdown accounting closes an epoch from a pre-drain snapshot** (High, Confirmed). The loss reporter waits a fixed 100 ms instead of joining the request-metadata writer. A slow in-flight XADD can persist after the epoch is closed, causing permanent false uncertainty or an inconsistent loss boundary.
-- **E-016 — Provider-reported usage above total reservation is not charged** (High, Confirmed). The gateway reserves an HTTP estimate plus a parsed-operation delta, but reconciliation only refunds over-reservation. If actual provider usage exceeds the combined estimate, TPM accounting remains low.
-- **E-040 — Crash or SIGKILL leaves private media spool trees forever** (High, Confirmed). Each process creates a new directory and removes it only in Drop. A node crash, power loss, abort, or SIGKILL leaves all prior files without a startup scavenger.
-- **E-044 — Image response has no aggregate output/file-descriptor bound** (High, Confirmed). Per-image size is bounded, but an arbitrary response count can open many handles and build a very large aggregate JSON/stream. This can exhaust FDs, memory, or response time.
-- **E-053 — Side-effecting operations may fail over after ambiguous upstream execution** (High, Contract-dependent). Post-send 5xx, rate-limit, or retryable canonical errors can permit failover for image/audio/video operations. If the first provider accepted work before returning/losing the response, a second target can duplicate and bill it.
-- **E-059 — Vertex OAuth refresh can be held indefinitely by a trickling body** (Medium, Confirmed). Each chunk has a timeout, but no total response deadline exists. A token endpoint sending one small chunk inside every idle window holds the shared refresh mutex indefinitely and queues all token consumers.
-- **E-072 — Request-metadata Valkey stream is unbounded** (High, Confirmed). Gateways XADD without MAXLEN/XTRIM. When Valkey is healthy but PostgreSQL or the consumer is unhealthy, accepted events accumulate until Valkey memory pressure affects limits, runtime hints, or the whole service.
-- **E-073 — One valid-but-invalid-for-DB event can poison the entire metadata consumer** (High, Confirmed). Negative media units/tokens, invalid numeric range, or another DB constraint failure is not classified as InvalidRequestMetadataEvent. The consumer retries/breaks on the same entry forever, so later entries pile up.
-- **E-080 — Fresh-start runtime recovery only searches the newest 32 releases** (High, Confirmed). SQL LIMIT is applied before envelope/authentication/compatibility filtering. Thirty-two corrupt, undecryptable, or incompatible newest rows hide an older valid last-known-good runtime and keep a replacement node unready.
-- **E-082 — Pricing revision creation holds a global advisory lock during serial work** (Medium, Confirmed). A valid request can contain up to 10,000 entries. It performs provider validation and insertion serially inside one transaction/global lock, monopolizing a connection and blocking every pricing writer.
-- **E-086 — UUIDv7-only cursors can skip later commits under clock skew** (Medium, Confirmed). Rows are paged by UUID ordering. A node with a behind clock can commit a newly created UUID lower than a cursor already issued by another node, so forward pagination never returns it.
-- **E-095 — Successful upstream create can lose its only recoverable ID** (High, Confirmed). After upstream create succeeds, attaching the upstream ID gets only three very short DB retries. If PostgreSQL remains down, the reservation has no ID; restart can only mark create ambiguous and cannot discover or delete the potentially billable job.
-- **E-096 — Local and provider media-job ID validators disagree** (High, Confirmed). The local store accepts a much broader <=1024-character ID; the OpenAI transport accepts only <=256 ASCII alnum/-/_. A persisted locally valid ID can become permanently unqueryable/undeletable.
-- **E-125 — Helm monitoring rules page on intentionally disabled components** (Medium, Confirmed). Rules always expect both gateway and control metrics. A valid single-component deployment continuously alerts that the disabled component is absent.
+1. **A-001:** Helm pre-upgrade migration can break serving N−1 pods.
+2. **E-001:** routine connection aging truncates valid long-running requests.
+3. **E-016:** actual token usage above reservation is never charged.
+4. **A-002:** live media jobs can block emergency credential containment.
+5. **A-003:** restore rehearsal compares URL strings before destructive DDL.
+6. **A-004:** public login permits large Argon2 and audit-row amplification.
+7. **E-072 / E-073:** metadata ingestion is both unbounded and poisonable.
+8. **E-095 / E-096:** media jobs can lose their upstream identity or persist an unusable one.
+9. **A-005:** pricing can prefer a stale provider override over a newer revision.
+10. **A-006:** retention and rollup work runs in one unbounded transaction.
+11. **E-044:** image output lacks aggregate byte, count, and file-descriptor bounds.
+12. **E-080:** fixed pre-filter pagination can hide a valid last-known-good runtime.
 
 ## Severity and confidence
 
-- **High:** can lose accounting/durability, orphan or duplicate billable work, cause broad availability failure, or permanently skip data.
-- **Medium:** material availability, correctness, security-boundary, operability, or resource-amplification failure.
-- **Low:** compatibility, bounded DoS, confusing semantics, future footgun, or defense-in-depth gap.
-- **Confirmed:** directly established by the source path. **High confidence:** strong static inference. **Test required:** timing behavior needs execution. **Contract-dependent:** impact depends on an upstream guarantee not encoded locally.
+- **Critical:** credible release-wide outage or destructive-data risk in a normal supported workflow.
+- **High:** can lose accounting or durability, orphan or duplicate billable work, cause broad availability failure, or permanently skip data.
+- **Medium:** material correctness, availability, security-state, operability, or resource-amplification failure.
+- **Low:** bounded compatibility, UX, maintainability, or defense-in-depth issue.
+- **Disputed:** another source report identified a control that may invalidate the claim; reproduce before filing.
 
-## Full inventory
+# Additional findings absent from the edge-case inventory
+
+### A-001 — Helm pre-upgrade migration breaks still-serving N−1 pods
+
+**Critical · Reported confirmed** — `deploy/helm/templates/migration-job.yaml:1-16` runs migrations as a pre-upgrade hook, while `deploy/helm/templates/workloads.yaml:20-27` keeps old pods serving during the rolling update. Migration `0028_naming_consistency.sql` renames live schema objects and values expected by the release pinned at migration `0021`.
+
+**Fix / gate:** use expand-contract migrations across releases, or explicitly stop traffic and old pods before migrating. CI must run the actual N−1 image against the migrated schema while sustained traffic continues.
+
+### A-002 — Live asynchronous media jobs can block compromised-credential containment
+
+**High · Reported confirmed** — Credential rotation, revocation, provider disablement, and route changes are rejected while non-deleted jobs retain historical references (`crates/storage/src/configuration/resources/credentials.rs:25-158,292-314`; `provider_lifecycle.rs:324-367`; `resources/providers.rs:184-213`; `route_lifecycle.rs:416-470`). Jobs may remain relevant for thirty days.
+
+**Fix / gate:** add an owner-only forced-containment operation that disables new traffic, tombstones or cancels affected jobs, publishes a safe runtime, and emits a high-severity audit event without requiring the compromised secret to remain active.
+
+### A-003 — Restore rehearsal can target production through an aliased URL
+
+**High · Reported confirmed** — `scripts/restore-rehearsal.sh:18-25` compares destination and production URL strings, then `:47-65` can execute `DROP SCHEMA public CASCADE`. Different DNS names, address forms, encodings, parameters, or proxy endpoints can identify the same database.
+
+**Fix / gate:** compare connected server/database and installation identities, require a rehearsal sentinel, and test aliased URLs before any DDL. Prefer creating the scratch database internally.
+
+### A-004 — Distributed login abuse amplifies Argon2 work and durable audit writes
+
+**High · Reported confirmed; deployment-dependent** — `auth_admission.rs:7-12` permits 10,000 admitted attempts per minute globally; unknown accounts still perform Argon2id and every admitted failure is inserted into long-retained audit storage (`management_api/auth.rs:267-320`; `store/sessions.rs:60-78`).
+
+**Fix / gate:** cap password work with a measured semaphore and lower global admission to sustainable capacity. Aggregate or sample anonymous failures and batch or partition their retention.
+
+### A-005 — Pricing specificity is ordered before revision freshness
+
+**High · Reported confirmed** — Pricing lookup in `request_metadata/ingestion.rs:337-346` orders provider-specific rows before `effective_at` and revision. An old provider override can therefore beat a newer generic price indefinitely.
+
+**Fix / gate:** first select the latest effective revision, then choose provider-specific or generic pricing only within that revision.
+
+### A-006 — Maintenance combines unrelated unbounded cleanup in one transaction
+
+**High · Reported confirmed** — `crates/storage/src/maintenance.rs:46-312` performs request deletion, usage rollup/deletion, audit cleanup, session/invitation/idempotency/OIDC/outbox cleanup, and media-job deletion under one transaction and advisory lock. Most operations are not batched.
+
+**Fix / gate:** use bounded keyset batches and separate commits per dataset, with resumable cursors and measured row/time/WAL budgets.
+
+### A-007 — Token reconciliation is not idempotent
+
+**Medium · Reported design fragility** — `crates/storage/scripts/reconcile_limits.lua:6-20` refunds a counter without a reservation identity or reconciled state; retrying the same cleanup can refund twice. This prevents safely adding retries to the one-shot cleanup in E-018.
+
+**Fix / gate:** give reservations IDs and atomically transition `pending -> reconciled` with the counter update; repeated reconciliation must be a no-op.
+
+### A-008 — Authenticated management responses lack a default no-store policy
+
+**Medium · Reported confirmed; intermediary-dependent** — The management router (`apps/olp/src/router.rs:123-132,146-205`) lacks a global `Cache-Control: no-store, private` layer, so cookie-authenticated configuration and identity responses rely on intermediaries behaving safely.
+
+**Fix / gate:** apply no-store/private to authenticated `/api/v1/**` responses by default and opt out only resources proven safe to cache.
+
+### A-009 — API-key HMAC rotation has no verification overlap
+
+**Medium · Reported design debt** — `crates/storage/src/security.rs:285-427` models one HMAC key. Because plaintext API keys are not retained, replacing it invalidates every stored digest and keyed bootstrap identity immediately.
+
+**Fix / gate:** version digests, retain bounded verify-only keys, and provide an audited reissue and retirement workflow.
+
+### A-010 — Management accepts TPM values the runtime always rejects
+
+**Medium · Reported confirmed** — Policy APIs accept through `i64::MAX`, while the Valkey/Lua path rejects values above `2^53-1` (`management_api/configuration/api_keys/policy.rs:14-16,150-154,208-231`; `storage/src/limits.rs:11-15,180-200`). A valid persisted policy can make all limited requests fail closed.
+
+**Fix / gate:** use one domain limit and maximum across API validation, persistence, runtime compilation, and Lua.
+
+### A-011 — The partitioned requests table has only an ever-growing default partition
+
+**Medium · Reported architecture debt** — `migrations/0001_initial.sql:297-320` declares range partitioning but creates only `requests_default`; no reported migration or runtime manager creates future partitions.
+
+**Fix / gate:** create time partitions ahead of use, monitor default spill, and expire data by detaching or dropping partitions.
+
+### A-012 — Configuration list endpoints perform hundreds of database round trips
+
+**Medium · Reported confirmed** — API-key and route listing paths use `1 + 3N` or `1 + 4N` query patterns (`configuration/resources/api_keys.rs:4-54`; `resources/routes.rs:4-53,344-475`). A 100-item page can issue roughly 301–401 queries.
+
+**Fix / gate:** batch child reads with `ANY($1)` and group results in memory; add query-count assertions.
+
+### A-013 — Common request, health, and cleanup filters lack supporting indexes
+
+**Medium · Scaling candidate** — The reports identify provider/time attempt queries, request dimension filters, expired unaccepted invitations, and deleted media-job cleanup without matching composite or partial indexes.
+
+**Fix / gate:** confirm with production-shaped `EXPLAIN (ANALYZE, BUFFERS)`, then add only the measured composites/partials.
+
+### A-014 — Secret changes neither roll pods nor reload long-lived keys
+
+**Medium · Reported confirmed for the chart** — Secret volumes in `deploy/helm/templates/workloads.yaml:31-41,140-174` have no rollout version/checksum, while the process loads master, HMAC, and bootstrap keys at startup.
+
+**Fix / gate:** define an explicit immutable-secret/keyring rotation workflow that stages overlap, rolls pods, verifies readiness, and then retires old keys.
+
+### A-015 — Operator-facing names accept bidi, control, and invisible Unicode
+
+**Medium · Reported confirmed UI/audit risk** — Display-name and configuration-name validators generally trim and length-check but do not reject controls or bidi overrides (`management_api/auth.rs:592-620`; `access.rs:860-884`; `configuration/validation.rs:9-55`).
+
+**Fix / gate:** centralize normalization for human-facing identifiers, reject control/bidi/most zero-width format characters, and show stable IDs in security-sensitive views.
+
+### A-016 — Default control-plane deployment is a single disruption-sensitive replica
+
+**Medium · Reported confirmed default** — `deploy/helm/values.yaml:73-93` defaults control to one replica with its PDB and topology spread disabled.
+
+**Fix / gate:** provide a production default/profile with at least two control replicas, a PDB, and topology spread; keep single-node settings explicitly developmental.
+
+### A-017 — Extreme usage timestamps can panic and become a caught 500
+
+**Medium · Static edge case** — Usage queries accept `i64` timestamps before `DateTime::from_timestamp(...).expect(...)` and unchecked ceiling arithmetic in `storage/src/usage/query.rs:141-152`.
+
+**Fix / gate:** perform checked conversion and bounded date validation at the API boundary; return 400 for unrepresentable values.
+
+### A-018 — Pricing uses request completion time
+
+**Medium · Policy ambiguity** — `request_metadata/ingestion.rs:341` receives the completion timestamp from gateway telemetry, so a long request crossing a price activation boundary is billed at the finish-time price.
+
+**Fix / gate:** normally snapshot at request start; if completion-time pricing is intentional, document and test it explicitly.
+
+### A-019 — Cached-token accounting cannot produce reliable discounted cost
+
+**Medium · Reported confirmed** — Usage stores `cached_input_tokens`, but pricing has no cached-input rate and charges all input at the normal price. The invariant `cached_input_tokens <= input_tokens` is also absent from canonical validation, ingestion, and database constraints.
+
+**Fix / gate:** enforce the invariant at all three layers, then add a cached-input price and calculate cached and uncached input separately.
+
+### A-020 — Ordinary generation can fail over after first-byte ambiguity
+
+**Medium · Cost/idempotency risk** — Media operations reportedly block ambiguous retries, but ordinary generation can be sent to another target when the first provider may already have generated and billed the request (`gateway/failover.rs:214-262,282-348,441-469`).
+
+**Fix / gate:** make `at_most_once` versus `availability_first` an explicit route policy and forward provider idempotency keys where available.
+
+### A-021 — Provider 429 handling discards Retry-After and feeds a health circuit
+
+**Medium · Reported confirmed** — Five canonical rate-limit failures open a process-local target circuit for thirty seconds, while OpenAI, Anthropic, and Gemini transports discard `Retry-After`.
+
+**Fix / gate:** separate credential/model-scoped rate-limit backoff from transport/5xx health circuits; safely parse delta-seconds and HTTP-date forms and propagate a bounded value.
+
+### A-022 — HTTP/1 keep-alive is globally disabled
+
+**Low · Explicit performance debt** — `apps/olp/src/listener.rs:279-287` uses `keep_alive(false)` to preserve exact first-request raw-header bounds, forcing a new connection per HTTP/1 request.
+
+**Fix / gate:** retain this only if measured and documented; otherwise enforce request-specific bounds without disabling reuse.
+
+### A-023 — Invitation display and clipboard values differ
+
+**Low · Reported confirmed UX issue** — `AccessPage.svelte:273-289,330-334` copies a full invitation URL but visibly displays the raw token.
+
+**Fix / gate:** display the full read-only URL and hide the bearer token unless explicitly requested.
+
+### A-024 — Route revision provenance points to a mutable draft
+
+**Low · Reported confirmed auditability issue** — Activation copies immutable runtime values, but `source_draft_id` identifies a draft that can later be edited and reactivated.
+
+**Fix / gate:** retain an immutable draft snapshot or canonical source document and hash on each revision.
+
+### A-025 — Invalid OIDC return_to silently becomes the default path
+
+**Low · Reported confirmed UX/API issue** — `oidc/authorization.rs:85-107,125-148` discards malformed or invalid present values with `.ok()`. Open redirects remain blocked, but integrations receive no error.
+
+**Fix / gate:** default only when absent; return a 400 problem response when present but invalid.
+
+### A-026 — Console CSP omits form-action
+
+**Low · Defense in depth** — `apps/olp/src/static_console.rs:8-44` builds the CSP without an explicit `form-action`.
+
+**Fix / gate:** add `form-action 'self'`, or `'none'` if no form submission is required.
+
+### A-027 — Helm chart has no NetworkPolicy
+
+**Low · Deployment hardening** — The chart exposes ClusterIP observability services but provides no NetworkPolicy template.
+
+**Fix / gate:** offer a default-deny production policy with explicit ingress, metrics, DNS, PostgreSQL, Valkey, and approved provider-egress allowances.
+
+### A-028 — Gateway topology spread is best-effort
+
+**Low · Availability default** — `deploy/helm/values.yaml:64-68` uses `whenUnsatisfiable: ScheduleAnyway`, so default gateway replicas may share a node.
+
+**Fix / gate:** use a production profile with protective spread or required anti-affinity where cluster size permits it.
+
+### A-029 — Pricing POST returns pre-normalized input
+
+**Low · Reported confirmed consistency issue** — Creation trims model names and uppercases currency before storage but constructs the response and idempotency payload from the original input (`storage/src/operations/pricing.rs:143-190`).
+
+**Fix / gate:** normalize once and use the same records for insertion and response, or return inserted rows.
+
+### A-030 — Console pagination collects up to 10,000 records sequentially
+
+**Low · Reported confirmed scaling issue** — `console/src/lib/api/pagination.ts:27-57` fetches all cursor pages into one array and throws only after appending the page that crosses 10,000 items.
+
+**Fix / gate:** use server-side search/virtualized selection; at minimum stop before fetching a page that would exceed the limit.
+
+### A-031 — A slow half-open probe can be joined by later probes
+
+**Medium · Reported confirmed** — Circuit code treats a probe lease as stale after the fixed thirty-second open duration even when its provider attempt can run longer (`apps/olp/src/circuit.rs:58-76`).
+
+**Fix / gate:** bind or renew the probe lease through the attempt deadline and fence completion.
+
+### A-032 — Panic-poisoned standard locks can cause persistent request failures
+
+**Low · Maintainability candidate** — Several request-path registries and state holders use `std::sync::{Mutex,RwLock}` followed by `expect`. No concrete panic-inside-lock path was established.
+
+**Fix / gate:** keep lock-held work non-panicking and recover from poison only where state invariants make that safe.
+
+### A-033 — ApiState construction can panic on spool creation failure
+
+**Low · Reported narrow path** — `apps/olp/src/state.rs:83-84` exposes a panic-producing constructor, although the production startup path reportedly creates the spool explicitly.
+
+**Fix / gate:** return `Result` from non-test constructors and keep panic-only helpers test-scoped.
+
+# CI and release-pipeline gaps
+
+### P-001 — Upgrade rehearsal never runs N−1 against the migrated schema
+
+**High · Reported confirmed** — CI builds the current binary and uses it for both prior-schema setup and post-migration verification (`ci.yml:642-684`; `scripts/ci/run-upgrade-rehearsal.sh:49-100`; `scripts/upgrade-rehearsal.sh:139-175`). This cannot catch A-001.
+
+### P-002 — Final-image vulnerability scanning does not run on pull requests
+
+**Medium · Reported confirmed** — PRs build and smoke-test amd64, but SBOM and Trivy steps are limited to push, schedule, or manual events.
+
+### P-003 — Several failure-mode and compatibility gates run only after merge
+
+**Medium · Reported confirmed** — Firefox/WebKit/mobile, HA/Toxiproxy, upgrade rehearsal, bounded fuzzing, and arm64 validation do not run on ordinary pull requests.
+
+### P-004 — Coverage is enforced only as a 51% workspace-wide line floor
+
+**Medium · Reported confirmed** — The aggregate threshold can hide coverage loss in auth, limits, migrations, egress, or cancellation paths.
+
+### P-005 — Restore safety has no database-alias regression test
+
+**Medium · Reported confirmed** — Existing backup-manifest tests do not cover syntactically different URLs resolving to the same database.
+
+### P-006 — SBOM retention is short and no in-repository signing/provenance flow was found
+
+**Low · External controls unknown** — Generated SBOMs are retained for seven days; image signing and durable provenance may exist outside the reviewed repository.
+
+### P-007 — The monolithic CI workflow duplicates infrastructure setup
+
+**Low · Maintainability** — The reported workflow is 813 lines. Split only when duplication is causing drift; this is not a release blocker.
+
+### P-008 — make shellcheck depends on Git metadata
+
+**Low · Reported confirmed for source archives** — `Makefile:108-112` uses `git ls-files`, so the target cannot enumerate scripts in a release archive without `.git`.
+
+### P-009 — Repository-side SAST and dependency-review coverage is unknown
+
+**Informational** — Organization-level controls were outside the supplied artifacts. Document the external guarantees before adding duplicate in-repository jobs.
+
+### P-010 — Image scans ignore vulnerabilities without a published fix
+
+**Low · Policy gap** — `ignore-unfixed: true` keeps such findings green. Publish the complete report and define a reachable/known-exploited exception policy if retaining this merge policy.
+
+# Disputed findings
+
+- **E-004:** one report says shutdown closes a metadata epoch from a pre-drain snapshot; another says a final checkpoint verifies both writer closure and zero pending work. Keep the inventory entry for reproduction, but do not file it as confirmed.
+- **E-053:** one report alleges ambiguous failover for image/audio/video operations; another cites explicit blocks and tests for those operations. The narrower ordinary-generation ambiguity is retained as A-020.
+
+# Edge-case inventory
 
 ## 1. Listener, HTTP boundary, routing, and shutdown
 
@@ -64,13 +309,13 @@ The codebase already contains unusually broad unit, PostgreSQL/Valkey integratio
 
 **Mitigation / regression test:** Use borrow_and_update()/has_changed() or select on the current value. Add a deterministic Tokio test where shutdown is sent before the accept/connection task starts waiting.
 
-### E-004 — Shutdown accounting closes an epoch from a pre-drain snapshot
+### E-004 — [Disputed] Shutdown accounting may close an epoch from a pre-drain snapshot
 
-**High · Confirmed** — The loss reporter waits a fixed 100 ms instead of joining the request-metadata writer. A slow in-flight XADD can persist after the epoch is closed, causing permanent false uncertainty or an inconsistent loss boundary.
+**Disputed · Reproduction required** — One report says the loss reporter waits a fixed 100 ms instead of joining the request-metadata writer. Another says the final checkpoint verifies both writer closure and zero pending work, which may close the alleged race.
 
 **Evidence / review locus:** `apps/olp/src/cli/startup.rs:391-428`
 
-**Mitigation / regression test:** Give the writer an explicit flush-and-stop protocol and join it before closing the epoch. Fault-test XADD latency above 100 ms.
+**Regression test:** Delay XADD beyond 100 ms, initiate shutdown, and verify whether epoch closure can precede writer completion. Change the shutdown protocol only if the test reproduces the inconsistency.
 
 ### E-005 — Only one background worker has terminal failure wired into runtime shutdown
 
@@ -462,13 +707,13 @@ The codebase already contains unusually broad unit, PostgreSQL/Valkey integratio
 
 ## 4. Provider transport, failover, codecs, and SSE protocol edges
 
-### E-053 — Side-effecting operations may fail over after ambiguous upstream execution
+### E-053 — [Disputed] Side-effecting media operations may fail over after ambiguous upstream execution
 
-**High · Contract-dependent** — Post-send 5xx, rate-limit, or retryable canonical errors can permit failover for image/audio/video operations. If the first provider accepted work before returning/losing the response, a second target can duplicate and bill it.
+**Disputed · Reproduction required** — One report claims post-send failures can fail over image/audio/video operations. Another cites explicit ambiguous-retry blocks and behavior-preserving tests for those operations; its narrower ordinary-generation finding is retained as A-020.
 
 **Evidence / review locus:** `apps/olp/src/gateway/failover.rs:214-263,371-393,437-468; crates/domain/src/ports.rs:167-178`
 
-**Mitigation / regression test:** For non-idempotent operations, require an upstream idempotency key or treat every post-send uncertain/retryable result as ambiguous. Test with a provider that creates work then returns 500.
+**Regression test:** Make a media provider accept work and then return 500 or lose the response. Confirm the gateway does not send the operation to a second target before filing this finding.
 
 ### E-054 — DNS refresh is serialized behind one mutex
 
@@ -1098,14 +1343,14 @@ The codebase already contains unusually broad unit, PostgreSQL/Valkey integratio
 
 - **Connection retirement:** Start an HTTP/2 stream at connection age 4m59s and keep it valid beyond 6 minutes; verify policy does not truncate it unexpectedly.
 - **Watch shutdown race:** Publish shutdown before spawning the listener/connection waiter and prove it exits immediately.
-- **Shutdown metadata drain:** Delay XADD for >100 ms, initiate shutdown, and prove epoch closure occurs only after writer completion.
+- **Disputed shutdown metadata drain:** Delay XADD for >100 ms, initiate shutdown, and determine whether the final checkpoint prevents epoch closure before writer completion.
 - **Poison metadata event:** Inject negative media units, NUMERIC overflow, FK failure, and oversized payload; prove each is dead-lettered and the next entry persists.
 - **Valkey backlog:** Disable PostgreSQL while keeping Valkey healthy; verify bounded stream memory, oldest-age alerts, and explicit loss/degradation policy.
 - **Usage surcharge:** Return actual usage above both HTTP and parsed estimates; assert the shortfall is charged atomically.
 - **Media create crash matrix:** Crash after reserve, upstream create, ID receipt, each attach retry, cleanup-intent write, and response commit; assert recoverability.
 - **Media ID grammar:** Fuzz provider IDs at 255/256/257/1024 bytes, Unicode, controls, slash, and whitespace; local and transport validators must agree.
 - **Reconciliation lease:** Hold provider I/O over two minutes; prove only one worker owns the job through lease renewal.
-- **Side-effect ambiguity:** Have provider create work then return 500/timeout; prove no second provider receives the operation without an idempotency guarantee.
+- **Ordinary-generation ambiguity:** Let a provider generate and bill a request while its first response byte is lost; verify the configured retry policy determines whether a second target receives it.
 - **Runtime LKG pagination:** Insert 33 invalid newest releases followed by one valid release; a fresh node must recover the valid one.
 - **UUID cursor skew:** Insert a lower UUID after issuing a cursor; prove pagination returns it or document snapshot semantics.
 - **Pricing cardinality:** Submit maximum entries and measure lock/transaction duration; enforce a bounded SLO and no global writer starvation.
@@ -1135,7 +1380,7 @@ The codebase already contains unusually broad unit, PostgreSQL/Valkey integratio
 2. Close the media-create identity durability gap and unify provider job-ID validation.
 3. Fix connection retirement, shutdown writer joining, and essential-worker supervision.
 4. Make accounting reconcile signed deltas and model unknown usage explicitly.
-5. Remove side-effecting failover ambiguity or require upstream idempotency.
+5. Make ordinary-generation ambiguity policy explicit; change media failover only if E-053 is reproduced.
 6. Page runtime LKG without a fixed pre-filter limit; replace UUID-only cursors.
 7. Bound high-cardinality control-plane and response paths (pricing, routes, image count/bytes/FDs).
 8. Add JWKS/token stale-if-error behavior, then harden duplicate headers, multipart grammar, console cross-tab state, and deployment alerts.
