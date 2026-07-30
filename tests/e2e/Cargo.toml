@@ -6,21 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# Every dependency is a dev-dependency: the crate is an empty library anchor
-# whose only content is the end-to-end contract test target, and dev-only
-# edges keep it out of the production dependency DAG contract.
+# Test-only edges keep the harness out of the production dependency DAG.
 [dev-dependencies]
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
-bytes.workspace = true
-futures.workspace = true
 rand.workspace = true
+redis.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true

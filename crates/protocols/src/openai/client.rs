@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use olp_domain::{CanonicalEvent, CanonicalEventKind, FinishReason, Surface};
+use olp_domain::{CanonicalEvent, CanonicalEventKind, Surface};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -10,9 +10,8 @@ use crate::sse::SseFrame;
 use super::extensions::apply_pointer_extensions;
 use super::responses::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::{
-    ChatCompletionChoice, ChatCompletionResponse, ChatFunctionCall, ChatResponseMessage, ChatRole,
-    ChatToolCall, ChatUsage, CompletionTokenDetails, PromptTokenDetails, ResponseErrorBody,
-    ResponseInputTokenDetails, ResponseObject, ResponseOutputTokenDetails, ResponseUsage,
+    ResponseErrorBody, ResponseInputTokenDetails, ResponseObject, ResponseOutputTokenDetails,
+    ResponseUsage,
 };
 
 pub fn encode_response_object(
@@ -126,92 +125,6 @@ pub fn encode_response_object(
             usage,
             error: None::<ResponseErrorBody>,
             incomplete_details,
-            extra: BTreeMap::new(),
-        },
-        &aggregate.extensions,
-    )
-    .map_err(OpenAiClientEncodeError::InvalidExtension)
-}
-
-pub fn encode_chat_completion_client_response(
-    events: &[CanonicalEvent],
-    client_model: &str,
-    fallback_id: &str,
-    created_at: i64,
-) -> Result<ChatCompletionResponse, OpenAiClientEncodeError> {
-    let aggregate = aggregate_generation(events, Surface::OpenAi)?;
-    let choices = aggregate
-        .outputs
-        .into_iter()
-        .map(|(index, item)| {
-            let tool_calls = item
-                .tools
-                .into_values()
-                .map(|tool| {
-                    Ok::<_, OpenAiClientEncodeError>(ChatToolCall {
-                        id: tool
-                            .id
-                            .ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?,
-                        kind: "function".into(),
-                        function: ChatFunctionCall {
-                            name: tool
-                                .name
-                                .ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?,
-                            arguments: tool.arguments,
-                            extra: BTreeMap::new(),
-                        },
-                        extra: BTreeMap::new(),
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let finish_reason = item.finish.as_ref().map(|reason| match reason {
-                FinishReason::Stop => "stop".into(),
-                FinishReason::Length => "length".into(),
-                FinishReason::ToolCalls => "tool_calls".into(),
-                FinishReason::ContentFilter => "content_filter".into(),
-                FinishReason::Error => "stop".into(),
-                FinishReason::Other(value) => value.clone(),
-            });
-            Ok(ChatCompletionChoice {
-                index,
-                message: ChatResponseMessage {
-                    role: ChatRole::Assistant,
-                    content: (!item.text.is_empty()).then_some(item.text),
-                    refusal: (!item.refusal.is_empty()).then_some(item.refusal),
-                    tool_calls,
-                    extra: BTreeMap::new(),
-                },
-                finish_reason,
-                extra: BTreeMap::new(),
-            })
-        })
-        .collect::<Result<Vec<_>, OpenAiClientEncodeError>>()?;
-    let usage = aggregate.usage.map(|usage| ChatUsage {
-        prompt_tokens: usage.input_tokens,
-        completion_tokens: usage.output_tokens,
-        total_tokens: usage.total_tokens,
-        prompt_tokens_details: usage
-            .cached_input_tokens
-            .map(|cached_tokens| PromptTokenDetails {
-                cached_tokens: Some(cached_tokens),
-                extra: BTreeMap::new(),
-            }),
-        completion_tokens_details: usage.reasoning_tokens.map(|reasoning_tokens| {
-            CompletionTokenDetails {
-                reasoning_tokens: Some(reasoning_tokens),
-                extra: BTreeMap::new(),
-            }
-        }),
-        extra: BTreeMap::new(),
-    });
-    apply_pointer_extensions(
-        ChatCompletionResponse {
-            id: aggregate.response_id.unwrap_or_else(|| fallback_id.into()),
-            object: "chat.completion".into(),
-            created: created_at,
-            model: client_model.into(),
-            choices,
-            usage,
             extra: BTreeMap::new(),
         },
         &aggregate.extensions,

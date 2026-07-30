@@ -19,12 +19,12 @@ use auth::{
 };
 use axum::{Json, Router, routing::get, routing::post};
 pub(crate) use common::{
-    CSRF_HEADER, RECENT_AUTH_COOKIE, SETUP_TOKEN_HEADER, WriteOnlySecret,
+    CSRF_HEADER, PageQuery, RECENT_AUTH_COOKIE, SETUP_TOKEN_HEADER, WriteOnlySecret,
     append_recent_auth_cookie, append_security_transition_cookies, clear_recent_auth_cookie,
     cookie, enforce_origin, idempotency_http_response, if_match, json_payload, map_persistence,
-    prevent_sensitive_response_caching, reauthentication_required, require_idempotency_key,
-    require_mutation_session, require_permission, require_read_session,
-    validate_session_cookie_ttl,
+    optional_if_match, page, prevent_sensitive_response_caching, reauthentication_required,
+    require_idempotency_key, require_mutation_session, require_permission, require_read_session,
+    validate_session_cookie_ttl, with_etag,
 };
 pub(crate) use configuration::common::{map_configuration_resource, validation};
 pub(crate) use olp_domain::Permission;

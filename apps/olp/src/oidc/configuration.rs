@@ -4,7 +4,7 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use jsonwebtoken::jwk::{JwkSet, PublicKeyUse};
 use olp_domain::Role;
@@ -22,12 +22,12 @@ use zeroize::Zeroizing;
 
 use super::claims::is_allowed_algorithm_name;
 use super::error::{field_problem, map_discovery_network, map_oidc, oidc_not_configured};
-use super::helpers::{network_policy, optional_if_match, require_master_key, valid_claim_name};
+use super::helpers::{network_policy, require_master_key, valid_claim_name};
 use crate::{
     ManagementState, Problem,
     management_api::{
-        Permission, json_payload, require_mutation_session, require_permission,
-        require_read_session,
+        Permission, json_payload, optional_if_match, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
 };
 
@@ -539,36 +539,34 @@ fn parse_role(value: &str) -> Result<Role, Problem> {
 
 fn configuration_response(configuration: OidcConfiguration) -> Result<Response, Problem> {
     let etag = configuration.etag;
-    let mut response = Json(OidcConfigurationResponse {
-        id: configuration.id,
-        discovery_url: configuration.discovery_url,
-        issuer: configuration.issuer,
-        client_id: configuration.client_id,
-        has_client_secret: true,
-        enabled: configuration.enabled,
-        scopes: configuration.scopes,
-        email_claim: configuration.email_claim,
-        groups_claim: configuration.groups_claim,
-        default_role: configuration
-            .default_role
-            .map(|role| role.as_str().to_owned()),
-        email_role_mappings: configuration
-            .email_role_mappings
-            .into_iter()
-            .map(mapping_response)
-            .collect(),
-        group_role_mappings: configuration
-            .group_role_mappings
-            .into_iter()
-            .map(mapping_response)
-            .collect(),
+    let mut response = with_etag(
+        Json(OidcConfigurationResponse {
+            id: configuration.id,
+            discovery_url: configuration.discovery_url,
+            issuer: configuration.issuer,
+            client_id: configuration.client_id,
+            has_client_secret: true,
+            enabled: configuration.enabled,
+            scopes: configuration.scopes,
+            email_claim: configuration.email_claim,
+            groups_claim: configuration.groups_claim,
+            default_role: configuration
+                .default_role
+                .map(|role| role.as_str().to_owned()),
+            email_role_mappings: configuration
+                .email_role_mappings
+                .into_iter()
+                .map(mapping_response)
+                .collect(),
+            group_role_mappings: configuration
+                .group_role_mappings
+                .into_iter()
+                .map(mapping_response)
+                .collect(),
+            etag,
+        }),
         etag,
-    })
-    .into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
+    )?;
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

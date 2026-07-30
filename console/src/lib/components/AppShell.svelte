@@ -2,7 +2,7 @@
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
   import type { SessionUser } from '$lib/api/auth';
-  import { provideAuthorization } from '$lib/auth/authorization';
+  import { can } from '$lib/auth/authorization';
   import BrandMark from './BrandMark.svelte';
   import NavIcon from './NavIcon.svelte';
   import Navigation from './Navigation.svelte';
@@ -22,7 +22,6 @@
     onSignOut: () => void;
   } = $props();
   let mobileNavigation = $state<HTMLDialogElement>();
-  const authorization = provideAuthorization(() => user.role);
 
   function openNavigation() {
     mobileNavigation?.showModal();
@@ -46,7 +45,7 @@
       <BrandMark />
       <span>OpenLLMProxy</span>
     </a>
-    <Navigation />
+    <Navigation role={user.role} />
     <div class="sidebar-footer">
       <span class="environment-dot" aria-hidden="true"></span>
       <span>Self-hosted</span>
@@ -77,7 +76,7 @@
           </summary>
           <div class="account-popover">
             <a href={resolve('/settings/profile')}>Personal profile</a>
-            {#if authorization.can('settings.read')}<a href={resolve('/settings')}>Installation settings</a>{/if}
+            {#if can(user.role, 'settings.read')}<a href={resolve('/settings')}>Installation settings</a>{/if}
             <button type="button" onclick={onSignOut} disabled={signingOut} aria-busy={signingOut}>
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
@@ -110,7 +109,7 @@
       </a>
       <button type="button" class="close-button" aria-label="Close navigation" onclick={closeNavigation}>×</button>
     </div>
-    <Navigation label="Mobile primary" onNavigate={closeNavigation} />
+    <Navigation role={user.role} label="Mobile primary" onNavigate={closeNavigation} />
   </div>
 </dialog>
 

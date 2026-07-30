@@ -65,8 +65,9 @@ These configure test/ops scripts, not the server process:
   filter, e.g. `make db-test ARGS="-E 'test(upgrade_0021)'"`.
 - `OLP_CONSOLE_E2E_*` — console↔Rust integration suite
   (`console/README.md`).
-- `OLP_HA_*` — two-gateway HA proof (`tests/ha/two-gateway.sh`, full CI tier
-  only).
+- `OLP_E2E_DATABASE_APP_ADMIN_URL`, `OLP_E2E_VALKEY_APP_URL`,
+  `OLP_E2E_TOXIPROXY_API`, `OLP_E2E_{DATABASE,VALKEY}_PROXY_NAME` —
+  two-gateway HA proof (`tests/e2e`, full CI tier only).
 - `OLP_REHEARSAL_*`, `OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_DUMP`,
   `OLP_PG_RESTORE`, `OLP_PSQL` — backup/restore/upgrade rehearsal scripts
   (`docs/operations.md`).

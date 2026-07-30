@@ -298,13 +298,6 @@ export async function listSessions(cursor?: string): Promise<CursorPage<Session>
   return result(data, error, response);
 }
 
-export async function revokeSession(id: string): Promise<void> {
-  const { error, response } = await apiClient.DELETE('/api/v1/sessions/{session_id}', {
-    params: { path: { session_id: id } }
-  });
-  ensureSuccess(error, response);
-}
-
 export async function listOidcIdentities(): Promise<OidcIdentityList> {
   const { data, error, response } = await apiClient.GET('/api/v1/oidc/identities');
   return result(data, error, response);
@@ -317,11 +310,6 @@ export async function beginOidcReauthentication(
   const { data, error, response } = await apiClient.POST('/api/v1/oidc/reauthenticate', {
     body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) }
   });
-  return result(data, error, response).authorization_url;
-}
-
-export async function beginOidcLink(): Promise<string> {
-  const { data, error, response } = await apiClient.POST('/api/v1/oidc/link');
   return result(data, error, response).authorization_url;
 }
 

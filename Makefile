@@ -106,9 +106,10 @@ script-selftest: ## Self-tests for the backup manifest and repository-validation
 	scripts/test-repository-validation.sh
 
 shellcheck: ## Shellcheck every tracked shell script
-	@scripts=$$(git ls-files -- '*.sh'); \
-	if [[ -z $$scripts ]]; then echo "no tracked shell scripts were found" >&2; exit 1; fi; \
-	git ls-files -z -- '*.sh' | xargs -0 shellcheck && echo "shellcheck passed"
+	@scripts=(); \
+	while IFS= read -r -d '' script; do [[ ! -f $$script ]] || scripts+=("$$script"); done < <(git ls-files -z -- '*.sh'); \
+	if (( $${#scripts[@]} == 0 )); then echo "no tracked shell scripts were found" >&2; exit 1; fi; \
+	shellcheck "$${scripts[@]}" && echo "shellcheck passed"
 
 fuzz-check: ## Compile fuzz targets (stable toolchain)
 	cargo check --locked --manifest-path fuzz/Cargo.toml --bins

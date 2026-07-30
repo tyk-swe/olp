@@ -2,7 +2,6 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { ApiProblem } from '$lib/api/http';
   import { invalidateProviderSummaries } from './providerCache';
   import {
     getProvider,
@@ -37,9 +36,7 @@
   const providerCount = $derived(new Set(inventory.map((entry) => entry.provider_id)).size);
 
   function message(error: unknown) {
-    return error instanceof ApiProblem
-      ? error.problem.detail ?? error.problem.title
-      : error instanceof Error ? error.message : 'The model inventory could not be loaded.';
+    return error instanceof Error ? error.message : 'The model inventory could not be loaded.';
   }
 
   async function toggle(entry: ProviderModelInventory, enabled: boolean) {

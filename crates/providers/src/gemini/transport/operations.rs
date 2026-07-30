@@ -18,10 +18,7 @@ use tokio::time::{Instant, timeout};
 
 use super::errors::*;
 use super::media::hydrate_gemini_contents;
-use crate::gemini::{
-    BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey,
-    headers::sanitize_forward_headers,
-};
+use crate::gemini::{BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey};
 use crate::transport_io::{ProviderResponseIo, bounded_duration};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
@@ -111,7 +108,7 @@ impl GeminiConnector {
                     query.append_pair("pageToken", page_token);
                 }
             }
-            let mut headers = sanitize_forward_headers(&HeaderMap::new());
+            let mut headers = HeaderMap::new();
             self.insert_authentication_header(&mut headers).await?;
             headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
             let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
@@ -194,7 +191,7 @@ impl GeminiConnector {
             .count_tokens_url(upstream_model)
             .map_err(map_endpoint_error)?;
         let body = br#"{"contents":[{"role":"user","parts":[{"text":"health"}]}]}"#;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.insert_authentication_header(&mut headers).await?;
         headers.insert(
             header::CONTENT_TYPE,
@@ -259,7 +256,7 @@ impl GeminiConnector {
             .await
             .map_err(map_endpoint_error)?;
 
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         let auth_wait = RESPONSE_IO.remaining(attempt_deadline, TransportPhase::Connect)?;
         timeout(auth_wait, self.insert_authentication_header(&mut headers))
             .await

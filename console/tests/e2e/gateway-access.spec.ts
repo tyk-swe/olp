@@ -1,5 +1,12 @@
 import AxeBuilder from '@axe-core/playwright';
-import { denyClipboard, expect, failUnexpectedApiRequest, test, type Page } from '../playwright';
+import {
+  denyClipboard,
+  emulateTwoHundredPercentZoom,
+  expect,
+  failUnexpectedApiRequest,
+  mockSession,
+  test
+} from '../playwright';
 
 import { mockProviderKinds } from './provider-capabilities';
 
@@ -23,32 +30,7 @@ const ids = {
 };
 
 const now = '2026-07-12T12:00:00Z';
-
-async function mockSession(page: Page) {
-  await page.route('**/api/v1/sessions/current', async (route) => {
-    await route.fulfill({
-      json: {
-        user: { id: ids.user, email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner' },
-        csrf_token: 'csrf-e2e'
-      }
-    });
-  });
-}
-
-async function emulateTwoHundredPercentZoom(page: Page) {
-  const viewport = page.viewportSize();
-  // Desktop browser zoom must reflow at 200%. Mobile projects already exercise
-  // the narrow layout; resizing an emulated device desynchronizes Chromium's
-  // visual and layout viewports after its device scale has been established.
-  if (!viewport || viewport.width <= 480) return;
-  // Browser zoom halves the available CSS-pixel viewport. Resizing exercises
-  // the same reflow contract without CSS `zoom`, which incorrectly scales
-  // fixed-position dialog viewport units in headless engines.
-  await page.setViewportSize({
-    width: Math.max(320, Math.floor(viewport.width / 2)),
-    height: Math.max(480, Math.floor(viewport.height / 2))
-  });
-}
+const sessionOptions = { userId: ids.user, csrfToken: 'csrf-e2e' };
 
 function providerRecord(
   state = 'draft',
@@ -137,7 +119,7 @@ const certifiedModelRecord = {
 
 test('provider wizard keeps the write-only secret out of subsequent steps', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let currentProvider = providerRecord();
   let createBody: Record<string, unknown> | undefined;
   let createHeaders: Record<string, string> = {};
@@ -311,7 +293,7 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
 });
 
 test('native provider detail never round-trips its official endpoint as a custom endpoint', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let updateBody: Record<string, unknown> | undefined;
   let currentProvider = providerRecord('active', [certifiedModelRecord], {
     endpoint: 'https://api.openai.com/v1/'
@@ -361,7 +343,7 @@ test('native provider detail never round-trips its official endpoint as a custom
 });
 
 test('native provider detail probes the current draft before certification', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let currentProvider = providerRecord('draft', [modelRecord], {
     etag: '01980000-0000-7000-8000-000000000120',
     updated_at: '2026-07-12T12:20:00Z'
@@ -477,7 +459,7 @@ test('native provider detail probes the current draft before certification', asy
 
 test('provider detail resets provider-wide model mutations and retains row-local model pages', async ({ page }) => {
   test.slow();
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   page.on('dialog', (dialog) => dialog.accept());
   let modelVersion = 0;
   const modelCursors: Array<string | null> = [];
@@ -711,7 +693,7 @@ test('provider detail resets provider-wide model mutations and retains row-local
 });
 
 test('provider detail keeps the live revision and credential until a certified draft activates', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const nextCredential = '01980000-0000-7000-8000-000000000104';
   let currentProvider = providerRecord('active', [certifiedModelRecord], {
     kind: 'openai_compatible',
@@ -874,7 +856,7 @@ test('provider detail keeps the live revision and credential until a certified d
 
 test('provider inventory preserves its cursor through detail and wizard navigation', async ({ page }) => {
   test.slow();
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const firstProvider = providerRecord('active', [modelRecord]);
   const secondProvider = {
     ...firstProvider,
@@ -931,7 +913,7 @@ test('provider inventory preserves its cursor through detail and wizard navigati
 });
 
 test('model inventory pages the global catalog and updates through provider ETags', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const secondProviderId = '01980000-0000-7000-8000-000000000106';
   const secondModel = {
     ...certifiedModelRecord,
@@ -997,7 +979,7 @@ test('model inventory pages the global catalog and updates through provider ETag
 
 test('Route Studio creates, simulates, validates, and activates deterministic routing', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let routeState = 'draft';
   let createBody: Record<string, unknown> | undefined;
   let createHeaders: Record<string, string> = {};
@@ -1093,7 +1075,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
 });
 
 test('failed route conflict reload preserves dirty fields until a successful reload', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let failNextReload = false;
   let current = {
     id: ids.draft,
@@ -1168,7 +1150,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
 test('API key creation shows a secret once with SDK snippets on mobile', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
   await denyClipboard(page);
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let createBody: Record<string, unknown> | undefined;
   let createHeaders: Record<string, string> = {};
   await page.route('**/api/v1/routes**', async (route) => {
@@ -1247,7 +1229,7 @@ test('API key creation shows a secret once with SDK snippets on mobile', async (
 });
 
 test('API key policy updates, rotation, and revocation converge in the list', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   page.on('dialog', (dialog) => dialog.accept());
   let revokedAt: string | null = null;
   let keyName = 'production SDK';
@@ -1313,7 +1295,7 @@ test('API key policy updates, rotation, and revocation converge in the list', as
 });
 
 test('route revision diff and restore-as-draft remain explicit', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const revision = (id: string, number: number, slug: string) => ({
     id,
     route_id: ids.route,
@@ -1364,7 +1346,7 @@ test('route revision diff and restore-as-draft remain explicit', async ({ page }
 
 test('access roles, one-time invitations, sessions, and OIDC are API-backed', async ({ page }) => {
   await denyClipboard(page);
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const members = [
     { id: ids.user, email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner', active: true, etag: '01980000-0000-7000-8000-000000000411', created_at: now, updated_at: now },
     { id: ids.developer, email: 'grace@example.com', display_name: 'Grace Developer', role: 'developer', active: true, etag: '01980000-0000-7000-8000-000000000412', created_at: now, updated_at: now }
@@ -1465,7 +1447,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
 });
 
 test('new OIDC configuration leaves the sentinel state and versions later saves', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let current: Record<string, unknown> | null = null;
   const saveEtags: Array<string | undefined> = [];
 
@@ -1519,7 +1501,7 @@ test('new OIDC configuration leaves the sentinel state and versions later saves'
 });
 
 test('failed OIDC conflict reload preserves edits and write-only secret', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let failNextReload = false;
   let current = {
     id: ids.oidc,
@@ -1589,7 +1571,7 @@ test('failed OIDC conflict reload preserves edits and write-only secret', async 
 });
 
 test('provider discovery advances its ETag without dropping dirty connector edits', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const currentModel = { ...modelRecord };
   let current = providerRecord('draft', [currentModel], {
     etag: '01980000-0000-7000-8000-000000000501'
@@ -1661,7 +1643,7 @@ test('provider discovery advances its ETag without dropping dirty connector edit
 });
 
 test('provider refetch failures keep dirty connector and capability forms mounted', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const currentModel = { ...certifiedModelRecord };
   let current = providerRecord('draft', [currentModel], {
     etag: '01980000-0000-7000-8000-000000000521'
@@ -1756,7 +1738,7 @@ test('provider refetch failures keep dirty connector and capability forms mounte
 });
 
 test('provider capability conflict reloads the row and retries from the remote ETag', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let currentModel = { ...modelRecord };
   let current = providerRecord('draft', [currentModel], {
     etag: '01980000-0000-7000-8000-000000000511'
@@ -1847,7 +1829,7 @@ test('provider capability conflict reloads the row and retries from the remote E
 });
 
 test('provider wizard recovers a capability save after an ETag conflict', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   let currentModel = {
     ...modelRecord,
     capabilities: [modelRecord.capabilities[0]]

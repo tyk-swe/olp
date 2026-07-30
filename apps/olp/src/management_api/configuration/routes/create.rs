@@ -1,8 +1,8 @@
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
+    response::Response,
 };
 use olp_domain::OperationKind;
 use olp_storage::{
@@ -174,21 +174,18 @@ pub(crate) async fn validate_route_draft(
         .validate_route_draft(draft_id, if_match(&headers)?, principal.user_id)
         .await
         .map_err(map_configuration)?;
-    let mut response = (
-        StatusCode::OK,
-        Json(RouteDraftResponse {
-            id: draft_id,
-            slug: slug.to_string(),
-            state: "validated".to_owned(),
-            etag,
-        }),
+    with_etag(
+        (
+            StatusCode::OK,
+            Json(RouteDraftResponse {
+                id: draft_id,
+                slug: slug.to_string(),
+                state: "validated".to_owned(),
+                etag,
+            }),
+        ),
+        etag,
     )
-        .into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
 }
 
 #[utoipa::path(
@@ -220,19 +217,16 @@ pub(crate) async fn activate_route_draft(
         .activate_route_draft(draft_id, expected_etag, principal.user_id, idempotency_key)
         .await
         .map_err(map_configuration)?;
-    let mut response = Json(RouteActivationResponse {
-        route_id: activated.route_id,
-        revision_id: activated.revision_id,
-        revision: activated.revision,
-        runtime_generation: RuntimeGenerationResponse {
-            id: activated.release.generation_id,
-            sequence: activated.release.sequence,
-        },
-    })
-    .into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{expected_etag}\"")).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
+    with_etag(
+        Json(RouteActivationResponse {
+            route_id: activated.route_id,
+            revision_id: activated.revision_id,
+            revision: activated.revision,
+            runtime_generation: RuntimeGenerationResponse {
+                id: activated.release.generation_id,
+                sequence: activated.release.sequence,
+            },
+        }),
+        expected_etag,
+    )
 }

@@ -1,8 +1,8 @@
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
+    response::Response,
 };
 use olp_domain::{
     ProviderAuthMode, ProviderConfiguration, ProviderKind, provider_kind_spec,
@@ -371,25 +371,21 @@ pub(crate) async fn activate_provider(
         )
         .await
         .map_err(map_configuration)?;
-    let mut response = (
-        StatusCode::OK,
-        Json(ProviderActivationResponse {
-            id: provider_id,
-            state: "active".to_owned(),
-            etag: activated.etag,
-            runtime_generation: RuntimeGenerationResponse {
-                id: activated.release.generation_id,
-                sequence: activated.release.sequence,
-            },
-        }),
+    with_etag(
+        (
+            StatusCode::OK,
+            Json(ProviderActivationResponse {
+                id: provider_id,
+                state: "active".to_owned(),
+                etag: activated.etag,
+                runtime_generation: RuntimeGenerationResponse {
+                    id: activated.release.generation_id,
+                    sequence: activated.release.sequence,
+                },
+            }),
+        ),
+        activated.etag,
     )
-        .into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{}\"", activated.etag))
-            .map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
 }
 
 #[derive(Debug, Serialize, ToSchema)]

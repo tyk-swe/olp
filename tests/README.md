@@ -33,11 +33,9 @@ pnpm --dir tests/sdk-smoke install --frozen-lockfile
 
 ## High-availability proof
 
-`ha/two-gateway.sh` runs two gateway processes against one PostgreSQL and one
-Valkey, with toxiproxy injecting partitions, and asserts failover behavior.
-It is driven by the `OLP_HA_*` environment variables (see the script header)
-and runs only in CI's full tier (push/schedule/dispatch), not on pull
-requests.
+The `ha` target in `tests/e2e` reuses the contract harness to run two gateways
+against one PostgreSQL and one Valkey, with Toxiproxy injecting partitions.
+It runs only in CI's full tier (push/schedule/dispatch), not on pull requests.
 
 ## Fuzz targets
 

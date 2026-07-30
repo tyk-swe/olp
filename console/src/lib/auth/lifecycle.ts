@@ -1,4 +1,4 @@
-import type { QueryClient } from '@tanstack/svelte-query';
+import { hashKey, type QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from '$lib/api/session';
 import type { FixedRole } from './authorization';
 
@@ -93,20 +93,6 @@ function combineSignals(...signals: AbortSignal[]): AbortSignal {
   return controller.signal;
 }
 
-function stableSerialize(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    if (typeof value === 'bigint') return JSON.stringify(value.toString());
-    if (value === undefined) return 'undefined';
-    return JSON.stringify(value) ?? String(value);
-  }
-  if (value instanceof Date) return `date:${value.toISOString()}`;
-  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
-  return `{${Object.keys(value as Record<string, unknown>)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableSerialize((value as Record<string, unknown>)[key])}`)
-    .join(',')}}`;
-}
-
 export class AuthenticationLifecycle {
   private queryClient: QueryClient | null = null;
   private boundary: Boundary | null = null;
@@ -173,7 +159,7 @@ export class AuthenticationLifecycle {
   }
 
   queryKeyHash(key: readonly unknown[]): string {
-    return `${this.partition}|${stableSerialize(key)}`;
+    return `${this.partition}|${hashKey(key)}`;
   }
 
   async authenticate(request: AuthenticationRequest): Promise<AuthenticatedSession> {

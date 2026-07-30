@@ -514,7 +514,7 @@ pub(super) async fn list_sessions(
     if user_id != principal.user_id {
         require_permission(&principal, Permission::ManageSessions)?;
     }
-    let (cursor, limit) = page_parameters(PageQuery {
+    let (cursor, limit) = page(PageQuery {
         cursor: query.cursor,
         limit: query.limit,
     })?;

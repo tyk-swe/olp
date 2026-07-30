@@ -4,9 +4,6 @@ description: >-
   action SHAs below in lockstep with scripts/check-supply-chain-pins.sh.
 
 inputs:
-  toolchain:
-    description: Rust toolchain to install
-    default: "1.97.0"
   components:
     description: Comma-separated rustup components
     default: ""
@@ -34,7 +31,7 @@ runs:
   steps:
     - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
       with:
-        toolchain: ${{ inputs.toolchain }}
+        toolchain: "1.97.0"
         components: ${{ inputs.components }}
     - if: ${{ inputs.cache == 'true' }}
       uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1

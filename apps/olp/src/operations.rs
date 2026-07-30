@@ -148,8 +148,6 @@ pub(crate) struct OperationsApiDoc;
 use helpers::{page_limit, validate_time_range};
 #[cfg(test)]
 use media_jobs::media_job_surface_wire_value;
-#[cfg(test)]
-use settings::if_match;
 
 #[cfg(test)]
 mod tests;

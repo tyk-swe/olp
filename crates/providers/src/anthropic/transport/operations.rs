@@ -17,7 +17,7 @@ use tokio::time::{Instant, timeout};
 
 use super::errors::*;
 use super::media::hydrate_anthropic_messages;
-use crate::anthropic::{AnthropicApiKey, ConnectorConfig, headers::sanitize_forward_headers};
+use crate::anthropic::{AnthropicApiKey, ConnectorConfig};
 use crate::transport_io::{ProviderResponseIo, bounded_duration};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
@@ -87,7 +87,7 @@ impl AnthropicConnector {
                     query.append_pair("after_id", after_id);
                 }
             }
-            let mut headers = sanitize_forward_headers(&HeaderMap::new());
+            let mut headers = HeaderMap::new();
             headers.insert("x-api-key", secret_header(&self.api_key)?);
             headers.insert(
                 "anthropic-version",
@@ -188,7 +188,7 @@ impl AnthropicConnector {
             .map_err(map_endpoint_error)?;
 
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         headers.insert("x-api-key", secret_header(&self.api_key)?);
         headers.insert(
             "anthropic-version",

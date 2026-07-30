@@ -8,7 +8,6 @@
     login,
     type AuthenticationCapabilities
   } from '$lib/api/auth';
-  import { ApiProblem } from '$lib/api/http';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import { relativeReturnTo } from '$lib/auth/relativeReturnTo';
   import SetupFrame from '$lib/features/setup/SetupFrame.svelte';
@@ -34,11 +33,7 @@
   }
 
   function problemMessage(error: unknown, fallback: string) {
-    return error instanceof ApiProblem
-      ? (error.problem.detail ?? error.problem.title)
-      : error instanceof Error
-        ? error.message
-        : fallback;
+    return error instanceof Error ? error.message : fallback;
   }
 
   async function submit(event: SubmitEvent) {

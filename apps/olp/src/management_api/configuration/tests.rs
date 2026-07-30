@@ -3,12 +3,10 @@ use olp_providers::{CapabilityCertificationEvidence, CompatibleCapabilityCertifi
 use olp_storage::{CapabilityRecord, ConfigurationError};
 use utoipa::OpenApi;
 
-use crate::management_api::WriteOnlySecret;
+use crate::management_api::{PageQuery, WriteOnlySecret, page};
 
 use super::{
-    ConfigurationApiDoc,
-    common::{PageQuery, map_configuration_resource, page},
-    providers::certification_item,
+    ConfigurationApiDoc, common::map_configuration_resource, providers::certification_item,
 };
 
 #[test]

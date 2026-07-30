@@ -17,6 +17,7 @@
 #                               (default postgres://olp_test:olp_test@localhost:5433/postgres)
 #   OLP_E2E_VALKEY_URL          Dedicated Valkey URL; when unset, the harness
 #                               leases and clears an exclusive local logical DB
+#   OLP_E2E_TEST_TARGET         contract (default) or ha
 #   OLP_E2E_BIN                 Prebuilt olp binary; built here when unset
 #   OLP_E2E_KEEP_DB=1           Keep the per-run database for debugging
 set -euo pipefail
@@ -70,8 +71,7 @@ stop_leftover_processes() {
   expected_executable=$(readlink -f -- "$OLP_E2E_BIN")
   for directory in "${TMPDIR:-/tmp}"/olp-e2e-"$run_token"-*; do
     [[ -d $directory ]] || continue
-    pid_file="$directory/olp.pid"
-    if [[ -f $pid_file ]]; then
+    for pid_file in "$directory"/*.pid; do
       IFS= read -r pid <"$pid_file" || true
       if [[ $pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
         running_executable=$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)
@@ -86,7 +86,7 @@ stop_leftover_processes() {
           echo "skipping stale pid $pid: executable no longer matches OLP_E2E_BIN" >&2
         fi
       fi
-    fi
+    done
     if [[ ${OLP_E2E_KEEP_DB:-0} != 1 ]]; then
       rm -rf -- "$directory"
     fi
@@ -120,6 +120,7 @@ if [[ ! -x ${OLP_E2E_BIN} ]]; then
   echo "OLP_E2E_BIN is not an executable file: ${OLP_E2E_BIN}" >&2
   exit 1
 fi
+OLP_E2E_BIN=$(readlink -f -- "$OLP_E2E_BIN")
 export OLP_E2E_BIN
 sweep_leftover_databases
 
@@ -128,5 +129,10 @@ sweep_leftover_databases
 # that uses cargo test rather than nextest: nextest runs every test in its own
 # process, which would boot a server per assertion.
 cd -- "$repo_root"
-env SQLX_OFFLINE=true cargo test --locked -p olp-e2e --test contract -- \
+test_target=${OLP_E2E_TEST_TARGET:-contract}
+[[ $test_target == contract || $test_target == ha ]] || {
+  echo "OLP_E2E_TEST_TARGET must be contract or ha" >&2
+  exit 1
+}
+env SQLX_OFFLINE=true cargo test --locked -p olp-e2e --test "$test_target" -- \
   --ignored --test-threads=1 "$@"

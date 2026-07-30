@@ -1,16 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { emulateTwoHundredPercentZoom } from '../playwright';
 
 const iframe = (id: string) => `/iframe.html?id=${id}&viewMode=story`;
-
-async function emulateTwoHundredPercentZoom(page: Page) {
-  const viewport = page.viewportSize();
-  if (!viewport) return;
-  await page.setViewportSize({
-    width: Math.max(320, Math.floor(viewport.width / 2)),
-    height: Math.max(480, Math.floor(viewport.height / 2))
-  });
-}
 
 test('operator primitives are interactive, keyboard complete, and axe clean', async ({ page }) => {
   await page.goto(iframe('foundation-operator-primitives--interactive'));

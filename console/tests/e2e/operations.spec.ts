@@ -1,30 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '../playwright';
+import { emulateTwoHundredPercentZoom, expect, mockSession, test } from '../playwright';
 
 const requestId = '01980000-0000-7000-8000-000000000101';
 const generationId = '01980000-0000-7000-8000-000000000102';
 const keyId = '01980000-0000-7000-8000-000000000103';
 const providerId = '01980000-0000-7000-8000-000000000104';
-
-async function mockSession(page: Page) {
-  await page.route('**/api/v1/sessions/current', async (route) => {
-    await route.fulfill({
-      json: {
-        user: { id: '01980000-0000-7000-8000-000000000001', email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner' },
-        csrf_token: 'csrf-test-token'
-      }
-    });
-  });
-}
-
-async function emulateTwoHundredPercentZoom(page: Page) {
-  const viewport = page.viewportSize();
-  if (!viewport || viewport.width <= 480) return;
-  await page.setViewportSize({
-    width: Math.max(320, Math.floor(viewport.width / 2)),
-    height: Math.max(480, Math.floor(viewport.height / 2))
-  });
-}
 
 test('request explorer filters metadata and opens an accessible attempt timeline', async ({ page }, testInfo) => {
   await mockSession(page);

@@ -6,7 +6,7 @@ use olp_domain::{
 };
 use tokio::time::{Instant, timeout};
 
-use crate::openai::{ConnectorConfig, OpenAiApiKey, headers::sanitize_forward_headers};
+use crate::openai::{ConnectorConfig, OpenAiApiKey};
 
 mod errors;
 mod media;
@@ -84,7 +84,7 @@ impl OpenAiConnector {
             .endpoint
             .resource_url("models")
             .map_err(map_endpoint_error)?;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.attach_auth(&mut headers)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;

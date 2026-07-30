@@ -62,8 +62,6 @@ fn every_selected_operation_family_has_a_decoding_and_encoding_golden_case() {
             OperationKind::VideoContent,
             OperationKind::VideoDelete,
             OperationKind::Moderation,
-            OperationKind::ModelList,
-            OperationKind::ModelGet,
         ]),
         "the golden corpus must cover every selected canonical operation"
     );
@@ -96,8 +94,6 @@ fn decode(fixture: &OperationFixture) -> Operation {
         )
         .unwrap(),
         "openai_video_delete" => openai::decode_video_delete(required_string(&wire, "job_id")),
-        "openai_model_list" => openai::decode_model_list(),
-        "openai_model_get" => openai::decode_model_get(&required_string(&wire, "model")).unwrap(),
         "anthropic_messages" => anthropic::decode_messages_request(from_wire(wire)).unwrap(),
         "anthropic_count_tokens" => {
             anthropic::decode_count_tokens_request(from_wire(wire)).unwrap()
@@ -188,7 +184,6 @@ fn assert_encodes(codec: &str, operation: &Operation) {
             "openai_video_get" | "openai_video_content" | "openai_video_delete",
             Operation::Video(_),
         )
-        | ("openai_model_list" | "openai_model_get", Operation::Models(_))
         | ("anthropic_count_tokens" | "gemini_count_tokens", Operation::TokenCount(_)) => {}
         _ => panic!("golden codec {codec} did not match its canonical operation"),
     }

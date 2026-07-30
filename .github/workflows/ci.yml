@@ -593,9 +593,15 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U olp -d olp"
           --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
       toxiproxy:
         image: ghcr.io/shopify/toxiproxy:2.12.0@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
-        ports: ["8474:8474", "15432:15432"]
+        ports: ["8474:8474", "15432:15432", "16379:16379"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -607,16 +613,18 @@ jobs:
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Build the HA binary
-        run: cargo build --locked -p olp
+        run: cargo build --locked -p olp --features test-util
       - name: Run two-gateway limits, LKG, missed-hint, and revocation proof
         env:
-          OLP_HA_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
-          OLP_HA_DATABASE_URL_PREFIX: postgres://olp:olp@localhost:5432
-          OLP_HA_DATABASE_OWNER: olp
-          OLP_HA_DATABASE_APP_URL_PREFIX: postgres://olp:olp@localhost:15432
-          OLP_HA_TOXIPROXY_API: http://localhost:8474
-          OLP_HA_TOXIPROXY_NAME: olp-postgresql
-          OLP_BIN: target/debug/olp
+          OLP_E2E_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
+          OLP_E2E_DATABASE_APP_ADMIN_URL: postgres://olp:olp@localhost:15432/postgres
+          OLP_E2E_VALKEY_URL: redis://localhost:6379/0
+          OLP_E2E_VALKEY_APP_URL: redis://localhost:16379/0
+          OLP_E2E_TOXIPROXY_API: http://localhost:8474
+          OLP_E2E_DATABASE_PROXY_NAME: olp-postgresql
+          OLP_E2E_VALKEY_PROXY_NAME: olp-valkey
+          OLP_E2E_BIN: target/debug/olp
+          OLP_E2E_TEST_TARGET: ha
         run: |
           for _ in $(seq 1 100); do
             curl --fail --silent http://localhost:8474/version >/dev/null 2>&1 && break
@@ -626,7 +634,10 @@ jobs:
           curl --fail --silent --show-error -X POST http://localhost:8474/proxies \
             -H 'Content-Type: application/json' \
             --data '{"name":"olp-postgresql","listen":"0.0.0.0:15432","upstream":"postgres:5432"}'
-          ./tests/ha/two-gateway.sh
+          curl --fail --silent --show-error -X POST http://localhost:8474/proxies \
+            -H 'Content-Type: application/json' \
+            --data '{"name":"olp-valkey","listen":"0.0.0.0:16379","upstream":"valkey:6379"}'
+          ./scripts/run-e2e-tests.sh
 
   upgrade-rehearsal:
     name: Backup / restore / upgrade

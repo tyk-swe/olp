@@ -1,20 +1,10 @@
 <script lang="ts">
   import { setContext } from 'svelte';
-  import {
-    providerPaginationContext,
-    type ProviderPagination
-  } from '$lib/features/gateway/providerPagination';
+  import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
+  import { providerPaginationContext } from '$lib/features/gateway/providerPagination';
 
   let { children } = $props();
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
-
-  const pagination: ProviderPagination = {
-    get cursor() { return cursor; },
-    get history() { return history; },
-    setCursor(value) { cursor = value; },
-    setHistory(value) { history = value; }
-  };
+  const pagination = $state<CursorHistory>(emptyCursorHistory());
 
   setContext(providerPaginationContext, pagination);
 </script>

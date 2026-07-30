@@ -3,7 +3,7 @@ use std::{fmt, net::SocketAddr};
 use axum::{
     Json,
     extract::{ConnectInfo, Extension, Path, Query, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Duration, Utc};
@@ -52,12 +52,7 @@ pub(super) async fn profile(
         .map_err(map_identity)?
         .ok_or_else(user_not_found)?;
     let etag = user.etag;
-    let mut response = Json(UserDetailResponse::from(user)).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
+    with_etag(Json(UserDetailResponse::from(user)), etag)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -94,12 +89,7 @@ pub(super) async fn update_profile(
         .await
         .map_err(map_identity)?;
     let etag = user.etag;
-    let mut response = Json(UserDetailResponse::from(user)).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
+    with_etag(Json(UserDetailResponse::from(user)), etag)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -325,11 +315,7 @@ pub(super) async fn change_password(
         .await
         .map_err(map_identity)?;
     let etag = rotation.user.etag;
-    let mut response = Json(UserDetailResponse::from(rotation.user)).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
+    let mut response = with_etag(Json(UserDetailResponse::from(rotation.user)), etag)?;
     append_security_transition_cookies(&mut response, &replacement, state.session_ttl)?;
     Ok(response)
 }
@@ -415,11 +401,7 @@ pub(super) async fn enroll_password(
         .await
         .map_err(map_identity)?;
     let etag = rotation.user.etag;
-    let mut response = Json(UserDetailResponse::from(rotation.user)).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
+    let mut response = with_etag(Json(UserDetailResponse::from(rotation.user)), etag)?;
     append_security_transition_cookies(&mut response, &replacement, state.session_ttl)?;
     Ok(response)
 }
@@ -480,7 +462,7 @@ pub(super) async fn list_users(
 ) -> Result<Json<UserListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
-    let (cursor, limit) = page_parameters(query)?;
+    let (cursor, limit) = page(query)?;
     let (users, next_cursor) = state
         .store()
         .list_users(cursor, limit)
@@ -516,12 +498,7 @@ pub(super) async fn get_user(
         .map_err(map_identity)?
         .ok_or_else(user_not_found)?;
     let etag = user.etag;
-    let mut response = Json(UserDetailResponse::from(user)).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
+    with_etag(Json(UserDetailResponse::from(user)), etag)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -582,12 +559,7 @@ pub(super) async fn update_user_role(
         .await
         .map_err(map_identity)?;
     let etag = user.etag;
-    let mut response = Json(UserDetailResponse::from(user)).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{etag}\"")).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
+    with_etag(Json(UserDetailResponse::from(user)), etag)
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -670,7 +642,7 @@ pub(super) async fn list_invitations(
 ) -> Result<Json<InvitationListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
-    let (cursor, limit) = page_parameters(query)?;
+    let (cursor, limit) = page(query)?;
     let (invitations, next_cursor) = state
         .store()
         .list_invitations(cursor, limit)

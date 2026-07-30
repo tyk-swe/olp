@@ -3,8 +3,8 @@ use std::fmt;
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
+    response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_storage::{
@@ -162,14 +162,11 @@ pub(crate) async fn revoke_api_key(
         )
         .await
         .map_err(map_access)?;
-    let mut response = Json(RuntimeGenerationResponse {
-        id: revoked.release.generation_id,
-        sequence: revoked.release.sequence,
-    })
-    .into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&format!("\"{}\"", revoked.etag)).map_err(|_| Problem::internal())?,
-    );
-    Ok(response)
+    with_etag(
+        Json(RuntimeGenerationResponse {
+            id: revoked.release.generation_id,
+            sequence: revoked.release.sequence,
+        }),
+        revoked.etag,
+    )
 }

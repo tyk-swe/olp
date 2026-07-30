@@ -1,4 +1,5 @@
 use super::*;
+use crate::management_api::if_match;
 
 #[test]
 fn strong_etag_parser_rejects_wildcards_and_unquoted_values() {

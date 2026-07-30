@@ -181,15 +181,6 @@ impl Capability {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct CapabilityKey {
-    pub provider_id: ProviderId,
-    pub model: String,
-    pub operation: OperationKind,
-    pub surface: Surface,
-    pub mode: TransportMode,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Provider {
     pub id: ProviderId,

@@ -7,24 +7,23 @@ use olp_domain::{
 use olp_protocols::openai::{
     BoundedMediaPart, EmbeddingRequest, EmbeddingResponse, ImageStreamOperation,
     OpenAiImageEditRequest, OpenAiImageGenerationRequest, OpenAiImageResponse,
-    OpenAiImageStreamEvent, OpenAiModelListResponse, OpenAiModerationRequest,
-    OpenAiModerationResponse, OpenAiResponsesStreamDecoder, OpenAiResponsesStreamEncoder,
-    OpenAiSpeechRequest, OpenAiSpeechStreamEvent, OpenAiTranscriptionRequest,
-    OpenAiTranscriptionResponse, OpenAiTranscriptionStreamDecoder,
-    OpenAiTranscriptionStreamEncoder, OpenAiVideoCreateRequest, OpenAiVideoDeleteResponse,
-    OpenAiVideoListQuery, OpenAiVideoListResponse, OpenAiVideoObject, ResponseCreateRequest,
-    ResponseInputTokensRequest, ResponseInputTokensResponse, ResponseObject,
+    OpenAiImageStreamEvent, OpenAiModerationRequest, OpenAiModerationResponse,
+    OpenAiResponsesStreamDecoder, OpenAiResponsesStreamEncoder, OpenAiSpeechRequest,
+    OpenAiSpeechStreamEvent, OpenAiTranscriptionRequest, OpenAiTranscriptionResponse,
+    OpenAiTranscriptionStreamDecoder, OpenAiTranscriptionStreamEncoder, OpenAiVideoCreateRequest,
+    OpenAiVideoDeleteResponse, OpenAiVideoListQuery, OpenAiVideoListResponse, OpenAiVideoObject,
+    ResponseCreateRequest, ResponseInputTokensRequest, ResponseInputTokensResponse, ResponseObject,
     decode_embedding_request, decode_embedding_response, decode_image_edit,
-    decode_image_generation, decode_image_response, decode_image_stream_event,
-    decode_model_list_response, decode_moderation, decode_moderation_response,
-    decode_response_create, decode_response_input_tokens, decode_response_input_tokens_result,
-    decode_response_object, decode_speech, decode_speech_stream_event, decode_transcription,
-    decode_transcription_response, decode_video_create, decode_video_delete_response,
-    decode_video_list, decode_video_list_response, encode_embedding_request,
-    encode_embedding_response, encode_image_generation, encode_image_response,
-    encode_image_stream_update, encode_model_list_response, encode_moderation_response,
-    encode_response_create, encode_response_object, encode_speech_stream_update,
-    encode_transcription_response, encode_video_delete_response, encode_video_list_response,
+    decode_image_generation, decode_image_response, decode_image_stream_event, decode_moderation,
+    decode_moderation_response, decode_response_create, decode_response_input_tokens,
+    decode_response_input_tokens_result, decode_response_object, decode_speech,
+    decode_speech_stream_event, decode_transcription, decode_transcription_response,
+    decode_video_create, decode_video_delete_response, decode_video_list,
+    decode_video_list_response, encode_embedding_request, encode_embedding_response,
+    encode_image_generation, encode_image_response, encode_image_stream_update,
+    encode_moderation_response, encode_response_create, encode_response_object,
+    encode_speech_stream_update, encode_transcription_response, encode_video_delete_response,
+    encode_video_list_response,
 };
 use serde_json::json;
 
@@ -655,26 +654,6 @@ fn video_async_lifecycle_uses_current_videos_contract() {
     assert!(deleted.deleted);
     let encoded = encode_video_delete_response(&deleted).unwrap();
     assert!(decode_video_delete_response(encoded).deleted);
-}
-
-#[test]
-fn model_result_forms_round_trip_unknown_fields() {
-    let wire: OpenAiModelListResponse = serde_json::from_value(json!({
-        "object": "list",
-        "data": [{
-            "id": "upstream-model",
-            "object": "model",
-            "created": 1800000000,
-            "owned_by": "openai",
-            "vendor": "kept"
-        }],
-        "next": null
-    }))
-    .unwrap();
-    let result = decode_model_list_response(wire).unwrap();
-    let encoded = serde_json::to_value(encode_model_list_response(&result).unwrap()).unwrap();
-    assert_eq!(encoded["data"][0]["vendor"], "kept");
-    assert!(encoded.get("next").is_some());
 }
 
 #[test]

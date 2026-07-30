@@ -14,8 +14,6 @@
   {"name":"openai_video_get","codec":"openai_video_get","surface":"openai","expected_operation":"video_get","expected_route":null,"wire":{"job_id":"video_1"}},
   {"name":"openai_video_content","codec":"openai_video_content","surface":"openai","expected_operation":"video_content","expected_route":null,"wire":{"job_id":"video_1","variant":"thumbnail"}},
   {"name":"openai_video_delete","codec":"openai_video_delete","surface":"openai","expected_operation":"video_delete","expected_route":null,"wire":{"job_id":"video_1"}},
-  {"name":"openai_model_list","codec":"openai_model_list","surface":"openai","expected_operation":"model_list","expected_route":null,"wire":{}},
-  {"name":"openai_model_get","codec":"openai_model_get","surface":"openai","expected_operation":"model_get","expected_route":"public-model","wire":{"model":"public-model"}},
   {"name":"anthropic_messages","codec":"anthropic_messages","surface":"anthropic","expected_operation":"generation","expected_route":"claude-route","wire":{"model":"claude-route","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}},
   {"name":"anthropic_count_tokens","codec":"anthropic_count_tokens","surface":"anthropic","expected_operation":"token_count","expected_route":"claude-count","wire":{"model":"claude-count","messages":[{"role":"user","content":"hello"}]}},
   {"name":"gemini_generate_content","codec":"gemini_generate_content","surface":"gemini","expected_operation":"generation","expected_route":"gemini-route","wire":{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}},

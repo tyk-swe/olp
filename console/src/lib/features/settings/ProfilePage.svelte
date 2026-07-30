@@ -5,6 +5,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { logout } from '$lib/api/auth';
   import { isEtagMismatch } from '$lib/api/http';
+  import { revokeSession } from '$lib/api/management/access';
+  import { beginOidcLink } from '$lib/api/management/oidc';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     acceptRemote,
@@ -17,7 +19,6 @@
     reconcile
   } from '$lib/forms/concurrentEdit';
   import {
-    beginOidcLink,
     beginOidcReauthentication,
     changePassword,
     enrollPassword,
@@ -25,7 +26,6 @@
     listOidcIdentities,
     listSessions,
     reauthenticateWithPassword,
-    revokeSession,
     unlinkOidcIdentity,
     updateProfile
   } from '$lib/api/operations';

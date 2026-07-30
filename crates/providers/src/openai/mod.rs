@@ -9,7 +9,6 @@
 
 mod certification;
 mod endpoint;
-mod headers;
 mod transport;
 
 use std::{fmt, time::Duration};

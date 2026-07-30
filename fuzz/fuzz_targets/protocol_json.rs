@@ -138,14 +138,6 @@ fuzz_target!(|data: &[u8]| {
 
     roundtrip(
         data,
-        "openai::chat_completion_response",
-        |response| openai::decode_chat_completion_response(response).ok(),
-        |events| {
-            openai::encode_chat_completion_client_response(events, PUBLIC_MODEL, "fuzz-chat", 1)
-        },
-    );
-    roundtrip(
-        data,
         "openai::response_object",
         |response| openai::decode_response_object(response).ok(),
         |events| openai::encode_response_object(events, PUBLIC_MODEL, "fuzz-response"),
@@ -161,18 +153,6 @@ fuzz_target!(|data: &[u8]| {
         "openai::embedding_response",
         |response| openai::decode_embedding_response(response).ok(),
         |canonical| openai::encode_embedding_response(canonical, PUBLIC_MODEL, None),
-    );
-    roundtrip(
-        data,
-        "openai::model_object",
-        |response| openai::decode_model_object(response).ok(),
-        openai::encode_model_object,
-    );
-    roundtrip(
-        data,
-        "openai::model_list_response",
-        |response| openai::decode_model_list_response(response).ok(),
-        openai::encode_model_list_response,
     );
     roundtrip(
         data,
@@ -220,10 +200,8 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::image_stream_event",
         |event| {
-            openai::decode_image_stream_event(event, |_| {
-                Ok(MediaHandle::new("fuzz-image-stream"))
-            })
-            .ok()
+            openai::decode_image_stream_event(event, |_| Ok(MediaHandle::new("fuzz-image-stream")))
+                .ok()
         },
         |canonical| {
             openai::encode_image_stream_update(
@@ -300,7 +278,6 @@ fuzz_target!(|data: &[u8]| {
         });
     }
 
-    let _ = openai::decode_model_list();
     let _ = openai::decode_video_get("fuzz-job");
     let _ = openai::decode_video_content("fuzz-job");
     let _ = openai::decode_video_delete("fuzz-job");

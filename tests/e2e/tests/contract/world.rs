@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
 
-use crate::harness::Server;
+use crate::harness::{GatewayProcess, Server};
 use crate::mock_upstream::{self, MockUpstream};
 
 pub const OPENAI_ROUTE: &str = "e2e-openai";
@@ -377,6 +377,7 @@ impl World {
                 201,
             )
             .await?;
+        let published_at = Instant::now();
         let secret = created.body["secret"]
             .as_str()
             .ok_or_else(|| format!("api key response lacks secret: {}", created.body))?
@@ -385,8 +386,18 @@ impl World {
             .as_str()
             .ok_or_else(|| format!("api key response lacks id: {}", created.body))?
             .to_owned();
+        let etag = created.require_etag("API key create")?;
+        let generation = created.body["runtime_generation"]["sequence"]
+            .as_i64()
+            .ok_or_else(|| format!("API key response lacks generation: {}", created.body))?;
         await_key(&self.http, &self.public_origin, &secret).await?;
-        Ok(IssuedKey { id, secret })
+        Ok(IssuedKey {
+            id,
+            secret,
+            etag,
+            generation,
+            published_at,
+        })
     }
 
     /// Waits until the request log holds `expected` rows for `api_key_id`.
@@ -454,8 +465,17 @@ impl World {
 /// Brings up a server, two providers, two routes and an API key, and waits
 /// until the gateway serves the key.
 pub async fn bootstrap() -> Result<World, String> {
+    bootstrap_server(Server::launch().await?).await
+}
+
+pub async fn bootstrap_ha() -> Result<(World, GatewayProcess), String> {
+    let mut server = Server::launch().await?;
+    let gateway = server.launch_gateway().await?;
+    Ok((bootstrap_server(server).await?, gateway))
+}
+
+async fn bootstrap_server(server: Server) -> Result<World, String> {
     let mock = MockUpstream::spawn().await;
-    let server = Server::launch().await?;
     let mut management = Management::new(&server.public_origin);
     management.setup(&server.setup_token).await?;
 
@@ -560,6 +580,9 @@ pub async fn bootstrap() -> Result<World, String> {
 pub struct IssuedKey {
     pub id: String,
     pub secret: String,
+    pub etag: String,
+    pub generation: i64,
+    pub published_at: Instant,
 }
 
 /// Blocks until the gateway accepts `secret`.

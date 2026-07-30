@@ -6,7 +6,6 @@
 //! Ambient proxies and reqwest retries are disabled.
 
 mod endpoint;
-mod headers;
 mod transport;
 
 use std::{fmt, sync::Arc, time::Duration};

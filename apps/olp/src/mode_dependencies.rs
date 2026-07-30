@@ -209,123 +209,20 @@ impl Deref for ObservabilityState {
     }
 }
 
-#[derive(Clone)]
-pub struct ConfigurationDependencies {
-    pub(crate) store: PgStore,
-    pub(crate) master_key: Option<Arc<MasterKey>>,
-}
-
-impl ConfigurationDependencies {
-    #[must_use]
-    pub fn store(&self) -> &PgStore {
-        &self.store
-    }
-
-    #[must_use]
-    pub fn master_key(&self) -> Option<&MasterKey> {
-        self.master_key.as_deref()
-    }
-}
-
-#[derive(Clone)]
-pub struct IdentityDependencies {
-    pub(crate) store: PgStore,
-    pub(crate) auth_hmac_key: Arc<AuthHmacKey>,
-}
-
-impl IdentityDependencies {
-    #[must_use]
-    pub fn store(&self) -> &PgStore {
-        &self.store
-    }
-
-    #[must_use]
-    pub fn auth_hmac_key(&self) -> &AuthHmacKey {
-        &self.auth_hmac_key
-    }
-}
-
-#[derive(Clone)]
-pub struct InferenceDependencies {
-    pub(crate) store: PgStore,
-    pub(crate) runtime: Arc<RuntimeManager>,
-    pub(crate) transports: TransportRegistry,
-    pub(crate) auth_hmac_key: Arc<AuthHmacKey>,
-}
-
-impl InferenceDependencies {
-    #[must_use]
-    pub fn store(&self) -> &PgStore {
-        &self.store
-    }
-
-    #[must_use]
-    pub fn runtime(&self) -> &RuntimeManager {
-        &self.runtime
-    }
-
-    #[must_use]
-    pub fn transports(&self) -> &TransportRegistry {
-        &self.transports
-    }
-
-    #[must_use]
-    pub fn auth_hmac_key(&self) -> &AuthHmacKey {
-        &self.auth_hmac_key
-    }
-}
-
-#[derive(Clone)]
-pub struct OperationsDependencies {
-    pub(crate) store: PgStore,
-}
-
-impl OperationsDependencies {
-    #[must_use]
-    pub fn store(&self) -> &PgStore {
-        &self.store
-    }
-}
-
-#[derive(Clone)]
-pub struct WorkerDependencies {
-    pub(crate) store: PgStore,
-}
-
-impl WorkerDependencies {
-    #[must_use]
-    pub fn new(store: PgStore) -> Self {
-        Self { store }
-    }
-
-    #[must_use]
-    pub fn store(&self) -> &PgStore {
-        &self.store
-    }
-}
-
 /// Fully validated state for one process mode.  Router composition consumes
 /// this value so the proof cannot be accidentally discarded.
 #[derive(Clone)]
 pub enum ModeDependencies {
     All {
-        configuration: ConfigurationDependencies,
-        identity: IdentityDependencies,
-        inference: InferenceDependencies,
-        operations: OperationsDependencies,
         gateway: Box<GatewayState>,
         management: Box<ManagementState>,
         observability: ObservabilityState,
     },
     Gateway {
-        inference: InferenceDependencies,
         gateway: Box<GatewayState>,
         observability: ObservabilityState,
     },
     Control {
-        configuration: ConfigurationDependencies,
-        identity: IdentityDependencies,
-        operations: OperationsDependencies,
         management: Box<ManagementState>,
         observability: ObservabilityState,
     },
@@ -422,40 +319,17 @@ impl ApiState {
             mode: self.mode,
             observability: self.observability.clone(),
         };
-        let inference = InferenceDependencies {
-            store: store.clone(),
-            runtime: Arc::clone(&self.runtime),
-            transports: self.transports.clone(),
-            auth_hmac_key: Arc::clone(&auth_hmac_key),
-        };
-        let configuration = ConfigurationDependencies {
-            store: store.clone(),
-            master_key: self.master_key.clone(),
-        };
-        let identity = IdentityDependencies {
-            store: store.clone(),
-            auth_hmac_key,
-        };
-        let operations = OperationsDependencies { store };
         match self.mode {
             ApiMode::All => Ok(ModeDependencies::All {
-                configuration,
-                identity,
-                inference,
-                operations,
                 gateway: Box::new(gateway),
                 management: Box::new(management),
                 observability,
             }),
             ApiMode::Gateway => Ok(ModeDependencies::Gateway {
-                inference,
                 gateway: Box::new(gateway),
                 observability,
             }),
             ApiMode::Control => Ok(ModeDependencies::Control {
-                configuration,
-                identity,
-                operations,
                 management: Box::new(management),
                 observability,
             }),

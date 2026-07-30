@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 helper="$script_dir/lib/repository-validation.sh"
 
-for required_executable in bash rg grep mktemp mkdir chmod; do
+for required_executable in bash rg grep mktemp mkdir chmod cargo cp; do
   command -v "$required_executable" >/dev/null || {
     echo "test-repository-validation.sh: $required_executable is required" >&2
     exit 1
@@ -12,6 +12,7 @@ for required_executable in bash rg grep mktemp mkdir chmod; do
 done
 
 real_bash=$(command -v bash)
+real_cargo=$(command -v cargo)
 real_grep=$(command -v grep)
 original_path=$PATH
 test_root=$(mktemp -d)
@@ -229,6 +230,51 @@ test_supply_chain_scan_error_has_no_success() {
   fi
 }
 
+test_external_cargo_patch_path_is_rejected() {
+  local fixture_root="$test_root/external-cargo-patch"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local output="$fixture_root/output.log"
+  local status
+
+  mkdir -p \
+    "$workspace/scripts/lib" "$workspace/apps/olp/src" \
+    "$workspace/crates/domain" "$workspace/crates/protocols" \
+    "$workspace/crates/providers" "$workspace/crates/storage" \
+    "$workspace/console/src/routes" "$fixture_root/external" "$fake_bin"
+  cp "$script_dir/check-boundaries.sh" "$workspace/scripts/check-boundaries.sh"
+  cp "$helper" "$workspace/scripts/lib/repository-validation.sh"
+  printf '%s\n' \
+    '[workspace]' \
+    'members = []' \
+    '[patch.crates-io]' \
+    'serde = { path = "../external" }' > "$workspace/Cargo.toml"
+  printf 'version = 4\n' > "$workspace/Cargo.lock"
+  printf '{}\n' > "$workspace/console/package.json"
+  printf '@sveltejs/adapter-static\n' > "$workspace/console/svelte.config.js"
+  printf 'export const ssr = false;\n' > "$workspace/console/src/routes/+layout.ts"
+  printf '%s\n' \
+    '[package]' \
+    'name = "serde"' \
+    'version = "0.0.0"' > "$fixture_root/external/Cargo.toml"
+  {
+    printf '#!%s\n' "$real_bash"
+    printf 'exec %q metadata --locked --no-deps --format-version 1 --manifest-path %q\n' \
+      "$real_cargo" "$script_dir/../Cargo.toml"
+  } > "$fake_bin/cargo"
+  chmod +x "$fake_bin/cargo"
+
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" >"$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" \
+    'Cargo.toml has a path dependency outside the workspace: ../external'
+}
+
 test_actual_repository_checks() {
   local output="$test_root/actual-checks.log"
 
@@ -255,6 +301,8 @@ run_test "match-only wrapper propagates producer failure" \
   test_match_only_wrapper_propagates_failure
 run_test "supply-chain success is suppressed after scan error" \
   test_supply_chain_scan_error_has_no_success
+run_test "external Cargo patch paths are rejected" \
+  test_external_cargo_patch_path_is_rejected
 run_test "actual repository invariant checks pass" test_actual_repository_checks
 
 printf 'repository validation regression tests passed: %d\n' "$tests_run"

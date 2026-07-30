@@ -38,33 +38,16 @@ if (( forbidden_rows_matched )); then
   exit 1
 fi
 
-# Runtime SQL construction remains available for SQL whose identity is truly
-# dynamic, but each production use must be reviewed and entered here with its
-# file/line pattern. The current storage implementation needs no exceptions.
-approved_runtime_queries=()
 runtime_query_output=
 runtime_queries_matched=
 checked_rg_capture runtime_query_output runtime_queries_matched \
   "scan runtime SQL APIs" "$storage_root" \
   --line-number --glob '*.rs' 'sqlx::(query|query_as|query_scalar)\s*\(' "$storage_root"
-runtime_queries=()
 if (( runtime_queries_matched )); then
-  mapfile -t runtime_queries <<< "$runtime_query_output"
+  printf '%s\n' "$runtime_query_output"
+  echo "unexpected runtime SQL API usage in production storage" >&2
+  exit 1
 fi
-for runtime_query in "${runtime_queries[@]}"; do
-  approved=false
-  for pattern in "${approved_runtime_queries[@]}"; do
-    if [[ $runtime_query =~ $pattern ]]; then
-      approved=true
-      break
-    fi
-  done
-  if [[ $approved != true ]]; then
-    printf '%s\n' "$runtime_query"
-    echo "unexpected runtime SQL API usage in production storage" >&2
-    exit 1
-  fi
-done
 
 checked_query_counts=
 checked_query_counts_matched=

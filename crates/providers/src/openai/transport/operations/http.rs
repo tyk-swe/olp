@@ -3,8 +3,6 @@ use olp_domain::{AttemptFailureClass, ProviderRequest, TransportError, Transport
 use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
-use crate::openai::headers::sanitize_forward_headers;
-
 use super::super::{OpenAiConnector, errors::*, streams::*};
 
 impl OpenAiConnector {
@@ -31,7 +29,7 @@ impl OpenAiConnector {
             .endpoint
             .resource_url(path)
             .map_err(map_endpoint_error)?;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.attach_auth(&mut headers)?;
         headers.insert(
             header::CONTENT_TYPE,
@@ -128,7 +126,7 @@ impl OpenAiConnector {
             );
             url.set_query(Some(&combined));
         }
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.attach_auth(&mut headers)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static(accept));
         let mut builder = client.request(method, url).headers(headers);
@@ -175,7 +173,7 @@ impl OpenAiConnector {
             .endpoint
             .resource_url(path)
             .map_err(map_endpoint_error)?;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.attach_auth(&mut headers)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let wait = bounded_duration(
@@ -223,7 +221,7 @@ impl OpenAiConnector {
             .resource_url(path)
             .map_err(map_endpoint_error)?;
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let mut headers = sanitize_forward_headers(&HeaderMap::new());
+        let mut headers = HeaderMap::new();
         self.attach_auth(&mut headers)?;
         headers.insert(
             header::CONTENT_TYPE,

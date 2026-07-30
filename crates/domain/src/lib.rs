@@ -51,7 +51,7 @@ pub use provider_configuration::{
     validate_provider_configuration,
 };
 pub use routing::{
-    AttemptPlan, Capability, CapabilityKey, InvalidProviderKind, Provider, ProviderKind, Route,
+    AttemptPlan, Capability, InvalidProviderKind, Provider, ProviderKind, Route,
     RouteValidationError, RoutingError, RuntimeGeneration, RuntimeSnapshot,
     SnapshotValidationError, Target, select_attempts, select_attempts_filtered,
     weighted_rendezvous_score,

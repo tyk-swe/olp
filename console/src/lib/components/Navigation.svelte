@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { useAuthorization, type Capability } from '$lib/auth/authorization';
+  import { can, type Capability, type FixedRole } from '$lib/auth/authorization';
   import NavIcon from './NavIcon.svelte';
   import type { IconName } from './icons';
 
@@ -17,8 +17,11 @@
     items: NavigationItem[];
   };
 
-  let { label = 'Primary', onNavigate }: { label?: string; onNavigate?: () => void } = $props();
-  const authorization = useAuthorization();
+  let {
+    role,
+    label = 'Primary',
+    onNavigate
+  }: { role: FixedRole; label?: string; onNavigate?: () => void } = $props();
 
   const groups: NavigationGroup[] = [
     { items: [{ label: 'Overview', href: resolve('/'), icon: 'overview' }] },
@@ -56,7 +59,7 @@
   ];
 
   function visible(item: NavigationItem) {
-    return !item.capability || authorization.can(item.capability);
+    return !item.capability || can(role, item.capability);
   }
 
   function isActive(href: string) {

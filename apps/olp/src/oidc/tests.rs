@@ -12,12 +12,12 @@ use zeroize::Zeroizing;
 use super::callback::matching_login_callback_flow;
 use super::claims::{bounded_claim, validate_id_token};
 use super::configuration::{OidcSecret, default_email_claim, default_groups_claim, default_scopes};
-use super::helpers::optional_if_match;
 use super::session::{
     FLOW_TTL, LOGIN_FLOW_COOKIE, LOGIN_FLOW_COOKIE_VERSION, LoginFlowCookiePayload,
     OidcCallbackState, OidcFlowId, consume_login_flow_cookie, flow_cookie_name,
     seal_login_flow_cookie,
 };
+use crate::management_api::optional_if_match;
 
 // Public test fixture used only to exercise the verifier.
 const ED25519_PRIVATE_DER_B64: &str =

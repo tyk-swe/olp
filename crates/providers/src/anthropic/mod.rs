@@ -7,7 +7,6 @@
 //! connector performs no hidden retries.
 
 mod endpoint;
-mod headers;
 mod transport;
 
 use std::{fmt, time::Duration};

@@ -1,8 +1,8 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, HeaderValue, header},
-    response::{IntoResponse, Response},
+    http::HeaderMap,
+    response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_domain::Surface;
@@ -18,7 +18,7 @@ use uuid::Uuid;
 use super::helpers::{map_operations, not_found, page_limit, validate_time_range};
 use crate::{
     FieldErrors, ManagementState, Problem,
-    management_api::{Permission, require_permission, require_read_session},
+    management_api::{Permission, require_permission, require_read_session, with_etag},
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -211,11 +211,8 @@ pub(super) async fn get_media_job(
         .media_job(job_id)
         .await
         .map_err(map_media_job)?;
-    let etag =
-        HeaderValue::from_str(&format!("\"{}\"", record.etag)).map_err(|_| Problem::internal())?;
-    let mut response = Json(MediaJobItem::from(record)).into_response();
-    response.headers_mut().insert(header::ETAG, etag);
-    Ok(response)
+    let etag = record.etag;
+    with_etag(Json(MediaJobItem::from(record)), etag)
 }
 
 fn parse_media_job_state(value: &str) -> Result<MediaJobState, Problem> {

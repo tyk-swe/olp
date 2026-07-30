@@ -1,5 +1,3 @@
-import { getContext, setContext } from 'svelte';
-
 const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
 export type FixedRole = (typeof FIXED_ROLE_VALUES)[number];
 
@@ -57,40 +55,9 @@ export function isFixedRole(value: unknown): value is FixedRole {
   return typeof value === 'string' && FIXED_ROLES.has(value);
 }
 
-function capabilitiesForRole(role: FixedRole | null | undefined): ReadonlySet<Capability> {
-  return role ? ROLE_CAPABILITIES[role] : new Set<Capability>();
-}
-
-function roleHasCapability(
+export function can(
   role: FixedRole | null | undefined,
   capability: Capability
 ): boolean {
-  return capabilitiesForRole(role).has(capability);
-}
-
-export type Authorization = {
-  role(): FixedRole | null;
-  capabilities(): ReadonlySet<Capability>;
-  can(capability: Capability): boolean;
-};
-
-const AUTHORIZATION_CONTEXT = Symbol('olp-authorization');
-const DENY_ALL: Authorization = {
-  role: () => null,
-  capabilities: () => new Set<Capability>(),
-  can: () => false
-};
-
-export function provideAuthorization(getRole: () => FixedRole | null): Authorization {
-  const authorization: Authorization = {
-    role: getRole,
-    capabilities: () => capabilitiesForRole(getRole()),
-    can: (capability) => roleHasCapability(getRole(), capability)
-  };
-  setContext(AUTHORIZATION_CONTEXT, authorization);
-  return authorization;
-}
-
-export function useAuthorization(): Authorization {
-  return getContext<Authorization | undefined>(AUTHORIZATION_CONTEXT) ?? DENY_ALL;
+  return role ? ROLE_CAPABILITIES[role].has(capability) : false;
 }

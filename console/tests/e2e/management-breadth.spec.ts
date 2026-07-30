@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, failUnexpectedApiRequest, test, type Page } from '../playwright';
+import { expect, failUnexpectedApiRequest, mockSession, test } from '../playwright';
 
 import { mockProviderKinds } from './provider-capabilities';
 
@@ -12,17 +12,7 @@ const ids = {
   key: '01980000-0000-7000-8000-000000000a06'
 };
 const now = '2026-07-12T12:00:00Z';
-
-async function mockSession(page: Page) {
-  await page.route('**/api/v1/sessions/current', async (route) => {
-    await route.fulfill({
-      json: {
-        user: { id: ids.user, email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner' },
-        csrf_token: 'csrf-management-breadth'
-      }
-    });
-  });
-}
+const sessionOptions = { userId: ids.user, csrfToken: 'csrf-management-breadth' };
 
 function providerRecord(state = 'active') {
   return {
@@ -82,7 +72,7 @@ function revision(id: string, number: number) {
 }
 
 test('provider studio compares redacted history and restores non-secret configuration', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   await mockProviderKinds(page);
   let current = providerRecord();
   let restoreHeaders: Record<string, string> = {};
@@ -144,7 +134,7 @@ test('provider studio compares redacted history and restores non-secret configur
 });
 
 test('media job explorer stays metadata-only through list and detail', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const job = {
     id: ids.job,
     upstream_job_id: 'video_upstream_1',

@@ -48,11 +48,8 @@ pub use management_api::management_openapi;
 #[cfg(any(test, feature = "test-util"))]
 pub use media_spool::create_bounded_media_spool_for_test;
 pub use media_spool::create_media_spool;
-pub use mode_dependencies::{
-    ConfigurationDependencies, IdentityDependencies, InferenceDependencies, ModeDependencies,
-    ModeDependencyError, OperationsDependencies, WorkerDependencies,
-};
 pub use mode_dependencies::{GatewayState, ManagementState, ObservabilityState};
+pub use mode_dependencies::{ModeDependencies, ModeDependencyError};
 pub use observability::{
     observability_router, refresh_observability_cache, spawn_observability_cache,
 };

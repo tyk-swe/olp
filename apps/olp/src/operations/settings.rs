@@ -1,8 +1,8 @@
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::HeaderMap,
+    response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_storage::SettingRecord;
@@ -14,8 +14,8 @@ use super::helpers::{map_operations, not_found};
 use crate::{
     ManagementState, Problem,
     management_api::{
-        Permission, json_payload, require_mutation_session, require_permission,
-        require_read_session,
+        Permission, if_match, json_payload, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
 };
 
@@ -128,31 +128,6 @@ pub(super) async fn update_setting(
 }
 
 fn setting_response(setting: SettingRecord) -> Result<Response, Problem> {
-    let etag =
-        HeaderValue::from_str(&format!("\"{}\"", setting.etag)).map_err(|_| Problem::internal())?;
-    let mut response = Json(SettingResponse::from(setting)).into_response();
-    response.headers_mut().insert(header::ETAG, etag);
-    Ok(response)
-}
-
-pub(super) fn if_match(headers: &HeaderMap) -> Result<Uuid, Problem> {
-    let value = headers
-        .get(header::IF_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| {
-            Problem::new(
-                StatusCode::PRECONDITION_REQUIRED,
-                "if_match_required",
-                "Precondition required",
-                "An If-Match header containing the current ETag is required.",
-            )
-        })?;
-    let value = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .ok_or_else(|| {
-            Problem::bad_request("invalid_if_match", "If-Match must be a strong ETag.")
-        })?;
-    Uuid::parse_str(value)
-        .map_err(|_| Problem::bad_request("invalid_if_match", "If-Match contains an invalid ETag."))
+    let etag = setting.etag;
+    with_etag(Json(SettingResponse::from(setting)), etag)
 }

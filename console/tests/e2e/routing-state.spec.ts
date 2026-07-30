@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '../playwright';
+import { expect, mockSession, test } from '../playwright';
 
 const ids = {
   user: '01980000-0000-7000-8000-000000000001',
@@ -17,22 +17,7 @@ const ids = {
   apiKeyTwo: '01980000-0000-7000-8000-000000000502'
 };
 const now = '2026-07-12T12:00:00Z';
-
-async function mockSession(page: Page) {
-  await page.route('**/api/v1/sessions/current', async (route) => {
-    await route.fulfill({
-      json: {
-        user: {
-          id: ids.user,
-          email: 'owner@example.com',
-          display_name: 'Ada Owner',
-          role: 'owner'
-        },
-        csrf_token: 'csrf-routing-state'
-      }
-    });
-  });
-}
+const sessionOptions = { userId: ids.user, csrfToken: 'csrf-routing-state' };
 
 function activeRoute(id: string, slug: string) {
   return {
@@ -148,7 +133,7 @@ function apiKey(id: string, name: string) {
 }
 
 test('route list keeps both cursor tracks through the new-route boundary', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   await page.route(/\/api\/v1\/(?:routes|route-drafts)(?:\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
     const cursor = url.searchParams.get('cursor');
@@ -196,7 +181,7 @@ test('route list keeps both cursor tracks through the new-route boundary', async
 });
 
 test('request filters and cursor history survive list-detail-list navigation', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const seenFilters: URLSearchParams[] = [];
   await page.route(/\/api\/v1\/requests(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
@@ -296,7 +281,7 @@ test('request filters and cursor history survive list-detail-list navigation', a
 });
 
 test('media-job filter drafts, applied filters, and pagination survive detail navigation', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   const seenFilters: URLSearchParams[] = [];
   await page.route(/\/api\/v1\/media-jobs(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
@@ -335,7 +320,7 @@ test('media-job filter drafts, applied filters, and pagination survive detail na
 });
 
 test('API-key pagination survives new/cancel and resets after leaving the family', async ({ page }) => {
-  await mockSession(page);
+  await mockSession(page, sessionOptions);
   await page.route(/\/api\/v1\/api-keys(?:\?.*)?$/, async (route) => {
     const cursor = new URL(route.request().url()).searchParams.get('cursor');
     await route.fulfill({

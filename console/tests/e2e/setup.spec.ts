@@ -1,14 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { denyClipboard, expect, test, type Page } from '../playwright';
-
-async function emulateTwoHundredPercentZoom(page: Page) {
-  const viewport = page.viewportSize();
-  if (!viewport || viewport.width <= 480) return;
-  await page.setViewportSize({
-    width: Math.max(320, Math.floor(viewport.width / 2)),
-    height: Math.max(480, Math.floor(viewport.height / 2))
-  });
-}
+import { denyClipboard, emulateTwoHundredPercentZoom, expect, test } from '../playwright';
 
 test('creates the first owner through the local setup contract', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
