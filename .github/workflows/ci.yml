@@ -250,6 +250,12 @@ jobs:
         with:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
+      # This job takes the prebuilt console artifact instead of running a
+      # build, so nothing has generated .svelte-kit/tsconfig.json yet, and
+      # console/tsconfig.json extends it. Playwright resolves that extends
+      # chain when it loads the test files and fails hard if it dangles.
+      - name: Generate SvelteKit types
+        run: pnpm exec svelte-kit sync
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Run Chromium end-to-end tests
@@ -551,6 +557,11 @@ jobs:
         with:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
+      # Same as Console / Chromium: the prebuilt artifact means
+      # .svelte-kit/tsconfig.json does not exist yet, and Playwright refuses
+      # to load tests whose tsconfig extends a missing file.
+      - name: Generate SvelteKit types
+        run: pnpm exec svelte-kit sync
       - name: Install ${{ matrix.browser }}
         run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
       - name: Run ${{ matrix.label }} end-to-end tests
