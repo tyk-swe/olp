@@ -17,7 +17,7 @@
     "pnpm": ">=11 <12"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.113.0",
+    "@anthropic-ai/sdk": "0.115.0",
     "@google/genai": "2.13.0",
     "openai": "6.48.0"
   }
