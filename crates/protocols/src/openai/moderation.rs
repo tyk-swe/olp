@@ -138,7 +138,17 @@ pub struct OpenAiModerationResult {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_moderation_response(response: OpenAiModerationResponse) -> ModerationResult {
+pub fn decode_moderation_response(
+    response: OpenAiModerationResponse,
+) -> Result<ModerationResult, ModerationCodecError> {
+    if response.results.iter().any(|result| {
+        result
+            .category_scores
+            .values()
+            .any(|score| !(0.0..=1.0).contains(score))
+    }) {
+        return Err(ModerationCodecError::InvalidCategoryScore);
+    }
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
     let results = response
@@ -160,12 +170,12 @@ pub fn decode_moderation_response(response: OpenAiModerationResponse) -> Moderat
             }
         })
         .collect();
-    ModerationResult {
+    Ok(ModerationResult {
         id: Some(response.id),
         model: Some(response.model),
         results,
         extensions: SourceExtensions::new(Surface::OpenAi, extensions),
-    }
+    })
 }
 
 pub fn encode_moderation_response(
@@ -236,6 +246,8 @@ pub enum ModerationCodecError {
     UnsupportedInputType(String),
     #[error("canonical moderation input cannot be represented by OpenAI")]
     UnrepresentableInput,
+    #[error("moderation category scores must be finite values from 0 to 1")]
+    InvalidCategoryScore,
     #[error("invalid source extension path: {0}")]
     InvalidExtension(String),
 }

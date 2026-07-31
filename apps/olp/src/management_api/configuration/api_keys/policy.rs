@@ -4,7 +4,9 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use olp_domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
+use olp_domain::{
+    ApiKeyLimits, ApiKeyScope, MAX_API_KEY_ALLOWED_ROUTES, MAX_TOKENS_PER_MINUTE, RouteSlug,
+};
 use olp_storage::UpdateApiKeyInput;
 
 use crate::{FieldErrors, Problem};
@@ -13,7 +15,6 @@ use super::{CreateApiKeyRequest, UpdateApiKeyRequest};
 
 const MAX_NAME_CHARACTERS: usize = 100;
 const MAX_U32_DATABASE_LIMIT: u32 = i32::MAX as u32;
-const MAX_U64_DATABASE_LIMIT: u64 = i64::MAX as u64;
 
 pub(super) struct RawApiKeyPolicy<'a> {
     name: &'a str,
@@ -92,10 +93,13 @@ pub(super) fn normalize_api_key_policy(
 ) -> Result<NormalizedApiKeyPolicy, Problem> {
     let mut errors = FieldErrors::new();
     let name = raw.name.trim().to_owned();
-    if name.is_empty() || raw.name.chars().count() > MAX_NAME_CHARACTERS {
+    if name.is_empty()
+        || raw.name.chars().count() > MAX_NAME_CHARACTERS
+        || olp_domain::has_unsafe_display_characters(raw.name)
+    {
         errors.insert(
             "name".to_owned(),
-            vec!["Use between 1 and 100 characters.".to_owned()],
+            vec!["Use 1-100 visible characters without control or bidi formatting.".to_owned()],
         );
     }
 
@@ -123,28 +127,38 @@ pub(super) fn normalize_api_key_policy(
         );
     }
 
-    let mut allowed_routes = Vec::with_capacity(raw.allowed_routes.len());
-    let mut invalid_route = None;
-    for route in raw.allowed_routes {
-        match RouteSlug::parse(route.clone()) {
-            Ok(route) => allowed_routes.push(route),
-            Err(error) if invalid_route.is_none() => invalid_route = Some(error),
-            Err(_) => {}
-        }
-    }
-    if let Some(error) = invalid_route {
-        errors.insert("allowed_routes".to_owned(), vec![error.to_string()]);
-    } else if allowed_routes
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .len()
-        != allowed_routes.len()
-    {
+    let mut allowed_routes = Vec::new();
+    if raw.allowed_routes.len() > MAX_API_KEY_ALLOWED_ROUTES {
         errors.insert(
             "allowed_routes".to_owned(),
-            vec!["Route allowlist entries must be unique.".to_owned()],
+            vec![format!(
+                "Select no more than {MAX_API_KEY_ALLOWED_ROUTES} routes."
+            )],
         );
+    } else {
+        allowed_routes.reserve(raw.allowed_routes.len());
+        let mut invalid_route = None;
+        for route in raw.allowed_routes {
+            match RouteSlug::parse(route.clone()) {
+                Ok(route) => allowed_routes.push(route),
+                Err(error) if invalid_route.is_none() => invalid_route = Some(error),
+                Err(_) => {}
+            }
+        }
+        if let Some(error) = invalid_route {
+            errors.insert("allowed_routes".to_owned(), vec![error.to_string()]);
+        } else if allowed_routes
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != allowed_routes.len()
+        {
+            errors.insert(
+                "allowed_routes".to_owned(),
+                vec!["Route allowlist entries must be unique.".to_owned()],
+            );
+        }
     }
 
     let requests_per_minute =
@@ -218,11 +232,11 @@ fn normalize_u64_limit(
             );
             None
         }
-        Some(value) if value > MAX_U64_DATABASE_LIMIT => {
+        Some(value) if value > MAX_TOKENS_PER_MINUTE => {
             errors.insert(
                 field.to_owned(),
                 vec![format!(
-                    "Use a limit no greater than {MAX_U64_DATABASE_LIMIT} or null."
+                    "Use a limit no greater than {MAX_TOKENS_PER_MINUTE} or null."
                 )],
             );
             None
@@ -335,7 +349,7 @@ mod tests {
         assert_eq!(create_problem.errors, update_problem.errors);
         assert_eq!(
             create_problem.errors["name"],
-            ["Use between 1 and 100 characters."]
+            ["Use 1-100 visible characters without control or bidi formatting."]
         );
         assert_eq!(create_problem.errors["scopes"], ["Unknown scope admin."]);
         assert_eq!(
@@ -386,7 +400,7 @@ mod tests {
         ] {
             assert_eq!(
                 problem.errors["name"],
-                ["Use between 1 and 100 characters."]
+                ["Use 1-100 visible characters without control or bidi formatting."]
             );
         }
 
@@ -421,16 +435,36 @@ mod tests {
     }
 
     #[test]
+    fn create_and_update_bound_route_allowlists_before_parsing() {
+        let now = Utc::now();
+        let mut create = create_request();
+        create.allowed_routes = (0..=MAX_API_KEY_ALLOWED_ROUTES)
+            .map(|index| format!("route-{index}"))
+            .collect();
+        let update = update_request(&create);
+
+        for problem in [
+            normalize_create(&create).unwrap_err(),
+            normalize_update(&update, now).unwrap_err(),
+        ] {
+            assert_eq!(
+                problem.errors["allowed_routes"],
+                ["Select no more than 1000 routes."]
+            );
+        }
+    }
+
+    #[test]
     fn limits_must_fit_the_positive_database_range() {
         let now = Utc::now();
         let mut create = create_request();
         create.requests_per_minute = Some(MAX_U32_DATABASE_LIMIT);
-        create.tokens_per_minute = Some(MAX_U64_DATABASE_LIMIT);
+        create.tokens_per_minute = Some(MAX_TOKENS_PER_MINUTE);
         create.max_concurrency = Some(MAX_U32_DATABASE_LIMIT);
         assert!(normalize_create(&create).is_ok());
 
         create.requests_per_minute = Some(MAX_U32_DATABASE_LIMIT + 1);
-        create.tokens_per_minute = Some(MAX_U64_DATABASE_LIMIT + 1);
+        create.tokens_per_minute = Some(MAX_TOKENS_PER_MINUTE + 1);
         create.max_concurrency = Some(MAX_U32_DATABASE_LIMIT + 1);
         let update = update_request(&create);
         let create_problem = normalize_create(&create).unwrap_err();
@@ -443,7 +477,7 @@ mod tests {
         );
         assert_eq!(
             create_problem.errors["tokens_per_minute"],
-            ["Use a limit no greater than 9223372036854775807 or null."]
+            ["Use a limit no greater than 9007199254740991 or null."]
         );
         assert_eq!(
             create_problem.errors["max_concurrency"],

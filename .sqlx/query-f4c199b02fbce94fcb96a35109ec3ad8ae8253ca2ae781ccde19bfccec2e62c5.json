@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO route_draft_targets (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) SELECT input.id, input.routing_id, $1, input.provider_model_id, input.priority, input.weight, input.timeout_ms, input.position FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::int[], $6::int[], $7::int[], $8::int[]) AS input(id, routing_id, provider_model_id, priority, weight, timeout_ms, position) ON CONFLICT (route_draft_id, position) DO UPDATE SET id = EXCLUDED.id, routing_id = CASE WHEN (route_draft_targets.provider_model_id, route_draft_targets.priority, route_draft_targets.weight, route_draft_targets.timeout_ms) IS NOT DISTINCT FROM (EXCLUDED.provider_model_id, EXCLUDED.priority, EXCLUDED.weight, EXCLUDED.timeout_ms) THEN route_draft_targets.routing_id ELSE EXCLUDED.routing_id END, provider_model_id = EXCLUDED.provider_model_id, priority = EXCLUDED.priority, weight = EXCLUDED.weight, timeout_ms = EXCLUDED.timeout_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "UuidArray",
+        "UuidArray",
+        "Int4Array",
+        "Int4Array",
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4c199b02fbce94fcb96a35109ec3ad8ae8253ca2ae781ccde19bfccec2e62c5"
+}

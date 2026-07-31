@@ -71,16 +71,10 @@ fn event_limit_applies_per_event_not_per_transport_chunk() {
 }
 
 #[test]
-fn finish_does_not_count_an_unterminated_line_twice() {
+fn finish_discards_an_unterminated_event() {
     let mut decoder = SseDecoder::new(7);
     assert!(decoder.push(b"data: x").unwrap().is_empty());
-    assert_eq!(
-        decoder.finish().unwrap(),
-        vec![SseFrame {
-            data: "x".into(),
-            ..SseFrame::default()
-        }]
-    );
+    assert!(decoder.finish().unwrap().is_empty());
 }
 
 #[test]

@@ -188,44 +188,104 @@ impl PgStore {
         actor: Uuid,
         idempotency_key: &str,
     ) -> Result<ProviderMutationResult, ConfigurationError> {
+        self.disable_provider_with_mode(provider_id, expected_etag, actor, idempotency_key, false)
+            .await
+    }
+
+    /// Immediately removes a compromised provider from the published runtime
+    /// and tombstones its live async jobs. Callers must enforce owner-only use.
+    pub async fn force_disable_provider(
+        &self,
+        provider_id: Uuid,
+        expected_etag: Uuid,
+        actor: Uuid,
+        idempotency_key: &str,
+    ) -> Result<ProviderMutationResult, ConfigurationError> {
+        self.disable_provider_with_mode(provider_id, expected_etag, actor, idempotency_key, true)
+            .await
+    }
+
+    async fn disable_provider_with_mode(
+        &self,
+        provider_id: Uuid,
+        expected_etag: Uuid,
+        actor: Uuid,
+        idempotency_key: &str,
+        force: bool,
+    ) -> Result<ProviderMutationResult, ConfigurationError> {
+        let action = if force {
+            "provider.force_disable"
+        } else {
+            "provider.disable"
+        };
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
-        if !claim_idempotency(&mut transaction, actor, "provider.disable", idempotency_key).await? {
+        if !claim_idempotency(&mut transaction, actor, action, idempotency_key).await? {
             return Err(ConfigurationError::IdempotencyConflict);
         }
-        // Serialize against the short reservation INSERT so the decision and
-        // runtime publication cannot race a newly committed upstream job.
-        sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
+        // Reconciliation locks a row before updating it. EXCLUSIVE conflicts
+        // with that preceding ROW SHARE table lock, so containment cannot take
+        // a weaker table lock and then deadlock waiting for the same row. It
+        // also keeps new reservations out until the safe runtime is published.
+        sqlx::query!("LOCK TABLE async_media_jobs IN EXCLUSIVE MODE")
             .execute(&mut *transaction)
             .await?;
-        let has_live_media_jobs: bool = sqlx::query_scalar!(
-            "SELECT EXISTS (SELECT 1 FROM async_media_jobs
-             WHERE provider_id = $1 AND lifecycle_state <> 'deleted') AS \"value!\"",
-            provider_id
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if has_live_media_jobs {
-            return Err(ConfigurationError::InUse);
+        if force {
+            // The lifecycle trigger requires active jobs to pass through
+            // delete_pending before they become terminal tombstones.
+            sqlx::query!(
+                "UPDATE async_media_jobs
+                 SET lifecycle_state = 'delete_pending',
+                     reconciliation_error = 'provider_force_disabled',
+                     next_reconciliation_at = now(), etag = uuidv7()
+                 WHERE provider_id = $1 AND lifecycle_state = 'active'",
+                provider_id
+            )
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query!(
+                "UPDATE async_media_jobs
+                 SET lifecycle_state = 'deleted',
+                     reconciliation_error = 'provider_force_disabled',
+                     reconciliation_claim_id = NULL, reconciliation_claimed_until = NULL,
+                     content_available = false, etag = uuidv7()
+                 WHERE provider_id = $1 AND lifecycle_state <> 'deleted'",
+                provider_id
+            )
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            let has_live_media_jobs: bool = sqlx::query_scalar!(
+                "SELECT EXISTS (SELECT 1 FROM async_media_jobs
+                 WHERE provider_id = $1 AND lifecycle_state <> 'deleted') AS \"value!\"",
+                provider_id
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            if has_live_media_jobs {
+                return Err(ConfigurationError::InUse);
+            }
         }
-        let referenced: bool = sqlx::query_scalar!(
-            "SELECT EXISTS ( \
-               SELECT 1 FROM routes r \
-               JOIN LATERAL (SELECT id FROM route_revisions WHERE route_id = r.id \
-                             ORDER BY revision DESC LIMIT 1) rr ON true \
-               JOIN route_revision_targets rt ON rt.route_revision_id = rr.id \
-               JOIN provider_models pm ON pm.id = rt.provider_model_id \
-               WHERE pm.provider_id = $1 \
-             ) AS \"value!\"",
-            provider_id
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if referenced {
-            return Err(ConfigurationError::InUse);
+        if !force {
+            let referenced: bool = sqlx::query_scalar!(
+                "SELECT EXISTS ( \
+                   SELECT 1 FROM routes r \
+                   JOIN LATERAL (SELECT id FROM route_revisions WHERE route_id = r.id \
+                                 ORDER BY revision DESC LIMIT 1) rr ON true \
+                   JOIN route_revision_targets rt ON rt.route_revision_id = rr.id \
+                   JOIN provider_models pm ON pm.id = rt.provider_model_id \
+                   WHERE pm.provider_id = $1 \
+                 ) AS \"value!\"",
+                provider_id
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            if referenced {
+                return Err(ConfigurationError::InUse);
+            }
         }
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(
@@ -253,7 +313,7 @@ impl PgStore {
         audit_in_transaction(
             &mut transaction,
             actor,
-            "provider.disable",
+            action,
             "provider",
             provider_id,
             "success",
@@ -262,7 +322,7 @@ impl PgStore {
         complete_idempotency(
             &mut transaction,
             actor,
-            "provider.disable",
+            action,
             idempotency_key,
             &provider_id.to_string(),
         )

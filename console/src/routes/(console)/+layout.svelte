@@ -53,17 +53,22 @@
     });
 
     const revalidate = () => {
-      if (document.visibilityState === 'visible' && authLifecycle.snapshot().phase === 'authenticated') {
-        void authLifecycle.validateSession({ passive: true });
+      if (
+        document.visibilityState === 'visible' &&
+        authLifecycle.snapshot().phase === 'authenticated'
+      ) {
+        void authLifecycle.refreshProtectedSession();
       }
     };
     window.addEventListener('focus', revalidate);
     document.addEventListener('visibilitychange', revalidate);
+    const stopSessionSync = authLifecycle.watchSessionChanges();
     void authLifecycle.validateSession();
 
     return () => {
       window.removeEventListener('focus', revalidate);
       document.removeEventListener('visibilitychange', revalidate);
+      stopSessionSync();
       unregister();
       unsubscribe();
     };

@@ -90,6 +90,8 @@ pub(crate) struct HealthResponse {
     request_metadata_gateway_unresolved_epochs: u64,
     request_metadata_historical_uncertain_gaps: u64,
     request_metadata_gateway_unresolved_event_lower_bound: u64,
+    request_partitions: &'static str,
+    request_default_partition_spill_detected: bool,
     media_reconciliation: &'static str,
     media_reconciliation_pending: u64,
     media_reconciliation_stale: u64,
@@ -318,6 +320,8 @@ async fn live() -> axum::Json<HealthResponse> {
         request_metadata_gateway_unresolved_epochs: 0,
         request_metadata_historical_uncertain_gaps: 0,
         request_metadata_gateway_unresolved_event_lower_bound: 0,
+        request_partitions: "not_checked",
+        request_default_partition_spill_detected: false,
         media_reconciliation: "not_checked",
         media_reconciliation_pending: 0,
         media_reconciliation_stale: 0,
@@ -347,30 +351,38 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
     let generation = state.runtime.active_generation_ordinal();
     let now = chrono::Utc::now();
     let unknown_consumer = RequestMetadataConsumerStatus::from_health(None, now);
-    let (database, media_reconciliation, request_metadata_consumer, request_metadata_epochs) =
-        match state.store().ping().await {
-            Ok(()) => {
-                let (media, consumer, epochs) = tokio::join!(
-                    state.store().media_reconciliation_summary(now),
-                    state.store().request_metadata_consumer_status(now),
-                    state.store().request_metadata_gateway_epoch_health(),
-                );
-                let media =
-                    media.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
-                let consumer =
-                    consumer.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
-                let epochs =
-                    epochs.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
-                ("ok", Some(media), consumer, epochs)
-            }
-            Err(_) if state.mode.serves_gateway() && generation.is_some() => (
-                "unavailable_lkg",
-                None,
-                unknown_consumer,
-                RequestMetadataEpochHealth::default(),
-            ),
-            Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
-        };
+    let (
+        database,
+        media_reconciliation,
+        request_metadata_consumer,
+        request_metadata_epochs,
+        request_partitions,
+    ) = match state.store().ping().await {
+        Ok(()) => {
+            let (media, consumer, epochs, partitions) = tokio::join!(
+                state.store().media_reconciliation_summary(now),
+                state.store().request_metadata_consumer_status(now),
+                state.store().request_metadata_gateway_epoch_health(),
+                state.store().request_partition_health(),
+            );
+            let media = media.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+            let consumer =
+                consumer.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+            let epochs =
+                epochs.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+            let partitions =
+                partitions.map_err(|_| Problem::service_unavailable("database_unavailable"))?;
+            ("ok", Some(media), consumer, epochs, Some(partitions))
+        }
+        Err(_) if state.mode.serves_gateway() && generation.is_some() => (
+            "unavailable_lkg",
+            None,
+            unknown_consumer,
+            RequestMetadataEpochHealth::default(),
+            None,
+        ),
+        Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
+    };
 
     if state.mode.serves_gateway() {
         let snapshot = state.runtime.pin();
@@ -411,6 +423,9 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
         .as_ref()
         .is_some_and(|summary| summary.stale > 0 || summary.failed > 0 || summary.unbound > 0)
         || media_reconciliation_gaps > 0;
+    let degraded_partitions = request_partitions
+        .as_ref()
+        .is_some_and(|health| health.default_spill_detected);
     let local_request_metadata_complete = state
         .request_metadata
         .as_ref()
@@ -421,7 +436,11 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
         && request_metadata_consumer.complete()
         && request_metadata_epochs.unresolved_epochs == 0;
     Ok(HealthResponse {
-        status: if degraded_limits || degraded_media || !request_metadata_complete {
+        status: if degraded_limits
+            || degraded_media
+            || degraded_partitions
+            || !request_metadata_complete
+        {
             "degraded"
         } else {
             "ok"
@@ -449,6 +468,18 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
             .historical_uncertain_gap_count,
         request_metadata_gateway_unresolved_event_lower_bound: request_metadata_epochs
             .unresolved_event_lower_bound,
+        request_partitions: if request_partitions.is_some() {
+            if degraded_partitions {
+                "degraded"
+            } else {
+                "ok"
+            }
+        } else {
+            "unknown"
+        },
+        request_default_partition_spill_detected: request_partitions
+            .as_ref()
+            .is_some_and(|health| health.default_spill_detected),
         media_reconciliation: if media_reconciliation.is_some() {
             "ok"
         } else {
@@ -530,13 +561,15 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
     let now = chrono::Utc::now();
     let mut request_metadata_consumer = RequestMetadataConsumerStatus::from_health(None, now);
     let mut request_metadata_epochs = RequestMetadataEpochHealth::default();
+    let mut request_default_partition_spill_detected = false;
     let mut provider_health = Vec::new();
-    let (consumer, epochs, operations, providers, media) = tokio::join!(
+    let (consumer, epochs, operations, providers, media, partitions) = tokio::join!(
         state.store().request_metadata_consumer_status(now),
         state.store().request_metadata_gateway_epoch_health(),
         state.store().prometheus_operations_summary(5),
         state.store().provider_health(15, None, 100),
         state.store().media_reconciliation_summary(now),
+        state.store().request_partition_health(),
     );
     if let Ok(status) = consumer {
         request_metadata_consumer = status;
@@ -549,6 +582,9 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         provider_health = page.items;
     }
     let media_reconciliation = media.ok();
+    if let Ok(health) = partitions {
+        request_default_partition_spill_detected = health.default_spill_detected;
+    }
     let mut body = format!(
         "# HELP olp_runtime_generation Current immutable runtime generation.\n\
          # TYPE olp_runtime_generation gauge\n\
@@ -598,9 +634,15 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
          # HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n\
          # TYPE olp_distributed_limiter_available gauge\n\
          olp_distributed_limiter_available {}\n\
+         # HELP olp_limit_cleanup_uncertainties_total Distributed limit cleanups that exhausted bounded retries.\n\
+         # TYPE olp_limit_cleanup_uncertainties_total counter\n\
+         olp_limit_cleanup_uncertainties_total {}\n\
          # HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n\
          # TYPE olp_open_target_circuits gauge\n\
          olp_open_target_circuits {}\n\
+         # HELP olp_request_default_partition_spill_detected Whether requests reached the default partition after managed time partitions began.\n\
+         # TYPE olp_request_default_partition_spill_detected gauge\n\
+         olp_request_default_partition_spill_detected {}\n\
          # HELP olp_media_reconciliation_pending Metadata-only media jobs awaiting reconciliation.\n\
          # TYPE olp_media_reconciliation_pending gauge\n\
          olp_media_reconciliation_pending {}\n\
@@ -635,7 +677,9 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         request_metadata_epochs.historical_uncertain_gap_count,
         request_metadata_epochs.unresolved_event_lower_bound,
         u8::from(limiter_available),
+        crate::gateway::limits::limit_cleanup_uncertainties(),
         state.circuits.open_count(),
+        u8::from(request_default_partition_spill_detected),
         media_reconciliation
             .as_ref()
             .map_or(0, |value| value.pending),

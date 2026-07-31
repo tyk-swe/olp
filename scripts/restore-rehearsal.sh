@@ -3,10 +3,14 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: OLP_RESTORE_DATABASE_URL=postgres://... restore-rehearsal.sh BACKUP [--replace]
+usage: OLP_DATABASE_URL=postgres://production/... \
+  OLP_RESTORE_DATABASE_URL=postgres://isolated/... \
+  restore-rehearsal.sh BACKUP [--replace]
 
 The destination must be an isolated rehearsal database. --replace is required
 when it contains application objects and irreversibly cleans that destination.
+Configure its server-side sentinel first with:
+ALTER DATABASE ... SET olp.restore_rehearsal = 'isolated-destination'.
 USAGE
 }
 
@@ -16,10 +20,11 @@ if [[ $# -lt 1 || ${1:-} == "--help" || ${1:-} == "-h" ]]; then
 fi
 
 : "${OLP_RESTORE_DATABASE_URL:?OLP_RESTORE_DATABASE_URL must identify an isolated destination}"
+: "${OLP_DATABASE_URL:?OLP_DATABASE_URL must identify the production database}"
 backup=$1
 replace=${2:-}
 [[ -f $backup ]] || { echo "backup does not exist: $backup" >&2; exit 1; }
-[[ -z ${OLP_DATABASE_URL:-} || $OLP_RESTORE_DATABASE_URL != "$OLP_DATABASE_URL" ]] || {
+[[ $OLP_RESTORE_DATABASE_URL != "$OLP_DATABASE_URL" ]] || {
   echo "refusing to restore over OLP_DATABASE_URL" >&2
   exit 1
 }
@@ -39,6 +44,31 @@ for command in "$pg_restore_command" "$psql_command"; do
     exit 1
   }
 done
+
+restore_sentinel=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc \
+  --tuples-only --no-align \
+  --command="SELECT EXISTS (
+      SELECT 1
+      FROM pg_db_role_setting setting
+      JOIN pg_database database ON database.oid = setting.setdatabase
+      WHERE database.datname = current_database()
+        AND setting.setrole = 0
+        AND setting.setconfig @> ARRAY['olp.restore_rehearsal=isolated-destination']
+    )")
+[[ $restore_sentinel == "t" ]] || {
+  echo "refusing to restore without the destination database isolation sentinel" >&2
+  exit 1
+}
+
+database_identity_sql="SELECT json_build_array(c.system_identifier::text, d.oid::text, current_database()) FROM pg_control_system() c CROSS JOIN pg_database d WHERE d.datname = current_database()"
+restore_identity=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc \
+  --tuples-only --no-align --command="$database_identity_sql")
+production_identity=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc \
+  --tuples-only --no-align --command="$database_identity_sql")
+[[ -n $restore_identity && -n $production_identity && $restore_identity != "$production_identity" ]] || {
+  echo "refusing to restore over the connected production database" >&2
+  exit 1
+}
 
 restore_expectations=$("$manifest_tool" validate "$backup")
 IFS=$'\t' read -r expected_migrations expected_generation <<< "$restore_expectations"

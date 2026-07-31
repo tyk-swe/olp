@@ -1,12 +1,126 @@
 //! Shared request metadata and error construction for native HTTP transports.
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::Mutex,
+    time::{Duration, Instant, SystemTime},
+};
 
-use http::{HeaderValue, StatusCode};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 use olp_domain::{AttemptFailureClass, SourceExtensions, Surface, TransportError, TransportPhase};
 use zeroize::Zeroizing;
 
 use crate::transport_io::ProviderResponseIo;
+
+const MAX_PROVIDER_RETRY_AFTER: Duration = Duration::from_secs(5 * 60);
+const MAX_PROVIDER_RATE_LIMIT_MODELS: usize = 256;
+
+#[derive(Default)]
+pub(crate) struct RateLimitCooldown {
+    state: Mutex<RateLimitCooldownState>,
+}
+
+#[derive(Default)]
+struct RateLimitCooldownState {
+    credential_until: Option<Instant>,
+    until_by_model: BTreeMap<String, Instant>,
+}
+
+impl RateLimitCooldown {
+    pub(crate) fn check(&self, upstream_model: &str) -> Result<(), TransportError> {
+        self.check_scope(Some(upstream_model))
+    }
+
+    pub(crate) fn check_credential(&self) -> Result<(), TransportError> {
+        self.check_scope(None)
+    }
+
+    fn check_scope(&self, upstream_model: Option<&str>) -> Result<(), TransportError> {
+        let now = Instant::now();
+        let mut state = self
+            .state
+            .lock()
+            .expect("provider rate-limit cooldown lock poisoned");
+        if state.credential_until.is_some_and(|until| until <= now) {
+            state.credential_until = None;
+        }
+        let mut model_until =
+            upstream_model.and_then(|model| state.until_by_model.get(model).copied());
+        if model_until.is_some_and(|until| until <= now) {
+            state
+                .until_by_model
+                .remove(upstream_model.expect("model cooldown came from a model"));
+            model_until = None;
+        }
+        let Some(until) = state.credential_until.into_iter().chain(model_until).max() else {
+            return Ok(());
+        };
+        let seconds = until.saturating_duration_since(now).as_secs().max(1);
+        drop(state);
+        Err(transport_error(
+            TransportPhase::Connect,
+            AttemptFailureClass::RateLimit,
+            false,
+            format!("provider rate-limit cooldown is active for another {seconds} seconds"),
+        ))
+    }
+
+    pub(crate) fn observe(&self, upstream_model: Option<&str>, headers: &HeaderMap) {
+        let Some(duration) = retry_after(headers, SystemTime::now()) else {
+            return;
+        };
+        let now = Instant::now();
+        let until = now + duration;
+        let mut state = self
+            .state
+            .lock()
+            .expect("provider rate-limit cooldown lock poisoned");
+        state.until_by_model.retain(|_, until| *until > now);
+        if let Some(model) = upstream_model
+            && !state.until_by_model.contains_key(model)
+            && state.until_by_model.len() >= MAX_PROVIDER_RATE_LIMIT_MODELS
+            && let Some(oldest) = state
+                .until_by_model
+                .iter()
+                .min_by_key(|(_, until)| *until)
+                .map(|(model, _)| model.clone())
+        {
+            state.until_by_model.remove(&oldest);
+        }
+        let entry = match upstream_model {
+            Some(model) => state
+                .until_by_model
+                .entry(model.to_owned())
+                .or_insert(until),
+            None => state.credential_until.get_or_insert(until),
+        };
+        *entry = (*entry).max(until);
+    }
+}
+
+fn retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Duration> {
+    headers
+        .get_all(header::RETRY_AFTER)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| {
+            let value = value.trim();
+            value
+                .parse::<u64>()
+                .ok()
+                .map(Duration::from_secs)
+                .or_else(|| {
+                    httpdate::parse_http_date(value)
+                        .ok()?
+                        .duration_since(now)
+                        .ok()
+                })
+        })
+        .filter(|duration| !duration.is_zero())
+        .map(|duration| duration.min(MAX_PROVIDER_RETRY_AFTER))
+        .max()
+}
 
 pub(crate) fn secret_header(
     secret: &str,
@@ -166,4 +280,57 @@ pub(crate) async fn read_inline_media(
         bytes.extend_from_slice(&chunk);
     }
     Ok(STANDARD.encode(bytes))
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::*;
+
+    #[test]
+    fn retry_after_supports_delta_and_http_date_with_a_safe_cap() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("999999"));
+        assert_eq!(retry_after(&headers, now), Some(MAX_PROVIDER_RETRY_AFTER));
+
+        headers.insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_str(&httpdate::fmt_http_date(now + Duration::from_secs(45))).unwrap(),
+        );
+        assert_eq!(retry_after(&headers, now), Some(Duration::from_secs(45)));
+
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("invalid"));
+        assert_eq!(retry_after(&headers, now), None);
+    }
+
+    #[test]
+    fn cooldown_is_model_and_connector_scoped() {
+        let first_credential = RateLimitCooldown::default();
+        let second_credential = RateLimitCooldown::default();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+
+        first_credential.observe(Some("limited-model"), &headers);
+
+        assert!(first_credential.check("limited-model").is_err());
+        assert!(first_credential.check("other-model").is_ok());
+        assert!(second_credential.check("limited-model").is_ok());
+
+        first_credential.observe(None, &headers);
+        assert!(first_credential.check("other-model").is_err());
+        assert!(first_credential.check_credential().is_err());
+
+        for index in 0..=MAX_PROVIDER_RATE_LIMIT_MODELS {
+            second_credential.observe(Some(&format!("model-{index}")), &headers);
+        }
+        assert_eq!(
+            second_credential
+                .state
+                .lock()
+                .expect("provider rate-limit cooldown lock poisoned")
+                .until_by_model
+                .len(),
+            MAX_PROVIDER_RATE_LIMIT_MODELS
+        );
+    }
 }

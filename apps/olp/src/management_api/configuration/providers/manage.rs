@@ -209,6 +209,12 @@ pub(crate) struct UpdateProviderRequest {
     pub auth_mode: ProviderAuthMode,
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct DisableProviderQuery {
+    #[serde(default)]
+    pub force: bool,
+}
+
 #[utoipa::path(
     patch,
     path = "/api/v1/providers/{provider_id}",
@@ -264,10 +270,12 @@ pub(crate) async fn update_provider(
     params(
         ("provider_id" = Uuid, Path),
         ("If-Match" = String, Header),
-        ("Idempotency-Key" = String, Header)
+        ("Idempotency-Key" = String, Header),
+        ("force" = Option<bool>, Query, description = "Owner-only emergency containment; tombstones live media jobs and removes affected routes from the runtime")
     ),
     responses(
         (status = 200, body = ProviderMutationResponse),
+        (status = 403, description = "Forced containment requires an owner", body = Problem),
         (status = 409, description = "Provider is still referenced by an active route", body = Problem),
         (status = 412, body = Problem)
     )
@@ -275,20 +283,37 @@ pub(crate) async fn update_provider(
 pub(crate) async fn disable_provider(
     State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
+    Query(query): Query<DisableProviderQuery>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let result = state
-        .store()
-        .disable_provider(
-            provider_id,
-            if_match(&headers)?,
-            principal.user_id,
-            require_idempotency_key(&headers)?,
-        )
-        .await
-        .map_err(map_configuration_resource)?;
+    if query.force {
+        require_permission(&principal, Permission::ManageAccess)?;
+    }
+    let store = state.store();
+    let expected_etag = if_match(&headers)?;
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let result = if query.force {
+        store
+            .force_disable_provider(
+                provider_id,
+                expected_etag,
+                principal.user_id,
+                idempotency_key,
+            )
+            .await
+    } else {
+        store
+            .disable_provider(
+                provider_id,
+                expected_etag,
+                principal.user_id,
+                idempotency_key,
+            )
+            .await
+    }
+    .map_err(map_configuration_resource)?;
     with_etag(
         Json(ProviderMutationResponse {
             provider_id,
@@ -352,6 +377,15 @@ fn validate_provider_update(
     }
 
     let mut errors = FieldErrors::new();
+    if request.name.trim().is_empty()
+        || request.name.chars().count() > 100
+        || olp_domain::has_unsafe_display_characters(&request.name)
+    {
+        errors.insert(
+            "name".to_owned(),
+            vec!["Use 1-100 visible characters without control or bidi formatting.".to_owned()],
+        );
+    }
     for violation in validate_provider_configuration(ProviderConfiguration {
         kind: provider.kind,
         auth_mode: request.auth_mode,

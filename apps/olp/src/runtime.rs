@@ -5,10 +5,11 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 use arc_swap::ArcSwap;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use olp_domain::{
     ApiKey, ApiKeyLookupId, ProviderId, ProviderTransport, RuntimeGeneration, RuntimeGenerationId,
     RuntimeSnapshot,
@@ -28,6 +29,18 @@ pub struct RuntimeManager {
 pub struct RuntimeBundle {
     snapshot: RuntimeSnapshot,
     transports: BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
+    clock: Arc<RuntimeClock>,
+}
+
+struct RuntimeClock {
+    sample: Mutex<RuntimeClockSample>,
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeClockSample {
+    database_time: DateTime<Utc>,
+    observed_at: Instant,
+    authoritative: bool,
 }
 
 impl RuntimeBundle {
@@ -43,6 +56,53 @@ impl RuntimeBundle {
             .keys()
             .all(|provider_id| self.transports.contains_key(provider_id))
     }
+
+    #[must_use]
+    pub fn database_time(&self) -> DateTime<Utc> {
+        self.clock.now()
+    }
+}
+
+impl RuntimeClock {
+    fn new(database_time: DateTime<Utc>) -> Self {
+        Self {
+            sample: Mutex::new(RuntimeClockSample {
+                database_time,
+                observed_at: Instant::now(),
+                authoritative: false,
+            }),
+        }
+    }
+
+    fn now(&self) -> DateTime<Utc> {
+        self.sample
+            .lock()
+            .expect("runtime clock lock poisoned")
+            .time_at(Instant::now())
+    }
+
+    fn sample(&self, database_time: DateTime<Utc>) {
+        let observed_at = Instant::now();
+        let mut sample = self.sample.lock().expect("runtime clock lock poisoned");
+        *sample = RuntimeClockSample {
+            database_time: if sample.authoritative {
+                database_time.max(sample.time_at(observed_at))
+            } else {
+                database_time
+            },
+            observed_at,
+            authoritative: true,
+        };
+    }
+}
+
+impl RuntimeClockSample {
+    fn time_at(self, observed_at: Instant) -> DateTime<Utc> {
+        chrono::Duration::from_std(observed_at.saturating_duration_since(self.observed_at))
+            .ok()
+            .and_then(|elapsed| self.database_time.checked_add_signed(elapsed))
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
+    }
 }
 
 impl Deref for RuntimeBundle {
@@ -55,6 +115,7 @@ impl Deref for RuntimeBundle {
 
 impl RuntimeManager {
     pub fn empty() -> Self {
+        let clock = Arc::new(RuntimeClock::new(Utc::now()));
         Self {
             bundle: ArcSwap::from_pointee(RuntimeBundle {
                 snapshot: RuntimeSnapshot {
@@ -68,6 +129,7 @@ impl RuntimeManager {
                     api_keys: Default::default(),
                 },
                 transports: Default::default(),
+                clock,
             }),
             loaded: AtomicBool::new(false),
             install_lock: Mutex::new(()),
@@ -83,6 +145,10 @@ impl RuntimeManager {
         self.loaded
             .load(Ordering::Acquire)
             .then(|| self.bundle.load().generation.ordinal)
+    }
+
+    pub fn sample_database_time(&self, database_time: DateTime<Utc>) {
+        self.bundle.load().clock.sample(database_time);
     }
 
     pub fn install(
@@ -107,9 +173,11 @@ impl RuntimeManager {
         {
             return Ok(false);
         }
+        let clock = Arc::clone(&self.bundle.load().clock);
         self.bundle.store(Arc::new(RuntimeBundle {
             snapshot,
             transports,
+            clock,
         }));
         self.loaded.store(true, Ordering::Release);
         Ok(true)
@@ -207,6 +275,20 @@ mod tests {
         stale.generation.ordinal = 1;
         assert!(!manager.install(stale, BTreeMap::new()).unwrap());
         assert_eq!(manager.pin().generation.ordinal, 2);
+    }
+
+    #[test]
+    fn database_clock_uses_fresh_samples_without_moving_backwards() {
+        let manager = RuntimeManager::empty();
+        let database_time = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        manager.sample_database_time(database_time);
+        let pinned = manager.pin();
+        let first = pinned.database_time();
+        assert!(first >= database_time);
+        assert!(first < database_time + Duration::seconds(1));
+
+        manager.sample_database_time(database_time - Duration::days(1));
+        assert!(pinned.database_time() >= first);
     }
 
     #[test]

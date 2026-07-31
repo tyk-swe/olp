@@ -17,6 +17,9 @@ use crate::{
     RuntimeGenerationId, Surface, TargetId, TransportMode,
 };
 
+pub const MAX_ROUTE_TARGETS: usize = 100;
+pub const MAX_ROUTE_TIMEOUT_MS: i32 = 600_000;
+
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, ToSchema,
 )]

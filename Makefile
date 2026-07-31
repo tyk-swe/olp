@@ -101,9 +101,10 @@ supply-chain: ## Require immutable Action and image references
 helm-verify: ## Verify Helm values, schema, and templates change together
 	scripts/verify-helm-contract.sh deploy/helm
 
-script-selftest: ## Self-tests for the backup manifest and repository-validation helpers
+script-selftest: ## Self-tests for backup, restore, and repository-validation helpers
 	scripts/test-backup-manifest.sh
 	scripts/test-repository-validation.sh
+	scripts/test-restore-rehearsal.sh
 
 shellcheck: ## Shellcheck every tracked shell script
 	@scripts=(); \

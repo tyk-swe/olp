@@ -69,6 +69,8 @@ jobs:
         run: scripts/test-backup-manifest.sh
       - name: Verify repository validation helper contract
         run: scripts/test-repository-validation.sh
+      - name: Verify restore rehearsal safety
+        run: scripts/test-restore-rehearsal.sh
       - name: Verify request metadata loss recorder contract
         run: |
           scripts/record-request-metadata-stream-loss.sh --help 2>&1 \
@@ -469,7 +471,6 @@ jobs:
       - name: Smoke production binary modes and packaged console
         run: ./scripts/smoke-image-modes.sh openllmproxy:ci-amd64
       - name: Generate amd64 SBOM
-        if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           image: openllmproxy:ci-amd64
@@ -478,7 +479,6 @@ jobs:
           output-file: openllmproxy-amd64.spdx.json
           upload-artifact: false
       - name: Scan amd64 image for HIGH and CRITICAL vulnerabilities
-        if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: openllmproxy:ci-amd64
@@ -488,7 +488,7 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
       - name: Upload amd64 SBOM
-        if: ${{ always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        if: ${{ always() && !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openllmproxy-sbom-amd64-${{ github.run_id }}-${{ github.run_attempt }}

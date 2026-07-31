@@ -1,11 +1,16 @@
 use std::{fmt::Write as _, path::Path};
 
-use axum::http::HeaderValue;
+use axum::{
+    Router,
+    body::Body,
+    http::{HeaderValue, Request, Response, StatusCode},
+};
 use base64::Engine as _;
 use sha2::{Digest as _, Sha256};
+use tower::{ServiceExt as _, service_fn};
 use tower_http::services::{ServeDir, ServeFile};
 
-const CSP_PREFIX: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'";
+const CSP_PREFIX: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'";
 // SvelteKit creates its route announcer from a client-side template. Keep the
 // framework's exact visually-hidden style working without admitting arbitrary
 // style attributes or weakening the external stylesheet policy.
@@ -44,14 +49,43 @@ pub fn content_security_policy(console_dir: &Path) -> HeaderValue {
     HeaderValue::from_str(&policy).expect("generated console CSP must be a valid header")
 }
 
-pub fn spa_service(console_dir: &Path) -> ServeDir<ServeFile> {
-    ServeDir::new(console_dir)
+pub fn spa_service(console_dir: &Path) -> Router {
+    let index = ServeFile::new(console_dir.join("index.html"));
+    let fallback = service_fn(move |request: Request<Body>| {
+        let index = index.clone();
+        async move {
+            if asset_like_path(request.uri().path()) {
+                Ok::<_, std::convert::Infallible>(
+                    Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Body::empty())
+                        .expect("static 404 response is valid"),
+                )
+            } else {
+                index
+                    .oneshot(request)
+                    .await
+                    .map(|response| response.map(Body::new))
+            }
+        }
+    });
+    let files = ServeDir::new(console_dir)
         .precompressed_br()
         .precompressed_gzip()
         .append_index_html_on_directories(true)
-        // SPA routes are real console entry points. `not_found_service` forces
-        // a 404 even when it serves this file, which breaks direct deep links.
-        .fallback(ServeFile::new(console_dir.join("index.html")))
+        .fallback(fallback);
+    Router::new().fallback_service(files)
+}
+
+fn asset_like_path(path: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let segment = path.rsplit('/').next().unwrap_or(path).as_bytes();
+    path == "/_app"
+        || path.starts_with("/_app/")
+        || segment.contains(&b'.')
+        || segment
+            .windows(3)
+            .any(|bytes| bytes.eq_ignore_ascii_case(b"%2e"))
 }
 
 #[cfg(test)]
@@ -80,6 +114,14 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::OK);
 
+        for path in ["/_app/immutable/missing.js", "/_app", "/missing.js/"] {
+            let response = spa_service(&root)
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        }
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -103,6 +145,7 @@ mod tests {
             assert!(policy.contains(&format!("'sha256-{digest}'")));
         }
         assert!(policy.contains("script-src 'self'"));
+        assert!(policy.contains("form-action 'self'"));
         assert!(policy.contains("; style-src 'self';"));
         assert!(policy.ends_with(
             "style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='"

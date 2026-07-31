@@ -180,11 +180,14 @@ pub(crate) async fn create_provider(
         request.legacy_api_key.is_some(),
         "api_key is no longer accepted; use credential.",
     );
-    if request.name.trim().is_empty() || request.name.chars().count() > 100 {
+    if request.name.trim().is_empty()
+        || request.name.chars().count() > 100
+        || olp_domain::has_unsafe_display_characters(&request.name)
+    {
         errors
             .entry("name".to_owned())
             .or_default()
-            .push("Use between 1 and 100 characters.".to_owned());
+            .push("Use 1-100 visible characters without control or bidi formatting.".to_owned());
     }
     if request
         .model
@@ -201,6 +204,16 @@ pub(crate) async fn create_provider(
             .entry("display_name".to_owned())
             .or_default()
             .push("A display name requires a seed model.".to_owned());
+    }
+    if request.display_name.as_ref().is_some_and(|name| {
+        name.trim().is_empty()
+            || name.chars().count() > 200
+            || olp_domain::has_unsafe_display_characters(name)
+    }) {
+        errors
+            .entry("display_name".to_owned())
+            .or_default()
+            .push("Use 1-200 visible characters without control or bidi formatting.".to_owned());
     }
     if request.credential.as_ref().is_some_and(|credential| {
         credential.expose().trim().is_empty() || credential.expose().len() > 8_192

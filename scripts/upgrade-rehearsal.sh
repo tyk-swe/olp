@@ -3,13 +3,16 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: OLP_REHEARSAL_DATABASE_URL=postgres://... OLP_VALKEY_URL=redis://... upgrade-rehearsal.sh BACKUP
+usage: OLP_DATABASE_URL=postgres://production/... \
+  OLP_REHEARSAL_DATABASE_URL=postgres://isolated/... \
+  OLP_VALKEY_URL=redis://... upgrade-rehearsal.sh BACKUP
 
-OLP_REHEARSAL_CONFIRM=destroy-target must be set. The script restores the
-backup into that isolated database, runs the current migrator twice, and proves
-that the second run is idempotent. The target migration set is derived from the
-tracked SQL migrations. Set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to require
-an exact number of newly applied migrations, or
+OLP_REHEARSAL_CONFIRM=destroy-target must be set. The isolated database must
+also have olp.restore_rehearsal=isolated-destination configured. The script
+restores the backup, runs the current migrator twice, and proves that the
+second run is idempotent. The target migration set is derived from the tracked
+SQL migrations. Set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to require an exact
+number of newly applied migrations, or
 OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION to derive it from a released
 migration marker.
 USAGE
@@ -26,6 +29,7 @@ if [[ -v OLP_REHEARSAL_MIN_NEW_MIGRATIONS ]]; then
 fi
 
 : "${OLP_REHEARSAL_DATABASE_URL:?OLP_REHEARSAL_DATABASE_URL is required}"
+: "${OLP_DATABASE_URL:?OLP_DATABASE_URL must identify the production database}"
 : "${OLP_VALKEY_URL:?OLP_VALKEY_URL is required for migration preflight}"
 expected_new_migrations=${OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS:-}
 if [[ -n $expected_new_migrations ]]; then

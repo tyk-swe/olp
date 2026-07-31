@@ -55,6 +55,7 @@ fn principal(role: &str) -> SessionPrincipal {
         security_version: 1,
         csrf_digest: vec![0; 32],
         expires_at: Utc::now() + chrono::Duration::hours(1),
+        database_now: Utc::now(),
     }
 }
 
@@ -216,15 +217,11 @@ fn session_cookie_lifetime_uses_the_configured_ttl() {
 }
 
 #[tokio::test]
-async fn logout_without_a_server_side_session_still_expires_every_browser_credential() {
+async fn logout_without_a_browser_session_still_expires_every_browser_credential() {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::ORIGIN,
         HeaderValue::from_static("https://olp.example.test"),
-    );
-    headers.insert(
-        header::COOKIE,
-        HeaderValue::from_static("__Host-olp_session=already-revoked"),
     );
     let response = logout(axum::extract::State(state()), headers)
         .await
@@ -252,6 +249,36 @@ async fn logout_without_a_server_side_session_still_expires_every_browser_creden
         cookies
             .iter()
             .any(|cookie| cookie.starts_with("__Host-olp_recent_auth="))
+    );
+}
+
+#[tokio::test]
+async fn logout_reports_a_server_side_revocation_failure_but_still_expires_credentials() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("https://olp.example.test"),
+    );
+    let material = SessionMaterial::generate();
+    headers.insert(
+        header::COOKIE,
+        HeaderValue::from_str(&format!("__Host-olp_session={}", material.token())).unwrap(),
+    );
+    let response = logout(axum::extract::State(state()), headers)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let cookies: Vec<_> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-olp_session=;")),
+        "an unconfirmed revocation must still expire the browser session: {cookies:?}"
     );
 }
 

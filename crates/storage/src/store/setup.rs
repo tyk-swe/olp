@@ -46,6 +46,11 @@ impl PgStore {
         input: InstallationSetupInput,
         session: Option<(&SessionMaterial, chrono::Duration)>,
     ) -> Result<(InstallationSetupResult, Option<Uuid>), PersistenceError> {
+        if olp_domain::has_unsafe_display_characters(&input.installation_name)
+            || olp_domain::has_unsafe_display_characters(&input.display_name)
+        {
+            return Err(PersistenceError::InvalidInstallationName);
+        }
         let mut transaction = self.pool.begin().await?;
         sqlx::query!("SELECT pg_advisory_xact_lock($1)", SETUP_LOCK_ID)
             .fetch_one(&mut *transaction)

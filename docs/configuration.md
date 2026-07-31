@@ -10,7 +10,7 @@ code wins and this file needs a patch.
 | Variable | Default | Purpose |
 |---|---|---|
 | `OLP_DATABASE_URL` | required | PostgreSQL connection URL. |
-| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Connection pool size. |
+| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Connection pool size, from 1 through 100. |
 | `OLP_VALKEY_URL` | optional (serve), required (`worker`, `migrate`, `doctor`) | Valkey URL for distributed limits, hints, and streams. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public HTTP listener. The CLI default is loopback on purpose; containers override to `0.0.0.0:8080` (see `deploy/compose.yaml`). Both are intentional — do not "align" them. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private listener for `/health/live`, `/health/ready`, `/metrics`. Keep loopback unless an internal network is deliberate. |
@@ -21,7 +21,7 @@ code wins and this file needs a patch.
 | `OLP_LOCAL_LOGIN_ENABLED` | `true` | Whether password sign-in stays available after setup. |
 | `OLP_TRUSTED_PROXY_CIDRS` | empty | Comma-separated CIDRs allowed to supply `X-Forwarded-For`. Empty means forwarding headers are ignored. |
 | `OLP_CONSOLE_DIR` | `console/build` | Built console assets served at `/` (`/opt/olp/console` in the image). |
-| `OLP_MEDIA_SPOOL_DIR` | optional | On-disk spool for media payloads. |
+| `OLP_MEDIA_SPOOL_DIR` | system temp directory under `openllmproxy-media` | On-disk spool for media payloads. |
 | `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB). |
 | `OLP_CONNECTOR_CONFIG_FILE` | optional | JSON mapping runtime provider IDs to credential file paths (paths only, never values). See `deploy/connectors.example.json`. |
 | `RUST_LOG` | unset | Standard tracing filter, e.g. `olp=info,tower_http=info`. |
@@ -34,7 +34,7 @@ Generation and rotation are documented in `deploy/secrets/README.md`.
 | Variable | Required by | Purpose |
 |---|---|---|
 | `OLP_MASTER_KEY_FILE` | serve (control), `doctor`, `master-key` | Envelope-encryption master key (JSON keyring for rotation). |
-| `OLP_AUTH_HMAC_KEY_FILE` | serve (control), `doctor` | Session/auth HMAC key. |
+| `OLP_AUTH_HMAC_KEY_FILE` | serve (control), `doctor` | Authentication HMAC key or bounded versioned keyring. |
 | `OLP_BOOTSTRAP_TOKEN_FILE` | first run only | One-time setup token; retire it after setup (see README quick start). |
 
 ## Compose-only variables

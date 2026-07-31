@@ -1,13 +1,46 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    fmt,
+    future::Future,
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 use axum::body::Bytes;
 use olp_domain::{ApiKey, MediaByteStream, MediaHandle, MediaSpool, Operation};
-use olp_storage::{LimitError, LimitLease, LimitRequest};
+use olp_storage::{DistributedLimiter, LimitError, LimitLease, LimitRequest, PgStore};
 use tracing::{error, warn};
 
 use crate::GatewayState;
 
 use super::error::InferenceError;
+
+const LIMIT_CLEANUP_RETRY_HORIZON: Duration = Duration::from_secs(30);
+static LIMIT_CLEANUP_UNCERTAINTIES: AtomicU64 = AtomicU64::new(0);
+static LIMIT_CLEANUP_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+static LIMIT_CLEANUP_TASKS: LazyLock<Mutex<tokio::task::JoinSet<()>>> =
+    LazyLock::new(|| Mutex::new(tokio::task::JoinSet::new()));
+
+pub(crate) fn limit_cleanup_uncertainties() -> u64 {
+    LIMIT_CLEANUP_UNCERTAINTIES.load(Ordering::Relaxed)
+}
+
+pub(crate) struct LimitReservation {
+    limiter: Arc<DistributedLimiter>,
+    lease: LimitLease,
+    api_key_id: uuid::Uuid,
+}
+
+impl fmt::Debug for LimitReservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LimitReservation")
+            .field("lease", &self.lease)
+            .finish_non_exhaustive()
+    }
+}
 
 pub(super) async fn reserve_limits(
     state: &GatewayState,
@@ -15,7 +48,7 @@ pub(super) async fn reserve_limits(
     operation: &Operation,
     lookup_id: &str,
     lease_ttl: Duration,
-) -> Result<Option<LimitLease>, InferenceError> {
+) -> Result<Option<LimitReservation>, InferenceError> {
     if let Some(reserved_tokens) = crate::http_inference_reserved_tokens() {
         let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
             return Ok(None);
@@ -44,7 +77,11 @@ pub(super) async fn reserve_limits(
         .await
         .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
         return match result {
-            Ok(lease) => Ok(Some(lease)),
+            Ok(lease) => Ok(Some(LimitReservation {
+                limiter,
+                lease,
+                api_key_id: key.id.as_uuid(),
+            })),
             Err(LimitError::Exceeded {
                 dimension,
                 retry_after,
@@ -87,7 +124,11 @@ pub(super) async fn reserve_limits(
     .await
     .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
     match result {
-        Ok(lease) => Ok(Some(lease)),
+        Ok(lease) => Ok(Some(LimitReservation {
+            limiter,
+            lease,
+            api_key_id: key.id.as_uuid(),
+        })),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
@@ -196,30 +237,181 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
         .sum()
 }
 
-pub(crate) async fn release_limits(
+pub(crate) fn release_limits(
     state: &GatewayState,
-    lease: Option<&LimitLease>,
+    reservation: Option<&LimitReservation>,
     actual_tokens: Option<i64>,
 ) {
-    if let (Some(limiter), Some(lease)) = (state.limiter.current(), lease) {
+    if let Some(reservation) = reservation {
         if let Some(actual_tokens) = actual_tokens {
+            reconcile_tokens_in_background(
+                Arc::clone(&reservation.limiter),
+                reservation.lease.clone(),
+                actual_tokens,
+                Some((state.store().clone(), reservation.api_key_id)),
+            );
+        }
+        release_concurrency_in_background(
+            Arc::clone(&reservation.limiter),
+            reservation.lease.clone(),
+            Some((state.store().clone(), reservation.api_key_id)),
+        );
+    }
+}
+
+pub(crate) fn reconcile_tokens_in_background(
+    limiter: Arc<olp_storage::DistributedLimiter>,
+    lease: LimitLease,
+    actual_tokens: i64,
+    uncertainty: Option<(PgStore, uuid::Uuid)>,
+) {
+    spawn_bounded_limit_cleanup(
+        "token reservation reconciliation",
+        move || {
+            let limiter = Arc::clone(&limiter);
+            let lease = lease.clone();
+            async move { limiter.reconcile(&lease, actual_tokens).await }
+        },
+        uncertainty.map(|(store, api_key_id)| (store, api_key_id, "limit.token_reconciliation")),
+    );
+}
+
+pub(crate) fn release_concurrency_in_background(
+    limiter: Arc<DistributedLimiter>,
+    lease: LimitLease,
+    uncertainty: Option<(PgStore, uuid::Uuid)>,
+) {
+    spawn_bounded_limit_cleanup(
+        "concurrency lease release",
+        move || {
+            let limiter = Arc::clone(&limiter);
+            let lease = lease.clone();
+            async move { limiter.release(&lease).await }
+        },
+        uncertainty.map(|(store, api_key_id)| (store, api_key_id, "limit.concurrency_release")),
+    );
+}
+
+fn spawn_bounded_limit_cleanup<F, Fut>(
+    operation: &'static str,
+    cleanup: F,
+    uncertainty: Option<(PgStore, uuid::Uuid, &'static str)>,
+) where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<(), LimitError>> + Send + 'static,
+{
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        warn!(operation, "limit cleanup skipped outside a Tokio runtime");
+        return;
+    };
+    let task = async move {
+        if retry_limit_cleanup_until(operation, LIMIT_CLEANUP_RETRY_HORIZON, cleanup).await {
+            return;
+        }
+        LIMIT_CLEANUP_UNCERTAINTIES.fetch_add(1, Ordering::Relaxed);
+        if let Some((store, api_key_id, action)) = uncertainty {
             match tokio::time::timeout(
-                Duration::from_millis(250),
-                limiter.reconcile(lease, actual_tokens),
+                Duration::from_secs(2),
+                store.record_limit_cleanup_uncertainty(api_key_id, action),
             )
             .await
             {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => warn!(%error, "failed to reconcile token reservation"),
-                Err(_) => warn!("timed out reconciling token reservation"),
+                Ok(Err(error)) => {
+                    warn!(%error, operation, "failed to persist limit cleanup uncertainty");
+                }
+                Err(_) => warn!(operation, "timed out persisting limit cleanup uncertainty"),
             }
         }
-        match tokio::time::timeout(Duration::from_millis(250), limiter.release(lease)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => warn!(%error, "failed to release concurrency lease"),
-            Err(_) => warn!("timed out releasing concurrency lease"),
+    };
+    let mut tasks = LIMIT_CLEANUP_TASKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    while let Some(result) = tasks.try_join_next() {
+        if let Err(error) = result {
+            warn!(%error, "limit cleanup task failed unexpectedly");
         }
     }
+    tasks.spawn_on(task, &runtime);
+}
+
+async fn retry_limit_cleanup_until<F, Fut>(
+    operation: &str,
+    horizon: Duration,
+    mut cleanup: F,
+) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<(), LimitError>>,
+{
+    let started = tokio::time::Instant::now();
+    let mut backoff = Duration::from_millis(25);
+    let mut attempted = false;
+    loop {
+        // Shutdown stops the *retries*, never the first attempt: a lease that
+        // is released once during the drain costs nothing, while skipping it
+        // holds the slot in Valkey until the lease TTL expires.
+        if attempted && LIMIT_CLEANUP_SHUTTING_DOWN.load(Ordering::Acquire) {
+            warn!(
+                operation,
+                "limit cleanup stopped retrying for graceful shutdown"
+            );
+            return false;
+        }
+        attempted = true;
+        match tokio::time::timeout(Duration::from_millis(250), cleanup()).await {
+            Ok(Ok(())) => return true,
+            Ok(Err(error)) if started.elapsed() >= horizon => {
+                warn!(%error, operation, "limit cleanup failed after bounded retries");
+                return false;
+            }
+            Err(_) if started.elapsed() >= horizon => {
+                warn!(operation, "limit cleanup timed out after bounded retries");
+                return false;
+            }
+            Ok(Err(_)) | Err(_) => {
+                let remaining = horizon.saturating_sub(started.elapsed());
+                tokio::time::sleep(backoff.min(remaining)).await;
+                backoff = (backoff * 2).min(Duration::from_millis(250));
+            }
+        }
+    }
+}
+
+pub(crate) async fn drain_limit_cleanup_tasks(timeout: Duration) {
+    LIMIT_CLEANUP_SHUTTING_DOWN.store(true, Ordering::Release);
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let mut tasks = {
+            let mut tracked = LIMIT_CLEANUP_TASKS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::take(&mut *tracked)
+        };
+        if tasks.is_empty() {
+            break;
+        }
+        while !tasks.is_empty() {
+            match tokio::time::timeout_at(deadline, tasks.join_next()).await {
+                Ok(Some(Ok(()))) => {}
+                Ok(Some(Err(error))) => {
+                    warn!(%error, "limit cleanup task failed during shutdown");
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    warn!(
+                        remaining = tasks.len(),
+                        "limit cleanup tasks did not stop before deadline; aborting them"
+                    );
+                    tasks.abort_all();
+                    while tasks.join_next().await.is_some() {}
+                    LIMIT_CLEANUP_SHUTTING_DOWN.store(false, Ordering::Release);
+                    return;
+                }
+            }
+        }
+    }
+    LIMIT_CLEANUP_SHUTTING_DOWN.store(false, Ordering::Release);
 }
 
 pub(super) fn operation_media_handles(operation: &Operation) -> Vec<MediaHandle> {
@@ -367,5 +559,90 @@ impl futures::Stream for CleanupMediaStream {
 impl Drop for CleanupMediaStream {
     fn drop(&mut self) {
         self.schedule_cleanup();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use super::*;
+
+    static CLEANUP_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn token_cleanup_retries_in_the_background_past_the_short_retry_window() {
+        let _guard = CLEANUP_TEST_LOCK.lock().await;
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let (completed_sender, completed) = tokio::sync::oneshot::channel();
+        let completed_sender = Arc::new(Mutex::new(Some(completed_sender)));
+        spawn_bounded_limit_cleanup(
+            "test token cleanup",
+            {
+                let attempts = Arc::clone(&attempts);
+                move || {
+                    let attempt = attempts.fetch_add(1, Ordering::Relaxed);
+                    let completed_sender = Arc::clone(&completed_sender);
+                    async move {
+                        if attempt < 4 {
+                            Err(LimitError::UnexpectedResponse)
+                        } else {
+                            completed_sender
+                                .lock()
+                                .expect("completion sender mutex is not poisoned")
+                                .take()
+                                .expect("completion is sent once")
+                                .send(())
+                                .expect("completion receiver remains available");
+                            Ok(())
+                        }
+                    }
+                }
+            },
+            None,
+        );
+
+        assert_eq!(attempts.load(Ordering::Relaxed), 0);
+        tokio::time::timeout(Duration::from_secs(2), completed)
+            .await
+            .expect("cleanup should outlive the old three-attempt window")
+            .expect("cleanup completion sender should remain available");
+        assert_eq!(attempts.load(Ordering::Relaxed), 5);
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_drains_cleanup_into_uncertainty_accounting() {
+        let _guard = CLEANUP_TEST_LOCK.lock().await;
+        let before = limit_cleanup_uncertainties();
+        let (started_sender, started) = tokio::sync::oneshot::channel();
+        let started_sender = Arc::new(Mutex::new(Some(started_sender)));
+        spawn_bounded_limit_cleanup(
+            "test shutdown cleanup",
+            move || {
+                let started_sender = Arc::clone(&started_sender);
+                async move {
+                    if let Some(sender) = started_sender
+                        .lock()
+                        .expect("start sender mutex is not poisoned")
+                        .take()
+                    {
+                        let _ = sender.send(());
+                    }
+                    Err(LimitError::UnexpectedResponse)
+                }
+            },
+            None,
+        );
+        tokio::time::timeout(Duration::from_secs(1), started)
+            .await
+            .expect("cleanup should start")
+            .expect("cleanup start sender should remain available");
+
+        drain_limit_cleanup_tasks(Duration::from_secs(1)).await;
+
+        assert!(limit_cleanup_uncertainties() > before);
     }
 }

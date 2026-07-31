@@ -157,13 +157,13 @@ fuzz_target!(|data: &[u8]| {
     roundtrip(
         data,
         "openai::transcription_response",
-        |response| Some(openai::decode_transcription_response(response)),
+        |response| openai::decode_transcription_response(response).ok(),
         openai::encode_transcription_response,
     );
     roundtrip(
         data,
         "openai::moderation_response",
-        |response| Some(openai::decode_moderation_response(response)),
+        |response| openai::decode_moderation_response(response).ok(),
         |canonical| openai::encode_moderation_response(canonical, PUBLIC_MODEL, "fuzz-moderation"),
     );
     roundtrip(

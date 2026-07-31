@@ -6,7 +6,6 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use olp_domain::{ApiKeyAuthorizationError, OperationKind, RouteSlug, Surface, authorize_api_key};
 use serde::Serialize;
 
@@ -21,7 +20,7 @@ pub(super) async fn list_models(
 ) -> Result<Json<ModelList>, OpenAiModelError> {
     let runtime = Arc::clone(principal.runtime());
     let key = principal.key();
-    authorize_api_key(key, None, OperationKind::ModelList, Utc::now())
+    authorize_api_key(key, None, OperationKind::ModelList, runtime.database_time())
         .map_err(map_authorization_error)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
@@ -40,7 +39,7 @@ pub(super) async fn list_models(
         object: "list",
         data,
     });
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease.as_ref());
     Ok(response)
 }
 
@@ -51,7 +50,7 @@ pub(super) async fn get_model(
 ) -> Result<Json<ModelObject>, OpenAiModelError> {
     let runtime = Arc::clone(principal.runtime());
     let key = principal.key();
-    authorize_api_key(key, None, OperationKind::ModelGet, Utc::now())
+    authorize_api_key(key, None, OperationKind::ModelGet, runtime.database_time())
         .map_err(map_authorization_error)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
@@ -72,7 +71,7 @@ pub(super) async fn get_model(
             runtime.generation.activated_at.timestamp().max(0),
         )))
     })();
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease.as_ref());
     result
 }
 

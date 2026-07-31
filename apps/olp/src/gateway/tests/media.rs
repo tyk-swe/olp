@@ -11,10 +11,22 @@ fn unknown_upstream_video_status_fails_closed() {
 #[test]
 fn upstream_media_identity_is_bounded_before_durable_attachment() {
     assert!(valid_upstream_media_job_id("video_123"));
+    assert!(valid_upstream_media_job_id(&"x".repeat(256)));
+    assert!(valid_upstream_media_job_id("video-_123"));
     assert!(!valid_upstream_media_job_id(""));
     assert!(!valid_upstream_media_job_id(" video_123"));
     assert!(!valid_upstream_media_job_id("video\n123"));
-    assert!(!valid_upstream_media_job_id(&"x".repeat(1_025)));
+    assert!(!valid_upstream_media_job_id("video/123"));
+    assert!(!valid_upstream_media_job_id("vidéo_123"));
+    assert!(!valid_upstream_media_job_id(&"x".repeat(257)));
+}
+
+#[test]
+fn video_create_fails_closed_without_recovery_journal() {
+    let (state, _) = test_state(false);
+    let error = require_media_job_recovery(&state).unwrap_err();
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error.code, "media_job_recovery_unavailable");
 }
 
 #[derive(Default)]
@@ -49,6 +61,78 @@ impl olp_domain::MediaSpool for CountingAdmissionSpool {
 struct RecordingSpool {
     inner: Arc<dyn MediaSpool>,
     handles: Mutex<Vec<MediaHandle>>,
+}
+
+struct FailingReadSpool;
+
+impl MediaSpool for FailingReadSpool {
+    fn put<'a>(
+        &'a self,
+        _upload: olp_domain::MediaUpload,
+    ) -> BoxFuture<'a, Result<olp_domain::MediaArtifact, olp_domain::MediaSpoolError>> {
+        Box::pin(async { Err(olp_domain::MediaSpoolError::Unavailable) })
+    }
+
+    fn open<'a>(
+        &'a self,
+        handle: &'a MediaHandle,
+    ) -> BoxFuture<'a, Result<olp_domain::OpenedMedia, olp_domain::MediaSpoolError>> {
+        let handle = handle.clone();
+        Box::pin(async move {
+            Ok(olp_domain::OpenedMedia {
+                artifact: olp_domain::MediaArtifact {
+                    handle,
+                    content_type: Some("image/png".to_owned()),
+                    content_length: None,
+                },
+                filename: "failed.png".to_owned(),
+                bytes: Box::pin(stream::once(async {
+                    Err(olp_domain::MediaSpoolError::Unavailable)
+                })),
+            })
+        })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _handle: &'a MediaHandle,
+    ) -> BoxFuture<'a, Result<(), olp_domain::MediaSpoolError>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test]
+async fn image_body_failure_is_recorded_in_request_metadata() {
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
+    state.request_metadata = Some(emitter);
+    state.media_spool = Arc::new(FailingReadSpool);
+    install_result(
+        &state,
+        OperationKind::ImageGeneration,
+        CanonicalResult::Images(olp_domain::ImagesResult {
+            created_at: None,
+            images: vec![olp_domain::ImageArtifact {
+                source: olp_domain::MediaSource::Handle(MediaHandle::new("failed-image")),
+                revised_prompt: None,
+            }],
+            usage: None,
+            extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        }),
+    );
+
+    let response = post_json(
+        &state,
+        &key,
+        "/openai/v1/images/generations",
+        r#"{"model":"default","prompt":"failed image"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.into_body().collect().await.is_err());
+    let event = request_metadata.recv_next().await.unwrap();
+    assert_eq!(event.status_code, Some(StatusCode::BAD_GATEWAY.as_u16()));
+    assert_eq!(event.error_class.as_deref(), Some("response_body_failed"));
 }
 
 impl RecordingSpool {

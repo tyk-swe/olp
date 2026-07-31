@@ -3,12 +3,12 @@ use std::{
     num::{NonZeroU16, NonZeroU32, NonZeroU64},
 };
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    Capability, CredentialVersionId, DurationMs, OperationKind, Provider, ProviderId, ProviderKind,
-    Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface,
-    Target, TargetId, TransportMode,
+    Capability, CredentialVersionId, DurationMs, MAX_TOKENS_PER_MINUTE, OperationKind, Provider,
+    ProviderId, ProviderKind, Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId,
+    RuntimeSnapshot, Surface, Target, TargetId, TransportMode,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -65,15 +65,19 @@ impl PgStore {
     /// never regain an old digest, scope, allowlist, expiry, or hard limit.
     pub async fn current_runtime_api_keys(
         &self,
-    ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
+    ) -> Result<(BTreeMap<ApiKeyLookupId, ApiKey>, DateTime<Utc>), RuntimeCompileError> {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
         let api_keys = compile_api_keys(&mut transaction).await?;
+        let database_time: DateTime<Utc> =
+            sqlx::query_scalar!("SELECT clock_timestamp() AS \"database_time!\"")
+                .fetch_one(&mut *transaction)
+                .await?;
         transaction.commit().await?;
-        Ok(api_keys)
+        Ok((api_keys, database_time))
     }
 }
 
@@ -226,7 +230,17 @@ async fn compile_snapshot(
     }
 
     let route_rows = sqlx::query!(
-        "SELECT r.id, r.slug, rr.id AS revision_id, rr.routing_id, rr.overall_timeout_ms, rr.max_attempts \
+        "SELECT r.id, r.slug, rr.id AS revision_id, rr.routing_id, rr.overall_timeout_ms, rr.max_attempts, \
+                EXISTS ( \
+                    SELECT 1 FROM route_revision_targets candidate \
+                    WHERE candidate.route_revision_id = rr.id \
+                ) AND NOT EXISTS ( \
+                    SELECT 1 FROM route_revision_targets candidate \
+                    JOIN provider_models pm ON pm.id = candidate.provider_model_id \
+                    JOIN providers p ON p.id = pm.provider_id \
+                    WHERE candidate.route_revision_id = rr.id \
+                      AND p.state <> 'disabled'::provider_state \
+                ) AS \"all_targets_forced_disabled!\" \
          FROM routes r \
          JOIN LATERAL ( \
              SELECT id, routing_id, overall_timeout_ms, max_attempts FROM route_revisions \
@@ -285,6 +299,12 @@ async fn compile_snapshot(
             })
         })
         .collect::<Result<Vec<_>, RuntimeCompileError>>()?;
+        // Forced provider containment can deliberately leave a route with no
+        // live targets. Omitting it stops new traffic without rewriting its
+        // immutable revision history.
+        if targets.is_empty() && row.all_targets_forced_disabled {
+            continue;
+        }
         let overall_timeout_ms: i32 = row.overall_timeout_ms;
         let max_attempts: i16 = row.max_attempts;
         let route = Route {
@@ -417,6 +437,7 @@ fn optional_nonzero_u64(
             u64::try_from(value)
                 .ok()
                 .and_then(NonZeroU64::new)
+                .filter(|value| value.get() <= MAX_TOKENS_PER_MINUTE)
                 .ok_or_else(|| {
                     RuntimeCompileError::InvalidConfiguration(format!(
                         "API key {field} limit is invalid"

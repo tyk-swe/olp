@@ -70,9 +70,8 @@ impl PgStore {
                           OR expires_at <= $1
                           OR created_at <= $1 - interval '30 days'
                         ))
-                  )
+                )
                 ORDER BY
-                    CASE WHEN lifecycle_state = 'active' THEN 1 ELSE 0 END,
                     next_reconciliation_at, created_at, id
                 FOR UPDATE SKIP LOCKED
                 LIMIT $2
@@ -105,6 +104,30 @@ impl PgStore {
         .fetch_all(self.pool())
         .await?;
         rows.into_iter().map(media_job_from_row).collect()
+    }
+
+    /// Extends an unexpired reconciliation lease while its provider operation
+    /// is still in flight. A false result fences a worker whose claim was lost.
+    pub async fn renew_media_reconciliation_claim(
+        &self,
+        id: Uuid,
+        claim_id: Uuid,
+    ) -> Result<bool, MediaJobError> {
+        let result = sqlx::query!(
+            "UPDATE async_media_jobs SET
+                reconciliation_claimed_until = now() + interval '2 minutes',
+                next_reconciliation_at = GREATEST(
+                    next_reconciliation_at, now() + interval '2 minutes'
+                ),
+                etag = uuidv7()
+             WHERE id = $1 AND reconciliation_claim_id = $2
+               AND reconciliation_claimed_until > now()",
+            id,
+            claim_id
+        )
+        .execute(self.pool())
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     /// Releases one reconciliation lease and records only a bounded error

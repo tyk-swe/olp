@@ -5,14 +5,18 @@ use chrono::Utc;
 use olp_domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
 };
-use olp_storage::{LimitLease, RequestAttemptMetadata, RequestMetadataEvent};
+use olp_storage::{RequestAttemptMetadata, RequestMetadataEvent};
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
 use serde_json::Value;
 use tracing::error;
 
 use crate::{GatewayState, request_admission::InferenceReservation};
 
-use super::{error::InferenceError, execution::RoutedEventExecution, limits::release_limits};
+use super::{
+    error::InferenceError,
+    execution::RoutedEventExecution,
+    limits::{LimitReservation, release_limits},
+};
 
 pub(super) fn outcome_status_code(failure: Option<&InferenceError>) -> Option<u16> {
     failure.map_or(Some(StatusCode::OK.as_u16()), |error| {
@@ -100,7 +104,7 @@ pub(crate) struct RequestAccountingGuard {
     usage: UsageCapture,
     surface: Surface,
     operation: OperationKind,
-    lease: Option<LimitLease>,
+    lease: Option<LimitReservation>,
     http_reservation: Option<InferenceReservation>,
     http_reserved_tokens: Option<i64>,
     active_attempt: Option<ActiveRequestAttempt>,
@@ -117,7 +121,7 @@ struct ActiveRequestAttempt {
 
 struct LimitCleanup {
     state: GatewayState,
-    delta_lease: Option<LimitLease>,
+    delta_lease: Option<LimitReservation>,
     http_reservation: Option<InferenceReservation>,
     http_reserved_tokens: Option<i64>,
     actual_tokens: Option<i64>,
@@ -125,26 +129,31 @@ struct LimitCleanup {
 
 impl LimitCleanup {
     async fn run(self) {
-        let (http_actual, delta_actual) =
-            split_actual_tokens(self.actual_tokens, self.http_reserved_tokens);
+        let (http_actual, delta_actual) = split_actual_tokens(
+            self.actual_tokens,
+            self.http_reserved_tokens,
+            self.delta_lease.is_some(),
+        );
         if let (Some(reservation), Some(actual)) = (self.http_reservation, http_actual) {
-            reservation.reconcile(actual).await;
+            reservation.reconcile(actual);
         }
-        release_limits(&self.state, self.delta_lease.as_ref(), delta_actual).await;
+        release_limits(&self.state, self.delta_lease.as_ref(), delta_actual);
     }
 }
 
 fn split_actual_tokens(
     actual_tokens: Option<i64>,
     http_reserved_tokens: Option<i64>,
+    has_delta_lease: bool,
 ) -> (Option<i64>, Option<i64>) {
-    match (actual_tokens, http_reserved_tokens) {
-        (Some(actual), Some(http_reserved)) => (
+    match (actual_tokens, http_reserved_tokens, has_delta_lease) {
+        (Some(actual), Some(http_reserved), true) => (
             Some(actual.min(http_reserved)),
             Some(actual.saturating_sub(http_reserved).max(0)),
         ),
-        (Some(actual), None) => (None, Some(actual)),
-        (None, _) => (None, None),
+        (Some(actual), Some(_), false) => (Some(actual), None),
+        (Some(actual), None, _) => (None, Some(actual)),
+        (None, _, _) => (None, None),
     }
 }
 
@@ -160,7 +169,7 @@ impl RequestAccountingGuard {
         request_started: tokio::time::Instant,
         surface: Surface,
         operation: OperationKind,
-        lease: Option<LimitLease>,
+        lease: Option<LimitReservation>,
     ) -> Self {
         crate::claim_http_inference_metadata();
         Self {
@@ -238,12 +247,12 @@ impl RequestAccountingGuard {
     }
 
     pub(crate) async fn finish(mut self, failure: Option<&InferenceError>) {
-        self.release_lease().await;
         self.emit(failure, true);
         self.armed = false;
+        self.release_lease().await;
     }
 
-    pub(crate) fn disarm(mut self) -> Option<LimitLease> {
+    pub(crate) fn disarm(mut self) -> Option<LimitReservation> {
         self.armed = false;
         self.lease.take()
     }
@@ -525,14 +534,18 @@ mod tests {
     #[test]
     fn actual_tokens_are_split_across_http_and_delta_reservations() {
         assert_eq!(
-            split_actual_tokens(Some(40), Some(100)),
+            split_actual_tokens(Some(40), Some(100), true),
             (Some(40), Some(0))
         );
         assert_eq!(
-            split_actual_tokens(Some(130), Some(100)),
+            split_actual_tokens(Some(130), Some(100), true),
             (Some(100), Some(30))
         );
-        assert_eq!(split_actual_tokens(Some(40), None), (None, Some(40)));
-        assert_eq!(split_actual_tokens(None, Some(100)), (None, None));
+        assert_eq!(
+            split_actual_tokens(Some(130), Some(100), false),
+            (Some(130), None)
+        );
+        assert_eq!(split_actual_tokens(Some(40), None, true), (None, Some(40)));
+        assert_eq!(split_actual_tokens(None, Some(100), false), (None, None));
     }
 }

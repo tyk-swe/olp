@@ -116,7 +116,11 @@ pub(super) async fn execute(
 
     if !response.status().is_success() {
         return Err(connector
-            .map_error_response(response, attempt_deadline)
+            .map_error_response(
+                response,
+                attempt_deadline,
+                Some(&request.attempt.upstream_model),
+            )
             .await);
     }
 

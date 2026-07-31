@@ -433,11 +433,10 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
         .into());
     }
     checks.insert("console".into(), json!({ "ok": true }));
-    let media_spool_dir = args
-        .assets
-        .media_spool_dir
-        .as_deref()
-        .map_or_else(std::env::temp_dir, Path::to_path_buf);
+    let media_spool_dir = args.assets.media_spool_dir.as_deref().map_or_else(
+        crate::media_spool::default_media_spool_dir,
+        Path::to_path_buf,
+    );
     let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     drop(media_spool);
     checks.insert(

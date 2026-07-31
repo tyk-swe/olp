@@ -11,6 +11,10 @@ use thiserror::Error;
 
 use super::extensions::{apply_flat_extensions, collect_extra};
 
+const MAX_EMBEDDING_VECTORS: usize = 2_048;
+const MAX_EMBEDDING_DIMENSIONS: usize = 65_536;
+const MAX_EMBEDDING_SCALARS: usize = 1_048_576;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EmbeddingRequest {
     pub model: String,
@@ -49,14 +53,29 @@ pub fn decode_embedding_request(
     if input.is_empty() {
         return Err(EmbeddingCodecError::EmptyInput);
     }
+    if input.len() > MAX_EMBEDDING_VECTORS {
+        return Err(EmbeddingCodecError::EmbeddingTooLarge);
+    }
     if input.iter().any(|value| match value {
         EmbeddingInput::Text(text) => text.is_empty(),
         EmbeddingInput::Tokens(tokens) => tokens.is_empty(),
     }) {
         return Err(EmbeddingCodecError::EmptyInputItem);
     }
-    if request.dimensions == Some(0) {
-        return Err(EmbeddingCodecError::ZeroDimensions);
+    if let Some(dimensions) = request.dimensions {
+        let dimensions =
+            usize::try_from(dimensions).map_err(|_| EmbeddingCodecError::EmbeddingTooLarge)?;
+        if dimensions == 0 {
+            return Err(EmbeddingCodecError::ZeroDimensions);
+        }
+        if dimensions > MAX_EMBEDDING_DIMENSIONS
+            || input
+                .len()
+                .checked_mul(dimensions)
+                .is_none_or(|total| total > MAX_EMBEDDING_SCALARS)
+        {
+            return Err(EmbeddingCodecError::EmbeddingTooLarge);
+        }
     }
 
     let mut extensions = BTreeMap::new();
@@ -193,7 +212,11 @@ pub fn decode_embedding_response(
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
     collect_extra("/usage", &response.usage.extra, &mut extensions);
+    if response.data.len() > MAX_EMBEDDING_VECTORS {
+        return Err(EmbeddingCodecError::EmbeddingTooLarge);
+    }
     let mut data = Vec::with_capacity(response.data.len());
+    let mut total_scalars = 0_usize;
     for item in response.data {
         if item.object != "embedding" {
             return Err(EmbeddingCodecError::UnexpectedObject(item.object));
@@ -207,12 +230,32 @@ pub fn decode_embedding_response(
             EmbeddingWireVector::Floats(values) => values,
             EmbeddingWireVector::Base64(encoded) => decode_base64_vector(&encoded)?,
         };
+        total_scalars = total_scalars
+            .checked_add(values.len())
+            .ok_or(EmbeddingCodecError::EmbeddingTooLarge)?;
+        if values.len() > MAX_EMBEDDING_DIMENSIONS || total_scalars > MAX_EMBEDDING_SCALARS {
+            return Err(EmbeddingCodecError::EmbeddingTooLarge);
+        }
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err(EmbeddingCodecError::InvalidEmbeddingVector);
+        }
         data.push(EmbeddingVector {
             index: item.index,
             values,
         });
     }
     data.sort_by_key(|item| item.index);
+    if data
+        .iter()
+        .enumerate()
+        .any(|(index, item)| item.index != u32::try_from(index).unwrap_or(u32::MAX))
+        || data.first().is_some_and(|first| {
+            data.iter()
+                .any(|item| item.values.len() != first.values.len())
+        })
+    {
+        return Err(EmbeddingCodecError::InvalidEmbeddingVector);
+    }
     Ok(EmbeddingsResult {
         model: Some(response.model),
         data,
@@ -276,7 +319,7 @@ pub fn encode_embedding_response(
 }
 
 fn decode_base64_vector(encoded: &str) -> Result<Vec<f32>, EmbeddingCodecError> {
-    const MAX_EMBEDDING_BYTES: usize = 16 * 1024 * 1024;
+    const MAX_EMBEDDING_BYTES: usize = MAX_EMBEDDING_DIMENSIONS * std::mem::size_of::<f32>();
     if encoded.len() > MAX_EMBEDDING_BYTES.saturating_mul(2) {
         return Err(EmbeddingCodecError::EmbeddingTooLarge);
     }
@@ -321,6 +364,12 @@ pub enum EmbeddingCodecError {
     InvalidBase64Embedding,
     #[error("embedding payload exceeds the bounded decoder limit")]
     EmbeddingTooLarge,
+    #[error("embedding response vectors or indices are invalid")]
+    InvalidEmbeddingVector,
+    #[error("embedding response contains {actual} vectors; expected {expected}")]
+    UnexpectedEmbeddingCount { expected: usize, actual: usize },
+    #[error("embedding response dimension does not match the requested {0}")]
+    UnexpectedEmbeddingDimensions(u32),
     #[error("unsupported embedding encoding_format: {0}")]
     UnsupportedEncoding(String),
 }

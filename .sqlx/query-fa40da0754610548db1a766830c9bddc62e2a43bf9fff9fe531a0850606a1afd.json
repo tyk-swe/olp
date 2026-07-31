@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_media_jobs\n                 SET lifecycle_state = 'delete_pending',\n                     reconciliation_error = 'provider_force_disabled',\n                     next_reconciliation_at = now(), etag = uuidv7()\n                 WHERE provider_id = $1 AND lifecycle_state = 'active'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fa40da0754610548db1a766830c9bddc62e2a43bf9fff9fe531a0850606a1afd"
+}

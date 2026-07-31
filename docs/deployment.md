@@ -117,6 +117,11 @@ observability Services with an installation-specific policy.
 
 ### Capacity
 
+The production chart defaults run two gateway and two control replicas, keep
+one replica available through voluntary disruptions, and use hard hostname
+topology spread. Override those safeguards only for an explicitly
+single-node development installation.
+
 `gateway.httpMaxConnections` and `control.httpMaxConnections` set the
 per-pod public-listener TCP caps (defaults 16,384 and 1,024). Each proxied
 HTTP/1.1 SSE stream holds one connection permit for its lifetime, so size

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM idempotency_records WHERE ctid IN ( SELECT ctid FROM idempotency_records WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d08ac5fd30553924cf3d522f8ad493d68caf844d36b32226b0c2ae3ddfc244cf"
+}

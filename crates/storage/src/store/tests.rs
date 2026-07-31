@@ -46,6 +46,7 @@ fn sensitive_repository_records_redact_debug_output() {
         security_version: 1,
         csrf_digest: vec![1, 2, 3, 4],
         expires_at: Utc::now(),
+        database_now: Utc::now(),
     };
     assert!(!format!("{principal:?}").contains("1, 2, 3, 4"));
     principal.csrf_digest.clear();
@@ -78,4 +79,16 @@ fn typed_idempotency_fingerprints_are_stable_and_request_bound() {
     .unwrap();
     assert_eq!(first, identical);
     assert_ne!(first, changed);
+}
+
+#[tokio::test]
+async fn database_pool_size_is_bounded_before_connecting() {
+    assert!(matches!(
+        PgStore::connect("postgres://unused", 0).await,
+        Err(PersistenceError::InvalidDatabasePoolSize)
+    ));
+    assert!(matches!(
+        PgStore::connect("postgres://unused", 101).await,
+        Err(PersistenceError::InvalidDatabasePoolSize)
+    ));
 }

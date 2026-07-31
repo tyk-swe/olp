@@ -47,7 +47,9 @@ exposure.
    `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` (default 256) and
    `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` (default 32) configure the
    independent process-wide pools, which reject immediately when full and
-   retain permits through streaming completion or cancellation.
+   retain permits through streaming completion or cancellation. The
+   `surface="management"` admission label denotes management API traffic.
+   Static assets and unmatched public paths bypass that reserved pool.
 
 ![Usage dashboard showing completeness, request volume, and cost](assets/screenshots/usage.png)
 
@@ -90,17 +92,26 @@ Treat the dump as sensitive: it contains password hashes, session and
 proxy-key digests, and encrypted provider/OIDC credentials. Mounted
 master-key and authentication HMAC key files are excluded — back them up
 separately in the secret manager. Losing any historical master key makes
-records encrypted with that version unrecoverable.
+records encrypted with that version unrecoverable. Losing a retained
+authentication HMAC key invalidates API keys created with that version.
 
 At least weekly, restore the newest dump to an isolated database with
 `scripts/restore-rehearsal.sh`. It requires the checksum and a contract-valid
-manifest, refuses the production URL, requires `--replace` for a nonempty
-destination, and verifies the restored migration count and
-runtime-generation ordinal against the manifest. Record duration, both
-counts, and the checksum. Start control and gateway processes with a fresh
-Valkey, then verify setup, session login, runtime loading, and a
-mock-provider request. Do not reuse production OIDC redirects or provider
-credentials.
+manifest, requires `OLP_DATABASE_URL` for a connected cluster/database identity
+comparison, and requires a database-scoped isolation sentinel:
+
+```sql
+ALTER DATABASE olp_restore
+  SET olp.restore_rehearsal = 'isolated-destination';
+```
+
+`--replace` is additionally required for a nonempty destination. The restore
+then verifies the migration count and runtime-generation ordinal against the
+manifest. Record duration, both counts, and the checksum. Start control and
+gateway processes with a fresh Valkey, then verify setup, session login,
+runtime loading, and a mock-provider request. Do not reuse production OIDC
+redirects or provider credentials. The restore role must be allowed to call
+PostgreSQL's `pg_control_system()` for the fail-closed cluster identity check.
 
 ## Upgrade
 
@@ -185,6 +196,16 @@ rows plus the event/request unique indexes, and alert on table growth or
 cleanup lag. During a delivery incident, restore or reconcile the Stream
 within seven days; do not extend the window by suspending database
 maintenance.
+
+Request metadata is routed into monthly PostgreSQL partitions prepared three
+months ahead by the maintenance worker. Up to three whole expired partitions
+per tick are detached and dropped after their attempts are removed; legacy
+rows retained in `requests_default` continue through the bounded row-delete
+path. A nonzero
+`olp_request_default_partition_spill_detected` or `request_partitions: degraded`
+means the worker missed a future partition window. Restore maintenance before
+the next UTC month boundary; do not manually move default rows because their
+attempt foreign keys still target the partitioned parent.
 
 Migrations are forward-only. Once any migration beyond the last released
 baseline (`release-metadata.env`) applies, an N-1 binary rollback is
@@ -314,3 +335,23 @@ reduced keyring and run `status` again. On any failure, retain both keys and
 investigate the reported table and row identifier without copying
 ciphertext, nonces, credentials, OIDC state, or replay bodies into logs or
 tickets.
+
+## Authentication-HMAC rotation
+
+The authentication HMAC file accepts legacy base64 as version 1 or the JSON
+keyring shape above, with at most four versions. Add the new version while the
+old key remains active and restart every replica. Then make the new version
+active and restart again. New API keys use the active version; retained keys
+continue to verify existing API keys and bootstrap material during overlap.
+Assign each replacement a version greater than every retained version.
+Public-auth distributed-limit identities use the lowest retained version so
+replicas agree during overlap; removing that version shifts those identities
+and must be rolled out to every replica together.
+
+After every replica uses the new active version, record that completion time.
+Reissue every API key created before the cutoff and revoke each replaced key
+after its caller has moved. Creation and revocation are written to the audit
+stream. Remove the old HMAC version only after no pre-cutoff API key remains,
+then restart every replica with the reduced keyring. Removing a version
+immediately invalidates keys signed by it; restore the overlap keyring if
+retirement verification is incomplete.

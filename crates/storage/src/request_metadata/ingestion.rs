@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use olp_domain::{OperationKind, Surface};
+use olp_domain::{MAX_ROUTE_TARGETS, OperationKind, Surface};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -65,6 +65,80 @@ pub enum RequestMetadataPersistenceOutcome {
     RejectedOutsideReplayWindow,
 }
 
+pub(super) fn validate_request_metadata_event(
+    event: &RequestMetadataEvent,
+) -> Result<(), PersistenceError> {
+    let has_attempts = !event.attempts.is_empty();
+    let final_target_matches = event.attempts.last().is_none_or(|attempt| {
+        event.provider_id == Some(attempt.provider_id)
+            && event.upstream_model.as_deref() == Some(attempt.upstream_model.as_str())
+            && attempt.committed == event.committed
+    });
+    let empty_attempt_metadata_is_valid = has_attempts
+        || (event.provider_id.is_none()
+            && event.upstream_model.is_none()
+            && !event.committed
+            && event.first_byte_ms.is_none()
+            && event.input_tokens.is_none()
+            && event.output_tokens.is_none()
+            && event.cached_input_tokens.is_none()
+            && event.media_units.is_none()
+            && !event.usage_complete);
+    let media_units_are_valid = event.media_units.is_none_or(|value| {
+        value >= Decimal::ZERO
+            && value.scale() <= 6
+            && value <= Decimal::from_i128_with_scale(999_999_999_999_999_999_999_999, 6)
+    });
+    if event.request_completed_at < event.request_started_at
+        || event.observed_at < event.request_completed_at
+        || event.route_slug.trim().is_empty()
+        || event
+            .status_code
+            .is_some_and(|status| !(100..=599).contains(&status))
+        || event.first_byte_ms > Some(event.latency_ms)
+        || event.input_tokens.is_some_and(|value| value < 0)
+        || event.output_tokens.is_some_and(|value| value < 0)
+        || (event.input_tokens.is_none() && event.output_tokens.is_some())
+        || event.cached_input_tokens.is_some_and(|value| value < 0)
+        || (event.cached_input_tokens.is_some() && event.input_tokens.is_none())
+        || event
+            .cached_input_tokens
+            .zip(event.input_tokens)
+            .is_some_and(|(cached, input)| cached > input)
+        || !media_units_are_valid
+        || !final_target_matches
+        || !empty_attempt_metadata_is_valid
+        || i32::try_from(event.latency_ms).is_err()
+        || event
+            .first_byte_ms
+            .is_some_and(|value| i32::try_from(value).is_err())
+        || event.attempts.len() > MAX_ROUTE_TARGETS
+    {
+        return Err(PersistenceError::InvalidRequestMetadataEvent);
+    }
+    let mut previous_completed_at = None;
+    for (index, attempt) in event.attempts.iter().enumerate() {
+        if usize::from(attempt.ordinal) != index + 1
+            || attempt.started_at < event.request_started_at
+            || attempt.completed_at > event.request_completed_at
+            || attempt.completed_at < attempt.started_at
+            || previous_completed_at.is_some_and(|previous| attempt.started_at < previous)
+            || attempt
+                .status_code
+                .is_some_and(|status| !(100..=599).contains(&status))
+            || attempt.first_byte_ms > Some(attempt.latency_ms)
+            || i32::try_from(attempt.latency_ms).is_err()
+            || attempt
+                .first_byte_ms
+                .is_some_and(|value| i32::try_from(value).is_err())
+        {
+            return Err(PersistenceError::InvalidRequestMetadataEvent);
+        }
+        previous_completed_at = Some(attempt.completed_at);
+    }
+    Ok(())
+}
+
 impl PgStore {
     /// Persists one idempotent metadata-only stream event. A bounded durable
     /// receipt protects the supported seven-day delivery window after raw
@@ -97,56 +171,17 @@ impl PgStore {
         event: &RequestMetadataEvent,
         event_sha256: [u8; 32],
     ) -> Result<RequestMetadataPersistenceOutcome, PersistenceError> {
+        validate_request_metadata_event(event)?;
         let has_attempts = !event.attempts.is_empty();
-        let final_target_matches = event.attempts.last().is_none_or(|attempt| {
-            event.provider_id == Some(attempt.provider_id)
-                && event.upstream_model.as_deref() == Some(attempt.upstream_model.as_str())
-                && attempt.committed == event.committed
-        });
-        let empty_attempt_metadata_is_valid = has_attempts
-            || (event.provider_id.is_none()
-                && event.upstream_model.is_none()
-                && !event.committed
-                && event.first_byte_ms.is_none()
-                && event.input_tokens.is_none()
-                && event.output_tokens.is_none()
-                && event.cached_input_tokens.is_none()
-                && event.media_units.is_none()
-                && !event.usage_complete);
-        if event.request_completed_at < event.request_started_at
-            || event.route_slug.trim().is_empty()
-            || event
-                .status_code
-                .is_some_and(|status| !(100..=599).contains(&status))
-            || !final_target_matches
-            || !empty_attempt_metadata_is_valid
-        {
-            return Err(PersistenceError::InvalidRequestMetadataEvent);
-        }
-        let latency_ms = i32::try_from(event.latency_ms)
-            .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?;
+        let latency_ms = i32::try_from(event.latency_ms).expect("validated request latency");
         let first_byte_ms = event
             .first_byte_ms
             .map(i32::try_from)
             .transpose()
-            .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?;
+            .expect("validated request first-byte latency");
         let status_code = event.status_code.map(i32::from);
-        let attempt_count = i16::try_from(event.attempts.len())
-            .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?;
-        for (index, attempt) in event.attempts.iter().enumerate() {
-            if usize::from(attempt.ordinal) != index + 1
-                || attempt.completed_at < attempt.started_at
-                || attempt
-                    .status_code
-                    .is_some_and(|status| !(100..=599).contains(&status))
-                || i32::try_from(attempt.latency_ms).is_err()
-                || attempt
-                    .first_byte_ms
-                    .is_some_and(|value| i32::try_from(value).is_err())
-            {
-                return Err(PersistenceError::InvalidRequestMetadataEvent);
-            }
-        }
+        let attempt_count =
+            i16::try_from(event.attempts.len()).expect("validated request attempt count");
         let mut transaction = self.pool().begin().await?;
         let receipt: Option<Uuid> = sqlx::query_scalar!(
             "INSERT INTO request_metadata_event_receipts \
@@ -329,16 +364,22 @@ impl PgStore {
                                AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
                                AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
                          THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) \
+                             - COALESCE($9::bigint * selected.input_per_million / 1000000, 0) \
+                             + COALESCE($9::bigint * COALESCE( \
+                                 selected.cached_input_per_million, \
+                                 selected.input_per_million) / 1000000, 0) \
                              + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
                              + COALESCE($7::numeric * selected.unit_price, 0)) \
                          ELSE NULL END AS \"estimated_cost?\" \
              FROM providers provider \
              LEFT JOIN LATERAL ( \
                  SELECT revision.id AS pricing_revision_id, price.input_per_million, \
-                        price.output_per_million, price.unit_price, price.currency::text AS currency \
+                        price.cached_input_per_million, price.output_per_million, \
+                        price.unit_price, price.currency::text AS currency \
                  FROM pricing_revisions revision \
                  JOIN prices price ON price.pricing_revision_id = revision.id \
                  WHERE revision.effective_at <= $4 \
+                   AND revision.created_at <= $4 \
                    AND price.provider_kind = provider.kind \
                    AND (price.provider_id IS NULL OR price.provider_id = provider.id) \
                    AND price.model = $2 AND price.operation = $3 \
@@ -346,7 +387,16 @@ impl PgStore {
                           revision.effective_at DESC, revision.revision DESC LIMIT 1 \
              ) selected ON true \
              WHERE provider.id = $1",
-        provider_id, upstream_model, event.operation.as_str(), event.observed_at, event.input_tokens, event.output_tokens, event.media_units, event.usage_complete)
+            provider_id,
+            upstream_model,
+            event.operation.as_str(),
+            event.request_started_at,
+            event.input_tokens,
+            event.output_tokens,
+            event.media_units,
+            event.usage_complete,
+            event.cached_input_tokens
+        )
         .fetch_one(&mut *transaction)
         .await?;
         let pricing_revision_id: Option<Uuid> = pricing.pricing_revision_id;

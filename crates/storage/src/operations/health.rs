@@ -39,7 +39,31 @@ pub struct PrometheusOperationsSummary {
     pub p99_latency_ms: Option<f64>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RequestPartitionHealth {
+    pub default_spill_detected: bool,
+}
+
 impl PgStore {
+    pub async fn request_partition_health(
+        &self,
+    ) -> Result<RequestPartitionHealth, OperationsError> {
+        let default_spill_detected = sqlx::query_scalar!(
+            "SELECT EXISTS (\
+                 SELECT 1 \
+                   FROM requests_default spill \
+                  WHERE spill.started_at >= state.managed_from\
+             ) AS \"value!\" \
+             FROM request_partition_state state \
+             WHERE state.singleton"
+        )
+        .fetch_one(self.pool())
+        .await?;
+        Ok(RequestPartitionHealth {
+            default_spill_detected,
+        })
+    }
+
     pub async fn prometheus_operations_summary(
         &self,
         window_minutes: u16,

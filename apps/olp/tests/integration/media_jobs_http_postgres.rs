@@ -329,6 +329,10 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         ORIGIN,
         PathBuf::from("missing-console-for-video-inference-test"),
     );
+    let media_job_recovery_dir = tempfile::tempdir().unwrap();
+    gateway_state
+        .enable_media_job_recovery(media_job_recovery_dir.path(), db.url())
+        .unwrap();
     gateway_state.auth_hmac_key = Some(auth_hmac_key);
     let delete_calls = Arc::new(AtomicUsize::new(0));
     let create_calls = Arc::new(AtomicUsize::new(0));
@@ -454,7 +458,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         .find(|item| item["id"].as_str() == Some(video_id.as_str()))
         .unwrap();
     assert_eq!(listed["model"], "video-default");
-    assert_eq!(listed["status"], "completed");
+    assert_eq!(listed["status"], "queued");
     assert!(listed.get("prompt").is_none() || listed["prompt"].is_null());
 
     let status = gateway

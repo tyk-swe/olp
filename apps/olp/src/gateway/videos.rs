@@ -8,7 +8,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use futures::{StreamExt, stream};
 use olp_domain::{CanonicalResult, Operation, OperationKind, Surface, TransportMode};
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
@@ -29,10 +28,10 @@ use super::{
     limits::CleanupMediaStream,
     media::open_response_media,
     media_jobs::{
-        attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
-        media_job_error, media_job_result, media_job_state, owned_media_job,
-        refresh_video_list_record, select_video_create_target, set_video_route,
-        valid_upstream_media_job_id,
+        attach_media_job_with_retry, clear_media_job_identity_journal, journal_media_job_identity,
+        mark_missing_delete_as_success, media_job_deletion_finalized, media_job_error,
+        media_job_result, media_job_state, owned_media_job, select_video_create_target,
+        set_video_route, valid_upstream_media_job_id,
     },
     multipart::parse_multipart,
 };
@@ -43,6 +42,7 @@ pub(super) async fn video_create(
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
+    require_media_job_recovery(&state)?;
     let mut form = parse_multipart(
         &state,
         multipart,
@@ -104,6 +104,14 @@ pub(super) async fn video_create(
             ))
         }
     }
+}
+
+pub(super) fn require_media_job_recovery(state: &GatewayState) -> Result<(), InferenceError> {
+    state
+        .media_job_journal
+        .as_ref()
+        .map(|_| ())
+        .ok_or_else(|| InferenceError::unavailable("media_job_recovery_unavailable"))
 }
 
 async fn complete_video_create(
@@ -190,12 +198,13 @@ async fn complete_video_create(
         executed.mark_failure(&failure);
         return Err(failure);
     }
+    journal_media_job_identity(&state, reserved.id, &upstream_job_id).await;
     debug_assert_eq!(executed.provider_id, required_target.provider_id);
     debug_assert_eq!(executed.upstream_model, required_target.upstream_model);
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
-            if let Err(error) = state
+            match state
                 .store()
                 .mark_media_job_create_cleanup_pending(
                     reserved.id,
@@ -204,8 +213,24 @@ async fn complete_video_create(
                 )
                 .await
             {
-                state.record_media_reconciliation_gap();
-                error!(job_id = %reserved.id, %error, "failed to schedule malformed video cleanup");
+                Ok(record)
+                    if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
+                        && record.upstream_job_id.as_deref() == Some(upstream_job_id.as_str()) =>
+                {
+                    clear_media_job_identity_journal(&state, reserved.id).await;
+                }
+                Ok(record) => {
+                    state.record_media_reconciliation_gap();
+                    error!(
+                        job_id = %reserved.id,
+                        lifecycle = record.lifecycle.as_str(),
+                        "malformed video cleanup did not retain the upstream identity"
+                    );
+                }
+                Err(error) => {
+                    state.record_media_reconciliation_gap();
+                    error!(job_id = %reserved.id, %error, "failed to schedule malformed video cleanup");
+                }
             }
             executed.mark_failure(&failure);
             return Err(failure);
@@ -249,6 +274,7 @@ async fn complete_video_create(
                             && record.upstream_job_id.as_deref()
                                 == Some(upstream_job_id.as_str()) =>
                     {
+                        clear_media_job_identity_journal(&state, reserved.id).await;
                         true
                     }
                     Ok(record) => {
@@ -330,6 +356,7 @@ async fn complete_video_create(
             return Err(failure);
         }
     };
+    clear_media_job_identity_journal(&state, reserved.id).await;
     result.id = record.id.to_string();
     result.model = Some(executed.route_slug.to_string());
     let response = encode_video_object(&result, executed.route_slug.as_str())
@@ -396,12 +423,7 @@ pub(super) async fn video_list(
         )
         .await
         .map_err(media_job_error)?;
-    let refreshed = stream::iter(page.items)
-        .map(|record| refresh_video_list_record(&state, &principal, record))
-        .buffered(4)
-        .collect::<Vec<_>>()
-        .await;
-    let jobs = refreshed.iter().map(media_job_result).collect::<Vec<_>>();
+    let jobs = page.items.iter().map(media_job_result).collect::<Vec<_>>();
     let result = olp_domain::VideoListResult {
         first_id: jobs.first().map(|job| job.id.clone()),
         last_id: jobs.last().map(|job| job.id.clone()),
@@ -562,8 +584,7 @@ pub(super) async fn video_content(
             .headers_mut()
             .insert(header::CONTENT_LENGTH, content_length);
     }
-    executed.mark_success();
-    Ok(response)
+    Ok(executed.finalize_on_response_body(response))
 }
 
 pub(super) async fn video_delete(

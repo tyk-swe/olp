@@ -18,7 +18,7 @@ use super::{
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
     startup::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
-        stop_background_tasks, wait_for_shutdown,
+        shutdown_reason_with_background, stop_background_tasks, wait_for_shutdown,
     },
     validation::{
         check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
@@ -386,6 +386,16 @@ async fn request_metadata_writer_failure_wins_when_shutdown_is_also_ready() {
         .unwrap();
 
     assert_eq!(error.to_string(), "writer failed");
+}
+
+#[tokio::test]
+async fn background_task_completion_is_a_shutdown_reason() {
+    let mut tasks = vec![tokio::spawn(async {})];
+    let error = shutdown_reason_with_background(std::future::pending(), None, &mut tasks)
+        .await
+        .unwrap();
+    assert_eq!(error.to_string(), "background task stopped unexpectedly");
+    assert!(tasks.is_empty());
 }
 
 #[tokio::test]

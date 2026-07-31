@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, RwLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -21,6 +21,8 @@ use tokio::{
 use uuid::Uuid;
 
 const READ_CHUNK_BYTES: usize = 64 * 1024;
+const SPOOL_MARKER: &str = ".openllmproxy-media-spool";
+const SPOOL_MARKER_CONTENT: &[u8] = b"openllmproxy-media-spool-v1\n";
 pub(crate) const DEFAULT_CAPACITY_BYTES: u64 = 1024 * 1024 * 1024;
 /// The smallest supported production spool. Multipart admission reserves
 /// fixed worst-case endpoint budgets, so a smaller volume cannot safely serve
@@ -33,12 +35,46 @@ struct SpoolEntry {
     filename: String,
     content_type: Option<String>,
     content_length: u64,
+    lifecycle: Arc<SpoolEntryLifecycle>,
+}
+
+#[derive(Debug)]
+struct SpoolEntryLifecycle {
+    readers: AtomicU64,
+    removed: AtomicBool,
+    released: AtomicBool,
+    used_bytes: Arc<AtomicU64>,
+    content_length: u64,
+}
+
+impl SpoolEntryLifecycle {
+    fn release_if_unused(&self) {
+        if self.removed.load(Ordering::Acquire)
+            && self.readers.load(Ordering::Acquire) == 0
+            && !self.released.swap(true, Ordering::AcqRel)
+        {
+            release_used_bytes(&self.used_bytes, self.content_length);
+        }
+    }
+}
+
+struct OpenSpoolEntry(Arc<SpoolEntryLifecycle>);
+
+impl Drop for OpenSpoolEntry {
+    fn drop(&mut self) {
+        let previous = self.0.readers.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "media spool reader accounting underflow");
+        if previous == 1 {
+            self.0.release_if_unused();
+        }
+    }
 }
 
 /// Per-process, private filesystem spool for bounded request and response
 /// media. Handles are random identifiers and never expose filesystem paths.
 pub(crate) struct FileMediaSpool {
     root: PathBuf,
+    _owner_lock: std::fs::File,
     entries: Arc<RwLock<BTreeMap<String, SpoolEntry>>>,
     used_bytes: Arc<AtomicU64>,
     capacity_bytes: u64,
@@ -56,7 +92,7 @@ fn release_used_bytes(used_bytes: &AtomicU64, bytes: u64) {
 
 impl FileMediaSpool {
     pub(crate) fn create() -> std::io::Result<Arc<Self>> {
-        Self::create_at(&std::env::temp_dir(), DEFAULT_CAPACITY_BYTES)
+        Self::create_at(&default_media_spool_dir(), DEFAULT_CAPACITY_BYTES)
     }
 
     fn create_at(base_dir: &Path, capacity_bytes: u64) -> std::io::Result<Arc<Self>> {
@@ -66,15 +102,35 @@ impl FileMediaSpool {
                 "media spool capacity must be greater than zero",
             ));
         }
-        std::fs::create_dir_all(base_dir)?;
+        prepare_spool_base(base_dir)?;
+        scavenge_stale_spools(base_dir)?;
         let root = base_dir.join(format!(
             "olp-media-{}-{}",
             std::process::id(),
             Uuid::now_v7()
         ));
         create_private_directory(&root)?;
+        let owner_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(root.join(SPOOL_MARKER))
+            .and_then(|mut marker| {
+                marker.lock()?;
+                std::io::Write::write_all(&mut marker, SPOOL_MARKER_CONTENT)?;
+                marker.sync_all()?;
+                Ok(marker)
+            });
+        let owner_lock = match owner_lock {
+            Ok(owner_lock) => owner_lock,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&root);
+                return Err(error);
+            }
+        };
         Ok(Arc::new(Self {
             root,
+            _owner_lock: owner_lock,
             entries: Arc::new(RwLock::new(BTreeMap::new())),
             used_bytes: Arc::new(AtomicU64::new(0)),
             capacity_bytes,
@@ -94,15 +150,111 @@ impl FileMediaSpool {
         release_used_bytes(&self.used_bytes, bytes);
     }
 
-    fn lookup_entry(&self, handle: &MediaHandle) -> Result<SpoolEntry, MediaSpoolError> {
+    fn lookup_entry(
+        &self,
+        handle: &MediaHandle,
+    ) -> Result<(SpoolEntry, OpenSpoolEntry), MediaSpoolError> {
         validate_handle(handle.as_str())?;
-        self.entries
+        let entry = self
+            .entries
             .read()
             .map_err(|_| MediaSpoolError::Unavailable)?
             .get(handle.as_str())
             .cloned()
-            .ok_or(MediaSpoolError::NotFound)
+            .ok_or(MediaSpoolError::NotFound)?;
+        entry.lifecycle.readers.fetch_add(1, Ordering::AcqRel);
+        let open = OpenSpoolEntry(Arc::clone(&entry.lifecycle));
+        Ok((entry, open))
     }
+}
+
+pub(crate) fn default_media_spool_dir() -> PathBuf {
+    std::env::temp_dir().join("openllmproxy-media")
+}
+
+fn prepare_spool_base(base_dir: &Path) -> std::io::Result<()> {
+    if base_dir != default_media_spool_dir() {
+        return std::fs::create_dir_all(base_dir);
+    }
+    match create_private_directory(base_dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            validate_default_spool_directory(base_dir)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn validate_default_spool_directory(base_dir: &Path) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(base_dir)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "default media spool path is not a directory",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "default media spool directory must not be accessible by other users",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn scavenge_stale_spools(base_dir: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(base_dir)? {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        if !name
+            .to_str()
+            .is_some_and(|name| name.starts_with("olp-media-"))
+        {
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let marker_path = entry.path().join(SPOOL_MARKER);
+        if !std::fs::symlink_metadata(&marker_path)
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+        {
+            continue;
+        }
+        let mut marker = match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(marker_path)
+        {
+            Ok(marker) => marker,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let mut marker_content = [0_u8; SPOOL_MARKER_CONTENT.len()];
+        if !marker
+            .metadata()
+            .is_ok_and(|metadata| metadata.len() == marker_content.len() as u64)
+            || std::io::Read::read_exact(&mut marker, &mut marker_content).is_err()
+            || marker_content != SPOOL_MARKER_CONTENT
+        {
+            continue;
+        }
+        match marker.try_lock() {
+            Ok(()) => match std::fs::remove_dir_all(entry.path()) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            },
+            Err(std::fs::TryLockError::WouldBlock) => {}
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 struct PendingSpoolWrite<'a> {
@@ -139,7 +291,6 @@ impl Drop for PendingSpoolWrite<'_> {
 /// request awaiting removal is canceled.
 struct PendingSpoolRemoval {
     entries: Arc<RwLock<BTreeMap<String, SpoolEntry>>>,
-    used_bytes: Arc<AtomicU64>,
     handle: String,
     entry: Option<SpoolEntry>,
 }
@@ -150,7 +301,8 @@ impl PendingSpoolRemoval {
             .entry
             .take()
             .expect("pending media removal always owns an entry");
-        release_used_bytes(&self.used_bytes, entry.content_length);
+        entry.lifecycle.removed.store(true, Ordering::Release);
+        entry.lifecycle.release_if_unused();
     }
 
     fn restore_entry(&mut self) -> Result<(), MediaSpoolError> {
@@ -268,6 +420,13 @@ impl MediaSpool for FileMediaSpool {
                     filename,
                     content_type: upload.content_type.clone(),
                     content_length: written,
+                    lifecycle: Arc::new(SpoolEntryLifecycle {
+                        readers: AtomicU64::new(0),
+                        removed: AtomicBool::new(false),
+                        released: AtomicBool::new(false),
+                        used_bytes: Arc::clone(&self.used_bytes),
+                        content_length: written,
+                    }),
                 },
             );
             pending_write.commit();
@@ -284,25 +443,26 @@ impl MediaSpool for FileMediaSpool {
         handle: &'a MediaHandle,
     ) -> BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         Box::pin(async move {
-            let entry = self.lookup_entry(handle)?;
+            let (entry, open) = self.lookup_entry(handle)?;
             let file = File::open(&entry.path)
                 .await
                 .map_err(|error| match error.kind() {
                     std::io::ErrorKind::NotFound => MediaSpoolError::NotFound,
                     _ => MediaSpoolError::Unavailable,
                 })?;
-            let bytes: MediaByteStream = Box::pin(stream::unfold(Some(file), |file| async move {
-                let mut file = file?;
-                let mut buffer = vec![0_u8; READ_CHUNK_BYTES];
-                match file.read(&mut buffer).await {
-                    Ok(0) => None,
-                    Ok(read) => {
-                        buffer.truncate(read);
-                        Some((Ok(Bytes::from(buffer)), Some(file)))
+            let bytes: MediaByteStream =
+                Box::pin(stream::unfold(Some((file, open)), |state| async move {
+                    let (mut file, open) = state?;
+                    let mut buffer = vec![0_u8; READ_CHUNK_BYTES];
+                    match file.read(&mut buffer).await {
+                        Ok(0) => None,
+                        Ok(read) => {
+                            buffer.truncate(read);
+                            Some((Ok(Bytes::from(buffer)), Some((file, open))))
+                        }
+                        Err(_) => Some((Err(MediaSpoolError::Unavailable), None)),
                     }
-                    Err(_) => Some((Err(MediaSpoolError::Unavailable), None)),
-                }
-            }));
+                }));
             Ok(OpenedMedia {
                 artifact: MediaArtifact {
                     handle: handle.clone(),
@@ -340,7 +500,6 @@ impl FileMediaSpool {
         let path = entry.path.clone();
         let pending_removal = PendingSpoolRemoval {
             entries: Arc::clone(&self.entries),
-            used_bytes: Arc::clone(&self.used_bytes),
             handle: handle.as_str().to_owned(),
             entry: Some(entry),
         };
@@ -374,6 +533,7 @@ impl FileMediaSpool {
 
 impl Drop for FileMediaSpool {
     fn drop(&mut self) {
+        let _ = self._owner_lock.unlock();
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -421,6 +581,47 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::*;
+
+    #[test]
+    fn startup_scavenges_only_unlocked_owned_spools() {
+        let base = std::env::temp_dir().join(format!("olp-spool-scavenge-{}", Uuid::now_v7()));
+        let stale = base.join("olp-media-4294967294-dead");
+        let partial = base.join("olp-media-4294967292-partial");
+        let unmarked = base.join("olp-media-4294967293-unmarked");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::create_dir_all(&partial).unwrap();
+        std::fs::create_dir_all(&unmarked).unwrap();
+        std::fs::write(stale.join(SPOOL_MARKER), SPOOL_MARKER_CONTENT).unwrap();
+        std::fs::write(partial.join(SPOOL_MARKER), b"partial").unwrap();
+        std::fs::write(stale.join("orphan"), b"bytes").unwrap();
+        let spool = FileMediaSpool::create_at(&base, 1).unwrap();
+        assert!(!stale.exists());
+        assert!(partial.exists());
+        assert!(unmarked.exists());
+        let live_root = spool.root.clone();
+        let second = FileMediaSpool::create_at(&base, 1).unwrap();
+        assert!(live_root.exists());
+        drop(second);
+        drop(spool);
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_spool_directory_rejects_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("olp-spool-link-{}", Uuid::now_v7()));
+        let target = base.join("target");
+        let link = base.join("link");
+        std::fs::create_dir_all(&target).unwrap();
+        symlink(&target, &link).unwrap();
+        assert_eq!(
+            validate_default_spool_directory(&link).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        std::fs::remove_dir_all(base).unwrap();
+    }
 
     #[tokio::test]
     async fn enforces_streamed_limit_and_never_exposes_a_path() {
@@ -565,6 +766,26 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn unlinked_open_files_keep_their_capacity_reserved() {
+        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let artifact = spool
+            .put(MediaUpload {
+                filename: "open.bin".into(),
+                content_type: None,
+                maximum_length: 4,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"data"))])),
+            })
+            .await
+            .unwrap();
+        let opened = spool.open(&artifact.handle).await.unwrap();
+        spool.remove(&artifact.handle).await.unwrap();
+        assert_eq!(spool.used_bytes.load(Ordering::Acquire), 4);
+        drop(opened);
+        assert_eq!(spool.used_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn a_file_read_error_is_terminal() {
         let spool = FileMediaSpool::create().unwrap();
         let token = "a".repeat(32);
@@ -575,6 +796,13 @@ mod tests {
                 filename: "directory.bin".to_owned(),
                 content_type: None,
                 content_length: 1,
+                lifecycle: Arc::new(SpoolEntryLifecycle {
+                    readers: AtomicU64::new(0),
+                    removed: AtomicBool::new(false),
+                    released: AtomicBool::new(false),
+                    used_bytes: Arc::clone(&spool.used_bytes),
+                    content_length: 1,
+                }),
             },
         );
 

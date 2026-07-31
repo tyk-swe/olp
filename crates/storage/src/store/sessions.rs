@@ -107,7 +107,8 @@ impl PgStore {
         let row = sqlx::query!(
             "WITH authenticated AS MATERIALIZED ( \
                  SELECT s.id AS session_id, s.security_version, s.csrf_digest, s.expires_at, \
-                        u.id AS user_id, u.email, u.display_name, u.role::text AS role \
+                        u.id AS user_id, u.email, u.display_name, u.role::text AS role, \
+                        now() AS database_now \
                  FROM sessions s JOIN users u ON u.id = s.user_id \
                  WHERE s.token_digest = $1 AND s.expires_at > now() AND u.active \
                    AND s.security_version = u.security_version \
@@ -123,7 +124,8 @@ impl PgStore {
              SELECT authenticated.session_id, authenticated.security_version, \
                     authenticated.csrf_digest, authenticated.expires_at, \
                     authenticated.user_id, authenticated.email, \
-                    authenticated.display_name, authenticated.role AS \"role!\" \
+                    authenticated.display_name, authenticated.role AS \"role!\", \
+                    authenticated.database_now AS \"database_now!\" \
              FROM authenticated \
              CROSS JOIN (SELECT count(*) FROM touched) activity",
             digest.to_vec()
@@ -140,6 +142,7 @@ impl PgStore {
             security_version: row.security_version,
             csrf_digest: row.csrf_digest,
             expires_at: row.expires_at,
+            database_now: row.database_now,
         }))
     }
 
@@ -153,13 +156,12 @@ impl PgStore {
         expected_digest: &[u8],
         replacement: &CsrfMaterial,
     ) -> Result<bool, PersistenceError> {
-        let now = Utc::now();
         let mut transaction = self.pool.begin().await?;
         let updated = sqlx::query!(
             "UPDATE sessions session SET csrf_digest = $5 \
              WHERE session.id = $1 AND session.user_id = $2 \
                AND session.security_version = $3 AND session.csrf_digest = $4 \
-               AND session.expires_at > $6 \
+               AND session.expires_at > now() \
                AND EXISTS ( \
                    SELECT 1 FROM users \
                    WHERE users.id = session.user_id AND users.active \
@@ -169,8 +171,7 @@ impl PgStore {
             user_id,
             security_version,
             expected_digest,
-            replacement.token_digest().to_vec(),
-            now
+            replacement.token_digest().to_vec()
         )
         .execute(&mut *transaction)
         .await?
@@ -179,11 +180,10 @@ impl PgStore {
             sqlx::query!(
                 "INSERT INTO audit_events \
                  (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-                 VALUES ($1, $2, 'session.csrf_rotate', 'session', $3, 'success', $4)",
+                 VALUES ($1, $2, 'session.csrf_rotate', 'session', $3, 'success', now())",
                 Uuid::now_v7(),
                 user_id,
-                session_id.to_string(),
-                now
+                session_id.to_string()
             )
             .execute(&mut *transaction)
             .await?;

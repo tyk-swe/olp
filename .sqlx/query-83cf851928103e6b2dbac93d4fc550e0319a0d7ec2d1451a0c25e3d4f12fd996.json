@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM route_draft_operations WHERE route_draft_id = $1 AND NOT operation = ANY($2::text[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "83cf851928103e6b2dbac93d4fc550e0319a0d7ec2d1451a0c25e3d4f12fd996"
+}

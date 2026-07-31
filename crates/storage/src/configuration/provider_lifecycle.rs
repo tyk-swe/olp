@@ -338,7 +338,6 @@ impl PgStore {
                  OR authority.deployment IS DISTINCT FROM candidate.deployment
                  OR authority.api_version IS DISTINCT FROM candidate.api_version
                  OR authority.auth_mode IS DISTINCT FROM candidate.auth_mode
-                 OR authority.credential_version_id IS DISTINCT FROM candidate.credential_version_id
                  OR NOT EXISTS (
                    SELECT 1 FROM provider_revision_models prm
                    WHERE prm.provider_revision_id = candidate.id

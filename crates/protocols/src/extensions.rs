@@ -182,7 +182,7 @@ where
 {
     let mut value = serde_json::to_value(response).map_err(PointerExtensionError::Json)?;
     let mut entries = extensions.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(pointer, _)| pointer_depth(pointer));
+    entries.sort_by(|(left, _), (right, _)| response_pointer_order(left, right));
     for (pointer, extension) in entries {
         insert_response_pointer(&mut value, pointer, extension.clone())?;
     }
@@ -240,6 +240,24 @@ fn pointer_depth(pointer: &str) -> usize {
     pointer.bytes().filter(|byte| *byte == b'/').count()
 }
 
+fn response_pointer_order(left: &str, right: &str) -> std::cmp::Ordering {
+    pointer_depth(left)
+        .cmp(&pointer_depth(right))
+        .then_with(|| {
+            let (left_parent, left_terminal) = left.rsplit_once('/').unwrap_or(("", left));
+            let (right_parent, right_terminal) = right.rsplit_once('/').unwrap_or(("", right));
+            if left_parent == right_parent
+                && let (Ok(left_index), Ok(right_index)) = (
+                    left_terminal.parse::<usize>(),
+                    right_terminal.parse::<usize>(),
+                )
+            {
+                return left_index.cmp(&right_index);
+            }
+            left.cmp(right)
+        })
+}
+
 pub(crate) fn insert_flat_extension(
     root: &mut Value,
     pointer: &str,
@@ -256,4 +274,22 @@ pub(crate) fn insert_flat_extension(
     }
     object.insert(key, value);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn response_array_extensions_are_inserted_in_numeric_index_order() {
+        let extensions = BTreeMap::from([
+            ("/items/2".to_owned(), json!(2)),
+            ("/items/10".to_owned(), json!(10)),
+        ]);
+        let output =
+            apply_response_extensions(json!({"items": [0, 1, 3, 4, 5, 6, 7, 8, 9]}), &extensions)
+                .unwrap_or_else(|_| panic!("valid response extensions"));
+        assert_eq!(output, json!({"items": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}));
+    }
 }

@@ -5,25 +5,26 @@ use olp_domain::{
     Surface, VideoOperation, validate_event_sequence,
 };
 use olp_protocols::openai::{
-    BoundedMediaPart, EmbeddingRequest, EmbeddingResponse, ImageStreamOperation,
-    OpenAiImageEditRequest, OpenAiImageGenerationRequest, OpenAiImageResponse,
-    OpenAiImageStreamEvent, OpenAiModerationRequest, OpenAiModerationResponse,
-    OpenAiResponsesStreamDecoder, OpenAiResponsesStreamEncoder, OpenAiSpeechRequest,
-    OpenAiSpeechStreamEvent, OpenAiTranscriptionRequest, OpenAiTranscriptionResponse,
-    OpenAiTranscriptionStreamDecoder, OpenAiTranscriptionStreamEncoder, OpenAiVideoCreateRequest,
-    OpenAiVideoDeleteResponse, OpenAiVideoListQuery, OpenAiVideoListResponse, OpenAiVideoObject,
-    ResponseCreateRequest, ResponseInputTokensRequest, ResponseInputTokensResponse, ResponseObject,
+    BoundedMediaPart, EmbeddingData, EmbeddingRequest, EmbeddingResponse, EmbeddingUsage,
+    EmbeddingWireInput, EmbeddingWireVector, ImageStreamOperation, OpenAiImageEditRequest,
+    OpenAiImageGenerationRequest, OpenAiImageResponse, OpenAiImageStreamEvent,
+    OpenAiModerationRequest, OpenAiModerationResponse, OpenAiResponsesStreamDecoder,
+    OpenAiResponsesStreamEncoder, OpenAiSpeechRequest, OpenAiSpeechStreamEvent,
+    OpenAiTranscriptionRequest, OpenAiTranscriptionResponse, OpenAiTranscriptionStreamDecoder,
+    OpenAiTranscriptionStreamEncoder, OpenAiVideoCreateRequest, OpenAiVideoDeleteResponse,
+    OpenAiVideoListQuery, OpenAiVideoListResponse, OpenAiVideoObject, ResponseCreateRequest,
+    ResponseInputTokensRequest, ResponseInputTokensResponse, ResponseObject,
     decode_embedding_request, decode_embedding_response, decode_image_edit,
     decode_image_generation, decode_image_response, decode_image_stream_event, decode_moderation,
     decode_moderation_response, decode_response_create, decode_response_input_tokens,
     decode_response_input_tokens_result, decode_response_object, decode_speech,
     decode_speech_stream_event, decode_transcription, decode_transcription_response,
     decode_video_create, decode_video_delete_response, decode_video_list,
-    decode_video_list_response, encode_embedding_request, encode_embedding_response,
-    encode_image_generation, encode_image_response, encode_image_stream_update,
-    encode_moderation_response, encode_response_create, encode_response_object,
-    encode_speech_stream_update, encode_transcription_response, encode_video_delete_response,
-    encode_video_list_response,
+    decode_video_list_response, decode_video_object, encode_embedding_request,
+    encode_embedding_response, encode_image_generation, encode_image_response,
+    encode_image_stream_update, encode_moderation_response, encode_response_create,
+    encode_response_object, encode_speech_stream_update, encode_transcription_response,
+    encode_video_delete_response, encode_video_list_response,
 };
 use serde_json::json;
 
@@ -369,6 +370,55 @@ fn embeddings_support_text_tokens_float_and_bounded_base64_forms() {
     }))
     .unwrap();
     assert!(decode_embedding_response(non_finite).is_err());
+
+    let inconsistent: EmbeddingResponse = serde_json::from_value(json!({
+        "object": "list",
+        "model": "text-embedding-upstream",
+        "data": [
+            {"object": "embedding", "index": 0, "embedding": [1.0, 2.0]},
+            {"object": "embedding", "index": 1, "embedding": [3.0]}
+        ],
+        "usage": {"prompt_tokens": 1, "total_tokens": 1}
+    }))
+    .unwrap();
+    assert!(decode_embedding_response(inconsistent).is_err());
+
+    let oversized_request = EmbeddingRequest {
+        model: "embed-route".into(),
+        input: EmbeddingWireInput::Texts(vec!["x".into(); 17]),
+        dimensions: Some(65_536),
+        encoding_format: None,
+        user: None,
+        extra: Default::default(),
+    };
+    assert!(decode_embedding_request(oversized_request).is_err());
+    let too_many_inputs = EmbeddingRequest {
+        model: "embed-route".into(),
+        input: EmbeddingWireInput::Texts(vec!["x".into(); 2_049]),
+        dimensions: None,
+        encoding_format: None,
+        user: None,
+        extra: Default::default(),
+    };
+    assert!(decode_embedding_request(too_many_inputs).is_err());
+
+    let oversized_response = EmbeddingResponse {
+        object: "list".into(),
+        data: vec![EmbeddingData {
+            object: "embedding".into(),
+            embedding: EmbeddingWireVector::Floats(vec![0.0; 65_537]),
+            index: 0,
+            extra: Default::default(),
+        }],
+        model: "text-embedding-upstream".into(),
+        usage: EmbeddingUsage {
+            prompt_tokens: 1,
+            total_tokens: 1,
+            extra: Default::default(),
+        },
+        extra: Default::default(),
+    };
+    assert!(decode_embedding_response(oversized_response).is_err());
 }
 
 #[test]
@@ -478,10 +528,20 @@ fn audio_requests_never_embed_uploaded_bytes() {
         "segments": [{"id": 0, "start": 0.0, "end": 1.5, "text": "hello", "speaker": "A"}]
     }))
     .unwrap();
-    let result = decode_transcription_response(response);
+    let result = decode_transcription_response(response).unwrap();
     assert_eq!(result.segments[0].speaker.as_deref(), Some("A"));
     let encoded = encode_transcription_response(&result).unwrap();
-    assert_eq!(decode_transcription_response(encoded).text, "hello");
+    assert_eq!(
+        decode_transcription_response(encoded).unwrap().text,
+        "hello"
+    );
+    let invalid: OpenAiTranscriptionResponse = serde_json::from_value(json!({
+        "text": "hello",
+        "duration": 1.0,
+        "segments": [{"start": 0.5, "end": 1.5, "text": "hello"}]
+    }))
+    .unwrap();
+    assert!(decode_transcription_response(invalid).is_err());
 }
 
 #[test]
@@ -582,12 +642,23 @@ fn moderation_preserves_dynamic_categories_and_multimodal_input() {
         }]
     }))
     .unwrap();
-    let result = decode_moderation_response(response);
+    let result = decode_moderation_response(response).unwrap();
     assert!(result.results[0].categories["violence"]);
     assert_eq!(result.results[0].category_scores["new/category"], 0.1);
     let encoded = encode_moderation_response(&result, "moderation-route", "modr_fallback").unwrap();
     assert_eq!(encoded.model, "moderation-route");
-    assert!(decode_moderation_response(encoded).results[0].flagged);
+    assert!(decode_moderation_response(encoded).unwrap().results[0].flagged);
+    let invalid: OpenAiModerationResponse = serde_json::from_value(json!({
+        "id": "modr_bad",
+        "model": "omni-moderation-latest",
+        "results": [{
+            "flagged": false,
+            "categories": {"violence": false},
+            "category_scores": {"violence": 1.1}
+        }]
+    }))
+    .unwrap();
+    assert!(decode_moderation_response(invalid).is_err());
 }
 
 #[test]
@@ -625,6 +696,9 @@ fn video_async_lifecycle_uses_current_videos_contract() {
     ));
 
     let object: OpenAiVideoObject = video_object("video_2", "completed");
+    let mut invalid = object.clone();
+    invalid.seconds = Some("-1".into());
+    assert!(decode_video_object(invalid).is_err());
     let mut second = video_object("video_3", "in_progress");
     second.model = "second-public-route".into();
     let list = OpenAiVideoListResponse {

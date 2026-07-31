@@ -30,6 +30,21 @@ describe('management selector pagination', () => {
       collectCursorPages(async () => ({ items: [], nextCursor: 'repeat' }))
     ).rejects.toBeInstanceOf(ApiProblem);
   });
+
+  it('bounds the next fetch by the capacity remaining after a short page', async () => {
+    const limits: number[] = [];
+    await expect(
+      collectCursorPages(async (_cursor, remaining) => {
+        limits.push(remaining);
+        return {
+          items: Array.from({ length: Math.min(49, remaining) }, (_, index) => index),
+          nextCursor: `page-${limits.length}`
+        };
+      })
+    ).rejects.toBeInstanceOf(ApiProblem);
+
+    expect(limits.at(-1)).toBe(4);
+  });
 });
 
 describe('management resources', () => {

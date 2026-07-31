@@ -58,12 +58,21 @@ impl PgStore {
         actor: Uuid,
     ) -> Result<UserRecord, IdentityError> {
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(IdentityError::NotFound)?;
+        let current = sqlx::query_as!(
+            UserRow,
+            "SELECT id, email, display_name, role::text AS \"role!\", active, etag, \
+                    created_at, updated_at FROM users WHERE id = $1 FOR UPDATE",
+            id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(IdentityError::NotFound)?;
         if current.etag != expected_etag {
             return Err(IdentityError::PreconditionFailed);
+        }
+        if current.role == role.as_str() {
+            transaction.rollback().await?;
+            return user_from_row(current);
         }
 
         let etag = Uuid::now_v7();
@@ -122,12 +131,23 @@ impl PgStore {
             ));
         }
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(IdentityError::NotFound)?;
+        let current = sqlx::query_as!(
+            UserRow,
+            "SELECT id, email, display_name, role::text AS \"role!\", active, etag, \
+                    created_at, updated_at FROM users WHERE id = $1 FOR UPDATE",
+            id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(IdentityError::NotFound)?;
         if current.etag != expected_etag {
             return Err(IdentityError::PreconditionFailed);
+        }
+        if role.is_none_or(|role| current.role == role.as_str())
+            && active.is_none_or(|active| current.active == active)
+        {
+            transaction.rollback().await?;
+            return user_from_row(current);
         }
         let etag = Uuid::now_v7();
         let row = match sqlx::query_as!(
@@ -179,9 +199,13 @@ impl PgStore {
         expected_etag: Uuid,
     ) -> Result<UserRecord, IdentityError> {
         let display_name = display_name.trim();
-        if display_name.is_empty() || display_name.chars().count() > 100 {
+        if display_name.is_empty()
+            || display_name.chars().count() > 100
+            || olp_domain::has_unsafe_display_characters(display_name)
+        {
             return Err(IdentityError::Invalid(
-                "display name must contain 1-100 characters".to_owned(),
+                "display name must contain 1-100 visible characters without control or bidi formatting"
+                    .to_owned(),
             ));
         }
         let mut transaction = self.pool().begin().await?;

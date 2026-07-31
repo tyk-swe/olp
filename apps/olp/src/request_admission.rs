@@ -35,7 +35,9 @@ use limits::{
     reserve_http_inference_limits,
 };
 use multipart::preauthorize_multipart;
-use validation::{is_json_content_type, payload_too_large, request_body_timeout};
+use validation::{
+    is_json_content_type, payload_too_large, request_body_failed, request_body_timeout,
+};
 
 pub(crate) use limits::InferencePrincipal;
 pub(crate) use limits::InferenceReservation;
@@ -287,6 +289,7 @@ async fn enforce_request_limits_inner(
         )
         .into());
     }
+    validate_singleton_headers(request.headers())?;
     // Public authentication endpoints must reject a malformed forwarding
     // chain before their extractors consume a JSON body.  This keeps the
     // trusted-proxy boundary uniform even for syntactically invalid login or
@@ -379,7 +382,6 @@ async fn enforce_request_limits_inner(
     {
         return Err(payload_too_large(maximum).into());
     }
-
     let principal = endpoint
         .map(|endpoint| {
             authenticate_inference_headers(state, request.headers(), endpoint.surface())
@@ -400,6 +402,39 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
+    if endpoint.is_some()
+        && matches!(
+            *request.method(),
+            axum::http::Method::GET | axum::http::Method::DELETE
+        )
+    {
+        let (parts, body) = request.into_parts();
+        match read_json_body(body, 0, REQUEST_BODY_TIMEOUT).await {
+            Ok(_) => request = axum::http::Request::from_parts(parts, Body::empty()),
+            Err(JsonBodyReadError::Rejected) => {
+                if let Some(metadata) = local_metadata.clone() {
+                    metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+                }
+                return Err(Problem::bad_request(
+                    "request_body_unsupported",
+                    "This endpoint does not accept a request body.",
+                )
+                .into());
+            }
+            Err(JsonBodyReadError::Timeout) => {
+                if let Some(metadata) = local_metadata.clone() {
+                    metadata.emit(axum::http::StatusCode::REQUEST_TIMEOUT);
+                }
+                return Err(request_body_timeout().into());
+            }
+            Err(JsonBodyReadError::Transport) => {
+                if let Some(metadata) = local_metadata.clone() {
+                    metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+                }
+                return Err(request_body_failed().into());
+            }
+        }
+    }
     let multipart_policy = endpoint.and_then(gateway::InferenceEndpoint::multipart);
     if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
@@ -427,15 +462,27 @@ async fn enforce_request_limits_inner(
                 }
                 return Err(request_body_timeout().into());
             }
+            Err(JsonBodyReadError::Transport) => {
+                if let Some(metadata) = local_metadata.clone() {
+                    metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+                }
+                return Err(request_body_failed().into());
+            }
         };
+        let request_route =
+            endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes));
         let local_metadata = local_metadata.map(|mut metadata| {
-            if let Some(route) =
-                endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes))
-            {
-                metadata.route_slug = route;
+            if let Some(route) = &request_route {
+                metadata.route_slug.clone_from(route);
             }
             metadata
         });
+        if let Err(problem) = validate_json_depth(&bytes) {
+            if let Some(metadata) = local_metadata {
+                metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+            }
+            return Err(problem.into());
+        }
         let requested_tokens = estimate_http_json_request_tokens(
             endpoint
                 .map(gateway::InferenceEndpoint::token_estimate)
@@ -443,7 +490,14 @@ async fn enforce_request_limits_inner(
             &bytes,
         );
         let reservation = if let Some(principal) = &principal {
-            match reserve_http_inference_limits(state, principal, requested_tokens).await {
+            match reserve_http_inference_limits(
+                state,
+                principal,
+                requested_tokens,
+                request_route.as_deref(),
+            )
+            .await
+            {
                 Ok(reservation) => reservation,
                 Err(error) => {
                     if let Some(metadata) = local_metadata.clone() {
@@ -455,13 +509,6 @@ async fn enforce_request_limits_inner(
         } else {
             None
         };
-        if let Err(problem) = validate_json_depth(&bytes) {
-            release_reservation(reservation).await;
-            if let Some(metadata) = local_metadata {
-                metadata.emit(axum::http::StatusCode::BAD_REQUEST);
-            }
-            return Err(problem.into());
-        }
         let request = Request::from_parts(parts, Body::from(bytes));
         let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
         return Ok(run_request_with_reservation(
@@ -475,13 +522,28 @@ async fn enforce_request_limits_inner(
         .await);
     }
 
+    let request_route =
+        endpoint.and_then(|endpoint| endpoint.route_from_json(request.uri().path(), &[]));
     let requested_tokens = estimate_http_non_json_request_tokens(
         endpoint
             .map(gateway::InferenceEndpoint::token_estimate)
             .unwrap_or(gateway::TokenEstimate::Default),
     );
-    let reservation = if let Some(principal) = &principal {
-        match reserve_http_inference_limits(state, principal, requested_tokens).await {
+    // Multipart handlers learn the bounded, authorized route while parsing the
+    // form. Their canonical execution path reserves the complete limits after
+    // that point, with the route's real timeout, so do not create a max-TTL
+    // HTTP lease from an empty body here.
+    let reservation = if multipart_content_type.is_some() {
+        None
+    } else if let Some(principal) = &principal {
+        match reserve_http_inference_limits(
+            state,
+            principal,
+            requested_tokens,
+            request_route.as_deref(),
+        )
+        .await
+        {
             Ok(reservation) => reservation,
             Err(error) => {
                 if let Some(metadata) = local_metadata.clone() {
@@ -505,7 +567,7 @@ async fn enforce_request_limits_inner(
             (Some((operation, reservation_bytes)), Some(principal)) => {
                 match preauthorize_multipart(
                     request.headers(),
-                    principal.key(),
+                    principal,
                     operation,
                     reservation_bytes,
                 ) {
@@ -563,6 +625,41 @@ async fn enforce_request_limits_inner(
         reserved_tokens,
     )
     .await)
+}
+
+pub(super) fn validate_singleton_headers(headers: &HeaderMap) -> Result<(), Problem> {
+    const SINGLETONS: [&str; 9] = [
+        "content-type",
+        "content-encoding",
+        "authorization",
+        "x-api-key",
+        "x-goog-api-key",
+        "origin",
+        "x-csrf-token",
+        "idempotency-key",
+        "if-match",
+    ];
+    if SINGLETONS
+        .iter()
+        .any(|name| headers.get_all(*name).iter().nth(1).is_some())
+    {
+        return Err(Problem::bad_request(
+            "duplicate_singleton_header",
+            "A singleton request header was supplied more than once.",
+        ));
+    }
+    if ["authorization", "x-api-key", "x-goog-api-key"]
+        .iter()
+        .filter(|name| headers.contains_key(**name))
+        .count()
+        > 1
+    {
+        return Err(Problem::bad_request(
+            "ambiguous_api_credentials",
+            "Use exactly one API credential header.",
+        ));
+    }
+    Ok(())
 }
 
 fn public_auth_source_required(request: &Request<Body>) -> bool {
@@ -654,15 +751,18 @@ async fn run_request_with_reservation(
         }
         _ => run.await,
     };
-    if let Some(metadata) = local_metadata {
-        let claimed = metadata_claimed
-            .as_ref()
-            .is_some_and(|claimed| claimed.load(Ordering::Acquire));
-        if metadata.always_emit || !claimed {
-            metadata.emit(response.status());
-        }
+    let claimed = metadata_claimed
+        .as_ref()
+        .is_some_and(|claimed| claimed.load(Ordering::Acquire));
+    if let Some(metadata) = local_metadata
+        && (metadata.always_emit || !claimed)
+    {
+        metadata.emit(response.status());
     }
     if let Some(reservation) = reservation {
+        if !claimed {
+            reservation.reconcile(0);
+        }
         let (parts, body) = response.into_parts();
         Response::from_parts(
             parts,
@@ -678,6 +778,7 @@ async fn run_request_with_reservation(
 
 async fn release_reservation(reservation: Option<InferenceReservation>) {
     if let Some(reservation) = reservation {
+        reservation.reconcile(0);
         reservation.release().await;
     }
 }

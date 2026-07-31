@@ -18,6 +18,7 @@ use tokio::time::{Instant, timeout};
 use super::errors::*;
 use super::media::hydrate_anthropic_messages;
 use crate::anthropic::{AnthropicApiKey, ConnectorConfig};
+use crate::transport_common::RateLimitCooldown;
 use crate::transport_io::{ProviderResponseIo, bounded_duration};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
@@ -51,17 +52,23 @@ enum ResponseKind {
 pub struct AnthropicConnector {
     pub(super) config: ConnectorConfig,
     pub(super) api_key: AnthropicApiKey,
+    rate_limit_cooldown: RateLimitCooldown,
 }
 
 impl AnthropicConnector {
     #[must_use]
     pub fn new(config: ConnectorConfig, api_key: AnthropicApiKey) -> Self {
-        Self { config, api_key }
+        Self {
+            config,
+            api_key,
+            rate_limit_cooldown: RateLimitCooldown::default(),
+        }
     }
 
     /// Lists the upstream model catalog through the same pinned-DNS and
     /// redirect-free transport boundary as inference.
     pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+        self.rate_limit_cooldown.check_credential()?;
         let mut discovered = Vec::new();
         let mut after_id: Option<String> = None;
         for _ in 0..100 {
@@ -105,7 +112,9 @@ impl AnthropicConnector {
             .map_err(|_| RESPONSE_IO.first_byte_timeout())?
             .map_err(map_send_error)?;
             if !response.status().is_success() {
-                return Err(self.map_error_response(response, attempt_deadline).await);
+                return Err(self
+                    .map_error_response(response, attempt_deadline, None)
+                    .await);
             }
             RESPONSE_IO.require_content_type(&response, "application/json")?;
             let body = RESPONSE_IO
@@ -172,6 +181,8 @@ impl AnthropicConnector {
         request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
         validate_request_envelope(&request)?;
+        self.rate_limit_cooldown
+            .check(&request.attempt.upstream_model)?;
         let (url, body, response_kind, streaming) = self.encode_request(&request).await?;
 
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
@@ -226,7 +237,13 @@ impl AnthropicConnector {
         .map_err(map_send_error)?;
 
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(
+                    response,
+                    attempt_deadline,
+                    Some(&request.attempt.upstream_model),
+                )
+                .await);
         }
         if streaming {
             self.streaming_response(
@@ -362,8 +379,13 @@ impl AnthropicConnector {
         &self,
         response: Response,
         attempt_deadline: Instant,
+        upstream_model: Option<&str>,
     ) -> TransportError {
         let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            self.rate_limit_cooldown
+                .observe(upstream_model, response.headers());
+        }
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(

@@ -99,6 +99,15 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set config.trustedProxyCidrs=10.0.0.0/8 \
   > "$work/edge-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true --set control.enabled=false \
+  > "$work/gateway-only-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true --set gateway.enabled=false \
+  > "$work/control-only-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true --set gateway.enabled=false --set control.enabled=false \
+  > "$work/no-public-components-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set mediaSpool.capacityBytes=9007199254740991 \
   > "$work/max-spool-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
@@ -336,6 +345,20 @@ checked_rg_match service_monitor_targets_matched \
   "$work/edge-manifests.yaml"
 if (( ! service_monitor_targets_matched )); then
   echo "ServiceMonitors must target private observability Services" >&2
+  exit 1
+fi
+if ! grep -Fq 'alert: OLPReadinessAbsent' "$work/gateway-only-monitoring.yaml" ||
+  grep -Fq 'olp-openllmproxy-control-observability' "$work/gateway-only-monitoring.yaml"; then
+  echo "gateway-only monitoring still expects a control target" >&2
+  exit 1
+fi
+if ! grep -Fq 'alert: OLPReadinessAbsent' "$work/control-only-monitoring.yaml" ||
+  grep -Fq 'olp-openllmproxy-gateway-observability' "$work/control-only-monitoring.yaml"; then
+  echo "control-only monitoring still expects a gateway target" >&2
+  exit 1
+fi
+if grep -Fq 'alert: OLPReadinessAbsent' "$work/no-public-components-monitoring.yaml"; then
+  echo "monitoring expects readiness targets when both public components are disabled" >&2
   exit 1
 fi
 

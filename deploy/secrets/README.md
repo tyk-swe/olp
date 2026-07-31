@@ -18,9 +18,9 @@ never copied into the application image. Compose runs OpenLLMProxy as
 `1000:1000` by default; set `OLP_UID` and `OLP_GID` to the host user's IDs
 when necessary.
 
-Existing installations must preserve the authentication HMAC key bytes.
-Before running the helper after an upgrade, rename the legacy file without
-changing its contents:
+Existing installations must preserve the authentication HMAC key bytes until
+they intentionally complete the overlap procedure below. Before running the
+helper after an upgrade, rename the legacy file without changing its contents:
 
 ```sh
 mv deploy/secrets/olp_key_hash_key deploy/secrets/olp_auth_hmac_key
@@ -74,6 +74,16 @@ until `olp master-key reencrypt` has rewritten all encrypted rows, and run
 remain. Follow the complete
 [rotation procedure](../../docs/operations.md#master-key-rotation) before
 removing a key.
+
+The authentication HMAC file accepts the same JSON shape, with at most four
+keys. To rotate it, first add the new key while version 1 remains active and
+restart every replica. Then select the new active version and restart again.
+New API keys are signed by the active version while retained versions continue
+to verify existing keys. After every replica uses the new active version,
+record the completion time. Reissue and revoke every API key created before
+that cutoff (those actions are audited), then remove the old version and
+restart every replica. Removing a version before its API keys are retired
+invalidates those keys immediately.
 
 ## File-backed connector configuration
 

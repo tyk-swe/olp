@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM transactional_outbox WHERE ctid IN ( SELECT ctid FROM transactional_outbox WHERE published_at IS NOT NULL AND published_at < $1::timestamptz - interval '7 days' LIMIT $2 FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c9937d988d638241c172b632dd52354f0e55c00e71b7e339027d78c7b36b7680"
+}

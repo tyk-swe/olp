@@ -847,6 +847,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "request_default_partition_spill_detected": {
+            "type": "boolean"
+          },
           "request_metadata_complete": {
             "type": "boolean"
           },
@@ -905,6 +908,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "request_partitions": {
+            "type": "string"
+          },
           "status": {
             "type": "string"
           }
@@ -921,6 +927,8 @@
           "request_metadata_gateway_unresolved_epochs",
           "request_metadata_historical_uncertain_gaps",
           "request_metadata_gateway_unresolved_event_lower_bound",
+          "request_partitions",
+          "request_default_partition_spill_detected",
           "media_reconciliation",
           "media_reconciliation_pending",
           "media_reconciliation_stale",
@@ -1721,6 +1729,12 @@
       },
       "PriceRequest": {
         "properties": {
+          "cached_input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -1769,6 +1783,12 @@
       },
       "PriceResponse": {
         "properties": {
+          "cached_input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -8918,6 +8938,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Owner-only emergency containment; tombstones live media jobs and removes affected routes from the runtime",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -8957,7 +8986,7 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Forced containment requires an owner"
           },
           "409": {
             "content": {
@@ -12155,6 +12184,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Session revocation could not be confirmed"
           }
         },
         "security": [

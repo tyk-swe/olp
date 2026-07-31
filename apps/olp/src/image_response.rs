@@ -14,6 +14,8 @@ use uuid::Uuid;
 use crate::gateway::InferenceError;
 
 const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_IMAGE_COUNT: usize = 32;
+const MAX_TOTAL_IMAGE_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_TEMPLATE_BYTES: usize = 4 * 1024 * 1024;
 const RAW_CHUNK_BYTES: usize = 48 * 1024;
 
@@ -57,6 +59,13 @@ pub(crate) async fn streaming_image_json_response(
             "The provider image metadata exceeded its bound.",
         ));
     }
+    if staged.len() > MAX_IMAGE_COUNT {
+        cleanup_staged(&spool, &staged).await;
+        return Err(InferenceError::bad_gateway(
+            "provider_protocol_error",
+            "The provider image count exceeded its bound.",
+        ));
+    }
     let pieces = match split_template(template, &staged) {
         Some(pieces) => pieces,
         None => {
@@ -78,13 +87,18 @@ pub(crate) async fn streaming_image_json_response(
     }
 
     let mut opened = Vec::with_capacity(staged.len());
+    let mut declared_total = 0_u64;
     for (_, handle) in &staged {
         match spool.open(handle).await {
             Ok(media)
                 if media
                     .artifact
                     .content_length
-                    .is_none_or(|length| length <= MAX_IMAGE_BYTES) =>
+                    .is_none_or(|length| length <= MAX_IMAGE_BYTES)
+                    && media.artifact.content_length.is_none_or(|length| {
+                        declared_total = declared_total.saturating_add(length);
+                        declared_total <= MAX_TOTAL_IMAGE_BYTES
+                    }) =>
             {
                 opened.push((handle.clone(), media));
             }
@@ -108,6 +122,7 @@ pub(crate) async fn streaming_image_json_response(
     }
 
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    let (terminal, terminal_receiver) = tokio::sync::oneshot::channel();
     let producer_spool = Arc::clone(&spool);
     let cleanup = staged
         .into_iter()
@@ -115,27 +130,51 @@ pub(crate) async fn streaming_image_json_response(
         .collect::<Vec<_>>();
     tokio::spawn(async move {
         let mut pieces = pieces.into_iter();
+        let mut total = 0;
         let mut completed = send_body_chunk(&sender, pieces.next().unwrap_or_default()).await;
         for (_, media) in opened {
             if !completed {
                 break;
             }
-            completed = stream_base64(&sender, media).await;
+            completed = stream_base64(&sender, media, &mut total).await;
             if completed {
                 completed = send_body_chunk(&sender, pieces.next().unwrap_or_default()).await;
             }
         }
         cleanup_handles(&producer_spool, &cleanup).await;
+        let _ = terminal.send(());
     });
-    let body_stream = futures::stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|item| (item, receiver))
-    });
+    let body_stream = image_body_stream(receiver, terminal_receiver);
     let mut response = Response::new(Body::from_stream(body_stream));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
     );
     Ok(response)
+}
+
+fn image_body_stream(
+    receiver: tokio::sync::mpsc::Receiver<Result<Bytes, io::Error>>,
+    terminal_receiver: tokio::sync::oneshot::Receiver<()>,
+) -> impl futures::Stream<Item = Result<Bytes, io::Error>> {
+    futures::stream::unfold(
+        (receiver, Some(terminal_receiver)),
+        |(mut receiver, terminal)| async move {
+            if let Some(item) = receiver.recv().await {
+                return Some((item, (receiver, terminal)));
+            }
+            let terminal = terminal?;
+            match terminal.await {
+                Ok(()) => None,
+                Err(_) => Some((
+                    Err(io::Error::other(
+                        "bounded image response producer terminated",
+                    )),
+                    (receiver, None),
+                )),
+            }
+        },
+    )
 }
 
 fn split_template(template: Vec<u8>, staged: &[(String, MediaHandle)]) -> Option<Vec<Bytes>> {
@@ -165,6 +204,7 @@ fn split_template(template: Vec<u8>, staged: &[(String, MediaHandle)]) -> Option
 async fn stream_base64(
     sender: &tokio::sync::mpsc::Sender<Result<Bytes, io::Error>>,
     mut media: OpenedMedia,
+    aggregate: &mut u64,
 ) -> bool {
     let mut total = 0_u64;
     let mut carry = Vec::with_capacity(2);
@@ -175,6 +215,11 @@ async fn stream_base64(
         };
         total = match total.checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX)) {
             Some(total) if total <= MAX_IMAGE_BYTES => total,
+            _ => return send_body_error(sender).await,
+        };
+        *aggregate = match (*aggregate).checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX))
+        {
+            Some(total) if total <= MAX_TOTAL_IMAGE_BYTES => total,
             _ => return send_body_error(sender).await,
         };
         let mut offset = 0;
@@ -289,5 +334,36 @@ mod tests {
             raw
         );
         assert!(spool.open(&artifact.handle).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn image_count_is_bounded_before_opening_spool_files() {
+        let spool = crate::create_bounded_media_spool_for_test().unwrap();
+        let result = ImagesResult {
+            created_at: None,
+            images: (0..=MAX_IMAGE_COUNT)
+                .map(|index| ImageArtifact {
+                    source: MediaSource::Handle(MediaHandle::new(format!("missing-{index}"))),
+                    revised_prompt: None,
+                })
+                .collect(),
+            usage: None,
+            extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        };
+        let error = streaming_image_json_response(spool, &result)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "provider_protocol_error");
+    }
+
+    #[tokio::test]
+    async fn image_producer_termination_is_a_body_error() {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let (terminal, terminal_receiver) = tokio::sync::oneshot::channel();
+        drop(sender);
+        drop(terminal);
+        let body = image_body_stream(receiver, terminal_receiver);
+        futures::pin_mut!(body);
+        assert!(body.next().await.unwrap().is_err());
     }
 }

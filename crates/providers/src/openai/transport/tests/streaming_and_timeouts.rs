@@ -31,6 +31,34 @@ fn transport_error_never_allows_failover_after_commit() {
 }
 
 #[tokio::test]
+async fn retry_after_short_circuits_the_same_model() {
+    let body = br#"{"error":{"message":"slow down"}}"#;
+    let headers = format!(
+        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let (base_url, captured) = spawn_mock(MockResponse {
+        chunks: vec![(
+            Duration::ZERO,
+            [headers.as_bytes(), body.as_slice()].concat(),
+        )],
+    })
+    .await;
+    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+
+    assert_eq!(
+        execute_error(&connector, fixture_request(false))
+            .await
+            .class,
+        AttemptFailureClass::RateLimit
+    );
+    captured.await.unwrap();
+    let error = execute_error(&connector, fixture_request(false)).await;
+    assert_eq!(error.class, AttemptFailureClass::RateLimit);
+    assert!(error.message.contains("cooldown is active"));
+}
+
+#[tokio::test]
 async fn raw_media_stream_is_bounded_ordered_and_terminal() {
     let body = concat!(
         "event: image_generation.partial_image\n",

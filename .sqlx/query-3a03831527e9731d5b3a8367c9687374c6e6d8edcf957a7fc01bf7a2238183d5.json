@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sessions WHERE ctid IN ( SELECT ctid FROM sessions WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3a03831527e9731d5b3a8367c9687374c6e6d8edcf957a7fc01bf7a2238183d5"
+}

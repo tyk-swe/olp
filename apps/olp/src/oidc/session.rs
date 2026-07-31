@@ -402,28 +402,31 @@ pub(super) fn flow_cookie_name(purpose: OidcFlowPurpose, flow_id: OidcFlowId) ->
 
 pub(super) fn flow_cookie_evictions(headers: &HeaderMap) -> Result<Vec<String>, Problem> {
     let cookies = RequestCookies::parse(headers)?;
-    let mut active = Vec::<(Option<OidcFlowId>, String)>::new();
+    let mut active = 0_usize;
     for prefix in [OIDC_LOGIN_FLOW_COOKIE_PREFIX, OIDC_LINK_FLOW_COOKIE_PREFIX] {
         for name in cookies.names_with_prefix(prefix) {
-            if let Some(flow_id) = name.strip_prefix(prefix).and_then(OidcFlowId::parse) {
-                active.push((Some(flow_id), name.to_owned()));
+            if name
+                .strip_prefix(prefix)
+                .and_then(OidcFlowId::parse)
+                .is_some()
+            {
+                active += 1;
             }
         }
     }
-    for legacy in [LOGIN_FLOW_COOKIE, FLOW_COOKIE] {
-        if cookies.get(legacy).is_some() {
-            active.push((None, legacy.to_owned()));
-        }
+    if active >= MAX_ACTIVE_BROWSER_FLOWS {
+        return Err(Problem::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "oidc_browser_flow_limit",
+            "Too many active OIDC authorization flows",
+            "Complete an existing authorization flow or wait for it to expire before starting another.",
+        ));
     }
-    active.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-    let overflow = active
-        .len()
-        .saturating_add(1)
-        .saturating_sub(MAX_ACTIVE_BROWSER_FLOWS);
-    Ok(active
+
+    Ok([LOGIN_FLOW_COOKIE, FLOW_COOKIE]
         .into_iter()
-        .take(overflow)
-        .map(|(_, name)| clear_flow_cookie(&name))
+        .filter(|name| cookies.get(name).is_some())
+        .map(clear_flow_cookie)
         .collect())
 }
 
@@ -469,13 +472,12 @@ mod flow_tests {
     }
 
     #[test]
-    fn active_flow_bound_evicts_oldest_uuidv7_cookie_deterministically() {
-        let mut ids = (0..MAX_ACTIVE_BROWSER_FLOWS + 2)
+    fn active_flow_bound_rejects_new_flow_without_evicting_live_cookies() {
+        let ids = (0..MAX_ACTIVE_BROWSER_FLOWS)
             .map(|_| OidcFlowId::generate())
             .collect::<Vec<_>>();
-        ids.sort();
         let mut headers = HeaderMap::new();
-        for id in ids.iter().rev() {
+        for id in &ids {
             headers.append(
                 header::COOKIE,
                 HeaderValue::from_str(&format!(
@@ -485,13 +487,19 @@ mod flow_tests {
                 .unwrap(),
             );
         }
-        let evictions = flow_cookie_evictions(&headers).unwrap();
-        assert_eq!(evictions.len(), 3);
-        for (eviction, flow_id) in evictions.iter().zip(ids.iter()) {
-            assert!(eviction.starts_with(&format!(
-                "{}=;",
-                flow_cookie_name(OidcFlowPurpose::Login, *flow_id)
-            )));
-        }
+        headers.append(
+            header::COOKIE,
+            HeaderValue::from_static("__Host-olp_oidc_login_flow=legacy"),
+        );
+
+        let problem = flow_cookie_evictions(&headers).unwrap_err();
+
+        assert_eq!(problem.status, StatusCode::TOO_MANY_REQUESTS.as_u16());
+        assert!(
+            problem
+                .problem_type
+                .as_ref()
+                .ends_with("/oidc_browser_flow_limit")
+        );
     }
 }

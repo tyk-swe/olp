@@ -6,6 +6,7 @@ use super::buffer::RequestMetadataBufferSnapshot;
 use crate::{PersistenceError, PgStore};
 
 const REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED: i64 = 0x4f4c_505f_5545;
+const REQUEST_METADATA_STREAM_TRIM_REPORTER: &str = "request-metadata-stream-retention";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestMetadataLossReport {
@@ -134,6 +135,59 @@ async fn record_unclean_request_metadata_epoch(
 }
 
 impl PgStore {
+    pub async fn report_request_metadata_stream_trim_uncertainty(
+        &self,
+        total: u64,
+    ) -> Result<u64, PersistenceError> {
+        let total =
+            i64::try_from(total).map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
+        let mut transaction = self.pool().begin().await?;
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+            REQUEST_METADATA_STREAM_TRIM_REPORTER,
+            REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let previous = sqlx::query_scalar!(
+            "SELECT dropped FROM request_metadata_loss_reporter_state \
+             WHERE gateway_instance = $1 FOR UPDATE",
+            REQUEST_METADATA_STREAM_TRIM_REPORTER
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or(0);
+        let delta = trim_count_delta(total, previous);
+        if delta > 0 {
+            sqlx::query!(
+                "INSERT INTO request_metadata_ingestion_gaps \
+                 (id, gateway_instance, event_count, reason, certainty, \
+                  first_observed_at, last_observed_at) \
+                 VALUES ($1, $2, $3, 'request_metadata_stream_retention_trim', \
+                         'lower_bound'::request_metadata_gap_certainty, now(), now())",
+                Uuid::now_v7(),
+                REQUEST_METADATA_STREAM_TRIM_REPORTER,
+                delta
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
+        sqlx::query!(
+            "INSERT INTO request_metadata_loss_reporter_state \
+             (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
+             VALUES ($1, $2, $3, 0, now()) \
+             ON CONFLICT (gateway_instance) DO UPDATE SET \
+               dropped = EXCLUDED.dropped, updated_at = EXCLUDED.updated_at",
+            REQUEST_METADATA_STREAM_TRIM_REPORTER,
+            Uuid::nil(),
+            total
+        )
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        u64::try_from(delta).map_err(|_| PersistenceError::InvalidRequestMetadataGap)
+    }
+
     /// Durably checkpoints the current gateway epoch and records exact unseen
     /// local-loss deltas. This runs only in the background reporter; inference
     /// requests never wait for PostgreSQL.
@@ -521,4 +575,12 @@ pub(super) fn request_metadata_gap_count_from_decimal(
         return Err(PersistenceError::InvalidRequestMetadataGap);
     }
     u64::try_from(value).map_err(|_| PersistenceError::InvalidRequestMetadataGap)
+}
+
+pub(super) const fn trim_count_delta(total: i64, previous: i64) -> i64 {
+    if total >= previous {
+        total - previous
+    } else {
+        total
+    }
 }

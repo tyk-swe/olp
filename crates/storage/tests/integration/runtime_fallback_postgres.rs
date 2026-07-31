@@ -183,7 +183,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     .await
     .unwrap();
 
-    let current = store.current_runtime_api_keys().await.unwrap();
+    let (current, _) = store.current_runtime_api_keys().await.unwrap();
     let current_key = current.values().next().unwrap();
     assert_eq!(current_key.lookup_id.as_str(), "lookup_same_key");
     assert_eq!(current_key.digest.as_bytes(), &[2; 32]);

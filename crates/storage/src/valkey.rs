@@ -17,12 +17,15 @@ use tracing::{error, warn};
 use crate::{
     PersistenceError, PgStore, RequestMetadataEvent, RequestMetadataGap,
     RequestMetadataPersistenceOutcome,
+    request_metadata::{MAX_REQUEST_METADATA_EVENT_BYTES, REQUEST_METADATA_TRIM_COUNTER},
 };
 
 const RUNTIME_HINT_CHANNEL: &str = "olp:v2:runtime";
 pub const REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
 const REQUEST_METADATA_GROUP: &str = "olp:persistence";
 const REQUEST_METADATA_CONSUMER: &str = "worker";
+const REQUEST_METADATA_DEAD_LETTER_STREAM: &str = "olp:v2:request-metadata:dead-letter";
+const REQUEST_METADATA_DEAD_LETTER_MAX_ENTRIES: usize = 10_000;
 
 #[derive(Debug, Error)]
 pub enum ValkeyAdapterError {
@@ -101,7 +104,7 @@ pub async fn run_request_metadata_consumer(
         .query_async(&mut connection)
         .await;
     if let Err(error) = create
-        && !error.to_string().contains("BUSYGROUP")
+        && error.code() != Some("BUSYGROUP")
     {
         return Err(error.into());
     }
@@ -141,40 +144,37 @@ pub async fn run_request_metadata_consumer(
         }
 
         for entry in entries {
-            let payload = entry
-                .map
-                .get("event")
-                .and_then(|value| redis::from_redis_value_ref::<String>(value).ok());
-            let event = payload
-                .as_deref()
-                .and_then(|payload| serde_json::from_str::<RequestMetadataEvent>(payload).ok());
-            let Some(event) = event else {
-                error!(stream_id = %entry.id, "discarding malformed request metadata stream event");
-                let now = Utc::now();
-                store
-                    .report_request_metadata_gap_once(
-                        RequestMetadataGap {
-                            gateway_instance: "request-metadata-consumer".to_owned(),
-                            event_count: 1,
-                            reason: "malformed_stream_event".to_owned(),
-                            first_observed_at: now,
-                            last_observed_at: now,
-                        },
-                        &format!("request-metadata-stream:{}:malformed", entry.id),
-                    )
-                    .await?;
+            if entry.map.is_empty() {
+                // XTRIM leaves pending-entry tombstones in the consumer group.
+                // Their loss is already represented by the durable trim count.
                 acknowledge_and_delete(&mut connection, &entry.id).await?;
                 continue;
+            }
+            let decoded = decode_request_metadata_stream_event(entry.map.get("event"));
+            let (payload, event) = match decoded {
+                Ok(decoded) => decoded,
+                Err(reason) => {
+                    error!(stream_id = %entry.id, reason, "discarding invalid request metadata stream event");
+                    let now = Utc::now();
+                    store
+                        .report_request_metadata_gap_once(
+                            RequestMetadataGap {
+                                gateway_instance: "request-metadata-consumer".to_owned(),
+                                event_count: 1,
+                                reason: reason.to_owned(),
+                                first_observed_at: now,
+                                last_observed_at: now,
+                            },
+                            &format!("request-metadata-stream:{}:{reason}", entry.id),
+                        )
+                        .await?;
+                    acknowledge_and_delete(&mut connection, &entry.id).await?;
+                    continue;
+                }
             };
 
             match store
-                .persist_request_metadata_stream_event(
-                    &event,
-                    payload
-                        .as_deref()
-                        .expect("a decoded request metadata event has its original payload")
-                        .as_bytes(),
-                )
+                .persist_request_metadata_stream_event(&event, payload)
                 .await
             {
                 Ok(outcome) => {
@@ -183,22 +183,22 @@ pub async fn run_request_metadata_consumer(
                     }
                     acknowledge_and_delete(&mut connection, &entry.id).await?;
                 }
-                Err(PersistenceError::InvalidRequestMetadataEvent) => {
-                    error!(stream_id = %entry.id, "discarding permanently invalid request metadata event");
+                Err(error) if is_permanent_request_metadata_error(&error) => {
+                    error!(%error, stream_id = %entry.id, "dead-lettering permanently invalid request metadata event");
                     let observed_at = Utc::now();
                     store
                         .report_request_metadata_gap_once(
                             RequestMetadataGap {
                                 gateway_instance: "request-metadata-consumer".to_owned(),
                                 event_count: 1,
-                                reason: "invalid_request_metadata_event".to_owned(),
+                                reason: "permanent_request_metadata_event_error".to_owned(),
                                 first_observed_at: observed_at,
                                 last_observed_at: observed_at,
                             },
-                            &format!("request-metadata-event:{}:invalid", event.event_id),
+                            &format!("request-metadata-event:{}:permanent", event.event_id),
                         )
                         .await?;
-                    acknowledge_and_delete(&mut connection, &entry.id).await?;
+                    dead_letter_and_acknowledge(&mut connection, &entry.id, payload).await?;
                 }
                 Err(error) => {
                     warn!(%error, stream_id = %entry.id, "request metadata persistence will retry");
@@ -212,6 +212,59 @@ pub async fn run_request_metadata_consumer(
             checkpoint_request_metadata_consumer_health(store, &mut connection).await?;
             last_health_checkpoint = tokio::time::Instant::now();
         }
+    }
+}
+
+fn is_permanent_request_metadata_error(error: &PersistenceError) -> bool {
+    match error {
+        PersistenceError::InvalidRequestMetadataEvent => true,
+        PersistenceError::Database(sqlx::Error::Database(error)) => error
+            .code()
+            .is_some_and(|code| is_permanent_request_metadata_sqlstate(code.as_ref())),
+        _ => false,
+    }
+}
+
+fn is_permanent_request_metadata_sqlstate(code: &str) -> bool {
+    code.starts_with("22") || code.starts_with("23")
+}
+
+async fn dead_letter_and_acknowledge(
+    connection: &mut ConnectionManager,
+    id: &str,
+    payload: &[u8],
+) -> Result<(), ValkeyAdapterError> {
+    let _: String = redis::Script::new(include_str!("../scripts/dead_letter_request_metadata.lua"))
+        .key(REQUEST_METADATA_STREAM)
+        .key(REQUEST_METADATA_DEAD_LETTER_STREAM)
+        .arg(REQUEST_METADATA_GROUP)
+        .arg(id)
+        .arg(payload)
+        .arg(REQUEST_METADATA_DEAD_LETTER_MAX_ENTRIES)
+        .invoke_async(connection)
+        .await?;
+    Ok(())
+}
+
+fn redis_value_bytes(value: &redis::Value) -> Option<&[u8]> {
+    match value {
+        redis::Value::BulkString(value) => Some(value),
+        redis::Value::SimpleString(value) => Some(value.as_bytes()),
+        _ => None,
+    }
+}
+
+fn decode_request_metadata_stream_event(
+    value: Option<&redis::Value>,
+) -> Result<(&[u8], RequestMetadataEvent), &'static str> {
+    match value.and_then(redis_value_bytes) {
+        Some(payload) if payload.len() > MAX_REQUEST_METADATA_EVENT_BYTES => {
+            Err("oversized_stream_event")
+        }
+        Some(payload) => serde_json::from_slice(payload)
+            .map(|event| (payload, event))
+            .map_err(|_| "malformed_stream_event"),
+        None => Err("malformed_stream_event"),
     }
 }
 
@@ -237,6 +290,15 @@ async fn checkpoint_request_metadata_consumer_health(
     store: &PgStore,
     connection: &mut ConnectionManager,
 ) -> Result<(), ValkeyAdapterError> {
+    let trimmed: Option<u64> = redis::cmd("GET")
+        .arg(REQUEST_METADATA_TRIM_COUNTER)
+        .query_async(connection)
+        .await?;
+    if let Some(trimmed) = trimmed {
+        store
+            .report_request_metadata_stream_trim_uncertainty(trimmed)
+            .await?;
+    }
     let pending: StreamPendingReply = connection
         .xpending(REQUEST_METADATA_STREAM, REQUEST_METADATA_GROUP)
         .await?;
@@ -269,8 +331,12 @@ async fn checkpoint_request_metadata_consumer_health(
         .ok_or(ValkeyAdapterError::InvalidState(
             "consumer group disappeared",
         ))?;
-    let lag_events = u64::try_from(group.lag.unwrap_or(0))
-        .map_err(|_| ValkeyAdapterError::InvalidState("stream lag overflow"))?;
+    let Some(lag) = group.lag else {
+        warn!("request metadata stream lag is unknown; retaining the previous health checkpoint");
+        return Ok(());
+    };
+    let lag_events =
+        u64::try_from(lag).map_err(|_| ValkeyAdapterError::InvalidState("stream lag overflow"))?;
     store
         .report_request_metadata_consumer_health(pending_events, lag_events, oldest_pending_at)
         .await?;
@@ -280,4 +346,49 @@ async fn checkpoint_request_metadata_consumer_health(
 async fn valkey_connection(url: &str) -> Result<ConnectionManager, redis::RedisError> {
     let client = redis::Client::open(url)?;
     ConnectionManager::new(client).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MAX_REQUEST_METADATA_EVENT_BYTES, decode_request_metadata_stream_event,
+        is_permanent_request_metadata_error, is_permanent_request_metadata_sqlstate,
+    };
+    use crate::PersistenceError;
+
+    #[test]
+    fn request_metadata_dead_letters_only_event_local_failures() {
+        for code in ["22003", "22007", "23503", "23514"] {
+            assert!(
+                is_permanent_request_metadata_sqlstate(code),
+                "{code} is caused by event data"
+            );
+        }
+        for code in [
+            "08006", "40001", "40P01", "42501", "42P01", "53300", "57014", "58030", "XX000",
+        ] {
+            assert!(
+                !is_permanent_request_metadata_sqlstate(code),
+                "{code} must leave the source event pending for retry"
+            );
+        }
+        assert!(!is_permanent_request_metadata_error(
+            &PersistenceError::Database(sqlx::Error::PoolTimedOut)
+        ));
+        assert!(!is_permanent_request_metadata_error(
+            &PersistenceError::Database(sqlx::Error::RowNotFound)
+        ));
+        assert!(is_permanent_request_metadata_error(
+            &PersistenceError::InvalidRequestMetadataEvent
+        ));
+    }
+
+    #[test]
+    fn oversized_request_metadata_is_rejected_before_deserialization() {
+        let payload = redis::Value::BulkString(vec![b'{'; MAX_REQUEST_METADATA_EVENT_BYTES + 1]);
+        assert!(matches!(
+            decode_request_metadata_stream_event(Some(&payload)),
+            Err("oversized_stream_event")
+        ));
+    }
 }

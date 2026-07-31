@@ -56,7 +56,7 @@ pub(super) async fn serve(
         .assets
         .media_spool_dir
         .clone()
-        .unwrap_or_else(std::env::temp_dir);
+        .unwrap_or_else(crate::media_spool::default_media_spool_dir);
     let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     let mut state = ApiState::new_with_media_spool(
         mode,
@@ -66,6 +66,7 @@ pub(super) async fn serve(
         args.assets.console_dir,
         media_spool,
     );
+    state.enable_media_job_recovery(&media_spool_dir, &args.database.database_url)?;
     state.set_public_admission_limits(
         args.http_max_in_flight_inference_requests,
         args.http_max_in_flight_management_requests,
@@ -260,12 +261,19 @@ pub(super) async fn serve(
     let (public_result, observability_result, terminal_error) = coordinate_shutdown(
         public_server,
         observability_server,
-        shutdown_reason(shutdown_signal(), request_metadata_writer_status.as_mut()),
+        shutdown_reason_with_background(
+            shutdown_signal(),
+            request_metadata_writer_status.as_mut(),
+            &mut background_tasks,
+        ),
         listener_shutdown_sender,
         background_shutdown_sender,
     )
     .await;
-    stop_background_tasks(background_tasks, BACKGROUND_SHUTDOWN_TIMEOUT).await;
+    tokio::join!(
+        crate::gateway::limits::drain_limit_cleanup_tasks(BACKGROUND_SHUTDOWN_TIMEOUT),
+        stop_background_tasks(background_tasks, BACKGROUND_SHUTDOWN_TIMEOUT),
+    );
     let terminal_error =
         resolve_request_metadata_writer_error(request_metadata_writer_status, terminal_error).await;
     public_result?;
@@ -274,6 +282,29 @@ pub(super) async fn serve(
         return Err(error);
     }
     Ok(())
+}
+
+pub(super) async fn shutdown_reason_with_background<Signal>(
+    signal: Signal,
+    request_metadata_writer_status: Option<&mut oneshot::Receiver<AppResult<()>>>,
+    background_tasks: &mut Vec<JoinHandle<()>>,
+) -> Option<AppError>
+where
+    Signal: Future<Output = ()>,
+{
+    tokio::select! {
+        biased;
+        reason = shutdown_reason(signal, request_metadata_writer_status) => reason,
+        (result, index, _) = select_all(background_tasks.iter_mut()) => {
+            drop(background_tasks.swap_remove(index));
+            Some(match result {
+                Ok(()) => std::io::Error::other("background task stopped unexpectedly").into(),
+                Err(error) => std::io::Error::other(format!(
+                    "background task failed unexpectedly: {error}",
+                )).into(),
+            })
+        },
+    }
 }
 
 pub(super) async fn shutdown_reason<Signal>(
@@ -634,69 +665,121 @@ async fn activate_latest_runtime(
     circuits: &crate::circuit::CircuitBreaker,
     master_key: Option<&MasterKey>,
 ) -> AppResult<bool> {
-    let releases = store
-        .recent_valid_runtime_releases_after(32, runtime.active_generation_ordinal())
-        .await?;
-    if releases.is_empty() {
-        return Ok(false);
-    }
-    let current_api_keys = store.current_runtime_api_keys().await?;
+    const PAGE_SIZE: u16 = 32;
+    const MAX_REJECTION_DETAILS: usize = 32;
+
+    let installed_sequence = runtime.active_generation_ordinal();
+    let (current_api_keys, database_time) = store.current_runtime_api_keys().await?;
+    runtime.sample_database_time(database_time);
     let mut rejected = Vec::new();
-    for release in releases {
-        let snapshot = match runtime.decode_release_candidate(&release, current_api_keys.clone()) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                rejected.push(format!("{}: {error}", release.sequence));
+    let mut rejected_count = 0_u64;
+    let mut before_sequence = None;
+    loop {
+        let releases = store
+            .valid_runtime_release_page(PAGE_SIZE, installed_sequence, before_sequence)
+            .await?;
+        if releases.is_empty() {
+            break;
+        }
+        let exhausted = releases.len() < usize::from(PAGE_SIZE);
+        before_sequence = releases
+            .last()
+            .and_then(|release| u64::try_from(release.sequence).ok());
+        for release in releases {
+            let snapshot =
+                match runtime.decode_release_candidate(&release, current_api_keys.clone()) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        record_runtime_rejection(
+                            &mut rejected,
+                            &mut rejected_count,
+                            MAX_REJECTION_DETAILS,
+                            format!("{}: {error}", release.sequence),
+                        );
+                        continue;
+                    }
+                };
+            // Provider transports are assembled from normalized secret storage, not
+            // the public runtime payload. Require the release-time sidecar to match
+            // every current transport-affecting field before accepting an LKG.
+            if let Err(error) = store.runtime_provider_configurations(&snapshot).await {
+                record_runtime_rejection(
+                    &mut rejected,
+                    &mut rejected_count,
+                    MAX_REJECTION_DETAILS,
+                    format!("{}: {error}", release.sequence),
+                );
                 continue;
             }
-        };
-        // Provider transports are assembled from normalized secret storage, not
-        // the public runtime payload. Require the release-time sidecar to match
-        // every current transport-affecting field before accepting an LKG.
-        if let Err(error) = store.runtime_provider_configurations(&snapshot).await {
-            rejected.push(format!("{}: {error}", release.sequence));
-            continue;
-        }
-        let mut candidate_transports = transports.snapshot();
-        if let Some(master_key) = master_key
-            && let Err(error) =
-                load_runtime_transports(store, master_key, &snapshot, &mut candidate_transports)
-                    .await
-        {
-            rejected.push(format!("{}: {error}", release.sequence));
-            continue;
-        }
-        candidate_transports.retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
-        let live_targets = snapshot
-            .routes
-            .values()
-            .flat_map(|route| route.targets.iter().map(|target| target.id))
-            .collect::<BTreeSet<_>>();
-        match runtime.install(snapshot, candidate_transports) {
-            Ok(installed) => {
-                if installed {
-                    circuits.retain_targets(&live_targets);
-                }
-                if !rejected.is_empty() {
-                    warn!(
-                        rejected = ?rejected,
-                        selected_sequence = release.sequence,
-                        "installed previous verified runtime release after rejecting newer candidates"
-                    );
-                }
-                return Ok(installed);
+            let mut candidate_transports = transports.snapshot();
+            if let Some(master_key) = master_key
+                && let Err(error) =
+                    load_runtime_transports(store, master_key, &snapshot, &mut candidate_transports)
+                        .await
+            {
+                record_runtime_rejection(
+                    &mut rejected,
+                    &mut rejected_count,
+                    MAX_REJECTION_DETAILS,
+                    format!("{}: {error}", release.sequence),
+                );
+                continue;
             }
-            Err(error) => rejected.push(format!("{}: {error}", release.sequence)),
+            candidate_transports
+                .retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
+            let live_targets = snapshot
+                .routes
+                .values()
+                .flat_map(|route| route.targets.iter().map(|target| target.id))
+                .collect::<BTreeSet<_>>();
+            match runtime.install(snapshot, candidate_transports) {
+                Ok(installed) => {
+                    if installed {
+                        circuits.retain_targets(&live_targets);
+                    }
+                    if rejected_count > 0 {
+                        warn!(
+                            rejected_count,
+                            rejected = ?rejected,
+                            selected_sequence = release.sequence,
+                            "installed previous verified runtime release after rejecting newer candidates"
+                        );
+                    }
+                    return Ok(installed);
+                }
+                Err(error) => record_runtime_rejection(
+                    &mut rejected,
+                    &mut rejected_count,
+                    MAX_REJECTION_DETAILS,
+                    format!("{}: {error}", release.sequence),
+                ),
+            }
+        }
+        if exhausted || before_sequence.is_none() {
+            break;
         }
     }
-    if rejected.is_empty() {
+    if rejected_count == 0 {
         return Ok(false);
     }
     Err(std::io::Error::other(format!(
-        "no verified runtime release could be installed: {}",
+        "no verified runtime release could be installed after rejecting {rejected_count} \
+         candidates; first details: {}",
         rejected.join("; ")
     ))
     .into())
+}
+
+fn record_runtime_rejection(
+    details: &mut Vec<String>,
+    count: &mut u64,
+    detail_limit: usize,
+    detail: String,
+) {
+    *count = count.saturating_add(1);
+    if details.len() < detail_limit {
+        details.push(detail);
+    }
 }
 
 pub(super) async fn shutdown_signal() {

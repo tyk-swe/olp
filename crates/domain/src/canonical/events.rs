@@ -68,6 +68,16 @@ pub struct Usage {
     pub reasoning_tokens: Option<u64>,
 }
 
+impl Usage {
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        match self.cached_input_tokens {
+            Some(cached) => cached <= self.input_tokens,
+            None => true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
@@ -137,6 +147,13 @@ impl EventSequenceValidator {
                 actual: event.sequence,
             });
         }
+        if let CanonicalEventKind::Usage { usage } = &event.kind
+            && !usage.is_valid()
+        {
+            return Err(EventSequenceError::InvalidUsage {
+                sequence: event.sequence,
+            });
+        }
         self.done = matches!(event.kind, CanonicalEventKind::Done);
         self.expected = self.expected.saturating_add(1);
         Ok(())
@@ -166,4 +183,6 @@ pub enum EventSequenceError {
     AfterDone { sequence: u64 },
     #[error("canonical event stream ended before done; next sequence would be {next_sequence}")]
     MissingDone { next_sequence: u64 },
+    #[error("canonical event {sequence} contains invalid usage")]
+    InvalidUsage { sequence: u64 },
 }

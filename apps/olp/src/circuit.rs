@@ -26,6 +26,54 @@ enum CircuitState {
     HalfOpen { probe_started: Instant },
 }
 
+pub(crate) struct CircuitPermit {
+    breaker: CircuitBreaker,
+    target: TargetId,
+    probe_started: Option<Instant>,
+}
+
+impl CircuitPermit {
+    pub(crate) fn record_success(&mut self) {
+        self.breaker
+            .record_success_for(self.target, self.probe_started);
+        self.probe_started = None;
+    }
+
+    pub(crate) fn record_failure(&mut self, class: AttemptFailureClass) {
+        self.breaker
+            .record_failure_for(self.target, class, self.probe_started);
+        self.probe_started = None;
+    }
+}
+
+impl Drop for CircuitPermit {
+    fn drop(&mut self) {
+        let Some(probe_started) = self.probe_started else {
+            return;
+        };
+        // A destructor must not panic: a poisoned lock during unwinding would
+        // abort the process instead of failing one request.
+        let mut states = self
+            .breaker
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(
+            states.get(&self.target),
+            Some(CircuitState::HalfOpen {
+                probe_started: active
+            }) if *active == probe_started
+        ) {
+            states.insert(
+                self.target,
+                CircuitState::Open {
+                    until: Instant::now() + self.breaker.open_duration,
+                },
+            );
+        }
+    }
+}
+
 impl Default for CircuitBreaker {
     fn default() -> Self {
         Self::new(DEFAULT_FAILURE_THRESHOLD, DEFAULT_OPEN_DURATION)
@@ -49,40 +97,46 @@ impl CircuitBreaker {
         match states.get(&target) {
             None | Some(CircuitState::Closed { .. }) => true,
             Some(CircuitState::Open { until }) => now >= *until,
-            Some(CircuitState::HalfOpen { probe_started }) => {
-                now.duration_since(*probe_started) >= self.open_duration
-            }
+            Some(CircuitState::HalfOpen { .. }) => false,
         }
     }
 
     /// Claims permission to execute this target. An expired open circuit moves
     /// to half-open and admits one caller; concurrent callers skip it.
-    pub(crate) fn try_acquire(&self, target: TargetId) -> bool {
+    pub(crate) fn try_acquire(&self, target: TargetId) -> Option<CircuitPermit> {
         let now = Instant::now();
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
         match states.get(&target).copied() {
-            None | Some(CircuitState::Closed { .. }) => true,
+            None | Some(CircuitState::Closed { .. }) => Some(CircuitPermit {
+                breaker: self.clone(),
+                target,
+                probe_started: None,
+            }),
             Some(CircuitState::Open { until }) if now >= until => {
                 states.insert(target, CircuitState::HalfOpen { probe_started: now });
-                true
+                Some(CircuitPermit {
+                    breaker: self.clone(),
+                    target,
+                    probe_started: Some(now),
+                })
             }
-            Some(CircuitState::HalfOpen { probe_started })
-                if now.duration_since(probe_started) >= self.open_duration =>
-            {
-                // Recover if a probing request was cancelled before reporting
-                // an outcome; otherwise a circuit could remain stuck forever.
-                states.insert(target, CircuitState::HalfOpen { probe_started: now });
-                true
-            }
-            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => false,
+            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => None,
         }
     }
 
-    pub(crate) fn record_success(&self, target: TargetId) {
-        self.inner
-            .lock()
-            .expect("circuit state lock poisoned")
-            .remove(&target);
+    fn record_success_for(&self, target: TargetId, probe_started: Option<Instant>) {
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        match (states.get(&target), probe_started) {
+            (None | Some(CircuitState::Closed { .. }), None) => {}
+            (
+                Some(CircuitState::HalfOpen {
+                    probe_started: active,
+                }),
+                Some(owner),
+            ) if *active == owner => {}
+            _ => return,
+        }
+        states.remove(&target);
     }
 
     pub(crate) fn retain_targets(&self, live: &BTreeSet<TargetId>) {
@@ -92,13 +146,47 @@ impl CircuitBreaker {
             .retain(|target, _| live.contains(target));
     }
 
+    #[cfg(test)]
     pub(crate) fn record_failure(&self, target: TargetId, class: AttemptFailureClass) {
+        self.record_failure_for(target, class, None);
+    }
+
+    fn record_failure_for(
+        &self,
+        target: TargetId,
+        class: AttemptFailureClass,
+        probe_started: Option<Instant>,
+    ) {
         if !counts_toward_circuit(class) {
+            let mut states = self.inner.lock().expect("circuit state lock poisoned");
+            if matches!(
+                states.get(&target),
+                Some(CircuitState::HalfOpen {
+                    probe_started: active
+                }) if Some(*active) == probe_started
+            ) {
+                if matches!(
+                    class,
+                    AttemptFailureClass::Cancelled | AttemptFailureClass::Ambiguous
+                ) {
+                    states.insert(
+                        target,
+                        CircuitState::Open {
+                            until: Instant::now() + self.open_duration,
+                        },
+                    );
+                } else {
+                    states.remove(&target);
+                }
+            }
             return;
         }
         let now = Instant::now();
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
         let next = match states.get(&target).copied() {
+            Some(CircuitState::HalfOpen {
+                probe_started: active,
+            }) if Some(active) != probe_started => return,
             Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. }) => CircuitState::Open {
                 until: now + self.open_duration,
             },
@@ -151,7 +239,6 @@ const fn counts_toward_circuit(class: AttemptFailureClass) -> bool {
         class,
         AttemptFailureClass::Connect
             | AttemptFailureClass::Timeout
-            | AttemptFailureClass::RateLimit
             | AttemptFailureClass::UpstreamServer
     )
 }
@@ -164,33 +251,110 @@ mod tests {
     fn opens_half_opens_and_recovers() {
         let breaker = CircuitBreaker::new(2, Duration::from_millis(5));
         let target = TargetId::new();
-        assert!(breaker.try_acquire(target));
+        assert!(breaker.try_acquire(target).is_some());
         breaker.record_failure(target, AttemptFailureClass::Connect);
-        assert!(breaker.try_acquire(target));
+        assert!(breaker.try_acquire(target).is_some());
         breaker.record_failure(target, AttemptFailureClass::UpstreamServer);
         assert!(!breaker.is_selectable(target));
-        assert!(!breaker.try_acquire(target));
+        assert!(breaker.try_acquire(target).is_none());
         std::thread::sleep(Duration::from_millis(8));
         assert!(breaker.is_selectable(target));
-        assert!(breaker.try_acquire(target));
-        assert!(!breaker.try_acquire(target));
-        breaker.record_success(target);
-        assert!(breaker.try_acquire(target));
+        let mut probe = breaker.try_acquire(target).unwrap();
+        assert!(breaker.try_acquire(target).is_none());
+        probe.record_success();
+        drop(probe);
+        assert!(breaker.try_acquire(target).is_some());
     }
 
     #[test]
-    fn client_protocol_and_ambiguous_failures_do_not_trip_circuit() {
+    fn client_rate_limit_protocol_and_ambiguous_failures_do_not_trip_circuit() {
         let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
         let target = TargetId::new();
         for class in [
             AttemptFailureClass::UpstreamClient,
+            AttemptFailureClass::RateLimit,
             AttemptFailureClass::Protocol,
             AttemptFailureClass::Cancelled,
             AttemptFailureClass::Ambiguous,
         ] {
             breaker.record_failure(target, class);
-            assert!(breaker.try_acquire(target));
+            assert!(breaker.try_acquire(target).is_some());
         }
+
+        let half_open = CircuitBreaker::new(1, Duration::from_millis(1));
+        half_open.record_failure(target, AttemptFailureClass::Connect);
+        std::thread::sleep(Duration::from_millis(2));
+        let mut probe = half_open.try_acquire(target).unwrap();
+        probe.record_failure(AttemptFailureClass::RateLimit);
+        drop(probe);
+        assert_eq!(half_open.open_count(), 0);
+    }
+
+    #[test]
+    fn a_live_half_open_probe_is_never_joined_and_cancellation_reopens_it() {
+        let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
+        let target = TargetId::new();
+        breaker.record_failure(target, AttemptFailureClass::Connect);
+        std::thread::sleep(Duration::from_millis(8));
+        let probe = breaker.try_acquire(target).unwrap();
+        std::thread::sleep(Duration::from_millis(8));
+        assert!(breaker.try_acquire(target).is_none());
+        drop(probe);
+        assert!(!breaker.is_selectable(target));
+    }
+
+    #[test]
+    fn uncertain_half_open_failures_reopen_the_circuit() {
+        for class in [
+            AttemptFailureClass::Cancelled,
+            AttemptFailureClass::Ambiguous,
+        ] {
+            let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
+            let target = TargetId::new();
+            breaker.record_failure(target, AttemptFailureClass::Connect);
+            std::thread::sleep(Duration::from_millis(8));
+
+            let mut probe = breaker.try_acquire(target).unwrap();
+            probe.record_failure(class);
+            drop(probe);
+
+            assert!(!breaker.is_selectable(target));
+            assert!(breaker.try_acquire(target).is_none());
+            std::thread::sleep(Duration::from_millis(8));
+            assert!(
+                breaker.try_acquire(target).is_some(),
+                "the unresolved probe must become retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_attempt_outcomes_cannot_release_a_half_open_probe() {
+        let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
+        let target = TargetId::new();
+        let mut stale = breaker.try_acquire(target).unwrap();
+        breaker.record_failure(target, AttemptFailureClass::Connect);
+        std::thread::sleep(Duration::from_millis(8));
+        let mut probe = breaker.try_acquire(target).unwrap();
+
+        stale.record_success();
+        assert!(breaker.try_acquire(target).is_none());
+        probe.record_success();
+        assert!(breaker.try_acquire(target).is_some());
+    }
+
+    #[test]
+    fn stale_success_cannot_close_a_newer_open_circuit() {
+        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let target = TargetId::new();
+        let mut stale = breaker.try_acquire(target).unwrap();
+        let mut failing = breaker.try_acquire(target).unwrap();
+
+        failing.record_failure(AttemptFailureClass::Connect);
+        stale.record_success();
+
+        assert!(!breaker.is_selectable(target));
+        assert!(breaker.try_acquire(target).is_none());
     }
 
     #[test]

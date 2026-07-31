@@ -44,6 +44,45 @@ fn event() -> RequestMetadataEvent {
 }
 
 #[test]
+fn metadata_validation_rejects_relational_and_numeric_poison_events() {
+    let valid = event();
+    assert!(validate_request_metadata_event(&valid).is_ok());
+
+    let mut invalid = valid.clone();
+    invalid.first_byte_ms = Some(invalid.latency_ms + 1);
+    assert!(validate_request_metadata_event(&invalid).is_err());
+
+    invalid = valid.clone();
+    invalid.cached_input_tokens = Some(invalid.input_tokens.unwrap() + 1);
+    assert!(validate_request_metadata_event(&invalid).is_err());
+
+    invalid = valid.clone();
+    invalid.input_tokens = None;
+    assert!(validate_request_metadata_event(&invalid).is_err());
+
+    invalid = valid;
+    invalid.media_units = Some(Decimal::from_i128_with_scale(
+        1_000_000_000_000_000_000_000_000,
+        6,
+    ));
+    assert!(validate_request_metadata_event(&invalid).is_err());
+}
+
+#[test]
+fn metadata_validation_rejects_more_attempts_than_a_route_can_make() {
+    let mut invalid = event();
+    let attempt = invalid.attempts[0].clone();
+    invalid.attempts = (1..=olp_domain::MAX_ROUTE_TARGETS + 1)
+        .map(|ordinal| RequestAttemptMetadata {
+            id: Uuid::now_v7(),
+            ordinal: u16::try_from(ordinal).unwrap(),
+            ..attempt.clone()
+        })
+        .collect();
+    assert!(validate_request_metadata_event(&invalid).is_err());
+}
+
+#[test]
 fn overflow_is_counted_instead_of_silently_swallowed() {
     let (emitter, _receiver) = RequestMetadataEmitter::bounded(1);
     assert!(emitter.emit(event()).is_ok());
@@ -281,4 +320,11 @@ fn numeric_request_metadata_gap_counts_are_integral_nonnegative_and_bounded() {
     assert!(
         request_metadata_gap_count_from_decimal(Decimal::from_parts(0, 0, 1, false, 0)).is_err()
     );
+}
+
+#[test]
+fn stream_trim_counter_reports_only_new_evictions_and_survives_reset() {
+    assert_eq!(trim_count_delta(12, 10), 2);
+    assert_eq!(trim_count_delta(12, 12), 0);
+    assert_eq!(trim_count_delta(2, 12), 2);
 }

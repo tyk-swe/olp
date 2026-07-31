@@ -408,6 +408,51 @@ fn asymmetric_validation_enforces_signature_issuer_audience_nonce_and_time() {
     );
 }
 
+#[test]
+fn oidc_display_names_reject_unsafe_formatting_and_accept_normal_unicode() {
+    let configuration = test_configuration();
+    let now = Utc::now().timestamp();
+    let jwks: JwkSet = serde_json::from_value(json!({"keys": [{
+        "kty": "OKP", "crv": "Ed25519", "use": "sig", "alg": "EdDSA",
+        "kid": "test-key", "x": ED25519_PUBLIC_X
+    }]}))
+    .unwrap();
+    let claims = |name| {
+        json!({
+            "iss": configuration.issuer,
+            "sub": "subject",
+            "aud": configuration.client_id,
+            "iat": now,
+            "exp": now + 300,
+            "nonce": "expected-nonce",
+            "name": name
+        })
+    };
+
+    let identity = validate_id_token(
+        &sign_ed_token(&claims("José 🚀")),
+        &jwks,
+        &configuration,
+        "expected-nonce",
+        false,
+    )
+    .unwrap();
+    assert_eq!(identity.display_name.as_deref(), Some("José 🚀"));
+
+    for name in ["safe\u{202e}txt", "look\u{200b}alike"] {
+        assert!(
+            validate_id_token(
+                &sign_ed_token(&claims(name)),
+                &jwks,
+                &configuration,
+                "expected-nonce",
+                false,
+            )
+            .is_err()
+        );
+    }
+}
+
 fn sign_ed_token(claims: &Value) -> String {
     let private_der = STANDARD.decode(ED25519_PRIVATE_DER_B64).unwrap();
     let mut header = Header::new(Algorithm::EdDSA);

@@ -6,7 +6,7 @@ use olp_domain::{
 use olp_protocols::openai::{
     OpenAiVideoDeleteResponse, OpenAiVideoListResponse, OpenAiVideoObject,
     decode_video_content_body, decode_video_delete_response, decode_video_list_response,
-    decode_video_object, encode_video_create, encode_video_list,
+    decode_video_object, encode_video_create, encode_video_list, valid_video_job_id,
 };
 use reqwest::{Method, multipart};
 
@@ -193,7 +193,11 @@ pub(super) async fn execute(
             }
             if !response.status().is_success() {
                 return Err(connector
-                    .map_error_response(response.response, response.attempt_deadline)
+                    .map_error_response(
+                        response.response,
+                        response.attempt_deadline,
+                        Some(&request.attempt.upstream_model),
+                    )
                     .await);
             }
             require_content_type(&response, "application/json")?;
@@ -212,12 +216,7 @@ pub(super) async fn execute(
 }
 
 fn video_job_path(job_id: &str, suffix: Option<&str>) -> Result<String, TransportError> {
-    if job_id.is_empty()
-        || job_id.len() > 256
-        || !job_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
+    if !valid_video_job_id(job_id) {
         return Err(protocol_body_error("OpenAI video job ID is invalid"));
     }
     Ok(suffix.map_or_else(

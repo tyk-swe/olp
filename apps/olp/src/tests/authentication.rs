@@ -84,7 +84,7 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
 
 #[tokio::test]
 async fn every_inference_surface_and_models_endpoint_requires_its_own_well_formed_header() {
-    let (state, key) = inference_state(false);
+    let (state, _key) = inference_state(false);
     let app = public_router(state.gateway_state_for_test());
     let cases = [
         (
@@ -185,18 +185,6 @@ async fn every_inference_surface_and_models_endpoint_requires_its_own_well_forme
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(Body::from("{}"))
                 .unwrap();
-            request.headers_mut().insert(
-                axum::http::header::AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {key}")).unwrap(),
-            );
-            request.headers_mut().insert(
-                HeaderName::from_static("x-api-key"),
-                HeaderValue::from_str(&key).unwrap(),
-            );
-            request.headers_mut().insert(
-                HeaderName::from_static("x-goog-api-key"),
-                HeaderValue::from_str(&key).unwrap(),
-            );
             match supplied {
                 Some(value) => {
                     request
@@ -275,6 +263,50 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
 }
 
 #[tokio::test]
+async fn api_key_expiry_uses_the_monotonic_database_clock() {
+    let (state, key) = inference_state(false);
+    let application_time = chrono::Utc::now();
+    let expires_at = application_time + chrono::Duration::hours(1);
+    let pinned = state.runtime.pin();
+    let mut api_keys = pinned.api_keys.clone();
+    api_keys.values_mut().next().unwrap().expires_at = Some(expires_at);
+    state
+        .runtime
+        .install(
+            RuntimeSnapshot {
+                generation: RuntimeGeneration {
+                    id: RuntimeGenerationId::new(),
+                    ordinal: pinned.generation.ordinal + 1,
+                    activated_at: application_time,
+                },
+                providers: pinned.providers.clone(),
+                routes: pinned.routes.clone(),
+                api_keys,
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    state
+        .runtime
+        .sample_database_time(application_time + chrono::Duration::hours(2));
+    state
+        .runtime
+        .sample_database_time(application_time - chrono::Duration::hours(2));
+
+    assert!(expires_at > chrono::Utc::now());
+    let response = public_router(state.gateway_state_for_test())
+        .oneshot(
+            Request::get("/openai/v1/models")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior() {
     let (state, key) = inference_state(false);
     let app = public_router(state.gateway_state_for_test());
@@ -338,7 +370,7 @@ async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior(
 }
 
 #[tokio::test]
-async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode() {
+async fn malformed_json_inference_requests_with_hard_limits_fail_closed_before_decode() {
     let (state, key) = inference_state(true);
     let app = public_router(state.gateway_state_for_test());
     for (path, header_name, header_value, content_type, body, pointer, expected) in [
@@ -368,15 +400,6 @@ async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode
             "{",
             "/error/status",
             "UNAVAILABLE",
-        ),
-        (
-            "/openai/v1/audio/transcriptions",
-            axum::http::header::AUTHORIZATION,
-            format!("Bearer {key}"),
-            "multipart/form-data",
-            "not-multipart",
-            "/error/code",
-            "distributed_limits_unavailable",
         ),
     ] {
         let response = app

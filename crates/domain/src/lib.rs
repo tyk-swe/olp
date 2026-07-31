@@ -14,7 +14,8 @@ pub mod routing;
 
 pub use auth::{
     ApiKey, ApiKeyAuthorizationError, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus,
-    InvalidRole, OwnerInvariantError, Permission, Role, authorize_api_key, validate_owner_change,
+    InvalidRole, MAX_API_KEY_ALLOWED_ROUTES, MAX_TOKENS_PER_MINUTE, OwnerInvariantError,
+    Permission, Role, authorize_api_key, validate_owner_change,
 };
 pub use canonical::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, CanonicalResult, ContentPart,
@@ -32,6 +33,7 @@ pub use canonical::{
     VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
     media_handle_from_inline_marker, validate_event_sequence,
 };
+pub use ids::has_unsafe_display_characters;
 pub use ids::{
     ApiKeyId, ApiKeyLookupId, ApiKeyLookupIdError, AttemptId, CredentialVersionId, DurationMs,
     ProviderId, RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId, TargetId,
@@ -51,8 +53,8 @@ pub use provider_configuration::{
     validate_provider_configuration,
 };
 pub use routing::{
-    AttemptPlan, Capability, InvalidProviderKind, Provider, ProviderKind, Route,
-    RouteValidationError, RoutingError, RuntimeGeneration, RuntimeSnapshot,
-    SnapshotValidationError, Target, select_attempts, select_attempts_filtered,
+    AttemptPlan, Capability, InvalidProviderKind, MAX_ROUTE_TARGETS, MAX_ROUTE_TIMEOUT_MS,
+    Provider, ProviderKind, Route, RouteValidationError, RoutingError, RuntimeGeneration,
+    RuntimeSnapshot, SnapshotValidationError, Target, select_attempts, select_attempts_filtered,
     weighted_rendezvous_score,
 };

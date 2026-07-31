@@ -30,6 +30,10 @@ enum AdmissionSurface {
     Management,
 }
 
+fn management_path(path: &str) -> bool {
+    path == "/api" || path.starts_with("/api/") || path == "/openapi.json"
+}
+
 #[derive(Clone)]
 pub(crate) struct PublicAdmission {
     inner: Arc<AdmissionInner>,
@@ -234,9 +238,14 @@ pub(crate) async fn admit_public_request(
         .then(|| gateway::InferenceEndpoint::classify(request.method(), request.uri().path()))
         .flatten();
     let surface = if endpoint.is_some() {
-        AdmissionSurface::Inference
+        Some(AdmissionSurface::Inference)
+    } else if management_path(request.uri().path()) {
+        Some(AdmissionSurface::Management)
     } else {
-        AdmissionSurface::Management
+        None
+    };
+    let Some(surface) = surface else {
+        return next.run(request).await;
     };
     let permit = match state.admission.try_acquire(surface) {
         Ok(permit) => permit,

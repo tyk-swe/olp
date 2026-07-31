@@ -12,6 +12,10 @@
 local RESPONSE_VERSION = 1
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
 local MINUTE_MS = 60000
+-- Keep per-reservation reconciliation markers beyond the longest 11-minute
+-- lease. Individual marker fields expire, so a continuously active key stays
+-- bounded while late provider usage can still be applied exactly once.
+local RECONCILIATION_RETENTION_MS = 900000
 
 local function failure(reason)
   return {RESPONSE_VERSION, -1, reason, 0, 0, 0}
@@ -192,7 +196,6 @@ if rate_enabled then
       "tpm",
       tpm_limit > 0 and requested_tokens or 0
     )
-    redis.call("PEXPIRE", KEYS[1], window_remaining_ms)
   else
     if rpm_limit > 0 then
       redis.call("HINCRBY", KEYS[1], "rpm", 1)
@@ -200,10 +203,12 @@ if rate_enabled then
     if tpm_limit > 0 then
       redis.call("HINCRBY", KEYS[1], "tpm", requested_tokens)
     end
-    -- Repair manually-created state without moving the fixed UTC boundary.
-    if redis.call("PTTL", KEYS[1]) < 1 then
-      redis.call("PEXPIRE", KEYS[1], window_remaining_ms)
-    end
+  end
+  -- Preserve reconciliation markers across minute resets without ever
+  -- shortening a manually configured or already-longer lifetime.
+  local required_ttl = window_remaining_ms + RECONCILIATION_RETENTION_MS
+  if redis.call("PTTL", KEYS[1]) < required_ttl then
+    redis.call("PEXPIRE", KEYS[1], required_ttl)
   end
 end
 

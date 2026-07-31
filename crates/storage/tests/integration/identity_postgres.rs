@@ -7,6 +7,8 @@ use olp_storage::{
 };
 use uuid::Uuid;
 
+const IDENTITY_EMAIL_LOCK_SEED: i64 = 0x4f4c_505f_4944;
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn local_identity_lifecycle_is_transactional_and_audited() {
@@ -144,6 +146,26 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
             )
             .await
             .is_err()
+    );
+
+    let unchanged = store
+        .update_user_access(
+            accepted.user.id,
+            Some(Role::Operator),
+            Some(true),
+            accepted.user.etag,
+            owner.user_id,
+        )
+        .await
+        .unwrap();
+    assert_eq!(unchanged.etag, accepted.user.etag);
+    assert!(
+        !store
+            .list_sessions(accepted.user.id, None, 50)
+            .await
+            .unwrap()
+            .0
+            .is_empty()
     );
 
     let updated = store
@@ -348,4 +370,118 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     assert!(local_login_audits.iter().any(|(actor, outcome, resource)| {
         actor.is_none() && outcome == "failure" && resource.is_none()
     }));
+}
+
+#[tokio::test]
+#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+async fn invitation_expiring_behind_identity_lock_cannot_be_accepted() {
+    let db = olp_storage::test_support::TestDb::create_migrated("identity_expiry_lock").await;
+    let store = db.store(5).await;
+    let owner = store
+        .setup_installation(InstallationSetupInput {
+            installation_name: "Invitation expiry lock".to_owned(),
+            email: "owner@example.test".to_owned(),
+            display_name: "Owner".to_owned(),
+            password_hash: hash_password("correct horse battery staple").unwrap(),
+        })
+        .await
+        .unwrap();
+    let master_key = MasterKey::new(1, [9; 32]);
+    let fingerprint = idempotency_fingerprint(&"invite-expiry-lock-001").unwrap();
+    let invitation = store
+        .create_invitation(
+            NewInvitation {
+                email: "waiting@example.test".to_owned(),
+                role: Role::Viewer,
+                expires_at: Utc::now() + Duration::days(1),
+                actor: owner.user_id,
+                idempotency_key: "invite-expiry-lock-001".to_owned(),
+            },
+            ReplayableIdempotency::new(fingerprint, &master_key),
+            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+        )
+        .await
+        .unwrap();
+    let IdempotencyOutcome::Executed {
+        value: invitation, ..
+    } = invitation
+    else {
+        panic!("new invitation must execute");
+    };
+
+    let mut blocker = store.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
+        .bind("waiting@example.test")
+        .bind(IDENTITY_EMAIL_LOCK_SEED)
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    let expires_at: chrono::DateTime<Utc> = sqlx::query_scalar(
+        "UPDATE invitations SET expires_at = clock_timestamp() + interval '500 milliseconds' \
+         WHERE id = $1 RETURNING expires_at",
+    )
+    .bind(invitation.invitation.id)
+    .fetch_one(&mut *blocker)
+    .await
+    .unwrap();
+
+    let accepting_store = store.clone();
+    let token = invitation.material.token().to_owned();
+    let acceptance = tokio::spawn(async move {
+        accepting_store
+            .accept_invitation(
+                AcceptInvitation {
+                    token,
+                    display_name: "Waiting".to_owned(),
+                    password_hash: hash_password("another correct local password").unwrap(),
+                },
+                &SessionMaterial::generate(),
+                Duration::hours(1),
+            )
+            .await
+    });
+    let mut waiting = false;
+    for _ in 0..100 {
+        waiting = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks \
+             WHERE locktype = 'advisory' AND database = \
+                   (SELECT oid FROM pg_database WHERE datname = current_database()) \
+               AND NOT granted)",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        if waiting {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        waiting,
+        "invitation acceptance did not wait for the email lock"
+    );
+    loop {
+        let expired: bool = sqlx::query_scalar("SELECT clock_timestamp() >= $1")
+            .bind(expires_at)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        if expired {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    blocker.commit().await.unwrap();
+
+    assert!(matches!(
+        acceptance.await.unwrap(),
+        Err(IdentityError::InvitationUnavailable)
+    ));
+    let member_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)")
+            .bind("waiting@example.test")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert!(!member_exists);
 }

@@ -4,6 +4,35 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Returns true for control, bidi-formatting, and default-ignorable code points
+/// that can make operator-facing labels misleading.
+#[must_use]
+pub fn has_unsafe_display_characters(value: &str) -> bool {
+    value.chars().any(|character| {
+        character.is_control()
+            || matches!(
+                character as u32,
+                0x00ad
+                    | 0x034f
+                    | 0x061c
+                    | 0x115f..=0x1160
+                    | 0x17b4..=0x17b5
+                    | 0x180b..=0x180f
+                    | 0x200b..=0x200f
+                    | 0x2028..=0x202e
+                    | 0x2060..=0x206f
+                    | 0x2800
+                    | 0x3164
+                    | 0xfe00..=0xfe0f
+                    | 0xfeff
+                    | 0xffa0
+                    | 0x1bca0..=0x1bca3
+                    | 0x1d173..=0x1d17a
+                    | 0xe0000..=0xe0fff
+            )
+    })
+}
+
 macro_rules! uuid_id {
     ($name:ident) => {
         #[derive(
@@ -225,3 +254,15 @@ impl From<ApiKeyLookupId> for String {
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 #[error("API key lookup ID must be 8-40 ASCII letters, digits, or underscores")]
 pub struct ApiKeyLookupIdError;
+
+#[cfg(test)]
+mod tests {
+    use super::has_unsafe_display_characters;
+
+    #[test]
+    fn operator_labels_reject_invisible_and_bidi_controls() {
+        assert!(!has_unsafe_display_characters("José 🚀"));
+        assert!(has_unsafe_display_characters("safe\u{202e}txt"));
+        assert!(has_unsafe_display_characters("look\u{200b}alike"));
+    }
+}

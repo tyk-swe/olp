@@ -200,6 +200,14 @@ pub(super) async fn setup(
                 "setup_already_completed",
                 "This installation already has an owner.",
             ),
+            olp_storage::PersistenceError::InvalidInstallationName => {
+                let mut errors = FieldErrors::new();
+                errors.insert(
+                    "installation_name".to_owned(),
+                    vec!["Use visible characters without control or bidi formatting.".to_owned()],
+                );
+                Problem::validation(errors)
+            }
             other => map_persistence(other),
         })?;
     state.clear_bootstrap_token().await;
@@ -356,7 +364,7 @@ pub(super) async fn current_session(
     let supplied_csrf = cookie(&headers, CSRF_COOKIE)?
         .filter(|csrf| SessionMaterial::verify_csrf(csrf, &principal.csrf_digest));
     let replacement = supplied_csrf.is_none().then(CsrfMaterial::generate);
-    let remaining = principal.expires_at - chrono::Utc::now();
+    let remaining = principal.expires_at - principal.database_now;
     if replacement.is_some() && validate_session_cookie_ttl(remaining).is_err() {
         // This request was authenticated with the session that arrived in its
         // Cookie header, but a concurrent login or security transition can
@@ -438,7 +446,8 @@ pub(super) fn csrf_recovery_cas_failure_response(session_is_current: bool) -> Re
     tag = "sessions",
     responses(
         (status = 204, description = "Session ended and browser credentials expired"),
-        (status = 403, description = "Origin check failed", body = Problem)
+        (status = 403, description = "Origin check failed", body = Problem),
+        (status = 503, description = "Session revocation could not be confirmed", body = Problem)
     )
 )]
 pub(super) async fn logout(
@@ -452,14 +461,17 @@ pub(super) async fn logout(
             if let Some(token) = token
                 && let Err(error) = state.store().revoke_session_by_token(token).await
             {
-                // Logout is intentionally idempotent and fail-closed in the browser.
-                // A transient database failure must not prevent credential expiry.
                 warn!(%error, "server-side logout revocation failed");
+                Problem::service_unavailable("database_unavailable").into_response()
+            } else {
+                StatusCode::NO_CONTENT.into_response()
             }
-            StatusCode::NO_CONTENT.into_response()
         }
         Err(problem) => problem.into_response(),
     };
+    // Logout is fail-closed in the browser. The 503 reports that server-side
+    // revocation is unconfirmed, but a database outage must never leave the
+    // session and CSRF cookies usable on a shared machine.
     expire_session_cookies(&mut response);
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
@@ -604,19 +616,23 @@ pub(super) fn validate_setup(request: &SetupRequest) -> Result<(), Problem> {
             .or_default()
             .push("Use between 12 and 1,024 characters.".to_owned());
     }
-    if request.display_name.trim().is_empty() || request.display_name.chars().count() > 100 {
+    if request.display_name.trim().is_empty()
+        || request.display_name.chars().count() > 100
+        || olp_domain::has_unsafe_display_characters(&request.display_name)
+    {
         errors
             .entry("display_name".to_owned())
             .or_default()
-            .push("Use between 1 and 100 characters.".to_owned());
+            .push("Use 1-100 visible characters without control or bidi formatting.".to_owned());
     }
     if request.installation_name.trim().is_empty()
         || request.installation_name.chars().count() > 100
+        || olp_domain::has_unsafe_display_characters(&request.installation_name)
     {
         errors
             .entry("installation_name".to_owned())
             .or_default()
-            .push("Use between 1 and 100 characters.".to_owned());
+            .push("Use 1-100 visible characters without control or bidi formatting.".to_owned());
     }
     if errors.is_empty() {
         Ok(())

@@ -332,7 +332,8 @@ async fn update_reconciliation_lifecycle(
         "UPDATE async_media_jobs SET lifecycle_state = $2,
                 upstream_job_id = COALESCE($3, upstream_job_id),
                 reconciliation_error = $4, next_reconciliation_at = now(), etag = uuidv7()
-         WHERE id = $1 AND lifecycle_state = ANY($5::text[])",
+         WHERE id = $1 AND lifecycle_state = ANY($5::text[])
+           AND ($3::text IS NULL OR upstream_job_id IS NULL OR upstream_job_id = $3)",
         id,
         lifecycle.as_str(),
         upstream_job_id,
@@ -340,8 +341,29 @@ async fn update_reconciliation_lifecycle(
         &allowed
     )
     .execute(store.pool())
-    .await?;
+    .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) if is_upstream_identity_conflict(&error) => {
+            return Err(MediaJobError::UpstreamIdentityConflict);
+        }
+        Err(error) => return Err(error.into()),
+    };
     if result.rows_affected() == 0 {
+        if let Some(incoming) = upstream_job_id {
+            let stored = sqlx::query_scalar!(
+                "SELECT upstream_job_id FROM async_media_jobs WHERE id = $1",
+                id
+            )
+            .fetch_optional(store.pool())
+            .await?;
+            if stored
+                .flatten()
+                .is_some_and(|existing| existing != incoming)
+            {
+                return Err(MediaJobError::UpstreamIdentityConflict);
+            }
+        }
         return Err(store.missing_or_changed(id).await?);
     }
     store.media_job(id).await

@@ -35,15 +35,18 @@ export async function listRouteDraftPage(
 }
 
 export async function listRoutes(signal?: ReadSignal): Promise<ActiveRoute[]> {
-  return collectCursorPages((cursor) => listRoutePage(cursor, getAbortSignal(signal)));
+  return collectCursorPages((cursor, remaining) =>
+    listRoutePage(cursor, getAbortSignal(signal), remaining)
+  );
 }
 
 export async function listRoutePage(
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 50
 ): Promise<CursorPage<ActiveRoute>> {
   const response = await apiClient.GET('/api/v1/routes', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: Math.min(50, limit), cursor } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);
@@ -113,16 +116,19 @@ export async function listRouteRevisions(
   routeId: string,
   signal?: AbortSignal
 ): Promise<RouteRevision[]> {
-  return collectCursorPages((cursor) => listRouteRevisionPage(routeId, cursor, signal));
+  return collectCursorPages((cursor, remaining) =>
+    listRouteRevisionPage(routeId, cursor, signal, remaining)
+  );
 }
 
 async function listRouteRevisionPage(
   routeId: string,
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 100
 ): Promise<CursorPage<RouteRevision>> {
   const response = await apiClient.GET('/api/v1/routes/{route_id}/revisions', {
-    params: { path: { route_id: routeId }, query: { cursor, limit: 100 } },
+    params: { path: { route_id: routeId }, query: { cursor, limit: Math.min(100, limit) } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);

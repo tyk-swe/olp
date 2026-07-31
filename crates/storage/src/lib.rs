@@ -43,9 +43,9 @@ pub use oidc::{
 pub use operations::{
     AttemptRecord, AuditRecord, OperationsError, OperationsPage, PriceInput, PricingRevisionRecord,
     PrometheusOperationsSummary, ProviderHealthRecord, RequestDetail, RequestFilters,
-    RequestRecord, RuntimeGenerationRecord, SettingRecord, TimestampCursor, UsageBreakdown,
-    UsageBreakdownReport, UsageCompleteness, UsageDimension, UsageFilters, UsageGranularity,
-    UsagePoint, UsageRangeCoverage, UsageSeries, UsageSummary,
+    RequestPartitionHealth, RequestRecord, RuntimeGenerationRecord, SettingRecord, TimestampCursor,
+    UsageBreakdown, UsageBreakdownReport, UsageCompleteness, UsageDimension, UsageFilters,
+    UsageGranularity, UsagePoint, UsageRangeCoverage, UsageSeries, UsageSummary,
 };
 pub use reencryption::{
     EncryptedTable, KeyVersionReference, MasterKeyEncryptionStatus, MasterKeyReencryptionBatch,
@@ -137,7 +137,8 @@ mod tests {
                 "duplicate migration version: {name}"
             );
         }
-        assert!(versions.contains(&29));
+        let latest = *versions.last().expect("at least one migration");
+        assert_eq!(versions, (1..=latest).collect());
     }
 
     #[test]

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO route_draft_targets (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) SELECT input.id, input.routing_id, $1, input.provider_model_id, input.priority, input.weight, input.timeout_ms, input.position FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::int[], $6::int[], $7::int[], $8::int[]) AS input(id, routing_id, provider_model_id, priority, weight, timeout_ms, position)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "UuidArray",
+        "UuidArray",
+        "Int4Array",
+        "Int4Array",
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7de9e0612d1e8a1c181c2b8d09b0963c1a938ae12547c6b52cd6f55f8088d52a"
+}

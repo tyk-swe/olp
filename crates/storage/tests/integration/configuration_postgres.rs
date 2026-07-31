@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_domain::{
-    ApiKeyLimits, ApiKeyScope, CredentialVersionId, OperationKind, ProviderId, ProviderKind,
-    RouteSlug, RuntimeSnapshot,
+    ApiKeyLimits, ApiKeyScope, CredentialVersionId, MAX_ROUTE_TARGETS, OperationKind, ProviderId,
+    ProviderKind, RouteSlug, RuntimeSnapshot,
 };
 use olp_storage::{
     AuthHmacKey, CapabilityCertificationOutcome, CapabilityRecord, ConfigurationError,
@@ -432,6 +432,82 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
         .await
         .unwrap()
         .expect_executed();
+    let maximum_route = store
+        .create_route_draft(
+            NewRouteDraft {
+                slug: "maximum-route".to_owned(),
+                operations: vec![OperationKind::Generation],
+                overall_timeout_ms: 30_000,
+                max_attempts: u16::try_from(MAX_ROUTE_TARGETS).unwrap(),
+                targets: (0..MAX_ROUTE_TARGETS)
+                    .map(|position| NewRouteTarget {
+                        provider_id,
+                        upstream_model: "gpt-test".to_owned(),
+                        priority: u16::try_from(position).unwrap(),
+                        weight: 1,
+                        timeout_ms: 20_000,
+                    })
+                    .collect(),
+                actor,
+                idempotency_key: "route-configuration-maximum-01".to_owned(),
+            },
+            test_replay(&master_key, "route-configuration-maximum-01"),
+            empty_created_response,
+        )
+        .await
+        .unwrap()
+        .expect_executed();
+    let maximum_before = store.get_route_draft(maximum_route.id).await.unwrap();
+    assert_eq!(maximum_before.targets.len(), MAX_ROUTE_TARGETS);
+    let maximum_etag = store
+        .replace_route_draft(
+            maximum_route.id,
+            maximum_before.etag,
+            &ReplaceRouteDraftInput {
+                slug: "maximum-route".to_owned(),
+                operations: vec![OperationKind::Generation, OperationKind::Embeddings],
+                overall_timeout_ms: 30_000,
+                max_attempts: i16::try_from(MAX_ROUTE_TARGETS).unwrap(),
+                targets: (0..MAX_ROUTE_TARGETS)
+                    .map(|position| {
+                        (
+                            model_id,
+                            i32::try_from(position).unwrap(),
+                            if position + 1 == MAX_ROUTE_TARGETS {
+                                2
+                            } else {
+                                1
+                            },
+                            20_000,
+                        )
+                    })
+                    .collect(),
+            },
+            actor,
+        )
+        .await
+        .unwrap();
+    let maximum_after = store.get_route_draft(maximum_route.id).await.unwrap();
+    assert_eq!(maximum_after.etag, maximum_etag);
+    assert_eq!(maximum_after.targets.len(), MAX_ROUTE_TARGETS);
+    assert_eq!(maximum_after.operations.len(), 2);
+    for (before, after) in maximum_before
+        .targets
+        .iter()
+        .zip(&maximum_after.targets)
+        .take(MAX_ROUTE_TARGETS - 1)
+    {
+        assert_ne!(before.id, after.id);
+        assert_eq!(before.routing_id, after.routing_id);
+    }
+    assert_ne!(
+        maximum_before.targets[MAX_ROUTE_TARGETS - 1].id,
+        maximum_after.targets[MAX_ROUTE_TARGETS - 1].id
+    );
+    assert_ne!(
+        maximum_before.targets[MAX_ROUTE_TARGETS - 1].routing_id,
+        maximum_after.targets[MAX_ROUTE_TARGETS - 1].routing_id
+    );
     let simulation = store
         .simulate_route_draft(
             route.id,
@@ -682,7 +758,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
         .await
         .unwrap();
     assert_eq!(key_revocation.release.sequence, 8);
-    let current_api_keys = store.current_runtime_api_keys().await.unwrap();
+    let (current_api_keys, _) = store.current_runtime_api_keys().await.unwrap();
     assert!(
         !current_api_keys
             .keys()
@@ -705,29 +781,49 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     historical_runtime.api_keys = current_api_keys;
     assert!(historical_runtime.api_keys.is_empty());
 
-    let corrupt_generation_id = Uuid::now_v7();
-    let corrupt_sequence: i64 = sqlx::query_scalar(
-        "INSERT INTO runtime_generations \
-         (id, compiled_release, release_sha256, created_by) VALUES ($1, $2, $3, $4) \
-         RETURNING sequence",
-    )
-    .bind(corrupt_generation_id)
-    .bind(b"corrupt runtime envelope".as_slice())
-    .bind([0_u8; 32].as_slice())
-    .bind(actor)
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
+    let mut corrupt_generation_ids = Vec::new();
+    let mut corrupt_sequence = 0;
+    for _ in 0..17 {
+        let corrupt_generation_id = Uuid::now_v7();
+        corrupt_sequence = sqlx::query_scalar(
+            "INSERT INTO runtime_generations \
+             (id, compiled_release, release_sha256, created_by) VALUES ($1, $2, $3, $4) \
+             RETURNING sequence",
+        )
+        .bind(corrupt_generation_id)
+        .bind(b"corrupt runtime envelope".as_slice())
+        .bind([0_u8; 32].as_slice())
+        .bind(actor)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        corrupt_generation_ids.push(corrupt_generation_id);
+    }
     assert!(corrupt_sequence > key_revocation.release.sequence);
     let recent_valid = store.recent_valid_runtime_releases(16).await.unwrap();
     assert_eq!(recent_valid[0].sequence, key_revocation.release.sequence);
     assert!(
         recent_valid
             .iter()
-            .all(|release| release.generation_id != corrupt_generation_id)
+            .all(|release| !corrupt_generation_ids.contains(&release.generation_id))
     );
-    sqlx::query("DELETE FROM runtime_generations WHERE id = $1")
-        .bind(corrupt_generation_id)
+    let newest_page = store
+        .valid_runtime_release_page(4, None, None)
+        .await
+        .unwrap();
+    assert_eq!(newest_page.len(), 4);
+    let older_page = store
+        .valid_runtime_release_page(
+            4,
+            None,
+            Some(u64::try_from(newest_page.last().unwrap().sequence).unwrap()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(older_page.len(), 4);
+    assert!(older_page[0].sequence < newest_page.last().unwrap().sequence);
+    sqlx::query("DELETE FROM runtime_generations WHERE id = ANY($1)")
+        .bind(&corrupt_generation_ids)
         .execute(store.pool())
         .await
         .unwrap();
@@ -1318,6 +1414,28 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     .await
     .unwrap();
     assert_eq!(certification_audits, 4);
+
+    let contained = store
+        .force_disable_provider(
+            adc_provider_id,
+            adc_activated.etag,
+            actor,
+            "provider-force-disable-referenced-01",
+        )
+        .await
+        .unwrap();
+    let contained_runtime: RuntimeSnapshot =
+        serde_json::from_slice(&contained.release.unwrap().payload).unwrap();
+    assert!(
+        !contained_runtime
+            .providers
+            .contains_key(&ProviderId::from_uuid(adc_provider_id))
+    );
+    assert!(
+        !contained_runtime
+            .routes
+            .contains_key(&"default".parse::<RouteSlug>().unwrap())
+    );
 }
 
 async fn certify_all_capabilities(store: &PgStore, provider_id: Uuid) {

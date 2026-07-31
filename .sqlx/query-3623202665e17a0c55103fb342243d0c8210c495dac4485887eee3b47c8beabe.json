@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM audit_events WHERE ctid IN ( SELECT ctid FROM audit_events WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3623202665e17a0c55103fb342243d0c8210c495dac4485887eee3b47c8beabe"
+}

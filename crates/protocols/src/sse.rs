@@ -88,6 +88,8 @@ pub struct SseDecoder {
     retry_ms: Option<u64>,
     pending_bytes: usize,
     max_event_bytes: usize,
+    first_line: bool,
+    skip_lf: bool,
 }
 
 impl fmt::Debug for SseDecoder {
@@ -122,43 +124,54 @@ impl SseDecoder {
             retry_ms: None,
             pending_bytes: 0,
             max_event_bytes: max_event_bytes.max(1),
+            first_line: true,
+            skip_lf: false,
         }
     }
 
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<SseFrame>, SseDecodeError> {
         let mut frames = Vec::new();
         let mut remaining = chunk;
-
-        while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
-            let line_size = self.buffer.len().saturating_add(newline);
-            self.check_additional(line_size.saturating_add(1))?;
-            self.buffer.extend_from_slice(&remaining[..newline]);
-            let mut line = self.buffer.split();
-            if line.last() == Some(&b'\r') {
-                line.truncate(line.len() - 1);
+        // Copy whole runs between terminators. Every streamed provider token
+        // flows through here, so a per-byte append is the wrong constant
+        // factor; CR / LF / CRLF handling is preserved by `skip_lf`.
+        while !remaining.is_empty() {
+            if self.skip_lf {
+                self.skip_lf = false;
+                if remaining[0] == b'\n' {
+                    remaining = &remaining[1..];
+                    continue;
+                }
             }
+            let Some(index) = remaining
+                .iter()
+                .position(|byte| matches!(byte, b'\r' | b'\n'))
+            else {
+                self.check_additional(self.buffer.len().saturating_add(remaining.len()))?;
+                self.buffer.extend_from_slice(remaining);
+                break;
+            };
+            self.check_additional(self.buffer.len().saturating_add(index).saturating_add(1))?;
+            self.buffer.extend_from_slice(&remaining[..index]);
+            let line_size = self.buffer.len();
             self.pending_bytes = self.pending_bytes.saturating_add(line_size + 1);
+            let line = self.buffer.split();
             self.process_line(&line, &mut frames)?;
-            remaining = &remaining[newline + 1..];
+            self.skip_lf = remaining[index] == b'\r';
+            remaining = &remaining[index + 1..];
         }
-
-        self.check_additional(self.buffer.len().saturating_add(remaining.len()))?;
-        self.buffer.extend_from_slice(remaining);
         Ok(frames)
     }
 
     pub fn finish(&mut self) -> Result<Vec<SseFrame>, SseDecodeError> {
-        let mut frames = Vec::new();
-        if !self.buffer.is_empty() {
-            self.check_additional(self.buffer.len())?;
-            self.pending_bytes = self.pending_bytes.saturating_add(self.buffer.len());
-            let line = self.buffer.split().freeze();
-            self.process_line(&line, &mut frames)?;
-        }
-        if let Some(frame) = self.dispatch() {
-            frames.push(frame);
-        }
-        Ok(frames)
+        self.buffer.clear();
+        self.event = None;
+        self.data_lines.clear();
+        self.has_data = false;
+        self.retry_ms = None;
+        self.pending_bytes = 0;
+        self.skip_lf = false;
+        Ok(Vec::new())
     }
 
     fn process_line(
@@ -166,6 +179,12 @@ impl SseDecoder {
         line: &[u8],
         frames: &mut Vec<SseFrame>,
     ) -> Result<(), SseDecodeError> {
+        let line = if self.first_line {
+            self.first_line = false;
+            line.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(line)
+        } else {
+            line
+        };
         if line.is_empty() {
             if let Some(frame) = self.dispatch() {
                 frames.push(frame);
@@ -281,4 +300,37 @@ pub enum SseEncodeError {
     MultilineField { field: &'static str },
     #[error("SSE event ID cannot contain a null character")]
     NullId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoder_accepts_bom_and_all_event_stream_line_endings() {
+        let mut decoder = SseDecoder::default();
+        assert!(decoder.push(&[0xef]).unwrap().is_empty());
+        let frames = decoder.push(b"\xbb\xbfdata: one\rdata: two\r\r").unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].data, "one\ntwo");
+
+        let frames = decoder.push(b"data: three\r\ndata: four\n\n").unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].data, "three\nfour");
+
+        let mut decoder = SseDecoder::default();
+        assert!(
+            decoder
+                .push(b"\n\xef\xbb\xbfdata: not-a-bom\n\n")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn decoder_discards_an_incomplete_event_at_eof() {
+        let mut decoder = SseDecoder::default();
+        assert!(decoder.push(b"data: incomplete\n").unwrap().is_empty());
+        assert!(decoder.finish().unwrap().is_empty());
+    }
 }

@@ -5,7 +5,7 @@ use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
     ApiKey, CanonicalResult, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, OperationKind,
-    RequestId, RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
+    RequestId, RequestMetadata, RouteSlug, Surface, TransportMode,
 };
 use olp_storage::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
@@ -20,7 +20,7 @@ use crate::{
 
 use super::{
     error::InferenceError,
-    execution::{RequiredTarget, authorize_principal, execute_routed_result},
+    execution::{RequiredTarget, authorize_principal},
     failover::{ExecutionOutput, FailoverContext, execute_with_failover},
     telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event, usage_from_result},
 };
@@ -106,10 +106,72 @@ pub(super) fn mark_missing_delete_as_success(
 }
 
 pub(super) fn valid_upstream_media_job_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 1_024
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
+    olp_protocols::openai::valid_video_job_id(value)
+}
+
+pub(super) async fn journal_media_job_identity(
+    state: &GatewayState,
+    job_id: uuid::Uuid,
+    upstream_job_id: &str,
+) {
+    let Some(journal) = state.media_job_journal.as_ref() else {
+        return;
+    };
+    let mut reported = false;
+    loop {
+        let journal_error = match journal.record(job_id, upstream_job_id).await {
+            Ok(()) => return,
+            Err(error) => error,
+        };
+        match state
+            .store()
+            .mark_media_job_create_cleanup_pending(
+                job_id,
+                upstream_job_id,
+                "recovery_journal_unavailable",
+            )
+            .await
+        {
+            Ok(record)
+                if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
+                    && record.upstream_job_id.as_deref() == Some(upstream_job_id) =>
+            {
+                warn!(%job_id, %journal_error, "persisted media job cleanup after recovery journal failure");
+                return;
+            }
+            Ok(record) if !reported => {
+                state.record_media_reconciliation_gap();
+                error!(
+                    %job_id,
+                    %journal_error,
+                    lifecycle = record.lifecycle.as_str(),
+                    "media job identity has no durable recovery owner"
+                );
+            }
+            Err(database_error) if !reported => {
+                state.record_media_reconciliation_gap();
+                error!(
+                    %job_id,
+                    %journal_error,
+                    %database_error,
+                    "media job identity has no durable recovery owner"
+                );
+            }
+            Ok(_) | Err(_) => {}
+        }
+        reported = true;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+pub(super) async fn clear_media_job_identity_journal(state: &GatewayState, job_id: uuid::Uuid) {
+    let Some(journal) = state.media_job_journal.as_ref() else {
+        return;
+    };
+    if let Err(error) = journal.remove(job_id).await {
+        state.record_media_reconciliation_gap();
+        error!(%job_id, %error, "failed to clear media job recovery identity");
+    }
 }
 
 /// Claims and reconciles a bounded metadata-only batch without authenticating
@@ -119,6 +181,7 @@ pub async fn reconcile_media_jobs_once(
     state: &GatewayState,
     limit: u16,
 ) -> Result<MediaReconciliationPass, MediaJobError> {
+    replay_media_job_identity_journal(state, usize::from(limit.clamp(1, 32))).await;
     let records = state
         .store()
         .claim_media_reconciliation_jobs(Utc::now(), limit)
@@ -138,13 +201,129 @@ pub async fn reconcile_media_jobs_once(
     })
 }
 
+async fn replay_media_job_identity_journal(state: &GatewayState, limit: usize) {
+    let Some(journal) = state.media_job_journal.as_ref() else {
+        return;
+    };
+    let entries = match journal.entries(limit, Duration::from_secs(120)).await {
+        Ok(entries) => entries,
+        Err(error) => {
+            state.record_media_reconciliation_gap();
+            error!(%error, "failed to read media job recovery journal");
+            return;
+        }
+    };
+    for entry in entries {
+        let record = match state.store().media_job(entry.job_id).await {
+            Ok(record) => record,
+            Err(MediaJobError::NotFound) => {
+                state.record_media_reconciliation_gap();
+                error!(
+                    job_id = %entry.job_id,
+                    upstream_job_id = %entry.upstream_job_id,
+                    "journaled media job has no durable database record"
+                );
+                continue;
+            }
+            Err(error) => {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %entry.job_id, %error, "failed to load journaled media job");
+                continue;
+            }
+        };
+        if record.lifecycle == MediaJobLifecycle::Deleted
+            || (record.upstream_job_id.as_deref() == Some(entry.upstream_job_id.as_str())
+                && matches!(
+                    record.lifecycle,
+                    MediaJobLifecycle::Active
+                        | MediaJobLifecycle::CreateCleanupPending
+                        | MediaJobLifecycle::DeletePending
+                ))
+        {
+            clear_media_job_identity_journal(state, entry.job_id).await;
+            continue;
+        }
+        if !matches!(
+            record.lifecycle,
+            MediaJobLifecycle::Creating | MediaJobLifecycle::CreateAmbiguous
+        ) {
+            state.record_media_reconciliation_gap();
+            error!(
+                job_id = %entry.job_id,
+                lifecycle = record.lifecycle.as_str(),
+                "journaled media job identity conflicts with durable state"
+            );
+            continue;
+        }
+        match state
+            .store()
+            .mark_media_job_create_cleanup_pending(
+                entry.job_id,
+                &entry.upstream_job_id,
+                "recovered_upstream_create_identity",
+            )
+            .await
+        {
+            Ok(record)
+                if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
+                    && record.upstream_job_id.as_deref()
+                        == Some(entry.upstream_job_id.as_str()) =>
+            {
+                clear_media_job_identity_journal(state, entry.job_id).await;
+            }
+            Ok(record) => {
+                state.record_media_reconciliation_gap();
+                error!(
+                    job_id = %entry.job_id,
+                    lifecycle = record.lifecycle.as_str(),
+                    "recovered media job identity was not persisted"
+                );
+            }
+            Err(error) => {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %entry.job_id, %error, "failed to recover media job identity");
+            }
+        }
+    }
+}
+
 async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobRecord) -> bool {
     let Some(claim_id) = record.reconciliation_claim_id else {
         state.record_media_reconciliation_gap();
         return false;
     };
     let store = state.store();
-    let outcome = reconcile_media_job_operation(state, &mut record).await;
+    let job_id = record.id;
+    let outcome = {
+        let operation = reconcile_media_job_operation(state, &mut record);
+        tokio::pin!(operation);
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        heartbeat.tick().await;
+        loop {
+            tokio::select! {
+                outcome = &mut operation => break outcome,
+                _ = heartbeat.tick() => {
+                    match store
+                        .renew_media_reconciliation_claim(job_id, claim_id)
+                        .await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            state.record_media_reconciliation_gap();
+                            warn!(job_id = %job_id, "lost autonomous media reconciliation claim");
+                            return false;
+                        }
+                        Err(error) => {
+                            state.record_media_reconciliation_gap();
+                            error!(job_id = %job_id, %error, "failed to renew autonomous media reconciliation claim");
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    };
     let now = Utc::now();
     let (next_attempt_at, error_class) = match outcome {
         Ok(()) => {
@@ -432,71 +611,6 @@ async fn execute_media_reconciliation_result(
     Ok(result)
 }
 
-pub(super) async fn refresh_video_list_record(
-    state: &GatewayState,
-    principal: &InferencePrincipal,
-    record: MediaJobRecord,
-) -> MediaJobRecord {
-    if !matches!(record.state, MediaJobState::Queued | MediaJobState::Running) {
-        return record;
-    }
-    let Some(upstream_id) = record.upstream_job_id.clone() else {
-        return record;
-    };
-    let mut operation = olp_protocols::openai::decode_video_get(upstream_id);
-    if set_video_route(&mut operation, &record.route_slug).is_err() {
-        return record;
-    }
-    let Ok(mut executed) = execute_routed_result(
-        state,
-        principal,
-        operation,
-        TransportMode::Unary,
-        Some(RequiredTarget {
-            provider_id: record.provider_id,
-            upstream_model: record.upstream_model.clone(),
-        }),
-    )
-    .await
-    else {
-        return record;
-    };
-    let result = match executed.result.as_ref() {
-        CanonicalResult::VideoJob(result) => result.clone(),
-        _ => {
-            executed.mark_provider_protocol_failure();
-            return record;
-        }
-    };
-    let state_update = match media_job_state(&result.status) {
-        Ok(state_update) => state_update,
-        Err(failure) => {
-            executed.mark_failure(&failure);
-            return record;
-        }
-    };
-    let update = MediaJobUpdate {
-        state: state_update,
-        progress_percent: result.progress_percent,
-        content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
-        expires_at: result
-            .expires_at
-            .and_then(chrono::DateTime::from_timestamp_secs),
-        error_class: result
-            .error
-            .as_ref()
-            .map(|error| format!("{:?}", error.class).to_lowercase()),
-        last_polled_at: Utc::now(),
-    };
-    let updated = state
-        .store()
-        .refresh_media_job(record.id, update)
-        .await
-        .unwrap_or(record);
-    executed.mark_success();
-    updated
-}
-
 pub(super) async fn owned_media_job(
     state: &GatewayState,
     principal: &InferencePrincipal,
@@ -523,8 +637,7 @@ pub(super) async fn owned_media_job(
     }
     let route = RouteSlug::parse(&record.route_slug)
         .map_err(|_| InferenceError::unavailable("media_job_route_invalid"))?;
-    authorize_api_key(key, Some(&route), operation, Utc::now())
-        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+    let _ = authorize_principal(principal, operation, Some(&route))?;
     Ok((key.clone(), record))
 }
 

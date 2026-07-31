@@ -22,6 +22,7 @@ const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platfo
 const MAX_TOKEN_RESPONSE_BYTES: usize = 64 * 1024;
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 32;
+const TOKEN_EXPIRY_SAFETY_MARGIN: Duration = Duration::from_secs(5);
 
 pub(crate) struct ApplicationDefaultTokenProvider {
     credentials: AccessTokenCredentials,
@@ -82,6 +83,17 @@ impl Drop for ServiceAccountCredential {
 struct CachedToken {
     value: Zeroizing<String>,
     refresh_at: Instant,
+    expires_at: Instant,
+}
+
+impl CachedToken {
+    fn is_fresh(&self) -> bool {
+        self.refresh_at > Instant::now()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.expires_at.saturating_duration_since(Instant::now()) > TOKEN_EXPIRY_SAFETY_MARGIN
+    }
 }
 
 pub(crate) struct ServiceAccountTokenProvider {
@@ -164,47 +176,66 @@ impl ServiceAccountTokenProvider {
         if response.status() != StatusCode::OK {
             return Err(BearerTokenError);
         }
-        let content_type_ok = response
-            .headers()
-            .get(header::CONTENT_TYPE)
+        let mut content_types = response.headers().get_all(header::CONTENT_TYPE).iter();
+        let content_type_ok = content_types
+            .next()
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.split(';').next())
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"));
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+            && content_types.next().is_none();
         if !content_type_ok {
             return Err(BearerTokenError);
         }
-        let bytes = read_bounded_token_response(response).await?;
+        let bytes = timeout(
+            Duration::from_secs(10),
+            read_bounded_token_response(response),
+        )
+        .await
+        .map_err(|_| BearerTokenError)??;
         let response: TokenResponse =
             serde_json::from_slice(&bytes).map_err(|_| BearerTokenError)?;
-        if response.token_type != "Bearer"
-            || response.expires_in < 30
-            || response.access_token.trim().is_empty()
-        {
+        if !valid_token_response(&response) {
             return Err(BearerTokenError);
         }
+        let (refresh_at, expires_at) = token_deadlines(response.expires_in)?;
         Ok(CachedToken {
             value: Zeroizing::new(response.access_token),
-            refresh_at: token_refresh_deadline(response.expires_in)?,
+            refresh_at,
+            expires_at,
         })
     }
 
-    fn cached_token(&self) -> Result<Option<SecretBearerToken>, BearerTokenError> {
+    fn cached_token(
+        &self,
+        accept_refresh_window: bool,
+    ) -> Result<Option<SecretBearerToken>, BearerTokenError> {
         self.cache
             .load()
             .as_ref()
-            .filter(|token| token.refresh_at > Instant::now())
+            .filter(|token| {
+                if accept_refresh_window {
+                    token.is_valid()
+                } else {
+                    token.is_fresh()
+                }
+            })
             .map(|token| SecretBearerToken::new(token.value.as_str().to_owned()))
             .transpose()
     }
 }
 
-fn token_refresh_deadline(expires_in: u64) -> Result<Instant, BearerTokenError> {
+fn token_deadlines(expires_in: u64) -> Result<(Instant, Instant), BearerTokenError> {
     let refresh_margin = 300_u64.min(expires_in / 2);
-    Instant::now()
+    let now = Instant::now();
+    let refresh_at = now
         .checked_add(Duration::from_secs(
             expires_in.saturating_sub(refresh_margin),
         ))
-        .ok_or(BearerTokenError)
+        .ok_or(BearerTokenError)?;
+    let expires_at = now
+        .checked_add(Duration::from_secs(expires_in))
+        .ok_or(BearerTokenError)?;
+    Ok((refresh_at, expires_at))
 }
 
 impl fmt::Debug for ServiceAccountTokenProvider {
@@ -218,14 +249,17 @@ impl BearerTokenProvider for ServiceAccountTokenProvider {
         &'a self,
     ) -> olp_domain::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
         Box::pin(async move {
-            if let Some(token) = self.cached_token()? {
+            if let Some(token) = self.cached_token(false)? {
                 return Ok(token);
             }
             let _refresh = self.refresh_lock.lock().await;
-            if let Some(token) = self.cached_token()? {
+            if let Some(token) = self.cached_token(false)? {
                 return Ok(token);
             }
-            let refreshed = Arc::new(self.refresh().await?);
+            let refreshed = match self.refresh().await {
+                Ok(token) => Arc::new(token),
+                Err(error) => return self.cached_token(true)?.ok_or(error),
+            };
             let value = SecretBearerToken::new(refreshed.value.as_str().to_owned())?;
             self.cache.store(Some(refreshed));
             Ok(value)
@@ -247,6 +281,12 @@ struct TokenResponse {
     access_token: String,
     token_type: String,
     expires_in: u64,
+}
+
+fn valid_token_response(response: &TokenResponse) -> bool {
+    response.token_type.trim().eq_ignore_ascii_case("Bearer")
+        && response.expires_in >= 30
+        && !response.access_token.trim().is_empty()
 }
 
 fn deserialize_zeroizing_string<'de, D>(deserializer: D) -> Result<Zeroizing<String>, D::Error>
@@ -388,8 +428,38 @@ mod tests {
 
     #[test]
     fn token_lifetime_cannot_overflow_the_runtime_clock() {
-        assert!(token_refresh_deadline(3_600).is_ok());
-        assert!(token_refresh_deadline(u64::MAX).is_err());
+        let (refresh_at, expires_at) = token_deadlines(3_600).unwrap();
+        assert!(refresh_at < expires_at);
+        assert!(token_deadlines(u64::MAX).is_err());
+    }
+
+    #[test]
+    fn refresh_window_token_remains_a_valid_fallback() {
+        let nearly_expired = CachedToken {
+            value: Zeroizing::new("token".to_owned()),
+            refresh_at: Instant::now() - Duration::from_secs(1),
+            expires_at: Instant::now() + Duration::from_secs(1),
+        };
+        assert!(!nearly_expired.is_fresh());
+        assert!(!nearly_expired.is_valid());
+
+        let valid = CachedToken {
+            value: Zeroizing::new("token".to_owned()),
+            refresh_at: Instant::now() - Duration::from_secs(1),
+            expires_at: Instant::now() + TOKEN_EXPIRY_SAFETY_MARGIN + Duration::from_secs(1),
+        };
+        assert!(!valid.is_fresh());
+        assert!(valid.is_valid());
+    }
+
+    #[test]
+    fn bearer_token_type_is_case_insensitive_and_whitespace_tolerant() {
+        let response = TokenResponse {
+            access_token: "token".to_owned(),
+            token_type: " BEARER ".to_owned(),
+            expires_in: 30,
+        };
+        assert!(valid_token_response(&response));
     }
 
     #[test]

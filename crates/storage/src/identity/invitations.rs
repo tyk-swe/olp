@@ -57,7 +57,9 @@ impl PgStore {
                 return Err(IdentityError::IdempotencyInProgress);
             }
         }
-        let now = Utc::now();
+        let now: DateTime<Utc> = sqlx::query_scalar!("SELECT now() AS \"now!\"")
+            .fetch_one(&mut *transaction)
+            .await?;
         if invitation.expires_at <= now || invitation.expires_at > now + Duration::days(30) {
             return Err(IdentityError::Invalid(
                 "expiration must be within the next 30 days".to_owned(),
@@ -216,13 +218,15 @@ impl PgStore {
         if acceptance.token.len() != 43
             || acceptance.display_name.trim().is_empty()
             || acceptance.display_name.chars().count() > 100
+            || olp_domain::has_unsafe_display_characters(&acceptance.display_name)
         {
             return Err(IdentityError::InvitationUnavailable);
         }
-        let session_expires_at = Utc::now()
-            .checked_add_signed(session_ttl)
-            .filter(|expires_at| *expires_at > Utc::now())
-            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
+        if session_ttl <= Duration::zero() {
+            return Err(IdentityError::Invalid(
+                "session lifetime is invalid".to_owned(),
+            ));
+        }
         let digest = InvitationMaterial::digest_token(&acceptance.token);
         let mut transaction = self.pool().begin().await?;
         let invitation_email: String = sqlx::query_scalar!(
@@ -241,19 +245,23 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(IdentityError::InvitationUnavailable)?;
+        let now: DateTime<Utc> = sqlx::query_scalar!("SELECT clock_timestamp() AS \"now!\"")
+            .fetch_one(&mut *transaction)
+            .await?;
         let expires_at: DateTime<Utc> = invitation.expires_at;
-        if invitation.accepted_at.is_some()
-            || invitation.revoked_at.is_some()
-            || expires_at <= Utc::now()
+        if invitation.accepted_at.is_some() || invitation.revoked_at.is_some() || expires_at <= now
         {
             return Err(IdentityError::InvitationUnavailable);
         }
+        let session_expires_at = now
+            .checked_add_signed(session_ttl)
+            .filter(|expires_at| *expires_at > now)
+            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
         let invitation_id: Uuid = invitation.id;
         let email: String = invitation.email;
         let role = parse_role(invitation.role)?;
         let user_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
-        let now = Utc::now();
         let user_row = match sqlx::query_as!(
             UserRow,
             "INSERT INTO users \
@@ -272,7 +280,8 @@ impl PgStore {
         };
         let updated = sqlx::query!(
             "UPDATE invitations SET accepted_at = $2, accepted_by = $3 \
-             WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL",
+             WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
+               AND expires_at > $2",
             invitation_id,
             now,
             user_id

@@ -126,6 +126,7 @@ fn compose_public_router(
             .merge(management_api::router())
             .route("/api/{*path}", any(api_not_found))
             .layer(middleware::from_fn(normalize_management_rejection))
+            .layer(middleware::from_fn(prevent_management_caching))
             .with_state(state.clone());
         router = router
             .merge(control)
@@ -286,6 +287,15 @@ async fn normalize_management_rejection(
     normalized
 }
 
+async fn prevent_management_caching(request: Request<Body>, next: middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store, private"),
+    );
+    response
+}
+
 fn problem_panic_response(_panic: Box<dyn std::any::Any + Send + 'static>) -> Response<Body> {
     // The panic payload can contain request or upstream data. The active HTTP
     // span retains method, path, and request ID without exposing that payload.
@@ -409,7 +419,7 @@ mod tests {
             ),
             (
                 crate::ApiMode::Control,
-                "/metrics",
+                "/api/v1/sessions",
                 "/api/v1/sessions",
                 "application/problem+json",
             ),
@@ -479,5 +489,28 @@ mod tests {
             );
             drop(held_response);
         }
+    }
+
+    #[tokio::test]
+    async fn management_responses_are_never_cacheable() {
+        let state = ApiState::new(
+            crate::ApiMode::Control,
+            None,
+            std::sync::Arc::new(crate::RuntimeManager::empty()),
+            "https://console.example.test",
+            std::path::PathBuf::from("missing-console"),
+        );
+        let response = public_router(state.management_state_for_test())
+            .oneshot(
+                Request::get("/api/not-a-route")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store, private"
+        );
     }
 }

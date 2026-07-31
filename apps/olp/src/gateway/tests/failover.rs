@@ -246,6 +246,18 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
     assert!(!generation.response_committed);
     assert!(generation.allows_failover());
 
+    let accepted_server_error = reclassify_ambiguous_transport_failure(
+        TransportError {
+            phase: olp_domain::TransportPhase::FirstByte,
+            class: AttemptFailureClass::UpstreamServer,
+            response_committed: false,
+            message: "provider returned 500 after accepting work".to_owned(),
+        },
+        OperationKind::ImageGeneration,
+    );
+    assert_eq!(accepted_server_error.class, AttemptFailureClass::Ambiguous);
+    assert!(!accepted_server_error.allows_failover());
+
     let connect = reclassify_ambiguous_transport_failure(
         TransportError {
             phase: olp_domain::TransportPhase::Connect,
@@ -261,12 +273,12 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
 }
 
 #[tokio::test]
-async fn retryable_first_canonical_error_fails_over_before_commit() {
+async fn retryable_rate_limit_fails_over_for_streaming_image() {
     let (state, _) = test_state(true);
     let second_calls = Arc::new(AtomicUsize::new(0));
     let (runtime, attempts) = install_two_target_streams(
         &state,
-        OperationKind::Generation,
+        OperationKind::ImageGeneration,
         Arc::new(CountingFiniteTransport {
             calls: Arc::new(AtomicUsize::new(0)),
             events: vec![
@@ -286,7 +298,7 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
         }),
         Arc::new(CountingFiniteTransport {
             calls: second_calls.clone(),
-            events: generation_stream_events("recovered"),
+            events: vec![CanonicalEvent::new(0, CanonicalEventKind::Done)],
         }),
     );
     let success = match execute_with_failover(
@@ -298,8 +310,8 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
             on_attempt_started: None,
         },
         attempts,
-        streaming_request_metadata(OperationKind::Generation),
-        streaming_generation_operation(),
+        streaming_request_metadata(OperationKind::ImageGeneration),
+        streaming_image_generation_operation(),
     )
     .await
     {
@@ -313,6 +325,64 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
     );
     assert!(!success.attempts[0].committed);
     assert_eq!(second_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn retryable_first_canonical_error_is_ambiguous_for_streaming_image() {
+    let (state, _) = test_state(true);
+    let first_calls = Arc::new(AtomicUsize::new(0));
+    let second_calls = Arc::new(AtomicUsize::new(0));
+    let (runtime, attempts) = install_two_target_streams(
+        &state,
+        OperationKind::ImageGeneration,
+        Arc::new(CountingFiniteTransport {
+            calls: first_calls.clone(),
+            events: vec![
+                CanonicalEvent::new(
+                    0,
+                    CanonicalEventKind::Error {
+                        error: CanonicalError {
+                            class: ErrorClass::Upstream,
+                            message: "provider failed after accepting image work".to_owned(),
+                            provider_code: Some("upstream_error".to_owned()),
+                            retryable: true,
+                        },
+                    },
+                ),
+                CanonicalEvent::new(1, CanonicalEventKind::Done),
+            ],
+        }),
+        Arc::new(CountingFiniteTransport {
+            calls: second_calls.clone(),
+            events: vec![CanonicalEvent::new(0, CanonicalEventKind::Done)],
+        }),
+    );
+    let failure = match execute_with_failover(
+        FailoverContext {
+            runtime: &runtime,
+            overall_timeout: Duration::from_millis(200),
+            media_spool: state.media_spool.clone(),
+            circuits: &crate::circuit::CircuitBreaker::default(),
+            on_attempt_started: None,
+        },
+        attempts,
+        streaming_request_metadata(OperationKind::ImageGeneration),
+        streaming_image_generation_operation(),
+    )
+    .await
+    {
+        Ok(_) => panic!("a committed image error must not fail over"),
+        Err(failure) => failure,
+    };
+    assert_eq!(failure.error.code, "ambiguous_upstream_result");
+    assert_eq!(failure.attempts.len(), 1);
+    assert!(failure.attempts[0].committed);
+    assert_eq!(
+        failure.attempts[0].error_class.as_deref(),
+        Some("ambiguous")
+    );
+    assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(second_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -439,4 +509,74 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
         .expect_err("missing delta limiter must fail closed above the HTTP baseline");
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error.code, "distributed_limits_unavailable");
+}
+
+#[tokio::test]
+#[ignore = "requires OLP_VALKEY_URL"]
+async fn distributed_limits_valkey_cleanup_uses_the_reserving_limiter_after_reload_clear() {
+    let valkey_url = std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must be set");
+    let (state, _) = test_state(false);
+    let pinned = state.runtime.pin();
+    let mut api_keys = pinned.api_keys.clone();
+    api_keys.values_mut().next().unwrap().limits.concurrency = NonZeroU32::new(1);
+    reinstall_api_keys(&state, api_keys);
+
+    let limiter = olp_storage::DistributedLimiter::connect(
+        &valkey_url,
+        format!("olp:test:limiter-reload:{}", uuid::Uuid::now_v7()),
+    )
+    .await
+    .unwrap();
+    state.limiter.install(limiter);
+    let verifier = state.limiter.current().unwrap();
+    let snapshot = state.runtime.pin();
+    let api_key = snapshot.api_keys.values().next().unwrap();
+    let lookup_id = api_key.lookup_id.as_str();
+    let operation = decode_chat_completion(
+        serde_json::from_value(json!({
+            "model": "default",
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let reservation = reserve_limits(
+        &state,
+        api_key,
+        &operation,
+        lookup_id,
+        Duration::from_secs(30),
+    )
+    .await
+    .unwrap()
+    .expect("the first request must hold the only concurrency slot");
+
+    state.limiter.clear();
+    assert!(state.limiter.current().is_none());
+    crate::gateway::limits::release_limits(&state, Some(&reservation), None);
+
+    let replacement = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match verifier
+                .reserve(olp_storage::LimitRequest {
+                    lookup_id,
+                    requests_per_minute: None,
+                    tokens_per_minute: None,
+                    max_concurrency: Some(1),
+                    requested_tokens: 1,
+                    lease_ttl: Duration::from_secs(30),
+                })
+                .await
+            {
+                Ok(lease) => break lease,
+                Err(olp_storage::LimitError::Exceeded { .. }) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("replacement reservation failed: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("cleanup must use the captured limiter after reloadable state is cleared");
+    verifier.release(&replacement).await.unwrap();
 }

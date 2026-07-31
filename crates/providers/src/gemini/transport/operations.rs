@@ -19,6 +19,7 @@ use tokio::time::{Instant, timeout};
 use super::errors::*;
 use super::media::hydrate_gemini_contents;
 use crate::gemini::{BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey};
+use crate::transport_common::RateLimitCooldown;
 use crate::transport_io::{ProviderResponseIo, bounded_duration};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
@@ -53,6 +54,7 @@ pub struct GeminiConnector {
     pub(super) config: ConnectorConfig,
     pub(super) credential: ConnectorCredential,
     pub(super) provider_kind: ProviderKind,
+    rate_limit_cooldown: RateLimitCooldown,
 }
 
 impl GeminiConnector {
@@ -62,6 +64,7 @@ impl GeminiConnector {
             config,
             credential: ConnectorCredential::ApiKey(api_key),
             provider_kind: ProviderKind::Gemini,
+            rate_limit_cooldown: RateLimitCooldown::default(),
         }
     }
 
@@ -77,12 +80,14 @@ impl GeminiConnector {
             config,
             credential: ConnectorCredential::Bearer(provider),
             provider_kind,
+            rate_limit_cooldown: RateLimitCooldown::default(),
         }
     }
 
     /// Lists all Gemini models with explicit pagination through a newly
     /// DNS-pinned, redirect-free client for every upstream page.
     pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+        self.rate_limit_cooldown.check_credential()?;
         let mut discovered = Vec::new();
         let mut page_token: Option<String> = None;
         for _ in 0..100 {
@@ -120,7 +125,9 @@ impl GeminiConnector {
             .map_err(|_| RESPONSE_IO.first_byte_timeout())?
             .map_err(map_send_error)?;
             if !response.status().is_success() {
-                return Err(self.map_error_response(response, attempt_deadline).await);
+                return Err(self
+                    .map_error_response(response, attempt_deadline, None)
+                    .await);
             }
             RESPONSE_IO.require_content_type(&response, "application/json")?;
             let body = RESPONSE_IO
@@ -175,6 +182,7 @@ impl GeminiConnector {
     /// Vertex publisher models) that do not expose a list endpoint in the same
     /// resource collection.
     pub async fn probe_model(&self, upstream_model: &str) -> Result<(), TransportError> {
+        self.rate_limit_cooldown.check(upstream_model)?;
         let attempt_deadline = Instant::now()
             + self.config.timeouts.connect
             + self.config.timeouts.first_byte
@@ -211,7 +219,9 @@ impl GeminiConnector {
         .map_err(|_| RESPONSE_IO.first_byte_timeout())?
         .map_err(map_send_error)?;
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(response, attempt_deadline, Some(upstream_model))
+                .await);
         }
         RESPONSE_IO.require_content_type(&response, "application/json")?;
         let body = RESPONSE_IO
@@ -241,6 +251,8 @@ impl GeminiConnector {
         request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
         validate_request_envelope(&request, self.provider_kind)?;
+        self.rate_limit_cooldown
+            .check(&request.attempt.upstream_model)?;
         let (url, body, response_kind, streaming) = self.encode_request(&request).await?;
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
         let connect_timeout = bounded_duration(
@@ -298,7 +310,13 @@ impl GeminiConnector {
         .map_err(|_| RESPONSE_IO.first_byte_timeout())?
         .map_err(map_send_error)?;
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(
+                    response,
+                    attempt_deadline,
+                    Some(&request.attempt.upstream_model),
+                )
+                .await);
         }
         if streaming {
             self.streaming_response(
@@ -442,8 +460,13 @@ impl GeminiConnector {
         &self,
         response: Response,
         attempt_deadline: Instant,
+        upstream_model: Option<&str>,
     ) -> TransportError {
         let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            self.rate_limit_cooldown
+                .observe(upstream_model, response.headers());
+        }
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(

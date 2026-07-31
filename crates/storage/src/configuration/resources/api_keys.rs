@@ -1,4 +1,5 @@
 use super::{helpers::audit_in_transaction, *};
+use olp_domain::{MAX_API_KEY_ALLOWED_ROUTES, MAX_TOKENS_PER_MINUTE};
 
 impl PgStore {
     pub async fn list_api_keys(
@@ -8,18 +9,41 @@ impl PgStore {
     ) -> Result<ConfigurationPage<ApiKeyRecord>, ConfigurationError> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
-            "SELECT id FROM api_keys WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+            "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
+                    k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
+                    k.revoked_at, k.rotated_at, k.etag, k.created_at, \
+                    ARRAY(SELECT scope::text FROM api_key_scopes \
+                          WHERE api_key_id = k.id ORDER BY scope) AS \"scopes!\", \
+                    ARRAY(SELECT route_slug FROM api_key_route_allowlist \
+                          WHERE api_key_id = k.id ORDER BY route_slug) AS \"allowed_routes!\" \
+             FROM api_keys k JOIN users u ON u.id = k.created_by \
+             WHERE ($1::uuid IS NULL OR k.id > $1) ORDER BY k.id LIMIT $2",
             cursor,
             limit + 1
         )
         .fetch_all(self.pool())
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
-        let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            items.push(self.get_api_key(id).await?);
-        }
+        let items = rows
+            .into_iter()
+            .map(|row| ApiKeyRecord {
+                id: row.id,
+                lookup_id: row.lookup_id,
+                name: row.name,
+                created_by: row.created_by,
+                created_by_email: row.created_by_email,
+                scopes: row.scopes,
+                allowed_routes: row.allowed_routes,
+                requests_per_minute: row.requests_per_minute,
+                tokens_per_minute: row.tokens_per_minute,
+                max_concurrency: row.max_concurrency,
+                expires_at: row.expires_at,
+                revoked_at: row.revoked_at,
+                rotated_at: row.rotated_at,
+                etag: row.etag,
+                created_at: row.created_at,
+            })
+            .collect();
         Ok(ConfigurationPage { items, next_cursor })
     }
 
@@ -61,15 +85,24 @@ impl PgStore {
         actor: Uuid,
     ) -> Result<ApiKeyMutationResult, ConfigurationError> {
         let name = input.name.trim();
-        if name.is_empty() || name.chars().count() > 100 {
+        if name.is_empty()
+            || name.chars().count() > 100
+            || olp_domain::has_unsafe_display_characters(name)
+        {
             return Err(ConfigurationError::Invalid(
-                "API-key name must contain 1-100 characters".to_owned(),
+                "API-key name must contain 1-100 visible characters without control or bidi formatting"
+                    .to_owned(),
             ));
         }
         if input.scopes.is_empty() {
             return Err(ConfigurationError::Invalid(
                 "at least one API-key scope is required".to_owned(),
             ));
+        }
+        if input.allowed_routes.len() > MAX_API_KEY_ALLOWED_ROUTES {
+            return Err(ConfigurationError::Invalid(format!(
+                "API-key route allowlist cannot exceed {MAX_API_KEY_ALLOWED_ROUTES} entries"
+            )));
         }
         let scopes = input
             .scopes
@@ -112,6 +145,14 @@ impl PgStore {
             .map(i32::try_from)
             .transpose()
             .map_err(|_| ConfigurationError::Invalid("RPM limit is too large".to_owned()))?;
+        if input
+            .tokens_per_minute
+            .is_some_and(|value| value > MAX_TOKENS_PER_MINUTE)
+        {
+            return Err(ConfigurationError::Invalid(
+                "TPM limit exceeds the distributed limiter maximum".to_owned(),
+            ));
+        }
         let tokens_per_minute = input
             .tokens_per_minute
             .map(i64::try_from)
@@ -138,18 +179,22 @@ impl PgStore {
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
-        for route in &allowed_routes {
-            let exists: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
-                route.as_str()
-            )
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !exists {
-                return Err(ConfigurationError::Invalid(format!(
-                    "allowlisted route {route} is not active"
-                )));
-            }
+        let allowed_route_names = allowed_routes
+            .iter()
+            .map(|route| route.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let active_route_count = sqlx::query_scalar!(
+            "SELECT count(*) AS \"value!\" FROM routes WHERE slug = ANY($1::text[])",
+            &allowed_route_names
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let expected_route_count = i64::try_from(allowed_route_names.len())
+            .expect("route allowlists are bounded before database access");
+        if active_route_count != expected_route_count {
+            return Err(ConfigurationError::Invalid(
+                "one or more allowlisted routes are not active".to_owned(),
+            ));
         }
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(

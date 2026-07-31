@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_ingestion_gaps (id, gateway_instance, event_count, reason, certainty, first_observed_at, last_observed_at) VALUES ($1, $2, $3, 'request_metadata_stream_retention_trim', 'lower_bound'::request_metadata_gap_certainty, now(), now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2859924b7efba14b5b6a6479f5a16ba2f3f3d85d965b70c5bf2b5c13b01a8de1"
+}

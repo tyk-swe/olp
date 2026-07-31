@@ -1,4 +1,4 @@
-use olp_domain::RouteSlug;
+use olp_domain::{MAX_ROUTE_TIMEOUT_MS, RouteSlug};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -11,7 +11,10 @@ use crate::{
     },
 };
 
-use super::{ConfigurationError, NewRouteDraft, RouteActivated, RouteDraftCreated};
+use super::{
+    ConfigurationError, NewRouteDraft, RouteActivated, RouteDraftCreated,
+    validation::validate_route_cardinality,
+};
 
 impl PgStore {
     pub async fn create_route_draft<F>(
@@ -23,6 +26,66 @@ impl PgStore {
     where
         F: FnOnce(&RouteDraftCreated) -> Result<IdempotencyResponse, PersistenceError>,
     {
+        validate_route_cardinality(&route.operations, route.targets.len())?;
+        let slug = RouteSlug::parse(route.slug.clone())
+            .map_err(|error| ConfigurationError::InvalidRoute(error.to_string()))?;
+        if route.operations.is_empty() {
+            return Err(ConfigurationError::InvalidRoute(
+                "at least one operation is required".to_owned(),
+            ));
+        }
+        if route.targets.is_empty() {
+            return Err(ConfigurationError::InvalidRoute(
+                "at least one target is required".to_owned(),
+            ));
+        }
+        if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
+            return Err(ConfigurationError::InvalidRoute(
+                "max_attempts must be between one and the target count".to_owned(),
+            ));
+        }
+        let overall_timeout_ms = i32::try_from(route.overall_timeout_ms).map_err(|_| {
+            ConfigurationError::InvalidRoute("overall timeout is too large".to_owned())
+        })?;
+        if !(1..=MAX_ROUTE_TIMEOUT_MS).contains(&overall_timeout_ms) {
+            return Err(ConfigurationError::InvalidRoute(format!(
+                "overall timeout must be between 1 and {MAX_ROUTE_TIMEOUT_MS} ms"
+            )));
+        }
+        let operation_names: Vec<_> = route
+            .operations
+            .iter()
+            .map(|operation| operation.as_str().to_owned())
+            .collect();
+        let mut provider_ids = Vec::with_capacity(route.targets.len());
+        let mut upstream_models = Vec::with_capacity(route.targets.len());
+        let mut priorities = Vec::with_capacity(route.targets.len());
+        let mut weights = Vec::with_capacity(route.targets.len());
+        let mut timeouts = Vec::with_capacity(route.targets.len());
+        let mut positions = Vec::with_capacity(route.targets.len());
+        for (position, target) in route.targets.iter().enumerate() {
+            if target.weight == 0
+                || target.timeout_ms == 0
+                || target.timeout_ms > route.overall_timeout_ms
+            {
+                return Err(ConfigurationError::InvalidRoute(
+                    "target weight/timeout is invalid".to_owned(),
+                ));
+            }
+            provider_ids.push(target.provider_id);
+            upstream_models.push(target.upstream_model.trim().to_owned());
+            priorities.push(i32::from(target.priority));
+            weights.push(i32::try_from(target.weight).map_err(|_| {
+                ConfigurationError::InvalidRoute("target weight is too large".to_owned())
+            })?);
+            timeouts.push(i32::try_from(target.timeout_ms).map_err(|_| {
+                ConfigurationError::InvalidRoute("target timeout is too large".to_owned())
+            })?);
+            positions
+                .push(i32::try_from(position).map_err(|_| {
+                    ConfigurationError::InvalidRoute("too many targets".to_owned())
+                })?);
+        }
         let mut transaction = self.pool().begin().await?;
         match claim_replayable_idempotency(
             &mut transaction,
@@ -48,31 +111,6 @@ impl PgStore {
                 return Err(ConfigurationError::IdempotencyInProgress);
             }
         }
-        let slug = RouteSlug::parse(route.slug)
-            .map_err(|error| ConfigurationError::InvalidRoute(error.to_string()))?;
-        if route.operations.is_empty() {
-            return Err(ConfigurationError::InvalidRoute(
-                "at least one operation is required".to_owned(),
-            ));
-        }
-        if route.targets.is_empty() {
-            return Err(ConfigurationError::InvalidRoute(
-                "at least one target is required".to_owned(),
-            ));
-        }
-        if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
-            return Err(ConfigurationError::InvalidRoute(
-                "max_attempts must be between one and the target count".to_owned(),
-            ));
-        }
-        let overall_timeout_ms = i32::try_from(route.overall_timeout_ms).map_err(|_| {
-            ConfigurationError::InvalidRoute("overall timeout is too large".to_owned())
-        })?;
-        if overall_timeout_ms <= 0 {
-            return Err(ConfigurationError::InvalidRoute(
-                "overall timeout must be positive".to_owned(),
-            ));
-        }
         let id = Uuid::now_v7();
         let routing_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
@@ -86,52 +124,62 @@ impl PgStore {
         })?, etag, route.actor, now)
         .execute(&mut *transaction)
         .await?;
-        for operation in route.operations {
-            sqlx::query!(
-                "INSERT INTO route_draft_operations (route_draft_id, operation) VALUES ($1, $2)",
-                id,
-                operation.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        for (position, target) in route.targets.into_iter().enumerate() {
-            if target.weight == 0
-                || target.timeout_ms == 0
-                || target.timeout_ms > route.overall_timeout_ms
-            {
-                return Err(ConfigurationError::InvalidRoute(
-                    "target weight/timeout is invalid".to_owned(),
-                ));
-            }
-            let provider_model_id: Option<Uuid> = sqlx::query_scalar!(
-                "SELECT prm.source_provider_model_id \
-                 FROM providers p \
-                 JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-                 WHERE p.id = $1 AND prm.upstream_model = $2 AND prm.enabled \
-                   AND p.state <> 'disabled'::provider_state",
-            target.provider_id, target.upstream_model.trim())
-            .fetch_optional(&mut *transaction)
-            .await?;
-            let provider_model_id = provider_model_id.ok_or_else(|| {
+        sqlx::query!(
+            "INSERT INTO route_draft_operations (route_draft_id, operation) \
+             SELECT $1, input.operation FROM unnest($2::text[]) AS input(operation)",
+            id,
+            &operation_names
+        )
+        .execute(&mut *transaction)
+        .await?;
+        let resolved_targets = sqlx::query!(
+            "SELECT input.position AS \"position!\", \
+                    prm.source_provider_model_id AS \"provider_model_id?\" \
+             FROM unnest($1::uuid[], $2::text[]) WITH ORDINALITY \
+                  AS input(provider_id, upstream_model, position) \
+             LEFT JOIN providers p ON p.id = input.provider_id \
+                  AND p.state <> 'disabled'::provider_state \
+             LEFT JOIN provider_revision_models prm \
+                  ON prm.provider_revision_id = p.active_revision_id \
+                 AND prm.upstream_model = input.upstream_model AND prm.enabled \
+             ORDER BY input.position",
+            &provider_ids,
+            &upstream_models
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        let mut provider_model_ids = Vec::with_capacity(resolved_targets.len());
+        for target in resolved_targets {
+            let position = usize::try_from(target.position - 1)
+                .expect("route target positions are bounded and one-based");
+            provider_model_ids.push(target.provider_model_id.ok_or_else(|| {
                 ConfigurationError::InvalidRoute(format!(
                     "target provider/model {}/{} is not active",
-                    target.provider_id, target.upstream_model
+                    provider_ids[position], upstream_models[position]
                 ))
-            })?;
-            sqlx::query!(
-                "INSERT INTO route_draft_targets \
-                 (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            Uuid::now_v7(), Uuid::now_v7(), id, provider_model_id, i32::from(target.priority), i32::try_from(target.weight).map_err(|_| {
-                ConfigurationError::InvalidRoute("target weight is too large".to_owned())
-            })?, i32::try_from(target.timeout_ms).map_err(|_| {
-                ConfigurationError::InvalidRoute("target timeout is too large".to_owned())
-            })?, i32::try_from(position)
-                    .map_err(|_| ConfigurationError::InvalidRoute("too many targets".to_owned()))?,)
-            .execute(&mut *transaction)
-            .await?;
+            })?);
         }
+        let target_ids: Vec<_> = positions.iter().map(|_| Uuid::now_v7()).collect();
+        let target_routing_ids: Vec<_> = positions.iter().map(|_| Uuid::now_v7()).collect();
+        sqlx::query!(
+            "INSERT INTO route_draft_targets \
+             (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
+             SELECT input.id, input.routing_id, $1, input.provider_model_id, input.priority, \
+                    input.weight, input.timeout_ms, input.position \
+             FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::int[], \
+                         $6::int[], $7::int[], $8::int[]) \
+                  AS input(id, routing_id, provider_model_id, priority, weight, timeout_ms, position)",
+            id,
+            &target_ids,
+            &target_routing_ids,
+            &provider_model_ids,
+            &priorities,
+            &weights,
+            &timeouts,
+            &positions
+        )
+        .execute(&mut *transaction)
+        .await?;
         sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \

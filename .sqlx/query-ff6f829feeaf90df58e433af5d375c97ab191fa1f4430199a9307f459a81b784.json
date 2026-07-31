@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT attempt.ctid FROM attempts attempt JOIN requests_default request ON request.id = attempt.request_id AND request.started_at = attempt.request_started_at WHERE request.started_at < $1 LIMIT $2 FOR UPDATE OF attempt SKIP LOCKED ) DELETE FROM attempts attempt USING expired WHERE attempt.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ff6f829feeaf90df58e433af5d375c97ab191fa1f4430199a9307f459a81b784"
+}

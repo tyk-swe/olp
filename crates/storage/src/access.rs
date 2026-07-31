@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use olp_domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
+use olp_domain::{
+    ApiKeyLimits, ApiKeyScope, MAX_API_KEY_ALLOWED_ROUTES, MAX_TOKENS_PER_MINUTE, RouteSlug,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -75,9 +77,13 @@ impl PgStore {
     where
         F: FnOnce(&ApiKeyCreated) -> Result<IdempotencyResponse, PersistenceError>,
     {
-        if key.name.trim().is_empty() || key.name.chars().count() > 100 {
+        if key.name.trim().is_empty()
+            || key.name.chars().count() > 100
+            || olp_domain::has_unsafe_display_characters(&key.name)
+        {
             return Err(AccessError::Invalid(
-                "name must contain 1-100 characters".to_owned(),
+                "name must contain 1-100 visible characters without control or bidi formatting"
+                    .to_owned(),
             ));
         }
         if key.scopes.is_empty() {
@@ -89,6 +95,11 @@ impl PgStore {
             return Err(AccessError::Invalid(
                 "scope entries must be unique".to_owned(),
             ));
+        }
+        if key.allowed_routes.len() > MAX_API_KEY_ALLOWED_ROUTES {
+            return Err(AccessError::Invalid(format!(
+                "route allowlist cannot exceed {MAX_API_KEY_ALLOWED_ROUTES} entries"
+            )));
         }
         if key
             .allowed_routes
@@ -142,6 +153,13 @@ impl PgStore {
                 "expiration must be in the future".to_owned(),
             ));
         }
+        if key
+            .limits
+            .tokens_per_minute
+            .is_some_and(|limit| limit.get() > MAX_TOKENS_PER_MINUTE)
+        {
+            return Err(AccessError::Invalid("TPM limit is too large".to_owned()));
+        }
         sqlx::query!(
             "INSERT INTO api_keys \
              (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, \
@@ -181,18 +199,25 @@ impl PgStore {
             .execute(&mut *transaction)
             .await?;
         }
+        let allowed_route_names = key
+            .allowed_routes
+            .iter()
+            .map(|route| route.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let active_route_count = sqlx::query_scalar!(
+            "SELECT count(*) AS \"value!\" FROM routes WHERE slug = ANY($1::text[])",
+            &allowed_route_names
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let expected_route_count = i64::try_from(allowed_route_names.len())
+            .expect("route allowlists are bounded before database access");
+        if active_route_count != expected_route_count {
+            return Err(AccessError::Invalid(
+                "one or more allowlisted routes are not active".to_owned(),
+            ));
+        }
         for route in &key.allowed_routes {
-            let exists: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
-                route.as_str()
-            )
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !exists {
-                return Err(AccessError::Invalid(format!(
-                    "allowlisted route {route} is not active"
-                )));
-            }
             sqlx::query!(
                 "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) VALUES ($1, $2)",
                 id,

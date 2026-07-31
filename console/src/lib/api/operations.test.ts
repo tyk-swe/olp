@@ -95,7 +95,7 @@ describe('provider-health pagination', () => {
       title: 'The control API collection exceeds the console safety limit',
       status: 502
     });
-    expect(requests).toHaveLength(51);
+    expect(requests).toHaveLength(50);
   });
 });
 

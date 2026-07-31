@@ -103,6 +103,12 @@ pub(super) fn validate_id_token(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let display_name = bounded_claim(&claims, "name", 100)?;
+    if display_name
+        .as_deref()
+        .is_some_and(olp_domain::has_unsafe_display_characters)
+    {
+        return Err(invalid_id_token());
+    }
     let groups = match claims.get(&configuration.groups_claim) {
         None => Vec::new(),
         Some(Value::Array(values)) if values.len() <= 200 => values

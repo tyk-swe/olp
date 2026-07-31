@@ -273,8 +273,8 @@ async fn begin_authorization(
     redirect: bool,
 ) -> Result<Response, Problem> {
     // Validate the complete multi-header cookie view before creating durable
-    // state. The returned expirations make room for the new flow without
-    // allowing a fixed-name cookie to overwrite an unrelated tab.
+    // state. Reject at the scoped-cookie cap rather than evicting another
+    // tab's potentially live flow; returned expirations remove legacy names.
     let evictions = flow_cookie_evictions(headers)?;
     let configuration = state
         .store()

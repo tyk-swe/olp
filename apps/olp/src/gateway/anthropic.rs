@@ -172,7 +172,7 @@ pub(super) async fn models(
         .await
         .map_err(ProtocolError::anthropic)?;
     let result = models_response(runtime, key, query);
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease.as_ref());
     result
 }
 
@@ -230,7 +230,7 @@ pub(super) async fn model(
         .map_err(ProtocolError::anthropic)?;
     let result = visible_route(runtime, key, &id, Surface::Anthropic)
         .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response());
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease.as_ref());
     result
 }
 

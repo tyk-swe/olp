@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT input.position AS \"position!\", prm.source_provider_model_id AS \"provider_model_id?\" FROM unnest($1::uuid[], $2::text[]) WITH ORDINALITY AS input(provider_id, upstream_model, position) LEFT JOIN providers p ON p.id = input.provider_id AND p.state <> 'disabled'::provider_state LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id AND prm.upstream_model = input.upstream_model AND prm.enabled ORDER BY input.position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_model_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_models",
+            "name": "source_provider_model_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "03ed32ce958047720dbf63e98a4c0c56eb1b60e1558a7386b438db55cc6e3662"
+}

@@ -17,15 +17,18 @@ export type ApiKeyMutation = Schemas['ApiKeyMutationResponse'];
 export type ApiKeySecret = Schemas['CreateApiKeyResponse'] | Schemas['RotateApiKeyResponse'];
 
 export async function listApiKeys(signal?: ReadSignal): Promise<ApiKey[]> {
-  return collectCursorPages((cursor) => listApiKeyPage(cursor, getAbortSignal(signal)));
+  return collectCursorPages((cursor, remaining) =>
+    listApiKeyPage(cursor, getAbortSignal(signal), remaining)
+  );
 }
 
 export async function listApiKeyPage(
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 50
 ): Promise<CursorPage<ApiKey>> {
   const response = await apiClient.GET('/api/v1/api-keys', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: Math.min(50, limit), cursor } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);

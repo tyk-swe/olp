@@ -27,6 +27,10 @@ pub enum PersistenceError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("installation setup has already completed")]
     AlreadySetup,
+    #[error("installation or owner display name is invalid")]
+    InvalidInstallationName,
+    #[error("database pool size must be between 1 and 100 connections")]
+    InvalidDatabasePoolSize,
     #[error("runtime release failed integrity verification")]
     CorruptRelease,
     #[error("runtime snapshot is invalid: {0}")]
@@ -61,6 +65,9 @@ impl PgStore {
         database_url: &str,
         max_connections: u32,
     ) -> Result<Self, PersistenceError> {
+        if !(1..=100).contains(&max_connections) {
+            return Err(PersistenceError::InvalidDatabasePoolSize);
+        }
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
             .acquire_timeout(Duration::from_secs(5))
@@ -127,6 +134,27 @@ impl PgStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
+    }
+
+    /// Persists that a distributed limit cleanup exhausted bounded retries.
+    /// The distinct audit outcome keeps the uncertainty visible after the
+    /// gateway process exits.
+    pub async fn record_limit_cleanup_uncertainty(
+        &self,
+        api_key_id: Uuid,
+        action: &'static str,
+    ) -> Result<(), PersistenceError> {
+        sqlx::query!(
+            "INSERT INTO audit_events \
+             (id, actor_user_id, action, resource_type, resource_id, outcome) \
+             VALUES ($1, NULL, $2, 'api_key', $3, 'uncertain')",
+            Uuid::now_v7(),
+            action,
+            api_key_id.to_string()
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Records a gap exactly once for a durable source identity such as a
@@ -213,6 +241,7 @@ pub struct SessionPrincipal {
     pub security_version: i64,
     pub csrf_digest: Vec<u8>,
     pub expires_at: DateTime<Utc>,
+    pub database_now: DateTime<Utc>,
 }
 
 impl fmt::Debug for SessionPrincipal {
@@ -227,6 +256,7 @@ impl fmt::Debug for SessionPrincipal {
             .field("security_version", &self.security_version)
             .field("csrf_digest", &"[REDACTED]")
             .field("expires_at", &self.expires_at)
+            .field("database_now", &self.database_now)
             .finish()
     }
 }

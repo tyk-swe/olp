@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT dropped FROM request_metadata_loss_reporter_state WHERE gateway_instance = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dropped",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_loss_reporter_state",
+            "name": "dropped"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2ca0c8b89358d52f3eeaecdceaf0dfef9fe8f69d32cc87af6b47589a68da88df"
+}

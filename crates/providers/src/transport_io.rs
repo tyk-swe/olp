@@ -47,13 +47,7 @@ impl ProviderResponseIo {
         response: &Response,
         expected: &'static str,
     ) -> Result<(), TransportError> {
-        let valid = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected));
-        if valid {
+        if has_content_type(response.headers(), expected) {
             Ok(())
         } else {
             Err(self.protocol_error(
@@ -98,20 +92,25 @@ impl ProviderResponseIo {
     {
         self.require_content_type(&response, "text/event-stream")?;
         let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let first_wait = self
-            .remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(|| self.first_byte_timeout())?;
-        let first = timeout(first_wait, source.next())
-            .await
-            .map_err(|_| self.first_byte_timeout())?
-            .ok_or_else(|| {
-                self.protocol_error(
-                    TransportPhase::FirstByte,
-                    false,
-                    format!("{} stream ended before its first body byte", self.provider),
-                )
-            })?
-            .map_err(|error| self.map_first_body_error(error))?;
+        let first = loop {
+            let first_wait = self
+                .remaining_until(first_byte_deadline, attempt_deadline)
+                .ok_or_else(|| self.first_byte_timeout())?;
+            let chunk = timeout(first_wait, source.next())
+                .await
+                .map_err(|_| self.first_byte_timeout())?
+                .ok_or_else(|| {
+                    self.protocol_error(
+                        TransportPhase::FirstByte,
+                        false,
+                        format!("{} stream ended before its first body byte", self.provider),
+                    )
+                })?
+                .map_err(|error| self.map_first_body_error(error))?;
+            if !chunk.is_empty() {
+                break chunk;
+            }
+        };
         let source = Box::pin(stream::once(ready(Ok(first))).chain(source));
         let bytes = self.after_first_byte_stream(source, idle_timeout, attempt_deadline);
         Ok(Box::pin(DecodedEventStream::new(self, bytes, decoder)))
@@ -210,23 +209,29 @@ impl ProviderResponseIo {
     ) -> Result<Vec<u8>, TransportError> {
         let mut output = Vec::new();
         let mut first = true;
+        let mut idle_deadline = None;
         loop {
-            let wait = if first {
-                self.remaining_until(first_byte_deadline, attempt_deadline)
-                    .ok_or_else(|| self.first_byte_timeout())?
-            } else {
-                bounded_duration(
-                    idle_timeout,
-                    self.remaining(attempt_deadline, TransportPhase::Body)?,
+            let (wait, timeout_error) = if first {
+                (
+                    self.remaining_until(first_byte_deadline, attempt_deadline)
+                        .ok_or_else(|| self.first_byte_timeout())?,
+                    self.first_byte_timeout(),
                 )
-            };
-            let next = timeout(wait, source.next()).await.map_err(|_| {
-                if first {
-                    self.first_byte_timeout()
+            } else {
+                let now = Instant::now();
+                let idle_remaining = idle_deadline
+                    .and_then(|deadline: Instant| deadline.checked_duration_since(now))
+                    .ok_or_else(|| self.body_idle_timeout())?;
+                let attempt_remaining = self.remaining(attempt_deadline, TransportPhase::Body)?;
+                if attempt_remaining <= idle_remaining {
+                    (attempt_remaining, self.attempt_body_timeout())
                 } else {
-                    self.body_idle_timeout()
+                    (idle_remaining, self.body_idle_timeout())
                 }
-            })?;
+            };
+            let next = timeout(wait, source.next())
+                .await
+                .map_err(|_| timeout_error)?;
             let Some(chunk) = next else { break };
             let chunk = chunk.map_err(|error| {
                 if first {
@@ -235,7 +240,11 @@ impl ProviderResponseIo {
                     self.map_body_error(error, false)
                 }
             })?;
+            if chunk.is_empty() {
+                continue;
+            }
             first = false;
+            idle_deadline = Some(Instant::now() + idle_timeout);
             if output.len().saturating_add(chunk.len()) > maximum {
                 return Err(self.protocol_error(
                     TransportPhase::Body,
@@ -322,6 +331,16 @@ impl ProviderResponseIo {
     }
 }
 
+fn has_content_type(headers: &http::HeaderMap, expected: &str) -> bool {
+    let mut values = headers.get_all(header::CONTENT_TYPE).iter();
+    values
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected))
+        && values.next().is_none()
+}
+
 #[must_use]
 pub(crate) fn bounded_duration(configured: Duration, remaining: Duration) -> Duration {
     configured.min(remaining)
@@ -385,6 +404,19 @@ impl Stream for DeadlineByteStream {
         }
         match self.source.as_mut().poll_next(context) {
             Poll::Ready(Some(Ok(chunk))) => {
+                if chunk.is_empty() {
+                    if self.idle_sleep.as_mut().poll(context).is_ready() {
+                        self.terminal = true;
+                        return Poll::Ready(Some(Err(if self.first {
+                            self.io.first_byte_timeout()
+                        } else if Instant::now() >= self.attempt_deadline {
+                            self.io.attempt_body_timeout()
+                        } else {
+                            self.io.body_idle_timeout()
+                        })));
+                    }
+                    return Poll::Ready(Some(Ok(chunk)));
+                }
                 self.first = false;
                 let wake = (Instant::now() + self.idle_timeout).min(self.attempt_deadline);
                 self.idle_sleep.as_mut().reset(wake);
@@ -567,6 +599,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bounded_body_ignores_empty_chunks_and_reports_absolute_deadline() {
+        let io = ProviderResponseIo::new("Test");
+        let now = Instant::now();
+        let body = io
+            .read_bounded_stream(
+                source([Bytes::new(), Bytes::from_static(b"payload"), Bytes::new()]),
+                now + Duration::from_secs(1),
+                now + Duration::from_secs(1),
+                Duration::from_secs(1),
+                16,
+            )
+            .await
+            .unwrap();
+        assert_eq!(body, b"payload");
+
+        let pending = Box::pin(
+            stream::once(ready(Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"x"))))
+                .chain(stream::pending()),
+        );
+        let error = io
+            .read_bounded_stream(
+                pending,
+                Instant::now() + Duration::from_secs(1),
+                Instant::now() + Duration::from_millis(20),
+                Duration::from_secs(1),
+                16,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Test attempt deadline elapsed while reading the response"
+        );
+    }
+
+    #[test]
+    fn content_type_must_be_a_single_header_field() {
+        let mut headers = http::HeaderMap::new();
+        headers.append(
+            header::CONTENT_TYPE,
+            http::HeaderValue::from_static("application/json"),
+        );
+        assert!(has_content_type(&headers, "application/json"));
+        headers.append(
+            header::CONTENT_TYPE,
+            http::HeaderValue::from_static("text/event-stream"),
+        );
+        assert!(!has_content_type(&headers, "application/json"));
+    }
+
+    #[tokio::test]
     async fn decoder_error_after_an_event_is_committed() {
         let io = ProviderResponseIo::new("Test");
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -623,6 +706,32 @@ mod tests {
         assert_eq!(idle_error.class, AttemptFailureClass::Timeout);
         assert_eq!(idle_error.message, "Test response idle deadline elapsed");
         assert!(idle.next().await.is_none());
+
+        let empty_chunks = Box::pin(
+            stream::once(ready(Ok::<Bytes, reqwest::Error>(Bytes::from_static(
+                b"event",
+            ))))
+            .chain(stream::unfold((), |_| async {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                Some((Ok(Bytes::new()), ()))
+            })),
+        );
+        let mut idle = io.after_first_byte_stream(
+            empty_chunks,
+            Duration::from_millis(20),
+            Instant::now() + Duration::from_secs(1),
+        );
+        assert!(idle.next().await.unwrap().is_ok());
+        let empty_chunk_error = loop {
+            match idle.next().await.unwrap() {
+                Ok(_) => {}
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(
+            empty_chunk_error.message,
+            "Test response idle deadline elapsed"
+        );
 
         let mut attempt = io.after_first_byte_stream(
             first_then_pending(),

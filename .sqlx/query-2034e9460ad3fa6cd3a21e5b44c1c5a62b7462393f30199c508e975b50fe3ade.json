@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "LOCK TABLE async_media_jobs IN EXCLUSIVE MODE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2034e9460ad3fa6cd3a21e5b44c1c5a62b7462393f30199c508e975b50fe3ade"
+}

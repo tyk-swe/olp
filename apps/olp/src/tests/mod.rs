@@ -44,6 +44,7 @@ use super::{
         LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody,
         enforce_request_limits, estimate_http_json_request_tokens, http_inference_principal,
         read_json_body, validate_json_depth, validate_multipart_boundary,
+        validate_singleton_headers,
     },
     router::{
         http_request_span, request_trace_path, sensitive_request_headers,

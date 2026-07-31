@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
 const RESERVE_SCRIPT: &str = include_str!("../../scripts/reserve_limits.lua");
+const RECONCILE_SCRIPT: &str = include_str!("../../scripts/reconcile_limits.lua");
 
 fn valkey_url() -> String {
     std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must point to an isolated test Valkey")
@@ -366,7 +367,7 @@ async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
 
 #[tokio::test]
 #[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
-async fn token_reconciliation_refunds_only_unused_reservation() {
+async fn token_reconciliation_is_signed_and_idempotent() {
     let namespace = namespace("token_refund");
     let lookup_id = "lookup_01";
     let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
@@ -402,47 +403,60 @@ async fn token_reconciliation_refunds_only_unused_reservation() {
         .await
         .unwrap();
     limiter.reconcile(&lease, 7).await.unwrap();
+    limiter.reconcile(&lease, 7).await.unwrap();
     let state = rate_state(&mut connection, &rate_key).await;
     assert_eq!(state["rpm"], 2);
-    assert_eq!(state["tpm"], 7);
+    assert_eq!(state["tpm"], 10);
 }
 
 #[tokio::test]
 #[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
-async fn token_reconciliation_does_not_touch_a_new_window() {
-    let namespace = namespace("token_refund_window");
+async fn token_reconciliation_carries_rollover_overage_but_not_refunds() {
+    let namespace = namespace("token_rollover");
     let lookup_id = "lookup_01";
-    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
-        .await
-        .unwrap();
     let mut connection = connection().await;
-    settle_in_minute(&mut connection).await;
+    let now = settle_in_minute(&mut connection).await;
     let (rate_key, _) = keys(&namespace, lookup_id);
-
-    let lease = limiter
-        .reserve(LimitRequest {
-            requests_per_minute: Some(10),
-            tokens_per_minute: Some(100),
-            max_concurrency: None,
-            requested_tokens: 8,
-            ..request(lookup_id)
-        })
-        .await
-        .unwrap();
-    let reservation_window = rate_state(&mut connection, &rate_key).await["window"];
+    let current_window = now / 60_000;
     let _: () = redis::pipe()
-        .hset(&rate_key, "window", reservation_window + 1)
+        .hset(&rate_key, "window", current_window)
         .hset(&rate_key, "rpm", 1)
         .hset(&rate_key, "tpm", 11)
         .query_async(&mut connection)
         .await
         .unwrap();
 
-    limiter.reconcile(&lease, 0).await.unwrap();
+    let refund: i64 = redis::Script::new(RECONCILE_SCRIPT)
+        .key(&rate_key)
+        .arg(current_window - 1)
+        .arg("old-refund")
+        .arg(8)
+        .arg(0)
+        .invoke_async(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(refund, 1);
     let state = rate_state(&mut connection, &rate_key).await;
-    assert_eq!(state["window"], reservation_window + 1);
+    assert_eq!(state["window"], current_window);
     assert_eq!(state["rpm"], 1);
     assert_eq!(state["tpm"], 11);
+
+    for expected in [1, 0] {
+        let charge: i64 = redis::Script::new(RECONCILE_SCRIPT)
+            .key(&rate_key)
+            .arg(current_window - 1)
+            .arg("old-overage")
+            .arg(8)
+            .arg(12)
+            .invoke_async(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(charge, expected);
+    }
+    let state = rate_state(&mut connection, &rate_key).await;
+    assert_eq!(state["window"], current_window);
+    assert_eq!(state["rpm"], 1);
+    assert_eq!(state["tpm"], 15);
 }
 
 #[tokio::test]

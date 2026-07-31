@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT input.provider_model_id AS \"provider_model_id!\" FROM unnest($1::uuid[]) AS input(provider_model_id) WHERE NOT EXISTS ( SELECT 1 FROM providers p JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id WHERE prm.source_provider_model_id = input.provider_model_id AND prm.enabled AND p.state <> 'disabled'::provider_state ) LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_model_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "be2350029e1305dc71269141edc2eb214ffe25fbba0ee4018b13791262a985cf"
+}

@@ -35,7 +35,10 @@ psql "$OLP_REHEARSAL_SERVER_URL/postgres" -v ON_ERROR_STOP=1 \
   -c 'CREATE DATABASE olp_restore' \
   -c 'CREATE DATABASE olp_legacy_restore' \
   -c 'CREATE DATABASE olp_upgrade' \
-  -c 'CREATE DATABASE olp_previous'
+  -c 'CREATE DATABASE olp_previous' \
+  -c "ALTER DATABASE olp_restore SET olp.restore_rehearsal = 'isolated-destination'" \
+  -c "ALTER DATABASE olp_legacy_restore SET olp.restore_rehearsal = 'isolated-destination'" \
+  -c "ALTER DATABASE olp_upgrade SET olp.restore_rehearsal = 'isolated-destination'"
 
 backup=$(./scripts/backup.sh "$scratch_dir/olp-backups")
 ./scripts/backup-manifest.sh validate "$backup" v2 >/dev/null

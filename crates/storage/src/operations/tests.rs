@@ -35,6 +35,7 @@ fn rejects_duplicate_pricing_dimensions_within_a_scope() {
         model: "model".to_owned(),
         operation: OperationKind::Generation,
         input_per_million: Some("1".to_owned()),
+        cached_input_per_million: None,
         output_per_million: None,
         unit_price: None,
         currency: "USD".to_owned(),
@@ -47,6 +48,22 @@ fn rejects_duplicate_pricing_dimensions_within_a_scope() {
 }
 
 #[test]
+fn pricing_revisions_have_a_bounded_entry_count() {
+    let price = PriceInput {
+        provider_kind: ProviderKind::OpenAi,
+        provider_id: None,
+        model: "model".to_owned(),
+        operation: OperationKind::Generation,
+        input_per_million: Some("1".to_owned()),
+        cached_input_per_million: None,
+        output_per_million: None,
+        unit_price: None,
+        currency: "USD".to_owned(),
+    };
+    assert!(validate_prices(&vec![price; MAX_PRICING_ENTRIES + 1]).is_err());
+}
+
+#[test]
 fn accepts_unit_only_media_pricing() {
     validate_prices(&[PriceInput {
         provider_kind: ProviderKind::OpenAi,
@@ -54,11 +71,30 @@ fn accepts_unit_only_media_pricing() {
         model: "image-model".to_owned(),
         operation: OperationKind::ImageGeneration,
         input_per_million: None,
+        cached_input_per_million: None,
         output_per_million: None,
         unit_price: Some("0.04".to_owned()),
         currency: "USD".to_owned(),
     }])
     .unwrap();
+}
+
+#[test]
+fn cached_input_pricing_requires_an_input_rate() {
+    assert!(
+        validate_prices(&[PriceInput {
+            provider_kind: ProviderKind::OpenAi,
+            provider_id: None,
+            model: "model".to_owned(),
+            operation: OperationKind::Generation,
+            input_per_million: None,
+            cached_input_per_million: Some("1".to_owned()),
+            output_per_million: None,
+            unit_price: None,
+            currency: "USD".to_owned(),
+        }])
+        .is_err()
+    );
 }
 
 #[test]

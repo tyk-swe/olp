@@ -11,7 +11,7 @@ impl PgStore {
         &self,
         limit: u16,
     ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
-        self.recent_valid_runtime_releases_after(limit, None).await
+        self.valid_runtime_release_page(limit, None, None).await
     }
 
     /// Returns verified releases newer than the supplied installed sequence.
@@ -21,44 +21,75 @@ impl PgStore {
         limit: u16,
         installed_sequence: Option<u64>,
     ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
+        self.valid_runtime_release_page(limit, installed_sequence, None)
+            .await
+    }
+
+    /// Returns one descending page of verified releases between the supplied
+    /// installed sequence and exclusive older-page cursor.
+    pub async fn valid_runtime_release_page(
+        &self,
+        limit: u16,
+        installed_sequence: Option<u64>,
+        before_sequence: Option<u64>,
+    ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
         let installed_sequence = installed_sequence
             .map(i64::try_from)
             .transpose()
             .map_err(|_| PersistenceError::CorruptRelease)?;
-        let rows = sqlx::query!(
-            "SELECT id, sequence, compiled_release, release_sha256, created_at \
-             FROM runtime_generations \
-             WHERE ($1::bigint IS NULL OR sequence > $1) \
-             ORDER BY sequence DESC LIMIT $2",
-            installed_sequence,
-            i64::from(limit.clamp(1, 100))
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        let mut releases = Vec::with_capacity(rows.len());
-        for row in rows {
-            let payload: Vec<u8> = row.compiled_release;
-            let stored_sha: Vec<u8> = row.release_sha256;
-            let generation_id: Uuid = row.id;
-            let sequence: i64 = row.sequence;
-            let actual_sha: [u8; 32] = Sha256::digest(&payload).into();
-            if stored_sha.as_slice() != actual_sha
-                || verify_release_envelope(&payload, generation_id, sequence).is_err()
-            {
-                tracing::error!(
-                    %generation_id,
+        let before_sequence = before_sequence
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| PersistenceError::CorruptRelease)?;
+        let limit = usize::from(limit.clamp(1, 100));
+        let mut releases = Vec::with_capacity(limit);
+        let mut before_sequence = before_sequence;
+        while releases.len() < limit {
+            let page_before_sequence = before_sequence.unwrap_or(i64::MAX);
+            let rows = sqlx::query!(
+                "SELECT id, sequence, compiled_release, release_sha256, created_at \
+                 FROM runtime_generations \
+                 WHERE ($1::bigint IS NULL OR sequence > $1) \
+                   AND sequence < $2 \
+                 ORDER BY sequence DESC LIMIT $3",
+                installed_sequence,
+                page_before_sequence,
+                i64::try_from(limit).expect("runtime release limit is bounded")
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            let exhausted = rows.len() < limit;
+            before_sequence = rows.last().map(|row| row.sequence);
+            for row in rows {
+                let payload: Vec<u8> = row.compiled_release;
+                let stored_sha: Vec<u8> = row.release_sha256;
+                let generation_id: Uuid = row.id;
+                let sequence: i64 = row.sequence;
+                let actual_sha: [u8; 32] = Sha256::digest(&payload).into();
+                if stored_sha.as_slice() != actual_sha
+                    || verify_release_envelope(&payload, generation_id, sequence).is_err()
+                {
+                    tracing::error!(
+                        %generation_id,
+                        sequence,
+                        "skipping corrupt runtime release while searching for last-known-good"
+                    );
+                    continue;
+                }
+                releases.push(PublishedRuntimeRelease {
+                    generation_id,
                     sequence,
-                    "skipping corrupt runtime release while searching for last-known-good"
-                );
-                continue;
+                    payload,
+                    payload_sha256: actual_sha,
+                    created_at: row.created_at,
+                });
+                if releases.len() == limit {
+                    break;
+                }
             }
-            releases.push(PublishedRuntimeRelease {
-                generation_id,
-                sequence,
-                payload,
-                payload_sha256: actual_sha,
-                created_at: row.created_at,
-            });
+            if exhausted || before_sequence.is_none() {
+                break;
+            }
         }
         Ok(releases)
     }

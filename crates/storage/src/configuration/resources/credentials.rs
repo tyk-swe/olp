@@ -294,24 +294,6 @@ impl PgStore {
         {
             return Err(ConfigurationError::InUse);
         }
-        // Historic jobs carry their immutable provider revision. Even an
-        // otherwise inactive credential remains lifecycle authority until
-        // every job that used it has a durable deletion tombstone.
-        let used_by_live_media_job: bool = sqlx::query_scalar!(
-            "SELECT EXISTS (
-               SELECT 1 FROM async_media_jobs j
-               JOIN provider_revisions pr ON pr.id = j.provider_revision_id
-               WHERE j.provider_id = $1 AND j.lifecycle_state <> 'deleted'
-                 AND pr.credential_version_id = $2
-             ) AS \"value!\"",
-            provider_id,
-            credential_id
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if used_by_live_media_job {
-            return Err(ConfigurationError::InUse);
-        }
         let result = sqlx::query!(
             "UPDATE provider_credential_versions SET revoked_at = COALESCE(revoked_at, now()) \
              WHERE id = $1 AND provider_id = $2",

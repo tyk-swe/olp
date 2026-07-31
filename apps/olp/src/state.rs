@@ -3,7 +3,7 @@
 
 use std::{
     collections::BTreeMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -57,6 +57,7 @@ pub struct ApiState {
     pub request_metadata: Option<RequestMetadataEmitter>,
     pub(crate) circuits: circuit::CircuitBreaker,
     pub(crate) media_reconciliation_gaps: Arc<AtomicU64>,
+    pub(crate) media_job_journal: Option<Arc<crate::media_job_journal::MediaJobJournal>>,
     pub media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: request_admission::PublicAdmission,
@@ -117,6 +118,7 @@ impl ApiState {
             request_metadata: None,
             circuits: circuit::CircuitBreaker::default(),
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
+            media_job_journal: None,
             media_spool,
             multipart_admission,
             public_admission: request_admission::PublicAdmission::default(),
@@ -130,6 +132,19 @@ impl ApiState {
             observability: ObservabilityCache::default(),
             oidc_allow_insecure_test_endpoints: false,
         }
+    }
+
+    /// Enables crash recovery for async media-job identities.
+    pub fn enable_media_job_recovery(
+        &mut self,
+        base_dir: &Path,
+        database_url: &str,
+    ) -> std::io::Result<()> {
+        self.media_job_journal = Some(crate::media_job_journal::MediaJobJournal::open(
+            base_dir,
+            database_url,
+        )?);
+        Ok(())
     }
 
     /// Installs the explicit proxy trust boundary parsed at process startup.

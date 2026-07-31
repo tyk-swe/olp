@@ -26,6 +26,7 @@ mod static_console;
 mod circuit;
 mod cli;
 mod connectors;
+mod media_job_journal;
 mod media_spool;
 mod mode_dependencies;
 mod provider_adapter;

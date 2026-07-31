@@ -4,6 +4,8 @@ use redis::{AsyncCommands, FromRedisValue, Script, aio::ConnectionManager};
 use thiserror::Error;
 use uuid::Uuid;
 
+use olp_domain::MAX_TOKENS_PER_MINUTE;
+
 const RESERVE_SCRIPT: &str = include_str!("../scripts/reserve_limits.lua");
 const RELEASE_SCRIPT: &str = include_str!("../scripts/release_concurrency.lua");
 const RECONCILE_SCRIPT: &str = include_str!("../scripts/reconcile_limits.lua");
@@ -11,7 +13,7 @@ const SCRIPT_RESPONSE_VERSION: i64 = 1;
 const FIXED_WINDOW_MS: i64 = 60_000;
 // Valkey executes Lua 5.1 scripts with IEEE-754 doubles. Keep every integer
 // involved in a comparison or sorted-set score exactly representable.
-const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
+const MAX_LUA_INTEGER: i64 = MAX_TOKENS_PER_MINUTE as i64;
 
 #[derive(Clone)]
 pub struct DistributedLimiter {
@@ -106,18 +108,26 @@ impl DistributedLimiter {
                 "actual_tokens must be a non-negative Lua-safe integer",
             ));
         }
-        let refund = lease.reserved_tokens.saturating_sub(actual_tokens).max(0);
-        if refund == 0 {
+        // An exact reservation has nothing to apply, so the script would only
+        // rewrite `tpm` to its current value and leave a retained
+        // `reconciled:<lease>` marker behind. Skipping it keeps the shared rate
+        // hash from growing by one field per request for the retention window.
+        if actual_tokens == lease.reserved_tokens {
             return Ok(());
         }
         let mut connection = self.connection.clone();
-        let _: i64 = Script::new(RECONCILE_SCRIPT)
+        let result: i64 = Script::new(RECONCILE_SCRIPT)
             .key(&lease.rate_key)
             .arg(lease.rate_window_id)
-            .arg(refund)
+            .arg(&lease.lease_id)
+            .arg(lease.reserved_tokens)
+            .arg(actual_tokens)
             .invoke_async(&mut connection)
             .await?;
-        Ok(())
+        match result {
+            0 | 1 => Ok(()),
+            _ => Err(LimitError::MalformedState),
+        }
     }
 
     pub async fn ping(&self) -> Result<(), LimitError> {

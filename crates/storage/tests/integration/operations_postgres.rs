@@ -66,11 +66,12 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     .unwrap();
 
     let observed_at = Utc::now() - Duration::hours(2);
+    let pricing_effective_at = observed_at - Duration::days(3);
     let pricing = store
         .create_pricing_revision(
             owner.user_id,
             "pricing-operations-001",
-            observed_at - Duration::days(3),
+            pricing_effective_at,
             &[
                 PriceInput {
                     provider_kind: olp_domain::ProviderKind::OpenAi,
@@ -78,6 +79,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                     model: "mock-model".to_owned(),
                     operation: olp_domain::OperationKind::Generation,
                     input_per_million: Some("1.000000000000".to_owned()),
+                    cached_input_per_million: None,
                     output_per_million: Some("2.000000000000".to_owned()),
                     unit_price: None,
                     currency: "USD".to_owned(),
@@ -88,6 +90,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                     model: "mock-model".to_owned(),
                     operation: olp_domain::OperationKind::Generation,
                     input_per_million: Some("3.000000000000".to_owned()),
+                    cached_input_per_million: Some("1.000000000000".to_owned()),
                     output_per_million: Some("4.000000000000".to_owned()),
                     unit_price: None,
                     currency: "USD".to_owned(),
@@ -98,6 +101,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                     model: "mock-model".to_owned(),
                     operation: olp_domain::OperationKind::ImageGeneration,
                     input_per_million: None,
+                    cached_input_per_million: None,
                     output_per_million: None,
                     unit_price: Some("0.040000000000".to_owned()),
                     currency: "USD".to_owned(),
@@ -112,6 +116,12 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         panic!("fresh pricing revision replayed");
     };
     assert_eq!(pricing.revision, 1);
+    sqlx::query("UPDATE pricing_revisions SET created_at = $2 WHERE id = $1")
+        .bind(pricing.id)
+        .bind(observed_at - Duration::hours(1))
+        .execute(store.pool())
+        .await
+        .unwrap();
     assert!(matches!(
         store
             .create_pricing_revision(
@@ -140,6 +150,32 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             .await,
         Err(OperationsError::Invalid(_))
     ));
+    let mut late_price = pricing.prices[1].clone();
+    late_price.input_per_million = Some("999.000000000000".to_owned());
+    let late_revision = store
+        .create_pricing_revision(
+            owner.user_id,
+            "pricing-operations-late-001",
+            pricing_effective_at,
+            &[late_price],
+            ReplayableIdempotency::new([4; 32], &master_key),
+            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+        )
+        .await
+        .unwrap();
+    let IdempotencyOutcome::Executed {
+        value: late_revision,
+        ..
+    } = late_revision
+    else {
+        panic!("fresh backdated pricing revision replayed");
+    };
+    sqlx::query("UPDATE pricing_revisions SET created_at = $2 WHERE id = $1")
+        .bind(late_revision.id)
+        .bind(observed_at + Duration::hours(1))
+        .execute(store.pool())
+        .await
+        .unwrap();
 
     let request_id = Uuid::now_v7();
     let request_started_at = observed_at - Duration::milliseconds(20);
@@ -451,7 +487,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     assert_eq!(request_page.items[0].id, request_id);
     assert_eq!(
         request_page.items[0].estimated_cost.as_deref(),
-        Some("0.000500000000")
+        Some("0.000480000000")
     );
     assert_eq!(
         store
@@ -547,7 +583,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let summary = store.usage_summary(&filters).await.unwrap();
     assert_eq!(summary.request_count, 1);
     assert_eq!(summary.cached_input_tokens, "10");
-    assert_eq!(summary.estimated_cost.as_deref(), Some("0.000500000000"));
+    assert_eq!(summary.estimated_cost.as_deref(), Some("0.000480000000"));
     assert_eq!(summary.currency.as_deref(), Some("USD"));
     assert_eq!(series[0].currency.as_deref(), Some("USD"));
     assert_eq!(breakdown[0].currency.as_deref(), Some("USD"));

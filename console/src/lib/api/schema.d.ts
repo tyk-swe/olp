@@ -1476,6 +1476,7 @@ export interface components {
             media_reconciliation_stale: number;
             /** Format: int64 */
             media_reconciliation_unbound: number;
+            request_default_partition_spill_detected: boolean;
             request_metadata_complete: boolean;
             request_metadata_consumer: string;
             /** Format: date-time */
@@ -1496,6 +1497,7 @@ export interface components {
             request_metadata_gateway_unresolved_event_lower_bound: number;
             /** Format: int64 */
             request_metadata_historical_uncertain_gaps: number;
+            request_partitions: string;
             status: string;
         };
         InvitationListResponse: {
@@ -1704,6 +1706,7 @@ export interface components {
         /** @enum {string} */
         PriceOperation: "generation" | "embeddings" | "token_count" | "image_generation" | "image_edit" | "image_variation" | "speech" | "transcription" | "video_create" | "video_list" | "video_get" | "video_content" | "video_delete" | "moderation" | "model_list" | "model_get";
         PriceRequest: {
+            cached_input_per_million?: string | null;
             currency: string;
             input_per_million?: string | null;
             model: string;
@@ -1715,6 +1718,7 @@ export interface components {
             unit_price?: string | null;
         };
         PriceResponse: {
+            cached_input_per_million?: string | null;
             currency: string;
             input_per_million?: string | null;
             model: string;
@@ -5500,7 +5504,10 @@ export interface operations {
     };
     disable_provider: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Owner-only emergency containment; tombstones live media jobs and removes affected routes from the runtime */
+                force?: boolean;
+            };
             header: {
                 "If-Match": string;
                 "Idempotency-Key": string;
@@ -5531,7 +5538,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Forced containment requires an owner */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7693,6 +7700,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Session revocation could not be confirmed */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

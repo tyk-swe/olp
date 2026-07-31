@@ -47,6 +47,7 @@ use super::{
     limits::reserve_limits,
     media_jobs::{media_job_state, valid_upstream_media_job_id},
     multipart::MultipartFormData,
+    videos::require_media_job_recovery,
 };
 use crate::MultipartRequestAdmission;
 

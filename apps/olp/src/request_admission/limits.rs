@@ -10,7 +10,7 @@ use axum::{
     body::{Body, HttpBody},
     http::HeaderMap,
 };
-use olp_domain::{ApiKey, ApiKeyLookupId, ApiKeyStatus, Surface};
+use olp_domain::{ApiKey, ApiKeyLookupId, ApiKeyStatus, MAX_ROUTE_TIMEOUT_MS, RouteSlug, Surface};
 use olp_protocols::openai::EmbeddingWireInput;
 use olp_storage::{DistributedLimiter, LimitError, LimitLease, LimitRequest};
 use serde::Deserialize;
@@ -27,6 +27,8 @@ struct InferenceReservationInner {
 struct DistributedReconciliation {
     limiter: Arc<DistributedLimiter>,
     lease: LimitLease,
+    store: olp_storage::PgStore,
+    api_key_id: uuid::Uuid,
 }
 
 #[derive(Clone)]
@@ -35,23 +37,26 @@ pub(crate) struct InferenceReservation {
 }
 
 impl InferenceReservation {
-    fn distributed(limiter: Arc<DistributedLimiter>, lease: LimitLease) -> Self {
+    fn distributed(
+        limiter: Arc<DistributedLimiter>,
+        lease: LimitLease,
+        store: olp_storage::PgStore,
+        api_key_id: uuid::Uuid,
+    ) -> Self {
         let reconcile = DistributedReconciliation {
             limiter: Arc::clone(&limiter),
             lease: lease.clone(),
+            store: store.clone(),
+            api_key_id,
         };
         Self {
             inner: Arc::new(InferenceReservationInner {
                 release: Mutex::new(Some(Box::pin(async move {
-                    match tokio::time::timeout(Duration::from_millis(250), limiter.release(&lease))
-                        .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => {
-                            tracing::warn!(%error, "failed to release HTTP concurrency lease");
-                        }
-                        Err(_) => tracing::warn!("timed out releasing HTTP concurrency lease"),
-                    }
+                    gateway::limits::release_concurrency_in_background(
+                        limiter,
+                        lease,
+                        Some((store, api_key_id)),
+                    );
                 }))),
                 reconcile: Mutex::new(Some(reconcile)),
             }),
@@ -68,7 +73,7 @@ impl InferenceReservation {
         }
     }
 
-    pub(crate) async fn reconcile(&self, actual_tokens: i64) {
+    pub(crate) fn reconcile(&self, actual_tokens: i64) {
         let reconcile = self
             .inner
             .reconcile
@@ -78,18 +83,12 @@ impl InferenceReservation {
         let Some(reconcile) = reconcile else {
             return;
         };
-        match tokio::time::timeout(
-            Duration::from_millis(250),
-            reconcile.limiter.reconcile(&reconcile.lease, actual_tokens),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::warn!(%error, "failed to reconcile HTTP token reservation");
-            }
-            Err(_) => tracing::warn!("timed out reconciling HTTP token reservation"),
-        }
+        gateway::limits::reconcile_tokens_in_background(
+            reconcile.limiter,
+            reconcile.lease,
+            actual_tokens,
+            Some((reconcile.store, reconcile.api_key_id)),
+        );
     }
 
     pub(super) async fn release(self) {
@@ -251,7 +250,7 @@ pub(super) fn authenticate_inference_headers(
     if key.status != ApiKeyStatus::Active
         || key
             .expires_at
-            .is_some_and(|expires_at| expires_at <= chrono::Utc::now())
+            .is_some_and(|expires_at| expires_at <= snapshot.database_time())
     {
         return Err(crate::Problem::unauthorized(
             "The API key is invalid or unavailable.",
@@ -268,6 +267,7 @@ pub(super) async fn reserve_http_inference_limits(
     state: &GatewayState,
     principal: &InferencePrincipal,
     requested_tokens: i64,
+    requested_route: Option<&str>,
 ) -> Result<Option<InferenceReservation>, gateway::InferenceError> {
     if !principal.key().limits.has_hard_limits() {
         return Ok(None);
@@ -283,17 +283,18 @@ pub(super) async fn reserve_http_inference_limits(
         .map(|value| i64::try_from(value.get()))
         .transpose()
         .map_err(|_| gateway::InferenceError::unavailable("limit_configuration_invalid"))?;
-    let route_timeout = principal
-        .runtime
-        .routes
-        .iter()
-        .filter(|(slug, _)| {
-            principal.key().allowed_routes.is_empty()
-                || principal.key().allowed_routes.contains(*slug)
-        })
-        .map(|(_, route)| route.overall_timeout.as_duration())
-        .max()
-        .unwrap_or(Duration::from_secs(30));
+    let route_allowed = |slug: &RouteSlug| {
+        principal.key().allowed_routes.is_empty() || principal.key().allowed_routes.contains(slug)
+    };
+    let route_timeout = requested_route
+        .and_then(|slug| RouteSlug::parse(slug).ok())
+        .as_ref()
+        .filter(|slug| route_allowed(slug))
+        .and_then(|slug| principal.runtime.routes.get(slug))
+        .map(|route| route.overall_timeout.as_duration())
+        .unwrap_or(Duration::from_millis(
+            u64::try_from(MAX_ROUTE_TIMEOUT_MS).expect("route timeout maximum is positive"),
+        ));
     let result = tokio::time::timeout(
         Duration::from_secs(1),
         limiter.reserve(LimitRequest {
@@ -318,7 +319,12 @@ pub(super) async fn reserve_http_inference_limits(
     .await
     .map_err(|_| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
     match result {
-        Ok(lease) => Ok(Some(InferenceReservation::distributed(limiter, lease))),
+        Ok(lease) => Ok(Some(InferenceReservation::distributed(
+            limiter,
+            lease,
+            state.store().clone(),
+            principal.key().id.as_uuid(),
+        ))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,

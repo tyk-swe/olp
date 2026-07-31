@@ -65,6 +65,8 @@ pub enum SecurityError {
     InvalidMasterKeyVersion,
     #[error("active master-key version is not present in the keyring")]
     MissingActiveMasterKey,
+    #[error("authentication HMAC keyring is invalid")]
+    InvalidAuthHmacKeyring,
     #[error("secret has an invalid format")]
     InvalidSecretFormat,
     #[error("secret encryption failed")]
@@ -279,18 +281,68 @@ impl fmt::Debug for EncryptedSecret {
     }
 }
 
-/// Authentication HMAC key used for proxy keys and public-auth identities. This
-/// is intentionally distinct from the provider-credential encryption key so the
-/// two can rotate separately.
-pub struct AuthHmacKey([u8; 32]);
+/// Authentication HMAC keys used for proxy keys and public-auth identities.
+/// The active key signs new material; retained versions verify existing API
+/// keys and keep public-auth limiter identities stable during rotation.
+pub struct AuthHmacKey {
+    active_version: u32,
+    keys: BTreeMap<u32, [u8; 32]>,
+}
 
 impl AuthHmacKey {
     pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+        Self {
+            active_version: 1,
+            keys: BTreeMap::from([(1, bytes)]),
+        }
     }
 
     pub fn from_base64(encoded: &str) -> Result<Self, SecurityError> {
-        Ok(Self(decode_key(encoded)?))
+        decode_key(encoded)
+            .map(Self::new)
+            .map_err(|_| SecurityError::InvalidAuthHmacKeyring)
+    }
+
+    /// Loads the legacy single-key format or the same versioned JSON keyring
+    /// used by master keys. At most four keys may overlap during rotation.
+    pub fn from_file_contents(contents: &str) -> Result<Self, SecurityError> {
+        let trimmed = contents.trim();
+        if !trimmed.starts_with('{') {
+            return Self::from_base64(trimmed);
+        }
+        let mut document: MasterKeyFile =
+            serde_json::from_str(trimmed).map_err(|_| SecurityError::InvalidAuthHmacKeyring)?;
+        if document.active_version == 0 || document.keys.is_empty() || document.keys.len() > 4 {
+            document.zeroize();
+            return Err(SecurityError::InvalidAuthHmacKeyring);
+        }
+        let mut keys = BTreeMap::new();
+        for entry in &mut document.keys {
+            if entry.version == 0 || keys.contains_key(&entry.version) {
+                document.zeroize();
+                zeroize_key_map(&mut keys);
+                return Err(SecurityError::InvalidAuthHmacKeyring);
+            }
+            let decoded = match decode_key(&entry.key) {
+                Ok(decoded) => decoded,
+                Err(_) => {
+                    document.zeroize();
+                    zeroize_key_map(&mut keys);
+                    return Err(SecurityError::InvalidAuthHmacKeyring);
+                }
+            };
+            keys.insert(entry.version, decoded);
+        }
+        let active_version = document.active_version;
+        document.zeroize();
+        if !keys.contains_key(&active_version) {
+            zeroize_key_map(&mut keys);
+            return Err(SecurityError::InvalidAuthHmacKeyring);
+        }
+        Ok(Self {
+            active_version,
+            keys,
+        })
     }
 
     pub fn generate_api_key(&self) -> ApiKeyMaterial {
@@ -326,13 +378,22 @@ impl AuthHmacKey {
         if secret.len() != SECRET_BYTES {
             return Err(SecurityError::InvalidSecretFormat);
         }
-        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
-            .expect("HMAC accepts keys of every size");
-        mac.update(API_KEY_PREFIX.as_bytes());
-        mac.update(lookup_id.as_bytes());
-        mac.update(&secret);
-        mac.verify_slice(expected_digest)
-            .map_err(|_| SecurityError::InvalidSecretFormat)?;
+        // Most live keys are signed by the active version, and `keys` is
+        // ordered by version, not by likelihood. Try the active key first so
+        // the common path computes one HMAC instead of walking the keyring.
+        let verified = std::iter::once(self.active_key())
+            .chain(self.keys.values())
+            .any(|key| {
+                let mut mac = <HmacSha256 as KeyInit>::new_from_slice(key)
+                    .expect("HMAC accepts keys of every size");
+                mac.update(API_KEY_PREFIX.as_bytes());
+                mac.update(lookup_id.as_bytes());
+                mac.update(&secret);
+                mac.verify_slice(expected_digest).is_ok()
+            });
+        if !verified {
+            return Err(SecurityError::InvalidSecretFormat);
+        }
         secret.zeroize();
         Ok(ParsedApiKey {
             lookup_id: lookup_id.to_owned(),
@@ -350,7 +411,7 @@ impl AuthHmacKey {
     /// identities so rate-limit rows cannot be correlated or repurposed.
     #[must_use]
     pub fn public_auth_source_digest(&self, source: &str) -> [u8; 32] {
-        self.scoped_digest(b"olp:v2:public-auth:source:v1", &[source.as_bytes()])
+        self.public_auth_digest(b"olp:v2:public-auth:source:v1", &[source.as_bytes()])
     }
 
     /// Produces an opaque identity for a public-auth source attempting a
@@ -358,7 +419,7 @@ impl AuthHmacKey {
     /// are length-framed before authentication to avoid ambiguous joins.
     #[must_use]
     pub fn public_auth_source_target_digest(&self, source: &str, target: &str) -> [u8; 32] {
-        self.scoped_digest(
+        self.public_auth_digest(
             b"olp:v2:public-auth:source-target:v1",
             &[source.as_bytes(), target.as_bytes()],
         )
@@ -381,9 +442,11 @@ impl AuthHmacKey {
         let Ok(token) = Self::decode_bootstrap_token(encoded) else {
             return false;
         };
-        self.scoped_mac(BOOTSTRAP_TOKEN_DOMAIN, &[&token])
-            .verify_slice(expected)
-            .is_ok()
+        self.keys.values().any(|key| {
+            scoped_mac(key, BOOTSTRAP_TOKEN_DOMAIN, &[&token])
+                .verify_slice(expected)
+                .is_ok()
+        })
     }
 
     fn decode_bootstrap_token(encoded: &str) -> Result<Zeroizing<Vec<u8>>, SecurityError> {
@@ -405,24 +468,37 @@ impl AuthHmacKey {
             .into()
     }
 
+    fn public_auth_digest(&self, domain: &[u8], parts: &[&[u8]]) -> [u8; 32] {
+        scoped_mac(
+            self.keys
+                .values()
+                .next()
+                .expect("validated authentication HMAC keyring is not empty"),
+            domain,
+            parts,
+        )
+        .finalize()
+        .into_bytes()
+        .into()
+    }
+
     fn scoped_mac(&self, domain: &[u8], parts: &[&[u8]]) -> HmacSha256 {
-        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
-            .expect("HMAC accepts keys of every size");
-        mac.update(domain);
-        for part in parts {
-            mac.update(&(part.len() as u64).to_be_bytes());
-            mac.update(part);
-        }
-        mac
+        scoped_mac(self.active_key(), domain, parts)
     }
 
     fn digest(&self, lookup_id: &str, secret: &[u8]) -> [u8; 32] {
-        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
+        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(self.active_key())
             .expect("HMAC accepts keys of every size");
         mac.update(API_KEY_PREFIX.as_bytes());
         mac.update(lookup_id.as_bytes());
         mac.update(secret);
         mac.finalize().into_bytes().into()
+    }
+
+    fn active_key(&self) -> &[u8; 32] {
+        self.keys
+            .get(&self.active_version)
+            .expect("validated authentication HMAC keyring contains its active version")
     }
 }
 
@@ -434,8 +510,19 @@ impl fmt::Debug for AuthHmacKey {
 
 impl Drop for AuthHmacKey {
     fn drop(&mut self) {
-        self.0.zeroize();
+        zeroize_key_map(&mut self.keys);
     }
+}
+
+fn scoped_mac(key: &[u8; 32], domain: &[u8], parts: &[&[u8]]) -> HmacSha256 {
+    let mut mac =
+        <HmacSha256 as KeyInit>::new_from_slice(key).expect("HMAC accepts keys of every size");
+    mac.update(domain);
+    for part in parts {
+        mac.update(&(part.len() as u64).to_be_bytes());
+        mac.update(part);
+    }
+    mac
 }
 
 pub struct ApiKeyMaterial {
@@ -804,6 +891,68 @@ mod tests {
                 .is_err()
         );
         assert!(!format!("{generated:?}").contains(generated.expose_once()));
+    }
+
+    #[test]
+    fn authentication_hmac_keyring_verifies_old_keys_during_rotation() {
+        let old_key = AuthHmacKey::new([1; 32]);
+        let old_material = old_key.generate_api_key();
+        let bootstrap = STANDARD.encode([3_u8; 32]);
+        let old_bootstrap_digest = old_key
+            .bootstrap_token_digest_from_base64(&bootstrap)
+            .unwrap();
+        let version_one = STANDARD.encode([1_u8; 32]);
+        let version_two = STANDARD.encode([2_u8; 32]);
+        let rotated = AuthHmacKey::from_file_contents(&format!(
+            r#"{{"active_version":2,"keys":[{{"version":1,"key":"{version_one}"}},{{"version":2,"key":"{version_two}"}}]}}"#
+        ))
+        .unwrap();
+        let source = "203.0.113.10";
+        let target = "owner@example.test";
+        assert_eq!(
+            old_key.public_auth_source_digest(source),
+            rotated.public_auth_source_digest(source)
+        );
+        assert_eq!(
+            old_key.public_auth_source_target_digest(source, target),
+            rotated.public_auth_source_target_digest(source, target)
+        );
+        assert!(
+            rotated
+                .parse_and_verify(old_material.expose_once(), &old_material.digest)
+                .is_ok()
+        );
+        assert!(rotated.verify_bootstrap_token_digest(&bootstrap, &old_bootstrap_digest));
+
+        let new_material = rotated.generate_api_key();
+        assert!(
+            old_key
+                .parse_and_verify(new_material.expose_once(), &new_material.digest)
+                .is_err()
+        );
+        let retired = AuthHmacKey::from_file_contents(&format!(
+            r#"{{"active_version":2,"keys":[{{"version":2,"key":"{version_two}"}}]}}"#
+        ))
+        .unwrap();
+        assert_ne!(
+            old_key.public_auth_source_digest(source),
+            retired.public_auth_source_digest(source)
+        );
+        assert_ne!(
+            old_key.public_auth_source_target_digest(source, target),
+            retired.public_auth_source_target_digest(source, target)
+        );
+        assert!(
+            retired
+                .parse_and_verify(old_material.expose_once(), &old_material.digest)
+                .is_err()
+        );
+        assert!(!retired.verify_bootstrap_token_digest(&bootstrap, &old_bootstrap_digest));
+        assert!(
+            retired
+                .parse_and_verify(new_material.expose_once(), &new_material.digest)
+                .is_ok()
+        );
     }
 
     #[test]

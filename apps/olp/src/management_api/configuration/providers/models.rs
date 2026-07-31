@@ -367,6 +367,16 @@ pub(crate) async fn discover_provider_models(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json(payload)?;
+    if request.models.iter().any(|model| {
+        model.display_name.trim().is_empty()
+            || model.display_name.chars().count() > 200
+            || olp_domain::has_unsafe_display_characters(&model.display_name)
+    }) {
+        return Err(validation(
+            "models",
+            "Display names must use 1-200 visible characters without control or bidi formatting.",
+        ));
+    }
     let models: Vec<DiscoveredModelInput> = if request.models.is_empty() {
         provider_connector(&state, provider_id)
             .await?

@@ -11,7 +11,7 @@ pub(super) async fn connect_store(args: &DatabaseArgs) -> AppResult<PgStore> {
 
 pub(super) async fn load_auth_hmac_key(path: &Path) -> AppResult<AuthHmacKey> {
     let encoded = Zeroizing::new(tokio::fs::read_to_string(path).await?);
-    Ok(AuthHmacKey::from_base64(&encoded)?)
+    Ok(AuthHmacKey::from_file_contents(&encoded)?)
 }
 
 pub(super) async fn load_bootstrap_token_digest(

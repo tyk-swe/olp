@@ -192,9 +192,11 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
   data: ProviderHealth[];
 }> {
   let responseWindow = windowMinutes;
-  const data = await collectCursorPages(async (cursor) => {
+  const data = await collectCursorPages(async (cursor, remaining) => {
     const response = await apiClient.GET('/api/v1/provider-health', {
-      params: { query: { window_minutes: windowMinutes, cursor, limit: 200 } }
+      params: {
+        query: { window_minutes: windowMinutes, cursor, limit: Math.min(200, remaining) }
+      }
     });
     const page = result(response.data, response.error, response.response);
     responseWindow = page.window_minutes;

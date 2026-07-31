@@ -3,7 +3,7 @@ use olp_domain::{
     TransportError, TransportPhase,
 };
 use olp_protocols::openai::{
-    EmbeddingResponse, OpenAiModerationResponse, ResponseInputTokensResponse,
+    EmbeddingCodecError, EmbeddingResponse, OpenAiModerationResponse, ResponseInputTokensResponse,
     decode_embedding_response, decode_moderation_response, decode_response_input_tokens_result,
     encode_embedding_request, encode_moderation, encode_response_input_tokens,
 };
@@ -21,7 +21,10 @@ pub(super) async fn execute(
             (
                 "embeddings",
                 serialize_wire("embeddings", &wire)?,
-                ResultKind::Embeddings,
+                ResultKind::Embeddings {
+                    count: operation.input.len(),
+                    dimensions: operation.dimensions,
+                },
             )
         }
         Operation::TokenCount(operation) => {
@@ -57,12 +60,31 @@ pub(super) async fn execute(
     };
     let response = connector.post_unary_json(&request, path, body).await?;
     let result = match result_kind {
-        ResultKind::Embeddings => {
+        ResultKind::Embeddings { count, dimensions } => {
             let wire: EmbeddingResponse = parse_wire("embeddings", &response)?;
-            CanonicalResult::Embeddings(
-                decode_embedding_response(wire)
-                    .map_err(|error| protocol_decode_error("embeddings", error))?,
-            )
+            let result = decode_embedding_response(wire)
+                .map_err(|error| protocol_decode_error("embeddings", error))?;
+            if result.data.len() != count {
+                return Err(protocol_decode_error(
+                    "embeddings",
+                    EmbeddingCodecError::UnexpectedEmbeddingCount {
+                        expected: count,
+                        actual: result.data.len(),
+                    },
+                ));
+            }
+            if let Some(dimensions) = dimensions
+                && result
+                    .data
+                    .iter()
+                    .any(|item| item.values.len() != dimensions as usize)
+            {
+                return Err(protocol_decode_error(
+                    "embeddings",
+                    EmbeddingCodecError::UnexpectedEmbeddingDimensions(dimensions),
+                ));
+            }
+            CanonicalResult::Embeddings(result)
         }
         ResultKind::TokenCount => {
             let wire: ResponseInputTokensResponse = parse_wire("input-token count", &response)?;
@@ -70,14 +92,20 @@ pub(super) async fn execute(
         }
         ResultKind::Moderation => {
             let wire: OpenAiModerationResponse = parse_wire("moderation", &response)?;
-            CanonicalResult::Moderation(decode_moderation_response(wire))
+            CanonicalResult::Moderation(
+                decode_moderation_response(wire)
+                    .map_err(|error| protocol_decode_error("moderation", error))?,
+            )
         }
     };
     Ok(ProviderOutput::Result(Box::new(result)))
 }
 
 enum ResultKind {
-    Embeddings,
+    Embeddings {
+        count: usize,
+        dimensions: Option<u32>,
+    },
     TokenCount,
     Moderation,
 }

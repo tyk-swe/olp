@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM requests_default spill WHERE spill.started_at >= state.managed_from) AS \"value!\" FROM request_partition_state state WHERE state.singleton",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "871b5f0b79d9d34922164209412d1f6158e1f33f82ff295c1f59502f2869867e"
+}

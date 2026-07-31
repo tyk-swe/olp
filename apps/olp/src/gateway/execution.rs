@@ -2,12 +2,14 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
+use axum::{body::Body, response::Response};
 use chrono::Utc;
+use futures::{StreamExt as _, stream};
 use olp_domain::{
     ApiKey, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId, RequestMetadata,
     RouteSlug, Surface, TransportMode, authorize_api_key,
 };
-use olp_storage::{LimitLease, RequestAttemptMetadata};
+use olp_storage::RequestAttemptMetadata;
 
 use crate::{
     GatewayState, InferencePrincipal, event_completion::collect_provider_events,
@@ -17,7 +19,10 @@ use crate::{
 use super::{
     error::InferenceError,
     failover::{ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover},
-    limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
+    limits::{
+        LimitReservation, RequestMediaGuard, operation_media_handles, release_limits,
+        reserve_limits,
+    },
     telemetry::{
         RequestAccountingGuard, UnaryRequestMetadataFinalizer, UsageCapture, elapsed_ms,
         emit_request_metadata_event, usage_from_result,
@@ -53,8 +58,13 @@ pub(super) fn authorize_principal<'a>(
     operation: OperationKind,
     route: Option<&RouteSlug>,
 ) -> Result<&'a ApiKey, InferenceError> {
-    authorize_api_key(principal.key(), route, operation, Utc::now())
-        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+    authorize_api_key(
+        principal.key(),
+        route,
+        operation,
+        principal.runtime().database_time(),
+    )
+    .map_err(|error| InferenceError::forbidden(error.to_string()))?;
     Ok(principal.key())
 }
 
@@ -73,7 +83,7 @@ struct ExecutionContext {
     operation_kind: OperationKind,
     request_started_at: chrono::DateTime<Utc>,
     request_started: tokio::time::Instant,
-    lease: Option<LimitLease>,
+    lease: Option<LimitReservation>,
     surface: Surface,
 }
 
@@ -98,7 +108,7 @@ async fn execute_operation(
         principal.key(),
         Some(&route_slug),
         operation_kind,
-        Utc::now(),
+        principal.runtime().database_time(),
     )
     .map_err(|error| InferenceError::forbidden(error.to_string()))?;
 
@@ -154,7 +164,7 @@ async fn execute_operation(
                 error
             };
             emit_early_failure(state, &context, &[], &failure);
-            release_limits(state, context.lease.as_ref(), None).await;
+            release_limits(state, context.lease.as_ref(), None);
             return Err(failure);
         }
     };
@@ -368,6 +378,53 @@ impl RoutedUnaryResult {
             Err(failure) => self.mark_failure(failure),
         }
     }
+
+    pub(crate) fn finalize_on_response_body(&mut self, response: Response) -> Response {
+        let finalizer = PendingUnaryRequestMetadata {
+            finalizer: self.request_metadata_finalizer.take(),
+        };
+        let (parts, body) = response.into_parts();
+        let body = stream::unfold(
+            (body.into_data_stream(), finalizer),
+            |(mut body, mut finalizer)| async move {
+                match body.next().await {
+                    Some(Ok(bytes)) => Some((Ok(bytes), (body, finalizer))),
+                    Some(Err(error)) => {
+                        let failure = InferenceError::bad_gateway(
+                            "response_body_failed",
+                            "The response body could not be streamed.",
+                        );
+                        finalizer.finalize(Some(&failure));
+                        Some((Err(error), (body, finalizer)))
+                    }
+                    None => {
+                        finalizer.finalize(None);
+                        None
+                    }
+                }
+            },
+        );
+        Response::from_parts(parts, Body::from_stream(body))
+    }
+}
+
+struct PendingUnaryRequestMetadata {
+    finalizer: Option<UnaryRequestMetadataFinalizer>,
+}
+
+impl PendingUnaryRequestMetadata {
+    fn finalize(&mut self, failure: Option<&InferenceError>) {
+        if let Some(finalizer) = self.finalizer.take() {
+            finalizer.finalize(failure);
+        }
+    }
+}
+
+impl Drop for PendingUnaryRequestMetadata {
+    fn drop(&mut self) {
+        let failure = InferenceError::client_cancelled();
+        self.finalize(Some(&failure));
+    }
 }
 
 impl Drop for RoutedUnaryResult {
@@ -504,7 +561,7 @@ pub(crate) fn authorize_model_access(
 pub(crate) async fn reserve_model_limits(
     state: &GatewayState,
     principal: &InferencePrincipal,
-) -> Result<Option<LimitLease>, InferenceError> {
+) -> Result<Option<LimitReservation>, InferenceError> {
     let operation = Operation::Models(olp_domain::ModelOperation::List {
         extensions: olp_domain::SourceExtensions::new(principal.surface(), BTreeMap::new()),
     });
@@ -518,8 +575,8 @@ pub(crate) async fn reserve_model_limits(
     .await
 }
 
-pub(crate) async fn release_model_limits(state: &GatewayState, lease: Option<&LimitLease>) {
-    release_limits(state, lease, None).await;
+pub(crate) fn release_model_limits(state: &GatewayState, lease: Option<&LimitReservation>) {
+    release_limits(state, lease, None);
 }
 
 pub(crate) struct SessionGenerationExecution {

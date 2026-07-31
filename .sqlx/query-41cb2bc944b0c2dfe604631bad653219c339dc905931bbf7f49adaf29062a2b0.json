@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM async_media_jobs WHERE ctid IN ( SELECT ctid FROM async_media_jobs WHERE lifecycle_state = 'deleted' AND deleted_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "41cb2bc944b0c2dfe604631bad653219c339dc905931bbf7f49adaf29062a2b0"
+}

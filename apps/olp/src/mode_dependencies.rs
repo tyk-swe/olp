@@ -6,15 +6,17 @@
 //! never observe a missing database or authentication key.
 
 use std::{
+    collections::BTreeMap,
     ops::Deref,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
+use jsonwebtoken::jwk::JwkSet;
 use olp_domain::{MediaSpool, ProviderKind};
 use olp_storage::{AuthHmacKey, MasterKey, PgStore, RequestMetadataEmitter};
 use thiserror::Error;
@@ -37,6 +39,7 @@ pub struct GatewayState {
     pub(crate) auth_hmac_key: Arc<AuthHmacKey>,
     pub(crate) request_metadata: Option<RequestMetadataEmitter>,
     pub(crate) circuits: CircuitBreaker,
+    pub(crate) media_job_journal: Option<Arc<crate::media_job_journal::MediaJobJournal>>,
     pub(crate) media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: PublicAdmission,
@@ -133,7 +136,22 @@ pub struct ManagementState {
     pub(crate) session_ttl: chrono::Duration,
     pub(crate) local_login_enabled: bool,
     pub(crate) oidc_allow_insecure_test_endpoints: bool,
+    oidc_jwks_cache: OidcJwksCache,
     observability: ObservabilityCache,
+}
+
+const OIDC_JWKS_STALE_TTL: Duration = Duration::from_secs(60 * 60);
+const OIDC_JWKS_CACHE_ENTRIES: usize = 4;
+
+#[derive(Clone, Default)]
+struct OidcJwksCache {
+    inner: Arc<RwLock<BTreeMap<(uuid::Uuid, uuid::Uuid), CachedOidcJwks>>>,
+}
+
+struct CachedOidcJwks {
+    callback_started_at: Instant,
+    refresh_started_at: Instant,
+    jwks: JwkSet,
 }
 
 impl Deref for ManagementState {
@@ -168,6 +186,7 @@ impl ManagementState {
                 session_ttl: builder.session_ttl,
                 local_login_enabled: builder.local_login_enabled,
                 oidc_allow_insecure_test_endpoints: builder.oidc_allow_insecure_test_endpoints,
+                oidc_jwks_cache: OidcJwksCache::default(),
                 observability: builder.observability.clone(),
             },
             Err(error) => panic!("test state must be valid: {error}"),
@@ -190,6 +209,68 @@ impl ManagementState {
     pub(crate) fn cached_readiness(&self) -> Result<HealthResponse, Problem> {
         let snapshot = self.observability.readiness();
         cached_readiness_from_snapshot(&snapshot, Instant::now())
+    }
+
+    pub(crate) fn cache_oidc_jwks(
+        &self,
+        configuration_id: uuid::Uuid,
+        configuration_etag: uuid::Uuid,
+        callback_started_at: Instant,
+        refresh_started_at: Instant,
+        jwks: JwkSet,
+    ) {
+        if refresh_started_at.elapsed() > OIDC_JWKS_STALE_TTL {
+            return;
+        }
+        let mut cache = self
+            .oidc_jwks_cache
+            .inner
+            .write()
+            .expect("OIDC JWKS cache lock poisoned");
+        cache.retain(|_, cached| cached.refresh_started_at.elapsed() <= OIDC_JWKS_STALE_TTL);
+        let key = (configuration_id, configuration_etag);
+        if cache
+            .get(&key)
+            .is_some_and(|cached| cached.refresh_started_at >= refresh_started_at)
+        {
+            return;
+        }
+        if !cache.contains_key(&key)
+            && cache.len() >= OIDC_JWKS_CACHE_ENTRIES
+            && let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, cached)| cached.callback_started_at)
+                .map(|(key, cached)| (*key, cached.callback_started_at))
+        {
+            if oldest.1 >= callback_started_at {
+                return;
+            }
+            cache.remove(&oldest.0);
+        }
+        cache.insert(
+            key,
+            CachedOidcJwks {
+                callback_started_at,
+                refresh_started_at,
+                jwks,
+            },
+        );
+    }
+
+    pub(crate) fn cached_oidc_jwks(
+        &self,
+        configuration_id: uuid::Uuid,
+        configuration_etag: uuid::Uuid,
+    ) -> Option<JwkSet> {
+        let cache = self
+            .oidc_jwks_cache
+            .inner
+            .read()
+            .expect("OIDC JWKS cache lock poisoned");
+        cache
+            .get(&(configuration_id, configuration_etag))
+            .filter(|cached| cached.refresh_started_at.elapsed() <= OIDC_JWKS_STALE_TTL)
+            .map(|cached| cached.jwks.clone())
     }
 }
 
@@ -294,6 +375,7 @@ impl ApiState {
             auth_hmac_key: Arc::clone(&auth_hmac_key),
             request_metadata: self.request_metadata.clone(),
             circuits: self.circuits.clone(),
+            media_job_journal: self.media_job_journal.clone(),
             media_spool: Arc::clone(&self.media_spool),
             multipart_admission: self.multipart_admission.clone(),
             public_admission: self.public_admission.clone(),
@@ -312,6 +394,7 @@ impl ApiState {
             session_ttl: self.session_ttl,
             local_login_enabled: self.local_login_enabled,
             oidc_allow_insecure_test_endpoints: self.oidc_allow_insecure_test_endpoints,
+            oidc_jwks_cache: OidcJwksCache::default(),
             observability: self.observability.clone(),
         };
         let observability = ObservabilityState {
@@ -355,6 +438,7 @@ impl ApiState {
                 session_ttl: self.session_ttl,
                 local_login_enabled: self.local_login_enabled,
                 oidc_allow_insecure_test_endpoints: self.oidc_allow_insecure_test_endpoints,
+                oidc_jwks_cache: OidcJwksCache::default(),
                 observability: self.observability.clone(),
             },
         }
@@ -471,5 +555,159 @@ mod tests {
             state(ApiMode::Gateway, true, true).mode_dependencies(),
             Ok(ModeDependencies::Gateway { .. })
         ));
+    }
+
+    #[test]
+    fn oidc_jwks_cache_is_shared_bounded_and_monotonic_per_configuration_etag() {
+        let dependencies = state(ApiMode::Control, true, true)
+            .mode_dependencies()
+            .unwrap();
+        let ModeDependencies::Control { management, .. } = dependencies else {
+            unreachable!()
+        };
+        let configuration_id = uuid::Uuid::now_v7();
+        let configuration_etag = uuid::Uuid::now_v7();
+        let now = Instant::now();
+        let earlier_callback = now - Duration::from_secs(4);
+        let later_callback = now - Duration::from_secs(3);
+        let older_refresh = now - Duration::from_secs(2);
+        let newer_refresh = now - Duration::from_secs(1);
+        management.cache_oidc_jwks(
+            configuration_id,
+            configuration_etag,
+            later_callback,
+            older_refresh,
+            JwkSet { keys: Vec::new() },
+        );
+        management.cache_oidc_jwks(
+            configuration_id,
+            configuration_etag,
+            earlier_callback,
+            newer_refresh,
+            JwkSet { keys: Vec::new() },
+        );
+        management.cache_oidc_jwks(
+            configuration_id,
+            configuration_etag,
+            Instant::now(),
+            older_refresh,
+            JwkSet { keys: Vec::new() },
+        );
+
+        assert!(
+            management
+                .clone()
+                .cached_oidc_jwks(configuration_id, configuration_etag)
+                .is_some()
+        );
+        assert!(
+            management
+                .cached_oidc_jwks(configuration_id, uuid::Uuid::now_v7())
+                .is_none()
+        );
+        assert_eq!(
+            management
+                .oidc_jwks_cache
+                .inner
+                .read()
+                .expect("OIDC JWKS cache lock poisoned")
+                .get(&(configuration_id, configuration_etag))
+                .expect("current JWKS entry must remain cached")
+                .callback_started_at,
+            earlier_callback
+        );
+        assert_eq!(
+            management
+                .oidc_jwks_cache
+                .inner
+                .read()
+                .expect("OIDC JWKS cache lock poisoned")
+                .get(&(configuration_id, configuration_etag))
+                .expect("current JWKS entry must remain cached")
+                .refresh_started_at,
+            newer_refresh
+        );
+
+        let other_configuration_id = uuid::Uuid::now_v7();
+        let other_configuration_etag = uuid::Uuid::now_v7();
+        let replacement_etag = uuid::Uuid::now_v7();
+        let other_started_at = Instant::now();
+        management.cache_oidc_jwks(
+            other_configuration_id,
+            other_configuration_etag,
+            other_started_at,
+            other_started_at,
+            JwkSet { keys: Vec::new() },
+        );
+        let replacement_started_at = Instant::now();
+        management.cache_oidc_jwks(
+            configuration_id,
+            replacement_etag,
+            replacement_started_at,
+            replacement_started_at,
+            JwkSet { keys: Vec::new() },
+        );
+        assert!(
+            management
+                .cached_oidc_jwks(configuration_id, configuration_etag)
+                .is_some()
+        );
+        assert!(
+            management
+                .cached_oidc_jwks(configuration_id, replacement_etag)
+                .is_some()
+        );
+        assert!(
+            management
+                .cached_oidc_jwks(other_configuration_id, other_configuration_etag)
+                .is_some()
+        );
+
+        let filler_started_at = Instant::now();
+        management.cache_oidc_jwks(
+            uuid::Uuid::now_v7(),
+            uuid::Uuid::now_v7(),
+            filler_started_at,
+            filler_started_at,
+            JwkSet { keys: Vec::new() },
+        );
+        let delayed_old_etag = uuid::Uuid::now_v7();
+        management.cache_oidc_jwks(
+            configuration_id,
+            delayed_old_etag,
+            earlier_callback - Duration::from_secs(1),
+            Instant::now(),
+            JwkSet { keys: Vec::new() },
+        );
+        assert!(
+            management
+                .cached_oidc_jwks(configuration_id, replacement_etag)
+                .is_some()
+        );
+        assert!(
+            management
+                .cached_oidc_jwks(configuration_id, delayed_old_etag)
+                .is_none()
+        );
+
+        for _ in 0..OIDC_JWKS_CACHE_ENTRIES {
+            let started_at = Instant::now();
+            management.cache_oidc_jwks(
+                uuid::Uuid::now_v7(),
+                uuid::Uuid::now_v7(),
+                started_at,
+                started_at,
+                JwkSet { keys: Vec::new() },
+            );
+        }
+        assert_eq!(
+            management
+                .oidc_jwks_cache
+                .inner
+                .read()
+                .expect("OIDC JWKS cache lock poisoned")
+                .len(),
+            OIDC_JWKS_CACHE_ENTRIES
+        );
     }
 }

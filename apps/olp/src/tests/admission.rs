@@ -265,17 +265,70 @@ async fn json_body_read_has_its_own_deadline_outside_route_layers() {
 }
 
 #[tokio::test]
-async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
-    let app = public_router(
-        ApiState::new(
-            ApiMode::Gateway,
-            None,
-            Arc::new(RuntimeManager::empty()),
-            "https://olp.example.test",
-            PathBuf::from("missing-console"),
-        )
-        .gateway_state_for_test(),
+async fn json_body_read_distinguishes_overflow_from_transport_failure() {
+    let overflow = read_json_body(
+        Body::from(bytes::Bytes::from_static(b"too large")),
+        3,
+        Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(overflow.unwrap_err(), JsonBodyReadError::Rejected);
+
+    let failed = Body::from_stream(futures::stream::once(async {
+        Err::<bytes::Bytes, _>(std::io::Error::other("client disconnected"))
+    }));
+    let failed = read_json_body(failed, 100, Duration::from_secs(1)).await;
+    assert_eq!(failed.unwrap_err(), JsonBodyReadError::Transport);
+}
+
+#[tokio::test]
+async fn zero_byte_body_limit_accepts_only_an_empty_body() {
+    assert!(
+        read_json_body(Body::empty(), 0, Duration::from_secs(1))
+            .await
+            .unwrap()
+            .is_empty()
     );
+    assert_eq!(
+        read_json_body(Body::from("x"), 0, Duration::from_secs(1))
+            .await
+            .unwrap_err(),
+        JsonBodyReadError::Rejected
+    );
+}
+
+#[test]
+fn singleton_and_api_credential_headers_are_unambiguous() {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.append(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain"),
+    );
+    assert_eq!(
+        validate_singleton_headers(&headers).unwrap_err().status,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer token"),
+    );
+    headers.insert("x-api-key", HeaderValue::from_static("token"));
+    assert_eq!(
+        validate_singleton_headers(&headers).unwrap_err().status,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
+    let (state, key) = inference_state(false);
+    let app = public_router(state.gateway_state_for_test());
 
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     let response = app
@@ -323,6 +376,19 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
     );
 
     let response = app
+        .clone()
+        .oneshot(
+            Request::get("/openai/v1/models")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+
+    let response = app
         .oneshot(
             Request::post("/openai/v1/audio/transcriptions")
                 .header(axum::http::header::CONTENT_TYPE, "multipart/form-data")
@@ -355,4 +421,80 @@ async fn authenticated_multipart_routes_reject_non_multipart_content_types() {
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
     }
+}
+
+#[tokio::test]
+async fn multipart_defers_hard_limit_reservation_until_after_route_parsing() {
+    let (state, key) = inference_state(true);
+    let app = public_router(state.gateway_state_for_test());
+    let authorization = format!("Bearer {key}");
+
+    let malformed = app
+        .clone()
+        .oneshot(
+            Request::post("/openai/v1/images/edits")
+                .header(axum::http::header::AUTHORIZATION, authorization.clone())
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=olp-test-boundary",
+                )
+                .body(Body::from("not-a-multipart-body"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        malformed.status(),
+        axum::http::StatusCode::BAD_REQUEST,
+        "multipart parsing must run before the distributed reservation"
+    );
+
+    let body = concat!(
+        "--olp-test-boundary\r\n",
+        "Content-Disposition: form-data; name=\"model\"\r\n\r\n",
+        "default\r\n",
+        "--olp-test-boundary\r\n",
+        "Content-Disposition: form-data; name=\"prompt\"\r\n\r\n",
+        "edit this\r\n",
+        "--olp-test-boundary\r\n",
+        "Content-Disposition: form-data; name=\"image\"; filename=\"fixture.bin\"\r\n",
+        "Content-Type: application/octet-stream\r\n\r\n",
+        "image-bytes\r\n",
+        "--olp-test-boundary--\r\n"
+    );
+    let parsed_multipart = app
+        .clone()
+        .oneshot(
+            Request::post("/openai/v1/images/edits")
+                .header(axum::http::header::AUTHORIZATION, authorization.clone())
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=olp-test-boundary",
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        parsed_multipart.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "canonical execution must reserve after parsing the multipart route"
+    );
+
+    let malformed_json = app
+        .oneshot(
+            Request::post("/openai/v1/chat/completions")
+                .header(axum::http::header::AUTHORIZATION, authorization)
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        malformed_json.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "ordinary JSON admission must reserve before handler decoding"
+    );
 }

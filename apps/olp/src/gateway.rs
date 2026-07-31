@@ -9,7 +9,7 @@ mod error;
 mod execution;
 mod failover;
 mod gemini;
-mod limits;
+pub(crate) mod limits;
 mod media;
 mod media_jobs;
 mod multipart;

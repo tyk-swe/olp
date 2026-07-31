@@ -136,7 +136,10 @@ pub(super) async fn execute_transcription(
         parse_wire("transcription", &bytes)?
     };
     Ok(ProviderOutput::Result(Box::new(
-        CanonicalResult::Transcription(decode_transcription_response(response)),
+        CanonicalResult::Transcription(
+            decode_transcription_response(response)
+                .map_err(|error| protocol_decode_error("transcription", error))?,
+        ),
     )))
 }
 

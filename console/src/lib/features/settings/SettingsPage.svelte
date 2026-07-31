@@ -32,6 +32,7 @@
   let model = $state('');
   let operation = $state<(typeof operationOptions)[number]>('generation');
   let inputPrice = $state('');
+  let cachedInputPrice = $state('');
   let outputPrice = $state('');
   let unitPrice = $state('');
   let currency = $state('USD');
@@ -115,14 +116,16 @@
         model: model.trim(),
         operation,
         input_per_million: optionalDecimal(inputPrice),
+        cached_input_per_million: optionalDecimal(cachedInputPrice),
         output_per_million: optionalDecimal(outputPrice),
         unit_price: optionalDecimal(unitPrice),
         currency: currency.trim().toUpperCase()
       };
+      if (price.cached_input_per_million && !price.input_per_million) throw new Error('Cached input pricing requires an input price.');
       if (!price.input_per_million && !price.output_per_million && !price.unit_price) throw new Error('Enter at least one price.');
       await createPricingRevision(new Date(effectiveAt).toISOString(), [price]);
       status = 'Pricing revision created. New usage will use the effective revision.';
-      model = inputPrice = outputPrice = unitPrice = providerId = '';
+      model = inputPrice = cachedInputPrice = outputPrice = unitPrice = providerId = '';
       effectiveAt = dateTimeLocalValue(new Date());
       pricingCursor = undefined;
       pricingHistory = [];
@@ -157,6 +160,7 @@
       <div class="form-field"><label for="price-model">Upstream model</label><input id="price-model" bind:value={model} required /></div>
       <div class="form-field"><label for="price-operation">Operation</label><select id="price-operation" bind:value={operation}>{#each operationOptions as option (option)}<option value={option}>{option}</option>{/each}</select></div>
       <div class="form-field"><label for="input-price">Input / million</label><input id="input-price" bind:value={inputPrice} inputmode="decimal" placeholder="2.50" /></div>
+      <div class="form-field"><label for="cached-input-price">Cached input / million</label><input id="cached-input-price" bind:value={cachedInputPrice} inputmode="decimal" placeholder="Defaults to input price" /></div>
       <div class="form-field"><label for="output-price">Output / million</label><input id="output-price" bind:value={outputPrice} inputmode="decimal" placeholder="10.00" /></div>
       <div class="form-field"><label for="unit-price">Media unit price</label><input id="unit-price" bind:value={unitPrice} inputmode="decimal" placeholder="0.04" /></div>
       <div class="form-field"><label for="currency">Currency</label><input id="currency" bind:value={currency} maxlength="3" required /></div>
@@ -176,8 +180,8 @@
           <div class="table-shell" tabindex="0" role="region" aria-label={`Prices in revision ${revision.revision}`}>
             <table class="data-table">
               <caption class="sr-only">Prices in revision {revision.revision}</caption>
-              <thead><tr><th>Provider / model</th><th>Operation</th><th>Input / million</th><th>Output / million</th><th>Unit</th><th>Currency</th></tr></thead>
-              <tbody>{#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr><td><strong>{price.provider_kind}</strong><small>{price.model}</small></td><td>{price.operation}</td><td>{price.input_per_million ?? '—'}</td><td>{price.output_per_million ?? '—'}</td><td>{price.unit_price ?? '—'}</td><td>{price.currency}</td></tr>{/each}</tbody>
+              <thead><tr><th>Provider / model</th><th>Operation</th><th>Input / million</th><th>Cached input / million</th><th>Output / million</th><th>Unit</th><th>Currency</th></tr></thead>
+              <tbody>{#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr><td><strong>{price.provider_kind}</strong><small>{price.model}</small></td><td>{price.operation}</td><td>{price.input_per_million ?? '—'}</td><td>{price.cached_input_per_million ?? price.input_per_million ?? '—'}</td><td>{price.output_per_million ?? '—'}</td><td>{price.unit_price ?? '—'}</td><td>{price.currency}</td></tr>{/each}</tbody>
             </table>
           </div>
         </details>

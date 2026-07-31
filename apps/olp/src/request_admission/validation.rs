@@ -1,6 +1,7 @@
-use std::time::Duration;
+use std::{error::Error as _, time::Duration};
 
 use axum::body::{Body, to_bytes};
+use http_body_util::LengthLimitError;
 
 use crate::Problem;
 
@@ -52,6 +53,7 @@ pub(crate) fn validate_json_depth(bytes: &[u8]) -> Result<(), Problem> {
 pub(crate) enum JsonBodyReadError {
     Rejected,
     Timeout,
+    Transport,
 }
 
 pub(crate) async fn read_json_body(
@@ -62,7 +64,16 @@ pub(crate) async fn read_json_body(
     tokio::time::timeout(deadline, to_bytes(body, maximum))
         .await
         .map_err(|_| JsonBodyReadError::Timeout)?
-        .map_err(|_| JsonBodyReadError::Rejected)
+        .map_err(|error| {
+            if error
+                .source()
+                .is_some_and(|source| source.is::<LengthLimitError>())
+            {
+                JsonBodyReadError::Rejected
+            } else {
+                JsonBodyReadError::Transport
+            }
+        })
 }
 
 pub(super) fn request_body_timeout() -> Problem {
@@ -81,4 +92,8 @@ pub(super) fn payload_too_large(maximum: usize) -> Problem {
         "Request body too large",
         format!("The request body exceeds the {maximum}-byte limit."),
     )
+}
+
+pub(super) fn request_body_failed() -> Problem {
+    Problem::bad_request("request_body_failed", "The request body could not be read.")
 }

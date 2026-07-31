@@ -438,8 +438,10 @@ pub struct OpenAiTranscriptionSegment {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_transcription_response(response: OpenAiTranscriptionResponse) -> TranscriptionResult {
-    match response {
+pub fn decode_transcription_response(
+    response: OpenAiTranscriptionResponse,
+) -> Result<TranscriptionResult, AudioCodecError> {
+    Ok(match response {
         OpenAiTranscriptionResponse::Text(text) => TranscriptionResult {
             text,
             language: None,
@@ -448,6 +450,28 @@ pub fn decode_transcription_response(response: OpenAiTranscriptionResponse) -> T
             extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         },
         OpenAiTranscriptionResponse::Json(response) => {
+            if response
+                .duration
+                .is_some_and(|duration| !duration.is_finite() || duration < 0.0)
+                || response
+                    .segments
+                    .iter()
+                    .enumerate()
+                    .any(|(index, segment)| {
+                        !segment.start.is_finite()
+                            || !segment.end.is_finite()
+                            || segment.start < 0.0
+                            || segment.end < segment.start
+                            || index.checked_sub(1).is_some_and(|previous| {
+                                segment.start < response.segments[previous].start
+                            })
+                            || response
+                                .duration
+                                .is_some_and(|duration| segment.end > duration)
+                    })
+            {
+                return Err(AudioCodecError::InvalidTranscriptionTiming);
+            }
             let mut extensions = BTreeMap::new();
             collect_extra("", &response.extra, &mut extensions);
             let segments = response
@@ -477,7 +501,7 @@ pub fn decode_transcription_response(response: OpenAiTranscriptionResponse) -> T
                 extensions: SourceExtensions::new(Surface::OpenAi, extensions),
             }
         }
-    }
+    })
 }
 
 pub fn encode_transcription_response(
@@ -817,6 +841,8 @@ pub enum AudioCodecError {
     InvalidKnownSpeakers,
     #[error("transcription file violates its bounded media limit")]
     InvalidMediaPart,
+    #[error("transcription duration and segment timestamps must be finite, ordered, and bounded")]
+    InvalidTranscriptionTiming,
     #[error("invalid source extension path: {0}")]
     InvalidExtension(String),
     #[error(transparent)]

@@ -312,12 +312,75 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         )
         .await
         .unwrap();
+    let retried = store
+        .mark_media_job_create_cleanup_pending(
+            cleanup_id,
+            "upstream-video-cleanup",
+            "injected_attach_failure",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        retried.upstream_job_id.as_deref(),
+        Some("upstream-video-cleanup")
+    );
+    assert!(matches!(
+        store
+            .mark_media_job_create_cleanup_pending(
+                cleanup_id,
+                "different-upstream-video",
+                "mismatched_retry",
+            )
+            .await,
+        Err(MediaJobError::UpstreamIdentityConflict)
+    ));
+    assert_eq!(
+        store
+            .media_job(cleanup_id)
+            .await
+            .unwrap()
+            .upstream_job_id
+            .as_deref(),
+        Some("upstream-video-cleanup")
+    );
     let pending = store
         .pending_media_reconciliation_jobs(api_key_id, 8)
         .await
         .unwrap();
     assert!(pending.iter().any(|record| record.id == cleanup_id));
     let claim_at = Utc::now();
+
+    // Due time, not lifecycle class, determines which ready job is oldest.
+    sqlx::query(
+        "UPDATE async_media_jobs SET
+            next_reconciliation_at = CASE WHEN id = $1 THEN $3 ELSE $3 + interval '1 second' END,
+            last_polled_at = CASE WHEN id = $1 THEN $3 - interval '10 seconds'
+                                  ELSE last_polled_at END
+         WHERE id IN ($1, $2)",
+    )
+    .bind(first.id)
+    .bind(cleanup_id)
+    .bind(claim_at - Duration::seconds(2))
+    .execute(store.pool())
+    .await
+    .unwrap();
+    let oldest = store
+        .claim_media_reconciliation_jobs(claim_at, 1)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(oldest.id, first.id);
+    store
+        .finish_media_reconciliation(
+            oldest.id,
+            oldest.reconciliation_claim_id.unwrap(),
+            claim_at + Duration::minutes(5),
+            None,
+        )
+        .await
+        .unwrap();
+
     let (left, right) = tokio::join!(
         store.claim_media_reconciliation_jobs(claim_at, 8),
         store.claim_media_reconciliation_jobs(claim_at, 8),
@@ -330,6 +393,18 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .collect::<Vec<_>>();
     assert_eq!(cleanup_claims.len(), 1);
     let first_claim_id = cleanup_claims[0].reconciliation_claim_id.unwrap();
+
+    assert!(
+        store
+            .renew_media_reconciliation_claim(cleanup_id, first_claim_id)
+            .await
+            .unwrap()
+    );
+    let still_leased = store
+        .claim_media_reconciliation_jobs(Utc::now(), 8)
+        .await
+        .unwrap();
+    assert!(!still_leased.iter().any(|record| record.id == cleanup_id));
 
     // A crashed gateway's lease is recoverable by another replica after the
     // bounded deadline, with a distinct fencing token.
@@ -351,6 +426,12 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .unwrap();
     let second_claim_id = reclaimed.reconciliation_claim_id.unwrap();
     assert_ne!(first_claim_id, second_claim_id);
+    assert!(
+        !store
+            .renew_media_reconciliation_claim(cleanup_id, first_claim_id)
+            .await
+            .unwrap()
+    );
     store
         .finish_media_reconciliation(
             cleanup_id,
@@ -410,6 +491,74 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             .await,
         Err(ConfigurationError::InUse)
     ));
+    let mut locker = store.pool().begin().await.unwrap();
+    sqlx::query("SELECT id FROM async_media_jobs WHERE id = $1 FOR UPDATE")
+        .bind(first_id)
+        .fetch_one(&mut *locker)
+        .await
+        .unwrap();
+    let force_store = store.clone();
+    let force_disable = tokio::spawn(async move {
+        force_store
+            .force_disable_provider(
+                provider_id,
+                provider_etag,
+                owner.user_id,
+                "media-provider-force-disable-01",
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                    SELECT 1 FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND pid <> pg_backend_pid()
+                      AND wait_event_type = 'Lock'
+                      AND query LIKE '%async_media_jobs%'
+                )",
+            )
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("force containment must wait behind an existing media-job row locker");
+    sqlx::query("UPDATE async_media_jobs SET progress_percent = progress_percent WHERE id = $1")
+        .bind(first_id)
+        .execute(&mut *locker)
+        .await
+        .unwrap();
+    locker.commit().await.unwrap();
+    let contained = tokio::time::timeout(std::time::Duration::from_secs(5), force_disable)
+        .await
+        .expect("force containment must complete after the row locker commits")
+        .unwrap()
+        .unwrap();
+    assert!(contained.release.is_some());
+    assert_eq!(
+        store.media_job(first_id).await.unwrap().lifecycle,
+        MediaJobLifecycle::Deleted
+    );
+    assert_eq!(
+        store.media_job(legacy_id).await.unwrap().lifecycle,
+        MediaJobLifecycle::Deleted
+    );
+    let containment_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events
+         WHERE action = 'provider.force_disable' AND resource_id = $1 AND outcome = 'success'",
+    )
+    .bind(provider_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(containment_audits, 1);
 
     let columns: Vec<String> = sqlx::query_scalar(
         "SELECT column_name FROM information_schema.columns

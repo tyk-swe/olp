@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO route_draft_operations (route_draft_id, operation) SELECT $1, input.operation FROM unnest($2::text[]) AS input(operation) ON CONFLICT (route_draft_id, operation) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7bb28fd9f6a856b728f9ab41450de9f007900f6a244c9141b848da24f0cba5e9"
+}

@@ -67,7 +67,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     );
 
     for _ in 0..5 {
-        assert!(circuits.try_acquire(target));
+        let permit = circuits.try_acquire(target).unwrap();
         let mut validator = EventSequenceValidator::new();
         validator.push(&first).unwrap();
         let provider: EventStream = Box::pin(stream::iter([Err(TransportError {
@@ -78,9 +78,8 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
         })]));
         let mut events = circuit_accounted_event_stream(
             validated_event_stream(provider, validator),
-            circuits.clone(),
-            target,
             false,
+            permit,
         );
         let error = events.next().await.unwrap().unwrap_err();
         assert!(error.response_committed);
@@ -89,18 +88,15 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
 
     let recovered_target = TargetId::new();
     circuits.record_failure(recovered_target, AttemptFailureClass::UpstreamServer);
+    let permit = circuits.try_acquire(recovered_target).unwrap();
     let mut validator = EventSequenceValidator::new();
     validator.push(&first).unwrap();
     let provider: EventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
         1,
         CanonicalEventKind::Done,
     ))]));
-    let mut events = circuit_accounted_event_stream(
-        validated_event_stream(provider, validator),
-        circuits.clone(),
-        recovered_target,
-        false,
-    );
+    let mut events =
+        circuit_accounted_event_stream(validated_event_stream(provider, validator), false, permit);
     assert!(matches!(
         events.next().await,
         Some(Ok(CanonicalEvent {

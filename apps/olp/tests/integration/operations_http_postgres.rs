@@ -5,7 +5,7 @@ use axum::{
     body::Body,
     http::{Method, Request, Response, StatusCode, header},
 };
-use chrono::{Duration, SecondsFormat, Timelike, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
 use http_body_util::BodyExt as _;
 use olp::{
     ApiMode, ApiState, RuntimeManager, observability_router, public_router,
@@ -99,13 +99,13 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     .await
     .unwrap();
 
-    let observed_at = Utc::now() - Duration::hours(2);
+    let pricing_reference_at = Utc::now() - Duration::hours(2);
     let pricing = send(
         &app,
         Method::POST,
         "/api/v1/pricing/revisions",
         Some(json!({
-            "effective_at": (observed_at - Duration::minutes(1)).to_rfc3339(),
+            "effective_at": (pricing_reference_at - Duration::minutes(1)).to_rfc3339(),
             "prices": [{
                 "provider_kind": "openai",
                 "provider_id": provider_id,
@@ -131,12 +131,17 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         provider_id.to_string()
     );
     assert_eq!(pricing_body["revision"], 1);
+    let pricing_created_at = pricing_body["created_at"]
+        .as_str()
+        .unwrap()
+        .parse::<DateTime<Utc>>()
+        .unwrap();
     let pricing_replay = send(
         &app,
         Method::POST,
         "/api/v1/pricing/revisions",
         Some(json!({
-            "effective_at": (observed_at - Duration::minutes(1)).to_rfc3339(),
+            "effective_at": (pricing_reference_at - Duration::minutes(1)).to_rfc3339(),
             "prices": [{
                 "provider_kind": "openai",
                 "provider_id": provider_id,
@@ -162,7 +167,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         Method::POST,
         "/api/v1/pricing/revisions",
         Some(json!({
-            "effective_at": (observed_at - Duration::minutes(1)).to_rfc3339(),
+            "effective_at": (pricing_reference_at - Duration::minutes(1)).to_rfc3339(),
             "prices": [{
                 "provider_kind": "openai",
                 "provider_id": provider_id,
@@ -188,7 +193,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         Method::POST,
         "/api/v1/pricing/revisions",
         Some(json!({
-            "effective_at": (observed_at + Duration::days(1)).to_rfc3339(),
+            "effective_at": (pricing_reference_at + Duration::days(1)).to_rfc3339(),
             "prices": [{
                 "provider_kind": "openai",
                 "provider_id": provider_id,
@@ -211,7 +216,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert_eq!(response_json(future_pricing).await["revision"], 2);
 
     let request_id = Uuid::now_v7();
-    let started_at = observed_at - Duration::milliseconds(25);
+    let started_at = Utc::now().max(pricing_created_at + Duration::milliseconds(1));
+    let observed_at = started_at + Duration::milliseconds(25);
     store
         .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),

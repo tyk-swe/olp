@@ -12,7 +12,7 @@ pub use crate::usage::{
 };
 pub use audit::AuditRecord;
 pub use cursor::{OperationsError, OperationsPage, TimestampCursor};
-pub use health::{PrometheusOperationsSummary, ProviderHealthRecord};
+pub use health::{PrometheusOperationsSummary, ProviderHealthRecord, RequestPartitionHealth};
 pub use pricing::{PriceInput, PricingRevisionRecord};
 pub use requests::{AttemptRecord, RequestDetail, RequestFilters, RequestRecord};
 pub use runtime::RuntimeGenerationRecord;
@@ -32,7 +32,7 @@ use crate::usage::query::{ceil_usage_hour, floor_usage_hour};
 #[cfg(test)]
 use health::provider_health_status;
 #[cfg(test)]
-use pricing::{validate_decimal, validate_prices};
+use pricing::{MAX_PRICING_ENTRIES, validate_decimal, validate_prices};
 
 #[cfg(test)]
 mod tests;

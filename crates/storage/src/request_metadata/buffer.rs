@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use chrono::{DateTime, Utc};
 use redis::{Client, RedisError, aio::ConnectionManager};
@@ -6,9 +9,17 @@ use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
-use super::ingestion::RequestMetadataEvent;
+use super::{MAX_REQUEST_METADATA_EVENT_BYTES, ingestion::RequestMetadataEvent};
 
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const STREAM_MAX_ENTRIES: usize = 1_000_000;
+const STREAM_APPEND_RECEIPT_TTL_SECONDS: usize = 60;
+pub(crate) const REQUEST_METADATA_TRIM_COUNTER: &str = "olp:v2:request-metadata:retention-trimmed";
+const REQUEST_METADATA_APPEND_RECEIPTS: &str = "olp:v2:request-metadata:append-receipts";
+// The SHA1 of the script body is a constant; rebuilding it per event copies and
+// re-hashes the Lua source on the per-request metadata path.
+static APPEND_SCRIPT: LazyLock<redis::Script> =
+    LazyLock::new(|| redis::Script::new(include_str!("../../scripts/append_request_metadata.lua")));
 
 #[derive(Clone)]
 pub struct RequestMetadataEmitter {
@@ -139,7 +150,8 @@ impl RequestMetadataReceiver {
 
     /// Writes to a Valkey Stream with bounded local buffering. On an outage the
     /// current event is retried, the channel fills to its configured bound, and
-    /// further loss is explicitly counted by `RequestMetadataEmitter`.
+    /// further loss and entries evicted by the durable stream cap are
+    /// explicitly counted.
     pub async fn run(
         mut self,
         mut connection: ConnectionManager,
@@ -182,12 +194,26 @@ impl RequestMetadataReceiver {
                     )));
                 }
             };
+            if payload.len() > MAX_REQUEST_METADATA_EVENT_BYTES {
+                self.record_abandoned(1).await;
+                return Err(RedisError::from((
+                    redis::ErrorKind::Client,
+                    "request metadata event exceeds the serialized size limit",
+                )));
+            }
             let mut backoff = Duration::from_millis(25);
             loop {
-                let mut command = redis::cmd("XADD");
-                command.arg(stream).arg("*").arg("event").arg(&payload);
-                let write = command.query_async(&mut connection);
-                let result: Result<String, RedisError> =
+                let mut invocation = APPEND_SCRIPT.prepare_invoke();
+                invocation
+                    .key(stream)
+                    .key(REQUEST_METADATA_TRIM_COUNTER)
+                    .key(REQUEST_METADATA_APPEND_RECEIPTS)
+                    .arg(&payload)
+                    .arg(STREAM_MAX_ENTRIES)
+                    .arg(event.event_id.to_string())
+                    .arg(STREAM_APPEND_RECEIPT_TTL_SECONDS);
+                let write = invocation.invoke_async(&mut connection);
+                let result: Result<(String, u64), RedisError> =
                     match tokio::time::timeout(STREAM_WRITE_TIMEOUT, write).await {
                         Ok(result) => result,
                         Err(_) => Err(RedisError::from((
@@ -196,7 +222,13 @@ impl RequestMetadataReceiver {
                         ))),
                     };
                 match result {
-                    Ok(_) => {
+                    Ok((_, trimmed)) => {
+                        if trimmed > 0 {
+                            tracing::warn!(
+                                trimmed,
+                                "request metadata stream retention evicted old events"
+                            );
+                        }
                         self.health
                             .persisted
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

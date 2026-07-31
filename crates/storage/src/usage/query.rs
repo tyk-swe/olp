@@ -148,7 +148,9 @@ pub(crate) fn ceil_usage_hour(value: DateTime<Utc>) -> DateTime<Utc> {
     if floor == value {
         floor
     } else {
-        floor + chrono::Duration::hours(1)
+        floor
+            .checked_add_signed(chrono::Duration::hours(1))
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
     }
 }
 
@@ -161,4 +163,18 @@ pub(super) fn validate_usage_range(filters: &UsageFilters) -> Result<(), Operati
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ceil_usage_hour;
+    use chrono::{DateTime, Utc};
+
+    #[test]
+    fn ceiling_the_largest_timestamp_does_not_overflow() {
+        assert_eq!(
+            ceil_usage_hour(DateTime::<Utc>::MAX_UTC),
+            DateTime::<Utc>::MAX_UTC
+        );
+    }
 }

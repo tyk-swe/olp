@@ -42,7 +42,7 @@ type PrincipalExitRequest = (signal: AbortSignal) => Promise<void>;
 type AuthenticationRequest = (signal: AbortSignal) => Promise<AuthenticatedSession>;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const SESSION_FRESHNESS_MS = 60_000;
+const SESSION_CHANGE_KEY = 'olp:session-change';
 
 function unauthorizedError(error: unknown): boolean {
   return (error as { problem?: { status?: unknown } } | null)?.problem?.status === 401;
@@ -183,6 +183,7 @@ export class AuthenticationLifecycle {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     this.establishSession(session);
+    this.announceSessionChange();
     return session;
   }
 
@@ -280,9 +281,8 @@ export class AuthenticationLifecycle {
     if (!this.snapshotValue.user || this.snapshotValue.phase !== 'authenticated') {
       throw new DOMException('No authenticated principal is active.', 'AbortError');
     }
+    if (!this.boundary && getCsrfToken()) return;
     const startingPartition = this.partition;
-    const age = Date.now() - (this.snapshotValue.lastValidatedAt ?? 0);
-    if (getCsrfToken() && age <= SESSION_FRESHNESS_MS) return;
     const session = await (this.activeValidation ?? this.validateSession());
     if (!session) throw new DOMException('Session validation did not complete.', 'AbortError');
     if (startingPartition !== this.partition) {
@@ -324,7 +324,9 @@ export class AuthenticationLifecycle {
       const rotatedCsrf = response.headers.get('x-csrf-token');
       if (rotatedCsrf) setCsrfToken(rotatedCsrf);
     }
-    if (response.status === 401) await this.handleUnauthorized(request);
+    if (response.status === 401 || response.status === 403) {
+      await this.handleUnauthorized(request);
+    }
   }
 
   async handleUnauthorized(request: Request): Promise<void> {
@@ -354,6 +356,28 @@ export class AuthenticationLifecycle {
 
   async principalInvalidated(): Promise<void> {
     await this.transitionToAnonymous();
+  }
+
+  watchSessionChanges(): () => void {
+    const listener = (event: StorageEvent) => {
+      if (event.key === SESSION_CHANGE_KEY && event.newValue) {
+        void this.refreshProtectedSession();
+      }
+    };
+    window.addEventListener('storage', listener);
+    return () => window.removeEventListener('storage', listener);
+  }
+
+  async refreshProtectedSession(): Promise<void> {
+    if (!this.boundary || this.snapshotValue.phase === 'transitioning') return;
+    this.abortSessionValidation();
+    const generation = this.validationGeneration;
+    this.gateProtectedContent('checking');
+    this.rotateAuthenticatedRequests();
+    clearCsrfToken();
+    await this.cancelAndClearQueries();
+    if (generation !== this.validationGeneration) return;
+    await this.validateSession();
   }
 
   async signOut(request: PrincipalExitRequest, destination = '/login'): Promise<void> {
@@ -395,6 +419,7 @@ export class AuthenticationLifecycle {
         principalExitError: '',
         lastValidatedAt: null
       });
+      this.announceSessionChange();
       return true;
     } catch (error) {
       if (controller.signal.aborted || abortError(error)) return false;
@@ -499,6 +524,14 @@ export class AuthenticationLifecycle {
   private setSnapshot(snapshot: AuthenticationSnapshot): void {
     this.snapshotValue = snapshot;
     for (const listener of this.listeners) listener(snapshot);
+  }
+
+  private announceSessionChange(): void {
+    try {
+      globalThis.localStorage?.setItem(SESSION_CHANGE_KEY, crypto.randomUUID());
+    } catch {
+      // Focus and visibility revalidation remain the fallback when storage is unavailable.
+    }
   }
 
   private async cancelAndClearQueries(): Promise<void> {

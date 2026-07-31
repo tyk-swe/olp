@@ -7,6 +7,7 @@ use olp_domain::{
 use tokio::time::{Instant, timeout};
 
 use crate::openai::{ConnectorConfig, OpenAiApiKey};
+use crate::transport_common::RateLimitCooldown;
 
 mod errors;
 mod media;
@@ -23,6 +24,7 @@ pub struct OpenAiConnector {
     config: ConnectorConfig,
     api_key: OpenAiApiKey,
     auth_style: AuthStyle,
+    rate_limit_cooldown: RateLimitCooldown,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +40,7 @@ impl OpenAiConnector {
             config,
             api_key,
             auth_style: AuthStyle::Bearer,
+            rate_limit_cooldown: RateLimitCooldown::default(),
         }
     }
 
@@ -50,6 +53,7 @@ impl OpenAiConnector {
             config,
             api_key,
             auth_style: AuthStyle::ApiKeyHeader,
+            rate_limit_cooldown: RateLimitCooldown::default(),
         }
     }
 
@@ -69,6 +73,7 @@ impl OpenAiConnector {
     /// intentionally separate from inference so management discovery never
     /// consumes the routing retry budget.
     pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+        self.rate_limit_cooldown.check_credential()?;
         let attempt_deadline = Instant::now()
             + self.config.timeouts.connect
             + self.config.timeouts.first_byte
@@ -96,7 +101,9 @@ impl OpenAiConnector {
         .map_err(|_| first_byte_timeout())?
         .map_err(map_send_error)?;
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(response, attempt_deadline, None)
+                .await);
         }
         operations::require_content_type(&response, "application/json")?;
         let body = read_bounded_body(

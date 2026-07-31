@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT upstream_job_id FROM async_media_jobs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "upstream_job_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "async_media_jobs",
+            "name": "upstream_job_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0c9acb8baaceba89a14dbe30584119ad5c79cfd7bb84156ce960f1f614a4a778"
+}

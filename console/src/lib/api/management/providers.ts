@@ -33,7 +33,9 @@ export type ProviderRevision = Schemas['ProviderRevisionSummaryResponse'];
 export type ProviderRevisionDiff = Schemas['ProviderRevisionDiffResponse'];
 
 export async function listProviders(signal?: ReadSignal): Promise<ProviderSummary[]> {
-  return collectCursorPages((cursor) => listProviderPage(cursor, getAbortSignal(signal)));
+  return collectCursorPages((cursor, remaining) =>
+    listProviderPage(cursor, getAbortSignal(signal), remaining)
+  );
 }
 
 export async function getProviderCapabilityOptions(
@@ -58,10 +60,11 @@ export async function listProviderKinds(signal?: AbortSignal): Promise<ProviderK
 
 export async function listProviderPage(
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 50
 ): Promise<CursorPage<ProviderSummary>> {
   const response = await apiClient.GET('/api/v1/providers', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: Math.min(50, limit), cursor } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);
@@ -84,10 +87,11 @@ export async function listProviderModelPage(
 export async function listProviderModelInventoryPage(
   cursor?: string,
   enabled?: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 50
 ): Promise<CursorPage<ProviderModelInventory>> {
   const response = await apiClient.GET('/api/v1/provider-models', {
-    params: { query: { limit: 50, cursor, enabled } },
+    params: { query: { limit: Math.min(50, limit), cursor, enabled } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);
@@ -98,7 +102,9 @@ export async function listProviderModelInventory(
   enabled?: boolean,
   signal?: AbortSignal
 ): Promise<ProviderModelInventory[]> {
-  return collectCursorPages((cursor) => listProviderModelInventoryPage(cursor, enabled, signal));
+  return collectCursorPages((cursor, remaining) =>
+    listProviderModelInventoryPage(cursor, enabled, signal, remaining)
+  );
 }
 
 export async function getProvider(id: string, signal?: AbortSignal): Promise<Provider> {
@@ -257,16 +263,19 @@ export async function listProviderCredentials(
   id: string,
   signal?: AbortSignal
 ): Promise<ProviderCredential[]> {
-  return collectCursorPages((cursor) => listProviderCredentialPage(id, cursor, signal));
+  return collectCursorPages((cursor, remaining) =>
+    listProviderCredentialPage(id, cursor, signal, remaining)
+  );
 }
 
 async function listProviderCredentialPage(
   id: string,
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 100
 ): Promise<CursorPage<ProviderCredential>> {
   const response = await apiClient.GET('/api/v1/providers/{provider_id}/credentials', {
-    params: { path: { provider_id: id }, query: { cursor, limit: 100 } },
+    params: { path: { provider_id: id }, query: { cursor, limit: Math.min(100, limit) } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);

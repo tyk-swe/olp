@@ -200,6 +200,12 @@ impl fmt::Debug for ApiKeyDigest {
     }
 }
 
+/// Largest TPM value that remains exact in the Lua 5.1 number representation
+/// used by the distributed limiter.
+pub const MAX_TOKENS_PER_MINUTE: u64 = (1_u64 << 53) - 1;
+/// Largest API-key route allowlist accepted at management and storage boundaries.
+pub const MAX_API_KEY_ALLOWED_ROUTES: usize = 1_000;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ApiKeyLimits {
     pub requests_per_minute: Option<NonZeroU32>,

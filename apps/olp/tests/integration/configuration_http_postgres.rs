@@ -1074,7 +1074,13 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     )
     .await;
     assert_eq!(revisions.status(), StatusCode::OK);
-    assert_eq!(response_json(revisions).await["items"][0]["revision"], 1);
+    let revisions = response_json(revisions).await;
+    assert_eq!(revisions["items"][0]["revision"], 1);
+    assert_eq!(revisions["items"][0]["operations"], json!(["embeddings"]));
+    assert_eq!(
+        revisions["items"][0]["targets"].as_array().unwrap().len(),
+        1
+    );
 
     let routes = send(
         &app,
@@ -1091,6 +1097,17 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     let routes_body = response_json(routes).await;
     assert_eq!(routes_body["items"][0]["id"], route_id);
     assert_eq!(routes_body["items"][0]["latest_revision"]["revision"], 1);
+    assert_eq!(
+        routes_body["items"][0]["latest_revision"]["operations"],
+        json!(["embeddings"])
+    );
+    assert_eq!(
+        routes_body["items"][0]["latest_revision"]["targets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(routes_body["items"][0]["revision_count"], 1);
     let route_detail = send(
         &app,
@@ -1269,6 +1286,27 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
             .unwrap()
             .starts_with("olp_v2_")
     );
+    let api_keys = send(
+        &app,
+        Method::GET,
+        "/api/v1/api-keys",
+        None,
+        Some(&cookie),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(api_keys.status(), StatusCode::OK);
+    let api_keys = response_json(api_keys).await;
+    let listed_key = api_keys["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|key| key["id"] == api_key_id)
+        .unwrap();
+    assert_eq!(listed_key["scopes"], json!(["inference", "models_read"]));
+    assert_eq!(listed_key["allowed_routes"], json!(["default"]));
     let api_key_replay = send(
         &app,
         Method::POST,

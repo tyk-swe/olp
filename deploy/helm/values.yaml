@@ -65,14 +65,14 @@ gateway:
     enabled: true
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
-    whenUnsatisfiable: ScheduleAnyway
+    whenUnsatisfiable: DoNotSchedule
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "4", memory: 2Gi }
 
 control:
   enabled: true
-  replicas: 1
+  replicas: 2
   httpMaxConnections: 1024
   # The inference pool is unused in control-only mode but remains explicit so
   # switching this component to combined mode cannot erase the reserve.
@@ -84,13 +84,13 @@ control:
     port: 80
     annotations: {}
   podDisruptionBudget:
-    enabled: false
+    enabled: true
     minAvailable: 1
   topologySpread:
-    enabled: false
+    enabled: true
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
-    whenUnsatisfiable: ScheduleAnyway
+    whenUnsatisfiable: DoNotSchedule
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }

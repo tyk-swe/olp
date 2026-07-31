@@ -1,4 +1,6 @@
-use olp_domain::{OperationKind, ProviderKind, RouteSlug};
+use std::collections::HashSet;
+
+use olp_domain::{MAX_ROUTE_TARGETS, MAX_ROUTE_TIMEOUT_MS, OperationKind, ProviderKind, RouteSlug};
 use uuid::Uuid;
 
 use super::{
@@ -6,10 +8,30 @@ use super::{
     resources::{CapabilityRecord, DiscoveredModelInput, UpdateProvider},
 };
 
+pub(crate) fn validate_route_cardinality(
+    operations: &[OperationKind],
+    target_count: usize,
+) -> Result<(), ConfigurationError> {
+    if operations.len() > OperationKind::ALL.len()
+        || operations.iter().copied().collect::<HashSet<_>>().len() != operations.len()
+        || target_count > MAX_ROUTE_TARGETS
+    {
+        return Err(ConfigurationError::Invalid(format!(
+            "routes support at most {} unique operations and {MAX_ROUTE_TARGETS} targets",
+            OperationKind::ALL.len()
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), ConfigurationError> {
-    if update.name.trim().is_empty() || update.name.chars().count() > 100 {
+    if update.name.trim().is_empty()
+        || update.name.chars().count() > 100
+        || olp_domain::has_unsafe_display_characters(&update.name)
+    {
         return Err(ConfigurationError::Invalid(
-            "provider name must contain 1-100 characters".to_owned(),
+            "provider name must contain 1-100 visible characters without control or bidi formatting"
+                .to_owned(),
         ));
     }
     for value in [
@@ -37,9 +59,13 @@ pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Configu
             "model ID must contain 1-200 characters".to_owned(),
         ));
     }
-    if model.display_name.trim().is_empty() || model.display_name.chars().count() > 200 {
+    if model.display_name.trim().is_empty()
+        || model.display_name.chars().count() > 200
+        || olp_domain::has_unsafe_display_characters(&model.display_name)
+    {
         return Err(ConfigurationError::Invalid(
-            "model display name must contain 1-200 characters".to_owned(),
+            "model display name must contain 1-200 visible characters without control or bidi formatting"
+                .to_owned(),
         ));
     }
     if model.enabled && model.capabilities.is_empty() {
@@ -90,6 +116,7 @@ pub(crate) fn validate_route_input(
     max_attempts: i16,
     targets: &[(Uuid, i32, i32, i32)],
 ) -> Result<(), ConfigurationError> {
+    validate_route_cardinality(operations, targets.len())?;
     RouteSlug::parse(slug.to_owned())
         .map_err(|error| ConfigurationError::Invalid(error.to_string()))?;
     if operations.is_empty() || targets.is_empty() {
@@ -97,7 +124,7 @@ pub(crate) fn validate_route_input(
             "route operations and targets cannot be empty".to_owned(),
         ));
     }
-    if overall_timeout_ms <= 0
+    if !(1..=MAX_ROUTE_TIMEOUT_MS).contains(&overall_timeout_ms)
         || max_attempts <= 0
         || usize::try_from(max_attempts).unwrap_or(usize::MAX) > targets.len()
     {
@@ -189,6 +216,37 @@ mod tests {
             .unwrap_err();
             assert!(
                 matches!(error, ConfigurationError::Invalid(detail) if detail.contains("installation-local"))
+            );
+        }
+    }
+
+    #[test]
+    fn route_cardinality_is_bounded_and_operations_are_unique() {
+        assert!(validate_route_cardinality(&[OperationKind::Generation], 100).is_ok());
+        assert!(
+            validate_route_cardinality(&[OperationKind::Generation, OperationKind::Generation], 1)
+                .is_err()
+        );
+        assert!(validate_route_cardinality(&[OperationKind::Generation], 101).is_err());
+    }
+
+    #[test]
+    fn route_timeout_is_bounded() {
+        let targets = [(Uuid::now_v7(), 0, 1, 500)];
+        for (timeout, valid) in [
+            (MAX_ROUTE_TIMEOUT_MS, true),
+            (MAX_ROUTE_TIMEOUT_MS + 1, false),
+        ] {
+            assert_eq!(
+                validate_route_input(
+                    "bounded-route",
+                    &[OperationKind::Generation],
+                    timeout,
+                    1,
+                    &targets,
+                )
+                .is_ok(),
+                valid
             );
         }
     }

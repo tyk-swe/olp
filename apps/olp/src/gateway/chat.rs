@@ -110,7 +110,12 @@ pub(super) async fn chat_completions(
         .route()
         .cloned()
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    if let Err(error) = authorize_api_key(key, Some(&route_slug), operation.kind(), Utc::now()) {
+    if let Err(error) = authorize_api_key(
+        key,
+        Some(&route_slug),
+        operation.kind(),
+        snapshot.database_time(),
+    ) {
         let failure = InferenceError::forbidden(error.to_string());
         emit_request_metadata_event(
             &state,
@@ -179,7 +184,7 @@ pub(super) async fn chat_completions(
                 Surface::OpenAi,
                 OperationKind::Generation,
             );
-            release_limits(&state, lease.as_ref(), None).await;
+            release_limits(&state, lease.as_ref(), None);
             return Err(failure);
         }
     };

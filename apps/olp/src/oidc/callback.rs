@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Instant};
 
 use axum::{
     extract::{OriginalUri, Query, State, rejection::QueryRejection},
@@ -12,7 +12,7 @@ use olp_storage::{
     oidc_client_secret_aad as client_secret_aad, oidc_flow_payload_aad as flow_payload_aad,
 };
 use serde::Deserialize;
-use tracing::error;
+use tracing::{error, warn};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::claims::validate_id_token;
@@ -172,6 +172,7 @@ async fn callback_inner(
     cookies: &RequestCookies<'_>,
     query: CallbackQuery,
 ) -> Result<Response, Problem> {
+    let callback_started_at = Instant::now();
     let callback_state = OidcCallbackState::parse(query.state.ok_or_else(|| {
         Problem::bad_request("oidc_state_missing", "The authorization state is missing.")
     })?)?;
@@ -284,10 +285,20 @@ async fn callback_inner(
     if token_response.id_token.expose().len() > ID_TOKEN_LIMIT {
         return Err(Problem::unauthorized("The ID token is invalid."));
     }
-    let jwks: JwkSet = network_policy(state)
-        .get_json(&configuration.jwks_uri, JWKS_LIMIT)
+    let refresh_started_at = Instant::now();
+    let (jwks, refreshed) = match network_policy(state)
+        .get_json::<JwkSet>(&configuration.jwks_uri, JWKS_LIMIT)
         .await
-        .map_err(map_token_network)?;
+    {
+        Ok(jwks) => (jwks, true),
+        Err(error) => {
+            let Some(jwks) = state.cached_oidc_jwks(configuration.id, configuration.etag) else {
+                return Err(map_token_network(error));
+            };
+            warn!(%error, "OIDC JWKS refresh failed; using the recent last-known-good set");
+            (jwks, false)
+        }
+    };
     let identity = validate_id_token(
         token_response.id_token.expose(),
         &jwks,
@@ -295,6 +306,15 @@ async fn callback_inner(
         &flow_secret.nonce,
         purpose == OidcFlowPurpose::Reauthenticate,
     )?;
+    if refreshed {
+        state.cache_oidc_jwks(
+            configuration.id,
+            configuration.etag,
+            callback_started_at,
+            refresh_started_at,
+            jwks,
+        );
+    }
     drop(token_response);
     drop(flow_secret);
 

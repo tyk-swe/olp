@@ -44,7 +44,13 @@ impl OpenAiConnector {
             .map_err(|_| first_byte_timeout())?
             .map_err(map_send_error)?;
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(
+                    response,
+                    attempt_deadline,
+                    Some(&request.attempt.upstream_model),
+                )
+                .await);
         }
         Ok(DeadlineResponse::new(
             response,
@@ -85,7 +91,11 @@ impl OpenAiConnector {
             .await?;
         if !response.status().is_success() {
             return Err(self
-                .map_error_response(response.response, response.attempt_deadline)
+                .map_error_response(
+                    response.response,
+                    response.attempt_deadline,
+                    Some(&request.attempt.upstream_model),
+                )
                 .await);
         }
         Ok(response)
@@ -188,7 +198,13 @@ impl OpenAiConnector {
         .map_err(|_| ambiguous_multipart_timeout())?
         .map_err(map_ambiguous_send_error)?;
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(
+                    response,
+                    attempt_deadline,
+                    Some(&request.attempt.upstream_model),
+                )
+                .await);
         }
         Ok(DeadlineResponse::new(
             response,
@@ -249,7 +265,13 @@ impl OpenAiConnector {
         .map_err(|_| first_byte_timeout())?
         .map_err(map_send_error)?;
         if !response.status().is_success() {
-            return Err(self.map_error_response(response, attempt_deadline).await);
+            return Err(self
+                .map_error_response(
+                    response,
+                    attempt_deadline,
+                    Some(&request.attempt.upstream_model),
+                )
+                .await);
         }
         require_content_type(&response, "application/json")?;
         read_bounded_body(
@@ -266,8 +288,13 @@ impl OpenAiConnector {
         &self,
         response: Response,
         attempt_deadline: Instant,
+        upstream_model: Option<&str>,
     ) -> TransportError {
         let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            self.rate_limit_cooldown
+                .observe(upstream_model, response.headers());
+        }
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match read_bounded_body(
             response,

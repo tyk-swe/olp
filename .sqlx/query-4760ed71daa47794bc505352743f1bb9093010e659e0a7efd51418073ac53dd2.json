@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oidc_login_flow_consumptions WHERE ctid IN ( SELECT ctid FROM oidc_login_flow_consumptions WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4760ed71daa47794bc505352743f1bb9093010e659e0a7efd51418073ac53dd2"
+}

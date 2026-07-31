@@ -95,6 +95,16 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     .execute(store.pool())
     .await
     .unwrap();
+    sqlx::query(
+        "INSERT INTO model_capabilities
+         (provider_model_id, operation, surface, mode, source, certified_at)
+         SELECT $1, operation, 'openai', 'unary', 'certified', now()
+         FROM unnest(ARRAY['video_get', 'video_content', 'video_delete']) AS operation",
+    )
+    .bind(model_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
     certify_all_draft_capabilities(&store, provider_id).await;
     store
         .record_provider_probe(
@@ -525,6 +535,129 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     .await
     .unwrap();
     assert_eq!(restore_audit, 1);
+
+    // A pure credential rotation can replace a compromised secret while live
+    // jobs continue through the same provider endpoint and lifecycle surface.
+    let restored_active_etag = store
+        .update_provider(
+            provider_id,
+            restored.etag,
+            &UpdateProvider {
+                name: "revision-provider-next".to_owned(),
+                endpoint: Some("https://new.example.test/v1/".to_owned()),
+                cloud_region: None,
+                cloud_project: None,
+                deployment: None,
+                api_version: None,
+                auth_mode: "api_key".parse().unwrap(),
+            },
+            actor,
+        )
+        .await
+        .unwrap();
+    let containment_job_id = Uuid::now_v7();
+    store
+        .reserve_media_job(NewMediaJobReservation {
+            id: containment_job_id,
+            runtime_generation_id: second_activation.release.generation_id,
+            api_key_id: media_api_key_id,
+            provider_id,
+            upstream_model: "model-old".to_owned(),
+            route_slug: "video-durable".to_owned(),
+            operation: "video_create".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    store
+        .attach_media_job_upstream(
+            containment_job_id,
+            "upstream-containment-video",
+            MediaJobUpdate {
+                state: MediaJobState::Queued,
+                progress_percent: Some(0.0),
+                content_available: false,
+                expires_at: None,
+                error_class: None,
+                last_polled_at: chrono::Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+    let containment_credential_id = Uuid::now_v7();
+    let containment_credential = master_key
+        .seal(
+            b"containment-provider-secret",
+            &credential_aad(provider_id, containment_credential_id, 3),
+        )
+        .unwrap();
+    let containment_fingerprint =
+        idempotency_fingerprint(&"provider-revision-containment-rotate-01").unwrap();
+    let containment_rotation = store
+        .rotate_provider_credential(
+            provider_id,
+            RotateCredentialInput {
+                credential_id: containment_credential_id,
+                version: 3,
+                encrypted: containment_credential,
+                expected_etag: restored_active_etag,
+                actor,
+                idempotency_key: "provider-revision-containment-rotate-01".to_owned(),
+            },
+            ReplayableIdempotency::new(containment_fingerprint, &master_key),
+            |_| IdempotencyResponse::new(200, None, None, Vec::new()),
+        )
+        .await
+        .unwrap();
+    let IdempotencyOutcome::Executed {
+        value: containment_rotation,
+        ..
+    } = containment_rotation
+    else {
+        panic!("containment credential rotation must execute");
+    };
+    certify_all_draft_capabilities(&store, provider_id).await;
+    store
+        .record_provider_probe(
+            provider_id,
+            containment_rotation.etag,
+            true,
+            "containment credential probe",
+            actor,
+        )
+        .await
+        .unwrap();
+    let containment_activation = store
+        .activate_provider(
+            provider_id,
+            containment_rotation.etag,
+            actor,
+            "provider-revision-containment-activate-01",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_provider(provider_id)
+            .await
+            .unwrap()
+            .runtime_credential_id,
+        Some(containment_credential_id)
+    );
+    store
+        .revoke_provider_credential(
+            provider_id,
+            second_credential_id,
+            containment_activation.etag,
+            actor,
+            "provider-revision-containment-revoke-old-01",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.media_job(containment_job_id).await.unwrap().lifecycle,
+        olp_storage::MediaJobLifecycle::Active
+    );
 }
 
 async fn certify_all_draft_capabilities(store: &PgStore, provider_id: Uuid) {

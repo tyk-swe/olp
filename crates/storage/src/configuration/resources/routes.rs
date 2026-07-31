@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::{helpers::audit_in_transaction, *};
 
 impl PgStore {
@@ -8,18 +10,87 @@ impl PgStore {
     ) -> Result<ConfigurationPage<RouteDraftRecord>, ConfigurationError> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
-            "SELECT id FROM route_drafts WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+            "SELECT id, routing_id, slug, state::text AS \"state!\", overall_timeout_ms, \
+                    max_attempts, etag, based_on_revision_id, created_at, updated_at \
+             FROM route_drafts WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
             cursor,
             limit + 1
         )
         .fetch_all(self.pool())
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
-        let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            items.push(self.get_route_draft(id).await?);
+        let ids: Vec<_> = rows.iter().map(|row| row.id).collect();
+        let operation_rows = sqlx::query!(
+            "SELECT route_draft_id, operation::text AS \"operation!\" \
+             FROM route_draft_operations WHERE route_draft_id = ANY($1) \
+             ORDER BY route_draft_id, operation",
+            &ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let mut operations = HashMap::<Uuid, Vec<OperationKind>>::new();
+        for row in operation_rows {
+            operations.entry(row.route_draft_id).or_default().push(
+                row.operation
+                    .parse()
+                    .map_err(|_| PersistenceError::InvalidStoredValue("route draft operation"))?,
+            );
         }
+        let target_rows = sqlx::query!(
+            "SELECT rdt.route_draft_id, rdt.id, rdt.routing_id, rdt.provider_model_id, \
+                    p.id AS provider_id, pr.name AS provider_name, \
+                    prm.upstream_model AS provider_model, rdt.priority, rdt.weight, \
+                    rdt.timeout_ms, rdt.position \
+             FROM route_draft_targets rdt \
+             JOIN provider_models pm ON pm.id = rdt.provider_model_id \
+             JOIN providers p ON p.id = pm.provider_id \
+             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+               AND prm.source_provider_model_id = pm.id \
+             WHERE rdt.route_draft_id = ANY($1) ORDER BY rdt.route_draft_id, rdt.position",
+            &ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let mut targets = HashMap::<Uuid, Vec<RouteTargetRecord>>::new();
+        for row in target_rows {
+            targets
+                .entry(row.route_draft_id)
+                .or_default()
+                .push(RouteTargetRecord {
+                    id: row.id,
+                    routing_id: row.routing_id,
+                    provider_model_id: row.provider_model_id,
+                    provider_id: row.provider_id,
+                    provider_name: row.provider_name,
+                    upstream_model: row.provider_model,
+                    priority: row.priority,
+                    weight: row.weight,
+                    timeout_ms: row.timeout_ms,
+                    position: row.position,
+                });
+        }
+        let items =
+            rows.into_iter()
+                .map(|row| {
+                    Ok(RouteDraftRecord {
+                        id: row.id,
+                        routing_id: row.routing_id,
+                        slug: row.slug,
+                        state: row.state.parse().map_err(|_| {
+                            PersistenceError::InvalidStoredValue("route draft state")
+                        })?,
+                        overall_timeout_ms: row.overall_timeout_ms,
+                        max_attempts: row.max_attempts,
+                        etag: row.etag,
+                        based_on_revision_id: row.based_on_revision_id,
+                        operations: operations.remove(&row.id).unwrap_or_default(),
+                        targets: targets.remove(&row.id).unwrap_or_default(),
+                        created_at: row.created_at,
+                        updated_at: row.updated_at,
+                    })
+                })
+                .collect::<Result<_, ConfigurationError>>()?;
         Ok(ConfigurationPage { items, next_cursor })
     }
 
@@ -68,6 +139,9 @@ impl PgStore {
             &input.targets,
         )?;
         let mut transaction = self.pool().begin().await?;
+        sqlx::query_scalar!("SELECT set_config('transaction_timeout', '30s', true)")
+            .fetch_one(&mut *transaction)
+            .await?;
         let lineage_slug: Option<String> = sqlx::query_scalar!(
             "SELECT rr.slug FROM route_drafts rd \
              JOIN route_revisions rr ON rr.id = rd.based_on_revision_id \
@@ -111,70 +185,114 @@ impl PgStore {
                 ConfigurationError::NotFound
             });
         }
-        let previous_targets = sqlx::query!(
-            "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
-             FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
-            draft_id
+        let operation_names: Vec<_> = input
+            .operations
+            .iter()
+            .map(|operation| operation.as_str().to_owned())
+            .collect();
+        let provider_model_ids: Vec<_> = input
+            .targets
+            .iter()
+            .map(|(provider_model_id, _, _, _)| *provider_model_id)
+            .collect();
+        let invalid_provider_model_id = sqlx::query_scalar!(
+            "SELECT input.provider_model_id AS \"provider_model_id!\" \
+             FROM unnest($1::uuid[]) AS input(provider_model_id) \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM providers p \
+                 JOIN provider_revision_models prm \
+                   ON prm.provider_revision_id = p.active_revision_id \
+                 WHERE prm.source_provider_model_id = input.provider_model_id AND prm.enabled \
+                   AND p.state <> 'disabled'::provider_state \
+             ) LIMIT 1",
+            &provider_model_ids
         )
-        .fetch_all(&mut *transaction)
+        .fetch_optional(&mut *transaction)
         .await?;
+        if let Some(provider_model_id) = invalid_provider_model_id {
+            return Err(ConfigurationError::Invalid(format!(
+                "provider model {provider_model_id} is not active"
+            )));
+        }
         sqlx::query!(
-            "DELETE FROM route_draft_operations WHERE route_draft_id = $1",
-            draft_id
+            "DELETE FROM route_draft_operations \
+             WHERE route_draft_id = $1 AND NOT operation = ANY($2::text[])",
+            draft_id,
+            &operation_names
         )
         .execute(&mut *transaction)
         .await?;
         sqlx::query!(
-            "DELETE FROM route_draft_targets WHERE route_draft_id = $1",
-            draft_id
+            "INSERT INTO route_draft_operations (route_draft_id, operation) \
+             SELECT $1, input.operation FROM unnest($2::text[]) AS input(operation) \
+             ON CONFLICT (route_draft_id, operation) DO NOTHING",
+            draft_id,
+            &operation_names
         )
         .execute(&mut *transaction)
         .await?;
-        for operation in &input.operations {
-            sqlx::query!(
-                "INSERT INTO route_draft_operations (route_draft_id, operation) VALUES ($1, $2)",
-                draft_id,
-                operation.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        for (position, (provider_model_id, priority, weight, timeout_ms)) in
-            input.targets.iter().enumerate()
-        {
-            let position = i32::try_from(position)
-                .map_err(|_| ConfigurationError::Invalid("too many targets".to_owned()))?;
-            let enabled: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM providers p \
-                 JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-                 WHERE prm.source_provider_model_id = $1 AND prm.enabled \
-                   AND p.state <> 'disabled'::provider_state) AS \"value!\"",
-            provider_model_id)
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !enabled {
-                return Err(ConfigurationError::Invalid(format!(
-                    "provider model {provider_model_id} is not active"
-                )));
-            }
-            let routing_id = previous_targets
-                .iter()
-                .find(|target| {
-                    target.position == position
-                        && target.provider_model_id == *provider_model_id
-                        && target.priority == *priority
-                        && target.weight == *weight
-                        && target.timeout_ms == *timeout_ms
-                })
-                .map_or_else(Uuid::now_v7, |target| target.routing_id);
-            sqlx::query!(
-                "INSERT INTO route_draft_targets \
-                  (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            Uuid::now_v7(), routing_id, draft_id, provider_model_id, priority, weight, timeout_ms, position)
-            .execute(&mut *transaction)
-            .await?;
-        }
+        let target_ids: Vec<_> = input.targets.iter().map(|_| Uuid::now_v7()).collect();
+        let target_routing_ids: Vec<_> = input.targets.iter().map(|_| Uuid::now_v7()).collect();
+        let priorities: Vec<_> = input
+            .targets
+            .iter()
+            .map(|(_, priority, _, _)| *priority)
+            .collect();
+        let weights: Vec<_> = input
+            .targets
+            .iter()
+            .map(|(_, _, weight, _)| *weight)
+            .collect();
+        let timeouts: Vec<_> = input
+            .targets
+            .iter()
+            .map(|(_, _, _, timeout)| *timeout)
+            .collect();
+        let positions: Vec<_> = (0..input.targets.len())
+            .map(|position| {
+                i32::try_from(position)
+                    .expect("route target cardinality is validated before database access")
+            })
+            .collect();
+        sqlx::query!(
+            "DELETE FROM route_draft_targets \
+             WHERE route_draft_id = $1 AND position >= $2",
+            draft_id,
+            i32::try_from(input.targets.len())
+                .expect("route target cardinality is validated before database access")
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO route_draft_targets \
+             (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
+             SELECT input.id, input.routing_id, $1, input.provider_model_id, input.priority, \
+                    input.weight, input.timeout_ms, input.position \
+             FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::int[], \
+                         $6::int[], $7::int[], $8::int[]) \
+                  AS input(id, routing_id, provider_model_id, priority, weight, timeout_ms, position) \
+             ON CONFLICT (route_draft_id, position) DO UPDATE SET \
+                 id = EXCLUDED.id, \
+                 routing_id = CASE WHEN \
+                     (route_draft_targets.provider_model_id, route_draft_targets.priority, \
+                      route_draft_targets.weight, route_draft_targets.timeout_ms) \
+                     IS NOT DISTINCT FROM \
+                     (EXCLUDED.provider_model_id, EXCLUDED.priority, \
+                      EXCLUDED.weight, EXCLUDED.timeout_ms) \
+                   THEN route_draft_targets.routing_id ELSE EXCLUDED.routing_id END, \
+                 provider_model_id = EXCLUDED.provider_model_id, priority = EXCLUDED.priority, \
+                 weight = EXCLUDED.weight, timeout_ms = EXCLUDED.timeout_ms",
+            draft_id,
+            &target_ids,
+            &target_routing_ids,
+            &provider_model_ids,
+            &priorities,
+            &weights,
+            &timeouts,
+            &positions
+        )
+        .execute(&mut *transaction)
+        .await?;
         audit_in_transaction(
             &mut transaction,
             actor,
@@ -385,10 +503,11 @@ impl PgStore {
         .fetch_all(self.pool())
         .await?;
         let (ids, next_cursor) = split_page(ids, limit as usize, |id| *id);
-        let mut revisions = Vec::with_capacity(ids.len());
-        for id in ids {
-            revisions.push(self.get_route_revision(route_id, id).await?);
-        }
+        let mut records = revision_records_by_ids(self.pool(), &ids).await?;
+        let revisions = ids
+            .into_iter()
+            .map(|id| records.remove(&id).ok_or(ConfigurationError::NotFound))
+            .collect::<Result<_, _>>()?;
         Ok(ConfigurationPage {
             items: revisions,
             next_cursor,
@@ -402,19 +521,47 @@ impl PgStore {
     ) -> Result<ConfigurationPage<RouteRecord>, ConfigurationError> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
-            "SELECT id FROM routes WHERE ($1::uuid IS NULL OR id > $1)
-             ORDER BY id LIMIT $2",
+            "SELECT r.id, r.slug, r.created_at, \
+                    (SELECT rr.id FROM route_revisions rr WHERE rr.route_id = r.id \
+                     ORDER BY rr.revision DESC LIMIT 1) AS latest_revision_id, \
+                    (SELECT count(*) FROM route_revisions rr WHERE rr.route_id = r.id)::bigint \
+                      AS \"revision_count!\" \
+             FROM routes r WHERE ($1::uuid IS NULL OR r.id > $1) \
+             ORDER BY r.id LIMIT $2",
             cursor,
             limit + 1
         )
         .fetch_all(self.pool())
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
-        let ids = rows.into_iter().map(|row| row.id).collect::<Vec<_>>();
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            items.push(self.get_route(id).await?);
-        }
+        let revision_ids = rows
+            .iter()
+            .map(|row| {
+                row.latest_revision_id.ok_or_else(|| {
+                    ConfigurationError::Invalid(
+                        "activated route has no immutable revision".to_owned(),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut revisions = revision_records_by_ids(self.pool(), &revision_ids).await?;
+        let items = rows
+            .into_iter()
+            .zip(revision_ids)
+            .map(|(row, revision_id)| {
+                Ok(RouteRecord {
+                    id: row.id,
+                    slug: row.slug,
+                    created_at: row.created_at,
+                    revision_count: u64::try_from(row.revision_count).map_err(|_| {
+                        ConfigurationError::Invalid("route revision count is invalid".to_owned())
+                    })?,
+                    latest_revision: revisions
+                        .remove(&revision_id)
+                        .ok_or(ConfigurationError::NotFound)?,
+                })
+            })
+            .collect::<Result<_, ConfigurationError>>()?;
         Ok(ConfigurationPage { items, next_cursor })
     }
 
@@ -589,6 +736,94 @@ impl PgStore {
     }
 }
 
+async fn revision_records_by_ids(
+    pool: &sqlx::PgPool,
+    ids: &[Uuid],
+) -> Result<HashMap<Uuid, RouteRevisionRecord>, ConfigurationError> {
+    let rows = sqlx::query_as!(
+        RouteRevisionRow,
+        "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, \
+                source_draft_id, activated_by, activated_at \
+         FROM route_revisions WHERE id = ANY($1)",
+        ids
+    )
+    .fetch_all(pool)
+    .await?;
+    let operation_rows = sqlx::query!(
+        "SELECT route_revision_id, operation::text AS \"operation!\" \
+         FROM route_revision_operations WHERE route_revision_id = ANY($1) \
+         ORDER BY route_revision_id, operation",
+        ids
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut operations = HashMap::<Uuid, Vec<OperationKind>>::new();
+    for row in operation_rows {
+        operations.entry(row.route_revision_id).or_default().push(
+            row.operation
+                .parse()
+                .map_err(|_| PersistenceError::InvalidStoredValue("route operation"))?,
+        );
+    }
+    let target_rows = sqlx::query!(
+        "SELECT rrt.route_revision_id, rrt.id, rrt.routing_id, rrt.provider_model_id, \
+                p.id AS provider_id, pr.name AS provider_name, \
+                prm.upstream_model AS provider_model, rrt.priority, rrt.weight, \
+                rrt.timeout_ms, rrt.position \
+         FROM route_revision_targets rrt \
+         JOIN provider_models pm ON pm.id = rrt.provider_model_id \
+         JOIN providers p ON p.id = pm.provider_id \
+         JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+         JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+           AND prm.source_provider_model_id = pm.id \
+         WHERE rrt.route_revision_id = ANY($1) \
+         ORDER BY rrt.route_revision_id, rrt.position",
+        ids
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut targets = HashMap::<Uuid, Vec<RouteTargetRecord>>::new();
+    for row in target_rows {
+        targets
+            .entry(row.route_revision_id)
+            .or_default()
+            .push(RouteTargetRecord {
+                id: row.id,
+                routing_id: row.routing_id,
+                provider_model_id: row.provider_model_id,
+                provider_id: row.provider_id,
+                provider_name: row.provider_name,
+                upstream_model: row.provider_model,
+                priority: row.priority,
+                weight: row.weight,
+                timeout_ms: row.timeout_ms,
+                position: row.position,
+            });
+    }
+    rows.into_iter()
+        .map(|row| {
+            let id = row.id;
+            Ok((
+                id,
+                RouteRevisionRecord {
+                    id,
+                    routing_id: row.routing_id,
+                    route_id: row.route_id,
+                    revision: row.revision,
+                    slug: row.slug,
+                    overall_timeout_ms: row.overall_timeout_ms,
+                    max_attempts: row.max_attempts,
+                    source_draft_id: row.source_draft_id,
+                    activated_by: row.activated_by,
+                    activated_at: row.activated_at,
+                    operations: operations.remove(&id).unwrap_or_default(),
+                    targets: targets.remove(&id).unwrap_or_default(),
+                },
+            ))
+        })
+        .collect()
+}
+
 async fn draft_operations(
     pool: &sqlx::PgPool,
     id: Uuid,
@@ -656,6 +891,20 @@ async fn revision_targets(
              WHERE rrt.route_revision_id = $1 ORDER BY rrt.position",
         id).fetch_all(pool).await?
     )
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RouteRevisionRow {
+    id: Uuid,
+    routing_id: Uuid,
+    route_id: Uuid,
+    revision: i32,
+    slug: String,
+    overall_timeout_ms: i32,
+    max_attempts: i16,
+    source_draft_id: Uuid,
+    activated_by: Uuid,
+    activated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, sqlx::FromRow)]

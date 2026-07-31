@@ -407,6 +407,56 @@ describe('authentication lifecycle', () => {
     expect(getCsrfToken()).toBe('csrf-renewed');
   });
 
+  it('revalidates a 403 without treating an authorized session as logged out', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const renewed = sessionFor('current-principal', 'csrf-renewed');
+    const loadSession = vi.fn(async () => renewed);
+    const registeredBoundary = boundary(loadSession);
+    lifecycle.registerBoundary(registeredBoundary);
+    lifecycle.establishSession(session('csrf-stale'));
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile')
+    );
+
+    await lifecycle.handleResponse(request, new Response(null, { status: 403 }));
+
+    expect(loadSession).toHaveBeenCalledOnce();
+    expect(registeredBoundary.navigate).not.toHaveBeenCalled();
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: renewed.user
+    });
+    expect(getCsrfToken()).toBe('csrf-renewed');
+  });
+
+  it('gates protected data immediately when another tab changes the session', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loaded = deferred<AuthenticatedSession>();
+    const clear = vi.fn();
+    lifecycle.attachQueryClient({
+      cancelQueries: vi.fn(async () => undefined),
+      clear
+    } as unknown as QueryClient);
+    lifecycle.registerBoundary(boundary(async () => loaded.promise));
+    lifecycle.establishSession(session('csrf-stale'));
+
+    const validation = lifecycle.refreshProtectedSession();
+
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledOnce());
+    expect(lifecycle.snapshot()).toMatchObject({ phase: 'checking', user: null });
+    expect(getCsrfToken()).toBeNull();
+
+    const renewed = sessionFor('other-principal', 'csrf-renewed');
+    loaded.resolve(renewed);
+    await validation;
+
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: renewed.user
+    });
+    expect(getCsrfToken()).toBe('csrf-renewed');
+  });
+
   it('ignores a 401 from a superseded authentication generation', async () => {
     const lifecycle = new AuthenticationLifecycle();
     const loadSession = vi.fn(async () => session('csrf-unexpected'));
@@ -440,6 +490,26 @@ describe('authentication lifecycle', () => {
     loaded.resolve(session('csrf-stale'));
     await validation;
 
+    expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
+    expect(getCsrfToken()).toBeNull();
+  });
+
+  it('does not start a cross-tab refresh while logout is transitioning', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const exit = deferred<void>();
+    const loadSession = vi.fn(async () => session('csrf-stale'));
+    lifecycle.registerBoundary(boundary(loadSession));
+    lifecycle.establishSession(session('csrf-old'));
+
+    const logout = lifecycle.signOut(async () => exit.promise);
+    expect(lifecycle.snapshot().phase).toBe('transitioning');
+
+    await lifecycle.refreshProtectedSession();
+    expect(loadSession).not.toHaveBeenCalled();
+    expect(lifecycle.snapshot().phase).toBe('transitioning');
+
+    exit.resolve();
+    await logout;
     expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
     expect(getCsrfToken()).toBeNull();
   });

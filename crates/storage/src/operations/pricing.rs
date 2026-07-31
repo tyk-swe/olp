@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use olp_domain::{OperationKind, ProviderKind};
 use rust_decimal::Decimal;
+use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use super::{
@@ -18,6 +19,7 @@ use crate::{
 };
 
 const PRICING_LOCK_ID: i64 = 0x4f4c_505f_5052; // "OLP_PR"
+pub(super) const MAX_PRICING_ENTRIES: usize = 1_000;
 
 #[derive(Clone, Debug)]
 pub struct PriceInput {
@@ -26,6 +28,7 @@ pub struct PriceInput {
     pub model: String,
     pub operation: OperationKind,
     pub input_per_million: Option<String>,
+    pub cached_input_per_million: Option<String>,
     pub output_per_million: Option<String>,
     pub unit_price: Option<String>,
     pub currency: String,
@@ -80,6 +83,32 @@ impl PgStore {
             }
         }
         validate_prices(prices)?;
+        let normalized_prices = prices
+            .iter()
+            .map(|price| {
+                let normalize_amount = |value: Option<&str>| {
+                    parse_optional_decimal(value).map(|value| {
+                        value.map(|mut value| {
+                            value.rescale(12);
+                            value.to_string()
+                        })
+                    })
+                };
+                Ok(PriceInput {
+                    provider_kind: price.provider_kind,
+                    provider_id: price.provider_id,
+                    model: price.model.trim().to_owned(),
+                    operation: price.operation,
+                    input_per_million: normalize_amount(price.input_per_million.as_deref())?,
+                    cached_input_per_million: normalize_amount(
+                        price.cached_input_per_million.as_deref(),
+                    )?,
+                    output_per_million: normalize_amount(price.output_per_million.as_deref())?,
+                    unit_price: normalize_amount(price.unit_price.as_deref())?,
+                    currency: price.currency.trim().to_uppercase(),
+                })
+            })
+            .collect::<Result<Vec<_>, OperationsError>>()?;
         sqlx::query!("SELECT pg_advisory_xact_lock($1)", PRICING_LOCK_ID)
             .fetch_one(&mut *transaction)
             .await?;
@@ -124,39 +153,79 @@ impl PgStore {
         )
         .execute(&mut *transaction)
         .await?;
-        for price in prices {
-            let input_per_million = parse_optional_decimal(price.input_per_million.as_deref())?;
-            let output_per_million = parse_optional_decimal(price.output_per_million.as_deref())?;
-            let unit_price = parse_optional_decimal(price.unit_price.as_deref())?;
-            if let Some(provider_id) = price.provider_id {
-                let provider_kind: Option<String> =
-                    sqlx::query_scalar!("SELECT kind FROM providers WHERE id = $1", provider_id)
-                        .fetch_optional(&mut *transaction)
-                        .await?;
-                if provider_kind.as_deref() != Some(price.provider_kind.as_str()) {
-                    return Err(OperationsError::Invalid(
-                        "a pricing override must reference a provider of the declared kind"
-                            .to_owned(),
-                    ));
-                }
-            }
-            sqlx::query!(
+        let provider_ids = normalized_prices
+            .iter()
+            .filter_map(|price| price.provider_id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let provider_kinds = sqlx::query!(
+            "SELECT id, kind FROM providers WHERE id = ANY($1)",
+            &provider_ids
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(|row| (row.id, row.kind))
+        .collect::<HashMap<_, _>>();
+        if normalized_prices.iter().any(|price| {
+            price.provider_id.is_some_and(|provider_id| {
+                provider_kinds.get(&provider_id).map(String::as_str)
+                    != Some(price.provider_kind.as_str())
+            })
+        }) {
+            return Err(OperationsError::Invalid(
+                "a pricing override must reference a provider of the declared kind".to_owned(),
+            ));
+        }
+        for prices in normalized_prices.chunks(MAX_PRICING_ENTRIES) {
+            let mut query = QueryBuilder::<Postgres>::new(
                 "INSERT INTO prices \
                  (pricing_revision_id, provider_kind, provider_id, model, operation, \
-                  input_per_million, output_per_million, unit_price, currency) \
-                 VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9)",
-                id,
-                price.provider_kind.as_str(),
-                price.provider_id,
-                price.model.trim(),
-                price.operation.as_str(),
-                input_per_million,
-                output_per_million,
-                unit_price,
-                price.currency.trim().to_uppercase()
-            )
-            .execute(&mut *transaction)
-            .await?;
+                  input_per_million, cached_input_per_million, output_per_million, \
+                  unit_price, currency) ",
+            );
+            query.push_values(prices, |mut row, price| {
+                row.push_bind(id)
+                    .push_bind(price.provider_kind.as_str())
+                    .push_bind(price.provider_id)
+                    .push_bind(&price.model)
+                    .push_bind(price.operation.as_str())
+                    .push_bind(
+                        price
+                            .input_per_million
+                            .as_deref()
+                            .map(str::parse::<Decimal>)
+                            .transpose()
+                            .expect("normalized pricing amount parses"),
+                    )
+                    .push_bind(
+                        price
+                            .cached_input_per_million
+                            .as_deref()
+                            .map(str::parse::<Decimal>)
+                            .transpose()
+                            .expect("normalized pricing amount parses"),
+                    )
+                    .push_bind(
+                        price
+                            .output_per_million
+                            .as_deref()
+                            .map(str::parse::<Decimal>)
+                            .transpose()
+                            .expect("normalized pricing amount parses"),
+                    )
+                    .push_bind(
+                        price
+                            .unit_price
+                            .as_deref()
+                            .map(str::parse::<Decimal>)
+                            .transpose()
+                            .expect("normalized pricing amount parses"),
+                    )
+                    .push_bind(&price.currency);
+            });
+            query.build().execute(&mut *transaction).await?;
         }
         sqlx::query!(
             "INSERT INTO audit_events \
@@ -176,7 +245,7 @@ impl PgStore {
             effective_at,
             created_by: actor,
             created_at: now,
-            prices: prices.to_vec(),
+            prices: normalized_prices,
         };
         let response = build_response(&record)?;
         complete_replayable_idempotency(
@@ -211,6 +280,7 @@ impl PgStore {
                     p.provider_kind AS \"provider_kind?\", p.provider_id AS \"provider_id?\", \
                     p.model AS \"model?\", p.operation AS \"operation?\", \
                     p.input_per_million::text AS \"input_per_million?\", \
+                    p.cached_input_per_million::text AS \"cached_input_per_million?\", \
                     p.output_per_million::text AS \"output_per_million?\", \
                     p.unit_price::text AS \"unit_price?\", p.currency::text AS \"currency?\" \
              FROM pricing_revisions r LEFT JOIN prices p ON p.pricing_revision_id = r.id \
@@ -264,6 +334,7 @@ impl PgStore {
                             )
                         })?,
                     input_per_million: row.input_per_million,
+                    cached_input_per_million: row.cached_input_per_million,
                     output_per_million: row.output_per_million,
                     unit_price: row.unit_price,
                     currency: row
@@ -285,10 +356,10 @@ impl PgStore {
 }
 
 pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsError> {
-    if prices.is_empty() || prices.len() > 10_000 {
-        return Err(OperationsError::Invalid(
-            "a pricing revision must contain 1-10000 entries".to_owned(),
-        ));
+    if prices.is_empty() || prices.len() > MAX_PRICING_ENTRIES {
+        return Err(OperationsError::Invalid(format!(
+            "a pricing revision must contain 1-{MAX_PRICING_ENTRIES} entries"
+        )));
     }
     let mut dimensions = HashSet::with_capacity(prices.len());
     let mut revision_currency: Option<String> = None;
@@ -297,7 +368,9 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsErr
         if price.model.trim().is_empty()
             || currency.len() != 3
             || !currency.bytes().all(|byte| byte.is_ascii_alphabetic())
+            || (price.cached_input_per_million.is_some() && price.input_per_million.is_none())
             || (price.input_per_million.is_none()
+                && price.cached_input_per_million.is_none()
                 && price.output_per_million.is_none()
                 && price.unit_price.is_none())
         {
@@ -328,6 +401,7 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsErr
         }
         for amount in [
             &price.input_per_million,
+            &price.cached_input_per_million,
             &price.output_per_million,
             &price.unit_price,
         ]

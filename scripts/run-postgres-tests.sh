@@ -85,11 +85,11 @@ if [[ -z ${OLP_VALKEY_URL:-} ]]; then
   # composes with any caller filterset or name filter, unlike a second -E
   # expression, which nextest would OR-combine. Reuse the caller's `--`
   # section if they already opened one.
-  echo "OLP_VALKEY_URL is unset; skipping the distributed_limits_valkey suite" >&2
-  skip_args=(-- --skip distributed_limits_valkey)
+  echo "OLP_VALKEY_URL is unset; skipping the Valkey-backed suites" >&2
+  skip_args=(-- --skip distributed_limits_valkey --skip request_metadata_valkey)
   for argument in "$@"; do
     if [[ $argument == -- ]]; then
-      skip_args=(--skip distributed_limits_valkey)
+      skip_args=(--skip distributed_limits_valkey --skip request_metadata_valkey)
       break
     fi
   done

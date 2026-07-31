@@ -3,6 +3,7 @@ mod delivery_health;
 mod ingestion;
 mod reconciliation;
 
+pub(crate) use buffer::REQUEST_METADATA_TRIM_COUNTER;
 pub use buffer::{
     RequestMetadataBufferSnapshot, RequestMetadataEmitError, RequestMetadataEmitter,
     RequestMetadataReceiver,
@@ -22,6 +23,7 @@ pub use reconciliation::{
 
 pub(crate) const REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS: i32 = 7;
 pub(crate) const REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES: i32 = 5;
+pub(crate) const MAX_REQUEST_METADATA_EVENT_BYTES: usize = 128 * 1024;
 
 #[cfg(test)]
 use chrono::Utc;
@@ -39,7 +41,9 @@ use uuid::Uuid;
 #[cfg(test)]
 use buffer::RequestMetadataBufferHealth;
 #[cfg(test)]
-use reconciliation::request_metadata_gap_count_from_decimal;
+use ingestion::validate_request_metadata_event;
+#[cfg(test)]
+use reconciliation::{request_metadata_gap_count_from_decimal, trim_count_delta};
 
 #[cfg(test)]
 mod tests;

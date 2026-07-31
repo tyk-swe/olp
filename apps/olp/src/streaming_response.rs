@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::Infallible};
+use std::{collections::VecDeque, io};
 
 use axum::{
     body::{Body, Bytes},
@@ -72,7 +72,7 @@ impl TerminalFrames {
 }
 
 pub(crate) struct SseResponseWriter {
-    ordinary: tokio::sync::mpsc::Sender<Result<Bytes, Infallible>>,
+    ordinary: tokio::sync::mpsc::Sender<Result<Bytes, io::Error>>,
     terminal: Option<tokio::sync::oneshot::Sender<TerminalFrames>>,
 }
 
@@ -147,7 +147,7 @@ impl SseResponseWriter {
 
 enum SseBodyState {
     Ordinary {
-        receiver: tokio::sync::mpsc::Receiver<Result<Bytes, Infallible>>,
+        receiver: tokio::sync::mpsc::Receiver<Result<Bytes, io::Error>>,
         terminal: tokio::sync::oneshot::Receiver<TerminalFrames>,
     },
     Terminal(VecDeque<Bytes>),
@@ -174,10 +174,18 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
                     if let Some(item) = receiver.recv().await {
                         Some((item, SseBodyState::Ordinary { receiver, terminal }))
                     } else {
-                        let mut frames = terminal.await.unwrap_or_default().into_queue();
-                        frames
-                            .pop_front()
-                            .map(|frame| (Ok(frame), SseBodyState::Terminal(frames)))
+                        match terminal.await {
+                            Ok(terminal) => {
+                                let mut frames = terminal.into_queue();
+                                frames
+                                    .pop_front()
+                                    .map(|frame| (Ok(frame), SseBodyState::Terminal(frames)))
+                            }
+                            Err(_) => Some((
+                                Err(io::Error::other("stream producer terminated")),
+                                SseBodyState::Terminal(VecDeque::new()),
+                            )),
+                        }
                     }
                 }
                 SseBodyState::Terminal(mut frames) => frames
@@ -430,6 +438,13 @@ mod tests {
                 .as_ref(),
             b"data: ordinary\n\ndata: error\n\ndata: [DONE]\n\n"
         );
+    }
+
+    #[tokio::test]
+    async fn producer_termination_is_a_body_error() {
+        let (writer, response) = sse_stream_with_capacity(1);
+        drop(writer);
+        assert!(response.into_body().collect().await.is_err());
     }
 
     #[tokio::test]

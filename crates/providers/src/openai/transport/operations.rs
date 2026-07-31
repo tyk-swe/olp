@@ -48,6 +48,8 @@ impl OpenAiConnector {
             ));
         }
         validate_transport_mode(&request)?;
+        self.rate_limit_cooldown
+            .check(&request.attempt.upstream_model)?;
 
         // This dispatcher owns the operation narrowing contract used by each
         // operation module's infallible destructuring below.

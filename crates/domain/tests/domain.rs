@@ -406,6 +406,21 @@ fn canonical_event_sequences_require_order_and_exactly_one_terminal_done() {
         Err(EventSequenceError::MissingDone { next_sequence: 1 })
     );
 
+    let invalid_usage = vec![CanonicalEvent::new(
+        0,
+        CanonicalEventKind::Usage {
+            usage: Usage {
+                input_tokens: 1,
+                cached_input_tokens: Some(2),
+                ..Usage::default()
+            },
+        },
+    )];
+    assert_eq!(
+        validate_event_sequence(&invalid_usage),
+        Err(EventSequenceError::InvalidUsage { sequence: 0 })
+    );
+
     let mut incremental = EventSequenceValidator::new();
     incremental.push(&valid[0]).unwrap();
     incremental.push(&valid[1]).unwrap();

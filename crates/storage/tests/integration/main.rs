@@ -18,6 +18,8 @@ mod operations_postgres;
 mod provider_revisions_postgres;
 mod request_metadata_consumer_health_postgres;
 mod request_metadata_naming_upgrade_postgres;
+mod request_metadata_valkey;
+mod request_partitions_postgres;
 mod route_activation_revalidation_postgres;
 mod route_draft_simulation_postgres;
 mod runtime_fallback_postgres;

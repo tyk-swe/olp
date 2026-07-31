@@ -16,6 +16,16 @@ use super::media::{BinaryMediaBody, BoundedMediaPart};
 
 pub const MAX_VIDEO_PROMPT_LENGTH: usize = 32_000;
 pub const DEFAULT_VIDEO_REFERENCE_LIMIT: u64 = 20 * 1024 * 1024;
+pub const MAX_VIDEO_JOB_ID_LENGTH: usize = 256;
+
+#[must_use]
+pub fn valid_video_job_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_VIDEO_JOB_ID_LENGTH
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiVideoCreateRequest {
@@ -255,6 +265,7 @@ pub fn decode_video_object(video: OpenAiVideoObject) -> Result<VideoJobResult, V
     if video.object != "video" {
         return Err(VideoCodecError::UnexpectedObject(video.object));
     }
+    validate_seconds(video.seconds.as_deref())?;
     let status = match video.status.as_str() {
         "queued" => VideoStatus::Queued,
         "in_progress" => VideoStatus::InProgress,
