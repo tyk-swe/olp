@@ -8,6 +8,7 @@ use arc_swap::ArcSwapOption;
 
 use crate::gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken};
 use crate::http_egress::pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool};
+use crate::transport_io::has_content_type;
 use futures::StreamExt;
 use google_cloud_auth::credentials::AccessTokenCredentials;
 use http::{HeaderValue, StatusCode, header};
@@ -176,14 +177,7 @@ impl ServiceAccountTokenProvider {
         if response.status() != StatusCode::OK {
             return Err(BearerTokenError);
         }
-        let mut content_types = response.headers().get_all(header::CONTENT_TYPE).iter();
-        let content_type_ok = content_types
-            .next()
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
-            && content_types.next().is_none();
-        if !content_type_ok {
+        if !has_content_type(response.headers(), "application/json") {
             return Err(BearerTokenError);
         }
         let bytes = timeout(

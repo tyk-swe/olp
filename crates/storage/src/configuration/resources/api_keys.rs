@@ -85,10 +85,7 @@ impl PgStore {
         actor: Uuid,
     ) -> Result<ApiKeyMutationResult, ConfigurationError> {
         let name = input.name.trim();
-        if name.is_empty()
-            || name.chars().count() > 100
-            || olp_domain::has_unsafe_display_characters(name)
-        {
+        if !olp_domain::is_safe_visible_label(name, 100) {
             return Err(ConfigurationError::Invalid(
                 "API-key name must contain 1-100 visible characters without control or bidi formatting"
                     .to_owned(),

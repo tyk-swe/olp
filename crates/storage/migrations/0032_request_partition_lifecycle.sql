@@ -94,6 +94,8 @@ BEGIN
                  WHERE spill.started_at >= month_start
                    AND spill.started_at < month_end
             ) THEN
+                SET LOCAL lock_timeout = '2s';
+                LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
                 LOCK TABLE public.requests_default IN ACCESS EXCLUSIVE MODE;
                 IF NOT EXISTS (
                     SELECT 1
@@ -131,6 +133,8 @@ BEGIN
          ORDER BY registry.partition_start
          LIMIT 3
     LOOP
+        SET LOCAL lock_timeout = '2s';
+        LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
         EXECUTE format(
             'LOCK TABLE public.%I IN ACCESS EXCLUSIVE MODE',
             child.partition_name

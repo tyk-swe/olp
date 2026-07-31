@@ -141,7 +141,7 @@ jobs:
             --lcov --output-path lcov.info --fail-under-lines 51
       - name: Upload Rust coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() && !cancelled() }}
+        if: ${{ !cancelled() }}
         with:
           name: rust-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: lcov.info
@@ -488,7 +488,7 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
       - name: Upload amd64 SBOM
-        if: ${{ always() && !cancelled() }}
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openllmproxy-sbom-amd64-${{ github.run_id }}-${{ github.run_attempt }}
@@ -783,7 +783,7 @@ jobs:
           severity: HIGH,CRITICAL
       - name: Upload arm64 SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() && !cancelled() }}
+        if: ${{ !cancelled() }}
         with:
           name: openllmproxy-sbom-arm64-${{ github.run_id }}-${{ github.run_attempt }}
           path: openllmproxy-arm64.spdx.json

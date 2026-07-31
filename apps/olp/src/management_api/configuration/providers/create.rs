@@ -180,10 +180,7 @@ pub(crate) async fn create_provider(
         request.legacy_api_key.is_some(),
         "api_key is no longer accepted; use credential.",
     );
-    if request.name.trim().is_empty()
-        || request.name.chars().count() > 100
-        || olp_domain::has_unsafe_display_characters(&request.name)
-    {
+    if !olp_domain::is_safe_visible_label(&request.name, 100) {
         errors
             .entry("name".to_owned())
             .or_default()
@@ -205,11 +202,11 @@ pub(crate) async fn create_provider(
             .or_default()
             .push("A display name requires a seed model.".to_owned());
     }
-    if request.display_name.as_ref().is_some_and(|name| {
-        name.trim().is_empty()
-            || name.chars().count() > 200
-            || olp_domain::has_unsafe_display_characters(name)
-    }) {
+    if request
+        .display_name
+        .as_ref()
+        .is_some_and(|name| !olp_domain::is_safe_visible_label(name, 200))
+    {
         errors
             .entry("display_name".to_owned())
             .or_default()

@@ -292,12 +292,13 @@ mod tests {
 
     #[test]
     fn a_live_half_open_probe_is_never_joined_and_cancellation_reopens_it() {
-        let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
+        let open_duration = Duration::from_millis(100);
+        let breaker = CircuitBreaker::new(1, open_duration);
         let target = TargetId::new();
         breaker.record_failure(target, AttemptFailureClass::Connect);
-        std::thread::sleep(Duration::from_millis(8));
+        std::thread::sleep(open_duration + Duration::from_millis(20));
         let probe = breaker.try_acquire(target).unwrap();
-        std::thread::sleep(Duration::from_millis(8));
+        std::thread::sleep(Duration::from_millis(20));
         assert!(breaker.try_acquire(target).is_none());
         drop(probe);
         assert!(!breaker.is_selectable(target));

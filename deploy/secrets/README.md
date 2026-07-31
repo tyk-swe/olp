@@ -76,10 +76,11 @@ remain. Follow the complete
 removing a key.
 
 The authentication HMAC file accepts the same JSON shape, with at most four
-keys. To rotate it, first add the new key while version 1 remains active and
-restart every replica. Then select the new active version and restart again.
-New API keys are signed by the active version while retained versions continue
-to verify existing keys. After every replica uses the new active version,
+keys. To rotate it, first add the new key while the current active version
+remains active and restart every replica. Then select the new active version
+and restart again. New API keys are signed by the active version while retained
+versions continue to verify existing keys. After every replica uses the new
+active version,
 record the completion time. Reissue and revoke every API key created before
 that cutoff (those actions are audited), then remove the old version and
 restart every replica. Removing a version before its API keys are retired

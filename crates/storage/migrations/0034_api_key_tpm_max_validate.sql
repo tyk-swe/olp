@@ -1,0 +1,2 @@
+ALTER TABLE api_keys
+VALIDATE CONSTRAINT api_keys_tokens_per_minute_safe_integer;

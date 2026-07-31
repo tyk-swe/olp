@@ -204,7 +204,21 @@ pub(super) async fn setup(
                 let mut errors = FieldErrors::new();
                 errors.insert(
                     "installation_name".to_owned(),
-                    vec!["Use visible characters without control or bidi formatting.".to_owned()],
+                    vec![
+                        "Use 1-100 visible characters without control or bidi formatting."
+                            .to_owned(),
+                    ],
+                );
+                Problem::validation(errors)
+            }
+            olp_storage::PersistenceError::InvalidOwnerDisplayName => {
+                let mut errors = FieldErrors::new();
+                errors.insert(
+                    "display_name".to_owned(),
+                    vec![
+                        "Use 1-100 visible characters without control or bidi formatting."
+                            .to_owned(),
+                    ],
                 );
                 Problem::validation(errors)
             }
@@ -616,19 +630,13 @@ pub(super) fn validate_setup(request: &SetupRequest) -> Result<(), Problem> {
             .or_default()
             .push("Use between 12 and 1,024 characters.".to_owned());
     }
-    if request.display_name.trim().is_empty()
-        || request.display_name.chars().count() > 100
-        || olp_domain::has_unsafe_display_characters(&request.display_name)
-    {
+    if !olp_domain::is_safe_visible_label(&request.display_name, 100) {
         errors
             .entry("display_name".to_owned())
             .or_default()
             .push("Use 1-100 visible characters without control or bidi formatting.".to_owned());
     }
-    if request.installation_name.trim().is_empty()
-        || request.installation_name.chars().count() > 100
-        || olp_domain::has_unsafe_display_characters(&request.installation_name)
-    {
+    if !olp_domain::is_safe_visible_label(&request.installation_name, 100) {
         errors
             .entry("installation_name".to_owned())
             .or_default()

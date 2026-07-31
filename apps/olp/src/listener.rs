@@ -696,6 +696,10 @@ mod tests {
 
     #[tokio::test]
     async fn valid_http2_data_uses_the_request_body_deadline() {
+        let request_header_timeout = Duration::from_millis(80);
+        let data_delay = request_header_timeout + Duration::from_millis(70);
+        assert!(data_delay > request_header_timeout);
+        assert!(data_delay < crate::router::REQUEST_BODY_TIMEOUT);
         let entered = Arc::new(Notify::new());
         let app = Router::new().route(
             "/",
@@ -712,7 +716,7 @@ mod tests {
             }),
         );
         let (address, shutdown, task) =
-            test_server_with_router(4, Duration::from_millis(80), app).await;
+            test_server_with_router(4, request_header_timeout, app).await;
         let mut stream = TcpStream::connect(address).await.unwrap();
         stream
             .write_all(
@@ -724,7 +728,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(data_delay).await;
         stream.write_all(b"x").await.unwrap();
         tokio::time::timeout(Duration::from_secs(1), entered.notified())
             .await

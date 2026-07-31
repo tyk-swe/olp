@@ -44,6 +44,14 @@ pub struct PricingRevisionRecord {
     pub prices: Vec<PriceInput>,
 }
 
+struct NormalizedPrice {
+    value: PriceInput,
+    input_per_million: Option<Decimal>,
+    cached_input_per_million: Option<Decimal>,
+    output_per_million: Option<Decimal>,
+    unit_price: Option<Decimal>,
+}
+
 impl PgStore {
     pub async fn create_pricing_revision<F>(
         &self,
@@ -87,25 +95,35 @@ impl PgStore {
             .iter()
             .map(|price| {
                 let normalize_amount = |value: Option<&str>| {
-                    parse_optional_decimal(value).map(|value| {
-                        value.map(|mut value| {
-                            value.rescale(12);
-                            value.to_string()
-                        })
-                    })
+                    let mut amount = parse_optional_decimal(value)?;
+                    if let Some(amount) = amount.as_mut() {
+                        amount.rescale(12);
+                    }
+                    Ok::<_, OperationsError>((amount.as_ref().map(ToString::to_string), amount))
                 };
-                Ok(PriceInput {
-                    provider_kind: price.provider_kind,
-                    provider_id: price.provider_id,
-                    model: price.model.trim().to_owned(),
-                    operation: price.operation,
-                    input_per_million: normalize_amount(price.input_per_million.as_deref())?,
-                    cached_input_per_million: normalize_amount(
-                        price.cached_input_per_million.as_deref(),
-                    )?,
-                    output_per_million: normalize_amount(price.output_per_million.as_deref())?,
-                    unit_price: normalize_amount(price.unit_price.as_deref())?,
-                    currency: price.currency.trim().to_uppercase(),
+                let (input_per_million, input_amount) =
+                    normalize_amount(price.input_per_million.as_deref())?;
+                let (cached_input_per_million, cached_input_amount) =
+                    normalize_amount(price.cached_input_per_million.as_deref())?;
+                let (output_per_million, output_amount) =
+                    normalize_amount(price.output_per_million.as_deref())?;
+                let (unit_price, unit_amount) = normalize_amount(price.unit_price.as_deref())?;
+                Ok(NormalizedPrice {
+                    value: PriceInput {
+                        provider_kind: price.provider_kind,
+                        provider_id: price.provider_id,
+                        model: price.model.trim().to_owned(),
+                        operation: price.operation,
+                        input_per_million,
+                        cached_input_per_million,
+                        output_per_million,
+                        unit_price,
+                        currency: price.currency.trim().to_uppercase(),
+                    },
+                    input_per_million: input_amount,
+                    cached_input_per_million: cached_input_amount,
+                    output_per_million: output_amount,
+                    unit_price: unit_amount,
                 })
             })
             .collect::<Result<Vec<_>, OperationsError>>()?;
@@ -155,7 +173,7 @@ impl PgStore {
         .await?;
         let provider_ids = normalized_prices
             .iter()
-            .filter_map(|price| price.provider_id)
+            .filter_map(|price| price.value.provider_id)
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -169,9 +187,9 @@ impl PgStore {
         .map(|row| (row.id, row.kind))
         .collect::<HashMap<_, _>>();
         if normalized_prices.iter().any(|price| {
-            price.provider_id.is_some_and(|provider_id| {
+            price.value.provider_id.is_some_and(|provider_id| {
                 provider_kinds.get(&provider_id).map(String::as_str)
-                    != Some(price.provider_kind.as_str())
+                    != Some(price.value.provider_kind.as_str())
             })
         }) {
             return Err(OperationsError::Invalid(
@@ -187,43 +205,15 @@ impl PgStore {
             );
             query.push_values(prices, |mut row, price| {
                 row.push_bind(id)
-                    .push_bind(price.provider_kind.as_str())
-                    .push_bind(price.provider_id)
-                    .push_bind(&price.model)
-                    .push_bind(price.operation.as_str())
-                    .push_bind(
-                        price
-                            .input_per_million
-                            .as_deref()
-                            .map(str::parse::<Decimal>)
-                            .transpose()
-                            .expect("normalized pricing amount parses"),
-                    )
-                    .push_bind(
-                        price
-                            .cached_input_per_million
-                            .as_deref()
-                            .map(str::parse::<Decimal>)
-                            .transpose()
-                            .expect("normalized pricing amount parses"),
-                    )
-                    .push_bind(
-                        price
-                            .output_per_million
-                            .as_deref()
-                            .map(str::parse::<Decimal>)
-                            .transpose()
-                            .expect("normalized pricing amount parses"),
-                    )
-                    .push_bind(
-                        price
-                            .unit_price
-                            .as_deref()
-                            .map(str::parse::<Decimal>)
-                            .transpose()
-                            .expect("normalized pricing amount parses"),
-                    )
-                    .push_bind(&price.currency);
+                    .push_bind(price.value.provider_kind.as_str())
+                    .push_bind(price.value.provider_id)
+                    .push_bind(&price.value.model)
+                    .push_bind(price.value.operation.as_str())
+                    .push_bind(price.input_per_million)
+                    .push_bind(price.cached_input_per_million)
+                    .push_bind(price.output_per_million)
+                    .push_bind(price.unit_price)
+                    .push_bind(&price.value.currency);
             });
             query.build().execute(&mut *transaction).await?;
         }
@@ -245,7 +235,10 @@ impl PgStore {
             effective_at,
             created_by: actor,
             created_at: now,
-            prices: normalized_prices,
+            prices: normalized_prices
+                .into_iter()
+                .map(|price| price.value)
+                .collect(),
         };
         let response = build_response(&record)?;
         complete_replayable_idempotency(

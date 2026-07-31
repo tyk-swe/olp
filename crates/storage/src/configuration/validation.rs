@@ -25,10 +25,7 @@ pub(crate) fn validate_route_cardinality(
 }
 
 pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), ConfigurationError> {
-    if update.name.trim().is_empty()
-        || update.name.chars().count() > 100
-        || olp_domain::has_unsafe_display_characters(&update.name)
-    {
+    if !olp_domain::is_safe_visible_label(&update.name, 100) {
         return Err(ConfigurationError::Invalid(
             "provider name must contain 1-100 visible characters without control or bidi formatting"
                 .to_owned(),
@@ -59,10 +56,7 @@ pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Configu
             "model ID must contain 1-200 characters".to_owned(),
         ));
     }
-    if model.display_name.trim().is_empty()
-        || model.display_name.chars().count() > 200
-        || olp_domain::has_unsafe_display_characters(&model.display_name)
-    {
+    if !olp_domain::is_safe_visible_label(&model.display_name, 200) {
         return Err(ConfigurationError::Invalid(
             "model display name must contain 1-200 visible characters without control or bidi formatting"
                 .to_owned(),

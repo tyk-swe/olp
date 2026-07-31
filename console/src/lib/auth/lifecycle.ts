@@ -80,6 +80,19 @@ function isCurrentSessionDeletion(request: Request): boolean {
   return method === 'DELETE' && pathname === '/api/v1/sessions/current';
 }
 
+async function invalidatesSession(response: Response): Promise<boolean> {
+  if (response.status === 401) return true;
+  if (response.status !== 403) return false;
+  try {
+    const problem = (await response.clone().json()) as { type?: unknown };
+    if (typeof problem.type !== 'string') return false;
+    const code = problem.type.split('/').pop();
+    return code === 'authentication_required' || code === 'csrf_invalid';
+  } catch {
+    return false;
+  }
+}
+
 function combineSignals(...signals: AbortSignal[]): AbortSignal {
   if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
   const controller = new AbortController();
@@ -324,7 +337,7 @@ export class AuthenticationLifecycle {
       const rotatedCsrf = response.headers.get('x-csrf-token');
       if (rotatedCsrf) setCsrfToken(rotatedCsrf);
     }
-    if (response.status === 401 || response.status === 403) {
+    if (await invalidatesSession(response)) {
       await this.handleUnauthorized(request);
     }
   }

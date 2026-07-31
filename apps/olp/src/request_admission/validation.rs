@@ -1,4 +1,4 @@
-use std::{error::Error as _, time::Duration};
+use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use http_body_util::LengthLimitError;
@@ -65,10 +65,17 @@ pub(crate) async fn read_json_body(
         .await
         .map_err(|_| JsonBodyReadError::Timeout)?
         .map_err(|error| {
-            if error
-                .source()
-                .is_some_and(|source| source.is::<LengthLimitError>())
-            {
+            let mut source: &(dyn std::error::Error + 'static) = &error;
+            let length_limited = loop {
+                if source.is::<LengthLimitError>() {
+                    break true;
+                }
+                let Some(next) = source.source() else {
+                    break false;
+                };
+                source = next;
+            };
+            if length_limited {
                 JsonBodyReadError::Rejected
             } else {
                 JsonBodyReadError::Transport

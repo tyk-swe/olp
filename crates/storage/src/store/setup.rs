@@ -31,7 +31,9 @@ impl PgStore {
         material: &SessionMaterial,
         ttl: chrono::Duration,
     ) -> Result<(InstallationSetupResult, Uuid), PersistenceError> {
-        checked_session_expiry(Utc::now(), ttl)?;
+        if ttl <= chrono::Duration::zero() {
+            return Err(PersistenceError::InvalidSessionTtl);
+        }
         let (result, session_id) = self
             .setup_installation_inner(input, Some((material, ttl)))
             .await?;
@@ -46,10 +48,11 @@ impl PgStore {
         input: InstallationSetupInput,
         session: Option<(&SessionMaterial, chrono::Duration)>,
     ) -> Result<(InstallationSetupResult, Option<Uuid>), PersistenceError> {
-        if olp_domain::has_unsafe_display_characters(&input.installation_name)
-            || olp_domain::has_unsafe_display_characters(&input.display_name)
-        {
+        if !olp_domain::is_safe_visible_label(&input.installation_name, 100) {
             return Err(PersistenceError::InvalidInstallationName);
+        }
+        if !olp_domain::is_safe_visible_label(&input.display_name, 100) {
+            return Err(PersistenceError::InvalidOwnerDisplayName);
         }
         let mut transaction = self.pool.begin().await?;
         sqlx::query!("SELECT pg_advisory_xact_lock($1)", SETUP_LOCK_ID)
@@ -65,7 +68,9 @@ impl PgStore {
         }
 
         let user_id = Uuid::now_v7();
-        let now = Utc::now();
+        let now: chrono::DateTime<Utc> = sqlx::query_scalar!("SELECT now() AS \"now!\"")
+            .fetch_one(&mut *transaction)
+            .await?;
         let normalized_email = input.email.trim().to_lowercase();
         sqlx::query!(
             "INSERT INTO installation (singleton, installation_name, created_at, updated_at) \

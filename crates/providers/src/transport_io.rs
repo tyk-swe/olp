@@ -331,7 +331,7 @@ impl ProviderResponseIo {
     }
 }
 
-fn has_content_type(headers: &http::HeaderMap, expected: &str) -> bool {
+pub(crate) fn has_content_type(headers: &http::HeaderMap, expected: &str) -> bool {
     let mut values = headers.get_all(header::CONTENT_TYPE).iter();
     values
         .next()

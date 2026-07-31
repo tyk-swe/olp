@@ -28,6 +28,3 @@ CHECK (
     tokens_per_minute IS NULL
     OR tokens_per_minute <= 9007199254740991
 ) NOT VALID;
-
-ALTER TABLE api_keys
-VALIDATE CONSTRAINT api_keys_tokens_per_minute_safe_integer;

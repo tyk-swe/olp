@@ -90,25 +90,24 @@ pub(crate) async fn streaming_image_json_response(
     let mut declared_total = 0_u64;
     for (_, handle) in &staged {
         match spool.open(handle).await {
-            Ok(media)
-                if media
-                    .artifact
-                    .content_length
-                    .is_none_or(|length| length <= MAX_IMAGE_BYTES)
-                    && media.artifact.content_length.is_none_or(|length| {
-                        declared_total = declared_total.saturating_add(length);
-                        declared_total <= MAX_TOTAL_IMAGE_BYTES
-                    }) =>
-            {
+            Ok(media) => {
+                let declared_length = media.artifact.content_length;
+                let next_total =
+                    declared_length.map(|length| declared_total.saturating_add(length));
+                if declared_length.is_some_and(|length| length > MAX_IMAGE_BYTES)
+                    || next_total.is_some_and(|total| total > MAX_TOTAL_IMAGE_BYTES)
+                {
+                    drop(opened);
+                    cleanup_staged(&spool, &staged).await;
+                    return Err(InferenceError::bad_gateway(
+                        "provider_protocol_error",
+                        "A spooled image exceeded its declared bound.",
+                    ));
+                }
+                if let Some(total) = next_total {
+                    declared_total = total;
+                }
                 opened.push((handle.clone(), media));
-            }
-            Ok(_) => {
-                drop(opened);
-                cleanup_staged(&spool, &staged).await;
-                return Err(InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "A spooled image exceeded its declared bound.",
-                ));
             }
             Err(_) => {
                 drop(opened);

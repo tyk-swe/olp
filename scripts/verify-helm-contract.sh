@@ -338,6 +338,24 @@ service_monitor_count=$(grep -c '^kind: ServiceMonitor$' "$work/edge-manifests.y
   echo "monitoring must render exactly one gateway and one control ServiceMonitor" >&2
   exit 1
 }
+gateway_service_monitor_count=$(awk '/^kind: ServiceMonitor$/ { count++ } END { print count + 0 }' \
+  "$work/gateway-only-monitoring.yaml")
+[[ $gateway_service_monitor_count == 1 ]] || {
+  echo "gateway-only monitoring must render exactly one ServiceMonitor" >&2
+  exit 1
+}
+control_service_monitor_count=$(awk '/^kind: ServiceMonitor$/ { count++ } END { print count + 0 }' \
+  "$work/control-only-monitoring.yaml")
+[[ $control_service_monitor_count == 1 ]] || {
+  echo "control-only monitoring must render exactly one ServiceMonitor" >&2
+  exit 1
+}
+no_public_service_monitor_count=$(awk '/^kind: ServiceMonitor$/ { count++ } END { print count + 0 }' \
+  "$work/no-public-components-monitoring.yaml")
+[[ $no_public_service_monitor_count == 0 ]] || {
+  echo "monitoring without public components must not render a ServiceMonitor" >&2
+  exit 1
+}
 service_monitor_targets_matched=
 checked_rg_match service_monitor_targets_matched \
   "verify rendered ServiceMonitor targets" "$work/edge-manifests.yaml" \

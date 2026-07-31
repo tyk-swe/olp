@@ -697,6 +697,7 @@ pub(crate) enum InferenceEndpoint {
         surface: Surface,
         media_body: bool,
         token_estimate: TokenEstimate,
+        accepts_body: bool,
     },
 }
 
@@ -716,6 +717,7 @@ impl InferenceEndpoint {
                 || path.starts_with("/openai/v1/audio/")
                 || path == "/openai/v1/videos",
             token_estimate: token_estimate_from_path(path),
+            accepts_body: !matches!(method, &Method::GET | &Method::DELETE),
         })
     }
 
@@ -756,6 +758,13 @@ impl InferenceEndpoint {
                 }),
                 Some(GeminiAction::Unsupported) | None => None,
             },
+        }
+    }
+
+    pub(crate) const fn accepts_body(self) -> bool {
+        match self {
+            Self::Registered { spec, .. } => matches!(spec.method, EndpointMethod::Post),
+            Self::Unknown { accepts_body, .. } => accepts_body,
         }
     }
 

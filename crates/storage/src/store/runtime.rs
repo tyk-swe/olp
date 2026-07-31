@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use super::{PersistenceError, PgStore, PublishedRuntimeRelease};
 
+const MAX_RELEASE_FETCH_PAGES: usize = 32;
+
 impl PgStore {
     /// Returns newest verified releases, skipping and visibly logging corrupt
     /// envelopes so a replacement gateway can try its previous durable LKG.
@@ -44,7 +46,10 @@ impl PgStore {
         let limit = usize::from(limit.clamp(1, 100));
         let mut releases = Vec::with_capacity(limit);
         let mut before_sequence = before_sequence;
-        while releases.len() < limit {
+        for _ in 0..MAX_RELEASE_FETCH_PAGES {
+            if releases.len() == limit {
+                break;
+            }
             let page_before_sequence = before_sequence.unwrap_or(i64::MAX);
             let rows = sqlx::query!(
                 "SELECT id, sequence, compiled_release, release_sha256, created_at \

@@ -510,14 +510,13 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     });
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            let waiting: bool = sqlx::query_scalar(
+            let waiting = sqlx::query_scalar!(
                 "SELECT EXISTS (
-                    SELECT 1 FROM pg_stat_activity
-                    WHERE datname = current_database()
+                    SELECT 1 FROM pg_locks
+                    WHERE NOT granted
                       AND pid <> pg_backend_pid()
-                      AND wait_event_type = 'Lock'
-                      AND query LIKE '%async_media_jobs%'
-                )",
+                      AND relation = 'async_media_jobs'::regclass
+                ) AS \"waiting!\"",
             )
             .fetch_one(store.pool())
             .await

@@ -132,7 +132,8 @@ redis.call(
 )
 local elapsed_in_minute_ms = (seconds % 60) * 1000 + math.floor(microseconds / 1000)
 local required_ttl = MINUTE_MS - elapsed_in_minute_ms + RECONCILIATION_RETENTION_MS
-if redis.call("PTTL", KEYS[1]) < required_ttl then
+local current_ttl = redis.call("PTTL", KEYS[1])
+if current_ttl >= 0 and current_ttl < required_ttl then
   redis.call("PEXPIRE", KEYS[1], required_ttl)
 end
 return 1

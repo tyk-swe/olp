@@ -255,7 +255,11 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
         },
         OperationKind::ImageGeneration,
     );
-    assert_eq!(accepted_server_error.class, AttemptFailureClass::Ambiguous);
+    assert_eq!(
+        accepted_server_error.class,
+        AttemptFailureClass::UpstreamServer
+    );
+    assert!(accepted_server_error.response_committed);
     assert!(!accepted_server_error.allows_failover());
 
     let connect = reclassify_ambiguous_transport_failure(
@@ -379,7 +383,7 @@ async fn retryable_first_canonical_error_is_ambiguous_for_streaming_image() {
     assert!(failure.attempts[0].committed);
     assert_eq!(
         failure.attempts[0].error_class.as_deref(),
-        Some("ambiguous")
+        Some("upstream_server")
     );
     assert_eq!(first_calls.load(Ordering::SeqCst), 1);
     assert_eq!(second_calls.load(Ordering::SeqCst), 0);

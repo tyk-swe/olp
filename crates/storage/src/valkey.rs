@@ -27,6 +27,33 @@ const REQUEST_METADATA_CONSUMER: &str = "worker";
 const REQUEST_METADATA_DEAD_LETTER_STREAM: &str = "olp:v2:request-metadata:dead-letter";
 const REQUEST_METADATA_DEAD_LETTER_MAX_ENTRIES: usize = 10_000;
 
+pub(crate) async fn supports_hash_field_expiration(
+    connection: &mut ConnectionManager,
+) -> Result<bool, redis::RedisError> {
+    let info: String = redis::cmd("INFO")
+        .arg("server")
+        .query_async(connection)
+        .await?;
+    Ok(info.lines().any(|line| {
+        line.strip_prefix("valkey_version:")
+            .is_some_and(|version| version_at_least(version, 9, 0))
+            || line
+                .strip_prefix("redis_version:")
+                .is_some_and(|version| version_at_least(version, 7, 4))
+    }))
+}
+
+fn version_at_least(version: &str, minimum_major: u64, minimum_minor: u64) -> bool {
+    let mut components = version.trim().split('.');
+    let Some(major) = components.next().and_then(|value| value.parse().ok()) else {
+        return false;
+    };
+    let Some(minor) = components.next().and_then(|value| value.parse().ok()) else {
+        return false;
+    };
+    (major, minor) >= (minimum_major, minimum_minor)
+}
+
 #[derive(Debug, Error)]
 pub enum ValkeyAdapterError {
     #[error("Valkey operation failed")]
@@ -154,7 +181,7 @@ pub async fn run_request_metadata_consumer(
             let (payload, event) = match decoded {
                 Ok(decoded) => decoded,
                 Err(reason) => {
-                    error!(stream_id = %entry.id, reason, "discarding invalid request metadata stream event");
+                    error!(stream_id = %entry.id, reason, "dead-lettering invalid request metadata stream event");
                     let now = Utc::now();
                     store
                         .report_request_metadata_gap_once(
@@ -168,7 +195,12 @@ pub async fn run_request_metadata_consumer(
                             &format!("request-metadata-stream:{}:{reason}", entry.id),
                         )
                         .await?;
-                    acknowledge_and_delete(&mut connection, &entry.id).await?;
+                    let payload = entry
+                        .map
+                        .get("event")
+                        .and_then(redis_value_bytes)
+                        .unwrap_or_default();
+                    dead_letter_and_acknowledge(&mut connection, &entry.id, payload).await?;
                     continue;
                 }
             };
@@ -353,6 +385,7 @@ mod tests {
     use super::{
         MAX_REQUEST_METADATA_EVENT_BYTES, decode_request_metadata_stream_event,
         is_permanent_request_metadata_error, is_permanent_request_metadata_sqlstate,
+        version_at_least,
     };
     use crate::PersistenceError;
 
@@ -390,5 +423,13 @@ mod tests {
             decode_request_metadata_stream_event(Some(&payload)),
             Err("oversized_stream_event")
         ));
+    }
+
+    #[test]
+    fn hash_field_expiration_version_floors_are_explicit() {
+        assert!(version_at_least("9.0.0", 9, 0));
+        assert!(version_at_least("7.4.1\r", 7, 4));
+        assert!(!version_at_least("8.1.0", 9, 0));
+        assert!(!version_at_least("7.2.7", 7, 4));
     }
 }

@@ -170,6 +170,7 @@ impl SseDecoder {
         self.has_data = false;
         self.retry_ms = None;
         self.pending_bytes = 0;
+        self.first_line = true;
         self.skip_lf = false;
         Ok(Vec::new())
     }
@@ -332,5 +333,7 @@ mod tests {
         let mut decoder = SseDecoder::default();
         assert!(decoder.push(b"data: incomplete\n").unwrap().is_empty());
         assert!(decoder.finish().unwrap().is_empty());
+        let frames = decoder.push(b"\xef\xbb\xbfdata: complete\n\n").unwrap();
+        assert_eq!(frames[0].data, "complete");
     }
 }

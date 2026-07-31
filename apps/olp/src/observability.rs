@@ -578,6 +578,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         request_metadata_epochs = health;
     }
     let operations_summary = operations.ok();
+    let request_partition_health_available = partitions.is_ok();
     if let Ok(page) = providers {
         provider_health = page.items;
     }
@@ -643,6 +644,9 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
          # HELP olp_request_default_partition_spill_detected Whether requests reached the default partition after managed time partitions began.\n\
          # TYPE olp_request_default_partition_spill_detected gauge\n\
          olp_request_default_partition_spill_detected {}\n\
+         # HELP olp_request_partition_health_available Whether request partition health was available from PostgreSQL.\n\
+         # TYPE olp_request_partition_health_available gauge\n\
+         olp_request_partition_health_available {}\n\
          # HELP olp_media_reconciliation_pending Metadata-only media jobs awaiting reconciliation.\n\
          # TYPE olp_media_reconciliation_pending gauge\n\
          olp_media_reconciliation_pending {}\n\
@@ -680,6 +684,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         crate::gateway::limits::limit_cleanup_uncertainties(),
         state.circuits.open_count(),
         u8::from(request_default_partition_spill_detected),
+        u8::from(request_partition_health_available),
         media_reconciliation
             .as_ref()
             .map_or(0, |value| value.pending),

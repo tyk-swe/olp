@@ -117,8 +117,7 @@ pub(super) async fn journal_media_job_identity(
     let Some(journal) = state.media_job_journal.as_ref() else {
         return;
     };
-    let mut reported = false;
-    loop {
+    for attempt in 0..3 {
         let journal_error = match journal.record(job_id, upstream_job_id).await {
             Ok(()) => return,
             Err(error) => error,
@@ -139,7 +138,10 @@ pub(super) async fn journal_media_job_identity(
                 warn!(%job_id, %journal_error, "persisted media job cleanup after recovery journal failure");
                 return;
             }
-            Ok(record) if !reported => {
+            Err(MediaJobError::Database(_)) if attempt < 2 => {
+                tokio::time::sleep(Duration::from_millis(25 * (attempt + 1))).await;
+            }
+            Ok(record) => {
                 state.record_media_reconciliation_gap();
                 error!(
                     %job_id,
@@ -147,8 +149,9 @@ pub(super) async fn journal_media_job_identity(
                     lifecycle = record.lifecycle.as_str(),
                     "media job identity has no durable recovery owner"
                 );
+                return;
             }
-            Err(database_error) if !reported => {
+            Err(database_error) => {
                 state.record_media_reconciliation_gap();
                 error!(
                     %job_id,
@@ -156,11 +159,9 @@ pub(super) async fn journal_media_job_identity(
                     %database_error,
                     "media job identity has no durable recovery owner"
                 );
+                return;
             }
-            Ok(_) | Err(_) => {}
         }
-        reported = true;
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
@@ -174,6 +175,43 @@ pub(super) async fn clear_media_job_identity_journal(state: &GatewayState, job_i
     }
 }
 
+pub(super) async fn persist_media_job_cleanup_intent(
+    state: &GatewayState,
+    job_id: uuid::Uuid,
+    upstream_job_id: &str,
+    reason: &'static str,
+) -> bool {
+    match state
+        .store()
+        .mark_media_job_create_cleanup_pending(job_id, upstream_job_id, reason)
+        .await
+    {
+        Ok(record)
+            if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
+                && record.upstream_job_id.as_deref() == Some(upstream_job_id) =>
+        {
+            clear_media_job_identity_journal(state, job_id).await;
+            true
+        }
+        Ok(record) => {
+            state.record_media_reconciliation_gap();
+            error!(
+                %job_id,
+                reason,
+                lifecycle = record.lifecycle.as_str(),
+                durable_upstream_job_id = ?record.upstream_job_id,
+                "media job cleanup intent did not retain the upstream identity"
+            );
+            false
+        }
+        Err(error) => {
+            state.record_media_reconciliation_gap();
+            error!(%job_id, reason, %error, "failed to persist media job cleanup intent");
+            false
+        }
+    }
+}
+
 /// Claims and reconciles a bounded metadata-only batch without authenticating
 /// the API key that originally created each job. This is intentionally public
 /// for the single-binary process supervisor; it is not an HTTP endpoint.
@@ -181,7 +219,7 @@ pub async fn reconcile_media_jobs_once(
     state: &GatewayState,
     limit: u16,
 ) -> Result<MediaReconciliationPass, MediaJobError> {
-    replay_media_job_identity_journal(state, usize::from(limit.clamp(1, 32))).await;
+    replay_media_job_identity_journal(state, usize::from(limit.min(32))).await;
     let records = state
         .store()
         .claim_media_reconciliation_jobs(Utc::now(), limit)
@@ -304,10 +342,13 @@ async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobR
             tokio::select! {
                 outcome = &mut operation => break outcome,
                 _ = heartbeat.tick() => {
-                    match store
-                        .renew_media_reconciliation_claim(job_id, claim_id)
-                        .await
-                    {
+                    let renewal = match store
+                        .renew_media_reconciliation_claim(job_id, claim_id).await {
+                        Err(_) => store
+                            .renew_media_reconciliation_claim(job_id, claim_id).await,
+                        result => result,
+                    };
+                    match renewal {
                         Ok(true) => {}
                         Ok(false) => {
                             state.record_media_reconciliation_gap();
@@ -316,7 +357,19 @@ async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobR
                         }
                         Err(error) => {
                             state.record_media_reconciliation_gap();
-                            error!(job_id = %job_id, %error, "failed to renew autonomous media reconciliation claim");
+                            error!(job_id = %job_id, %error, "failed twice to renew autonomous media reconciliation claim");
+                            if let Err(finish_error) = store
+                                .finish_media_reconciliation(
+                                    job_id,
+                                    claim_id,
+                                    Utc::now() + chrono::Duration::seconds(5),
+                                    Some("claim_renewal_failed"),
+                                )
+                                .await
+                            {
+                                state.record_media_reconciliation_gap();
+                                error!(job_id = %job_id, %finish_error, "failed to release autonomous media reconciliation claim");
+                            }
                             return false;
                         }
                     }
@@ -617,7 +670,7 @@ pub(super) async fn owned_media_job(
     video_id: &str,
     operation: OperationKind,
 ) -> Result<(ApiKey, MediaJobRecord), InferenceError> {
-    let key = authorize_principal(principal, operation, None)?;
+    let key = principal.key();
     let id = uuid::Uuid::parse_str(video_id)
         .map_err(|_| InferenceError::resource_not_found("video_not_found"))?;
     let record = state.store().media_job(id).await.map_err(media_job_error)?;
@@ -637,7 +690,7 @@ pub(super) async fn owned_media_job(
     }
     let route = RouteSlug::parse(&record.route_slug)
         .map_err(|_| InferenceError::unavailable("media_job_route_invalid"))?;
-    let _ = authorize_principal(principal, operation, Some(&route))?;
+    let key = authorize_principal(principal, operation, Some(&route))?;
     Ok((key.clone(), record))
 }
 

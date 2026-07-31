@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT 1 FROM pg_locks\n                    WHERE NOT granted\n                      AND pid <> pg_backend_pid()\n                      AND relation = 'async_media_jobs'::regclass\n                ) AS \"waiting!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "waiting!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ca09bda923616036ba881713ed9574cc57925af46d76b3b598950268f9c76f29"
+}

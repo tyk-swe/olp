@@ -275,23 +275,45 @@ fn parse_entry_name(name: &str) -> Option<(Uuid, bool)> {
 
 #[cfg(unix)]
 fn ensure_private_directory(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 
     let mut builder = std::fs::DirBuilder::new();
     match builder.mode(0o700).create(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            let metadata = std::fs::symlink_metadata(path)?;
-            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-                return Err(io::Error::new(
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| {
+            if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) {
+                io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "media job journal path is not a directory",
-                ));
+                )
+            } else {
+                error
             }
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-        }
-        Err(error) => Err(error),
-    }
+        })?;
+    directory.set_permissions(std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn private_directory_rejects_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let base = tempfile::tempdir().unwrap();
+    let target = base.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    let link = base.path().join("link");
+    symlink(target, &link).unwrap();
+    assert_eq!(
+        ensure_private_directory(&link).unwrap_err().kind(),
+        io::ErrorKind::InvalidInput
+    );
 }
 
 #[cfg(not(unix))]

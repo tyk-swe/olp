@@ -15,8 +15,8 @@ use olp_protocols::openai::{
     encode_video_delete_response, encode_video_list_response, encode_video_object,
 };
 use olp_storage::{
-    MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobRecord,
-    MediaJobUpdate, NewMediaJobReservation,
+    MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobRecord, MediaJobUpdate,
+    NewMediaJobReservation,
 };
 use tracing::error;
 
@@ -30,8 +30,8 @@ use super::{
     media_jobs::{
         attach_media_job_with_retry, clear_media_job_identity_journal, journal_media_job_identity,
         mark_missing_delete_as_success, media_job_deletion_finalized, media_job_error,
-        media_job_result, media_job_state, owned_media_job, select_video_create_target,
-        set_video_route, valid_upstream_media_job_id,
+        media_job_result, media_job_state, owned_media_job, persist_media_job_cleanup_intent,
+        select_video_create_target, set_video_route, valid_upstream_media_job_id,
     },
     multipart::parse_multipart,
 };
@@ -204,34 +204,13 @@ async fn complete_video_create(
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
-            match state
-                .store()
-                .mark_media_job_create_cleanup_pending(
-                    reserved.id,
-                    &upstream_job_id,
-                    "upstream_create_response_invalid_status",
-                )
-                .await
-            {
-                Ok(record)
-                    if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
-                        && record.upstream_job_id.as_deref() == Some(upstream_job_id.as_str()) =>
-                {
-                    clear_media_job_identity_journal(&state, reserved.id).await;
-                }
-                Ok(record) => {
-                    state.record_media_reconciliation_gap();
-                    error!(
-                        job_id = %reserved.id,
-                        lifecycle = record.lifecycle.as_str(),
-                        "malformed video cleanup did not retain the upstream identity"
-                    );
-                }
-                Err(error) => {
-                    state.record_media_reconciliation_gap();
-                    error!(job_id = %reserved.id, %error, "failed to schedule malformed video cleanup");
-                }
-            }
+            persist_media_job_cleanup_intent(
+                &state,
+                reserved.id,
+                &upstream_job_id,
+                "upstream_create_response_invalid_status",
+            )
+            .await;
             executed.mark_failure(&failure);
             return Err(failure);
         }
@@ -252,45 +231,17 @@ async fn complete_video_create(
     let record = attach_media_job_with_retry(&state, reserved.id, &upstream_job_id, update).await;
     let record = match record {
         Ok(record) => record,
-        Err(error) => {
-            let identity_conflict = matches!(error, MediaJobError::UpstreamIdentityConflict);
+        Err(_) => {
             // A compensation DELETE is only safe after PostgreSQL records the
             // upstream identity and cleanup intent. An ambiguous attachment
             // outcome can already have committed the active row.
-            let cleanup_intent_persisted = if identity_conflict {
-                false
-            } else {
-                match state
-                    .store()
-                    .mark_media_job_create_cleanup_pending(
-                        reserved.id,
-                        &upstream_job_id,
-                        "upstream_created_local_attach_failed",
-                    )
-                    .await
-                {
-                    Ok(record)
-                        if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
-                            && record.upstream_job_id.as_deref()
-                                == Some(upstream_job_id.as_str()) =>
-                    {
-                        clear_media_job_identity_journal(&state, reserved.id).await;
-                        true
-                    }
-                    Ok(record) => {
-                        error!(
-                            job_id = %reserved.id,
-                            lifecycle = record.lifecycle.as_str(),
-                            "video cleanup intent did not retain the upstream identity"
-                        );
-                        false
-                    }
-                    Err(persistence_error) => {
-                        error!(job_id = %reserved.id, %persistence_error, "failed to persist video cleanup reconciliation metadata");
-                        false
-                    }
-                }
-            };
+            let cleanup_intent_persisted = persist_media_job_cleanup_intent(
+                &state,
+                reserved.id,
+                &upstream_job_id,
+                "upstream_created_local_attach_failed",
+            )
+            .await;
             let compensation_confirmed = if cleanup_intent_persisted {
                 let mut cleanup = decode_video_delete(upstream_job_id.clone());
                 if let Err(failure) = set_video_route(&mut cleanup, executed.route_slug.as_str()) {
@@ -341,7 +292,7 @@ async fn complete_video_create(
                         error!(job_id = %reserved.id, %persistence_error, "upstream cleanup succeeded but reconciliation tombstone failed");
                     }
                 }
-            } else {
+            } else if cleanup_intent_persisted {
                 state.record_media_reconciliation_gap();
                 error!(
                     job_id = %reserved.id,

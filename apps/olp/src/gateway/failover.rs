@@ -228,7 +228,7 @@ pub(super) async fn execute_with_failover(
                         continue;
                     }
                     return Err(ExecutionFailure {
-                        error: InferenceError::from_transport(error),
+                        error: inference_error_from_transport(error, operation.kind()),
                         attempts: traces,
                     });
                 }
@@ -255,7 +255,7 @@ pub(super) async fn execute_with_failover(
                         continue;
                     }
                     return Err(ExecutionFailure {
-                        error: InferenceError::from_transport(error),
+                        error: inference_error_from_transport(error, operation.kind()),
                         attempts: traces,
                     });
                 }
@@ -328,7 +328,7 @@ pub(super) async fn execute_with_failover(
                     continue;
                 }
                 return Err(ExecutionFailure {
-                    error: InferenceError::from_transport(error),
+                    error: inference_error_from_transport(error, operation.kind()),
                     attempts: traces,
                 });
             }
@@ -378,7 +378,7 @@ pub(super) async fn execute_with_failover(
                     continue;
                 }
                 return Err(ExecutionFailure {
-                    error: InferenceError::from_transport(error),
+                    error: inference_error_from_transport(error, operation.kind()),
                     attempts: traces,
                 });
             }
@@ -424,7 +424,10 @@ pub(super) async fn execute_with_failover(
                     circuit_permit.record_failure(transport_error.class);
                     if !allows_failover {
                         return Err(ExecutionFailure {
-                            error: InferenceError::from_transport(transport_error),
+                            error: inference_error_from_transport(
+                                transport_error,
+                                operation.kind(),
+                            ),
                             attempts: traces,
                         });
                     }
@@ -486,16 +489,34 @@ pub(super) fn reclassify_ambiguous_transport_failure(
     if operation_is_side_effecting(operation)
         && matches!(
             error.class,
-            AttemptFailureClass::Connect
-                | AttemptFailureClass::Timeout
-                | AttemptFailureClass::UpstreamServer
+            AttemptFailureClass::Connect | AttemptFailureClass::Timeout
         )
         && !matches!(error.phase, olp_domain::TransportPhase::Connect)
     {
         error.class = AttemptFailureClass::Ambiguous;
         error.response_committed = true;
+    } else if operation_is_side_effecting(operation)
+        && error.class == AttemptFailureClass::UpstreamServer
+        && !matches!(error.phase, olp_domain::TransportPhase::Connect)
+    {
+        // Preserve the circuit-accounting class while preventing failover
+        // after the provider may have accepted the side effect.
+        error.response_committed = true;
     }
     error
+}
+
+fn inference_error_from_transport(
+    mut error: TransportError,
+    operation: OperationKind,
+) -> InferenceError {
+    if operation_is_side_effecting(operation)
+        && error.response_committed
+        && error.class == AttemptFailureClass::UpstreamServer
+    {
+        error.class = AttemptFailureClass::Ambiguous;
+    }
+    InferenceError::from_transport(error)
 }
 
 const fn operation_is_side_effecting(operation: OperationKind) -> bool {

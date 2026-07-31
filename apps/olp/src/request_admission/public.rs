@@ -17,7 +17,7 @@ use axum::{
 use http_body::{Frame, SizeHint};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::{Problem, gateway};
+use crate::{Problem, gateway, router::is_management_path};
 
 pub(crate) const DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS: usize = 256;
 pub(crate) const DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS: usize = 32;
@@ -28,10 +28,6 @@ const RETRY_AFTER_SECONDS: &str = "1";
 enum AdmissionSurface {
     Inference,
     Management,
-}
-
-fn management_path(path: &str) -> bool {
-    path == "/api" || path.starts_with("/api/") || path == "/openapi.json"
 }
 
 #[derive(Clone)]
@@ -239,7 +235,7 @@ pub(crate) async fn admit_public_request(
         .flatten();
     let surface = if endpoint.is_some() {
         Some(AdmissionSurface::Inference)
-    } else if management_path(request.uri().path()) {
+    } else if is_management_path(request.uri().path()) {
         Some(AdmissionSurface::Management)
     } else {
         None

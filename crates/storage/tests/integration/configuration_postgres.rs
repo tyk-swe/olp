@@ -785,15 +785,15 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     let mut corrupt_sequence = 0;
     for _ in 0..17 {
         let corrupt_generation_id = Uuid::now_v7();
-        corrupt_sequence = sqlx::query_scalar(
+        corrupt_sequence = sqlx::query_scalar!(
             "INSERT INTO runtime_generations \
              (id, compiled_release, release_sha256, created_by) VALUES ($1, $2, $3, $4) \
              RETURNING sequence",
+            corrupt_generation_id,
+            b"corrupt runtime envelope".as_slice(),
+            [0_u8; 32].as_slice(),
+            actor,
         )
-        .bind(corrupt_generation_id)
-        .bind(b"corrupt runtime envelope".as_slice())
-        .bind([0_u8; 32].as_slice())
-        .bind(actor)
         .fetch_one(store.pool())
         .await
         .unwrap();
@@ -822,11 +822,13 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
         .unwrap();
     assert_eq!(older_page.len(), 4);
     assert!(older_page[0].sequence < newest_page.last().unwrap().sequence);
-    sqlx::query("DELETE FROM runtime_generations WHERE id = ANY($1)")
-        .bind(&corrupt_generation_ids)
-        .execute(store.pool())
-        .await
-        .unwrap();
+    sqlx::query!(
+        "DELETE FROM runtime_generations WHERE id = ANY($1)",
+        &corrupt_generation_ids[..]
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     let audit_actions: Vec<String> = sqlx::query_scalar(
         "SELECT action FROM audit_events WHERE action LIKE 'provider.%' OR action LIKE 'route.%' \

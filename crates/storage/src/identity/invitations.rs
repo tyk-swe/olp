@@ -216,9 +216,7 @@ impl PgStore {
         session_ttl: Duration,
     ) -> Result<AcceptedInvitation, IdentityError> {
         if acceptance.token.len() != 43
-            || acceptance.display_name.trim().is_empty()
-            || acceptance.display_name.chars().count() > 100
-            || olp_domain::has_unsafe_display_characters(&acceptance.display_name)
+            || !olp_domain::is_safe_visible_label(&acceptance.display_name, 100)
         {
             return Err(IdentityError::InvitationUnavailable);
         }

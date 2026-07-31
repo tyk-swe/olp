@@ -77,10 +77,7 @@ impl PgStore {
     where
         F: FnOnce(&ApiKeyCreated) -> Result<IdempotencyResponse, PersistenceError>,
     {
-        if key.name.trim().is_empty()
-            || key.name.chars().count() > 100
-            || olp_domain::has_unsafe_display_characters(&key.name)
-        {
+        if !olp_domain::is_safe_visible_label(&key.name, 100) {
             return Err(AccessError::Invalid(
                 "name must contain 1-100 visible characters without control or bidi formatting"
                     .to_owned(),

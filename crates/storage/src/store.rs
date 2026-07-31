@@ -27,8 +27,10 @@ pub enum PersistenceError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("installation setup has already completed")]
     AlreadySetup,
-    #[error("installation or owner display name is invalid")]
+    #[error("installation name is invalid")]
     InvalidInstallationName,
+    #[error("owner display name is invalid")]
+    InvalidOwnerDisplayName,
     #[error("database pool size must be between 1 and 100 connections")]
     InvalidDatabasePoolSize,
     #[error("runtime release failed integrity verification")]

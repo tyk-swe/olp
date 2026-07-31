@@ -407,7 +407,7 @@ describe('authentication lifecycle', () => {
     expect(getCsrfToken()).toBe('csrf-renewed');
   });
 
-  it('revalidates a 403 without treating an authorized session as logged out', async () => {
+  it('does not revalidate an ordinary permission-denied response', async () => {
     const lifecycle = new AuthenticationLifecycle();
     const renewed = sessionFor('current-principal', 'csrf-renewed');
     const loadSession = vi.fn(async () => renewed);
@@ -418,14 +418,47 @@ describe('authentication lifecycle', () => {
       new Request('https://console.example.test/api/v1/profile')
     );
 
-    await lifecycle.handleResponse(request, new Response(null, { status: 403 }));
+    await lifecycle.handleResponse(
+      request,
+      new Response(
+        JSON.stringify({
+          type: 'https://openllmproxy.dev/problems/permission_denied',
+          status: 403
+        }),
+        { status: 403, headers: { 'content-type': 'application/problem+json' } }
+      )
+    );
 
-    expect(loadSession).toHaveBeenCalledOnce();
+    expect(loadSession).not.toHaveBeenCalled();
     expect(registeredBoundary.navigate).not.toHaveBeenCalled();
     expect(lifecycle.snapshot()).toMatchObject({
       phase: 'authenticated',
-      user: renewed.user
+      user: session().user
     });
+    expect(getCsrfToken()).toBe('csrf-stale');
+  });
+
+  it('revalidates a csrf-invalid response', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loadSession = vi.fn(async () => session('csrf-renewed'));
+    lifecycle.registerBoundary(boundary(loadSession));
+    lifecycle.establishSession(session('csrf-stale'));
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile')
+    );
+
+    await lifecycle.handleResponse(
+      request,
+      new Response(
+        JSON.stringify({
+          type: 'https://openllmproxy.dev/problems/csrf_invalid',
+          status: 403
+        }),
+        { status: 403, headers: { 'content-type': 'application/problem+json' } }
+      )
+    );
+
+    expect(loadSession).toHaveBeenCalledOnce();
     expect(getCsrfToken()).toBe('csrf-renewed');
   });
 

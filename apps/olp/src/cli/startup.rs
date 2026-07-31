@@ -292,6 +292,9 @@ pub(super) async fn shutdown_reason_with_background<Signal>(
 where
     Signal: Future<Output = ()>,
 {
+    if background_tasks.is_empty() {
+        return shutdown_reason(signal, request_metadata_writer_status).await;
+    }
     tokio::select! {
         biased;
         reason = shutdown_reason(signal, request_metadata_writer_status) => reason,

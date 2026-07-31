@@ -12,9 +12,11 @@ impl PgStore {
         material: &SessionMaterial,
         ttl: chrono::Duration,
     ) -> Result<Uuid, PersistenceError> {
-        let now = Utc::now();
-        let expires_at = checked_session_expiry(now, ttl)?;
         let mut transaction = self.pool.begin().await?;
+        let now: DateTime<Utc> = sqlx::query_scalar!("SELECT now() AS \"now!\"")
+            .fetch_one(&mut *transaction)
+            .await?;
+        let expires_at = checked_session_expiry(now, ttl)?;
         let security_version: Option<i64> = sqlx::query_scalar!(
             "SELECT security_version FROM users WHERE id = $1 AND active FOR SHARE",
             user_id

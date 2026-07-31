@@ -33,6 +33,13 @@ pub fn has_unsafe_display_characters(value: &str) -> bool {
     })
 }
 
+#[must_use]
+pub fn is_safe_visible_label(value: &str, maximum_characters: usize) -> bool {
+    !value.trim().is_empty()
+        && value.chars().count() <= maximum_characters
+        && !has_unsafe_display_characters(value)
+}
+
 macro_rules! uuid_id {
     ($name:ident) => {
         #[derive(
@@ -257,12 +264,20 @@ pub struct ApiKeyLookupIdError;
 
 #[cfg(test)]
 mod tests {
-    use super::has_unsafe_display_characters;
+    use super::{has_unsafe_display_characters, is_safe_visible_label};
 
     #[test]
     fn operator_labels_reject_invisible_and_bidi_controls() {
         assert!(!has_unsafe_display_characters("José 🚀"));
         assert!(has_unsafe_display_characters("safe\u{202e}txt"));
         assert!(has_unsafe_display_characters("look\u{200b}alike"));
+    }
+
+    #[test]
+    fn visible_labels_are_trimmed_bounded_and_safe() {
+        assert!(is_safe_visible_label(" José 🚀 ", 8));
+        assert!(!is_safe_visible_label(" \t ", 100));
+        assert!(!is_safe_visible_label("too long", 7));
+        assert!(!is_safe_visible_label("safe\u{202e}txt", 100));
     }
 }

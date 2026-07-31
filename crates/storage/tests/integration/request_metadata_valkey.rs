@@ -30,7 +30,7 @@ fn keys(label: &str) -> (String, String, String) {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey 9.0+ or Redis 7.4+ in OLP_VALKEY_URL (CI/deploy use Valkey 9.1)"]
 async fn append_is_idempotent_and_preflights_trim_counter() {
     let mut connection = connection().await;
     let (stream, counter, receipts) = keys("append");
@@ -95,7 +95,7 @@ async fn append_is_idempotent_and_preflights_trim_counter() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey 9.0+ or Redis 7.4+ in OLP_VALKEY_URL (CI/deploy use Valkey 9.1)"]
 async fn dead_letter_failure_preserves_the_pending_source() {
     let mut connection = connection().await;
     let (source, dead_letter, _) = keys("dead-letter");

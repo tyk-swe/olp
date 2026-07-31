@@ -125,14 +125,25 @@ impl RequestMetadataReceiver {
                 }
                 connection = ConnectionManager::new(client.clone()) => connection,
             };
-            if let Ok(connection) = connection {
-                self.health
-                    .retrying
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                return self
-                    .run(connection, stream, shutdown)
-                    .await
-                    .map_err(Into::into);
+            if let Ok(mut connection) = connection {
+                match crate::valkey::supports_hash_field_expiration(&mut connection).await {
+                    Ok(true) => {
+                        self.health
+                            .retrying
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
+                        return self
+                            .run_connected(connection, stream, shutdown)
+                            .await
+                            .map_err(Into::into);
+                    }
+                    Ok(false) => {
+                        self.record_abandoned(0).await;
+                        return Err(crate::ValkeyAdapterError::InvalidState(
+                            "Valkey 9.0+ or Redis 7.4+ is required",
+                        ));
+                    }
+                    Err(_) => {}
+                }
             }
             tokio::select! {
                 biased;
@@ -153,6 +164,22 @@ impl RequestMetadataReceiver {
     /// further loss and entries evicted by the durable stream cap are
     /// explicitly counted.
     pub async fn run(
+        mut self,
+        mut connection: ConnectionManager,
+        stream: &str,
+        shutdown: watch::Receiver<bool>,
+    ) -> Result<(), RedisError> {
+        if !crate::valkey::supports_hash_field_expiration(&mut connection).await? {
+            self.record_abandoned(0).await;
+            return Err(RedisError::from((
+                redis::ErrorKind::Client,
+                "Valkey 9.0+ or Redis 7.4+ is required",
+            )));
+        }
+        self.run_connected(connection, stream, shutdown).await
+    }
+
+    async fn run_connected(
         mut self,
         mut connection: ConnectionManager,
         stream: &str,
@@ -195,11 +222,14 @@ impl RequestMetadataReceiver {
                 }
             };
             if payload.len() > MAX_REQUEST_METADATA_EVENT_BYTES {
-                self.record_abandoned(1).await;
-                return Err(RedisError::from((
-                    redis::ErrorKind::Client,
-                    "request metadata event exceeds the serialized size limit",
-                )));
+                self.health.record_abandoned(1);
+                tracing::warn!(
+                    event_id = %event.event_id,
+                    payload_bytes = payload.len(),
+                    max_payload_bytes = MAX_REQUEST_METADATA_EVENT_BYTES,
+                    "dropping oversized request metadata event"
+                );
+                continue;
             }
             let mut backoff = Duration::from_millis(25);
             loop {
@@ -222,13 +252,7 @@ impl RequestMetadataReceiver {
                         ))),
                     };
                 match result {
-                    Ok((_, trimmed)) => {
-                        if trimmed > 0 {
-                            tracing::warn!(
-                                trimmed,
-                                "request metadata stream retention evicted old events"
-                            );
-                        }
+                    Ok((_, _trimmed)) => {
                         self.health
                             .persisted
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

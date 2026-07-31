@@ -871,10 +871,7 @@ fn validate_invitation_acceptance(request: &AcceptInvitationRequest) -> Result<(
             vec!["Use between 12 and 1,024 characters.".to_owned()],
         );
     }
-    if request.display_name.trim().is_empty()
-        || request.display_name.chars().count() > 100
-        || olp_domain::has_unsafe_display_characters(&request.display_name)
-    {
+    if !olp_domain::is_safe_visible_label(&request.display_name, 100) {
         errors.insert(
             "display_name".to_owned(),
             vec!["Use 1-100 visible characters without control or bidi formatting.".to_owned()],

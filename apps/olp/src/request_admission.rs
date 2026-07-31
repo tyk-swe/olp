@@ -32,7 +32,7 @@ mod validation;
 
 use limits::{
     authenticate_inference_headers, estimate_http_non_json_request_tokens,
-    reserve_http_inference_limits,
+    reserve_http_inference_limits, reserve_http_multipart_limits,
 };
 use multipart::preauthorize_multipart;
 use validation::{
@@ -402,12 +402,7 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
-    if endpoint.is_some()
-        && matches!(
-            *request.method(),
-            axum::http::Method::GET | axum::http::Method::DELETE
-        )
-    {
+    if endpoint.is_some_and(|endpoint| !endpoint.accepts_body()) {
         let (parts, body) = request.into_parts();
         match read_json_body(body, 0, REQUEST_BODY_TIMEOUT).await {
             Ok(_) => request = axum::http::Request::from_parts(parts, Body::empty()),
@@ -529,12 +524,23 @@ async fn enforce_request_limits_inner(
             .map(gateway::InferenceEndpoint::token_estimate)
             .unwrap_or(gateway::TokenEstimate::Default),
     );
-    // Multipart handlers learn the bounded, authorized route while parsing the
-    // form. Their canonical execution path reserves the complete limits after
-    // that point, with the route's real timeout, so do not create a max-TTL
-    // HTTP lease from an empty body here.
+    // Multipart handlers learn the route and token estimate while parsing.
+    // Reserve RPM/concurrency for that body phase now; canonical execution
+    // reuses it and adds only the eventual TPM delta.
     let reservation = if multipart_content_type.is_some() {
-        None
+        if let Some(principal) = &principal {
+            match reserve_http_multipart_limits(state, principal).await {
+                Ok(reservation) => reservation,
+                Err(error) => {
+                    if let Some(metadata) = local_metadata.clone() {
+                        metadata.emit(error.status());
+                    }
+                    return Err(error.into());
+                }
+            }
+        } else {
+            None
+        }
     } else if let Some(principal) = &principal {
         match reserve_http_inference_limits(
             state,
@@ -555,8 +561,8 @@ async fn enforce_request_limits_inner(
     } else {
         None
     };
-    let multipart_preauthorization = if let Some(content_type) = multipart_content_type {
-        if let Err(problem) = validate_multipart_boundary(&content_type) {
+    let multipart_preauthorization = if let Some(content_type) = multipart_content_type.as_deref() {
+        if let Err(problem) = validate_multipart_boundary(content_type) {
             release_reservation(reservation).await;
             if let Some(metadata) = local_metadata.clone() {
                 metadata.emit(axum::http::StatusCode::BAD_REQUEST);
@@ -615,7 +621,13 @@ async fn enforce_request_limits_inner(
     if let Some(admission) = multipart_admission {
         request.extensions_mut().insert(admission);
     }
-    let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
+    let reserved_tokens = reservation.as_ref().map(|_| {
+        if multipart_content_type.is_some() {
+            0
+        } else {
+            requested_tokens
+        }
+    });
     Ok(run_request_with_reservation(
         request,
         next,

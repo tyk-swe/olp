@@ -377,10 +377,7 @@ fn validate_provider_update(
     }
 
     let mut errors = FieldErrors::new();
-    if request.name.trim().is_empty()
-        || request.name.chars().count() > 100
-        || olp_domain::has_unsafe_display_characters(&request.name)
-    {
+    if !olp_domain::is_safe_visible_label(&request.name, 100) {
         errors.insert(
             "name".to_owned(),
             vec!["Use 1-100 visible characters without control or bidi formatting.".to_owned()],

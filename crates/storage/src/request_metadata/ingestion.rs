@@ -357,17 +357,17 @@ impl PgStore {
                       AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
                       AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
                       AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
+                      AND ($9::bigint IS NULL OR selected.cached_input_per_million IS NOT NULL) \
                       AS \"pricing_complete!\", \
                     CASE WHEN $8::boolean \
                                AND selected.pricing_revision_id IS NOT NULL \
                                AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
                                AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
                                AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
+                               AND ($9::bigint IS NULL OR selected.cached_input_per_million IS NOT NULL) \
                          THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) \
                              - COALESCE($9::bigint * selected.input_per_million / 1000000, 0) \
-                             + COALESCE($9::bigint * COALESCE( \
-                                 selected.cached_input_per_million, \
-                                 selected.input_per_million) / 1000000, 0) \
+                             + COALESCE($9::bigint * selected.cached_input_per_million / 1000000, 0) \
                              + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
                              + COALESCE($7::numeric * selected.unit_price, 0)) \
                          ELSE NULL END AS \"estimated_cost?\" \

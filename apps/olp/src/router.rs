@@ -29,6 +29,17 @@ use crate::{
 };
 
 pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
+const MANAGEMENT_API_MOUNT_PATH: &str = "/api";
+const MANAGEMENT_API_FALLBACK_PATH: &str = "/api/{*path}";
+const MANAGEMENT_OPENAPI_PATH: &str = "/openapi.json";
+
+pub(crate) fn is_management_path(path: &str) -> bool {
+    path == MANAGEMENT_API_MOUNT_PATH
+        || path
+            .strip_prefix(MANAGEMENT_API_MOUNT_PATH)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+        || path == MANAGEMENT_OPENAPI_PATH
+}
 
 /// Builds the public application router. Observability is intentionally served
 /// by [`crate::observability_router`] on a separate listener. Public-auth
@@ -122,9 +133,9 @@ fn compose_public_router(
 
     if let Some(state) = management_state.as_ref() {
         let control = Router::new()
-            .route("/openapi.json", any(api_not_found))
+            .route(MANAGEMENT_OPENAPI_PATH, any(api_not_found))
             .merge(management_api::router())
-            .route("/api/{*path}", any(api_not_found))
+            .route(MANAGEMENT_API_FALLBACK_PATH, any(api_not_found))
             .layer(middleware::from_fn(normalize_management_rejection))
             .layer(middleware::from_fn(prevent_management_caching))
             .with_state(state.clone());
@@ -219,7 +230,7 @@ async fn normalize_management_rejection(
 ) -> Response {
     let uri = request.uri().clone();
     let response = next.run(request).await;
-    if !uri.path().starts_with("/api/")
+    if !is_management_path(uri.path())
         || !response.status().is_client_error() && !response.status().is_server_error()
     {
         return response;

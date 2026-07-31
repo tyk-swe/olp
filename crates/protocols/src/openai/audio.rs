@@ -15,6 +15,8 @@ use super::media::{BinaryMediaBody, BoundedMediaPart};
 use crate::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame};
 
 pub const DEFAULT_AUDIO_UPLOAD_LIMIT: u64 = 25 * 1024 * 1024;
+// Provider JSON timestamps are rounded independently.
+const TRANSCRIPTION_DURATION_TOLERANCE_SECONDS: f64 = 0.001;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TranscriptionResponseFormat {
@@ -465,9 +467,9 @@ pub fn decode_transcription_response(
                             || index.checked_sub(1).is_some_and(|previous| {
                                 segment.start < response.segments[previous].start
                             })
-                            || response
-                                .duration
-                                .is_some_and(|duration| segment.end > duration)
+                            || response.duration.is_some_and(|duration| {
+                                segment.end > duration + TRANSCRIPTION_DURATION_TOLERANCE_SECONDS
+                            })
                     })
             {
                 return Err(AudioCodecError::InvalidTranscriptionTiming);
@@ -871,4 +873,36 @@ pub enum AudioCodecError {
     UnrepresentableStreamEvent,
     #[error("transcription stream payload must be an object")]
     InvalidStreamPayload,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcription_segment_allows_rounding_past_duration() {
+        let mut response = OpenAiTranscriptionJson {
+            text: "ok".into(),
+            language: None,
+            duration: Some(1.0),
+            segments: vec![OpenAiTranscriptionSegment {
+                id: None,
+                start: 0.0,
+                end: 1.000_5,
+                text: "ok".into(),
+                speaker: None,
+                extra: BTreeMap::new(),
+            }],
+            extra: BTreeMap::new(),
+        };
+        assert!(
+            decode_transcription_response(OpenAiTranscriptionResponse::Json(response.clone()))
+                .is_ok()
+        );
+        response.segments[0].end = 1.002;
+        assert!(matches!(
+            decode_transcription_response(OpenAiTranscriptionResponse::Json(response)),
+            Err(AudioCodecError::InvalidTranscriptionTiming)
+        ));
+    }
 }

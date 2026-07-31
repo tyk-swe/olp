@@ -93,10 +93,7 @@ pub(super) fn normalize_api_key_policy(
 ) -> Result<NormalizedApiKeyPolicy, Problem> {
     let mut errors = FieldErrors::new();
     let name = raw.name.trim().to_owned();
-    if name.is_empty()
-        || raw.name.chars().count() > MAX_NAME_CHARACTERS
-        || olp_domain::has_unsafe_display_characters(raw.name)
-    {
+    if !olp_domain::is_safe_visible_label(raw.name, MAX_NAME_CHARACTERS) {
         errors.insert(
             "name".to_owned(),
             vec!["Use 1-100 visible characters without control or bidi formatting.".to_owned()],

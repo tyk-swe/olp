@@ -387,6 +387,14 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
         .await
         .unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let error: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        error
+            .pointer("/error/code")
+            .and_then(serde_json::Value::as_str),
+        Some("request_body_unsupported")
+    );
 
     let response = app
         .oneshot(
@@ -424,7 +432,7 @@ async fn authenticated_multipart_routes_reject_non_multipart_content_types() {
 }
 
 #[tokio::test]
-async fn multipart_defers_hard_limit_reservation_until_after_route_parsing() {
+async fn multipart_reserves_request_limits_before_route_parsing() {
     let (state, key) = inference_state(true);
     let app = public_router(state.gateway_state_for_test());
     let authorization = format!("Bearer {key}");
@@ -445,8 +453,8 @@ async fn multipart_defers_hard_limit_reservation_until_after_route_parsing() {
         .unwrap();
     assert_eq!(
         malformed.status(),
-        axum::http::StatusCode::BAD_REQUEST,
-        "multipart parsing must run before the distributed reservation"
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "malformed multipart must consume request limits before parser failure"
     );
 
     let body = concat!(

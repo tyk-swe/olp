@@ -106,6 +106,17 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                     unit_price: Some("0.040000000000".to_owned()),
                     currency: "USD".to_owned(),
                 },
+                PriceInput {
+                    provider_kind: olp_domain::ProviderKind::OpenAi,
+                    provider_id: None,
+                    model: "cached-unpriced-model".to_owned(),
+                    operation: olp_domain::OperationKind::Generation,
+                    input_per_million: Some("1.000000000000".to_owned()),
+                    cached_input_per_million: None,
+                    output_per_million: Some("2.000000000000".to_owned()),
+                    unit_price: None,
+                    currency: "USD".to_owned(),
+                },
             ],
             ReplayableIdempotency::new([1; 32], &master_key),
             |_| IdempotencyResponse::new(201, None, None, Vec::new()),
@@ -588,7 +599,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     assert_eq!(series[0].currency.as_deref(), Some("USD"));
     assert_eq!(breakdown[0].currency.as_deref(), Some("USD"));
 
-    let unpriced_observed_at = Utc::now() - Duration::hours(5);
+    let unpriced_observed_at = observed_at + Duration::minutes(1);
     store
         .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
@@ -596,9 +607,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             runtime_generation_id: generation_id,
             api_key_id,
             provider_id: Some(provider_id),
-            route_slug: "moderation".to_owned(),
-            upstream_model: Some("unpriced-model".to_owned()),
-            operation: "moderation".parse().unwrap(),
+            route_slug: "cached-unpriced".to_owned(),
+            upstream_model: Some("cached-unpriced-model".to_owned()),
+            operation: "generation".parse().unwrap(),
             surface: Surface::OpenAi,
             request_started_at: unpriced_observed_at - Duration::milliseconds(5),
             request_completed_at: unpriced_observed_at,
@@ -608,9 +619,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             committed: true,
             latency_ms: 5,
             first_byte_ms: Some(2),
-            input_tokens: Some(1),
-            output_tokens: None,
-            cached_input_tokens: None,
+            input_tokens: Some(2),
+            output_tokens: Some(1),
+            cached_input_tokens: Some(1),
             media_units: None,
             usage_complete: true,
             unpriced: true,
@@ -618,7 +629,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
-                upstream_model: "unpriced-model".to_owned(),
+                upstream_model: "cached-unpriced-model".to_owned(),
                 started_at: unpriced_observed_at - Duration::milliseconds(5),
                 completed_at: unpriced_observed_at,
                 status_code: Some(200),
@@ -635,9 +646,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         observed_before: unpriced_observed_at + Duration::minutes(10),
         route_slug: None,
         provider_id: None,
-        upstream_model: None,
+        upstream_model: Some("cached-unpriced-model".to_owned()),
         api_key_id: None,
-        operation: Some("moderation".parse().unwrap()),
+        operation: Some("generation".parse().unwrap()),
     };
     let unpriced = store.usage_completeness(&unpriced_filters).await.unwrap();
     assert_eq!(unpriced.unpriced_count, 1);
@@ -647,7 +658,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let health = store.provider_health(180, None, 50).await.unwrap();
     assert_eq!(health.items.len(), 1);
     assert_eq!(health.items[0].status, "healthy");
-    assert_eq!(health.items[0].attempt_count, 1);
+    assert_eq!(health.items[0].attempt_count, 2);
     let generations = store.runtime_generations(None, 50).await.unwrap();
     assert_eq!(generations.items[0].id, generation_id);
     assert!(!store.audit_events(None, 50).await.unwrap().items.is_empty());

@@ -15,7 +15,7 @@ use olp_protocols::openai::EmbeddingWireInput;
 use olp_storage::{DistributedLimiter, LimitError, LimitLease, LimitRequest};
 use serde::Deserialize;
 
-use crate::{GatewayState, RuntimeBundle, gateway};
+use crate::{GatewayState, RuntimeBundle, gateway, router::REQUEST_BODY_TIMEOUT};
 
 type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
@@ -272,10 +272,6 @@ pub(super) async fn reserve_http_inference_limits(
     if !principal.key().limits.has_hard_limits() {
         return Ok(None);
     }
-    let limiter = state
-        .limiter
-        .current()
-        .ok_or_else(|| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
     let tokens_per_minute = principal
         .key()
         .limits
@@ -295,6 +291,46 @@ pub(super) async fn reserve_http_inference_limits(
         .unwrap_or(Duration::from_millis(
             u64::try_from(MAX_ROUTE_TIMEOUT_MS).expect("route timeout maximum is positive"),
         ));
+    reserve_http_limits(
+        state,
+        principal,
+        tokens_per_minute,
+        requested_tokens,
+        route_timeout.saturating_add(Duration::from_secs(60)),
+    )
+    .await
+}
+
+pub(super) async fn reserve_http_multipart_limits(
+    state: &GatewayState,
+    principal: &InferencePrincipal,
+) -> Result<Option<InferenceReservation>, gateway::InferenceError> {
+    if principal.key().limits.requests_per_minute.is_none()
+        && principal.key().limits.concurrency.is_none()
+    {
+        return Ok(None);
+    }
+    reserve_http_limits(
+        state,
+        principal,
+        None,
+        0,
+        REQUEST_BODY_TIMEOUT.saturating_add(Duration::from_secs(60)),
+    )
+    .await
+}
+
+async fn reserve_http_limits(
+    state: &GatewayState,
+    principal: &InferencePrincipal,
+    tokens_per_minute: Option<i64>,
+    requested_tokens: i64,
+    lease_ttl: Duration,
+) -> Result<Option<InferenceReservation>, gateway::InferenceError> {
+    let limiter = state
+        .limiter
+        .current()
+        .ok_or_else(|| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
     let result = tokio::time::timeout(
         Duration::from_secs(1),
         limiter.reserve(LimitRequest {
@@ -311,9 +347,7 @@ pub(super) async fn reserve_http_inference_limits(
                 .concurrency
                 .map(|value| i64::from(value.get())),
             requested_tokens,
-            // Account for the bounded body-read phase in addition to the
-            // route deadline. This is only a crash-recovery backstop.
-            lease_ttl: route_timeout.saturating_add(Duration::from_secs(60)),
+            lease_ttl,
         }),
     )
     .await

@@ -33,11 +33,11 @@ pub use canonical::{
     VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
     media_handle_from_inline_marker, validate_event_sequence,
 };
-pub use ids::has_unsafe_display_characters;
 pub use ids::{
     ApiKeyId, ApiKeyLookupId, ApiKeyLookupIdError, AttemptId, CredentialVersionId, DurationMs,
     ProviderId, RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId, TargetId,
 };
+pub use ids::{has_unsafe_display_characters, is_safe_visible_label};
 pub use ports::{
     AttemptFailureClass, BoxFuture, DiscoveredProviderModel, MediaByteStream, MediaSpool,
     MediaSpoolError, MediaUpload, OpenedMedia, ProviderEventStream, ProviderOutput,

@@ -26,7 +26,10 @@ impl DistributedLimiter {
         let namespace = namespace.into();
         validate_namespace(&namespace)?;
         let client = redis::Client::open(url)?;
-        let connection = ConnectionManager::new(client).await?;
+        let mut connection = ConnectionManager::new(client).await?;
+        if !crate::valkey::supports_hash_field_expiration(&mut connection).await? {
+            return Err(LimitError::UnsupportedServer);
+        }
         Ok(Self {
             connection,
             namespace,
@@ -264,6 +267,8 @@ pub enum LimitError {
     MalformedState,
     #[error("Valkey returned an unexpected response")]
     UnexpectedResponse,
+    #[error("Valkey 9.0+ or Redis 7.4+ is required for hash-field expiration")]
+    UnsupportedServer,
     #[error("invalid distributed limit request: {0}")]
     InvalidRequest(&'static str),
     #[error("{dimension:?} limit exceeded; retry after {retry_after:?}")]
