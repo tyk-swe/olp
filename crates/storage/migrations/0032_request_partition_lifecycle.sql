@@ -55,6 +55,7 @@ DECLARE
     child_name text;
     child record;
     child_has_attempts boolean;
+    ready_partitions text[] := ARRAY[]::text[];
 BEGIN
     created_count := 0;
     dropped_count := 0;
@@ -139,11 +140,6 @@ BEGIN
          LIMIT 3
     LOOP
         BEGIN
-            LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
-            EXECUTE format(
-                'LOCK TABLE public.%I IN ACCESS EXCLUSIVE MODE',
-                child.partition_name
-            );
             -- The parent FK prevents detach while attempts still reference this
             -- child. Drain them in bounded batches and leave the partition
             -- attached until a later maintenance tick removes the final batch.
@@ -164,16 +160,43 @@ BEGIN
                 'AND request.started_at = attempt.request_started_at)',
                 child.partition_name
             ) INTO child_has_attempts;
+            IF NOT child_has_attempts THEN
+                ready_partitions := array_append(
+                    ready_partitions,
+                    child.partition_name
+                );
+            END IF;
+        EXCEPTION
+            WHEN lock_not_available THEN
+                NULL;
+        END;
+    END LOOP;
+
+    FOREACH child_name IN ARRAY ready_partitions LOOP
+        BEGIN
+            LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
+            EXECUTE format(
+                'LOCK TABLE public.%I IN ACCESS EXCLUSIVE MODE',
+                child_name
+            );
+            EXECUTE format(
+                'SELECT EXISTS ('
+                'SELECT 1 FROM public.attempts attempt '
+                'JOIN public.%I request '
+                'ON request.id = attempt.request_id '
+                'AND request.started_at = attempt.request_started_at)',
+                child_name
+            ) INTO child_has_attempts;
             IF child_has_attempts THEN
-                CONTINUE;
+                EXIT;
             END IF;
             EXECUTE format(
                 'ALTER TABLE public.requests DETACH PARTITION public.%I',
-                child.partition_name
+                child_name
             );
-            EXECUTE format('DROP TABLE public.%I', child.partition_name);
+            EXECUTE format('DROP TABLE public.%I', child_name);
             DELETE FROM public.request_partitions registry
-             WHERE registry.partition_start = child.partition_start;
+             WHERE registry.partition_name = child_name;
             dropped_count := dropped_count + 1;
         EXCEPTION
             WHEN lock_not_available THEN
