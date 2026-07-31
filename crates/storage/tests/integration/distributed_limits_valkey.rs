@@ -145,6 +145,7 @@ async fn server_time_unifies_callers() {
         .unwrap();
     let (other_rate_key, _) = keys(&namespace, other_lookup_id);
     assert_eq!(rate_state(&mut connection, &other_rate_key).await["rpm"], 1);
+    assert!(connection.pttl::<_, i64>(&other_rate_key).await.unwrap() > 0);
 
     release_twice(&limiter_a, &first).await;
     release_twice(&limiter_b, &second).await;

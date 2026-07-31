@@ -144,6 +144,11 @@ if helm template invalid "$chart" --set gateway.httpMaxConnections=0 \
   echo "chart accepted a zero gateway connection cap" >&2
   exit 1
 fi
+if helm template invalid "$chart" --set config.databaseMaxConnections=101 \
+  >/dev/null 2>&1; then
+  echo "chart accepted a database connection cap above the runtime maximum" >&2
+  exit 1
+fi
 
 for expected in \
   "ghcr.io/tyk-swe/olp@$digest" \

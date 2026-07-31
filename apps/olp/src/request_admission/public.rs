@@ -28,6 +28,7 @@ const RETRY_AFTER_SECONDS: &str = "1";
 enum AdmissionSurface {
     Inference,
     Management,
+    Other,
 }
 
 #[derive(Clone)]
@@ -38,12 +39,16 @@ pub(crate) struct PublicAdmission {
 struct AdmissionInner {
     inference: Arc<Semaphore>,
     management: Arc<Semaphore>,
+    other: Arc<Semaphore>,
     inference_capacity: usize,
     management_capacity: usize,
+    other_capacity: usize,
     inference_admitted: AtomicUsize,
     management_admitted: AtomicUsize,
+    other_admitted: AtomicUsize,
     inference_rejections: AtomicU64,
     management_rejections: AtomicU64,
+    other_rejections: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -86,12 +91,16 @@ impl PublicAdmission {
             inner: Arc::new(AdmissionInner {
                 inference: Arc::new(Semaphore::new(inference_capacity)),
                 management: Arc::new(Semaphore::new(management_capacity)),
+                other: Arc::new(Semaphore::new(management_capacity)),
                 inference_capacity,
                 management_capacity,
+                other_capacity: management_capacity,
                 inference_admitted: AtomicUsize::new(0),
                 management_admitted: AtomicUsize::new(0),
+                other_admitted: AtomicUsize::new(0),
                 inference_rejections: AtomicU64::new(0),
                 management_rejections: AtomicU64::new(0),
+                other_rejections: AtomicU64::new(0),
             }),
         }
     }
@@ -100,18 +109,21 @@ impl PublicAdmission {
         let permit = match surface {
             AdmissionSurface::Inference => Arc::clone(&self.inner.inference),
             AdmissionSurface::Management => Arc::clone(&self.inner.management),
+            AdmissionSurface::Other => Arc::clone(&self.inner.other),
         }
         .try_acquire_owned()
         .map_err(|_| {
             match surface {
                 AdmissionSurface::Inference => &self.inner.inference_rejections,
                 AdmissionSurface::Management => &self.inner.management_rejections,
+                AdmissionSurface::Other => &self.inner.other_rejections,
             }
             .fetch_add(1, Ordering::Relaxed);
         })?;
         match surface {
             AdmissionSurface::Inference => &self.inner.inference_admitted,
             AdmissionSurface::Management => &self.inner.management_admitted,
+            AdmissionSurface::Other => &self.inner.other_admitted,
         }
         .fetch_add(1, Ordering::AcqRel);
         Ok(AdmissionPermit {
@@ -124,29 +136,37 @@ impl PublicAdmission {
     pub(crate) fn metrics(&self) -> String {
         let inference_admitted = self.inner.inference_admitted.load(Ordering::Acquire);
         let management_admitted = self.inner.management_admitted.load(Ordering::Acquire);
+        let other_admitted = self.inner.other_admitted.load(Ordering::Acquire);
         let inference_rejections = self.inner.inference_rejections.load(Ordering::Relaxed);
         let management_rejections = self.inner.management_rejections.load(Ordering::Relaxed);
+        let other_rejections = self.inner.other_rejections.load(Ordering::Relaxed);
         format!(
             concat!(
                 "# HELP olp_http_admission_capacity Configured process-local HTTP request admission capacity.\n",
                 "# TYPE olp_http_admission_capacity gauge\n",
                 "olp_http_admission_capacity{{surface=\"inference\"}} {}\n",
                 "olp_http_admission_capacity{{surface=\"management\"}} {}\n",
+                "olp_http_admission_capacity{{surface=\"other\"}} {}\n",
                 "# HELP olp_http_admitted_requests Current process-local admitted HTTP requests whose responses have not completed.\n",
                 "# TYPE olp_http_admitted_requests gauge\n",
                 "olp_http_admitted_requests{{surface=\"inference\"}} {}\n",
                 "olp_http_admitted_requests{{surface=\"management\"}} {}\n",
+                "olp_http_admitted_requests{{surface=\"other\"}} {}\n",
                 "# HELP olp_http_admission_rejections_total HTTP requests rejected because the process-local admission pool was full.\n",
                 "# TYPE olp_http_admission_rejections_total counter\n",
                 "olp_http_admission_rejections_total{{surface=\"inference\"}} {}\n",
                 "olp_http_admission_rejections_total{{surface=\"management\"}} {}\n",
+                "olp_http_admission_rejections_total{{surface=\"other\"}} {}\n",
             ),
             self.inner.inference_capacity,
             self.inner.management_capacity,
+            self.inner.other_capacity,
             inference_admitted,
             management_admitted,
+            other_admitted,
             inference_rejections,
             management_rejections,
+            other_rejections,
         )
     }
 
@@ -155,6 +175,7 @@ impl PublicAdmission {
         match surface {
             "inference" => self.inner.inference_admitted.load(Ordering::Acquire),
             "management" => self.inner.management_admitted.load(Ordering::Acquire),
+            "other" => self.inner.other_admitted.load(Ordering::Acquire),
             _ => panic!("unknown admission surface"),
         }
     }
@@ -174,6 +195,7 @@ impl Drop for AdmissionPermit {
         let admitted = match self.surface {
             AdmissionSurface::Inference => &self.admission.inner.inference_admitted,
             AdmissionSurface::Management => &self.admission.inner.management_admitted,
+            AdmissionSurface::Other => &self.admission.inner.other_admitted,
         };
         let previous = admitted.fetch_sub(1, Ordering::AcqRel);
         debug_assert!(previous > 0, "admission permit accounting underflow");
@@ -234,14 +256,11 @@ pub(crate) async fn admit_public_request(
         .then(|| gateway::InferenceEndpoint::classify(request.method(), request.uri().path()))
         .flatten();
     let surface = if endpoint.is_some() {
-        Some(AdmissionSurface::Inference)
+        AdmissionSurface::Inference
     } else if is_management_path(request.uri().path()) {
-        Some(AdmissionSurface::Management)
+        AdmissionSurface::Management
     } else {
-        None
-    };
-    let Some(surface) = surface else {
-        return next.run(request).await;
+        AdmissionSurface::Other
     };
     let permit = match state.admission.try_acquire(surface) {
         Ok(permit) => permit,
@@ -263,7 +282,7 @@ fn overload_response(
             endpoint.surface(),
             gateway::InferenceError::overloaded(),
         ),
-        (AdmissionSurface::Management, _) => Problem::new(
+        (AdmissionSurface::Management | AdmissionSurface::Other, _) => Problem::new(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "request_admission_overloaded",
             "Service unavailable",

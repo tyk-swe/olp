@@ -36,7 +36,7 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
   expect(settingHeaders['x-csrf-token']).toBe('csrf-test-token');
 
   await page.getByLabel('Upstream model').fill('gpt-test');
-  await page.getByLabel('Input / million').fill('2.500000');
+  await page.getByLabel('Input / million', { exact: true }).fill('2.500000');
   await page.getByLabel('Output / million').fill('10.125000');
   await page.getByRole('button', { name: 'Create pricing revision' }).click();
   await expect(page.getByText('Pricing revision created.')).toBeVisible();

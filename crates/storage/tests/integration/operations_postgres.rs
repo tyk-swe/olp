@@ -109,7 +109,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                 PriceInput {
                     provider_kind: olp_domain::ProviderKind::OpenAi,
                     provider_id: None,
-                    model: "cached-unpriced-model".to_owned(),
+                    model: "cached-fallback-model".to_owned(),
                     operation: olp_domain::OperationKind::Generation,
                     input_per_million: Some("1.000000000000".to_owned()),
                     cached_input_per_million: None,
@@ -599,21 +599,22 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     assert_eq!(series[0].currency.as_deref(), Some("USD"));
     assert_eq!(breakdown[0].currency.as_deref(), Some("USD"));
 
-    let unpriced_observed_at = observed_at + Duration::minutes(1);
+    let fallback_observed_at = observed_at + Duration::minutes(1);
+    let fallback_request_id = Uuid::now_v7();
     store
         .persist_request_metadata_event(&RequestMetadataEvent {
             event_id: Uuid::now_v7(),
-            request_id: Uuid::now_v7(),
+            request_id: fallback_request_id,
             runtime_generation_id: generation_id,
             api_key_id,
             provider_id: Some(provider_id),
-            route_slug: "cached-unpriced".to_owned(),
-            upstream_model: Some("cached-unpriced-model".to_owned()),
+            route_slug: "cached-fallback".to_owned(),
+            upstream_model: Some("cached-fallback-model".to_owned()),
             operation: "generation".parse().unwrap(),
             surface: Surface::OpenAi,
-            request_started_at: unpriced_observed_at - Duration::milliseconds(5),
-            request_completed_at: unpriced_observed_at,
-            observed_at: unpriced_observed_at,
+            request_started_at: fallback_observed_at - Duration::milliseconds(5),
+            request_completed_at: fallback_observed_at,
+            observed_at: fallback_observed_at,
             status_code: Some(200),
             error_class: None,
             committed: true,
@@ -629,9 +630,9 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
-                upstream_model: "cached-unpriced-model".to_owned(),
-                started_at: unpriced_observed_at - Duration::milliseconds(5),
-                completed_at: unpriced_observed_at,
+                upstream_model: "cached-fallback-model".to_owned(),
+                started_at: fallback_observed_at - Duration::milliseconds(5),
+                completed_at: fallback_observed_at,
                 status_code: Some(200),
                 error_class: None,
                 committed: true,
@@ -641,19 +642,29 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         })
         .await
         .unwrap();
-    let unpriced_filters = UsageFilters {
-        observed_after: unpriced_observed_at - Duration::minutes(10),
-        observed_before: unpriced_observed_at + Duration::minutes(10),
+    let fallback_cost: (Option<String>, bool) = sqlx::query_as(
+        "SELECT estimated_cost::text, unpriced FROM usage_facts WHERE request_id = $1",
+    )
+    .bind(fallback_request_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(fallback_cost.0.as_deref(), Some("0.000004000000"));
+    assert!(!fallback_cost.1);
+    let fallback_filters = UsageFilters {
+        observed_after: fallback_observed_at - Duration::minutes(10),
+        observed_before: fallback_observed_at + Duration::minutes(10),
         route_slug: None,
         provider_id: None,
-        upstream_model: Some("cached-unpriced-model".to_owned()),
+        upstream_model: Some("cached-fallback-model".to_owned()),
         api_key_id: None,
         operation: Some("generation".parse().unwrap()),
     };
-    let unpriced = store.usage_completeness(&unpriced_filters).await.unwrap();
-    assert_eq!(unpriced.unpriced_count, 1);
-    assert_eq!(unpriced.incomplete_count, 0);
-    assert!(!unpriced.complete);
+    let fallback = store.usage_completeness(&fallback_filters).await.unwrap();
+    assert_eq!(fallback.request_count, 1);
+    assert_eq!(fallback.priced_count, 1);
+    assert_eq!(fallback.unpriced_count, 0);
+    assert_eq!(fallback.incomplete_count, 0);
 
     let health = store.provider_health(180, None, 50).await.unwrap();
     assert_eq!(health.items.len(), 1);

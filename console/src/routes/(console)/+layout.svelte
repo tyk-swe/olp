@@ -57,7 +57,7 @@
         document.visibilityState === 'visible' &&
         authLifecycle.snapshot().phase === 'authenticated'
       ) {
-        void authLifecycle.refreshProtectedSession();
+        void authLifecycle.validateSession({ passive: true });
       }
     };
     window.addEventListener('focus', revalidate);

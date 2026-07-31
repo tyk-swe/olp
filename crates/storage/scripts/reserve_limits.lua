@@ -208,7 +208,7 @@ if rate_enabled then
   -- shortening a manually configured or already-longer lifetime.
   local required_ttl = window_remaining_ms + RECONCILIATION_RETENTION_MS
   local current_ttl = redis.call("PTTL", KEYS[1])
-  if current_ttl >= 0 and current_ttl < required_ttl then
+  if current_ttl == -1 or (current_ttl >= 0 and current_ttl < required_ttl) then
     redis.call("PEXPIRE", KEYS[1], required_ttl)
   end
 end

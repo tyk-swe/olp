@@ -1494,6 +1494,7 @@ test('new OIDC configuration leaves the sentinel state and versions later saves'
 
   await page.getByLabel('Client ID').fill('olp-console-v2');
   await page.getByRole('button', { name: 'Save and validate' }).click();
+  await expect.poll(() => saveEtags).toHaveLength(2);
   expect(saveEtags).toEqual([
     undefined,
     '"01980000-0000-7000-8000-000000000451"'

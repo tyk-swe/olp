@@ -267,6 +267,17 @@ async fn independent_pools_reject_without_invoking_saturated_handler() {
         .await
         .unwrap();
     assert_eq!(asset.status(), StatusCode::OK);
+    assert_eq!(admission.admitted("other"), 1);
+    let rejected_asset = app
+        .clone()
+        .oneshot(Request::get("/asset.js").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(rejected_asset.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        rejected_asset.headers()[header::RETRY_AFTER],
+        RETRY_AFTER_SECONDS
+    );
     let rejected = app
         .oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap())
         .await
@@ -287,6 +298,7 @@ async fn independent_pools_reject_without_invoking_saturated_handler() {
         rejection["type"],
         "https://openllmproxy.dev/problems/request_admission_overloaded"
     );
+    drop(asset);
     drop(management_hold);
     drop(inference_hold);
     assert_metrics_zero(&admission);
@@ -366,7 +378,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
 }
 
 #[tokio::test]
-async fn observability_is_independent_while_both_public_pools_are_saturated() {
+async fn observability_is_independent_while_public_pools_are_saturated() {
     let mut state = ApiState::new(
         ApiMode::All,
         None,
@@ -383,6 +395,9 @@ async fn observability_is_independent_while_both_public_pools_are_saturated() {
     let management = admission
         .try_acquire(AdmissionSurface::Management)
         .expect("management permit");
+    let other = admission
+        .try_acquire(AdmissionSurface::Other)
+        .expect("other permit");
 
     let app = observability_router(observability_state);
     let response = app
@@ -409,8 +424,10 @@ async fn observability_is_independent_while_both_public_pools_are_saturated() {
     .unwrap();
     assert!(metrics.contains("olp_http_admitted_requests{surface=\"inference\"} 1"));
     assert!(metrics.contains("olp_http_admitted_requests{surface=\"management\"} 1"));
+    assert!(metrics.contains("olp_http_admitted_requests{surface=\"other\"} 1"));
     drop(inference);
     drop(management);
+    drop(other);
     let response = app
         .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
         .await
@@ -427,13 +444,16 @@ async fn observability_is_independent_while_both_public_pools_are_saturated() {
     .unwrap();
     assert!(metrics.contains("olp_http_admitted_requests{surface=\"inference\"} 0"));
     assert!(metrics.contains("olp_http_admitted_requests{surface=\"management\"} 0"));
+    assert!(metrics.contains("olp_http_admitted_requests{surface=\"other\"} 0"));
     assert_metrics_zero(&admission);
 }
 
 fn assert_metrics_zero(admission: &PublicAdmission) {
     assert_eq!(admission.admitted("inference"), 0);
     assert_eq!(admission.admitted("management"), 0);
+    assert_eq!(admission.admitted("other"), 0);
     let metrics = admission.metrics();
     assert!(metrics.contains("olp_http_admitted_requests{surface=\"inference\"} 0"));
     assert!(metrics.contains("olp_http_admitted_requests{surface=\"management\"} 0"));
+    assert!(metrics.contains("olp_http_admitted_requests{surface=\"other\"} 0"));
 }
