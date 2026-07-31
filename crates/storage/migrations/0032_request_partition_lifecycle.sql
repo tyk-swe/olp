@@ -45,6 +45,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SET search_path = pg_catalog, public
+SET lock_timeout = '2s'
 AS $$
 DECLARE
     month_start timestamptz;
@@ -94,31 +95,35 @@ BEGIN
                  WHERE spill.started_at >= month_start
                    AND spill.started_at < month_end
             ) THEN
-                SET LOCAL lock_timeout = '2s';
-                LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
-                LOCK TABLE public.requests_default IN ACCESS EXCLUSIVE MODE;
-                IF NOT EXISTS (
-                    SELECT 1
-                      FROM public.requests_default spill
-                     WHERE spill.started_at >= month_start
-                       AND spill.started_at < month_end
-                ) THEN
-                    IF to_regclass(format('public.%I', child_name)) IS NOT NULL THEN
-                        RAISE EXCEPTION 'request partition name % already exists', child_name;
-                    END IF;
+                BEGIN
+                    LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
+                    LOCK TABLE public.requests_default IN ACCESS EXCLUSIVE MODE;
+                    IF NOT EXISTS (
+                        SELECT 1
+                          FROM public.requests_default spill
+                         WHERE spill.started_at >= month_start
+                           AND spill.started_at < month_end
+                    ) THEN
+                        IF to_regclass(format('public.%I', child_name)) IS NOT NULL THEN
+                            RAISE EXCEPTION 'request partition name % already exists', child_name;
+                        END IF;
 
-                    EXECUTE format(
-                        'CREATE TABLE public.%I PARTITION OF public.requests '
-                        'FOR VALUES FROM (%L) TO (%L)',
-                        child_name,
-                        month_start,
-                        month_end
-                    );
-                    INSERT INTO public.request_partitions
-                        (partition_start, partition_end, partition_name)
-                    VALUES (month_start, month_end, child_name);
-                    created_count := created_count + 1;
-                END IF;
+                        EXECUTE format(
+                            'CREATE TABLE public.%I PARTITION OF public.requests '
+                            'FOR VALUES FROM (%L) TO (%L)',
+                            child_name,
+                            month_start,
+                            month_end
+                        );
+                        INSERT INTO public.request_partitions
+                            (partition_start, partition_end, partition_name)
+                        VALUES (month_start, month_end, child_name);
+                        created_count := created_count + 1;
+                    END IF;
+                EXCEPTION
+                    WHEN lock_not_available THEN
+                        NULL;
+                END;
             END IF;
         END IF;
         month_start := month_end;
@@ -133,43 +138,47 @@ BEGIN
          ORDER BY registry.partition_start
          LIMIT 3
     LOOP
-        SET LOCAL lock_timeout = '2s';
-        LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
-        EXECUTE format(
-            'LOCK TABLE public.%I IN ACCESS EXCLUSIVE MODE',
-            child.partition_name
-        );
-        -- The parent FK prevents detach while attempts still reference this
-        -- child. Drain them in bounded batches and leave the partition
-        -- attached until a later maintenance tick removes the final batch.
-        EXECUTE format(
-            'DELETE FROM public.attempts attempt WHERE attempt.ctid IN ('
-            'SELECT candidate.ctid FROM public.attempts candidate '
-            'JOIN public.%I request '
-            'ON request.id = candidate.request_id '
-            'AND request.started_at = candidate.request_started_at '
-            'LIMIT 10000 FOR UPDATE OF candidate SKIP LOCKED)',
-            child.partition_name
-        );
-        EXECUTE format(
-            'SELECT EXISTS ('
-            'SELECT 1 FROM public.attempts attempt '
-            'JOIN public.%I request '
-            'ON request.id = attempt.request_id '
-            'AND request.started_at = attempt.request_started_at)',
-            child.partition_name
-        ) INTO child_has_attempts;
-        IF child_has_attempts THEN
-            CONTINUE;
-        END IF;
-        EXECUTE format(
-            'ALTER TABLE public.requests DETACH PARTITION public.%I',
-            child.partition_name
-        );
-        EXECUTE format('DROP TABLE public.%I', child.partition_name);
-        DELETE FROM public.request_partitions registry
-         WHERE registry.partition_start = child.partition_start;
-        dropped_count := dropped_count + 1;
+        BEGIN
+            LOCK TABLE public.requests IN ACCESS EXCLUSIVE MODE;
+            EXECUTE format(
+                'LOCK TABLE public.%I IN ACCESS EXCLUSIVE MODE',
+                child.partition_name
+            );
+            -- The parent FK prevents detach while attempts still reference this
+            -- child. Drain them in bounded batches and leave the partition
+            -- attached until a later maintenance tick removes the final batch.
+            EXECUTE format(
+                'DELETE FROM public.attempts attempt WHERE attempt.ctid IN ('
+                'SELECT candidate.ctid FROM public.attempts candidate '
+                'JOIN public.%I request '
+                'ON request.id = candidate.request_id '
+                'AND request.started_at = candidate.request_started_at '
+                'LIMIT 10000 FOR UPDATE OF candidate SKIP LOCKED)',
+                child.partition_name
+            );
+            EXECUTE format(
+                'SELECT EXISTS ('
+                'SELECT 1 FROM public.attempts attempt '
+                'JOIN public.%I request '
+                'ON request.id = attempt.request_id '
+                'AND request.started_at = attempt.request_started_at)',
+                child.partition_name
+            ) INTO child_has_attempts;
+            IF child_has_attempts THEN
+                CONTINUE;
+            END IF;
+            EXECUTE format(
+                'ALTER TABLE public.requests DETACH PARTITION public.%I',
+                child.partition_name
+            );
+            EXECUTE format('DROP TABLE public.%I', child.partition_name);
+            DELETE FROM public.request_partitions registry
+             WHERE registry.partition_start = child.partition_start;
+            dropped_count := dropped_count + 1;
+        EXCEPTION
+            WHEN lock_not_available THEN
+                NULL;
+        END;
     END LOOP;
 
     RETURN NEXT;

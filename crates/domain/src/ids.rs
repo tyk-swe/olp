@@ -26,6 +26,7 @@ pub fn has_unsafe_display_characters(value: &str) -> bool {
                     | 0xfe00..=0xfe0f
                     | 0xfeff
                     | 0xffa0
+                    | 0xfff0..=0xfffb
                     | 0x1bca0..=0x1bca3
                     | 0x1d173..=0x1d17a
                     | 0xe0000..=0xe0fff
@@ -271,6 +272,11 @@ mod tests {
         assert!(!has_unsafe_display_characters("José 🚀"));
         assert!(has_unsafe_display_characters("safe\u{202e}txt"));
         assert!(has_unsafe_display_characters("look\u{200b}alike"));
+        for character in ['\u{fff0}', '\u{fff5}', '\u{fffb}'] {
+            let label = format!("safe{character}");
+            assert!(has_unsafe_display_characters(&label));
+            assert!(!is_safe_visible_label(&label, 100));
+        }
     }
 
     #[test]

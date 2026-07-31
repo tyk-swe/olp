@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "LOCK TABLE public.requests IN ACCESS SHARE MODE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "cc8d059e1385bb9ea398666b2ac51f92c45952060efe3c13449aa43369c25545"
+}

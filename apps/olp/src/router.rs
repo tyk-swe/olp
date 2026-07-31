@@ -137,7 +137,6 @@ fn compose_public_router(
             .merge(management_api::router())
             .route(MANAGEMENT_API_FALLBACK_PATH, any(api_not_found))
             .layer(middleware::from_fn(normalize_management_rejection))
-            .layer(middleware::from_fn(prevent_management_caching))
             .with_state(state.clone());
         router = router
             .merge(control)
@@ -170,6 +169,7 @@ fn compose_public_router(
             public_admission,
             admit_public_request,
         ))
+        .layer(middleware::from_fn(prevent_management_caching))
         .layer(
             ServiceBuilder::new()
                 .layer(SetSensitiveRequestHeadersLayer::new(
@@ -299,11 +299,14 @@ async fn normalize_management_rejection(
 }
 
 async fn prevent_management_caching(request: Request<Body>, next: middleware::Next) -> Response {
+    let is_management = is_management_path(request.uri().path());
     let mut response = next.run(request).await;
-    response.headers_mut().insert(
-        axum::http::header::CACHE_CONTROL,
-        axum::http::HeaderValue::from_static("no-store, private"),
-    );
+    if is_management {
+        response.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store, private"),
+        );
+    }
     response
 }
 
@@ -498,6 +501,12 @@ mod tests {
                 response.headers().contains_key("content-security-policy"),
                 "{mode:?}",
             );
+            if matches!(mode, crate::ApiMode::Control) {
+                assert_eq!(
+                    response.headers().get(header::CACHE_CONTROL).unwrap(),
+                    HeaderValue::from_static("no-store, private"),
+                );
+            }
             drop(held_response);
         }
     }

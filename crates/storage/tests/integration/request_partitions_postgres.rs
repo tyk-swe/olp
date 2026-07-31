@@ -357,6 +357,40 @@ async fn request_partitions_route_ahead_detect_spill_and_drop_with_attempts() {
     );
 }
 
+#[tokio::test]
+#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+async fn request_partition_maintenance_skips_lock_contention() {
+    let db = olp_storage::test_support::TestDb::create_empty("request_partition_lock").await;
+    let store = db.store(2).await;
+    MIGRATOR.run(store.pool()).await.unwrap();
+
+    let mut blocker = store.pool().begin().await.unwrap();
+    sqlx::query!("LOCK TABLE public.requests IN ACCESS SHARE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    let retention_cutoff = sqlx::query_scalar!(
+        "SELECT min(partition_end) AS \"partition_end!\" FROM request_partitions"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let maintenance = sqlx::query!(
+        "SELECT created_count AS \"created_count!\", \
+                dropped_count AS \"dropped_count!\" \
+           FROM olp_maintain_request_partitions($1, $2)",
+        Utc::now(),
+        retention_cutoff
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(maintenance.created_count, 0);
+    assert_eq!(maintenance.dropped_count, 0);
+    blocker.rollback().await.unwrap();
+}
+
 async fn insert_request(
     pool: &sqlx::PgPool,
     request_id: Uuid,

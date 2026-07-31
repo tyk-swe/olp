@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT min(partition_end) AS \"partition_end!\" FROM request_partitions",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "partition_end!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "32b7b08ff26173bb182521366014949b7762a52984a89e987fae027c0734f92b"
+}
