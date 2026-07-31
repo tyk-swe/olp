@@ -236,7 +236,7 @@ async fn callback_inner(
             "The OIDC login flow is invalid or expired.",
         ));
     }
-    let redirect_uri = callback_url(state)?;
+    let redirect_uri = callback_url(state);
     let client_secret_bytes = master_key
         .open(
             &configuration.encrypted_client_secret,

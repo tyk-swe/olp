@@ -35,7 +35,7 @@ const DISCOVERY_LIMIT: usize = 128 * 1024;
 pub(super) const JWKS_LIMIT: usize = 512 * 1024;
 
 #[derive(Deserialize, ToSchema)]
-pub struct OidcConfigurationRequest {
+pub(super) struct OidcConfigurationRequest {
     pub discovery_url: String,
     /// Issuer identifier configured out-of-band with the identity provider.
     /// Discovery must return this exact value.
@@ -79,13 +79,13 @@ impl fmt::Debug for OidcConfigurationRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct OidcRoleMappingRequest {
+pub(super) struct OidcRoleMappingRequest {
     pub claim_value: String,
     pub role: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct OidcConfigurationResponse {
+pub(super) struct OidcConfigurationResponse {
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
     pub discovery_url: String,
@@ -104,7 +104,7 @@ pub struct OidcConfigurationResponse {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct OidcRoleMappingResponse {
+pub(super) struct OidcRoleMappingResponse {
     pub claim_value: String,
     pub role: String,
 }
@@ -242,23 +242,42 @@ pub(super) async fn put_configuration(
 
     let policy = network_policy(&state);
     validate_issuer(request.issuer.trim(), policy.allow_insecure_test_endpoints)?;
-    let discovery: DiscoveryDocument = policy
-        .get_json(request.discovery_url.trim(), DISCOVERY_LIMIT)
-        .await
-        .map_err(map_discovery_network)?;
-    validate_discovery(&policy, &discovery).await?;
-    if discovery.issuer != request.issuer.trim() {
-        return Err(field_problem(
-            "issuer",
-            "The discovery document issuer does not match the configured issuer.",
-        ));
-    }
-    let jwks: JwkSet = policy
-        .get_json(&discovery.jwks_uri, JWKS_LIMIT)
-        .await
-        .map_err(map_discovery_network)?;
-    validate_jwks(&jwks)?;
-    let token_endpoint_auth_method = choose_token_auth_method(&discovery)?;
+    let (authorization_endpoint, token_endpoint, jwks_uri, token_endpoint_auth_method) =
+        if let Some(existing) = existing
+            .as_ref()
+            .filter(|existing| can_reuse_provider_metadata(&request, existing))
+        {
+            (
+                existing.authorization_endpoint.clone(),
+                existing.token_endpoint.clone(),
+                existing.jwks_uri.clone(),
+                existing.token_endpoint_auth_method.clone(),
+            )
+        } else {
+            let discovery: DiscoveryDocument = policy
+                .get_json(request.discovery_url.trim(), DISCOVERY_LIMIT)
+                .await
+                .map_err(map_discovery_network)?;
+            validate_discovery(&policy, &discovery).await?;
+            if discovery.issuer != request.issuer.trim() {
+                return Err(field_problem(
+                    "issuer",
+                    "The discovery document issuer does not match the configured issuer.",
+                ));
+            }
+            let jwks: JwkSet = policy
+                .get_json(&discovery.jwks_uri, JWKS_LIMIT)
+                .await
+                .map_err(map_discovery_network)?;
+            validate_jwks(&jwks)?;
+            let token_endpoint_auth_method = choose_token_auth_method(&discovery)?;
+            (
+                discovery.authorization_endpoint,
+                discovery.token_endpoint,
+                discovery.jwks_uri,
+                token_endpoint_auth_method,
+            )
+        };
     let scopes = normalized_scopes(&request.scopes)?;
     let default_role = request
         .default_role
@@ -281,9 +300,9 @@ pub(super) async fn put_configuration(
             id,
             discovery_url: request.discovery_url.trim().to_owned(),
             issuer: request.issuer.trim().to_owned(),
-            authorization_endpoint: discovery.authorization_endpoint,
-            token_endpoint: discovery.token_endpoint,
-            jwks_uri: discovery.jwks_uri,
+            authorization_endpoint,
+            token_endpoint,
+            jwks_uri,
             token_endpoint_auth_method,
             client_id: request.client_id.trim().to_owned(),
             encrypted_client_secret,
@@ -306,6 +325,15 @@ pub(super) async fn put_configuration(
         StatusCode::OK
     };
     Ok(response)
+}
+
+fn can_reuse_provider_metadata(
+    request: &OidcConfigurationRequest,
+    existing: &OidcConfiguration,
+) -> bool {
+    !request.enabled
+        && request.discovery_url.trim() == existing.discovery_url
+        && request.issuer.trim() == existing.issuer
 }
 
 async fn validate_discovery(

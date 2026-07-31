@@ -8,8 +8,7 @@ use crate::{
     },
 };
 
-const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
-const REQUEST_METADATA_RECEIPT_DELETE_BATCH: i64 = 250_000;
+const MAINTENANCE_DELETE_BATCH: i64 = 250_000;
 
 #[derive(Debug, Error)]
 pub enum MaintenanceError {
@@ -41,31 +40,18 @@ pub struct MaintenanceReport {
 
 impl PgStore {
     /// Rebuilds completed hourly aggregates before enforcing independent
-    /// metadata, usage, and audit retention. One PostgreSQL advisory lock keeps
-    /// multiple worker replicas from overlapping the same maintenance pass.
+    /// metadata, usage, and audit retention. Each dataset commits one bounded
+    /// batch so replicas can cooperate through `SKIP LOCKED` without one long
+    /// transaction retaining every deleted row until the pass completes.
     pub async fn run_maintenance(
         &self,
         now: DateTime<Utc>,
     ) -> Result<MaintenanceReport, MaintenanceError> {
-        let mut transaction = self.pool().begin().await?;
-        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
-            .fetch_one(&mut *transaction)
-            .await?;
-        let locked: bool = sqlx::query_scalar!(
-            "SELECT pg_try_advisory_xact_lock($1) AS \"value!\"",
-            MAINTENANCE_LOCK_ID
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if !locked {
-            return Ok(MaintenanceReport::default());
-        }
-
         let rows = sqlx::query!(
             "SELECT key, value FROM settings WHERE key IN \
              ('retention.requests_days', 'retention.usage_days', 'retention.audit_days')",
         )
-        .fetch_all(&mut *transaction)
+        .fetch_all(self.pool())
         .await?;
         let mut requests_days = 30_i64;
         let mut usage_days = 90_i64;
@@ -92,20 +78,36 @@ impl PgStore {
         // Delete request metadata before facts, matching ingestion's
         // request -> anchor -> fact lock order. Facts no longer reference the
         // request table, so this does not affect usage retention.
-        let request_rows =
-            sqlx::query!("DELETE FROM requests WHERE started_at < $1", request_cutoff)
-                .execute(&mut *transaction)
-                .await?
-                .rows_affected();
+        let request_rows = sqlx::query!(
+            "WITH expired AS ( \
+               SELECT tableoid, ctid FROM requests \
+               WHERE started_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM requests request USING expired \
+             WHERE request.tableoid = expired.tableoid AND request.ctid = expired.ctid",
+            request_cutoff,
+            MAINTENANCE_DELETE_BATCH
+        )
+        .execute(self.pool())
+        .await?
+        .rows_affected();
 
         // Delete and aggregate the same row set in one statement. This keeps a
         // late stream event out of the delete set until a later pass and makes
         // repeated rollups additive for hours that already contain retained
         // totals.
+        let mut usage_transaction = self.pool().begin().await?;
+        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+            .fetch_one(&mut *usage_transaction)
+            .await?;
         let usage_rollup = sqlx::query!(
-            "WITH expired AS ( \
-               DELETE FROM usage_facts \
+            "WITH selected AS ( \
+               SELECT ctid FROM usage_facts \
                WHERE observed_at < date_trunc('hour', $1::timestamptz) \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ), expired AS ( \
+               DELETE FROM usage_facts fact USING selected \
+               WHERE fact.ctid = selected.ctid \
                RETURNING route_slug, provider_id, upstream_model, operation, surface, \
                          api_key_id, observed_at, input_tokens, output_tokens, \
                          cached_input_tokens, media_units, estimated_cost, unpriced, \
@@ -143,12 +145,14 @@ impl PgStore {
              ) \
              SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", \
                     (SELECT count(*) FROM expired) AS \"usage_rows!\"",
-            usage_cutoff
+            usage_cutoff,
+            MAINTENANCE_DELETE_BATCH
         )
-        .fetch_one(&mut *transaction)
+        .fetch_one(&mut *usage_transaction)
         .await?;
         let rollups = checked_count(usage_rollup.rollup_rows, "usage rollup")?;
         let usage_rows = checked_count(usage_rollup.usage_rows, "usage")?;
+        usage_transaction.commit().await?;
 
         // Lock candidates before deleting them. A concurrent fact insert holds
         // KEY SHARE on its anchor, so SKIP LOCKED leaves that anchor for the
@@ -161,30 +165,45 @@ impl PgStore {
                  SELECT 1 FROM usage_facts fact \
                  WHERE fact.request_id = anchor.request_id \
                    AND fact.request_started_at = anchor.request_started_at \
-               ) \
+               ) LIMIT $2 \
                FOR UPDATE OF anchor SKIP LOCKED \
              ) \
              DELETE FROM usage_request_anchors anchor USING orphan \
              WHERE anchor.request_id = orphan.request_id \
                AND anchor.request_started_at = orphan.request_started_at",
-            request_cutoff
+            request_cutoff,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?;
         let audit_rows = sqlx::query!(
-            "DELETE FROM audit_events WHERE occurred_at < $1",
-            audit_cutoff
+            "WITH expired AS ( \
+               SELECT ctid FROM audit_events \
+               WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM audit_events event USING expired \
+             WHERE event.ctid = expired.ctid",
+            audit_cutoff,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected();
+        let mut gap_transaction = self.pool().begin().await?;
+        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+            .fetch_one(&mut *gap_transaction)
+            .await?;
         let request_metadata_gap_rollup = sqlx::query!(
-            "WITH expired AS ( \
-               DELETE FROM request_metadata_ingestion_gaps \
+            "WITH selected AS ( \
+               SELECT ctid FROM request_metadata_ingestion_gaps \
                WHERE reported_at < $1 \
                  AND (deduplication_key IS NULL OR \
                       reported_at < now() - make_interval( \
                           days => $2::integer, mins => $3::integer)) \
+               LIMIT $4 FOR UPDATE SKIP LOCKED \
+             ), expired AS ( \
+               DELETE FROM request_metadata_ingestion_gaps gap USING selected \
+               WHERE gap.ctid = selected.ctid \
                RETURNING gateway_instance, reason, event_count, certainty, \
                          first_observed_at, last_observed_at \
              ), rolled AS ( \
@@ -209,8 +228,9 @@ impl PgStore {
              ) \
              SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", \
                     (SELECT count(*) FROM expired) AS \"gap_rows!\"",
-        usage_cutoff, REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS, REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES)
-        .fetch_one(&mut *transaction)
+        usage_cutoff, REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS, REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES,
+        MAINTENANCE_DELETE_BATCH)
+        .fetch_one(&mut *gap_transaction)
         .await?;
         let request_metadata_gap_rollup_rows = checked_count(
             request_metadata_gap_rollup.rollup_rows,
@@ -218,13 +238,20 @@ impl PgStore {
         )?;
         let request_metadata_gap_rows =
             checked_count(request_metadata_gap_rollup.gap_rows, "request metadata gap")?;
+        gap_transaction.commit().await?;
         let request_metadata_epoch_rows = sqlx::query!(
-            "DELETE FROM request_metadata_gateway_epochs \
-             WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1) \
-                OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)",
-            usage_cutoff
+            "WITH expired AS ( \
+               SELECT ctid FROM request_metadata_gateway_epochs \
+               WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1) \
+                  OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1) \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM request_metadata_gateway_epochs epoch USING expired \
+             WHERE epoch.ctid = expired.ctid",
+            usage_cutoff,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected();
         let request_metadata_receipt_rows = sqlx::query!(
@@ -238,61 +265,106 @@ impl PgStore {
              WHERE receipt.ctid = expired.ctid",
             REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
             REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES,
-            REQUEST_METADATA_RECEIPT_DELETE_BATCH
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected();
-        let session_rows = sqlx::query!("DELETE FROM sessions WHERE expires_at <= $1", now)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected();
-        let invitation_rows = sqlx::query!(
-            "DELETE FROM invitations WHERE expires_at <= $1 AND accepted_at IS NULL",
-            now
+        let session_rows = sqlx::query!(
+            "WITH expired AS ( \
+               SELECT ctid FROM sessions \
+               WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM sessions session USING expired \
+             WHERE session.ctid = expired.ctid",
+            now,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
+        .await?
+        .rows_affected();
+        let invitation_rows = sqlx::query!(
+            "WITH expired AS ( \
+               SELECT ctid FROM invitations \
+               WHERE expires_at <= $1 AND accepted_at IS NULL \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM invitations invitation USING expired \
+             WHERE invitation.ctid = expired.ctid",
+            now,
+            MAINTENANCE_DELETE_BATCH
+        )
+        .execute(self.pool())
         .await?
         .rows_affected();
         let idempotency_rows = sqlx::query!(
-            "DELETE FROM idempotency_records WHERE expires_at <= $1",
-            now
+            "WITH expired AS ( \
+               SELECT ctid FROM idempotency_records \
+               WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM idempotency_records record USING expired \
+             WHERE record.ctid = expired.ctid",
+            now,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected();
         let oidc_flow_rows = sqlx::query!(
-            "DELETE FROM oidc_authorization_flows WHERE expires_at <= $1",
-            now
+            "WITH expired AS ( \
+               SELECT ctid FROM oidc_authorization_flows \
+               WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM oidc_authorization_flows flow USING expired \
+             WHERE flow.ctid = expired.ctid",
+            now,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected()
             + sqlx::query!(
-                "DELETE FROM oidc_login_flow_consumptions WHERE expires_at <= $1",
-                now
+                "WITH expired AS ( \
+                   SELECT ctid FROM oidc_login_flow_consumptions \
+                   WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED \
+                 ) \
+                 DELETE FROM oidc_login_flow_consumptions consumption USING expired \
+                 WHERE consumption.ctid = expired.ctid",
+                now,
+                MAINTENANCE_DELETE_BATCH
             )
-            .execute(&mut *transaction)
+            .execute(self.pool())
             .await?
             .rows_affected();
         let outbox_rows = sqlx::query!(
-            "DELETE FROM transactional_outbox \
-             WHERE published_at IS NOT NULL AND published_at < $1::timestamptz - interval '7 days'",
-            now
+            "WITH expired AS ( \
+               SELECT ctid FROM transactional_outbox \
+               WHERE published_at IS NOT NULL \
+                 AND published_at < $1::timestamptz - interval '7 days' \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM transactional_outbox event USING expired \
+             WHERE event.ctid = expired.ctid",
+            now,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected();
         let media_job_rows = sqlx::query!(
-            "DELETE FROM async_media_jobs
-             WHERE lifecycle_state = 'deleted' AND deleted_at < $1",
-            request_cutoff
+            "WITH expired AS ( \
+               SELECT ctid FROM async_media_jobs \
+               WHERE lifecycle_state = 'deleted' AND deleted_at < $1 \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ) \
+             DELETE FROM async_media_jobs job USING expired \
+             WHERE job.ctid = expired.ctid",
+            request_cutoff,
+            MAINTENANCE_DELETE_BATCH
         )
-        .execute(&mut *transaction)
+        .execute(self.pool())
         .await?
         .rows_affected();
-
-        transaction.commit().await?;
         Ok(MaintenanceReport {
             rollup_rows: rollups,
             request_metadata_gap_rollup_rows,

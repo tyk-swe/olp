@@ -34,7 +34,7 @@ where
 {
     Router::new()
         .route(
-            "/",
+            "/api/v1/test",
             get(move || {
                 let body = make_body();
                 async { Response::new(body) }
@@ -50,7 +50,7 @@ where
 async fn unary_response_releases_only_after_body_completion() {
     let admission = PublicAdmission::new(1, 1);
     let response = app(admission.clone(), || Body::from("ok"))
-        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -61,13 +61,31 @@ async fn unary_response_releases_only_after_body_completion() {
 }
 
 #[tokio::test]
+async fn console_routes_do_not_consume_management_capacity() {
+    let admission = PublicAdmission::new(1, 1);
+    let app = Router::new()
+        .route("/settings", get(|| async { "console" }))
+        .layer(middleware::from_fn_with_state(
+            PublicAdmissionMiddleware::new(admission.clone(), false),
+            admit_public_request,
+        ));
+
+    let response = app
+        .oneshot(Request::get("/settings").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(admission.admitted("management"), 0);
+}
+
+#[tokio::test]
 async fn handler_execution_is_admitted_and_early_error_body_releases() {
     let admission = PublicAdmission::new(1, 1);
     let entered = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let app = Router::new()
         .route(
-            "/",
+            "/api/v1/test",
             get({
                 let entered = Arc::clone(&entered);
                 let release = Arc::clone(&release);
@@ -86,7 +104,8 @@ async fn handler_execution_is_admitted_and_early_error_body_releases() {
             PublicAdmissionMiddleware::new(admission.clone(), false),
             admit_public_request,
         ));
-    let request = tokio::spawn(app.oneshot(Request::get("/").body(Body::empty()).unwrap()));
+    let request =
+        tokio::spawn(app.oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap()));
     entered.notified().await;
     assert_eq!(admission.admitted("management"), 1);
     release.notify_one();
@@ -103,7 +122,7 @@ async fn cancelling_handler_future_releases_permit() {
     let entered = Arc::new(Notify::new());
     let app = Router::new()
         .route(
-            "/",
+            "/api/v1/test",
             get({
                 let entered = Arc::clone(&entered);
                 move || {
@@ -119,7 +138,8 @@ async fn cancelling_handler_future_releases_permit() {
             PublicAdmissionMiddleware::new(admission.clone(), false),
             admit_public_request,
         ));
-    let request = tokio::spawn(app.oneshot(Request::get("/").body(Body::empty()).unwrap()));
+    let request =
+        tokio::spawn(app.oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap()));
     entered.notified().await;
     assert_eq!(admission.admitted("management"), 1);
     request.abort();
@@ -152,7 +172,7 @@ async fn streaming_body_holds_until_eof_and_drop_releases_unread_body() {
             Ok(Bytes::from_static(b"b")),
         ]))
     })
-    .oneshot(Request::get("/").body(Body::empty()).unwrap())
+    .oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap())
     .await
     .unwrap();
     assert_eq!(admission.admitted("management"), 1);
@@ -162,7 +182,7 @@ async fn streaming_body_holds_until_eof_and_drop_releases_unread_body() {
     assert_eq!(admission.admitted("management"), 0);
 
     let response = app(admission.clone(), || Body::from("unread"))
-        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(admission.admitted("management"), 1);
@@ -179,7 +199,7 @@ async fn dropping_partially_read_body_releases_permit() {
             Ok(Bytes::from_static(b"b")),
         ]))
     })
-    .oneshot(Request::get("/").body(Body::empty()).unwrap())
+    .oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap())
     .await
     .unwrap();
     let mut body = response.into_body();
@@ -200,7 +220,7 @@ async fn terminal_body_error_releases_permit() {
             Err::<Bytes, _>(std::io::Error::other("terminal test error"))
         }))
     })
-    .oneshot(Request::get("/").body(Body::empty()).unwrap())
+    .oneshot(Request::get("/api/v1/test").body(Body::empty()).unwrap())
     .await
     .unwrap();
     assert_eq!(admission.admitted("management"), 1);
@@ -288,7 +308,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
     let admission = PublicAdmission::new(1, 1);
     let app = Router::new()
         .route(
-            "/stream",
+            "/api/v1/stream",
             get(|| async {
                 Response::new(Body::from_stream(stream::pending::<
                     Result<Bytes, Infallible>,
@@ -317,7 +337,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
     let connection = tokio::spawn(connection);
     let first = sender
         .send_request(
-            Request::get("http://localhost/stream")
+            Request::get("http://localhost/api/v1/stream")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -328,7 +348,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
 
     let second = sender
         .send_request(
-            Request::get("http://localhost/stream")
+            Request::get("http://localhost/api/v1/stream")
                 .body(Body::empty())
                 .unwrap(),
         )

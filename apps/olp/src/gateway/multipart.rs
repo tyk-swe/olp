@@ -109,11 +109,17 @@ impl MultipartFormData {
             .transpose()
     }
 
-    pub(super) fn take_repeated(&mut self, name: &str) -> Vec<String> {
-        self.text
-            .remove(name)
-            .or_else(|| self.text.remove(&format!("{name}[]")))
-            .unwrap_or_default()
+    pub(super) fn take_repeated(&mut self, name: &str) -> Result<Vec<String>, InferenceError> {
+        match (
+            self.text.remove(name),
+            self.text.remove(&format!("{name}[]")),
+        ) {
+            (Some(_), Some(_)) => Err(InferenceError::invalid_request(format!(
+                "The {name} and {name}[] fields cannot be mixed."
+            ))),
+            (Some(values), None) | (None, Some(values)) => Ok(values),
+            (None, None) => Ok(Vec::new()),
+        }
     }
 
     pub(super) fn take_single_file(
@@ -131,16 +137,65 @@ impl MultipartFormData {
         Ok(values.pop())
     }
 
-    pub(super) fn take_files_with_prefix(&mut self, prefix: &str) -> Vec<BoundedMediaPart> {
-        let keys = self
+    pub(super) fn take_files_with_prefix(
+        &mut self,
+        prefix: &str,
+    ) -> Result<Vec<BoundedMediaPart>, InferenceError> {
+        let exact = self.files.remove(prefix);
+        let indexed_keys = self
             .files
             .keys()
-            .filter(|name| *name == prefix || name.starts_with(&format!("{prefix}[")))
+            .filter(|name| name.starts_with(&format!("{prefix}[")))
             .cloned()
             .collect::<Vec<_>>();
-        keys.into_iter()
-            .flat_map(|name| self.files.remove(&name).unwrap_or_default())
-            .collect()
+        if exact.is_some() && !indexed_keys.is_empty() {
+            return Err(InferenceError::invalid_request(format!(
+                "The {prefix} file and indexed {prefix} files cannot be mixed."
+            )));
+        }
+        if let Some(files) = exact {
+            return Ok(files);
+        }
+
+        let mut indexed = Vec::with_capacity(indexed_keys.len());
+        for name in indexed_keys {
+            let index = name
+                .strip_prefix(prefix)
+                .and_then(|suffix| suffix.strip_prefix('['))
+                .and_then(|suffix| suffix.strip_suffix(']'))
+                .filter(|index| {
+                    !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+                })
+                .and_then(|index| index.parse::<usize>().ok())
+                .ok_or_else(|| {
+                    InferenceError::invalid_request(format!(
+                        "The {name} file field must use the form {prefix}[0]."
+                    ))
+                })?;
+            let files = self.files.remove(&name).unwrap_or_default();
+            if files.len() != 1 {
+                return Err(InferenceError::invalid_request(format!(
+                    "The {name} file field must appear exactly once."
+                )));
+            }
+            let file = files.into_iter().next().ok_or_else(|| {
+                InferenceError::invalid_request(format!(
+                    "The {name} file field must appear exactly once."
+                ))
+            })?;
+            indexed.push((index, file));
+        }
+        indexed.sort_unstable_by_key(|(index, _)| *index);
+        if indexed
+            .iter()
+            .enumerate()
+            .any(|(expected, (actual, _))| expected != *actual)
+        {
+            return Err(InferenceError::invalid_request(format!(
+                "Indexed {prefix} file fields must be unique and contiguous from {prefix}[0]."
+            )));
+        }
+        Ok(indexed.into_iter().map(|(_, file)| file).collect())
     }
 
     pub(super) fn take_extensions(&mut self) -> Result<BTreeMap<String, Value>, InferenceError> {
@@ -425,5 +480,64 @@ pub(super) fn media_spool_error(error: olp_domain::MediaSpoolError) -> Inference
         olp_domain::MediaSpoolError::NotFound | olp_domain::MediaSpoolError::Unavailable => {
             InferenceError::unavailable("media_spool_unavailable")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn part(index: usize) -> BoundedMediaPart {
+        BoundedMediaPart::new(
+            MediaHandle::new(format!("handle-{index}")),
+            format!("file-{index}"),
+            None,
+            0,
+            1,
+        )
+        .unwrap()
+    }
+
+    fn form() -> MultipartFormData {
+        MultipartFormData::new(
+            crate::media_spool::FileMediaSpool::create().unwrap(),
+            MultipartRequestAdmission::unrestricted(),
+        )
+    }
+
+    #[test]
+    fn repeated_aliases_and_indexed_files_have_one_unambiguous_order() {
+        let mut repeated = form();
+        repeated.text.insert("include".into(), vec!["a".into()]);
+        repeated.text.insert("include[]".into(), vec!["b".into()]);
+        assert!(repeated.take_repeated("include").is_err());
+
+        let mut indexed = form();
+        for index in (0..=10).rev() {
+            indexed
+                .files
+                .insert(format!("image[{index}]"), vec![part(index)]);
+        }
+        let filenames = indexed
+            .take_files_with_prefix("image")
+            .unwrap()
+            .into_iter()
+            .map(|file| file.filename)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            filenames,
+            (0..=10)
+                .map(|index| format!("file-{index}"))
+                .collect::<Vec<_>>()
+        );
+
+        let mut malformed = form();
+        malformed.files.insert("image[evil]".into(), vec![part(0)]);
+        assert!(malformed.take_files_with_prefix("image").is_err());
+
+        let mut duplicate = form();
+        duplicate.files.insert("image[0]".into(), vec![part(0)]);
+        duplicate.files.insert("image[00]".into(), vec![part(1)]);
+        assert!(duplicate.take_files_with_prefix("image").is_err());
     }
 }

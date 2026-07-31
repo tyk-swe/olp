@@ -6,7 +6,7 @@ pub(crate) mod pinned;
 
 /// Returns whether an IP address is safe to use as a public egress target.
 #[must_use]
-pub fn is_public_ip(address: IpAddr) -> bool {
+pub(crate) fn is_public_ip(address: IpAddr) -> bool {
     !is_blocked_ip(address)
 }
 
@@ -23,11 +23,6 @@ fn is_blocked_ipv4(address: Ipv4Addr) -> bool {
         || address.is_loopback()
         || address.is_link_local()
         || address.is_multicast()
-        || address.is_unspecified()
-        || address.is_broadcast()
-        // Current cloud metadata services use link-local space, including
-        // 169.254.169.254. Keep the exact address explicit as defense in depth.
-        || address == Ipv4Addr::new(169, 254, 169, 254)
         // "This network", shared carrier space, benchmarking, documentation,
         // and future/reserved ranges are not public upstream destinations.
         || octets[0] == 0
@@ -45,37 +40,13 @@ fn is_blocked_ipv4(address: Ipv4Addr) -> bool {
 }
 
 fn is_blocked_ipv6(address: Ipv6Addr) -> bool {
-    if let Some(mapped) = address.to_ipv4_mapped() {
-        return is_blocked_ipv4(mapped);
-    }
-    if let Some(compatible) = address.to_ipv4() {
-        return is_blocked_ipv4(compatible);
+    if let Some(ipv4) = address.to_ipv4() {
+        return is_blocked_ipv4(ipv4);
     }
     let segments = address.segments();
-    address.is_loopback()
-        || address.is_unspecified()
-        || address.is_multicast()
-        || address.is_unique_local()
-        || address.is_unicast_link_local()
-        // Only allow the IANA global-unicast allocations below. The remainder
-        // of 2000::/3 is reserved for future allocation and must not become a
-        // fail-open path to an internally routed network.
-        || !is_allocated_global_ipv6(segments)
-        // Deprecated site-local addresses remain non-public even though they
-        // are outside the modern unique-local prefix.
-        || (segments[0] & 0xffc0) == 0xfec0
-        // Translation, discard-only, transition, benchmarking, ORCHID, and
-        // documentation prefixes are not ordinary globally routed endpoints.
-        || (segments[0] == 0x0064
-            && segments[1] == 0xff9b
-            && segments[2..6].iter().all(|part| *part == 0))
-        || (segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 1)
-        || (segments[0] == 0x0100 && segments[1..4].iter().all(|part| *part == 0))
-        || (segments[0] == 0x2001 && segments[1] <= 0x01ff)
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
-        || segments[0] == 0x2002
-        || (segments[0] & 0xfff0) == 0x3ff0
-        || segments[0] == 0x5f00
+    // Only allow known IANA global-unicast allocations, excluding the
+    // documentation prefix within an otherwise allocated block.
+    !is_allocated_global_ipv6(segments) || (segments[0] == 0x2001 && segments[1] == 0x0db8)
 }
 
 fn is_allocated_global_ipv6(segments: [u16; 8]) -> bool {

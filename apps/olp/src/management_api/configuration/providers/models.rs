@@ -527,32 +527,30 @@ pub(crate) async fn certify_provider_model(
     }
     let upstream_model = model.upstream_model;
     let connector = provider_connector(&state, provider_id).await?;
-    let results = stream::iter(model.capabilities.into_iter().map(|capability| {
+    let pairs = stream::iter(model.capabilities.into_iter().map(|capability| {
         let connector = &connector;
         let upstream_model = &upstream_model;
         async move {
-            let tuple = compatible_capability(&capability)?;
+            let tuple = CompatibleCapability {
+                operation: capability.operation,
+                surface: capability.surface,
+                mode: capability.mode,
+            };
             let result = connector.certify_capability(upstream_model, tuple).await;
-            Ok::<_, Problem>(certification_item(capability, result))
+            let item = certification_item(capability, result);
+            let outcome = CapabilityCertificationOutcome {
+                operation: tuple.operation,
+                surface: tuple.surface,
+                mode: tuple.mode,
+                succeeded: item.succeeded,
+            };
+            (item, outcome)
         }
     }))
     .buffered(4)
     .collect::<Vec<_>>()
-    .await
-    .into_iter()
-    .collect::<Result<Vec<_>, _>>()?;
-
-    let outcomes = results
-        .iter()
-        .map(|result| {
-            Ok::<_, Problem>(CapabilityCertificationOutcome {
-                operation: result.operation.parse().map_err(|_| Problem::internal())?,
-                surface: result.surface.parse().map_err(|_| Problem::internal())?,
-                mode: result.mode.parse().map_err(|_| Problem::internal())?,
-                succeeded: result.succeeded,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    .await;
+    let (results, outcomes): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
     let applied = store
         .apply_compatible_capability_certification(
             provider_id,
@@ -582,14 +580,6 @@ pub(crate) async fn certify_provider_model(
         }),
         applied.etag,
     )
-}
-
-fn compatible_capability(capability: &CapabilityRecord) -> Result<CompatibleCapability, Problem> {
-    Ok(CompatibleCapability {
-        operation: capability.operation,
-        surface: capability.surface,
-        mode: capability.mode,
-    })
 }
 
 pub(crate) fn certification_item(

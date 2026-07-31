@@ -430,6 +430,8 @@ mod tests {
         let responses_body = concat!(
             "event: response.created\n",
             "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_cert\",\"model\":\"compatible-model\"}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"msg_cert\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n",
             "event: response.output_text.delta\n",
             "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"OK\"}\n\n",
             "event: response.completed\n",

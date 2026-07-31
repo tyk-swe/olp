@@ -24,7 +24,7 @@ export function popCursor(state: CursorHistory) {
   state.history = state.history.slice(0, -1);
 }
 
-const MAX_COLLECTED_ITEMS = 10_000;
+const MAX_COLLECTED_ITEMS = 1_000;
 
 export async function collectCursorPages<T>(
   load: (cursor?: string) => Promise<CursorPage<T>>
@@ -34,15 +34,16 @@ export async function collectCursorPages<T>(
   let cursor: string | undefined;
   do {
     const page = await load(cursor);
-    items.push(...page.items);
-    if (items.length > MAX_COLLECTED_ITEMS) {
+    const next = page.nextCursor ?? undefined;
+    const collected = items.length + page.items.length;
+    if (collected > MAX_COLLECTED_ITEMS || (collected === MAX_COLLECTED_ITEMS && next)) {
       throw new ApiProblem({
         type: 'urn:olp:problem:pagination-limit-exceeded',
         title: 'The control API collection exceeds the console safety limit',
         status: 502
       });
     }
-    const next = page.nextCursor ?? undefined;
+    items.push(...page.items);
     if (!next) break;
     if (seen.has(next)) {
       throw new ApiProblem({

@@ -81,6 +81,8 @@ fn optional_u64(value: Option<&Value>) -> Option<Option<u64>> {
 
 pub struct SseDecoder {
     buffer: BytesMut,
+    pending_cr: bool,
+    at_stream_start: bool,
     event: Option<String>,
     data_lines: Vec<String>,
     has_data: bool,
@@ -115,6 +117,8 @@ impl SseDecoder {
     pub fn new(max_event_bytes: usize) -> Self {
         Self {
             buffer: BytesMut::new(),
+            pending_cr: false,
+            at_stream_start: true,
             event: None,
             data_lines: Vec::new(),
             has_data: false,
@@ -129,17 +133,47 @@ impl SseDecoder {
         let mut frames = Vec::new();
         let mut remaining = chunk;
 
-        while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
-            let line_size = self.buffer.len().saturating_add(newline);
-            self.check_additional(line_size.saturating_add(1))?;
-            self.buffer.extend_from_slice(&remaining[..newline]);
-            let mut line = self.buffer.split();
-            if line.last() == Some(&b'\r') {
-                line.truncate(line.len() - 1);
-            }
-            self.pending_bytes = self.pending_bytes.saturating_add(line_size + 1);
+        if self.pending_cr && !remaining.is_empty() {
+            let terminator_bytes = 1 + usize::from(remaining[0] == b'\n');
+            let line_size = self.buffer.len();
+            self.check_additional(line_size.saturating_add(terminator_bytes))?;
+            let line = self.buffer.split();
+            self.pending_bytes = self
+                .pending_bytes
+                .saturating_add(line_size + terminator_bytes);
+            self.pending_cr = false;
             self.process_line(&line, &mut frames)?;
-            remaining = &remaining[newline + 1..];
+            remaining = &remaining[terminator_bytes - 1..];
+        }
+
+        while let Some(line_end) = remaining
+            .iter()
+            .position(|byte| matches!(*byte, b'\r' | b'\n'))
+        {
+            if remaining[line_end] == b'\r' && line_end + 1 == remaining.len() {
+                self.check_additional(
+                    self.buffer.len().saturating_add(line_end).saturating_add(1),
+                )?;
+                self.buffer.extend_from_slice(&remaining[..line_end]);
+                self.pending_cr = true;
+                remaining = &[];
+                break;
+            }
+            let terminator_bytes =
+                if remaining[line_end] == b'\r' && remaining.get(line_end + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
+            let line_size = self.buffer.len().saturating_add(line_end);
+            self.check_additional(line_size.saturating_add(terminator_bytes))?;
+            self.buffer.extend_from_slice(&remaining[..line_end]);
+            let line = self.buffer.split();
+            self.pending_bytes = self
+                .pending_bytes
+                .saturating_add(line_size + terminator_bytes);
+            self.process_line(&line, &mut frames)?;
+            remaining = &remaining[line_end + terminator_bytes..];
         }
 
         self.check_additional(self.buffer.len().saturating_add(remaining.len()))?;
@@ -149,15 +183,23 @@ impl SseDecoder {
 
     pub fn finish(&mut self) -> Result<Vec<SseFrame>, SseDecodeError> {
         let mut frames = Vec::new();
-        if !self.buffer.is_empty() {
-            self.check_additional(self.buffer.len())?;
-            self.pending_bytes = self.pending_bytes.saturating_add(self.buffer.len());
+        if self.pending_cr {
+            self.check_additional(self.buffer.len().saturating_add(1))?;
+            self.pending_bytes = self
+                .pending_bytes
+                .saturating_add(self.buffer.len().saturating_add(1));
             let line = self.buffer.split().freeze();
             self.process_line(&line, &mut frames)?;
+            self.pending_cr = false;
         }
-        if let Some(frame) = self.dispatch() {
-            frames.push(frame);
-        }
+        // The SSE algorithm discards an event that was not terminated by a
+        // blank line before EOF.
+        self.buffer.clear();
+        self.event = None;
+        self.data_lines.clear();
+        self.has_data = false;
+        self.retry_ms = None;
+        self.pending_bytes = 0;
         Ok(frames)
     }
 
@@ -166,6 +208,12 @@ impl SseDecoder {
         line: &[u8],
         frames: &mut Vec<SseFrame>,
     ) -> Result<(), SseDecodeError> {
+        let line = if self.at_stream_start {
+            self.at_stream_start = false;
+            line.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(line)
+        } else {
+            line
+        };
         if line.is_empty() {
             if let Some(frame) = self.dispatch() {
                 frames.push(frame);
@@ -183,14 +231,16 @@ impl SseDecoder {
         }
 
         match field {
-            "event" => self.event = Some(value.to_owned()),
+            "event" => self.event = (!value.is_empty()).then(|| value.to_owned()),
             "data" => {
                 self.has_data = true;
                 self.data_lines.push(value.to_owned());
             }
             "id" if !value.contains('\0') => self.last_event_id = Some(value.to_owned()),
             "retry" if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
-                self.retry_ms = value.parse().ok();
+                if let Ok(retry_ms) = value.parse() {
+                    self.retry_ms = Some(retry_ms);
+                }
             }
             _ => {}
         }

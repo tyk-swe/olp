@@ -11,7 +11,7 @@ pub(crate) mod common;
 pub(crate) mod providers;
 mod routes;
 
-pub fn router() -> Router<ManagementState> {
+pub(super) fn router() -> Router<ManagementState> {
     Router::new()
         .route(
             "/api/v1/provider-kinds",
@@ -266,7 +266,7 @@ pub fn router() -> Router<ManagementState> {
         (name = "api-keys")
     )
 )]
-pub struct ConfigurationApiDoc;
+pub(super) struct ConfigurationApiDoc;
 
 #[cfg(test)]
 mod tests;

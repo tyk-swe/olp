@@ -44,6 +44,7 @@ function boundary(loadSession: (signal: AbortSignal) => Promise<AuthenticatedSes
 afterEach(() => {
   clearCsrfToken();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe('authentication lifecycle', () => {
@@ -90,11 +91,16 @@ describe('authentication lifecycle', () => {
       cancelQueries,
       clear: vi.fn()
     } as unknown as QueryClient);
-    const registeredBoundary = boundary(async () => session());
+    const registeredBoundary = boundary(async () => {
+      throw { problem: { status: 401 } };
+    });
     lifecycle.registerBoundary(registeredBoundary);
     lifecycle.establishSession(session('csrf-old'));
 
-    const transition = lifecycle.principalInvalidated();
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/providers')
+    );
+    const transition = lifecycle.handleResponse(request, new Response(null, { status: 401 }));
     await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
     const authenticated = lifecycle.authenticate(async () => session('csrf-new'));
 
@@ -108,35 +114,6 @@ describe('authentication lifecycle', () => {
       user: session().user
     });
     expect(getCsrfToken()).toBe('csrf-new');
-  });
-
-  it('does not let an obsolete transition clear a newer transition handle', async () => {
-    const lifecycle = new AuthenticationLifecycle();
-    const firstCancellation = deferred<void>();
-    const secondCancellation = deferred<void>();
-    const cancelQueries = vi
-      .fn<() => Promise<void>>()
-      .mockImplementationOnce(async () => firstCancellation.promise)
-      .mockImplementationOnce(async () => secondCancellation.promise);
-    lifecycle.attachQueryClient({
-      cancelQueries,
-      clear: vi.fn()
-    } as unknown as QueryClient);
-    lifecycle.registerBoundary(boundary(async () => session()));
-
-    const firstTransition = lifecycle.principalInvalidated();
-    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
-    lifecycle.registerBoundary(boundary(async () => session()));
-    const secondTransition = lifecycle.principalInvalidated();
-    await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledTimes(2));
-
-    firstCancellation.resolve(undefined);
-    await firstTransition;
-    const coalescedTransition = lifecycle.principalInvalidated();
-
-    expect(cancelQueries).toHaveBeenCalledTimes(2);
-    secondCancellation.resolve(undefined);
-    await Promise.all([secondTransition, coalescedTransition]);
   });
 
   it('does not establish a validation result superseded during cache clearing', async () => {
@@ -368,6 +345,61 @@ describe('authentication lifecycle', () => {
     );
 
     expect(getCsrfToken()).toBe('csrf-rotated');
+  });
+
+  it('revalidates authorization rejections', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const loadSession = vi.fn(async () => session('csrf-recovered'));
+    lifecycle.registerBoundary(boundary(loadSession));
+    lifecycle.establishSession(session('csrf-stale'));
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+    );
+
+    await lifecycle.handleResponse(
+      request,
+      new Response(JSON.stringify({ type: 'https://openllmproxy.dev/problems/forbidden' }), {
+        status: 403
+      })
+    );
+
+    expect(loadSession).toHaveBeenCalledOnce();
+    expect(getCsrfToken()).toBe('csrf-recovered');
+  });
+
+  it('gates and refreshes principal-scoped state after another tab changes the session', async () => {
+    const channels: FakeChannel[] = [];
+    class FakeChannel extends EventTarget {
+      postMessage = vi.fn();
+      close = vi.fn();
+
+      constructor() {
+        super();
+        channels.push(this);
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeChannel);
+    const lifecycle = new AuthenticationLifecycle();
+    const nextSession = sessionFor('second-principal', 'csrf-second');
+    lifecycle.registerBoundary(boundary(async () => nextSession));
+    lifecycle.establishSession(sessionFor('first-principal', 'csrf-first'));
+    const cancelQueries = vi.fn(async () => undefined);
+    const clear = vi.fn();
+    lifecycle.attachQueryClient({ cancelQueries, clear } as unknown as QueryClient);
+    const detach = lifecycle.attachCrossTabSync();
+    const channel = channels[0]!;
+
+    channel.dispatchEvent(new Event('message'));
+
+    expect(lifecycle.snapshot().phase).toBe('checking');
+    await vi.waitFor(() => expect(lifecycle.snapshot().user).toEqual(nextSession.user));
+    expect(cancelQueries).toHaveBeenCalledOnce();
+    expect(clear).toHaveBeenCalledOnce();
+    expect(getCsrfToken()).toBe('csrf-second');
+    expect(channel.postMessage).toHaveBeenCalledOnce();
+
+    detach();
+    expect(channel.close).toHaveBeenCalledOnce();
   });
 
   it('ignores a CSRF rotation from a superseded authentication generation', async () => {

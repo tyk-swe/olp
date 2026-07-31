@@ -2,6 +2,17 @@
 {{- $root := . -}}
 {{- $gatewayService := include "olp.observabilityServiceFullname" (dict "root" . "component" "gateway") -}}
 {{- $controlService := include "olp.observabilityServiceFullname" (dict "root" . "component" "control") -}}
+{{- $readinessChecks := list -}}
+{{- if and .Values.gateway.enabled .Values.gateway.service.enabled -}}
+{{- $readinessChecks = append $readinessChecks (printf "(min_over_time(olp_ready{namespace=%q,service=%q}[5m]) < 1)" .Release.Namespace $gatewayService) -}}
+{{- $readinessChecks = append $readinessChecks (printf "(min_over_time(up{namespace=%q,service=%q}[5m]) < 1)" .Release.Namespace $gatewayService) -}}
+{{- $readinessChecks = append $readinessChecks (printf "(absent_over_time(olp_ready{namespace=%q,service=%q}[5m]) == 1)" .Release.Namespace $gatewayService) -}}
+{{- end -}}
+{{- if and .Values.control.enabled .Values.control.service.enabled -}}
+{{- $readinessChecks = append $readinessChecks (printf "(min_over_time(olp_ready{namespace=%q,service=%q}[5m]) < 1)" .Release.Namespace $controlService) -}}
+{{- $readinessChecks = append $readinessChecks (printf "(min_over_time(up{namespace=%q,service=%q}[5m]) < 1)" .Release.Namespace $controlService) -}}
+{{- $readinessChecks = append $readinessChecks (printf "(absent_over_time(olp_ready{namespace=%q,service=%q}[5m]) == 1)" .Release.Namespace $controlService) -}}
+{{- end -}}
 {{- range $componentName := list "gateway" "control" -}}
 {{- $component := index $root.Values $componentName -}}
 {{- if and $component.enabled $component.service.enabled }}
@@ -51,13 +62,15 @@ spec:
   groups:
     - name: openllmproxy.rules
       rules:
+        {{- if $readinessChecks }}
         - alert: OLPReadinessAbsent
-          expr: (min_over_time(olp_ready{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}}[5m]) < 1) or (min_over_time(olp_ready{namespace={{ .Release.Namespace | quote }},service={{ $controlService | quote }}}[5m]) < 1) or (min_over_time(up{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}}[5m]) < 1) or (min_over_time(up{namespace={{ .Release.Namespace | quote }},service={{ $controlService | quote }}}[5m]) < 1) or (absent_over_time(olp_ready{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}}[5m]) == 1) or (absent_over_time(olp_ready{namespace={{ .Release.Namespace | quote }},service={{ $controlService | quote }}}[5m]) == 1)
+          expr: {{ join " or " $readinessChecks }}
           for: 5m
           labels: { severity: critical }
           annotations:
             summary: OpenLLMProxy readiness is absent
-            description: A gateway or control target has been unready or unavailable for five minutes.
+            description: An enabled gateway or control target has been unready or unavailable for five minutes.
+        {{- end }}
         - alert: OLPRequestMetadataEventsDropped
           expr: increase(olp_request_metadata_events_dropped_total[5m]) > 0
           for: 0m
@@ -71,7 +84,7 @@ spec:
           labels: { severity: critical }
           annotations:
             summary: OpenLLMProxy abandoned accepted metadata events
-            description: A shutdown or writer failure abandoned accepted events and requires reconciliation.
+            description: Stream capacity, shutdown, or writer failure abandoned accepted events and requires reconciliation.
         - alert: OLPRequestMetadataPersistenceUnavailable
           expr: min_over_time(olp_request_metadata_persistence_available[5m]) == 0
           for: 5m

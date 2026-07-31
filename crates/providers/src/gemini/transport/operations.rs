@@ -18,6 +18,7 @@ use tokio::time::{Instant, timeout};
 
 use super::errors::*;
 use super::media::hydrate_gemini_contents;
+use crate::gemini::endpoint::validate_model_name;
 use crate::gemini::{BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey};
 use crate::transport_io::{ProviderResponseIo, bounded_duration};
 
@@ -31,6 +32,7 @@ pub fn validate_operation(
     operation: &Operation,
     upstream_model: &str,
 ) -> Result<(), TransportError> {
+    validate_model_name(upstream_model).map_err(|error| protocol_error(error.to_string()))?;
     match operation {
         Operation::Generation(generation) => encode_generate_content_request(generation)
             .map(|_| ())
@@ -444,6 +446,8 @@ impl GeminiConnector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let retry_after =
+            crate::transport_common::rate_limit_retry_after(status, response.headers());
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(
@@ -467,7 +471,9 @@ impl GeminiConnector {
         } else {
             AttemptFailureClass::UpstreamClient
         };
-        transport_error(TransportPhase::FirstByte, class, false, message)
+        let mut error = transport_error(TransportPhase::FirstByte, class, false, message);
+        error.retry_after = retry_after;
+        error
     }
 
     async fn insert_authentication_header(

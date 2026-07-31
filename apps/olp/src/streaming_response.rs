@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::Infallible};
+use std::{collections::VecDeque, io};
 
 use axum::{
     body::{Body, Bytes},
@@ -20,7 +20,6 @@ pub(crate) fn encode_server_sse_frame(frame: &SseFrame) -> Bytes {
 }
 
 const STREAM_BUFFER_CAPACITY: usize = 32;
-const MAX_TERMINAL_FRAMES: usize = 2;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum StreamSendFailure {
@@ -59,10 +58,6 @@ impl TerminalFrames {
     }
 
     pub(crate) fn new(frames: Vec<Bytes>) -> Self {
-        assert!(
-            frames.len() <= MAX_TERMINAL_FRAMES,
-            "terminal SSE tails are limited to two frames"
-        );
         Self { frames }
     }
 
@@ -72,7 +67,7 @@ impl TerminalFrames {
 }
 
 pub(crate) struct SseResponseWriter {
-    ordinary: tokio::sync::mpsc::Sender<Result<Bytes, Infallible>>,
+    ordinary: tokio::sync::mpsc::Sender<Result<Bytes, io::Error>>,
     terminal: Option<tokio::sync::oneshot::Sender<TerminalFrames>>,
 }
 
@@ -106,6 +101,10 @@ impl SseResponseWriter {
 
     pub(crate) async fn closed(&self) {
         self.ordinary.closed().await;
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.ordinary.is_closed()
     }
 
     pub(crate) fn finish(mut self, terminal: TerminalFrames) -> StreamFinishOutcome {
@@ -147,7 +146,7 @@ impl SseResponseWriter {
 
 enum SseBodyState {
     Ordinary {
-        receiver: tokio::sync::mpsc::Receiver<Result<Bytes, Infallible>>,
+        receiver: tokio::sync::mpsc::Receiver<Result<Bytes, io::Error>>,
         terminal: tokio::sync::oneshot::Receiver<TerminalFrames>,
     },
     Terminal(VecDeque<Bytes>),
@@ -174,7 +173,13 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
                     if let Some(item) = receiver.recv().await {
                         Some((item, SseBodyState::Ordinary { receiver, terminal }))
                     } else {
-                        let mut frames = terminal.await.unwrap_or_default().into_queue();
+                        let Ok(terminal) = terminal.await else {
+                            return Some((
+                                Err(io::Error::other("SSE producer stopped before finalization")),
+                                SseBodyState::Terminal(VecDeque::new()),
+                            ));
+                        };
+                        let mut frames = terminal.into_queue();
                         frames
                             .pop_front()
                             .map(|frame| (Ok(frame), SseBodyState::Terminal(frames)))
@@ -284,11 +289,15 @@ where
                 "The provider stream ended without a terminal event.",
             ));
         }
+        drop(events);
+        accounting.release_lease().await;
+        if failure.is_none() && writer.is_closed() {
+            failure = Some(InferenceError::client_cancelled());
+        }
+        accounting.finish(failure.as_ref()).await;
         writer.finish_stream(terminal, &mut failure, |error| {
             TerminalFrames::one(encoder.encode_error(error))
         });
-        drop(events);
-        accounting.finish(failure.as_ref()).await;
     });
     response
 }
@@ -447,6 +456,7 @@ mod tests {
             tokio::time::Instant::now() + Duration::from_secs(60),
         );
         drop(response);
+        assert!(writer.is_closed());
         assert_eq!(send.await, Err(StreamSendFailure::ClientClosed));
     }
 
@@ -471,9 +481,11 @@ mod tests {
         );
     }
 
-    #[test]
-    #[should_panic(expected = "terminal SSE tails are limited to two frames")]
-    fn terminal_tail_is_count_bounded() {
-        let _ = TerminalFrames::new(vec![Bytes::new(), Bytes::new(), Bytes::new()]);
+    #[tokio::test]
+    async fn dropped_writer_fails_the_response_body() {
+        let (writer, response) = sse_stream_with_capacity(1);
+        drop(writer);
+
+        assert!(response.into_body().collect().await.is_err());
     }
 }

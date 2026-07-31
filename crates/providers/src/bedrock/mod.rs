@@ -16,7 +16,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use zeroize::Zeroize;
 
-pub use transport::BedrockConnector;
+pub(crate) use transport::BedrockConnector;
 
 /// Validates that a canonical operation can be encoded by Bedrock without
 /// making an AWS request or loading credentials. The gateway uses this before
@@ -30,6 +30,7 @@ pub fn validate_operation(operation: &Operation) -> Result<(), TransportError> {
             phase: olp_domain::TransportPhase::Connect,
             class: olp_domain::AttemptFailureClass::Protocol,
             response_committed: false,
+            retry_after: None,
             message: "Bedrock does not represent this canonical operation".to_owned(),
         }),
     }
@@ -41,15 +42,15 @@ const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_STATIC_CREDENTIAL_DOCUMENT_BYTES: usize = 16 * 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ConnectorTimeouts {
+pub(crate) struct ConnectorTimeouts {
     /// DNS/TCP/TLS connection bound applied by the AWS SDK HTTP client.
-    pub connect: Duration,
+    pub(crate) connect: Duration,
     /// Response-setup bound for streaming calls. Buffered unary SDK calls do
     /// not expose a separate first-body-byte phase and use the total attempt.
-    pub first_byte: Duration,
+    pub(crate) first_byte: Duration,
     /// Resetting event idle bound for streams and SDK socket-read bound for
     /// buffered unary calls.
-    pub idle: Duration,
+    pub(crate) idle: Duration,
 }
 
 impl Default for ConnectorTimeouts {
@@ -63,14 +64,14 @@ impl Default for ConnectorTimeouts {
 }
 
 #[derive(Clone, Debug)]
-pub struct ConnectorConfig {
+pub(crate) struct ConnectorConfig {
     region: String,
     timeouts: ConnectorTimeouts,
     endpoint_url: Option<String>,
 }
 
 impl ConnectorConfig {
-    pub fn new(region: impl Into<String>) -> Result<Self, ConfigError> {
+    pub(crate) fn new(region: impl Into<String>) -> Result<Self, ConfigError> {
         let region = region.into();
         validate_region(&region)?;
         Ok(Self {
@@ -81,7 +82,10 @@ impl ConnectorConfig {
     }
 
     #[cfg(test)]
-    pub fn with_timeouts(mut self, timeouts: ConnectorTimeouts) -> Result<Self, ConfigError> {
+    pub(crate) fn with_timeouts(
+        mut self,
+        timeouts: ConnectorTimeouts,
+    ) -> Result<Self, ConfigError> {
         validate_timeouts(timeouts)?;
         self.timeouts = timeouts;
         Ok(self)
@@ -92,7 +96,7 @@ impl ConnectorConfig {
     /// Production provider drafts do not expose this setting. It exists for
     /// connector conformance tests only.
     #[cfg(test)]
-    pub fn with_endpoint_url(
+    pub(crate) fn with_endpoint_url(
         mut self,
         endpoint_url: impl Into<String>,
     ) -> Result<Self, ConfigError> {
@@ -128,7 +132,7 @@ impl Drop for StaticCredentialDocument {
 }
 
 /// Credential selection for an installed Bedrock provider.
-pub enum BedrockCredentials {
+pub(crate) enum BedrockCredentials {
     /// AWS environment/shared-profile/web-identity/container/instance chain.
     DefaultChain,
     /// An encrypted-at-rest JSON document decoded only while installing the
@@ -145,14 +149,14 @@ impl fmt::Debug for BedrockCredentials {
     }
 }
 
-pub struct StaticCredentials {
+pub(crate) struct StaticCredentials {
     access_key_id: String,
     secret_access_key: String,
     session_token: Option<String>,
 }
 
 impl StaticCredentials {
-    pub fn from_json(value: impl AsRef<[u8]>) -> Result<Self, CredentialError> {
+    pub(crate) fn from_json(value: impl AsRef<[u8]>) -> Result<Self, CredentialError> {
         let value = value.as_ref();
         if value.len() > MAX_STATIC_CREDENTIAL_DOCUMENT_BYTES {
             return Err(CredentialError::InvalidDocument);
@@ -197,7 +201,7 @@ impl fmt::Debug for StaticCredentials {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     #[error("AWS region is invalid")]
     InvalidRegion,
     #[cfg(test)]
@@ -209,7 +213,7 @@ pub enum ConfigError {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum CredentialError {
+pub(crate) enum CredentialError {
     #[error("static AWS credentials must be a bounded JSON object")]
     InvalidDocument,
     #[error("static AWS credential component is invalid")]

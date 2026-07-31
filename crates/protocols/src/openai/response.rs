@@ -308,11 +308,6 @@ impl OpenAiChatStreamDecoder {
         Ok(events)
     }
 
-    #[must_use]
-    pub const fn is_done(&self) -> bool {
-        self.done
-    }
-
     fn decode_frames(
         &mut self,
         frames: Vec<SseFrame>,

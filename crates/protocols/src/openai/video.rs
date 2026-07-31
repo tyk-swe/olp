@@ -14,8 +14,16 @@ use thiserror::Error;
 use super::extensions::{apply_pointer_extensions, collect_extra};
 use super::media::{BinaryMediaBody, BoundedMediaPart};
 
-pub const MAX_VIDEO_PROMPT_LENGTH: usize = 32_000;
+const MAX_VIDEO_PROMPT_LENGTH: usize = 32_000;
 pub const DEFAULT_VIDEO_REFERENCE_LIMIT: u64 = 20 * 1024 * 1024;
+
+pub fn is_valid_video_job_id(job_id: &str) -> bool {
+    !job_id.is_empty()
+        && job_id.len() <= 1_024
+        && !matches!(job_id, "." | "..")
+        && job_id.trim() == job_id
+        && !job_id.chars().any(char::is_control)
+}
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiVideoCreateRequest {
@@ -157,10 +165,6 @@ pub fn decode_video_get(job_id: impl Into<String>) -> Operation {
     video_job_operation(job_id.into(), VideoJobKind::Get)
 }
 
-pub fn decode_video_content(job_id: impl Into<String>) -> Operation {
-    video_job_operation(job_id.into(), VideoJobKind::Content)
-}
-
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiVideoContentQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,7 +202,6 @@ pub fn decode_video_delete(job_id: impl Into<String>) -> Operation {
 
 enum VideoJobKind {
     Get,
-    Content,
     Delete,
 }
 
@@ -210,7 +213,6 @@ fn video_job_operation(job_id: String, kind: VideoJobKind) -> Operation {
     };
     Operation::Video(match kind {
         VideoJobKind::Get => VideoOperation::Get(request),
-        VideoJobKind::Content => VideoOperation::Content(request),
         VideoJobKind::Delete => VideoOperation::Delete(request),
     })
 }
@@ -255,6 +257,10 @@ pub fn decode_video_object(video: OpenAiVideoObject) -> Result<VideoJobResult, V
     if video.object != "video" {
         return Err(VideoCodecError::UnexpectedObject(video.object));
     }
+    if !is_valid_video_job_id(&video.id) {
+        return Err(VideoCodecError::InvalidJobId);
+    }
+    validate_progress(video.progress)?;
     let status = match video.status.as_str() {
         "queued" => VideoStatus::Queued,
         "in_progress" => VideoStatus::InProgress,
@@ -297,6 +303,10 @@ pub fn encode_video_object(
     client_model: &str,
 ) -> Result<OpenAiVideoObject, VideoCodecError> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
+    if !is_valid_video_job_id(&result.id) {
+        return Err(VideoCodecError::InvalidJobId);
+    }
+    validate_progress(result.progress_percent)?;
     let status = match &result.status {
         VideoStatus::Queued => "queued",
         VideoStatus::InProgress => "in_progress",
@@ -313,7 +323,7 @@ pub fn encode_video_object(
         message: error.message.clone(),
         extra: BTreeMap::new(),
     });
-    apply_pointer_extensions(
+    let response = apply_pointer_extensions(
         OpenAiVideoObject {
             id: result.id.clone(),
             object: "video".into(),
@@ -334,7 +344,9 @@ pub fn encode_video_object(
         },
         &result.extensions.values,
     )
-    .map_err(VideoCodecError::InvalidExtension)
+    .map_err(VideoCodecError::InvalidExtension)?;
+    validate_progress(response.progress)?;
+    Ok(response)
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -404,18 +416,6 @@ pub fn decode_video_content_body(body: BinaryMediaBody) -> VideoContentResult {
     }
 }
 
-pub fn encode_video_content_body(
-    result: &VideoContentResult,
-) -> Result<BinaryMediaBody, VideoCodecError> {
-    result.extensions.ensure_representable_on(Surface::OpenAi)?;
-    if !result.extensions.values.is_empty() {
-        return Err(VideoCodecError::BinaryExtensionsUnsupported);
-    }
-    Ok(BinaryMediaBody {
-        media: result.media.clone(),
-    })
-}
-
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiVideoDeleteResponse {
     pub id: String,
@@ -476,6 +476,13 @@ fn validate_size(value: Option<&str>) -> Result<(), VideoCodecError> {
     Ok(())
 }
 
+fn validate_progress(value: Option<f32>) -> Result<(), VideoCodecError> {
+    if value.is_some_and(|value| !value.is_finite() || !(0.0..=100.0).contains(&value)) {
+        return Err(VideoCodecError::InvalidProgress);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum VideoCodecError {
     #[error(transparent)]
@@ -496,6 +503,10 @@ pub enum VideoCodecError {
     InvalidOrder,
     #[error("video content variant must be video, thumbnail, or spritesheet")]
     InvalidContentVariant,
+    #[error("video job ID must be a bounded, non-control opaque value")]
+    InvalidJobId,
+    #[error("video progress must be a finite percentage from 0 through 100")]
+    InvalidProgress,
     #[error("a provider route cannot be encoded in the OpenAI video list query")]
     RouteCannotBeEncoded,
     #[error("unexpected OpenAI object type: {0}")]
@@ -504,6 +515,4 @@ pub enum VideoCodecError {
     InvalidExtension(String),
     #[error("bounded reference staging failed: {0}")]
     Staging(String),
-    #[error("binary video extensions require an HTTP header representation")]
-    BinaryExtensionsUnsupported,
 }

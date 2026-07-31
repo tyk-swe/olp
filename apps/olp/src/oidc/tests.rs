@@ -271,7 +271,7 @@ async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
         "https://console.example.test",
         std::path::PathBuf::from("missing-console"),
     );
-    let response = crate::router::management_router_for_test(state)
+    let response = crate::public_router(state)
         .oneshot(
             axum::http::Request::get("/api/v1/oidc/callback?code=one&code=two")
                 .header(header::COOKIE, format!("{LOGIN_FLOW_COOKIE}=opaque"))
@@ -305,7 +305,7 @@ async fn callback_clears_the_matching_scoped_cookie_when_query_extraction_fails(
     let state_value = OidcCallbackState::encode(flow_id, &"a".repeat(43));
     let flow_cookie = flow_cookie_name(OidcFlowPurpose::Login, flow_id);
     let other_flow_cookie = flow_cookie_name(OidcFlowPurpose::Login, other_flow_id);
-    let response = crate::router::management_router_for_test(state)
+    let response = crate::public_router(state)
         .oneshot(
             axum::http::Request::get(format!(
                 "/api/v1/oidc/callback?state={state_value}&code=one&code=two"

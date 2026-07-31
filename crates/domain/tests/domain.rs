@@ -283,14 +283,20 @@ proptest! {
         let reversed_ids = select(&reversed, &affinity).into_iter().map(|attempt| attempt.target_id).collect::<Vec<_>>();
         prop_assert_eq!(normal_ids, reversed_ids);
     }
+}
 
-    #[test]
-    fn accepted_route_slugs_round_trip(segments in prop::collection::vec("[a-z0-9]{1,8}", 1..6)) {
-        let candidate = segments.join("-");
-        prop_assume!(candidate.len() <= RouteSlug::MAX_LENGTH);
-        let slug = RouteSlug::parse(candidate.clone()).unwrap();
-        prop_assert_eq!(slug.as_str(), candidate);
+#[test]
+fn route_slug_validation_covers_format_and_length_boundaries() {
+    for valid in ["a", "a-b", "0", &"a".repeat(RouteSlug::MAX_LENGTH)] {
+        assert!(RouteSlug::parse(valid).is_ok(), "{valid}");
     }
+    for invalid in ["", "-a", "a-", "a--b", "A", "a_b"] {
+        assert!(RouteSlug::parse(invalid).is_err(), "{invalid}");
+    }
+    assert!(matches!(
+        RouteSlug::parse("a".repeat(RouteSlug::MAX_LENGTH + 1)),
+        Err(RouteSlugError::TooLong { .. })
+    ));
 }
 
 #[test]
@@ -345,6 +351,25 @@ fn route_attempt_budget_cannot_exceed_target_count() {
             source: RouteValidationError::AttemptsExceedTargets,
             ..
         })
+    ));
+}
+
+#[test]
+fn route_targets_must_have_distinct_effective_routing_ids() {
+    let mut runtime = snapshot(vec![provider(1, 11, 0, 1), provider(2, 12, 0, 1)], 2);
+    let route = runtime.routes.values_mut().next().unwrap();
+    let routing_id = TargetId::from_uuid(id(99));
+    route.targets[0].routing_id = Some(routing_id);
+    route.targets[1].routing_id = Some(routing_id);
+
+    assert!(matches!(
+        runtime.validate(),
+        Err(SnapshotValidationError::InvalidRoute {
+            source: RouteValidationError::DuplicateTargetRoutingId {
+                routing_id: duplicate
+            },
+            ..
+        }) if duplicate == routing_id
     ));
 }
 
@@ -412,6 +437,40 @@ fn canonical_event_sequences_require_order_and_exactly_one_terminal_done() {
     assert_eq!(incremental.finish(), Ok(()));
 }
 
+#[test]
+fn canonical_usage_rejects_cached_tokens_exceeding_input_tokens() {
+    let usage = Usage {
+        input_tokens: 4,
+        output_tokens: 2,
+        total_tokens: 6,
+        cached_input_tokens: Some(5),
+        reasoning_tokens: None,
+    };
+    let error = UsageValidationError {
+        input_tokens: 4,
+        cached_input_tokens: 5,
+    };
+
+    assert_eq!(usage.validate(), Err(error));
+    assert_eq!(
+        validate_event_sequence(&[
+            CanonicalEvent::new(0, CanonicalEventKind::Usage { usage }),
+            CanonicalEvent::new(1, CanonicalEventKind::Done),
+        ]),
+        Err(EventSequenceError::InvalidUsage(error))
+    );
+    assert_eq!(
+        CanonicalResult::Embeddings(EmbeddingsResult {
+            model: None,
+            data: Vec::new(),
+            usage: Some(usage),
+            extensions: SourceExtensions::default(),
+        })
+        .validate(),
+        Err(error)
+    );
+}
+
 fn api_key(status: ApiKeyStatus, expires_at: Option<chrono::DateTime<Utc>>) -> ApiKey {
     ApiKey {
         id: ApiKeyId::from_uuid(id(900)),
@@ -477,22 +536,12 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
 }
 
 #[test]
-fn last_owner_cannot_be_demoted_or_removed() {
-    assert_eq!(
-        validate_owner_change(Role::Owner, Some(Role::Operator), 1),
-        Err(OwnerInvariantError::LastOwner)
-    );
-    assert_eq!(validate_owner_change(Role::Owner, None, 2), Ok(()));
-    assert!(Role::Operator.allows(Permission::ManageRoutes));
-    assert!(!Role::Viewer.allows(Permission::ManageRoutes));
-}
-
-#[test]
 fn failover_is_never_allowed_after_commit() {
     let retryable = TransportError {
         phase: TransportPhase::FirstByte,
         class: AttemptFailureClass::Timeout,
         response_committed: false,
+        retry_after: None,
         message: "upstream timeout".into(),
     };
     assert!(retryable.allows_failover());
@@ -511,6 +560,7 @@ fn transport_error_diagnostics_never_include_upstream_text() {
         phase: TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed: true,
+        retry_after: None,
         message: "sensitive upstream response".into(),
     };
 

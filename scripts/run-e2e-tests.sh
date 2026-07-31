@@ -31,16 +31,23 @@ source "$repo_root/scripts/lib/cargo-target-dir.sh"
 : "${OLP_E2E_DATABASE_ADMIN_URL:=postgres://olp_test:olp_test@localhost:5433/postgres}"
 export OLP_E2E_DATABASE_ADMIN_URL
 
-for command in cargo psql sha256sum timeout; do
+for command in cargo flock psql sha256sum timeout; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "required command is unavailable: $command" >&2
     exit 1
   }
 done
 
-run_token=$(printf '%s' "${GITHUB_RUN_ID:-}_${GITHUB_RUN_ATTEMPT:-}_$$_${RANDOM}_$(date +%s%N)" | sha256sum)
+# One checkout owns one deterministic namespace. Descendants inherit the lock,
+# preventing a new run from sweeping resources while any old process is alive.
+run_token=$(printf '%s' "$repo_root" | sha256sum)
 run_token=${run_token:0:10}
 export OLP_E2E_RUN_TOKEN="$run_token"
+exec {run_lock_fd}<"$repo_root/tests/e2e"
+flock --exclusive --nonblock "$run_lock_fd" || {
+  echo "another E2E run already owns this checkout" >&2
+  exit 75
+}
 
 sweep_leftover_databases() {
   local leftovers database
@@ -64,33 +71,62 @@ sweep_leftover_databases() {
   done <<<"$leftovers"
 }
 
+process_start_time() {
+  local stat
+  local -a fields
+  IFS= read -r stat <"/proc/$1/stat" || return 1
+  stat=${stat##*) }
+  read -ra fields <<<"$stat"
+  [[ ${fields[19]:-} =~ ^[1-9][0-9]*$ ]] || return 1
+  printf '%s\n' "${fields[19]}"
+}
+
 stop_leftover_processes() {
-  local directory pid_file pid running_executable expected_executable
+  local directory pid_file pid recorded_started extra current_started
+  local running_executable expected_executable unresolved=0
   [[ -n ${OLP_E2E_BIN:-} ]] || return 0
   shopt -s nullglob
   expected_executable=$(readlink -f -- "$OLP_E2E_BIN")
   for directory in "${TMPDIR:-/tmp}"/olp-e2e-"$run_token"-*; do
     [[ -d $directory ]] || continue
     for pid_file in "$directory"/*.pid; do
-      IFS= read -r pid <"$pid_file" || true
-      if [[ $pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
+      IFS=' ' read -r pid recorded_started extra <"$pid_file" || true
+      if [[ ! $pid =~ ^[1-9][0-9]*$ \
+        || ! $recorded_started =~ ^[1-9][0-9]*$ || -n $extra ]]; then
+        echo "refusing cleanup with malformed process identity: $pid_file" >&2
+        unresolved=1
+        continue
+      fi
+      kill -0 "$pid" 2>/dev/null || continue
+      current_started=$(process_start_time "$pid" 2>/dev/null || true)
+      if [[ $current_started == "$recorded_started" ]]; then
         running_executable=$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)
-        if [[ $running_executable == "$expected_executable" ]]; then
+        if [[ $running_executable == "$expected_executable" \
+          || $running_executable == "$expected_executable (deleted)" ]]; then
           kill -TERM "$pid" 2>/dev/null || true
-          for _ in $(seq 1 100); do
-            kill -0 "$pid" 2>/dev/null || break
+          for _ in {1..100}; do
+            current_started=$(process_start_time "$pid" 2>/dev/null || true)
+            [[ $current_started == "$recorded_started" ]] || break
             sleep 0.1
           done
-          kill -KILL "$pid" 2>/dev/null || true
+          current_started=$(process_start_time "$pid" 2>/dev/null || true)
+          if [[ $current_started == "$recorded_started" ]]; then
+            kill -KILL "$pid" 2>/dev/null || true
+          fi
         else
           echo "skipping stale pid $pid: executable no longer matches OLP_E2E_BIN" >&2
+          unresolved=1
         fi
+      elif [[ -z $current_started ]] && kill -0 "$pid" 2>/dev/null; then
+        echo "unable to verify process identity for live pid $pid" >&2
+        unresolved=1
       fi
     done
-    if [[ ${OLP_E2E_KEEP_DB:-0} != 1 ]]; then
+    if (( unresolved == 0 )) && [[ ${OLP_E2E_KEEP_DB:-0} != 1 ]]; then
       rm -rf -- "$directory"
     fi
   done
+  (( unresolved == 0 ))
 }
 
 cleanup() {
@@ -99,8 +135,7 @@ cleanup() {
   if ! stop_leftover_processes; then
     echo "failed to stop an E2E process" >&2
     ((status == 0)) && status=1
-  fi
-  if [[ ${OLP_E2E_KEEP_DB:-0} != 1 ]] && ! sweep_leftover_databases; then
+  elif [[ ${OLP_E2E_KEEP_DB:-0} != 1 ]] && ! sweep_leftover_databases; then
     echo "failed to sweep leftover E2E databases" >&2
     ((status == 0)) && status=1
   fi
@@ -122,7 +157,10 @@ if [[ ! -x ${OLP_E2E_BIN} ]]; then
 fi
 OLP_E2E_BIN=$(readlink -f -- "$OLP_E2E_BIN")
 export OLP_E2E_BIN
-sweep_leftover_databases
+stop_leftover_processes
+if [[ ${OLP_E2E_KEEP_DB:-0} != 1 ]]; then
+  sweep_leftover_databases
+fi
 
 # One server is booted for the whole binary and shared, so the tests must not
 # run concurrently with each other. This is the one suite in the repository

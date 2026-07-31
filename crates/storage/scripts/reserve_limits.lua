@@ -54,9 +54,6 @@ local lease_ttl = parse_safe_unsigned_integer(ARGV[6])
 
 if rpm_limit == nil or tpm_limit == nil or requested_tokens == nil
     or concurrency_limit == nil or lease_ttl == nil
-    or (rpm_limit > 0 and rpm_limit < 1)
-    or (tpm_limit > 0 and tpm_limit < 1)
-    or (concurrency_limit > 0 and concurrency_limit < 1)
     or (tpm_limit > 0 and requested_tokens < 1)
     or lease_ttl < 1
     or type(lease_id) ~= "string" or #lease_id < 1 or #lease_id > 128 then
@@ -172,10 +169,6 @@ if concurrency_limit > 0 then
         0
       }
     end
-  elseif concurrency >= concurrency_limit then
-    -- This is unreachable for a positive configured limit, but fail safely if
-    -- the representation or command behavior ever changes.
-    return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
   end
 end
 

@@ -5,7 +5,7 @@ use olp_protocols::anthropic::{
     AnthropicMessagesClientStreamEncoder, AnthropicMessagesStreamDecoder, CountTokensRequest,
     CountTokensResponse, MessagesRequest, MessagesResponse, StreamError,
     decode_count_tokens_request, decode_messages_request, decode_messages_response,
-    encode_count_tokens_result, encode_messages_request,
+    encode_count_tokens_result, encode_messages_request, encode_messages_response,
 };
 use serde_json::{Value, json};
 
@@ -125,7 +125,12 @@ fn unary_response_preserves_thinking_and_maps_tools_usage_and_finish() {
         ],
         "stop_reason": "tool_use",
         "stop_sequence": null,
-        "usage": {"input_tokens": 20, "output_tokens": 8, "cache_read_input_tokens": 4}
+        "usage": {
+            "input_tokens": 20,
+            "output_tokens": 8,
+            "cache_creation_input_tokens": 3,
+            "cache_read_input_tokens": 4
+        }
     }))
     .unwrap();
     let events = decode_messages_response(response).unwrap();
@@ -154,10 +159,14 @@ fn unary_response_preserves_thinking_and_maps_tools_usage_and_finish() {
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Usage { usage } if usage.input_tokens == 24
-            && usage.total_tokens == 32
+        CanonicalEventKind::Usage { usage } if usage.input_tokens == 27
+            && usage.total_tokens == 35
             && usage.cached_input_tokens == Some(4)
     )));
+    let encoded = encode_messages_response(&events, "team-claude", "fallback").unwrap();
+    assert_eq!(encoded.usage.input_tokens, 20);
+    assert_eq!(encoded.usage.cache_creation_input_tokens, Some(3));
+    assert_eq!(encoded.usage.cache_read_input_tokens, Some(4));
 }
 
 fn sse(event: &str, data: Value) -> String {
@@ -259,7 +268,6 @@ fn fragmented_stream_maps_text_thinking_tool_usage_unknown_events_and_done() {
     }
     events.extend(decoder.finish().unwrap());
     validate_event_sequence(&events).unwrap();
-    assert!(decoder.is_done());
     assert!(events.iter().any(|event| matches!(
         &event.kind,
         CanonicalEventKind::TextDelta { text, .. } if text == "héllo 🌍"
@@ -301,7 +309,6 @@ fn stream_errors_are_terminal_and_truncation_is_not_success() {
     );
     let mut decoder = AnthropicMessagesStreamDecoder::new();
     let events = decoder.push(error_wire.as_bytes()).unwrap();
-    assert!(decoder.is_done());
     assert!(matches!(
         &events[0].kind,
         CanonicalEventKind::Error { error } if error.retryable

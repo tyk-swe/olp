@@ -9,12 +9,19 @@ fn unknown_upstream_video_status_fails_closed() {
 }
 
 #[test]
-fn upstream_media_identity_is_bounded_before_durable_attachment() {
-    assert!(valid_upstream_media_job_id("video_123"));
-    assert!(!valid_upstream_media_job_id(""));
-    assert!(!valid_upstream_media_job_id(" video_123"));
-    assert!(!valid_upstream_media_job_id("video\n123"));
-    assert!(!valid_upstream_media_job_id(&"x".repeat(1_025)));
+fn media_job_persistence_retry_is_exponential_and_capped() {
+    assert_eq!(
+        media_job_persistence_retry_delay(0),
+        Duration::from_millis(25)
+    );
+    assert_eq!(
+        media_job_persistence_retry_delay(3),
+        Duration::from_millis(200)
+    );
+    assert_eq!(
+        media_job_persistence_retry_delay(100),
+        Duration::from_secs(2)
+    );
 }
 
 #[derive(Default)]

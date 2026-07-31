@@ -9,7 +9,7 @@
 //! encode is excluded from the comparison.
 
 use libfuzzer_sys::fuzz_target;
-use olp_domain::{MediaArtifact, MediaHandle, Operation, TokenCountResult};
+use olp_domain::{MediaHandle, Operation, TokenCountResult};
 use olp_protocols::{anthropic, gemini, openai};
 
 mod oracle;
@@ -157,13 +157,13 @@ fuzz_target!(|data: &[u8]| {
     roundtrip(
         data,
         "openai::transcription_response",
-        |response| Some(openai::decode_transcription_response(response)),
+        |response| openai::decode_transcription_response(response).ok(),
         openai::encode_transcription_response,
     );
     roundtrip(
         data,
         "openai::moderation_response",
-        |response| Some(openai::decode_moderation_response(response)),
+        |response| openai::decode_moderation_response(response).ok(),
         |canonical| openai::encode_moderation_response(canonical, PUBLIC_MODEL, "fuzz-moderation"),
     );
     roundtrip(
@@ -195,36 +195,6 @@ fuzz_target!(|data: &[u8]| {
                 Ok(openai::OpenAiImagePayload::Base64Json("Zg==".into()))
             })
         },
-    );
-    roundtrip(
-        data,
-        "openai::image_stream_event",
-        |event| {
-            openai::decode_image_stream_event(event, |_| Ok(MediaHandle::new("fuzz-image-stream")))
-                .ok()
-        },
-        |canonical| {
-            openai::encode_image_stream_update(
-                canonical,
-                openai::ImageStreamOperation::Generation,
-                |_| Ok("Zg==".into()),
-            )
-        },
-    );
-    roundtrip(
-        data,
-        "openai::speech_stream_event",
-        |event| {
-            openai::decode_speech_stream_event(event, |_| {
-                Ok(MediaArtifact {
-                    handle: MediaHandle::new("fuzz-speech-stream"),
-                    content_type: Some("audio/mpeg".into()),
-                    content_length: None,
-                })
-            })
-            .ok()
-        },
-        |canonical| openai::encode_speech_stream_update(canonical, |_| Ok("Zg==".into())),
     );
     roundtrip(
         data,
@@ -277,22 +247,4 @@ fuzz_target!(|data: &[u8]| {
             extensions: olp_domain::SourceExtensions::new(olp_domain::Surface::Gemini, values),
         });
     }
-
-    let _ = openai::decode_video_get("fuzz-job");
-    let _ = openai::decode_video_content("fuzz-job");
-    let _ = openai::decode_video_delete("fuzz-job");
-
-    // Binary media bodies carry no JSON, so they are driven off the raw length
-    // rather than a parsed document.
-    let binary = openai::BinaryMediaBody {
-        media: MediaArtifact {
-            handle: MediaHandle::new("fuzz-binary"),
-            content_type: Some("application/octet-stream".into()),
-            content_length: Some(u64::try_from(data.len()).unwrap_or(u64::MAX)),
-        },
-    };
-    let speech = openai::decode_speech_body(binary.clone());
-    let _ = openai::encode_speech_body(&speech);
-    let video = openai::decode_video_content_body(binary);
-    let _ = openai::encode_video_content_body(&video);
 });

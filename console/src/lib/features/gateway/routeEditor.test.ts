@@ -3,7 +3,6 @@ import type { ProviderModelInventory } from '$lib/api/management/providers';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
-  certifiedCapabilities,
   eligibleTargetTuples,
   missingTargetOperations,
   modesFor,
@@ -12,9 +11,7 @@ import {
   surfacesFor,
   toRouteModelOptions,
   validateRouteEditor,
-  type EditableTarget,
-  type RouteEditorValues,
-  type RouteModelOption
+  type EditableTarget
 } from './routeEditor';
 
 const target: EditableTarget = {
@@ -24,15 +21,15 @@ const target: EditableTarget = {
   timeoutMs: 60_000
 };
 
-const validEditor: RouteEditorValues = {
+const validEditor = {
   slug: 'support-chat-v2',
   operations: ['generation'],
   overallTimeoutMs: 120_000,
   maxAttempts: 1,
   targets: [target]
-};
+} satisfies Parameters<typeof validateRouteEditor>[0];
 
-const modelOptions: RouteModelOption[] = [
+const modelOptions = [
   {
     id: 'model-a',
     providerId: 'provider-a',
@@ -76,7 +73,7 @@ const modelOptions: RouteModelOption[] = [
       }
     ]
   }
-];
+] satisfies Parameters<typeof eligibleTargetTuples>[1];
 
 describe('Route Studio operation policy', () => {
   it('keeps installation-local model operations out of routed choices', () => {
@@ -140,9 +137,6 @@ describe('Route Studio model eligibility', () => {
 
   it('uses only certified capabilities selected by the route', () => {
     const operations = ['generation', 'embeddings'];
-    expect(certifiedCapabilities(target, modelOptions, operations)).toMatchObject([
-      { operation: 'generation', source: 'certified' }
-    ]);
     expect(eligibleTargetTuples(target, modelOptions, operations)).toEqual([
       'generation · openai · streaming'
     ]);
@@ -193,7 +187,7 @@ describe('Route Studio editor validation', () => {
     );
   });
 
-  it.each([0, 2])('rejects maximum attempt count %s for one target', (maxAttempts) => {
+  it.each([0, 1.5, 2])('rejects maximum attempt count %s for one target', (maxAttempts) => {
     expect(validateRouteEditor({ ...validEditor, maxAttempts })).toContain(
       'between 1 and the number of targets'
     );
@@ -201,25 +195,35 @@ describe('Route Studio editor validation', () => {
 
   it.each([
     { priority: 0 },
+    { priority: 101 },
+    { priority: 1.5 },
     { weight: 0 },
-    { timeoutMs: 99 }
+    { weight: 10_001 },
+    { timeoutMs: 99 },
+    { timeoutMs: 120_001 }
   ])('rejects an invalid target bound: %o', (override) => {
     expect(
       validateRouteEditor({
         ...validEditor,
         targets: [{ ...target, ...override }]
       })
-    ).toBe('Every target needs a positive priority, weight, and timeout.');
+    ).toContain('valid priority, weight, and timeout');
+  });
+
+  it.each([undefined, 99, 1.5, 2_147_483_648])('rejects invalid overall deadline %s', (overallTimeoutMs) => {
+    expect(
+      validateRouteEditor({ ...validEditor, overallTimeoutMs: overallTimeoutMs as number })
+    ).toContain('Overall deadline');
   });
 });
 
 describe('Route Studio API payloads', () => {
-  const values: RouteEditorValues = {
+  const values = {
     ...validEditor,
     operations: ['generation', 'embeddings'],
     targets: [target, { ...target, providerModelId: 'model-b', priority: 2, weight: 25 }],
     maxAttempts: 2
-  };
+  } satisfies Parameters<typeof buildCreateRouteDraftInput>[0];
 
   it('maps new targets from inventory IDs to provider and upstream model identity', () => {
     expect(buildCreateRouteDraftInput(values, modelOptions)).toEqual({
@@ -244,6 +248,10 @@ describe('Route Studio API payloads', () => {
         }
       ]
     });
+  });
+
+  it('reports a selected model that disappeared during refresh', () => {
+    expect(() => buildCreateRouteDraftInput(values, [])).toThrow('no longer available');
   });
 
   it('keeps existing targets anchored by provider-model ID', () => {

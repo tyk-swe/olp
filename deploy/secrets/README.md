@@ -67,11 +67,12 @@ this example shows version 2 after activation:
 }
 ```
 
-Add the new key while the old version is still active, restart every replica,
-then select the new active version and restart again. Retain the old key
-until `olp master-key reencrypt` has rewritten all encrypted rows, and run
-`olp master-key verify-retirement --version 1` to confirm no references
-remain. Follow the complete
+Add the new key while the old version is still active, restart every
+master-key-consuming `all`, `gateway`, and `control` replica, then select the
+new active version and restart those replicas again. Retain the old key until
+`olp master-key reencrypt` has rewritten all encrypted rows, and run
+`olp master-key verify-retirement --version 1` to confirm no references remain.
+Follow the complete
 [rotation procedure](../../docs/operations.md#master-key-rotation) before
 removing a key.
 

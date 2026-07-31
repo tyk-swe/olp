@@ -1,8 +1,15 @@
 use std::{collections::HashMap, time::Duration};
 
+use chrono::Utc;
 use futures::future::join_all;
-use olp_storage::{DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest};
+use olp_domain::{OperationKind, Surface};
+use olp_storage::{
+    DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest,
+    REQUEST_METADATA_STREAM, RequestAttemptMetadata, RequestMetadataEmitter, RequestMetadataEvent,
+    run_request_metadata_consumer,
+};
 use redis::{AsyncCommands, aio::MultiplexedConnection};
+use tokio::sync::watch;
 use uuid::Uuid;
 
 const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
@@ -32,6 +39,155 @@ fn request(lookup_id: &str) -> LimitRequest<'_> {
         requested_tokens: 5,
         lease_ttl: Duration::from_secs(5),
     }
+}
+
+fn request_metadata_event() -> RequestMetadataEvent {
+    let observed_at = Utc::now();
+    let provider_id = Uuid::now_v7();
+    RequestMetadataEvent {
+        event_id: Uuid::now_v7(),
+        request_id: Uuid::now_v7(),
+        runtime_generation_id: Uuid::now_v7(),
+        api_key_id: Uuid::now_v7(),
+        provider_id: Some(provider_id),
+        route_slug: "default".into(),
+        upstream_model: Some("mock-model".into()),
+        operation: OperationKind::Generation,
+        surface: Surface::OpenAi,
+        request_started_at: observed_at - chrono::Duration::milliseconds(10),
+        request_completed_at: observed_at,
+        observed_at,
+        status_code: Some(200),
+        error_class: None,
+        committed: true,
+        latency_ms: 10,
+        first_byte_ms: Some(3),
+        input_tokens: Some(1),
+        output_tokens: Some(2),
+        cached_input_tokens: None,
+        media_units: None,
+        usage_complete: true,
+        attempts: vec![RequestAttemptMetadata {
+            id: Uuid::now_v7(),
+            ordinal: 1,
+            provider_id,
+            upstream_model: "mock-model".into(),
+            started_at: observed_at - chrono::Duration::milliseconds(10),
+            completed_at: observed_at,
+            status_code: Some(200),
+            error_class: None,
+            committed: true,
+            latency_ms: 10,
+            first_byte_ms: Some(3),
+        }],
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+async fn request_metadata_stream_cap_is_atomic_and_rejection_does_not_poison_writer() {
+    let stream = namespace("request_metadata_cap");
+    let url = valkey_url();
+    let mut connection = connection().await;
+    let (emitter_a, receiver_a) = RequestMetadataEmitter::bounded(2);
+    let (emitter_b, receiver_b) = RequestMetadataEmitter::bounded(2);
+    let (shutdown_a, shutdown_receiver_a) = watch::channel(false);
+    let (shutdown_b, shutdown_receiver_b) = watch::channel(false);
+
+    emitter_a.emit(request_metadata_event()).unwrap();
+    emitter_b.emit(request_metadata_event()).unwrap();
+    let writer_a = tokio::spawn({
+        let url = url.clone();
+        let stream = stream.clone();
+        async move {
+            receiver_a
+                .run_connecting(&url, &stream, 1, shutdown_receiver_a)
+                .await
+        }
+    });
+    let writer_b = tokio::spawn({
+        let url = url.clone();
+        let stream = stream.clone();
+        async move {
+            receiver_b
+                .run_connecting(&url, &stream, 1, shutdown_receiver_b)
+                .await
+        }
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let a = emitter_a.snapshot();
+            let b = emitter_b.snapshot();
+            if a.persisted + a.abandoned + b.persisted + b.abandoned == 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let first_a = emitter_a.snapshot();
+    let first_b = emitter_b.snapshot();
+    assert_eq!(first_a.persisted + first_b.persisted, 1);
+    assert_eq!(first_a.abandoned + first_b.abandoned, 1);
+    assert_eq!(connection.xlen::<_, usize>(&stream).await.unwrap(), 1);
+
+    let loser = if first_a.abandoned == 1 {
+        &emitter_a
+    } else {
+        &emitter_b
+    };
+    let _: usize = connection.del(&stream).await.unwrap();
+    loser.emit(request_metadata_event()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let snapshot = loser.snapshot();
+            if snapshot.persisted == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let recovered = loser.snapshot();
+    assert_eq!(recovered.accepted, 2);
+    assert_eq!(recovered.persisted, 1);
+    assert_eq!(recovered.abandoned, 1);
+    assert_eq!(recovered.pending(), 0);
+    assert_eq!(recovered.lost(), 1);
+    assert_eq!(connection.xlen::<_, usize>(&stream).await.unwrap(), 1);
+
+    shutdown_a.send(true).unwrap();
+    shutdown_b.send(true).unwrap();
+    writer_a.await.unwrap().unwrap();
+    writer_b.await.unwrap().unwrap();
+    let _: usize = connection.del(&stream).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL and an isolated Valkey"]
+async fn idle_request_metadata_consumer_outlives_its_blocking_read() {
+    let db = olp_storage::test_support::TestDb::create_migrated("idle_metadata_consumer").await;
+    let store = db.store(3).await;
+    let url = valkey_url();
+    let mut connection = connection().await;
+    let _: usize = connection.del(REQUEST_METADATA_STREAM).await.unwrap();
+    let (shutdown, shutdown_receiver) = watch::channel(false);
+    let consumer = tokio::spawn(async move {
+        run_request_metadata_consumer(&store, &url, shutdown_receiver).await
+    });
+
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    assert!(!consumer.is_finished());
+    shutdown.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), consumer)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let _: usize = connection.del(REQUEST_METADATA_STREAM).await.unwrap();
 }
 
 async fn connection() -> MultiplexedConnection {
@@ -366,7 +522,7 @@ async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
 
 #[tokio::test]
 #[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
-async fn token_reconciliation_refunds_only_unused_reservation() {
+async fn token_reconciliation_applies_each_actual_delta_once() {
     let namespace = namespace("token_refund");
     let lookup_id = "lookup_01";
     let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
@@ -387,6 +543,7 @@ async fn token_reconciliation_refunds_only_unused_reservation() {
         .await
         .unwrap();
     limiter.reconcile(&lease, 3).await.unwrap();
+    limiter.reconcile(&lease, 3).await.unwrap();
     let state = rate_state(&mut connection, &rate_key).await;
     assert_eq!(state["rpm"], 1);
     assert_eq!(state["tpm"], 3);
@@ -402,9 +559,10 @@ async fn token_reconciliation_refunds_only_unused_reservation() {
         .await
         .unwrap();
     limiter.reconcile(&lease, 7).await.unwrap();
+    limiter.reconcile(&lease, 7).await.unwrap();
     let state = rate_state(&mut connection, &rate_key).await;
     assert_eq!(state["rpm"], 2);
-    assert_eq!(state["tpm"], 7);
+    assert_eq!(state["tpm"], 10);
 }
 
 #[tokio::test]

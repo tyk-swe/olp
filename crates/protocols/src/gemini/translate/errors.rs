@@ -46,6 +46,8 @@ pub enum EncodeError {
     Extensions(#[from] olp_domain::ExtensionError),
     #[error("Gemini tool configuration cannot represent parallel_tool_calls")]
     ParallelToolCallsUnsupported,
+    #[error("Gemini maxOutputTokens must be greater than zero")]
+    ZeroMaxOutputTokens,
     #[error("system or developer messages cannot appear after conversation content")]
     SystemMessageAfterConversation,
     #[error("Gemini system instructions support text content only")]
@@ -103,6 +105,8 @@ pub enum ResponseError {
     UnexpectedRole(String),
     #[error("Gemini response has too many tool calls")]
     TooManyToolCalls,
+    #[error("Gemini response usage counters overflow")]
+    UsageOverflow,
     #[error("Gemini response JSON is invalid: {0}")]
     Json(serde_json::Error),
 }

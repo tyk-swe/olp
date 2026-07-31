@@ -102,6 +102,16 @@ impl InferenceError {
         }
     }
 
+    pub(super) fn model_not_found(id: &str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: "model_not_found",
+            kind: "invalid_request_error",
+            message: format!("The model `{id}` does not exist or you do not have access to it."),
+            retry_after: None,
+        }
+    }
+
     pub(crate) fn rate_limited(dimension: LimitDimension, retry_after: Duration) -> Self {
         let name = match dimension {
             LimitDimension::Requests => "requests per minute",
@@ -209,7 +219,7 @@ impl InferenceError {
                 code: "upstream_rate_limit",
                 kind: "rate_limit_error",
                 message: error.message,
-                retry_after: None,
+                retry_after: error.retry_after,
             },
             AttemptFailureClass::Timeout => Self::timeout(),
             AttemptFailureClass::UpstreamClient => {
@@ -279,8 +289,17 @@ impl IntoResponse for InferenceError {
             }),
         )
             .into_response();
+        if self.status == StatusCode::UNAUTHORIZED {
+            response
+                .headers_mut()
+                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        }
         if let Some(retry_after) = self.retry_after {
-            let seconds = retry_after.as_secs().max(1).to_string();
+            let seconds = retry_after
+                .as_secs()
+                .saturating_add(u64::from(retry_after.subsec_nanos() != 0))
+                .max(1)
+                .to_string();
             if let Ok(value) = HeaderValue::from_str(&seconds) {
                 response.headers_mut().insert(header::RETRY_AFTER, value);
             }
@@ -292,5 +311,28 @@ impl IntoResponse for InferenceError {
 impl From<InferenceError> for Problem {
     fn from(error: InferenceError) -> Self {
         Problem::new(error.status, error.code, error.kind, error.message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use olp_domain::{AttemptFailureClass, TransportError, TransportPhase};
+
+    use super::*;
+
+    #[test]
+    fn upstream_rate_limit_preserves_retry_after_without_rounding_down() {
+        let response = InferenceError::from_transport(TransportError {
+            phase: TransportPhase::FirstByte,
+            class: AttemptFailureClass::RateLimit,
+            response_committed: false,
+            retry_after: Some(Duration::from_millis(1_500)),
+            message: "slow down".into(),
+        })
+        .into_response();
+
+        assert_eq!(response.headers()[header::RETRY_AFTER], "2");
     }
 }

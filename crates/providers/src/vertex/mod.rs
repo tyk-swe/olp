@@ -20,12 +20,12 @@ use olp_domain::{
 };
 use url::Url;
 
-pub use oauth::ServiceAccountError;
+pub(crate) use oauth::ServiceAccountError;
 
 const DEFAULT_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 
 #[derive(Clone, Debug)]
-pub struct ConnectorConfig {
+pub(crate) struct ConnectorConfig {
     inner: GeminiConnectorConfig,
     project: String,
     location: String,
@@ -33,7 +33,7 @@ pub struct ConnectorConfig {
 }
 
 impl ConnectorConfig {
-    pub fn new(
+    pub(crate) fn new(
         project: impl Into<String>,
         location: impl Into<String>,
         probe_model: impl Into<String>,
@@ -69,7 +69,7 @@ impl ConnectorConfig {
     }
 }
 
-pub struct VertexConnector {
+pub(crate) struct VertexConnector {
     config: ConnectorConfig,
     inner: GeminiConnector,
 }
@@ -77,7 +77,9 @@ pub struct VertexConnector {
 impl VertexConnector {
     /// Uses Application Default Credentials, including attached workload
     /// identity, external-account federation, user ADC, and metadata identity.
-    pub fn with_application_default(config: ConnectorConfig) -> Result<Self, ConnectorBuildError> {
+    pub(crate) fn with_application_default(
+        config: ConnectorConfig,
+    ) -> Result<Self, ConnectorBuildError> {
         let credentials = google_cloud_auth::credentials::Builder::default()
             .with_scopes([DEFAULT_SCOPE])
             .build_access_token_credentials()
@@ -90,7 +92,7 @@ impl VertexConnector {
     /// Uses a versioned service-account JSON value decrypted by the runtime.
     /// The long-lived key stays inside this generation's connector object;
     /// only cached short-lived access tokens are used for requests.
-    pub fn with_service_account_json(
+    pub(crate) fn with_service_account_json(
         config: ConnectorConfig,
         credential_json: &str,
     ) -> Result<Self, ConnectorBuildError> {
@@ -102,7 +104,7 @@ impl VertexConnector {
     }
 
     #[must_use]
-    pub fn with_token_provider(
+    pub(crate) fn with_token_provider(
         config: ConnectorConfig,
         provider: Arc<dyn BearerTokenProvider>,
     ) -> Self {
@@ -117,7 +119,9 @@ impl VertexConnector {
     /// Vertex publisher-model collections do not provide the Gemini Developer
     /// API's model-list contract. Probe the configured model with countTokens
     /// and return that explicit model as the discovered target.
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+    pub(crate) async fn discover_models(
+        &self,
+    ) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         self.inner.probe_model(&self.config.probe_model).await?;
         Ok(vec![DiscoveredProviderModel {
             id: self.config.probe_model.clone(),
@@ -180,7 +184,7 @@ fn normalize_model(model: String) -> Result<String, ConnectorBuildError> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ConnectorBuildError {
+pub(crate) enum ConnectorBuildError {
     #[error(transparent)]
     Gemini(#[from] crate::gemini::ConnectorBuildError),
     #[error("Vertex AI {0} is not a valid cloud resource identifier")]

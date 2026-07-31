@@ -36,7 +36,7 @@ type Boundary = {
   navigate(destination: string): Promise<void>;
 };
 
-type ValidateOptions = { passive?: boolean };
+type ValidateOptions = { passive?: boolean; principalStateCleared?: boolean };
 
 type PrincipalExitRequest = (signal: AbortSignal) => Promise<void>;
 type AuthenticationRequest = (signal: AbortSignal) => Promise<AuthenticatedSession>;
@@ -80,19 +80,6 @@ function isCurrentSessionDeletion(request: Request): boolean {
   return method === 'DELETE' && pathname === '/api/v1/sessions/current';
 }
 
-function combineSignals(...signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
-  const controller = new AbortController();
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      break;
-    }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
-  }
-  return controller.signal;
-}
-
 export class AuthenticationLifecycle {
   private queryClient: QueryClient | null = null;
   private boundary: Boundary | null = null;
@@ -119,11 +106,35 @@ export class AuthenticationLifecycle {
   private activeValidation: Promise<AuthenticatedSession | null> | null = null;
   private unauthorizedTransition: Promise<void> | null = null;
   private unauthorizedHandled = false;
+  private sessionChannel: BroadcastChannel | null = null;
 
   attachQueryClient(client: QueryClient): () => void {
     this.queryClient = client;
     return () => {
       if (this.queryClient === client) this.queryClient = null;
+    };
+  }
+
+  attachCrossTabSync(): () => void {
+    const channel = new BroadcastChannel('openllmproxy-session');
+    this.sessionChannel?.close();
+    this.sessionChannel = channel;
+    const revalidate = () => {
+      if (this.snapshotValue.phase === 'authenticated') {
+        this.gateProtectedContent('checking');
+        this.abortSessionValidation();
+        this.rotateAuthenticatedRequests();
+        void this.cancelAndClearQueries().then(() =>
+          this.validateSession({ principalStateCleared: true })
+        );
+      }
+    };
+    channel.addEventListener('message', revalidate);
+    return () => {
+      if (this.sessionChannel !== channel) return;
+      channel.removeEventListener('message', revalidate);
+      channel.close();
+      this.sessionChannel = null;
     };
   }
 
@@ -183,6 +194,7 @@ export class AuthenticationLifecycle {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     this.establishSession(session);
+    this.announceSessionChange();
     return session;
   }
 
@@ -229,15 +241,19 @@ export class AuthenticationLifecycle {
         const session = await boundary.loadSession(controller.signal);
         if (controller.signal.aborted || generation !== this.validationGeneration) return null;
         const nextPartition = this.principalPartition(session.user);
-        if (nextPartition !== this.partition) {
-          this.gateProtectedContent('checking');
-          this.rotateAuthenticatedRequests();
-          await this.cancelAndClearQueries();
-          if (controller.signal.aborted || generation !== this.validationGeneration) return null;
+        const principalChanged = nextPartition !== this.partition;
+        if (principalChanged) {
+          if (!options.principalStateCleared) {
+            this.gateProtectedContent('checking');
+            this.rotateAuthenticatedRequests();
+            await this.cancelAndClearQueries();
+            if (controller.signal.aborted || generation !== this.validationGeneration) return null;
+          }
           clearCsrfToken();
           this.partition = nextPartition;
         }
         this.establishSession(session);
+        if (principalChanged) this.announceSessionChange();
         return session;
       } catch (error) {
         if (controller.signal.aborted || generation !== this.validationGeneration || abortError(error)) {
@@ -306,14 +322,13 @@ export class AuthenticationLifecycle {
     const mutation = !SAFE_METHODS.has(request.method.toUpperCase());
     if (mutation && !isCurrentSessionDeletion(request)) await this.ensureFreshSession();
     const generation = this.authenticatedRequestGeneration;
-    const signal = combineSignals(request.signal, this.authenticatedRequestController.signal);
+    const signal = AbortSignal.any([request.signal, this.authenticatedRequestController.signal]);
     const headers = new Headers(request.headers);
     if (mutation) {
       const csrf = getCsrfToken();
       if (csrf) headers.set('x-csrf-token', csrf);
     }
     const prepared = new Request(request, { headers, signal });
-    this.requestGenerations.set(request, generation);
     this.requestGenerations.set(prepared, generation);
     return prepared;
   }
@@ -324,10 +339,12 @@ export class AuthenticationLifecycle {
       const rotatedCsrf = response.headers.get('x-csrf-token');
       if (rotatedCsrf) setCsrfToken(rotatedCsrf);
     }
-    if (response.status === 401) await this.handleUnauthorized(request);
+    if (response.status === 401 || response.status === 403) {
+      await this.handleSessionRejection(request);
+    }
   }
 
-  async handleUnauthorized(request: Request): Promise<void> {
+  private async handleSessionRejection(request: Request): Promise<void> {
     if (
       isAuthenticationEndpoint(request) ||
       isSessionValidationEndpoint(request) ||
@@ -349,10 +366,6 @@ export class AuthenticationLifecycle {
       await this.validateSession({ passive: true });
       return;
     }
-    await this.transitionToAnonymous();
-  }
-
-  async principalInvalidated(): Promise<void> {
     await this.transitionToAnonymous();
   }
 
@@ -395,6 +408,7 @@ export class AuthenticationLifecycle {
         principalExitError: '',
         lastValidatedAt: null
       });
+      this.announceSessionChange();
       return true;
     } catch (error) {
       if (controller.signal.aborted || abortError(error)) return false;
@@ -430,6 +444,7 @@ export class AuthenticationLifecycle {
     this.unauthorizedTransition = (async () => {
       await this.cancelAndClearQueries();
       if (controller.signal.aborted || boundaryGeneration !== this.boundaryGeneration) return;
+      this.announceSessionChange();
       if (!boundary) {
         this.setSnapshot({
           phase: 'anonymous',
@@ -490,6 +505,10 @@ export class AuthenticationLifecycle {
     this.authenticatedRequestController.abort();
     this.authenticatedRequestController = new AbortController();
     this.authenticatedRequestGeneration++;
+  }
+
+  private announceSessionChange(): void {
+    this.sessionChannel?.postMessage(null);
   }
 
   private gateProtectedContent(phase: AuthenticationPhase, error = ''): void {

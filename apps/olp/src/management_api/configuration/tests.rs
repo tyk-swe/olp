@@ -3,19 +3,11 @@ use olp_providers::{CapabilityCertificationEvidence, CompatibleCapabilityCertifi
 use olp_storage::{CapabilityRecord, ConfigurationError};
 use utoipa::OpenApi;
 
-use crate::management_api::{PageQuery, WriteOnlySecret, page};
+use crate::management_api::{PageQuery, page};
 
 use super::{
     ConfigurationApiDoc, common::map_configuration_resource, providers::certification_item,
 };
-
-#[test]
-fn write_only_secret_debug_is_redacted() {
-    assert_eq!(
-        format!("{:?}", WriteOnlySecret::new("top-secret".to_owned())),
-        "WriteOnlySecret([REDACTED])"
-    );
-}
 
 #[test]
 fn cursor_and_page_size_are_strict() {

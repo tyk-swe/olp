@@ -213,6 +213,7 @@ pub fn decode_embedding_response(
         });
     }
     data.sort_by_key(|item| item.index);
+    validate_embedding_vectors(&data)?;
     Ok(EmbeddingsResult {
         model: Some(response.model),
         data,
@@ -233,6 +234,7 @@ pub fn encode_embedding_response(
     encoding_format: Option<&str>,
 ) -> Result<EmbeddingResponse, EmbeddingCodecError> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
+    validate_embedding_vectors(&result.data)?;
     let data = result
         .data
         .iter()
@@ -273,6 +275,32 @@ pub fn encode_embedding_response(
         &result.extensions.values,
     )
     .map_err(EmbeddingCodecError::InvalidExtension)
+}
+
+fn validate_embedding_vectors(data: &[EmbeddingVector]) -> Result<(), EmbeddingCodecError> {
+    if data.is_empty() {
+        return Err(EmbeddingCodecError::EmptyEmbeddingData);
+    }
+    let mut seen = vec![false; data.len()];
+    let mut dimensions = None;
+    for item in data {
+        let index = usize::try_from(item.index)
+            .ok()
+            .filter(|index| *index < data.len() && !seen[*index])
+            .ok_or(EmbeddingCodecError::InvalidEmbeddingIndex(item.index))?;
+        seen[index] = true;
+        if item.values.is_empty() || item.values.iter().any(|value| !value.is_finite()) {
+            return Err(EmbeddingCodecError::InvalidEmbeddingVector(item.index));
+        }
+        match dimensions {
+            Some(expected) if item.values.len() != expected => {
+                return Err(EmbeddingCodecError::InconsistentEmbeddingDimensions);
+            }
+            None => dimensions = Some(item.values.len()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn decode_base64_vector(encoded: &str) -> Result<Vec<f32>, EmbeddingCodecError> {
@@ -317,6 +345,14 @@ pub enum EmbeddingCodecError {
     InvalidExtension(String),
     #[error("unexpected OpenAI object type: {0}")]
     UnexpectedObject(String),
+    #[error("embedding response data cannot be empty")]
+    EmptyEmbeddingData,
+    #[error("embedding response index {0} is duplicated or leaves a gap")]
+    InvalidEmbeddingIndex(u32),
+    #[error("embedding vector {0} must contain only finite values and cannot be empty")]
+    InvalidEmbeddingVector(u32),
+    #[error("embedding vectors must all have the same dimensions")]
+    InconsistentEmbeddingDimensions,
     #[error("base64 embedding payload is invalid")]
     InvalidBase64Embedding,
     #[error("embedding payload exceeds the bounded decoder limit")]

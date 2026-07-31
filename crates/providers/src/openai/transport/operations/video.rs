@@ -1,4 +1,4 @@
-use http::{StatusCode, header};
+use http::StatusCode;
 use olp_domain::{
     CanonicalResult, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, ProviderOutput,
     ProviderRequest, Surface, TransportError,
@@ -6,7 +6,7 @@ use olp_domain::{
 use olp_protocols::openai::{
     OpenAiVideoDeleteResponse, OpenAiVideoListResponse, OpenAiVideoObject,
     decode_video_content_body, decode_video_delete_response, decode_video_list_response,
-    decode_video_object, encode_video_create, encode_video_list,
+    decode_video_object, encode_video_create, encode_video_list, is_valid_video_job_id,
 };
 use reqwest::{Method, multipart};
 
@@ -138,13 +138,16 @@ pub(super) async fn execute(
             let response = connector
                 .request_raw(&request, Method::GET, &path, None, "*/*")
                 .await?;
-            let content_type = response
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
+            let content_type = crate::transport_common::single_content_type(response.headers())
                 .and_then(|value| value.split(';').next())
                 .map(str::trim)
-                .filter(|value| value.starts_with("video/") || value.starts_with("image/"))
+                .filter(|value| {
+                    value.split_once('/').is_some_and(|(kind, subtype)| {
+                        !subtype.is_empty()
+                            && (kind.eq_ignore_ascii_case("video")
+                                || kind.eq_ignore_ascii_case("image"))
+                    })
+                })
                 .ok_or_else(|| {
                     protocol_body_error("OpenAI video content used an invalid content type")
                 })?
@@ -212,14 +215,10 @@ pub(super) async fn execute(
 }
 
 fn video_job_path(job_id: &str, suffix: Option<&str>) -> Result<String, TransportError> {
-    if job_id.is_empty()
-        || job_id.len() > 256
-        || !job_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
+    if !is_valid_video_job_id(job_id) {
         return Err(protocol_body_error("OpenAI video job ID is invalid"));
     }
+    let job_id = percent_encode(job_id);
     Ok(suffix.map_or_else(
         || format!("videos/{job_id}"),
         |suffix| format!("videos/{job_id}/{suffix}"),
@@ -230,7 +229,7 @@ fn percent_encode(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'~') {
             encoded.push(char::from(byte));
         } else {
             encoded.push('%');
@@ -239,4 +238,19 @@ fn percent_encode(value: &str) -> String {
         }
     }
     encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::video_job_path;
+
+    #[test]
+    fn opaque_video_job_ids_are_encoded_as_one_path_segment() {
+        assert_eq!(
+            video_job_path("folder/../café", Some("content")).unwrap(),
+            "videos/folder%2F%2E%2E%2Fcaf%C3%A9/content"
+        );
+        assert!(video_job_path(".", None).is_err());
+        assert!(video_job_path("..", None).is_err());
+    }
 }

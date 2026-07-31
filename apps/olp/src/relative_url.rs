@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use url::{Position, Url};
 
 const VALIDATION_BASE: &str = "https://return.invalid/";
-pub const MAX_RELATIVE_RETURN_TO_BYTES: usize = 2_048;
+pub(crate) const MAX_RELATIVE_RETURN_TO_BYTES: usize = 2_048;
 const LOGIN_LOOP_PATHS: &[&str] = &["/login", "/api/v1/oidc/login", "/api/v1/oidc/callback"];
 
 /// A canonical same-origin absolute-path reference suitable for post-login
@@ -77,11 +77,6 @@ impl RelativeReturnTo {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    #[must_use]
-    pub fn into_string(self) -> String {
-        self.0
     }
 }
 

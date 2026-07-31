@@ -72,7 +72,13 @@ pub fn decode_messages_response(
         });
     }
     builder.push(CanonicalEventKind::Usage {
-        usage: canonical_usage(&response.usage),
+        usage: canonical_usage(
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            response.usage.cache_creation_input_tokens,
+            response.usage.cache_read_input_tokens,
+        )
+        .ok_or(ResponseError::UsageOverflow)?,
     });
     let stop_reason = response
         .stop_reason
@@ -85,18 +91,22 @@ pub fn decode_messages_response(
     Ok(builder.events)
 }
 
-pub(crate) fn canonical_usage(usage: &super::super::dto::Usage) -> CanonicalUsage {
-    let input_tokens = usage
-        .input_tokens
-        .saturating_add(usage.cache_creation_input_tokens.unwrap_or(0))
-        .saturating_add(usage.cache_read_input_tokens.unwrap_or(0));
-    CanonicalUsage {
+pub(crate) fn canonical_usage(
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+) -> Option<CanonicalUsage> {
+    let input_tokens = input_tokens
+        .checked_add(cache_creation_input_tokens.unwrap_or(0))?
+        .checked_add(cache_read_input_tokens.unwrap_or(0))?;
+    Some(CanonicalUsage {
         input_tokens,
-        output_tokens: usage.output_tokens,
-        total_tokens: input_tokens.saturating_add(usage.output_tokens),
-        cached_input_tokens: usage.cache_read_input_tokens,
+        output_tokens,
+        total_tokens: input_tokens.checked_add(output_tokens)?,
+        cached_input_tokens: cache_read_input_tokens,
         reasoning_tokens: None,
-    }
+    })
 }
 
 pub(crate) fn collect_usage_extensions(
@@ -119,5 +129,15 @@ pub(crate) fn anthropic_finish_reason(reason: &str) -> FinishReason {
         "tool_use" => FinishReason::ToolCalls,
         "refusal" => FinishReason::ContentFilter,
         other => FinishReason::Other(other.to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_usage;
+
+    #[test]
+    fn usage_overflow_is_rejected() {
+        assert!(canonical_usage(u64::MAX, 0, Some(1), None).is_none());
     }
 }

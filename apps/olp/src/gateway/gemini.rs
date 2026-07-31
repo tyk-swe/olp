@@ -24,8 +24,8 @@ use crate::{
 };
 
 use super::{
-    InferenceError, RoutedUnaryResult, authorize_model_access, execute_event_operation_for_surface,
-    execute_routed_result_for_surface,
+    InferenceError, RoutedUnaryResult, authorize_model_access, execute_event_operation,
+    execute_routed_result,
     native_models::{after_cursor_start, supported_operations, visible_route, visible_routes},
     protocol_error::{ProtocolError, gemini_error_body, valid_json},
     release_model_limits, reserve_model_limits,
@@ -57,14 +57,10 @@ pub(super) async fn action(
                 ));
             }
         };
-        let execution = execute_event_operation_for_surface(
-            &state,
-            &principal,
-            operation,
-            TransportMode::Unary,
-        )
-        .await
-        .map_err(ProtocolError::gemini)?;
+        let execution =
+            execute_event_operation(&state, &principal, operation, TransportMode::Unary)
+                .await
+                .map_err(ProtocolError::gemini)?;
         let completed = collect_event_execution(&state, execution)
             .await
             .map_err(ProtocolError::gemini)?;
@@ -94,14 +90,10 @@ pub(super) async fn action(
                 ));
             }
         };
-        let execution = execute_event_operation_for_surface(
-            &state,
-            &principal,
-            operation,
-            TransportMode::Streaming,
-        )
-        .await
-        .map_err(ProtocolError::gemini)?;
+        let execution =
+            execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
+                .await
+                .map_err(ProtocolError::gemini)?;
         let encoder = GeminiHttpStreamEncoder(GeminiGenerateContentClientStreamEncoder::new(
             execution.route_slug.as_str(),
             execution.request_id.to_string(),
@@ -125,15 +117,10 @@ pub(super) async fn action(
                 ));
             }
         };
-        let executed = execute_routed_result_for_surface(
-            &state,
-            &principal,
-            operation,
-            TransportMode::Unary,
-            None,
-        )
-        .await
-        .map_err(ProtocolError::gemini)?;
+        let executed =
+            execute_routed_result(&state, &principal, operation, TransportMode::Unary, None)
+                .await
+                .map_err(ProtocolError::gemini)?;
         return count_result(executed);
     }
     Err(ProtocolError::not_found(

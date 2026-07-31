@@ -312,11 +312,6 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         )
         .await
         .unwrap();
-    let pending = store
-        .pending_media_reconciliation_jobs(api_key_id, 8)
-        .await
-        .unwrap();
-    assert!(pending.iter().any(|record| record.id == cleanup_id));
     let claim_at = Utc::now();
     let (left, right) = tokio::join!(
         store.claim_media_reconciliation_jobs(claim_at, 8),
@@ -330,6 +325,25 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .collect::<Vec<_>>();
     assert_eq!(cleanup_claims.len(), 1);
     let first_claim_id = cleanup_claims[0].reconciliation_claim_id.unwrap();
+    store
+        .renew_media_reconciliation_claim(
+            cleanup_id,
+            first_claim_id,
+            claim_at + Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+    let renewed_until: chrono::DateTime<Utc> = sqlx::query_scalar(
+        "SELECT reconciliation_claimed_until FROM async_media_jobs WHERE id = $1",
+    )
+    .bind(cleanup_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        renewed_until.timestamp_micros(),
+        (claim_at + Duration::minutes(3)).timestamp_micros()
+    );
 
     // A crashed gateway's lease is recoverable by another replica after the
     // bounded deadline, with a distinct fencing token.
@@ -351,6 +365,12 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .unwrap();
     let second_claim_id = reclaimed.reconciliation_claim_id.unwrap();
     assert_ne!(first_claim_id, second_claim_id);
+    assert!(
+        store
+            .renew_media_reconciliation_claim(cleanup_id, first_claim_id, claim_at)
+            .await
+            .is_err()
+    );
     store
         .finish_media_reconciliation(
             cleanup_id,

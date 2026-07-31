@@ -1,11 +1,18 @@
 use std::{fmt::Write as _, path::Path};
 
-use axum::http::HeaderValue;
+use axum::{
+    Router,
+    body::Body,
+    extract::Request,
+    http::{HeaderValue, StatusCode},
+    response::IntoResponse as _,
+};
 use base64::Engine as _;
 use sha2::{Digest as _, Sha256};
+use tower::ServiceExt as _;
 use tower_http::services::{ServeDir, ServeFile};
 
-const CSP_PREFIX: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'";
+const CSP_PREFIX: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'";
 // SvelteKit creates its route announcer from a client-side template. Keep the
 // framework's exact visually-hidden style working without admitting arbitrary
 // style attributes or weakening the external stylesheet policy.
@@ -15,7 +22,7 @@ const SVELTEKIT_ANNOUNCER_STYLE: &str = "position: absolute; left: 0; top: 0; cl
 /// the generated console entry point. SvelteKit cannot externalize this
 /// bootstrap, and its content changes with each asset build, so a static hash
 /// would break every new console release.
-pub fn content_security_policy(console_dir: &Path) -> HeaderValue {
+pub(crate) fn content_security_policy(console_dir: &Path) -> HeaderValue {
     let mut policy = String::from(CSP_PREFIX);
     if let Ok(index) = std::fs::read_to_string(console_dir.join("index.html")) {
         let mut remainder = index.as_str();
@@ -44,14 +51,32 @@ pub fn content_security_policy(console_dir: &Path) -> HeaderValue {
     HeaderValue::from_str(&policy).expect("generated console CSP must be a valid header")
 }
 
-pub fn spa_service(console_dir: &Path) -> ServeDir<ServeFile> {
+pub(crate) fn spa_service(console_dir: &Path) -> ServeDir<Router> {
+    let index = console_dir.join("index.html");
+    let fallback = Router::new().fallback(move |request: Request| {
+        let index = index.clone();
+        async move {
+            if is_asset_like(request.uri().path()) {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+            ServeFile::new(index)
+                .oneshot(request)
+                .await
+                .map(|response| response.map(Body::new))
+                .unwrap_or_else(|never| match never {})
+        }
+    });
     ServeDir::new(console_dir)
         .precompressed_br()
         .precompressed_gzip()
         .append_index_html_on_directories(true)
-        // SPA routes are real console entry points. `not_found_service` forces
-        // a 404 even when it serves this file, which breaks direct deep links.
-        .fallback(ServeFile::new(console_dir.join("index.html")))
+        .fallback(fallback)
+}
+
+fn is_asset_like(path: &str) -> bool {
+    path.rsplit('/')
+        .next()
+        .is_some_and(|name| Path::new(name).extension().is_some())
 }
 
 #[cfg(test)]
@@ -83,6 +108,25 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn missing_asset_is_not_spa_html() {
+        let root = std::env::temp_dir().join(format!("olp-console-test-{}", Uuid::now_v7()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("index.html"), "<!doctype html><title>OLP</title>").unwrap();
+
+        let response = spa_service(&root)
+            .oneshot(
+                Request::get("/_app/missing.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn csp_hashes_each_generated_inline_bootstrap() {
         let root = std::env::temp_dir().join(format!("olp-console-csp-test-{}", Uuid::now_v7()));
@@ -103,6 +147,7 @@ mod tests {
             assert!(policy.contains(&format!("'sha256-{digest}'")));
         }
         assert!(policy.contains("script-src 'self'"));
+        assert!(policy.contains("form-action 'self'"));
         assert!(policy.contains("; style-src 'self';"));
         assert!(policy.ends_with(
             "style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='"

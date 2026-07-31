@@ -1,12 +1,53 @@
 //! Shared request metadata and error construction for native HTTP transports.
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    time::{Duration, SystemTime},
+};
 
-use http::{HeaderValue, StatusCode};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 use olp_domain::{AttemptFailureClass, SourceExtensions, Surface, TransportError, TransportPhase};
 use zeroize::Zeroizing;
 
 use crate::transport_io::ProviderResponseIo;
+
+pub(crate) fn single_content_type(headers: &HeaderMap) -> Option<&str> {
+    let mut values = headers.get_all(header::CONTENT_TYPE).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
+}
+
+pub(crate) fn has_content_type(headers: &HeaderMap, expected: &str) -> bool {
+    single_content_type(headers)
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected))
+}
+
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+
+pub(crate) fn rate_limit_retry_after(status: StatusCode, headers: &HeaderMap) -> Option<Duration> {
+    (status == StatusCode::TOO_MANY_REQUESTS)
+        .then(|| parse_retry_after_at(headers, SystemTime::now()))
+        .flatten()
+}
+
+fn parse_retry_after_at(headers: &HeaderMap, now: SystemTime) -> Option<Duration> {
+    let mut values = headers.get_all(header::RETRY_AFTER).iter();
+    let value = values.next()?.to_str().ok()?.trim();
+    if values.next().is_some() {
+        return None;
+    }
+    let duration = if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        Duration::from_secs(value.parse().ok()?)
+    } else {
+        httpdate::parse_http_date(value)
+            .ok()?
+            .duration_since(now)
+            .unwrap_or_default()
+    };
+    Some(duration.min(MAX_RETRY_AFTER))
+}
 
 pub(crate) fn secret_header(
     secret: &str,
@@ -124,6 +165,7 @@ pub(crate) fn transport_error(
         phase,
         class,
         response_committed,
+        retry_after: None,
         message: message.into(),
     }
 }
@@ -166,4 +208,38 @@ pub(crate) async fn read_inline_media(
         bytes.extend_from_slice(&chunk);
     }
     Ok(STANDARD.encode(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_after_accepts_bounded_delta_or_date_and_rejects_ambiguity() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+        assert_eq!(
+            parse_retry_after_at(&headers, now),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(
+            rate_limit_retry_after(StatusCode::BAD_REQUEST, &headers),
+            None
+        );
+
+        headers.insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_str(&httpdate::fmt_http_date(now + Duration::from_secs(60))).unwrap(),
+        );
+        assert_eq!(
+            parse_retry_after_at(&headers, now),
+            Some(Duration::from_secs(60))
+        );
+
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("999999999"));
+        assert_eq!(parse_retry_after_at(&headers, now), Some(MAX_RETRY_AFTER));
+        headers.append(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        assert_eq!(parse_retry_after_at(&headers, now), None);
+    }
 }

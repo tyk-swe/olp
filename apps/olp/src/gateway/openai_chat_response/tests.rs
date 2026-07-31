@@ -173,7 +173,6 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
         .push(&join_sse_frames(&[message_start, text_delta, finish, done]))
         .unwrap();
     decoded.extend(decoder.finish().unwrap());
-    assert!(decoder.is_done());
     assert_eq!(
         decoded,
         vec![
@@ -438,7 +437,6 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
     let mut decoded = decoder.push(&join_sse_frames(&frames)).unwrap();
     decoded.extend(decoder.finish().unwrap());
     validate_event_sequence(&decoded).unwrap();
-    assert!(decoder.is_done());
     assert!(matches!(
         &decoded[0].kind,
         CanonicalEventKind::ResponseStart {
@@ -503,7 +501,6 @@ fn stream_encoder_error_frame_is_terminal() {
             CanonicalEvent::new(1, CanonicalEventKind::Done),
         ]
     );
-    assert!(decoder.is_done());
     assert!(decoder.finish().unwrap().is_empty());
     assert!(matches!(
         decoder.push(b"data: [DONE]\n\n"),

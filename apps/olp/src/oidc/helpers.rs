@@ -3,11 +3,11 @@ use olp_storage::MasterKey;
 
 use crate::{ManagementState, Problem};
 
-pub(super) fn callback_url(state: &ManagementState) -> Result<String, Problem> {
-    Ok(state
+pub(super) fn callback_url(state: &ManagementState) -> String {
+    state
         .public_origin
         .with_path("/api/v1/oidc/callback")
-        .to_string())
+        .to_string()
 }
 
 pub(super) fn require_master_key(state: &ManagementState) -> Result<&MasterKey, Problem> {

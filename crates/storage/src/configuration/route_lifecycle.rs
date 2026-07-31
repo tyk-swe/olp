@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use olp_domain::RouteSlug;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
@@ -11,7 +13,10 @@ use crate::{
     },
 };
 
-use super::{ConfigurationError, NewRouteDraft, RouteActivated, RouteDraftCreated};
+use super::{
+    ConfigurationError, NewRouteDraft, RouteActivated, RouteDraftCreated,
+    validation::{MAX_ROUTE_OPERATIONS, MAX_ROUTE_TARGETS},
+};
 
 impl PgStore {
     pub async fn create_route_draft<F>(
@@ -23,6 +28,17 @@ impl PgStore {
     where
         F: FnOnce(&RouteDraftCreated) -> Result<IdempotencyResponse, PersistenceError>,
     {
+        if route.operations.len() > MAX_ROUTE_OPERATIONS || route.targets.len() > MAX_ROUTE_TARGETS
+        {
+            return Err(ConfigurationError::InvalidRoute(format!(
+                "a route supports at most {MAX_ROUTE_OPERATIONS} operations and {MAX_ROUTE_TARGETS} targets"
+            )));
+        }
+        if route.operations.iter().collect::<BTreeSet<_>>().len() != route.operations.len() {
+            return Err(ConfigurationError::InvalidRoute(
+                "route operations must be unique".to_owned(),
+            ));
+        }
         let mut transaction = self.pool().begin().await?;
         match claim_replayable_idempotency(
             &mut transaction,

@@ -27,6 +27,5 @@ apiClient.use({
   },
   async onResponse({ request, response }) {
     await authLifecycle.handleResponse(request, response);
-    return response;
   }
 });

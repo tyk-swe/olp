@@ -4,13 +4,7 @@ use utoipa::OpenApi;
 use crate::{HealthResponse, ManagementState, Problem};
 
 #[cfg(test)]
-use axum::http::{HeaderMap, HeaderValue, header};
-#[cfg(test)]
 use chrono::Utc;
-#[cfg(test)]
-use olp_domain::Surface;
-#[cfg(test)]
-use uuid::Uuid;
 
 mod audit;
 mod health;
@@ -146,8 +140,6 @@ pub(crate) struct OperationsApiDoc;
 
 #[cfg(test)]
 use helpers::{page_limit, validate_time_range};
-#[cfg(test)]
-use media_jobs::media_job_surface_wire_value;
 
 #[cfg(test)]
 mod tests;

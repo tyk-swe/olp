@@ -202,6 +202,11 @@ fn generation(streaming: bool) -> ProviderRequest {
     )
 }
 
+#[test]
+fn semantic_validation_rejects_malformed_model_paths() {
+    assert!(validate_operation(&generation(false).operation, "foo//bar").is_err());
+}
+
 fn count() -> ProviderRequest {
     attempt(
         OperationKind::TokenCount,

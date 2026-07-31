@@ -61,7 +61,7 @@ export async function listProviderPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderSummary>> {
   const response = await apiClient.GET('/api/v1/providers', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: 100, cursor } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);
@@ -87,7 +87,7 @@ export async function listProviderModelInventoryPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderModelInventory>> {
   const response = await apiClient.GET('/api/v1/provider-models', {
-    params: { query: { limit: 50, cursor, enabled } },
+    params: { query: { limit: 100, cursor, enabled } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);

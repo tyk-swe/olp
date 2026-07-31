@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM idempotency_records WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED ) DELETE FROM idempotency_records record USING expired WHERE record.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc7913c933b619110ee4381907f5444efcc33e6b1d1db3ea71e7adb621343e80"
+}

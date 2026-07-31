@@ -32,7 +32,7 @@ use utoipa::OpenApi;
 
 use crate::{ManagementState, Problem};
 
-pub fn router() -> Router<ManagementState> {
+pub(crate) fn router() -> Router<ManagementState> {
     Router::new()
         .route("/api/v1/openapi.json", get(openapi))
         .route(
@@ -137,7 +137,7 @@ pub fn router() -> Router<ManagementState> {
         (name = "invitations"),
     )
 )]
-pub struct ManagementApiDoc;
+struct ManagementApiDoc;
 
 #[utoipa::path(
     get,

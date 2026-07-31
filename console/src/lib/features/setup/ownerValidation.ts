@@ -12,15 +12,18 @@ export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
   const displayName = values.displayName.trim();
   const email = values.email.trim();
   if (!displayName) errors.displayName = 'Enter your name.';
-  else if (displayName.length > 100) errors.displayName = 'Use 100 characters or fewer.';
+  else if (Array.from(displayName).length > 100) errors.displayName = 'Use 100 characters or fewer.';
   if (!email) errors.email = 'Enter your email address.';
   // Client-side shape check only; the API remains the authoritative email validator.
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errors.email = 'Enter a valid email address.';
-  } else if (email.length > 254) errors.email = 'Use 254 characters or fewer.';
-  const passwordValid = values.password.length >= 12 && values.password.length <= 1024;
-  if (values.password.length < 12) errors.password = 'Use at least 12 characters.';
-  else if (values.password.length > 1024) errors.password = 'Use 1,024 characters or fewer.';
+  } else if (new TextEncoder().encode(email).length > 254) {
+    errors.email = 'Use 254 UTF-8 bytes or fewer.';
+  }
+  const passwordLength = Array.from(values.password).length;
+  const passwordValid = passwordLength >= 12 && passwordLength <= 1024;
+  if (passwordLength < 12) errors.password = 'Use at least 12 characters.';
+  else if (passwordLength > 1024) errors.password = 'Use 1,024 characters or fewer.';
   if (passwordValid && values.password !== values.confirmPassword) {
     errors.confirmPassword = 'Passwords do not match.';
   }

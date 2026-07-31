@@ -289,60 +289,9 @@ impl<'a> ProviderConfiguration<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderViolationField {
-    AuthMode,
-    Credential,
-    Endpoint,
-    CloudRegion,
-    CloudProject,
-    Deployment,
-    ApiVersion,
-    Model,
-}
-
-impl ProviderViolationField {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AuthMode => "auth_mode",
-            Self::Credential => "credential",
-            Self::Endpoint => "endpoint",
-            Self::CloudRegion => "cloud_region",
-            Self::CloudProject => "cloud_project",
-            Self::Deployment => "deployment",
-            Self::ApiVersion => "api_version",
-            Self::Model => "model",
-        }
-    }
-}
-
-impl From<ProviderConfigurationField> for ProviderViolationField {
-    fn from(value: ProviderConfigurationField) -> Self {
-        match value {
-            ProviderConfigurationField::Endpoint => Self::Endpoint,
-            ProviderConfigurationField::CloudRegion => Self::CloudRegion,
-            ProviderConfigurationField::CloudProject => Self::CloudProject,
-            ProviderConfigurationField::Deployment => Self::Deployment,
-            ProviderConfigurationField::ApiVersion => Self::ApiVersion,
-            ProviderConfigurationField::Model => Self::Model,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderViolationCode {
-    UnsupportedAuthMode,
-    Required,
-    Forbidden,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderConfigurationViolation {
-    pub field: ProviderViolationField,
-    pub code: ProviderViolationCode,
+    pub field: &'static str,
     pub detail: &'static str,
 }
 
@@ -356,8 +305,7 @@ pub fn validate_provider_configuration(
     let auth = spec.auth_mode(configuration.auth_mode);
     if auth.is_none() {
         violations.push(ProviderConfigurationViolation {
-            field: ProviderViolationField::AuthMode,
-            code: ProviderViolationCode::UnsupportedAuthMode,
+            field: "auth_mode",
             detail: unsupported_auth_detail(configuration.kind),
         });
     }
@@ -368,14 +316,12 @@ pub fn validate_provider_configuration(
                 if field_spec.required && value.is_none_or(|value| value.trim().is_empty()) =>
             {
                 violations.push(ProviderConfigurationViolation {
-                    field: field.into(),
-                    code: ProviderViolationCode::Required,
+                    field: field.as_str(),
                     detail: required_field_detail(configuration.kind, field),
                 });
             }
             (None, Some(_)) => violations.push(ProviderConfigurationViolation {
-                field: field.into(),
-                code: ProviderViolationCode::Forbidden,
+                field: field.as_str(),
                 detail: forbidden_field_detail(configuration.kind, field),
             }),
             _ => {}
@@ -386,15 +332,13 @@ pub fn validate_provider_configuration(
         match (auth.credential, credential_present) {
             (CredentialRequirement::Required, false) => {
                 violations.push(ProviderConfigurationViolation {
-                    field: ProviderViolationField::Credential,
-                    code: ProviderViolationCode::Required,
+                    field: "credential",
                     detail: "This authentication mode requires a write-only credential.",
                 });
             }
             (CredentialRequirement::Forbidden, true) => {
                 violations.push(ProviderConfigurationViolation {
-                    field: ProviderViolationField::Credential,
-                    code: ProviderViolationCode::Forbidden,
+                    field: "credential",
                     detail: forbidden_credential_detail(configuration.auth_mode),
                 });
             }
@@ -569,7 +513,7 @@ mod tests {
                 assert_eq!(
                     violations
                         .iter()
-                        .any(|violation| violation.field == ProviderViolationField::AuthMode),
+                        .any(|violation| violation.field == "auth_mode"),
                     !supports
                 );
             }
@@ -589,22 +533,21 @@ mod tests {
                     ProviderConfigurationField::ApiVersion => &mut candidate.api_version,
                     ProviderConfigurationField::Model => &mut candidate.model,
                 };
-                let expected = match spec.field(field) {
+                match spec.field(field) {
                     Some(field) if field.required => {
                         *slot = None;
-                        ProviderViolationCode::Required
                     }
                     None => {
                         *slot = Some("unexpected");
-                        ProviderViolationCode::Forbidden
                     }
                     Some(_) => continue,
-                };
+                }
                 let violations = validate_provider_configuration(candidate);
-                assert!(violations.iter().any(|violation| {
-                    violation.field == ProviderViolationField::from(field)
-                        && violation.code == expected
-                }));
+                assert!(
+                    violations
+                        .iter()
+                        .any(|violation| violation.field == field.as_str())
+                );
             }
         }
     }

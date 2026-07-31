@@ -156,21 +156,9 @@ fn native_provider_create_shape_rejects_custom_and_cloud_fields() {
         model: request.model.as_deref(),
         credential_present: Some(request.credential.is_some()),
     });
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.field.as_str() == "endpoint")
-    );
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.field.as_str() == "cloud_region")
-    );
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.field.as_str() == "auth_mode")
-    );
+    assert!(errors.iter().any(|error| error.field == "endpoint"));
+    assert!(errors.iter().any(|error| error.field == "cloud_region"));
+    assert!(errors.iter().any(|error| error.field == "auth_mode"));
 }
 
 #[test]
@@ -353,6 +341,12 @@ fn idempotency_key_requires_url_safe_header_value() {
         require_idempotency_key(&headers).unwrap(),
         "provider-create_01.v2"
     );
+
+    headers.append(
+        "idempotency-key",
+        HeaderValue::from_static("provider-create_02.v2"),
+    );
+    assert_eq!(require_idempotency_key(&headers).unwrap_err().status, 400);
 }
 
 #[test]
@@ -372,6 +366,30 @@ fn if_match_requires_one_strong_quoted_uuid_etag() {
     assert_eq!(if_match(&headers).unwrap_err().status, 400);
     headers.insert(header::IF_MATCH, HeaderValue::from_static("*"));
     assert_eq!(if_match(&headers).unwrap_err().status, 400);
+
+    headers.insert(
+        header::IF_MATCH,
+        HeaderValue::from_str(&format!("\"{id}\"")).unwrap(),
+    );
+    headers.append(
+        header::IF_MATCH,
+        HeaderValue::from_str(&format!("\"{}\"", Uuid::now_v7())).unwrap(),
+    );
+    assert_eq!(if_match(&headers).unwrap_err().status, 400);
+}
+
+#[test]
+fn origin_rejects_multiple_field_lines() {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::ORIGIN,
+        HeaderValue::from_static("https://olp.example.test"),
+    );
+    headers.append(
+        header::ORIGIN,
+        HeaderValue::from_static("https://evil.example.test"),
+    );
+    assert_eq!(enforce_origin(&state(), &headers).unwrap_err().status, 403);
 }
 
 #[test]

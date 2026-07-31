@@ -1,5 +1,4 @@
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
     num::{NonZeroU16, NonZeroU32},
@@ -247,6 +246,7 @@ impl Route {
         }
 
         let mut target_ids = HashSet::with_capacity(self.targets.len());
+        let mut target_routing_ids = HashSet::with_capacity(self.targets.len());
         for target in &self.targets {
             if target.timeout.is_zero() {
                 return Err(RouteValidationError::ZeroTargetTimeout {
@@ -262,6 +262,10 @@ impl Route {
                 return Err(RouteValidationError::DuplicateTarget {
                     target_id: target.id,
                 });
+            }
+            let routing_id = target.routing_id.unwrap_or(target.id);
+            if !target_routing_ids.insert(routing_id) {
+                return Err(RouteValidationError::DuplicateTargetRoutingId { routing_id });
             }
         }
 
@@ -283,6 +287,8 @@ pub enum RouteValidationError {
     TargetTimeoutExceedsRoute { target_id: TargetId },
     #[error("target ID {target_id} appears more than once")]
     DuplicateTarget { target_id: TargetId },
+    #[error("target routing ID {routing_id} appears more than once")]
+    DuplicateTargetRoutingId { routing_id: TargetId },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -498,16 +504,12 @@ pub fn select_attempts_filtered(
     let mut attempts = Vec::with_capacity(maximum);
     for (priority, mut group) in groups {
         group.sort_by(|left, right| {
-            right
-                .score
-                .partial_cmp(&left.score)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| {
-                    left.target
-                        .routing_id
-                        .unwrap_or(left.target.id)
-                        .cmp(&right.target.routing_id.unwrap_or(right.target.id))
-                })
+            right.score.total_cmp(&left.score).then_with(|| {
+                left.target
+                    .routing_id
+                    .unwrap_or(left.target.id)
+                    .cmp(&right.target.routing_id.unwrap_or(right.target.id))
+            })
         });
 
         for ranked in group {

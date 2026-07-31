@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use olp_domain::{
     CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole, Surface,
@@ -18,8 +18,10 @@ pub enum ClientStreamEncodeError {
     Tool,
     #[error("source extensions cannot be represented in a Gemini client stream")]
     Extension,
-    #[error("Gemini stream completed with unfinished function calls")]
-    UnfinishedTools,
+    #[error("Gemini stream completed with unfinished output")]
+    UnfinishedOutput,
+    #[error("invalid Gemini client stream lifecycle")]
+    Lifecycle,
 }
 
 #[derive(Debug)]
@@ -28,8 +30,12 @@ pub struct GeminiGenerateContentClientStreamEncoder {
     fallback_id: String,
     expected_sequence: u64,
     response_id: Option<String>,
+    response_started: bool,
+    started_outputs: BTreeSet<u32>,
+    finished_outputs: BTreeSet<u32>,
     tools: BTreeMap<(u32, u32), ToolState>,
     done: bool,
+    native_passthrough: bool,
     skip_native_events: usize,
 }
 
@@ -48,8 +54,12 @@ impl GeminiGenerateContentClientStreamEncoder {
             fallback_id: fallback_id.into(),
             expected_sequence: 0,
             response_id: None,
+            response_started: false,
+            started_outputs: BTreeSet::new(),
+            finished_outputs: BTreeSet::new(),
             tools: BTreeMap::new(),
             done: false,
+            native_passthrough: false,
             skip_native_events: 0,
         }
     }
@@ -69,17 +79,36 @@ impl GeminiGenerateContentClientStreamEncoder {
             }
             return Ok(Vec::new());
         }
+        let continues_native_passthrough = matches!(&event.kind, CanonicalEventKind::Done)
+            || matches!(
+                &event.kind,
+                CanonicalEventKind::SourceExtension { extensions }
+                    if extensions.values.contains_key(RAW_SSE_FRAME_EXTENSION)
+            );
+        if self.native_passthrough && !continues_native_passthrough {
+            return Err(ClientStreamEncodeError::Lifecycle);
+        }
         let mut frames = Vec::new();
         match event.kind {
             CanonicalEventKind::ResponseStart { response_id, .. } => {
+                if self.response_started {
+                    return Err(ClientStreamEncodeError::Lifecycle);
+                }
+                self.response_started = true;
                 self.response_id = response_id;
             }
-            CanonicalEventKind::MessageStart { role, .. } => {
+            CanonicalEventKind::MessageStart {
+                output_index, role, ..
+            } => {
                 if role != MessageRole::Assistant {
                     return Err(ClientStreamEncodeError::Role);
                 }
+                if !self.response_started || !self.started_outputs.insert(output_index) {
+                    return Err(ClientStreamEncodeError::Lifecycle);
+                }
             }
             CanonicalEventKind::TextDelta { output_index, text } => {
+                self.require_open_output(output_index)?;
                 frames.push(self.response_frame(json!({
                     "candidates": [{
                         "index": output_index,
@@ -94,6 +123,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                 name,
                 arguments_delta,
             } => {
+                self.require_open_output(output_index)?;
                 let tool = self.tools.entry((output_index, tool_index)).or_default();
                 if let Some(id) = id {
                     if tool.id.as_ref().is_some_and(|existing| existing != &id) {
@@ -124,6 +154,8 @@ impl GeminiGenerateContentClientStreamEncoder {
                 output_index,
                 reason,
             } => {
+                self.require_open_output(output_index)?;
+                self.finished_outputs.insert(output_index);
                 let keys = self
                     .tools
                     .keys()
@@ -152,6 +184,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                 })));
             }
             CanonicalEventKind::Error { error } => {
+                self.done = true;
                 frames.push(SseFrame {
                     event: None,
                     data: json!({
@@ -177,6 +210,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                     let (mut raw, semantic_events) =
                         decode_raw_sse_frame(value).ok_or(ClientStreamEncodeError::Extension)?;
                     rewrite_gemini_model(&mut raw, &self.public_model)?;
+                    self.native_passthrough = true;
                     self.skip_native_events = semantic_events;
                     frames.push(raw);
                 } else if !extensions.values.is_empty() {
@@ -187,13 +221,27 @@ impl GeminiGenerateContentClientStreamEncoder {
                 return Err(ClientStreamEncodeError::Role);
             }
             CanonicalEventKind::Done => {
-                if !self.tools.is_empty() {
-                    return Err(ClientStreamEncodeError::UnfinishedTools);
+                if !self.native_passthrough
+                    && (!self.tools.is_empty()
+                        || !self.response_started
+                        || self.started_outputs != self.finished_outputs)
+                {
+                    return Err(ClientStreamEncodeError::UnfinishedOutput);
                 }
                 self.done = true;
             }
         }
         Ok(frames)
+    }
+
+    fn require_open_output(&self, output_index: u32) -> Result<(), ClientStreamEncodeError> {
+        if !self.response_started
+            || !self.started_outputs.contains(&output_index)
+            || self.finished_outputs.contains(&output_index)
+        {
+            return Err(ClientStreamEncodeError::Lifecycle);
+        }
+        Ok(())
     }
 
     fn response_frame(&self, mut value: Value) -> SseFrame {

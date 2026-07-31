@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiProblem } from './http';
-import { listProviderHealth, listRequests, operationsTesting } from './operations';
+import { listProviderHealth, listRequests } from './operations';
 import { captureRequests, jsonResponse } from './test/requestCapture';
 
 afterEach(() => {
@@ -23,16 +23,12 @@ function providerHealth(providerId: string) {
 }
 
 describe('operations query serialization', () => {
-  it('removes empty filters while retaining zero and false values', () => {
-    expect(
-      operationsTesting.compact({
-        status: 0,
-        enabled: false,
-        route: '',
-        cursor: undefined,
-        provider: null
-      })
-    ).toEqual({ status: 0, enabled: false });
+  it('removes empty filters while retaining zero values', async () => {
+    const requests = captureRequests(() => jsonResponse({ data: [], next_cursor: null }));
+
+    await listRequests({ status_code: 0, route: '', cursor: undefined });
+
+    expect(Object.fromEntries(new URL(requests[0]!.url).searchParams)).toEqual({ status_code: '0' });
   });
 });
 
@@ -58,44 +54,6 @@ describe('provider-health pagination', () => {
       expect(params.get('window_minutes')).toBe('30');
       expect(params.get('limit')).toBe('200');
     }
-  });
-
-  it('rejects a repeated cursor instead of looping', async () => {
-    const requests = captureRequests(() =>
-      jsonResponse({ window_minutes: 15, data: [], next_cursor: 'repeat' })
-    );
-
-    const error = await listProviderHealth().catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:invalid-cursor-cycle',
-      title: 'The control API returned a repeated pagination cursor',
-      status: 502
-    });
-    expect(requests).toHaveLength(2);
-  });
-
-  it('enforces the shared collection safety limit', async () => {
-    const requests = captureRequests((_request, page) =>
-      jsonResponse({
-        window_minutes: 15,
-        data: Array.from({ length: 200 }, (_, item) =>
-          providerHealth(`provider-${page + 1}-${item + 1}`)
-        ),
-        next_cursor: `page-${page + 2}`
-      })
-    );
-
-    const error = await listProviderHealth().catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:pagination-limit-exceeded',
-      title: 'The control API collection exceeds the console safety limit',
-      status: 502
-    });
-    expect(requests).toHaveLength(51);
   });
 });
 

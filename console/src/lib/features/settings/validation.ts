@@ -1,7 +1,7 @@
 export function validateDisplayName(value: string) {
   const displayName = value.trim();
   if (!displayName) throw new Error('Enter your display name.');
-  if (displayName.length > 100) throw new Error('Use 100 characters or fewer.');
+  if (Array.from(displayName).length > 100) throw new Error('Use 100 characters or fewer.');
   return displayName;
 }
 
@@ -13,8 +13,9 @@ export function validatePassword(current: string, next: string, confirmation: st
 }
 
 export function validateNewPassword(next: string, confirmation: string) {
-  if (next.length < 12) throw new Error('Use at least 12 characters.');
-  if (next.length > 1024) throw new Error('Use 1,024 characters or fewer.');
+  const length = Array.from(next).length;
+  if (length < 12) throw new Error('Use at least 12 characters.');
+  if (length > 1024) throw new Error('Use 1,024 characters or fewer.');
   if (next !== confirmation) throw new Error('New passwords do not match.');
   return next;
 }

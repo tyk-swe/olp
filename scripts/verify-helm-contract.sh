@@ -99,6 +99,24 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set config.trustedProxyCidrs=10.0.0.0/8 \
   > "$work/edge-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true \
+  --set control.enabled=false \
+  > "$work/gateway-only-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true \
+  --set gateway.enabled=false \
+  > "$work/control-only-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true \
+  --set gateway.enabled=false \
+  --set control.enabled=false \
+  > "$work/no-control-plane-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true \
+  --set gateway.service.enabled=false \
+  --set control.enabled=false \
+  > "$work/gateway-without-service-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set mediaSpool.capacityBytes=9007199254740991 \
   > "$work/max-spool-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
@@ -245,9 +263,10 @@ docker compose -f "$compose_file" -f "$bootstrap_compose_file" config \
   > "$work/compose-bootstrap.yaml"
 jq -e '
   .services.migrate.environment.OLP_VALKEY_URL == "redis://valkey:6379" and
-  .services.migrate.depends_on.valkey.condition == "service_healthy"
+  .services.migrate.depends_on.valkey.condition == "service_healthy" and
+  .services.valkey.user == "999:1000"
 ' "$work/compose.json" >/dev/null || {
-  echo "Compose migration must wait for and preflight Valkey" >&2
+  echo "Compose migration/Valkey privilege contract is invalid" >&2
   exit 1
 }
 rendered_bootstrap_tokens_matched=
@@ -294,6 +313,29 @@ for expected in \
     echo "rendered edge/monitoring contract is missing: $expected" >&2
     exit 1
   }
+done
+
+grep -Fq 'service="olp-openllmproxy-gateway-observability"' "$work/gateway-only-monitoring.yaml" || {
+  echo "gateway-only monitoring omitted the enabled gateway readiness target" >&2
+  exit 1
+}
+if grep -Fq 'service="olp-openllmproxy-control-observability"' "$work/gateway-only-monitoring.yaml"; then
+  echo "gateway-only monitoring references the disabled control target" >&2
+  exit 1
+fi
+grep -Fq 'service="olp-openllmproxy-control-observability"' "$work/control-only-monitoring.yaml" || {
+  echo "control-only monitoring omitted the enabled control readiness target" >&2
+  exit 1
+}
+if grep -Fq 'service="olp-openllmproxy-gateway-observability"' "$work/control-only-monitoring.yaml"; then
+  echo "control-only monitoring references the disabled gateway target" >&2
+  exit 1
+fi
+for manifest in no-control-plane-monitoring gateway-without-service-monitoring; do
+  if grep -Fq 'alert: OLPReadinessAbsent' "$work/$manifest.yaml"; then
+    echo "$manifest renders a readiness alert without an enabled target service" >&2
+    exit 1
+  fi
 done
 
 legacy_usage_telemetry_matched=

@@ -209,12 +209,6 @@ impl Management {
             .await
     }
 
-    pub async fn post(&self, path: &str, body: Value) -> Result<MgmtResponse, String> {
-        let key = self.next_idempotency_key();
-        self.send(reqwest::Method::POST, path, Some(body), Some(&key), None)
-            .await
-    }
-
     pub async fn expect(
         &self,
         method: reqwest::Method,
@@ -265,7 +259,6 @@ pub struct World {
     pub http: reqwest::Client,
     pub api_key: String,
     pub compat_provider: String,
-    pub azure_provider: String,
 }
 
 /// A gateway response kept whole: assertions need the status line, the headers
@@ -573,7 +566,6 @@ async fn bootstrap_server(server: Server) -> Result<World, String> {
         http,
         api_key: secret,
         compat_provider,
-        azure_provider,
     })
 }
 

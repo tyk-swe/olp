@@ -85,9 +85,10 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     assert_eq!(owner_record.role, Role::Owner);
     assert!(matches!(
         store
-            .update_user_role(
+            .update_user_access(
                 owner.user_id,
-                Role::Viewer,
+                Some(Role::Viewer),
+                None,
                 owner_record.etag,
                 owner.user_id,
             )
@@ -146,10 +147,32 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
             .is_err()
     );
 
-    let updated = store
-        .update_user_role(
+    let unchanged = store
+        .update_user_access(
             accepted.user.id,
-            Role::Developer,
+            Some(Role::Operator),
+            None,
+            accepted.user.etag,
+            owner.user_id,
+        )
+        .await
+        .unwrap();
+    assert_eq!(unchanged.etag, accepted.user.etag);
+    assert_eq!(
+        store
+            .list_sessions(accepted.user.id, None, 50)
+            .await
+            .unwrap()
+            .0
+            .len(),
+        1
+    );
+
+    let updated = store
+        .update_user_access(
+            accepted.user.id,
+            Some(Role::Developer),
+            None,
             accepted.user.etag,
             owner.user_id,
         )
@@ -187,6 +210,33 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     else {
         panic!("new invitation must execute");
     };
+    sqlx::query(
+        "UPDATE invitations SET created_at = now() - interval '2 seconds', \
+         expires_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(viewer_invitation.invitation.id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    assert!(
+        store
+            .accept_invitation(
+                AcceptInvitation {
+                    token: viewer_invitation.material.token().to_owned(),
+                    display_name: "Viewer".to_owned(),
+                    password_hash: hash_password("a third correct local password").unwrap(),
+                },
+                &SessionMaterial::generate(),
+                Duration::hours(12),
+            )
+            .await
+            .is_err()
+    );
+    sqlx::query("UPDATE invitations SET expires_at = now() + interval '1 day' WHERE id = $1")
+        .bind(viewer_invitation.invitation.id)
+        .execute(store.pool())
+        .await
+        .unwrap();
     let revoked = store
         .revoke_invitation(
             viewer_invitation.invitation.id,
@@ -316,7 +366,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     let audit_actions: Vec<String> = sqlx::query_scalar(
         "SELECT action FROM audit_events WHERE action IN \
          ('invitation.create', 'invitation.accept', 'invitation.revoke', \
-          'user.create', 'user.role_update', 'session.create', 'session.revoke')",
+          'user.create', 'user.access_update', 'session.create', 'session.revoke')",
     )
     .fetch_all(store.pool())
     .await
@@ -326,7 +376,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
         "invitation.accept",
         "invitation.revoke",
         "user.create",
-        "user.role_update",
+        "user.access_update",
         "session.create",
         "session.revoke",
     ] {

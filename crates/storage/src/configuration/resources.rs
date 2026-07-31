@@ -5,8 +5,8 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use olp_domain::{
-    CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind, ProviderState,
-    RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
+    CapabilitySource, MAX_API_KEY_TOKENS_PER_MINUTE, OperationKind, ProviderAuthMode, ProviderKind,
+    ProviderState, RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
     weighted_rendezvous_score,
 };
 use sqlx::{Postgres, Transaction};
@@ -26,7 +26,7 @@ use crate::{
 use super::{
     ConfigurationError,
     validation::{
-        checked_limit, enforce_provider_revision_diff_limit, validate_capability, validate_model,
+        checked_limit, enforce_provider_revision_diff_limit, validate_model,
         validate_provider_capability, validate_provider_update, validate_route_input,
     },
 };
@@ -41,10 +41,10 @@ mod routes;
 
 /// Maximum number of models loaded from either immutable provider revision
 /// while producing an in-memory revision diff.
-pub const PROVIDER_REVISION_DIFF_MODEL_LIMIT: usize = 2_000;
+pub(super) const PROVIDER_REVISION_DIFF_MODEL_LIMIT: usize = 2_000;
 /// Maximum number of capability tuples loaded from either immutable provider
 /// revision while producing an in-memory revision diff.
-pub const PROVIDER_REVISION_DIFF_CAPABILITY_LIMIT: usize = 32_000;
+pub(super) const PROVIDER_REVISION_DIFF_CAPABILITY_LIMIT: usize = 32_000;
 
 #[derive(Clone, Debug)]
 pub struct ConfigurationPage<T> {

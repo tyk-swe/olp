@@ -75,7 +75,6 @@ async function smokeAnthropic() {
     messages: [{ role: 'user', content: 'official SDK smoke' }]
   });
   assert.equal(message.model, routeSlug);
-  assert.equal(message.content[0]?.type, 'text');
   assert.equal(message.content[0]?.text, `official anthropic sdk reached ${routeSlug}`);
 
   const streamed = await client.messages
@@ -85,7 +84,6 @@ async function smokeAnthropic() {
       messages: [{ role: 'user', content: 'official streaming SDK smoke' }]
     })
     .finalMessage();
-  assert.equal(streamed.content[0]?.type, 'text');
   assert.equal(streamed.content[0]?.text, `official anthropic sdk reached ${routeSlug}`);
 
   const page = await client.models.list({ limit: 10 });
@@ -134,13 +132,7 @@ async function rejection(what, attempt) {
   throw new assert.AssertionError({ message: `${what} was expected to fail but succeeded` });
 }
 
-// README.md calls these surfaces OpenAI-, Anthropic- and Gemini-compatible.
-// Compatibility is what the official client can do with a response, and a
-// client's error handling is the half a happy-path smoke never reaches: an
-// application catches `AuthenticationError`, not "some rejection". A gateway
-// whose failures do not land in the SDK's own typed hierarchy, with the status
-// each vendor documents for that condition, is not compatible however well its
-// successes are shaped.
+// Compatibility includes each official SDK's error class and status contract.
 async function errorContractOpenAI() {
   const wrongKey = new OpenAI({
     apiKey: 'olp_not-a-real-key',

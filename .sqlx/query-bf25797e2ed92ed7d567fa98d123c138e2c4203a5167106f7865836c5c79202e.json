@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM oidc_authorization_flows WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED ) DELETE FROM oidc_authorization_flows flow USING expired WHERE flow.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf25797e2ed92ed7d567fa98d123c138e2c4203a5167106f7865836c5c79202e"
+}

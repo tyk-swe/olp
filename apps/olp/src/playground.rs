@@ -189,7 +189,7 @@ async fn execute_playground(
 
     let mut output_text = String::new();
     let mut refusal = String::new();
-    let mut tool_calls = BTreeMap::<(u32, u32), ToolCallBuilder>::new();
+    let mut tool_calls = BTreeMap::<u32, ToolCallBuilder>::new();
     let mut provider_model = None;
     let mut usage = None;
     let mut finish_reason = None;
@@ -212,13 +212,13 @@ async fn execute_playground(
                 refusal.push_str(&text);
             }
             CanonicalEventKind::ToolCallDelta {
-                output_index,
+                output_index: 0,
                 tool_index,
                 id,
                 name,
                 arguments_delta,
-            } if output_index == 0 => {
-                let call = tool_calls.entry((output_index, tool_index)).or_default();
+            } => {
+                let call = tool_calls.entry(tool_index).or_default();
                 if id.is_some() {
                     call.id = id;
                 }

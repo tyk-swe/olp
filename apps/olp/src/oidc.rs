@@ -7,16 +7,16 @@ mod helpers;
 mod identities;
 mod session;
 
-pub use authorization::{OidcAuthorizationResponse, OidcLoginRequest, OidcReauthenticationRequest};
+use authorization::{OidcAuthorizationResponse, OidcLoginRequest, OidcReauthenticationRequest};
 use authorization::{begin_link, begin_login, begin_login_post, begin_reauthentication};
 use axum::{Router, routing::get, routing::post};
 use callback::callback;
-pub use configuration::{
+use configuration::{
     OidcConfigurationRequest, OidcConfigurationResponse, OidcRoleMappingRequest,
     OidcRoleMappingResponse,
 };
 use configuration::{get_configuration, put_configuration};
-pub use identities::{OidcIdentityListResponse, OidcIdentityResponse};
+use identities::{OidcIdentityListResponse, OidcIdentityResponse};
 use identities::{list_identities, unlink_identity};
 use utoipa::OpenApi;
 

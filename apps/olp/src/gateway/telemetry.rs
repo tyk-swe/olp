@@ -330,14 +330,18 @@ pub(super) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
         CanonicalResult::Images(result) => (result.usage, Decimal::from_usize(result.images.len())),
         CanonicalResult::Transcription(result) => (
             None,
-            result.duration_seconds.and_then(Decimal::from_f64_retain),
+            result
+                .duration_seconds
+                .and_then(Decimal::from_f64_retain)
+                .and_then(valid_media_units),
         ),
         CanonicalResult::VideoJob(result) => (
             None,
             result
                 .seconds
                 .as_deref()
-                .and_then(|value| value.parse::<Decimal>().ok()),
+                .and_then(|value| value.parse::<Decimal>().ok())
+                .and_then(valid_media_units),
         ),
         CanonicalResult::TokenCount(result) => (
             Some(olp_domain::Usage {
@@ -374,6 +378,10 @@ pub(super) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
         cached_input_tokens,
         media_units,
     }
+}
+
+fn valid_media_units(value: Decimal) -> Option<Decimal> {
+    (!value.is_sign_negative()).then_some(value)
 }
 
 #[derive(Clone, Default)]
@@ -505,7 +513,6 @@ pub(super) fn emit_request_metadata_event(
             cached_input_tokens: usage.cached_input_tokens,
             media_units: usage.media_units,
             usage_complete: usage.observed && usage.complete,
-            unpriced: true,
             attempts,
         });
         if result.is_err() {
@@ -520,7 +527,9 @@ pub(super) fn elapsed_ms(duration: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::split_actual_tokens;
+    use rust_decimal::Decimal;
+
+    use super::{split_actual_tokens, valid_media_units};
 
     #[test]
     fn actual_tokens_are_split_across_http_and_delta_reservations() {
@@ -534,5 +543,16 @@ mod tests {
         );
         assert_eq!(split_actual_tokens(Some(40), None), (None, Some(40)));
         assert_eq!(split_actual_tokens(None, Some(100)), (None, None));
+    }
+
+    #[test]
+    fn media_usage_must_be_nonnegative() {
+        for (value, expected) in [
+            (Decimal::new(-1, 0), None),
+            (Decimal::ZERO, Some(Decimal::ZERO)),
+            (Decimal::ONE, Some(Decimal::ONE)),
+        ] {
+            assert_eq!(valid_media_units(value), expected);
+        }
     }
 }

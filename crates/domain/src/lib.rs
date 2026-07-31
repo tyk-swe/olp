@@ -14,7 +14,7 @@ pub mod routing;
 
 pub use auth::{
     ApiKey, ApiKeyAuthorizationError, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus,
-    InvalidRole, OwnerInvariantError, Permission, Role, authorize_api_key, validate_owner_change,
+    InvalidRole, MAX_API_KEY_TOKENS_PER_MINUTE, Permission, Role, authorize_api_key,
 };
 pub use canonical::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, CanonicalResult, ContentPart,
@@ -27,14 +27,14 @@ pub use canonical::{
     ModerationItem, ModerationRequest, ModerationResult, Operation, OperationKind, RequestMetadata,
     ResponseFormat, SourceExtensions, SpeechRequest, SpeechResult, Surface, TokenCountRequest,
     TokenCountResult, ToolCall, ToolChoice, ToolDefinition, TranscriptionRequest,
-    TranscriptionResult, TranscriptionSegment, TransportMode, Usage, VideoContentResult,
-    VideoCreateRequest, VideoDeleteResult, VideoJobRequest, VideoJobResult, VideoListRequest,
-    VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
+    TranscriptionResult, TranscriptionSegment, TransportMode, Usage, UsageValidationError,
+    VideoContentResult, VideoCreateRequest, VideoDeleteResult, VideoJobRequest, VideoJobResult,
+    VideoListRequest, VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
     media_handle_from_inline_marker, validate_event_sequence,
 };
 pub use ids::{
-    ApiKeyId, ApiKeyLookupId, ApiKeyLookupIdError, AttemptId, CredentialVersionId, DurationMs,
-    ProviderId, RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId, TargetId,
+    ApiKeyId, ApiKeyLookupId, ApiKeyLookupIdError, CredentialVersionId, DurationMs, ProviderId,
+    RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId, TargetId,
 };
 pub use ports::{
     AttemptFailureClass, BoxFuture, DiscoveredProviderModel, MediaByteStream, MediaSpool,
@@ -46,9 +46,8 @@ pub use provider::{
 };
 pub use provider_configuration::{
     CredentialRequirement, ProviderAuthModeSpec, ProviderConfiguration, ProviderConfigurationField,
-    ProviderConfigurationViolation, ProviderFieldSpec, ProviderKindSpec, ProviderViolationCode,
-    ProviderViolationField, provider_kind_spec, provider_kind_specs,
-    validate_provider_configuration,
+    ProviderConfigurationViolation, ProviderFieldSpec, ProviderKindSpec, provider_kind_spec,
+    provider_kind_specs, validate_provider_configuration,
 };
 pub use routing::{
     AttemptPlan, Capability, InvalidProviderKind, Provider, ProviderKind, Route,

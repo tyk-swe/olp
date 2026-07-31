@@ -138,7 +138,10 @@ pub struct OpenAiModerationResult {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_moderation_response(response: OpenAiModerationResponse) -> ModerationResult {
+pub fn decode_moderation_response(
+    response: OpenAiModerationResponse,
+) -> Result<ModerationResult, ModerationCodecError> {
+    validate_moderation_scores(&response.results)?;
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
     let results = response
@@ -160,12 +163,12 @@ pub fn decode_moderation_response(response: OpenAiModerationResponse) -> Moderat
             }
         })
         .collect();
-    ModerationResult {
+    Ok(ModerationResult {
         id: Some(response.id),
         model: Some(response.model),
         results,
         extensions: SourceExtensions::new(Surface::OpenAi, extensions),
-    }
+    })
 }
 
 pub fn encode_moderation_response(
@@ -185,18 +188,33 @@ pub fn encode_moderation_response(
             extra: BTreeMap::new(),
         })
         .collect();
-    apply_pointer_extensions(
-        OpenAiModerationResponse {
-            id: result.id.clone().unwrap_or_else(|| fallback_id.into()),
-            // Client-facing model identifiers are always public route slugs;
-            // never leak the selected provider model into the response.
-            model: client_model.into(),
-            results,
-            extra: BTreeMap::new(),
-        },
-        &result.extensions.values,
-    )
-    .map_err(ModerationCodecError::InvalidExtension)
+    let response = OpenAiModerationResponse {
+        id: result.id.clone().unwrap_or_else(|| fallback_id.into()),
+        // Client-facing model identifiers are always public route slugs;
+        // never leak the selected provider model into the response.
+        model: client_model.into(),
+        results,
+        extra: BTreeMap::new(),
+    };
+    validate_moderation_scores(&response.results)?;
+    let wire = apply_pointer_extensions(response, &result.extensions.values)
+        .map_err(ModerationCodecError::InvalidExtension)?;
+    validate_moderation_scores(&wire.results)?;
+    Ok(wire)
+}
+
+fn validate_moderation_scores(
+    results: &[OpenAiModerationResult],
+) -> Result<(), ModerationCodecError> {
+    if results.iter().any(|result| {
+        result
+            .category_scores
+            .values()
+            .any(|score| !score.is_finite() || !(0.0..=1.0).contains(score))
+    }) {
+        return Err(ModerationCodecError::InvalidCategoryScore);
+    }
+    Ok(())
 }
 
 fn take_string(
@@ -206,7 +224,12 @@ fn take_string(
 ) -> Result<String, ModerationCodecError> {
     object
         .remove(field)
-        .and_then(|value| value.as_str().map(str::to_owned))
+        .and_then(|value| {
+            value
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })
         .ok_or(ModerationCodecError::InvalidInputItem(index))
 }
 
@@ -236,6 +259,8 @@ pub enum ModerationCodecError {
     UnsupportedInputType(String),
     #[error("canonical moderation input cannot be represented by OpenAI")]
     UnrepresentableInput,
+    #[error("moderation category scores must be finite and between 0 and 1")]
+    InvalidCategoryScore,
     #[error("invalid source extension path: {0}")]
     InvalidExtension(String),
 }

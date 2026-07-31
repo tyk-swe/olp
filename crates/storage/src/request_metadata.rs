@@ -39,6 +39,8 @@ use uuid::Uuid;
 #[cfg(test)]
 use buffer::RequestMetadataBufferHealth;
 #[cfg(test)]
+use ingestion::validate_request_metadata_event;
+#[cfg(test)]
 use reconciliation::request_metadata_gap_count_from_decimal;
 
 #[cfg(test)]

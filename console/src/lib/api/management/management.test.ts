@@ -30,6 +30,22 @@ describe('management selector pagination', () => {
       collectCursorPages(async () => ({ items: [], nextCursor: 'repeat' }))
     ).rejects.toBeInstanceOf(ApiProblem);
   });
+
+  it('fails before returning a partial collection at the safety cap', async () => {
+    let calls = 0;
+    await expect(
+      collectCursorPages(async () => {
+        calls++;
+        return {
+          items: Array.from({ length: 100 }, (_, index) => index),
+          nextCursor: String(calls)
+        };
+      })
+    ).rejects.toMatchObject({
+      problem: { type: 'urn:olp:problem:pagination-limit-exceeded' }
+    });
+    expect(calls).toBe(10);
+  });
 });
 
 describe('management resources', () => {

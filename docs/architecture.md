@@ -169,5 +169,6 @@ The gateway emits one bounded terminal metadata envelope containing the full
 attempt list. PostgreSQL enforces composite foreign keys from attempts and
 usage facts to the partitioned request. Missing upstream usage is incomplete
 and unpriced, never zero. Stream entries are removed only after the database
-transaction commits and the consumer acknowledges them; producers do not
-trim unconsumed events.
+transaction commits and the consumer acknowledges them. Producers never trim
+unconsumed events; at the configured Stream length cap they reject the new
+append and durably report the resulting completeness gap.

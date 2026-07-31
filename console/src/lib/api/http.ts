@@ -19,7 +19,7 @@ export class ApiProblem extends Error {
   }
 }
 
-export const ETAG_MISMATCH_TYPE = 'https://openllmproxy.dev/problems/etag_mismatch';
+const ETAG_MISMATCH_TYPE = 'https://openllmproxy.dev/problems/etag_mismatch';
 
 export function isEtagMismatch(error: unknown): error is ApiProblem {
   return (

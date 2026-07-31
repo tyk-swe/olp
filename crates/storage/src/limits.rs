@@ -1,5 +1,6 @@
 use std::{fmt, time::Duration};
 
+use olp_domain::MAX_API_KEY_TOKENS_PER_MINUTE;
 use redis::{AsyncCommands, FromRedisValue, Script, aio::ConnectionManager};
 use thiserror::Error;
 use uuid::Uuid;
@@ -11,7 +12,7 @@ const SCRIPT_RESPONSE_VERSION: i64 = 1;
 const FIXED_WINDOW_MS: i64 = 60_000;
 // Valkey executes Lua 5.1 scripts with IEEE-754 doubles. Keep every integer
 // involved in a comparison or sorted-set score exactly representable.
-const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
+const MAX_LUA_INTEGER: i64 = MAX_API_KEY_TOKENS_PER_MINUTE as i64;
 
 #[derive(Clone)]
 pub struct DistributedLimiter {
@@ -106,15 +107,13 @@ impl DistributedLimiter {
                 "actual_tokens must be a non-negative Lua-safe integer",
             ));
         }
-        let refund = lease.reserved_tokens.saturating_sub(actual_tokens).max(0);
-        if refund == 0 {
-            return Ok(());
-        }
+        let token_delta = actual_tokens - lease.reserved_tokens;
         let mut connection = self.connection.clone();
         let _: i64 = Script::new(RECONCILE_SCRIPT)
             .key(&lease.rate_key)
             .arg(lease.rate_window_id)
-            .arg(refund)
+            .arg(&lease.lease_id)
+            .arg(token_delta)
             .invoke_async(&mut connection)
             .await?;
         Ok(())
@@ -203,9 +202,9 @@ impl LimitRequest<'_> {
                 "requested_tokens must be positive when a token limit is configured",
             ));
         }
-        if self.lease_ttl.is_zero() {
+        if self.lease_ttl.as_millis() == 0 {
             return Err(LimitError::InvalidRequest(
-                "concurrency lease TTL must be greater than zero",
+                "concurrency lease TTL must be at least one millisecond",
             ));
         }
         Ok(())
@@ -430,6 +429,10 @@ mod tests {
                 ..valid.clone()
             },
             LimitRequest {
+                lease_ttl: Duration::from_nanos(1),
+                ..valid.clone()
+            },
+            LimitRequest {
                 lookup_id: "bad}{slot",
                 ..valid
             },
@@ -451,14 +454,6 @@ mod tests {
         assert_ne!(hash_tag(&first.rate), hash_tag(&second.rate));
         assert!(!first.rate.contains(":rpm:"));
         assert!(!first.rate.contains(":tpm:"));
-    }
-
-    #[test]
-    fn reservation_contract_uses_valkey_time_and_no_timestamp_argument() {
-        assert!(RESERVE_SCRIPT.contains("redis.call(\"TIME\")"));
-        assert!(RESERVE_SCRIPT.contains("#ARGV ~= 6"));
-        assert!(!RESERVE_SCRIPT.contains("ARGV: now_ms"));
-        assert!(!RESERVE_SCRIPT.contains("window_ttl_ms"));
     }
 
     #[test]

@@ -10,8 +10,9 @@ code wins and this file needs a patch.
 | Variable | Default | Purpose |
 |---|---|---|
 | `OLP_DATABASE_URL` | required | PostgreSQL connection URL. |
-| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Connection pool size. |
+| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Connection pool size; must be at least 1. |
 | `OLP_VALKEY_URL` | optional (serve), required (`worker`, `migrate`, `doctor`) | Valkey URL for distributed limits, hints, and streams. |
+| `OLP_REQUEST_METADATA_STREAM_MAX_LENGTH` | `8192` | Maximum retained request-metadata Stream entries; must be 1..9007199254740991. At the bound, gateways reject new metadata appends and report accepted events as abandoned rather than trimming older entries. Use the same value on every gateway. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public HTTP listener. The CLI default is loopback on purpose; containers override to `0.0.0.0:8080` (see `deploy/compose.yaml`). Both are intentional — do not "align" them. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private listener for `/health/live`, `/health/ready`, `/metrics`. Keep loopback unless an internal network is deliberate. |
 | `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Max simultaneously admitted TCP connections per listener. |

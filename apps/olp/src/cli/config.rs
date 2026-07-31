@@ -10,6 +10,9 @@ use crate::{
     },
 };
 
+pub(super) const DEFAULT_REQUEST_METADATA_STREAM_MAX_LENGTH: u64 = 8_192;
+const MAX_REQUEST_METADATA_STREAM_LENGTH: u64 = (1_u64 << 53) - 1;
+
 #[derive(Debug, Parser)]
 #[command(name = "olp", version, about = "OpenLLMProxy")]
 pub(super) struct Cli {
@@ -50,7 +53,12 @@ pub(super) struct InternalPreStopArgs {
 pub(super) struct DatabaseArgs {
     #[arg(long, env = "OLP_DATABASE_URL")]
     pub(super) database_url: String,
-    #[arg(long, env = "OLP_DATABASE_MAX_CONNECTIONS", default_value_t = 20)]
+    #[arg(
+        long,
+        env = "OLP_DATABASE_MAX_CONNECTIONS",
+        default_value_t = 20,
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
     pub(super) database_max_connections: u32,
 }
 
@@ -97,6 +105,15 @@ pub(super) struct ServeArgs {
     pub(super) database: DatabaseArgs,
     #[arg(long, env = "OLP_VALKEY_URL")]
     pub(super) valkey_url: Option<String>,
+    /// Maximum request-metadata events retained in Valkey before new events
+    /// are rejected and reported through the durable loss ledger.
+    #[arg(
+        long,
+        env = "OLP_REQUEST_METADATA_STREAM_MAX_LENGTH",
+        default_value_t = DEFAULT_REQUEST_METADATA_STREAM_MAX_LENGTH,
+        value_parser = parse_request_metadata_stream_max_length
+    )]
+    pub(super) request_metadata_stream_max_length: u64,
     #[arg(long, env = "OLP_LISTEN_ADDR", default_value = "127.0.0.1:8080")]
     pub(super) listen_addr: SocketAddr,
     /// Private listener for probes and Prometheus metrics. Keep the default
@@ -171,6 +188,18 @@ fn parse_admission_capacity(value: &str) -> Result<usize, String> {
         ));
     }
     Ok(capacity)
+}
+
+fn parse_request_metadata_stream_max_length(value: &str) -> Result<u64, String> {
+    let length = value
+        .parse::<u64>()
+        .map_err(|_| "request metadata stream maximum length must be an integer".to_owned())?;
+    if !(1..=MAX_REQUEST_METADATA_STREAM_LENGTH).contains(&length) {
+        return Err(format!(
+            "request metadata stream maximum length must be between 1 and {MAX_REQUEST_METADATA_STREAM_LENGTH}"
+        ));
+    }
+    Ok(length)
 }
 
 #[derive(Clone, Debug, Args)]

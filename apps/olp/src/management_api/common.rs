@@ -219,9 +219,10 @@ pub(crate) fn enforce_origin(
     state: &crate::GatewayState,
     headers: &HeaderMap,
 ) -> Result<(), Problem> {
-    let origin = headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
+    let origin = singleton_header(headers, header::ORIGIN.as_str())
+        .map_err(|()| {
+            Problem::forbidden("origin_invalid", "Supply exactly one valid Origin header.")
+        })?
         .ok_or_else(|| Problem::forbidden("origin_required", "An Origin header is required."))?;
     if !state.public_origin.matches_header(origin) {
         warn!(%origin, "rejected cross-origin management mutation");
@@ -264,9 +265,13 @@ pub(crate) async fn require_mutation_session(
 ) -> Result<SessionPrincipal, Problem> {
     enforce_origin(state, headers)?;
     let principal = require_read_session(state, headers).await?;
-    let csrf = headers
-        .get(CSRF_HEADER)
-        .and_then(|value| value.to_str().ok())
+    let csrf = singleton_header(headers, CSRF_HEADER)
+        .map_err(|()| {
+            Problem::forbidden(
+                "csrf_invalid",
+                "Supply exactly one valid CSRF token header.",
+            )
+        })?
         .ok_or_else(|| Problem::forbidden("csrf_required", "A CSRF token is required."))?;
     if !SessionMaterial::verify_csrf(csrf, &principal.csrf_digest) {
         return Err(Problem::forbidden(
@@ -320,9 +325,13 @@ pub(super) fn require_route_manager(principal: &SessionPrincipal) -> Result<(), 
 }
 
 pub(crate) fn require_idempotency_key(headers: &HeaderMap) -> Result<&str, Problem> {
-    let value = headers
-        .get("idempotency-key")
-        .and_then(|value| value.to_str().ok())
+    let value = singleton_header(headers, "idempotency-key")
+        .map_err(|()| {
+            Problem::bad_request(
+                "invalid_idempotency_key",
+                "Supply exactly one valid Idempotency-Key header.",
+            )
+        })?
         .ok_or_else(|| {
             Problem::bad_request(
                 "idempotency_key_required",
@@ -354,22 +363,34 @@ pub(crate) fn if_match(headers: &HeaderMap) -> Result<Uuid, Problem> {
 }
 
 pub(crate) fn optional_if_match(headers: &HeaderMap) -> Result<Option<Uuid>, Problem> {
-    headers
-        .get(header::IF_MATCH)
+    singleton_header(headers, header::IF_MATCH.as_str())
+        .map_err(|()| invalid_if_match())?
         .map(|value| {
             value
-                .to_str()
-                .ok()
-                .and_then(|value| value.strip_prefix('"')?.strip_suffix('"'))
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
                 .and_then(|value| Uuid::parse_str(value).ok())
-                .ok_or_else(|| {
-                    Problem::bad_request(
-                        "invalid_if_match",
-                        "If-Match must contain one strong UUID ETag.",
-                    )
-                })
+                .ok_or_else(invalid_if_match)
         })
         .transpose()
+}
+
+fn singleton_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ()> {
+    let mut values = headers.get_all(name).iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(());
+    }
+    value.to_str().map(Some).map_err(|_| ())
+}
+
+fn invalid_if_match() -> Problem {
+    Problem::bad_request(
+        "invalid_if_match",
+        "If-Match must contain one strong UUID ETag.",
+    )
 }
 
 pub(crate) fn with_etag(response: impl IntoResponse, etag: Uuid) -> Result<Response, Problem> {
@@ -381,7 +402,7 @@ pub(crate) fn with_etag(response: impl IntoResponse, etag: Uuid) -> Result<Respo
     Ok(response)
 }
 
-pub(super) fn map_configuration(error: ConfigurationError) -> Problem {
+pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
     match error {
         ConfigurationError::ProviderNotFound => Problem::new(
             StatusCode::NOT_FOUND,

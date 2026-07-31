@@ -68,6 +68,27 @@ pub struct Usage {
     pub reasoning_tokens: Option<u64>,
 }
 
+impl Usage {
+    pub fn validate(&self) -> Result<(), UsageValidationError> {
+        if let Some(cached_input_tokens) = self.cached_input_tokens
+            && cached_input_tokens > self.input_tokens
+        {
+            return Err(UsageValidationError {
+                input_tokens: self.input_tokens,
+                cached_input_tokens,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+#[error("cached input token count {cached_input_tokens} exceeds input token count {input_tokens}")]
+pub struct UsageValidationError {
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
@@ -137,6 +158,9 @@ impl EventSequenceValidator {
                 actual: event.sequence,
             });
         }
+        if let CanonicalEventKind::Usage { usage } = &event.kind {
+            usage.validate()?;
+        }
         self.done = matches!(event.kind, CanonicalEventKind::Done);
         self.expected = self.expected.saturating_add(1);
         Ok(())
@@ -166,4 +190,6 @@ pub enum EventSequenceError {
     AfterDone { sequence: u64 },
     #[error("canonical event stream ended before done; next sequence would be {next_sequence}")]
     MissingDone { next_sequence: u64 },
+    #[error(transparent)]
+    InvalidUsage(#[from] UsageValidationError),
 }

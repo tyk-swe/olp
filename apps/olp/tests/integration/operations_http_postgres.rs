@@ -109,11 +109,11 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
             "prices": [{
                 "provider_kind": "openai",
                 "provider_id": provider_id,
-                "model": "mock-model",
+                "model": " mock-model ",
                 "operation": "generation",
-                "input_per_million": "1.000000000000",
-                "output_per_million": "2.000000000000",
-                "currency": "USD"
+                "input_per_million": " 1.000000000000 ",
+                "output_per_million": " 2.000000000000 ",
+                "currency": " usd "
             }]
         })),
         RequestHeaders {
@@ -130,6 +130,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         pricing_body["prices"][0]["provider_id"],
         provider_id.to_string()
     );
+    assert_eq!(pricing_body["prices"][0]["model"], "mock-model");
+    assert_eq!(pricing_body["prices"][0]["currency"], "USD");
     assert_eq!(pricing_body["revision"], 1);
     let pricing_replay = send(
         &app,
@@ -236,7 +238,6 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
             cached_input_tokens: None,
             media_units: None,
             usage_complete: true,
-            unpriced: false,
             attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,

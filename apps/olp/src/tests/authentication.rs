@@ -83,6 +83,41 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
 }
 
 #[tokio::test]
+async fn duplicate_inference_credentials_are_rejected() {
+    let (state, key) = inference_state(false);
+    let app = public_router(state.gateway_state_for_test());
+    for (path, name, value) in [
+        (
+            "/openai/v1/chat/completions",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {key}"),
+        ),
+        (
+            "/anthropic/v1/messages",
+            HeaderName::from_static("x-api-key"),
+            key.clone(),
+        ),
+        (
+            "/gemini/v1beta/models/test:generateContent",
+            HeaderName::from_static("x-goog-api-key"),
+            key.clone(),
+        ),
+    ] {
+        let mut request = Request::post(path)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        let value = HeaderValue::from_str(&value).unwrap();
+        request.headers_mut().append(name.clone(), value.clone());
+        request.headers_mut().append(name, value);
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+    }
+}
+
+#[tokio::test]
 async fn every_inference_surface_and_models_endpoint_requires_its_own_well_formed_header() {
     let (state, key) = inference_state(false);
     let app = public_router(state.gateway_state_for_test());

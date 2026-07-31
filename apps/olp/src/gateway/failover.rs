@@ -5,8 +5,8 @@ use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
     AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation, OperationKind,
-    ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
+    ErrorClass, EventSequenceValidator, MediaSpool, Operation, OperationKind, ProviderOutput,
+    ProviderRequest, RequestMetadata, TransportError,
 };
 use olp_storage::RequestAttemptMetadata;
 
@@ -16,15 +16,17 @@ use super::{error::InferenceError, telemetry::elapsed_ms};
 
 pub(super) type EventStream = olp_domain::ProviderEventStream;
 
-fn canonical_event_protocol_error(
-    error: EventSequenceError,
+fn canonical_protocol_error(
+    context: &str,
+    error: impl std::fmt::Display,
     response_committed: bool,
 ) -> TransportError {
     TransportError {
         phase: olp_domain::TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed,
-        message: format!("invalid canonical event stream: {error}"),
+        retry_after: None,
+        message: format!("invalid canonical {context}: {error}"),
     }
 }
 
@@ -42,14 +44,14 @@ pub(super) fn validated_event_stream(
                 Some(Ok(event)) => match validator.push(&event) {
                     Ok(()) => Some((Ok(event), (events, validator, false))),
                     Err(error) => Some((
-                        Err(canonical_event_protocol_error(error, true)),
+                        Err(canonical_protocol_error("event stream", error, true)),
                         (events, validator, true),
                     )),
                 },
                 Some(Err(error)) => Some((Err(error), (events, validator, true))),
                 None => validator.finish().err().map(|error| {
                     (
-                        Err(canonical_event_protocol_error(error, true)),
+                        Err(canonical_protocol_error("event stream", error, true)),
                         (events, validator, true),
                     )
                 }),
@@ -61,7 +63,7 @@ pub(super) fn validated_event_stream(
 pub(super) fn circuit_accounted_event_stream(
     events: EventStream,
     circuits: crate::circuit::CircuitBreaker,
-    target: TargetId,
+    permit: crate::circuit::CircuitPermit,
     initial_failure: bool,
 ) -> EventStream {
     Box::pin(stream::unfold(
@@ -73,11 +75,11 @@ pub(super) fn circuit_accounted_event_stream(
                     match &event.kind {
                         CanonicalEventKind::Error { error } => {
                             if let Some(class) = canonical_error_circuit_class(error.class) {
-                                circuits.record_failure(target, class);
+                                circuits.record_failure(permit, class);
                             }
                             failed = true;
                         }
-                        CanonicalEventKind::Done if !failed => circuits.record_success(target),
+                        CanonicalEventKind::Done if !failed => circuits.record_success(permit),
                         _ => {}
                     }
                     Ok(event)
@@ -87,7 +89,7 @@ pub(super) fn circuit_accounted_event_stream(
                     // owns it. Terminal transport failures still affect target
                     // health, but must never trigger request failover.
                     error.response_committed = true;
-                    circuits.record_failure(target, error.class);
+                    circuits.record_failure(permit, error.class);
                     failed = true;
                     Err(error)
                 }
@@ -164,12 +166,13 @@ pub(super) async fn execute_with_failover(
     let mut traces = Vec::with_capacity(attempts.len());
     let attempt_count = attempts.len();
     for (attempt_index, attempt) in attempts.into_iter().enumerate() {
-        if !circuits.try_acquire(attempt.target_id) {
+        let attempt_started = tokio::time::Instant::now();
+        let attempt_deadline = deadline.min(attempt_started + attempt.timeout.as_duration());
+        let Some(permit) = circuits.try_acquire(attempt.target_id, attempt_deadline) else {
             continue;
-        }
+        };
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
-        let attempt_started = tokio::time::Instant::now();
         if let Some(observer) = on_attempt_started.as_mut() {
             observer(
                 &traces,
@@ -179,12 +182,12 @@ pub(super) async fn execute_with_failover(
                 attempt_started,
             );
         }
-        let attempt_deadline = deadline.min(attempt_started + attempt.timeout.as_duration());
         let Some(transport) = runtime.transport(attempt.provider_id) else {
             let error = TransportError {
                 phase: olp_domain::TransportPhase::Connect,
                 class: AttemptFailureClass::Connect,
                 response_committed: false,
+                retry_after: None,
                 message: "provider transport is not loaded".to_owned(),
             };
             traces.push(failed_attempt(
@@ -194,7 +197,7 @@ pub(super) async fn execute_with_failover(
                 attempt_started,
                 &error,
             ));
-            circuits.record_failure(attempt.target_id, error.class);
+            circuits.record_failure(permit, error.class);
             last_error = Some(error);
             continue;
         };
@@ -223,7 +226,7 @@ pub(super) async fn execute_with_failover(
                         attempt_started,
                         &error,
                     ));
-                    circuits.record_failure(attempt.target_id, error.class);
+                    circuits.record_failure(permit, error.class);
                     if error.allows_failover() {
                         last_error = Some(error);
                         continue;
@@ -239,6 +242,7 @@ pub(super) async fn execute_with_failover(
                             phase: olp_domain::TransportPhase::FirstByte,
                             class: AttemptFailureClass::Timeout,
                             response_committed: false,
+                            retry_after: None,
                             message: "route deadline elapsed before provider response".to_owned(),
                         },
                         operation.kind(),
@@ -250,7 +254,7 @@ pub(super) async fn execute_with_failover(
                         attempt_started,
                         &error,
                     ));
-                    circuits.record_failure(attempt.target_id, error.class);
+                    circuits.record_failure(permit, error.class);
                     if error.allows_failover() {
                         last_error = Some(error);
                         continue;
@@ -264,7 +268,22 @@ pub(super) async fn execute_with_failover(
         let mut events = match output {
             ProviderOutput::Events(events) => events,
             ProviderOutput::Result(result) => {
-                circuits.record_success(attempt.target_id);
+                if let Err(validation_error) = result.validate() {
+                    let error = canonical_protocol_error("result", validation_error, false);
+                    traces.push(failed_attempt(
+                        &attempt,
+                        ordinal,
+                        attempt_started_at,
+                        attempt_started,
+                        &error,
+                    ));
+                    circuits.record_failure(permit, error.class);
+                    return Err(ExecutionFailure {
+                        error: InferenceError::from_transport(error),
+                        attempts: traces,
+                    });
+                }
+                circuits.record_success(permit);
                 traces.push(successful_attempt(
                     &attempt,
                     ordinal,
@@ -291,7 +310,7 @@ pub(super) async fn execute_with_failover(
                     attempt_started,
                     &error,
                 ));
-                circuits.record_failure(attempt.target_id, error.class);
+                circuits.record_failure(permit, error.class);
                 if error.allows_failover() {
                     last_error = Some(error);
                     continue;
@@ -306,6 +325,7 @@ pub(super) async fn execute_with_failover(
                     phase: olp_domain::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,
+                    retry_after: None,
                     message: "the provider returned an empty response".to_owned(),
                 };
                 traces.push(failed_attempt(
@@ -315,7 +335,7 @@ pub(super) async fn execute_with_failover(
                     attempt_started,
                     &error,
                 ));
-                circuits.record_failure(attempt.target_id, error.class);
+                circuits.record_failure(permit, error.class);
                 return Err(ExecutionFailure {
                     error: InferenceError::bad_gateway(
                         "provider_protocol_error",
@@ -330,6 +350,7 @@ pub(super) async fn execute_with_failover(
                         phase: olp_domain::TransportPhase::FirstByte,
                         class: AttemptFailureClass::Timeout,
                         response_committed: false,
+                        retry_after: None,
                         message: "route deadline elapsed before a canonical event".to_owned(),
                     },
                     operation.kind(),
@@ -341,7 +362,7 @@ pub(super) async fn execute_with_failover(
                     attempt_started,
                     &error,
                 ));
-                circuits.record_failure(attempt.target_id, error.class);
+                circuits.record_failure(permit, error.class);
                 if error.allows_failover() {
                     last_error = Some(error);
                     continue;
@@ -354,7 +375,7 @@ pub(super) async fn execute_with_failover(
         };
         let mut event_sequence = EventSequenceValidator::new();
         if let Err(sequence_error) = event_sequence.push(&first) {
-            let error = canonical_event_protocol_error(sequence_error, false);
+            let error = canonical_protocol_error("event stream", sequence_error, false);
             traces.push(failed_attempt(
                 &attempt,
                 ordinal,
@@ -362,7 +383,7 @@ pub(super) async fn execute_with_failover(
                 attempt_started,
                 &error,
             ));
-            circuits.record_failure(attempt.target_id, error.class);
+            circuits.record_failure(permit, error.class);
             return Err(ExecutionFailure {
                 error: InferenceError::from_transport(error),
                 attempts: traces,
@@ -377,6 +398,7 @@ pub(super) async fn execute_with_failover(
                     phase: olp_domain::TransportPhase::FirstByte,
                     class,
                     response_committed: false,
+                    retry_after: None,
                     message: error.message.clone(),
                 };
                 traces.push(failed_attempt(
@@ -386,25 +408,25 @@ pub(super) async fn execute_with_failover(
                     attempt_started,
                     &transport_error,
                 ));
-                circuits.record_failure(attempt.target_id, class);
+                circuits.record_failure(permit, class);
                 last_error = Some(transport_error);
                 last_canonical_error = Some((traces.len(), error.clone()));
                 continue;
             }
             if let Some(class) = canonical_error_circuit_class(error.class) {
-                circuits.record_failure(attempt.target_id, class);
+                circuits.record_failure(permit, class);
             }
             true
         } else {
             false
         };
         if matches!(first.kind, CanonicalEventKind::Done) && !initial_failure {
-            circuits.record_success(attempt.target_id);
+            circuits.record_success(permit);
         }
         let events = circuit_accounted_event_stream(
             validated_event_stream(events, event_sequence),
             circuits.clone(),
-            attempt.target_id,
+            permit,
             initial_failure,
         );
         traces.push(successful_attempt(
@@ -445,7 +467,9 @@ pub(super) fn reclassify_ambiguous_transport_failure(
     if operation_is_side_effecting(operation)
         && matches!(
             error.class,
-            AttemptFailureClass::Connect | AttemptFailureClass::Timeout
+            AttemptFailureClass::Connect
+                | AttemptFailureClass::Timeout
+                | AttemptFailureClass::UpstreamServer
         )
         && !matches!(error.phase, olp_domain::TransportPhase::Connect)
     {

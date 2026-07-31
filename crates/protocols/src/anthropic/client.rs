@@ -23,6 +23,8 @@ pub enum ClientEncodeError {
     ToolJson(#[source] serde_json::Error),
     #[error("canonical reasoning-token usage is not representable in Anthropic usage")]
     ReasoningUsage,
+    #[error("canonical input-token usage is inconsistent with Anthropic cache usage")]
+    InputUsage,
     #[error("source extension path cannot be represented on the Anthropic response")]
     Extension,
     #[error("Anthropic response encoding failed")]
@@ -78,6 +80,23 @@ pub fn encode_messages_response(
     if usage.reasoning_tokens.is_some() {
         return Err(ClientEncodeError::ReasoningUsage);
     }
+    let cache_creation_input_tokens = match aggregate
+        .extensions
+        .get("/usage/cache_creation_input_tokens")
+    {
+        Some(Value::Null) => 0,
+        Some(value) => value.as_u64().ok_or(ClientEncodeError::Extension)?,
+        None => 0,
+    };
+    let cached_input_tokens = usage.cached_input_tokens.unwrap_or(0);
+    let uncached_input_tokens = usage
+        .input_tokens
+        .checked_sub(
+            cached_input_tokens
+                .checked_add(cache_creation_input_tokens)
+                .ok_or(ClientEncodeError::InputUsage)?,
+        )
+        .ok_or(ClientEncodeError::InputUsage)?;
     let response = MessagesResponse {
         id: aggregate
             .response_id
@@ -89,9 +108,7 @@ pub fn encode_messages_response(
         stop_reason: Some(stop_reason),
         stop_sequence: None,
         usage: Usage {
-            input_tokens: usage
-                .input_tokens
-                .saturating_sub(usage.cached_input_tokens.unwrap_or(0)),
+            input_tokens: uncached_input_tokens,
             output_tokens: usage.output_tokens,
             cache_creation_input_tokens: None,
             cache_read_input_tokens: usage.cached_input_tokens,

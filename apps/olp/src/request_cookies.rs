@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use axum::http::{HeaderMap, header};
 
 use crate::Problem;
@@ -27,23 +29,23 @@ pub(crate) struct RequestCookies<'a> {
 impl<'a> RequestCookies<'a> {
     pub(crate) fn parse(headers: &'a HeaderMap) -> Result<Self, Problem> {
         let mut cookies = Vec::new();
+        let mut seen = HashSet::new();
+        let mut security_values = HashMap::new();
         for field in headers.get_all(header::COOKIE).iter() {
             let field = field.to_str().map_err(|_| malformed_cookie_header())?;
             for segment in field.split(';') {
                 if let Some(cookie) = parse_cookie_pair(segment) {
                     if security_sensitive(cookie.name)
-                        && cookies.iter().any(|existing: &RequestCookie<'_>| {
-                            existing.name == cookie.name && existing.value != cookie.value
-                        })
+                        && security_values
+                            .insert(cookie.name, cookie.value)
+                            .is_some_and(|value| value != cookie.value)
                     {
                         return Err(Problem::bad_request(
                             "conflicting_cookie_values",
                             "Conflicting values were supplied for an authentication cookie.",
                         ));
                     }
-                    if !cookies.iter().any(|existing: &RequestCookie<'_>| {
-                        existing.name == cookie.name && existing.value == cookie.value
-                    }) {
+                    if seen.insert((cookie.name, cookie.value)) {
                         cookies.push(cookie);
                     }
                 }

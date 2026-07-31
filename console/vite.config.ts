@@ -1,5 +1,4 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -8,7 +7,7 @@ export default defineConfig({
     // policy even when a small Unicode subset falls below Vite's inline limit.
     assetsInlineLimit: 0
   },
-  plugins: [tailwindcss(), sveltekit()],
+  plugins: [sveltekit()],
   test: {
     clearMocks: true,
     environment: 'jsdom',

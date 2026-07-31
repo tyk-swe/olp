@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
 use redis::{
     AsyncCommands,
-    aio::{ConnectionManager, PubSubStream},
+    aio::{ConnectionManager, ConnectionManagerConfig, PubSubStream},
     streams::{StreamInfoGroupsReply, StreamPendingReply, StreamReadOptions, StreamReadReply},
 };
 use thiserror::Error;
@@ -23,6 +23,7 @@ const RUNTIME_HINT_CHANNEL: &str = "olp:v2:runtime";
 pub const REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
 const REQUEST_METADATA_GROUP: &str = "olp:persistence";
 const REQUEST_METADATA_CONSUMER: &str = "worker";
+const REQUEST_METADATA_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug, Error)]
 pub enum ValkeyAdapterError {
@@ -91,7 +92,13 @@ pub async fn run_request_metadata_consumer(
     valkey_url: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ValkeyAdapterError> {
-    let mut connection = valkey_connection(valkey_url).await?;
+    let client = redis::Client::open(valkey_url)?;
+    let mut connection = ConnectionManager::new_with_config(
+        client,
+        ConnectionManagerConfig::new()
+            .set_response_timeout(Some(REQUEST_METADATA_RESPONSE_TIMEOUT)),
+    )
+    .await?;
     let create: Result<String, redis::RedisError> = redis::cmd("XGROUP")
         .arg("CREATE")
         .arg(REQUEST_METADATA_STREAM)
@@ -101,7 +108,7 @@ pub async fn run_request_metadata_consumer(
         .query_async(&mut connection)
         .await;
     if let Err(error) = create
-        && !error.to_string().contains("BUSYGROUP")
+        && !is_busygroup(&error)
     {
         return Err(error.into());
     }
@@ -183,8 +190,8 @@ pub async fn run_request_metadata_consumer(
                     }
                     acknowledge_and_delete(&mut connection, &entry.id).await?;
                 }
-                Err(PersistenceError::InvalidRequestMetadataEvent) => {
-                    error!(stream_id = %entry.id, "discarding permanently invalid request metadata event");
+                Err(error) if is_permanent_request_metadata_error(&error) => {
+                    error!(%error, stream_id = %entry.id, "discarding permanently invalid request metadata event");
                     let observed_at = Utc::now();
                     store
                         .report_request_metadata_gap_once(
@@ -269,15 +276,65 @@ async fn checkpoint_request_metadata_consumer_health(
         .ok_or(ValkeyAdapterError::InvalidState(
             "consumer group disappeared",
         ))?;
-    let lag_events = u64::try_from(group.lag.unwrap_or(0))
-        .map_err(|_| ValkeyAdapterError::InvalidState("stream lag overflow"))?;
+    let Some(lag_events) = checked_stream_lag(group.lag)? else {
+        warn!("request metadata stream lag is unavailable; leaving consumer health stale");
+        return Ok(());
+    };
     store
         .report_request_metadata_consumer_health(pending_events, lag_events, oldest_pending_at)
         .await?;
     Ok(())
 }
 
+fn is_busygroup(error: &redis::RedisError) -> bool {
+    error.code() == Some("BUSYGROUP")
+}
+
+fn is_permanent_request_metadata_error(error: &PersistenceError) -> bool {
+    match error {
+        PersistenceError::InvalidRequestMetadataEvent => true,
+        PersistenceError::Database(sqlx::Error::Database(error)) => error
+            .code()
+            .is_some_and(|code| is_permanent_request_metadata_sqlstate(&code)),
+        _ => false,
+    }
+}
+
+fn is_permanent_request_metadata_sqlstate(code: &str) -> bool {
+    code.starts_with("22") || code.starts_with("23")
+}
+
+fn checked_stream_lag(lag: Option<usize>) -> Result<Option<u64>, ValkeyAdapterError> {
+    lag.map(u64::try_from)
+        .transpose()
+        .map_err(|_| ValkeyAdapterError::InvalidState("stream lag overflow"))
+}
+
 async fn valkey_connection(url: &str) -> Result<ConnectionManager, redis::RedisError> {
     let client = redis::Client::open(url)?;
     ConnectionManager::new(client).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_structured_group_and_permanent_database_errors() {
+        let value =
+            redis::parse_redis_value(b"-BUSYGROUP Consumer Group name already exists\r\n").unwrap();
+        let redis::Value::ServerError(error) = value else {
+            panic!("expected a server error");
+        };
+        let error = redis::RedisError::from(error);
+        assert!(is_busygroup(&error));
+
+        for code in ["22003", "22P02", "23503", "23514"] {
+            assert!(is_permanent_request_metadata_sqlstate(code));
+        }
+        for code in ["08006", "40001", "40P01", "53300", "57P01"] {
+            assert!(!is_permanent_request_metadata_sqlstate(code));
+        }
+        assert_eq!(checked_stream_lag(None).unwrap(), None);
+    }
 }

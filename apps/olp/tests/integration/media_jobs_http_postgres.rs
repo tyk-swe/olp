@@ -96,6 +96,7 @@ impl ProviderTransport for VideoLifecycleTransport {
                             phase: olp_domain::TransportPhase::FirstByte,
                             class: olp_domain::AttemptFailureClass::Ambiguous,
                             response_committed: true,
+                            retry_after: None,
                             message: "injected cleanup ambiguity".to_owned(),
                         });
                     }
@@ -454,7 +455,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         .find(|item| item["id"].as_str() == Some(video_id.as_str()))
         .unwrap();
     assert_eq!(listed["model"], "video-default");
-    assert_eq!(listed["status"], "completed");
+    assert_eq!(listed["status"], "queued");
     assert!(listed.get("prompt").is_none() || listed["prompt"].is_null());
 
     let status = gateway
@@ -586,7 +587,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     sqlx::query(
         "CREATE FUNCTION fail_test_media_attach() RETURNS trigger LANGUAGE plpgsql AS $$
          BEGIN
-             IF OLD.lifecycle_state = 'creating' AND NEW.lifecycle_state = 'active' THEN
+             IF OLD.lifecycle_state = 'creating'
+                AND NEW.lifecycle_state IN ('active', 'create_cleanup_pending') THEN
                  RAISE EXCEPTION 'injected attach failure';
              END IF;
              RETURN NEW;
@@ -621,12 +623,27 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     assert_eq!(compensated_create.status(), StatusCode::SERVICE_UNAVAILABLE);
     let compensated_lifecycle: String = sqlx::query_scalar(
         "SELECT lifecycle_state FROM async_media_jobs
-         WHERE upstream_job_id = 'upstream-video-created-2'",
+         ORDER BY created_at DESC, id DESC LIMIT 1",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
     assert_eq!(compensated_lifecycle, "deleted");
+    assert_eq!(delete_calls.load(Ordering::Acquire), 3);
+
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION fail_test_media_attach() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+             IF OLD.lifecycle_state = 'creating' AND NEW.lifecycle_state = 'active' THEN
+                 RAISE EXCEPTION 'injected attach failure';
+             END IF;
+             RETURN NEW;
+         END;
+         $$",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     fail_cleanup.store(true, Ordering::Release);
     let unresolved_create = gateway

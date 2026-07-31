@@ -11,9 +11,13 @@ use olp_domain::{ImagesResult, MediaHandle, MediaSpool, OpenedMedia};
 use olp_protocols::openai::{OpenAiImagePayload, encode_image_response};
 use uuid::Uuid;
 
-use crate::gateway::InferenceError;
+use crate::{
+    MAX_MEDIA_BODY_BYTES,
+    gateway::{InferenceError, RequestMediaGuard},
+};
 
 const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_IMAGE_COUNT: usize = 10;
 const MAX_TEMPLATE_BYTES: usize = 4 * 1024 * 1024;
 const RAW_CHUNK_BYTES: usize = 48 * 1024;
 
@@ -40,6 +44,13 @@ pub(crate) async fn streaming_image_json_response(
             ));
         }
     };
+    if staged.len() > MAX_IMAGE_COUNT {
+        cleanup_staged(&spool, &staged).await;
+        return Err(InferenceError::bad_gateway(
+            "provider_protocol_error",
+            "The provider returned too many images.",
+        ));
+    }
     let template = match serde_json::to_vec(&wire) {
         Ok(template) => template,
         Err(_) => {
@@ -86,50 +97,50 @@ pub(crate) async fn streaming_image_json_response(
                     .content_length
                     .is_none_or(|length| length <= MAX_IMAGE_BYTES) =>
             {
-                opened.push((handle.clone(), media));
+                opened.push(media);
             }
-            Ok(_) => {
+            Ok(_) | Err(_) => {
                 drop(opened);
                 cleanup_staged(&spool, &staged).await;
                 return Err(InferenceError::bad_gateway(
                     "provider_protocol_error",
-                    "A spooled image exceeded its declared bound.",
-                ));
-            }
-            Err(_) => {
-                drop(opened);
-                cleanup_staged(&spool, &staged).await;
-                return Err(InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "A spooled provider image was unavailable.",
+                    "A spooled provider image was unavailable or too large.",
                 ));
             }
         }
     }
 
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
-    let producer_spool = Arc::clone(&spool);
-    let cleanup = staged
-        .into_iter()
-        .map(|(_, handle)| handle)
-        .collect::<Vec<_>>();
+    let (terminal_sender, terminal_receiver) = tokio::sync::oneshot::channel();
+    let cleanup = RequestMediaGuard::new(
+        spool,
+        staged.into_iter().map(|(_, handle)| handle).collect(),
+    );
     tokio::spawn(async move {
         let mut pieces = pieces.into_iter();
         let mut completed = send_body_chunk(&sender, pieces.next().unwrap_or_default()).await;
-        for (_, media) in opened {
+        let mut aggregate_bytes = 0_u64;
+        for media in opened {
             if !completed {
                 break;
             }
-            completed = stream_base64(&sender, media).await;
+            completed = stream_base64(&sender, media, &mut aggregate_bytes).await;
             if completed {
                 completed = send_body_chunk(&sender, pieces.next().unwrap_or_default()).await;
             }
         }
-        cleanup_handles(&producer_spool, &cleanup).await;
+        cleanup.cleanup().await;
+        let _ = terminal_sender.send(());
     });
     let body_stream = futures::stream::unfold(receiver, |mut receiver| async move {
         receiver.recv().await.map(|item| (item, receiver))
-    });
+    })
+    .chain(futures::stream::once(async move {
+        terminal_receiver
+            .await
+            .map(|()| Bytes::new())
+            .map_err(|_| io::Error::other("image response producer stopped"))
+    }));
     let mut response = Response::new(Body::from_stream(body_stream));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -143,14 +154,6 @@ fn split_template(template: Vec<u8>, staged: &[(String, MediaHandle)]) -> Option
     let mut offset = 0;
     for (marker, _) in staged {
         let marker = marker.as_bytes();
-        if template
-            .windows(marker.len())
-            .filter(|candidate| *candidate == marker)
-            .count()
-            != 1
-        {
-            return None;
-        }
         let relative = template[offset..]
             .windows(marker.len())
             .position(|candidate| candidate == marker)?;
@@ -165,16 +168,22 @@ fn split_template(template: Vec<u8>, staged: &[(String, MediaHandle)]) -> Option
 async fn stream_base64(
     sender: &tokio::sync::mpsc::Sender<Result<Bytes, io::Error>>,
     mut media: OpenedMedia,
+    aggregate_bytes: &mut u64,
 ) -> bool {
-    let mut total = 0_u64;
+    let mut image_bytes = 0_u64;
     let mut carry = Vec::with_capacity(2);
     while let Some(next) = media.bytes.next().await {
         let chunk = match next {
             Ok(chunk) => chunk,
             Err(_) => return send_body_error(sender).await,
         };
-        total = match total.checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX)) {
+        let chunk_bytes = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+        image_bytes = match image_bytes.checked_add(chunk_bytes) {
             Some(total) if total <= MAX_IMAGE_BYTES => total,
+            _ => return send_body_error(sender).await,
+        };
+        *aggregate_bytes = match aggregate_bytes.checked_add(chunk_bytes) {
+            Some(total) if total <= MAX_MEDIA_BODY_BYTES as u64 => total,
             _ => return send_body_error(sender).await,
         };
         let mut offset = 0;
@@ -229,15 +238,12 @@ async fn send_body_error(sender: &tokio::sync::mpsc::Sender<Result<Bytes, io::Er
 }
 
 async fn cleanup_staged(spool: &Arc<dyn MediaSpool>, staged: &[(String, MediaHandle)]) {
-    for (_, handle) in staged {
-        let _ = spool.remove(handle).await;
-    }
-}
-
-async fn cleanup_handles(spool: &Arc<dyn MediaSpool>, handles: &[MediaHandle]) {
-    for handle in handles {
-        let _ = spool.remove(handle).await;
-    }
+    RequestMediaGuard::new(
+        Arc::clone(spool),
+        staged.iter().map(|(_, handle)| handle.clone()).collect(),
+    )
+    .cleanup()
+    .await;
 }
 
 #[cfg(test)]
@@ -248,6 +254,33 @@ mod tests {
     use olp_domain::{ImageArtifact, MediaSource, MediaUpload, SourceExtensions, Surface};
 
     use super::*;
+
+    #[tokio::test]
+    async fn image_count_is_bounded_before_streaming() {
+        let spool = crate::create_bounded_media_spool_for_test().unwrap();
+        let artifact = spool
+            .put(MediaUpload {
+                filename: "image.png".into(),
+                content_type: Some("image/png".into()),
+                maximum_length: 1,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"x"))])),
+            })
+            .await
+            .unwrap();
+        let result = ImagesResult {
+            created_at: Some(1),
+            images: (0..=MAX_IMAGE_COUNT)
+                .map(|_| ImageArtifact {
+                    source: MediaSource::Handle(artifact.handle.clone()),
+                    revised_prompt: None,
+                })
+                .collect(),
+            usage: None,
+            extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        };
+
+        assert!(streaming_image_json_response(spool, &result).await.is_err());
+    }
 
     #[tokio::test]
     async fn image_json_is_incremental_valid_and_cleans_the_spool() {

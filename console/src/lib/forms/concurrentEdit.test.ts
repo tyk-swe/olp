@@ -45,7 +45,7 @@ describe('concurrent edit state', () => {
     expect(accepted.snapshotEtag).toBe('v2');
     expect(accepted.dirty).toBe(true);
     expect(conflictNotice(accepted)).toBeNull();
-    expect(markSaved(accepted, 'v3')).toEqual({
+    expect(markSaved('v3')).toEqual({
       snapshotEtag: 'v3',
       remoteEtag: 'v3',
       dirty: false,

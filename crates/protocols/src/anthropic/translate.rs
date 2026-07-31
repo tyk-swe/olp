@@ -10,4 +10,4 @@ pub use errors::{DecodeError, EncodeError, ResponseError};
 pub use response::decode_messages_response;
 
 pub(crate) use extensions::collect_extra;
-pub(crate) use response::anthropic_finish_reason;
+pub(crate) use response::{anthropic_finish_reason, canonical_usage};

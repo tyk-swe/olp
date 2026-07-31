@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM audit_events WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED ) DELETE FROM audit_events event USING expired WHERE event.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f426649b64b6133a43069e7ef15b8c4647f525311b2ee68595fc0c1b8855744a"
+}

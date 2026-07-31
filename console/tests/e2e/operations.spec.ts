@@ -138,7 +138,7 @@ test('playground sends an ephemeral session-authorized structured-output request
   await page.getByRole('radio', { name: 'Text' }).focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('radio', { name: 'Structured output' })).toHaveAttribute('data-state', 'checked');
+  await expect(page.getByRole('radio', { name: 'Structured output' })).toBeChecked();
   await page.getByLabel('Route slug').fill('support-chat');
   await page.getByLabel('Client surface').selectOption('anthropic');
   await page.getByLabel('Prompt').fill('Return a structured answer.');

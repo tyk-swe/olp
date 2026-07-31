@@ -3,13 +3,15 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: OLP_REHEARSAL_DATABASE_URL=postgres://... OLP_VALKEY_URL=redis://... upgrade-rehearsal.sh BACKUP
+usage: OLP_DATABASE_URL=postgres://... OLP_REHEARSAL_DATABASE_URL=postgres://... \
+  OLP_VALKEY_URL=redis://... upgrade-rehearsal.sh BACKUP
 
 OLP_REHEARSAL_CONFIRM=destroy-target must be set. The script restores the
-backup into that isolated database, runs the current migrator twice, and proves
-that the second run is idempotent. The target migration set is derived from the
-tracked SQL migrations. Set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to require
-an exact number of newly applied migrations, or
+backup into that isolated database, verifies it is not the protected
+OLP_DATABASE_URL database, runs the current migrator twice, and proves that the
+second run is idempotent. The target migration set is derived from the tracked
+SQL migrations. Set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to require an exact
+number of newly applied migrations, or
 OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION to derive it from a released
 migration marker.
 USAGE

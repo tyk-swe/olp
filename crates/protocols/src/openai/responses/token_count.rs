@@ -23,7 +23,7 @@ pub struct ResponseInputTokensRequest {
 /// canonical token-count operation intentionally carries only countable media
 /// and text parts; it cannot faithfully represent Responses roles, function
 /// calls/results, or future stateless input item fields on its own.
-pub const OPENAI_RESPONSES_INPUT_TOKENS_REQUEST_EXTENSION: &str =
+const OPENAI_RESPONSES_INPUT_TOKENS_REQUEST_EXTENSION: &str =
     "/__olp/openai_responses_input_tokens_request";
 
 pub fn decode_response_input_tokens(

@@ -143,6 +143,41 @@ fn file_media_round_trips_mime_and_inline_media_is_rejected() {
 }
 
 #[test]
+fn restricted_auto_tool_choice_is_preserved_and_zero_output_tokens_are_rejected() {
+    let request: GenerateContentRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        "toolConfig": {
+            "functionCallingConfig": {
+                "mode": "AUTO",
+                "allowedFunctionNames": ["weather", "forecast"]
+            }
+        },
+        "generationConfig": {"maxOutputTokens": 1}
+    }))
+    .unwrap();
+    let Operation::Generation(mut canonical) =
+        decode_generate_content_request("default", request, false).unwrap()
+    else {
+        unreachable!();
+    };
+    let encoded =
+        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    assert_eq!(
+        encoded["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"],
+        json!(["weather", "forecast"])
+    );
+
+    canonical.parameters.max_output_tokens = Some(0);
+    assert!(encode_generate_content_request(&canonical).is_err());
+    let invalid: GenerateContentRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        "generationConfig": {"maxOutputTokens": 0}
+    }))
+    .unwrap();
+    assert!(decode_generate_content_request("default", invalid, false).is_err());
+}
+
+#[test]
 fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
     let response: GenerateContentResponse = serde_json::from_value(json!({
         "responseId": "response-1",
@@ -229,7 +264,6 @@ fn fragmented_stream_maps_unicode_tool_usage_finish_and_eof_done() {
     events.extend(decoder.finish().unwrap());
 
     validate_event_sequence(&events).unwrap();
-    assert!(decoder.is_done());
     let text = events
         .iter()
         .filter_map(|event| match &event.kind {
@@ -264,7 +298,6 @@ fn stream_error_is_terminal_and_missing_finish_reason_is_truncation() {
             .as_bytes(),
         )
         .unwrap();
-    assert!(decoder.is_done());
     assert!(matches!(
         &events[0].kind,
         CanonicalEventKind::Error { error } if error.retryable
@@ -435,6 +468,28 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
         CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "lookup" && arguments_delta.contains("Paris")
     )));
+
+    let mut invalid = GeminiGenerateContentClientStreamEncoder::new("public-route", "fallback");
+    invalid
+        .push(olp_domain::CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ))
+        .unwrap();
+    assert!(
+        invalid
+            .push(olp_domain::CanonicalEvent::new(
+                1,
+                CanonicalEventKind::TextDelta {
+                    output_index: 0,
+                    text: "before item start".into(),
+                },
+            ))
+            .is_err()
+    );
 }
 
 #[test]

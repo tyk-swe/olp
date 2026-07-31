@@ -701,7 +701,8 @@ fn apply_extensions(
             .ok_or_else(|| OpenAiEncodeError::InvalidExtensionPath(pointer.clone()))?
             .split('/')
             .map(unescape_json_pointer)
-            .collect::<Vec<_>>();
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| OpenAiEncodeError::InvalidExtensionPath(pointer.clone()))?;
         match segments.as_slice() {
             [field] => {
                 request.extra.insert(field.clone(), value.clone());

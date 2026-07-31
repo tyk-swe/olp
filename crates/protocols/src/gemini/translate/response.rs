@@ -66,7 +66,7 @@ fn decode_response(
     if let Some(usage) = response.usage_metadata {
         collect_extra("/usageMetadata", &usage.extra, &mut extensions);
         builder.push(CanonicalEventKind::Usage {
-            usage: canonical_usage(&usage),
+            usage: canonical_usage(&usage)?,
         });
     }
     if !extensions.is_empty() {
@@ -176,22 +176,23 @@ fn decode_candidate(
     Ok(finished)
 }
 
-pub(crate) fn canonical_usage(usage: &UsageMetadata) -> Usage {
+pub(crate) fn canonical_usage(usage: &UsageMetadata) -> Result<Usage, ResponseError> {
     let total_tokens = if usage.total_token_count == 0 {
         usage
             .prompt_token_count
-            .saturating_add(usage.candidates_token_count)
-            .saturating_add(usage.thoughts_token_count.unwrap_or(0))
+            .checked_add(usage.candidates_token_count)
+            .and_then(|total| total.checked_add(usage.thoughts_token_count.unwrap_or(0)))
+            .ok_or(ResponseError::UsageOverflow)?
     } else {
         usage.total_token_count
     };
-    Usage {
+    Ok(Usage {
         input_tokens: usage.prompt_token_count,
         output_tokens: usage.candidates_token_count,
         total_tokens,
         cached_input_tokens: usage.cached_content_token_count,
         reasoning_tokens: usage.thoughts_token_count,
-    }
+    })
 }
 
 pub(crate) fn gemini_finish_reason(reason: &str) -> FinishReason {
@@ -207,5 +208,26 @@ pub(crate) fn gemini_finish_reason(reason: &str) -> FinishReason {
         | "IMAGE_PROHIBITED_CONTENT" => FinishReason::ContentFilter,
         "MALFORMED_FUNCTION_CALL" | "UNEXPECTED_TOOL_CALL" => FinishReason::Error,
         other => FinishReason::Other(other.to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthesized_usage_total_rejects_overflow() {
+        let usage = UsageMetadata {
+            prompt_token_count: u64::MAX,
+            candidates_token_count: 1,
+            total_token_count: 0,
+            cached_content_token_count: None,
+            thoughts_token_count: None,
+            extra: BTreeMap::new(),
+        };
+        assert!(matches!(
+            canonical_usage(&usage),
+            Err(ResponseError::UsageOverflow)
+        ));
     }
 }

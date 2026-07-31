@@ -11,8 +11,7 @@ use thiserror::Error;
 
 use crate::{ApiKeyId, ApiKeyLookupId, OperationKind, RouteSlug};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Role {
     Owner,
     Operator,
@@ -58,8 +57,7 @@ impl fmt::Display for Role {
 #[error("invalid fixed user role")]
 pub struct InvalidRole;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Permission {
     ReadConfiguration,
     ManageProviders,
@@ -122,24 +120,6 @@ impl Role {
     }
 }
 
-pub fn validate_owner_change(
-    current_role: Role,
-    new_role: Option<Role>,
-    current_owner_count: usize,
-) -> Result<(), OwnerInvariantError> {
-    let removes_owner = current_role == Role::Owner && new_role != Some(Role::Owner);
-    if removes_owner && current_owner_count <= 1 {
-        return Err(OwnerInvariantError::LastOwner);
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum OwnerInvariantError {
-    #[error("the installation must retain at least one owner")]
-    LastOwner,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiKeyScope {
@@ -158,15 +138,24 @@ impl ApiKeyScope {
 
     #[must_use]
     pub const fn permits(self, operation: OperationKind) -> bool {
-        match self {
-            Self::Inference => !matches!(
-                operation,
-                OperationKind::ModelList | OperationKind::ModelGet
-            ),
-            Self::ModelsRead => matches!(
-                operation,
-                OperationKind::ModelList | OperationKind::ModelGet
-            ),
+        match operation {
+            OperationKind::Generation
+            | OperationKind::Embeddings
+            | OperationKind::TokenCount
+            | OperationKind::ImageGeneration
+            | OperationKind::ImageEdit
+            | OperationKind::ImageVariation
+            | OperationKind::Speech
+            | OperationKind::Transcription
+            | OperationKind::VideoCreate
+            | OperationKind::VideoList
+            | OperationKind::VideoGet
+            | OperationKind::VideoContent
+            | OperationKind::VideoDelete
+            | OperationKind::Moderation => matches!(self, Self::Inference),
+            OperationKind::ModelList | OperationKind::ModelGet => {
+                matches!(self, Self::ModelsRead)
+            }
         }
     }
 }
@@ -207,6 +196,9 @@ pub struct ApiKeyLimits {
     pub concurrency: Option<NonZeroU32>,
 }
 
+/// Largest token-per-minute limit exactly representable by supported numeric counters.
+pub const MAX_API_KEY_TOKENS_PER_MINUTE: u64 = (1_u64 << 53) - 1;
+
 impl ApiKeyLimits {
     #[must_use]
     pub const fn has_hard_limits(self) -> bool {
@@ -237,8 +229,9 @@ pub fn authorize_api_key(
     operation: OperationKind,
     now: DateTime<Utc>,
 ) -> Result<(), ApiKeyAuthorizationError> {
-    if key.status == ApiKeyStatus::Revoked {
-        return Err(ApiKeyAuthorizationError::Revoked);
+    match key.status {
+        ApiKeyStatus::Active => {}
+        ApiKeyStatus::Revoked => return Err(ApiKeyAuthorizationError::Revoked),
     }
     if key.expires_at.is_some_and(|expiration| expiration <= now) {
         return Err(ApiKeyAuthorizationError::Expired);
@@ -351,14 +344,14 @@ mod tests {
     }
 
     #[test]
-    fn access_permission_strings_are_stable() {
-        assert_eq!(
-            serde_json::to_string(&Permission::ReadAccess).unwrap(),
-            r#""read_access""#
-        );
-        assert_eq!(
-            serde_json::to_string(&Permission::ManageAccess).unwrap(),
-            r#""manage_access""#
-        );
+    fn api_key_scope_permissions_cover_every_operation() {
+        for operation in OperationKind::ALL {
+            let model_operation = matches!(
+                operation,
+                OperationKind::ModelList | OperationKind::ModelGet
+            );
+            assert_eq!(ApiKeyScope::Inference.permits(operation), !model_operation);
+            assert_eq!(ApiKeyScope::ModelsRead.permits(operation), model_operation);
+        }
     }
 }

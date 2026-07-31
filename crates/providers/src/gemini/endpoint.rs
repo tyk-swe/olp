@@ -7,6 +7,21 @@ use crate::endpoint::{EndpointCore, EndpointCoreError};
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";
 
+pub(crate) fn validate_model_name(upstream_model: &str) -> Result<&str, EndpointError> {
+    let model = upstream_model
+        .strip_prefix("models/")
+        .unwrap_or(upstream_model);
+    if model.is_empty()
+        || model
+            .split('/')
+            .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
+        || upstream_model.chars().any(char::is_control)
+    {
+        return Err(EndpointError::InvalidModelName);
+    }
+    Ok(model)
+}
+
 #[derive(Clone)]
 pub(crate) struct Endpoint {
     core: EndpointCore,
@@ -70,18 +85,8 @@ impl Endpoint {
     }
 
     fn model_action_url(&self, upstream_model: &str, action: &str) -> Result<Url, EndpointError> {
-        let model = upstream_model
-            .strip_prefix("models/")
-            .unwrap_or(upstream_model);
+        let model = validate_model_name(upstream_model)?;
         let segments = model.split('/').collect::<Vec<_>>();
-        if segments.is_empty()
-            || segments
-                .iter()
-                .any(|segment| segment.is_empty() || matches!(*segment, "." | ".."))
-            || upstream_model.chars().any(char::is_control)
-        {
-            return Err(EndpointError::InvalidModelName);
-        }
         let mut url = self.core.url().clone();
         {
             let mut path = url

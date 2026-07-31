@@ -179,7 +179,7 @@
         sync.snapshotEtag,
         buildReplaceRouteDraftInput(editorValues)
       );
-      sync = markSaved(sync, updated.etag);
+      sync = markSaved(updated.etag);
       queryClient.setQueryData(['route-draft', current.id], updated);
       validated = false;
       notice = 'Draft saved. Simulate and validate before activation.';
@@ -262,9 +262,9 @@
               <span class="target-number" aria-hidden="true">{index + 1}</span>
               <div class="target-fields">
                 <div class="form-field model-select"><label for={`target-model-${index}`}>Provider model</label><select id={`target-model-${index}`} bind:value={target.providerModelId} onchange={touch}>{#each modelOptions as option (option.id)}<option value={option.id}>{option.label}</option>{/each}</select></div>
-                <div class="form-field"><label for={`priority-${index}`}>Priority</label><input id={`priority-${index}`} type="number" min="1" max="100" bind:value={target.priority} oninput={touch} /></div>
-                <div class="form-field"><label for={`weight-${index}`}>Weight</label><input id={`weight-${index}`} type="number" min="1" max="10000" bind:value={target.weight} oninput={touch} /></div>
-                <div class="form-field"><label for={`timeout-${index}`}>Attempt timeout (ms)</label><input id={`timeout-${index}`} type="number" min="100" bind:value={target.timeoutMs} oninput={touch} /></div>
+                <div class="form-field"><label for={`priority-${index}`}>Priority</label><input id={`priority-${index}`} type="number" min="1" max="100" required bind:value={target.priority} oninput={touch} /></div>
+                <div class="form-field"><label for={`weight-${index}`}>Weight</label><input id={`weight-${index}`} type="number" min="1" max="10000" required bind:value={target.weight} oninput={touch} /></div>
+                <div class="form-field"><label for={`timeout-${index}`}>Attempt timeout (ms)</label><input id={`timeout-${index}`} type="number" min="100" max={overallTimeoutMs} required bind:value={target.timeoutMs} oninput={touch} /></div>
               </div>
               <button class="remove-target" type="button" aria-label={`Remove target ${index + 1}`} onclick={() => removeTarget(index)}>×</button>
               <div class:warning={missingTargetOperations(target, modelOptions, operations).length > 0} class="target-eligibility">
@@ -280,7 +280,7 @@
         </ol>
         {#if routeEligibilityWarnings.length}<div class="eligibility-warning" role="status"><strong>Route eligibility is incomplete.</strong><span>No selected target has a certified tuple for: {routeEligibilityWarnings.join(', ')}.</span></div>{/if}
       </section>
-      <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" bind:value={overallTimeoutMs} oninput={touch} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" bind:value={maxAttempts} oninput={touch} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
+      <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" max="2147483647" required bind:value={overallTimeoutMs} oninput={touch} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" max={targets.length} required bind:value={maxAttempts} oninput={touch} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
     </div>
     <aside class="card publish-panel" aria-labelledby="publish-heading"><p class="eyebrow">Draft controls</p><h2 id="publish-heading">Test before activation</h2><p>Saving changes invalidates prior validation.</p><button class="button button-secondary" type="submit" disabled={Boolean(busy)}>{busy === 'save' ? 'Saving…' : isNew ? 'Create draft' : 'Save draft'}</button>
       {#if !isNew && draft.data}

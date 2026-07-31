@@ -20,8 +20,7 @@ use reqwest::multipart;
 use serde_json::Value;
 
 use super::{OpenAiConnector, errors::*, streams::*};
-
-const MAX_INLINE_REQUEST_MEDIA_BYTES: usize = 1024 * 1024;
+use crate::transport_common::read_inline_media;
 
 pub(super) async fn hydrate_chat_media(
     request: &mut ChatCompletionRequest,
@@ -36,7 +35,7 @@ pub(super) async fn hydrate_chat_media(
                 continue;
             };
             if media_handle_from_inline_marker(&input_audio.data).is_some() {
-                input_audio.data = read_inline_request_media(&input_audio.data, spool).await?;
+                input_audio.data = read_inline_media(&input_audio.data, spool).await?;
             }
         }
     }
@@ -72,7 +71,7 @@ pub(super) async fn hydrate_responses_media(
                         ));
                     };
                     if media_handle_from_inline_marker(marker).is_some() {
-                        let encoded = read_inline_request_media(marker, spool).await?;
+                        let encoded = read_inline_media(marker, spool).await?;
                         audio.insert("data".to_owned(), Value::String(encoded));
                     }
                 }
@@ -83,7 +82,7 @@ pub(super) async fn hydrate_responses_media(
                         ));
                     };
                     if media_handle_from_inline_marker(marker).is_some() {
-                        let encoded = read_inline_request_media(marker, spool).await?;
+                        let encoded = read_inline_media(marker, spool).await?;
                         object.insert(
                             "file_data".to_owned(),
                             Value::String(format!("data:application/pdf;base64,{encoded}")),
@@ -95,38 +94,6 @@ pub(super) async fn hydrate_responses_media(
         }
     }
     Ok(())
-}
-
-async fn read_inline_request_media(
-    marker: &str,
-    spool: Option<&Arc<dyn MediaSpool>>,
-) -> Result<String, TransportError> {
-    let handle = media_handle_from_inline_marker(marker)
-        .ok_or_else(|| protocol_body_error("invalid bounded inline-media handle"))?;
-    let spool =
-        spool.ok_or_else(|| protocol_body_error("bounded inline-media spool is unavailable"))?;
-    let opened = spool.open(&handle).await.map_err(map_spool_error)?;
-    if opened
-        .artifact
-        .content_length
-        .is_none_or(|length| length > MAX_INLINE_REQUEST_MEDIA_BYTES as u64)
-    {
-        return Err(protocol_body_error(
-            "bounded inline request media exceeded its limit",
-        ));
-    }
-    let mut stream = opened.bytes;
-    let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(map_spool_error)?;
-        if bytes.len().saturating_add(chunk.len()) > MAX_INLINE_REQUEST_MEDIA_BYTES {
-            return Err(protocol_body_error(
-                "bounded inline request media exceeded its limit",
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(STANDARD.encode(bytes))
 }
 
 impl OpenAiConnector {

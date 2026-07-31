@@ -11,7 +11,7 @@ export type EditableTarget = {
   timeoutMs: number;
 };
 
-export type RouteModelOption = {
+type RouteModelOption = {
   id: string;
   providerId: string;
   providerName: string;
@@ -20,7 +20,7 @@ export type RouteModelOption = {
   capabilities: ProviderModelInventory['model']['capabilities'];
 };
 
-export type RouteEditorValues = {
+type RouteEditorValues = {
   slug: string;
   operations: string[];
   overallTimeoutMs: number;
@@ -80,7 +80,7 @@ function providerModel(target: EditableTarget, modelOptions: RouteModelOption[])
   return modelOptions.find((option) => option.id === target.providerModelId);
 }
 
-export function certifiedCapabilities(
+function certifiedCapabilities(
   target: EditableTarget,
   modelOptions: RouteModelOption[],
   operations: string[]
@@ -136,15 +136,35 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
   }
   if (!values.operations.length) return 'Select at least one supported operation.';
   if (!values.targets.length) return 'Add at least one eligible provider model target.';
-  if (values.maxAttempts < 1 || values.maxAttempts > values.targets.length) {
+  if (
+    !Number.isInteger(values.overallTimeoutMs) ||
+    values.overallTimeoutMs < 100 ||
+    values.overallTimeoutMs > 2_147_483_647
+  ) {
+    return 'Overall deadline must be a whole number between 100 and 2,147,483,647 ms.';
+  }
+  if (
+    !Number.isInteger(values.maxAttempts) ||
+    values.maxAttempts < 1 ||
+    values.maxAttempts > values.targets.length
+  ) {
     return 'Maximum attempts must be between 1 and the number of targets.';
   }
   if (
     values.targets.some(
-      (target) => target.weight < 1 || target.timeoutMs < 100 || target.priority < 1
+      (target) =>
+        !Number.isInteger(target.priority) ||
+        target.priority < 1 ||
+        target.priority > 100 ||
+        !Number.isInteger(target.weight) ||
+        target.weight < 1 ||
+        target.weight > 10_000 ||
+        !Number.isInteger(target.timeoutMs) ||
+        target.timeoutMs < 100 ||
+        target.timeoutMs > values.overallTimeoutMs
     )
   ) {
-    return 'Every target needs a positive priority, weight, and timeout.';
+    return 'Every target needs a valid priority, weight, and timeout within the overall deadline.';
   }
   return null;
 }
@@ -159,7 +179,8 @@ export function buildCreateRouteDraftInput(
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
     targets: values.targets.map((target) => {
-      const model = providerModel(target, modelOptions)!;
+      const model = providerModel(target, modelOptions);
+      if (!model) throw new Error('A selected provider model is no longer available. Reload the draft.');
       return {
         provider_id: model.providerId,
         provider_model: model.upstreamModel,

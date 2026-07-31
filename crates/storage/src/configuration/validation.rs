@@ -6,6 +6,9 @@ use super::{
     resources::{CapabilityRecord, DiscoveredModelInput, UpdateProvider},
 };
 
+pub(super) const MAX_ROUTE_OPERATIONS: usize = 14;
+pub(super) const MAX_ROUTE_TARGETS: usize = 64;
+
 pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), ConfigurationError> {
     if update.name.trim().is_empty() || update.name.chars().count() > 100 {
         return Err(ConfigurationError::Invalid(
@@ -55,11 +58,6 @@ pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Configu
     Ok(())
 }
 
-pub(crate) fn validate_capability(capability: &CapabilityRecord) -> Result<(), ConfigurationError> {
-    let _ = capability;
-    Ok(())
-}
-
 pub(crate) fn validate_provider_capability(
     provider_kind: &str,
     capability: &CapabilityRecord,
@@ -96,6 +94,11 @@ pub(crate) fn validate_route_input(
         return Err(ConfigurationError::Invalid(
             "route operations and targets cannot be empty".to_owned(),
         ));
+    }
+    if operations.len() > MAX_ROUTE_OPERATIONS || targets.len() > MAX_ROUTE_TARGETS {
+        return Err(ConfigurationError::Invalid(format!(
+            "a route supports at most {MAX_ROUTE_OPERATIONS} operations and {MAX_ROUTE_TARGETS} targets"
+        )));
     }
     if overall_timeout_ms <= 0
         || max_attempts <= 0
@@ -191,6 +194,31 @@ mod tests {
                 matches!(error, ConfigurationError::Invalid(detail) if detail.contains("installation-local"))
             );
         }
+    }
+
+    #[test]
+    fn route_drafts_bound_operator_supplied_cardinality() {
+        let target = (Uuid::now_v7(), 0, 1, 500);
+        assert!(
+            validate_route_input(
+                "bounded-route",
+                &[OperationKind::Generation; MAX_ROUTE_OPERATIONS + 1],
+                1_000,
+                1,
+                &[target],
+            )
+            .is_err()
+        );
+        assert!(
+            validate_route_input(
+                "bounded-route",
+                &[OperationKind::Generation],
+                1_000,
+                1,
+                &vec![target; MAX_ROUTE_TARGETS + 1],
+            )
+            .is_err()
+        );
     }
 
     #[test]

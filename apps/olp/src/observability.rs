@@ -180,49 +180,53 @@ pub async fn refresh_observability_cache(state: &ObservabilityState) {
 /// expensive metrics rollups are refreshed every fifteen seconds.
 pub fn spawn_observability_cache(
     state: ObservabilityState,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        refresh_observability_cache(&state).await;
+    tokio::spawn(run_observability_cache(state, shutdown))
+}
 
-        let mut readiness_interval =
-            tokio::time::interval(OBSERVABILITY_READINESS_REFRESH_INTERVAL);
-        let mut metrics_interval = tokio::time::interval(OBSERVABILITY_METRICS_REFRESH_INTERVAL);
-        readiness_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        metrics_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        // `interval` ticks immediately. The initial synchronous refresh above
-        // already populated both snapshots, so consume those first ticks.
-        readiness_interval.tick().await;
-        metrics_interval.tick().await;
+pub(crate) async fn run_observability_cache(
+    state: ObservabilityState,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    refresh_observability_cache(&state).await;
 
-        let readiness_state = state.clone();
-        let mut readiness_shutdown = shutdown.clone();
-        let readiness_refresh = async move {
-            loop {
-                tokio::select! {
-                    _ = readiness_interval.tick() => refresh_readiness_cache(&readiness_state).await,
-                    changed = readiness_shutdown.changed() => {
-                        if changed.is_err() || *readiness_shutdown.borrow() {
-                            return;
-                        }
+    let mut readiness_interval = tokio::time::interval(OBSERVABILITY_READINESS_REFRESH_INTERVAL);
+    let mut metrics_interval = tokio::time::interval(OBSERVABILITY_METRICS_REFRESH_INTERVAL);
+    readiness_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    metrics_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // `interval` ticks immediately. The initial synchronous refresh above
+    // already populated both snapshots, so consume those first ticks.
+    readiness_interval.tick().await;
+    metrics_interval.tick().await;
+
+    let readiness_state = state.clone();
+    let mut readiness_shutdown = shutdown.clone();
+    let readiness_refresh = async move {
+        loop {
+            tokio::select! {
+                _ = readiness_interval.tick() => refresh_readiness_cache(&readiness_state).await,
+                changed = readiness_shutdown.changed() => {
+                    if changed.is_err() || *readiness_shutdown.borrow() {
+                        return;
                     }
                 }
             }
-        };
-        let metrics_refresh = async move {
-            loop {
-                tokio::select! {
-                    _ = metrics_interval.tick() => refresh_metrics_cache(&state).await,
-                    changed = shutdown.changed() => {
-                        if changed.is_err() || *shutdown.borrow() {
-                            return;
-                        }
+        }
+    };
+    let metrics_refresh = async move {
+        loop {
+            tokio::select! {
+                _ = metrics_interval.tick() => refresh_metrics_cache(&state).await,
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        return;
                     }
                 }
             }
-        };
-        tokio::join!(readiness_refresh, metrics_refresh);
-    })
+        }
+    };
+    tokio::join!(readiness_refresh, metrics_refresh);
 }
 
 async fn refresh_readiness_cache(state: &ObservabilityState) {
@@ -556,7 +560,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
          # HELP olp_request_metadata_events_dropped_total Metadata events dropped from the bounded buffer.\n\
          # TYPE olp_request_metadata_events_dropped_total counter\n\
          olp_request_metadata_events_dropped_total {}\n\
-         # HELP olp_request_metadata_events_abandoned_total Accepted metadata events abandoned during shutdown or worker failure.\n\
+         # HELP olp_request_metadata_events_abandoned_total Accepted metadata events not written to the Stream because of capacity, shutdown, or writer failure.\n\
          # TYPE olp_request_metadata_events_abandoned_total counter\n\
          olp_request_metadata_events_abandoned_total {}\n\
          # HELP olp_request_metadata_events_pending Accepted metadata events not yet written to the stream.\n\

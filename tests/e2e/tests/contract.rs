@@ -1398,6 +1398,37 @@ fn a_key_over_its_request_limit_is_refused_with_a_retry_after() {
     });
 }
 
+mod harness_unit_tests {
+    use super::harness::{database_url, process_start_time};
+
+    #[test]
+    fn process_start_time_ignores_spaces_and_parentheses_in_the_name() {
+        let mut fields = vec!["0"; 20];
+        fields[19] = "12345";
+        let stat = format!("42 (olp worker ) name) {}", fields.join(" "));
+        assert_eq!(process_start_time(&stat), Some("12345"));
+    }
+
+    #[test]
+    fn database_url_replaces_only_the_database_path() {
+        let actual = database_url(
+            "postgres://user:pass@db.example:5432/postgres?sslmode=require&application_name=e2e",
+            "olp_e2e_abc",
+        )
+        .expect("valid database URL");
+        assert_eq!(
+            actual,
+            "postgres://user:pass@db.example:5432/olp_e2e_abc?sslmode=require&application_name=e2e"
+        );
+    }
+
+    #[test]
+    fn database_url_rejects_malformed_or_pathless_admin_urls() {
+        assert!(database_url("not a URL", "olp_e2e_abc").is_err());
+        assert!(database_url("postgres://db.example", "olp_e2e_abc").is_err());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Teardown
 //
@@ -1410,6 +1441,11 @@ fn a_key_over_its_request_limit_is_refused_with_a_retry_after() {
 fn zzz_teardown_releases_the_run_database() {
     runtime().block_on(async {
         let stderr = world().shutdown().await;
+        let unexpected = world().mock.unexpected();
+        assert!(
+            unexpected.is_empty(),
+            "unexpected mock-upstream requests: {unexpected:?}"
+        );
         assert!(
             !stderr.contains("panicked at"),
             "the server logged a panic during the run:\n{stderr}"

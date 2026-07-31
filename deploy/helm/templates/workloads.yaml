@@ -84,6 +84,10 @@ spec:
               value: {{ printf "%d" $mediaSpoolCapacity | quote }}
             - name: OLP_DATABASE_MAX_CONNECTIONS
               value: {{ $root.Values.config.databaseMaxConnections | quote }}
+            {{- if eq $componentName "gateway" }}
+            - name: OLP_REQUEST_METADATA_STREAM_MAX_LENGTH
+              value: {{ $root.Values.config.requestMetadataStreamMaxLength | quote }}
+            {{- end }}
             - name: OLP_DATABASE_URL
               valueFrom:
                 secretKeyRef:

@@ -117,7 +117,11 @@ pub fn decode_response_create(
     if request.background == Some(true) {
         return Err(ResponsesCodecError::BackgroundUnsupported);
     }
-    if let Some(value) = request.extra.remove("conversation") {
+    if let Some(value) = request
+        .extra
+        .remove("conversation")
+        .filter(|value| !value.is_null())
+    {
         return Err(ResponsesCodecError::StatefulField {
             field: "conversation",
             value: value.to_string(),
@@ -127,9 +131,6 @@ pub fn decode_response_create(
     let route = RouteSlug::parse(request.model)?;
     let mut extensions = BTreeMap::new();
     collect_extra("", &request.extra, &mut extensions);
-    if let Some(value) = request.background {
-        extensions.insert("/background".into(), Value::Bool(value));
-    }
     if let Some(value) = request.previous_response_id {
         // OLP intentionally does not implement upstream state. Keeping this as
         // an extension would make a retry/failover target-dependent, so reject.
@@ -150,9 +151,6 @@ pub fn decode_response_create(
         });
     }
     messages.extend(decode_response_input(request.input, &mut extensions)?);
-    if messages.is_empty() {
-        return Err(ResponsesCodecError::EmptyInput);
-    }
 
     let mut tools = Vec::new();
     for (index, tool) in request.tools.into_iter().enumerate() {
@@ -167,8 +165,8 @@ pub fn decode_response_create(
             .parameters
             .ok_or(ResponsesCodecError::MissingToolField("parameters"))?;
         collect_extra(&format!("/tools/{index}"), &tool.extra, &mut extensions);
-        if let Some(strict) = tool.strict {
-            extensions.insert(format!("/tools/{index}/strict"), Value::Bool(strict));
+        if tool.strict == Some(true) {
+            extensions.insert(format!("/tools/{index}/strict"), Value::Bool(true));
         }
         tools.push(ToolDefinition {
             name,
@@ -439,11 +437,13 @@ pub(super) fn encode_response_content_part(
         ContentPart::Image {
             source: MediaSource::Uri(url),
             detail,
-        } => Ok(serde_json::json!({
-            "type": "input_image",
-            "image_url": url,
-            "detail": detail,
-        })),
+        } => {
+            let mut encoded = serde_json::json!({"type": "input_image", "image_url": url});
+            if let Some(detail) = detail {
+                encoded["detail"] = serde_json::json!(detail);
+            }
+            Ok(encoded)
+        }
         ContentPart::Image {
             source: MediaSource::Handle(_),
             ..
@@ -565,6 +565,9 @@ fn decode_response_content(
 ) -> Result<Vec<ContentPart>, ResponsesCodecError> {
     match content {
         Value::String(text) => Ok(vec![ContentPart::Text { text }]),
+        Value::Array(parts) if parts.is_empty() => {
+            Err(ResponsesCodecError::InvalidInputItem(item_index))
+        }
         Value::Array(parts) => parts
             .into_iter()
             .enumerate()
@@ -667,7 +670,6 @@ fn decode_response_function_call(
     let call_id = take_required_string(&mut object, "call_id", index)?;
     let name = take_required_string(&mut object, "name", index)?;
     let arguments = take_required_string(&mut object, "arguments", index)?;
-    let id = take_optional_string(&mut object, "id", index)?.unwrap_or_else(|| call_id.clone());
     collect_object_extra(&format!("/input/{index}"), object, extensions);
     Ok(Message {
         role: MessageRole::Assistant,
@@ -675,7 +677,7 @@ fn decode_response_function_call(
         name: None,
         tool_call_id: None,
         tool_calls: vec![ToolCall {
-            id,
+            id: call_id,
             name,
             arguments,
         }],

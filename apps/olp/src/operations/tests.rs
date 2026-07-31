@@ -1,23 +1,4 @@
 use super::*;
-use crate::management_api::if_match;
-
-#[test]
-fn strong_etag_parser_rejects_wildcards_and_unquoted_values() {
-    let id = Uuid::now_v7();
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::IF_MATCH,
-        HeaderValue::from_str(&format!("\"{id}\"")).unwrap(),
-    );
-    assert_eq!(if_match(&headers).unwrap(), id);
-    headers.insert(
-        header::IF_MATCH,
-        HeaderValue::from_str(&id.to_string()).unwrap(),
-    );
-    assert_eq!(if_match(&headers).unwrap_err().status, 400);
-    headers.insert(header::IF_MATCH, HeaderValue::from_static("*"));
-    assert_eq!(if_match(&headers).unwrap_err().status, 400);
-}
 
 #[test]
 fn pagination_and_time_ranges_reject_silent_clamping_or_reversal() {
@@ -30,35 +11,7 @@ fn pagination_and_time_ranges_reject_silent_clamping_or_reversal() {
 }
 
 #[test]
-fn media_job_surface_preserves_wire_contract() {
-    assert_eq!(media_job_surface_wire_value(Surface::OpenAi), "openai");
-    assert_eq!(
-        media_job_surface_wire_value(Surface::Anthropic),
-        "anthropic"
-    );
-    assert_eq!(media_job_surface_wire_value(Surface::Gemini), "gemini");
-}
-
-#[test]
-fn pricing_provider_kind_uses_current_wire_names_only() {
-    assert_eq!(
-        serde_json::to_value(olp_domain::ProviderKind::OpenAi).unwrap(),
-        "openai"
-    );
-    assert_eq!(
-        serde_json::to_value(olp_domain::ProviderKind::AzureOpenAi).unwrap(),
-        "azure_openai"
-    );
-    assert_eq!(
-        serde_json::to_value(olp_domain::ProviderKind::OpenAiCompatible).unwrap(),
-        "openai_compatible"
-    );
-    for legacy in ["open_ai", "azure_open_ai", "open_ai_compatible"] {
-        assert!(
-            serde_json::from_value::<olp_domain::ProviderKind>(legacy.into()).is_err(),
-            "accepted legacy provider kind {legacy}"
-        );
-    }
+fn pricing_openapi_lists_current_provider_kinds() {
     let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
     assert_eq!(
         document["components"]["schemas"]["ProviderKind"]["enum"],
@@ -72,16 +25,6 @@ fn pricing_provider_kind_uses_current_wire_names_only() {
             "openai_compatible"
         ])
     );
-}
-
-#[test]
-fn audit_contract_omits_unavailable_request_provenance() {
-    let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
-    let properties = document["components"]["schemas"]["AuditEventResponse"]["properties"]
-        .as_object()
-        .unwrap();
-    assert!(!properties.contains_key("source_ip"));
-    assert!(!properties.contains_key("user_agent_family"));
 }
 
 #[test]

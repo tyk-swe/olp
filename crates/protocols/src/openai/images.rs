@@ -13,7 +13,7 @@ use thiserror::Error;
 use super::extensions::{apply_pointer_extensions, collect_extra};
 use super::media::BoundedMediaPart;
 
-pub const DEFAULT_IMAGE_UPLOAD_LIMIT: u64 = 50 * 1024 * 1024;
+const DEFAULT_IMAGE_UPLOAD_LIMIT: u64 = 50 * 1024 * 1024;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiImageGenerationRequest {
@@ -404,137 +404,6 @@ pub fn encode_image_response(
     .map_err(ImageCodecError::InvalidExtension)
 }
 
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiImageStreamEvent {
-    #[serde(rename = "type")]
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub b64_json: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub partial_image_index: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<OpenAiImageUsage>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-pub enum ImageStreamUpdate {
-    Partial {
-        index: u32,
-        image: ImageArtifact,
-        extensions: SourceExtensions,
-    },
-    Completed {
-        usage: Option<Usage>,
-        extensions: SourceExtensions,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ImageStreamOperation {
-    Generation,
-    Edit,
-}
-
-pub fn decode_image_stream_event(
-    event: OpenAiImageStreamEvent,
-    mut stage_base64: impl FnMut(&str) -> Result<MediaHandle, ImageCodecError>,
-) -> Result<ImageStreamUpdate, ImageCodecError> {
-    let mut extensions = BTreeMap::new();
-    collect_extra("", &event.extra, &mut extensions);
-    if let Some(created_at) = event.created_at {
-        extensions.insert("/created_at".into(), Value::from(created_at));
-    }
-    match event.kind.as_str() {
-        "image_generation.partial_image" | "image_edit.partial_image" => {
-            let encoded = event.b64_json.ok_or(ImageCodecError::MissingStreamImage)?;
-            Ok(ImageStreamUpdate::Partial {
-                index: event.partial_image_index.unwrap_or(0),
-                image: ImageArtifact {
-                    source: MediaSource::Handle(stage_base64(&encoded)?),
-                    revised_prompt: None,
-                },
-                extensions: SourceExtensions::new(Surface::OpenAi, extensions),
-            })
-        }
-        "image_generation.completed" | "image_edit.completed" => {
-            let usage = event.usage.map(|usage| Usage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                total_tokens: usage.total_tokens,
-                cached_input_tokens: None,
-                reasoning_tokens: None,
-            });
-            Ok(ImageStreamUpdate::Completed {
-                usage,
-                extensions: SourceExtensions::new(Surface::OpenAi, extensions),
-            })
-        }
-        _ => Err(ImageCodecError::UnsupportedStreamEvent(event.kind)),
-    }
-}
-
-pub fn encode_image_stream_update(
-    update: &ImageStreamUpdate,
-    operation: ImageStreamOperation,
-    mut read_base64: impl FnMut(&MediaHandle) -> Result<String, ImageCodecError>,
-) -> Result<OpenAiImageStreamEvent, ImageCodecError> {
-    let (suffix, b64_json, partial_image_index, created_at, usage, extensions) = match update {
-        ImageStreamUpdate::Partial {
-            index,
-            image,
-            extensions,
-        } => {
-            extensions.ensure_representable_on(Surface::OpenAi)?;
-            let MediaSource::Handle(handle) = &image.source else {
-                return Err(ImageCodecError::StreamImageNeedsHandle);
-            };
-            (
-                "partial_image",
-                Some(read_base64(handle)?),
-                Some(*index),
-                None,
-                None,
-                extensions,
-            )
-        }
-        ImageStreamUpdate::Completed { usage, extensions } => {
-            extensions.ensure_representable_on(Surface::OpenAi)?;
-            (
-                "completed",
-                None,
-                None,
-                None,
-                usage.map(|usage| OpenAiImageUsage {
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                    total_tokens: usage.total_tokens,
-                    extra: BTreeMap::new(),
-                }),
-                extensions,
-            )
-        }
-    };
-    let prefix = match operation {
-        ImageStreamOperation::Generation => "image_generation",
-        ImageStreamOperation::Edit => "image_edit",
-    };
-    apply_pointer_extensions(
-        OpenAiImageStreamEvent {
-            kind: format!("{prefix}.{suffix}"),
-            b64_json,
-            partial_image_index,
-            created_at,
-            usage,
-            extra: BTreeMap::new(),
-        },
-        &extensions.values,
-    )
-    .map_err(ImageCodecError::InvalidExtension)
-}
-
 fn validate_prompt_and_count(prompt: &str, count: Option<u16>) -> Result<(), ImageCodecError> {
     if prompt.trim().is_empty() {
         return Err(ImageCodecError::EmptyPrompt);
@@ -597,10 +466,4 @@ pub enum ImageCodecError {
     InvalidExtension(String),
     #[error("base64 media staging failed: {0}")]
     Staging(String),
-    #[error("image partial event is missing b64_json")]
-    MissingStreamImage,
-    #[error("unsupported image stream event: {0}")]
-    UnsupportedStreamEvent(String),
-    #[error("image stream update requires a bounded media handle")]
-    StreamImageNeedsHandle,
 }

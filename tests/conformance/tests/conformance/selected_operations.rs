@@ -36,7 +36,7 @@ fn every_selected_operation_family_has_a_decoding_and_encoding_golden_case() {
             fixture.name
         );
         assert_eq!(
-            operation.extensions().and_then(|value| value.source),
+            operation.extensions().source,
             Some(fixture.surface),
             "{} lost its source surface",
             fixture.name

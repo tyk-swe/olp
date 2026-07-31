@@ -1,27 +1,29 @@
 # OpenLLMProxy consolidated static audit
 
-**Merged sources:** three independently generated reports formerly stored as `1.txt`, `2.txt`, and `3.txt`  
-**Merge date:** 2026-07-30  
-**Scope:** Rust gateway/control plane, storage, providers/protocols, Svelte console, Helm and Compose deployment, operational scripts, tests, and CI  
-**Revision note:** one source identified commit `e75ea6d6729f99f4339d37d4694a54596ec4b6a2`; the other two identified archive variants only. Verify that every source locator still applies before filing an issue.
+**Merged sources:** three independently generated reports formerly stored as `1.txt`, `2.txt`, and `3.txt`
+
+**Last refreshed:** 2026-07-31
+
+**Scope:** unresolved findings in the Rust gateway/control plane, storage, providers/protocols, Svelte console, Helm and Compose deployment, operational scripts, tests, and CI
+
+**Revision note:** refreshed against `0d173f7b6b37283d16772ba1a5546fb76c8acc98` plus the current uncommitted audit patch. Findings closed by that patch were removed after code and focused-test verification; retained line references are review loci and may move before commit.
 
 ## Status and merge policy
 
-This is a deduplicated static-analysis backlog, not runtime proof. Duplicate findings were collapsed by root cause, unique findings from the focused reports were added as `A-*`, and the broad edge-case inventory remains as `E-*`. Direct contradictions are marked disputed. Severity and confidence were inherited from the source reports and were not independently re-established during this merge.
+This is a deduplicated unresolved static-analysis backlog, not runtime proof. Duplicate findings were collapsed by root cause, unique findings from the focused reports were added as `A-*`, and the broad edge-case inventory remains as `E-*`. The 2026-07-31 refresh removed entries directly closed by the current patch and narrowed entries whose original claim was only partly closed.
 
 `Confirmed` means a source report considered the control/data flow direct. `High confidence` still needs an executable regression test. `Test required` and `Contract-dependent` are hypotheses, not proven defects. Validate each finding against the current tree before changing production behavior.
 
 ## Executive priority
 
-1. **E-001:** routine connection aging truncates valid long-running requests.
-2. **E-016:** actual token usage above reservation is never charged.
-3. **A-002:** live media jobs can block emergency credential containment.
-4. **A-003:** restore rehearsal compares URL strings before destructive DDL.
-5. **E-072 / E-073:** metadata ingestion is both unbounded and poisonable.
-6. **E-095 / E-096:** media jobs can lose their upstream identity or persist an unusable one.
-7. **A-006:** retention and rollup work runs in one unbounded transaction.
-8. **E-044:** image output lacks aggregate byte, count, and file-descriptor bounds.
-9. **E-080:** fixed pre-filter pagination can hide a valid last-known-good runtime.
+1. **A-002:** live media jobs can block emergency credential containment.
+2. **E-095 / E-097:** a successful upstream create can still lose its only durable recovery and cleanup identity during a database outage.
+3. **E-018:** limit release and reconciliation still rely on one-shot short operations.
+4. **A-011 / A-012:** request retention and configuration-list query amplification remain database scaling risks.
+5. **A-009 / A-014 / E-104:** key and identity-provider rotation still lack overlap or last-known-good availability contracts.
+6. **E-040 / E-042:** process death can strand spool trees and make logical accounting understate disk use.
+7. **E-128:** recognized OpenAI Responses stream-event extra fidelity remains incomplete.
+8. **E-082 / E-087:** bounded but potentially long global pricing writes and unbounded positive pool sizing remain operator-risk contracts.
 
 ## Severity and confidence
 
@@ -39,12 +41,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Fix / gate:** add an owner-only forced-containment operation that disables new traffic, tombstones or cancels affected jobs, publishes a safe runtime, and emits a high-severity audit event without requiring the compromised secret to remain active.
 
-### A-003 — Restore rehearsal can target production through an aliased URL
-
-**High · Reported confirmed** — `scripts/restore-rehearsal.sh:18-25` compares destination and production URL strings, then `:47-65` can execute `DROP SCHEMA public CASCADE`. Different DNS names, address forms, encodings, parameters, or proxy endpoints can identify the same database.
-
-**Fix / gate:** compare connected server/database and installation identities, require a rehearsal sentinel, and test aliased URLs before any DDL. Prefer creating the scratch database internally.
-
 ### A-004 — Distributed login abuse amplifies durable audit writes
 
 **Medium · Confirmed; deployment-dependent** — The global bucket permits 10,000 admitted attempts per minute across replicas, and admitted invalid or failed attempts create durable audit rows. A distributed attacker can therefore translate the admission allowance into sustained database writes. Password work is already bounded by a measured process-wide semaphore and the public management admission limit.
@@ -53,35 +49,11 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Fix / gate:** lower global admission to sustainable audit-write capacity. Aggregate or sample anonymous failures and batch or partition their retention.
 
-### A-006 — Maintenance combines unrelated unbounded cleanup in one transaction
-
-**High · Reported confirmed** — `crates/storage/src/maintenance.rs:46-312` performs request deletion, usage rollup/deletion, audit cleanup, session/invitation/idempotency/OIDC/outbox cleanup, and media-job deletion under one transaction and advisory lock. Most operations are not batched.
-
-**Fix / gate:** use bounded keyset batches and separate commits per dataset, with resumable cursors and measured row/time/WAL budgets.
-
-### A-007 — Token reconciliation is not idempotent
-
-**Medium · Reported design fragility** — `crates/storage/scripts/reconcile_limits.lua:6-20` refunds a counter without a reservation identity or reconciled state; retrying the same cleanup can refund twice. This prevents safely adding retries to the one-shot cleanup in E-018.
-
-**Fix / gate:** give reservations IDs and atomically transition `pending -> reconciled` with the counter update; repeated reconciliation must be a no-op.
-
-### A-008 — Authenticated management responses lack a default no-store policy
-
-**Medium · Reported confirmed; intermediary-dependent** — The management router (`apps/olp/src/router.rs:123-132,146-205`) lacks a global `Cache-Control: no-store, private` layer, so cookie-authenticated configuration and identity responses rely on intermediaries behaving safely.
-
-**Fix / gate:** apply no-store/private to authenticated `/api/v1/**` responses by default and opt out only resources proven safe to cache.
-
 ### A-009 — API-key HMAC rotation has no verification overlap
 
 **Medium · Reported design debt** — `crates/storage/src/security.rs:285-427` models one HMAC key. Because plaintext API keys are not retained, replacing it invalidates every stored digest and keyed bootstrap identity immediately.
 
 **Fix / gate:** version digests, retain bounded verify-only keys, and provide an audited reissue and retirement workflow.
-
-### A-010 — Management accepts TPM values the runtime always rejects
-
-**Medium · Reported confirmed** — Policy APIs accept through `i64::MAX`, while the Valkey/Lua path rejects values above `2^53-1` (`management_api/configuration/api_keys/policy.rs:14-16,150-154,208-231`; `storage/src/limits.rs:11-15,180-200`). A valid persisted policy can make all limited requests fail closed.
-
-**Fix / gate:** use one domain limit and maximum across API validation, persistence, runtime compilation, and Lua.
 
 ### A-011 — The partitioned requests table has only an ever-growing default partition
 
@@ -113,12 +85,6 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Fix / gate:** provide a production default/profile with at least two control replicas, a PDB, and topology spread; keep single-node settings explicitly developmental.
 
-### A-017 — Extreme usage timestamps can panic and become a caught 500
-
-**Medium · Static edge case** — Usage queries accept RFC 3339 `DateTime<Utc>` values. A valid timestamp at the upper edge can overflow the unchecked one-hour addition in `crates/storage/src/usage/query.rs:141-152`.
-
-**Fix / gate:** perform checked conversion and bounded date validation at the API boundary; return 400 for unrepresentable values.
-
 ### A-018 — Pricing uses request completion time
 
 **Medium · Policy ambiguity** — Gateway telemetry assigns the completion timestamp, and pricing binds it as the observation time, so a long request crossing a price activation boundary is billed at the finish-time price.
@@ -129,21 +95,9 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 ### A-019 — Cached-token accounting cannot produce reliable discounted cost
 
-**Medium · Reported confirmed** — Usage stores `cached_input_tokens`, but pricing has no cached-input rate and charges all input at the normal price. The invariant `cached_input_tokens <= input_tokens` is also absent from canonical validation, ingestion, and database constraints.
+**Medium · Confirmed residual** — Usage validates and stores `cached_input_tokens`, but pricing has no cached-input rate and still charges all input at the normal price. The current patch closes the ingestion-invariant part of the original finding, not discounted billing.
 
-**Fix / gate:** enforce the invariant at all three layers, then add a cached-input price and calculate cached and uncached input separately.
-
-### A-021 — Provider 429 handling discards Retry-After and feeds a health circuit
-
-**Medium · Reported confirmed** — Five canonical rate-limit failures open a process-local target circuit for thirty seconds, while OpenAI, Anthropic, and Gemini transports discard `Retry-After`.
-
-**Fix / gate:** separate credential/model-scoped rate-limit backoff from transport/5xx health circuits; safely parse delta-seconds and HTTP-date forms and propagate a bounded value.
-
-### A-026 — Console CSP omits form-action
-
-**Low · Defense in depth** — `apps/olp/src/static_console.rs:8-44` builds the CSP without an explicit `form-action`.
-
-**Fix / gate:** add `form-action 'self'`, or `'none'` if no form submission is required.
+**Fix / gate:** add a cached-input price and calculate cached and uncached input separately; preserve the new `cached_input_tokens <= input_tokens` regression.
 
 ### A-028 — Gateway topology spread is best-effort
 
@@ -151,23 +105,13 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Fix / gate:** use a production profile with protective spread or required anti-affinity where cluster size permits it.
 
-### A-029 — Pricing POST returns pre-normalized input
+### A-030 — Console aggregate collectors fetch up to 1,000 records serially
 
-**Low · Reported confirmed consistency issue** — Creation trims model names and uppercases currency before storage but constructs the response and idempotency payload from the original input (`storage/src/operations/pricing.rs:143-190`).
+**Low · Confirmed residual** — The collector now rejects a page before crossing a 1,000-record bound, closing the original over-limit behavior. It still follows every cursor sequentially and retains the complete bounded result, so high-latency configuration sets remain a UI scaling edge.
 
-**Fix / gate:** normalize once and use the same records for insertion and response, or return inserted rows.
+**Evidence / review locus:** `console/src/lib/api/pagination.ts`
 
-### A-030 — Console pagination collects up to 10,000 records sequentially
-
-**Low · Reported confirmed scaling issue** — `console/src/lib/api/pagination.ts:27-57` fetches all cursor pages into one array and throws only after appending the page that crosses 10,000 items.
-
-**Fix / gate:** use server-side search/virtualized selection; at minimum stop before fetching a page that would exceed the limit.
-
-### A-031 — A slow half-open probe can be joined by later probes
-
-**Medium · Reported confirmed** — Circuit code treats a probe lease as stale after the fixed thirty-second open duration even when its provider attempt can run longer (`apps/olp/src/circuit.rs:58-76`).
-
-**Fix / gate:** bind or renew the probe lease through the attempt deadline and fence completion.
+**Fix / gate:** use server-side search or virtualized incremental selection where operators need large configuration sets; retain the pre-append bound.
 
 # CI and release-pipeline gaps
 
@@ -183,201 +127,65 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Medium · Reported confirmed** — The aggregate threshold can hide coverage loss in auth, limits, migrations, egress, or cancellation paths.
 
-### P-005 — Restore safety has no database-alias regression test
-
-**Medium · Reported confirmed** — Existing backup-manifest tests do not cover syntactically different URLs resolving to the same database.
-
 ### P-010 — Image scans ignore vulnerabilities without a published fix
 
 **Low · Policy gap** — `ignore-unfixed: true` keeps such findings green. Publish the complete report and define a reachable/known-exploited exception policy if retaining this merge policy.
-
-# Disputed findings
-
-- **E-053:** explicit blocks cover connected timeout failures, but static flow keeps an uncommitted HTTP 5xx failover-eligible. Retain the accepted-then-500 reproduction.
 
 # Edge-case inventory
 
 ## 1. Listener, HTTP boundary, routing, and shutdown
 
-### E-001 — Valid long-lived responses are terminated by connection age
-
-**High · Confirmed** — Every accepted connection is shut down after roughly 5 minutes plus a 30-second drain, regardless of a route/provider timeout. A valid long stream or download is truncated; an HTTP/2 stream opened late inherits only the connection’s remaining lifetime.
-
-**Evidence / review locus:** `apps/olp/src/listener.rs:40-41,301-342`
-
-**Mitigation / regression test:** Make lifetime configurable and stream-aware, or stop accepting new H2 streams before retirement while allowing active streams to finish up to their own deadlines. Add a >6-minute stream test.
-
 ### E-002 — HTTP/2 streams lack a per-stream request-establishment deadline
 
-**Medium · High confidence** — A client can keep many streams in header/body establishment on one connection until the connection-age cutoff. The configured 100-stream concurrency therefore becomes a state-retention multiplier.
+**Medium · High confidence** — The first request on a connection has an establishment deadline, but later HTTP/2 streams do not. A client can retain up to the configured concurrent-stream limit in incomplete establishment for the life of a reused connection.
 
 **Evidence / review locus:** `apps/olp/src/listener.rs:36-41,256-342`
 
 **Mitigation / regression test:** Apply header/read/body establishment deadlines per stream and test slow headers plus incomplete bodies across 100 streams.
 
-### E-004 — Detached stream finalizers can emit metadata after shutdown closes the epoch
-
-**Medium · High confidence** — A streaming response can reach EOF while its detached producer still awaits limit cleanup before emitting request metadata. Listener drain can then finish and shutdown can close the writer and epoch from a currently graceful snapshot. A later emit sees the closed receiver and increments the dropped count after the loss reporter has exited.
-
-**Evidence / review locus:** `apps/olp/src/streaming_response.rs:287-291; apps/olp/src/gateway/telemetry.rs:230-243; apps/olp/src/cli/startup.rs:391-428; crates/storage/src/request_metadata/buffer.rs:34-53,238-247,354-371`
-
-**Mitigation / regression test:** Join detached response finalizers before closing request-metadata ingestion. Block limit cleanup after response EOF, initiate shutdown, release cleanup, and assert the late event is persisted or included in the closed epoch's loss accounting.
-
-### E-005 — Only one background worker has terminal failure wired into runtime shutdown
-
-**Medium · Confirmed** — The request-metadata writer is watched during normal operation, while other spawned workers are generally observed only while shutting down. A panic or early return can silently remove reconciliation/maintenance behavior from a still-ready process.
-
-**Evidence / review locus:** `apps/olp/src/cli/startup.rs:145-241,279-323,546-572`
-
-**Mitigation / regression test:** Supervise every essential task and transition readiness or terminate on unexpected completion. Add panic injection for each worker.
-
-### E-006 — Public admission classifies all non-inference traffic as management
-
-**Medium · Confirmed** — Static assets, SPA fallbacks, malformed paths, and true management calls share the reserved management pool. Slow asset/unknown-path responses can consume capacity intended to preserve the control plane.
-
-**Evidence / review locus:** `apps/olp/src/request_admission/public.rs:183-248; apps/olp/src/router.rs:123-133`
-
-**Mitigation / regression test:** Separate management API, static console, health, and unknown-path pools; reject unknown paths before acquiring a scarce permit.
-
-### E-009 — Non-timeout body transport failures are flattened into HTTP 413
-
-**Medium · Confirmed** — Explicit body deadline expiry maps to HTTP 408, but disconnects, other `to_bytes()` transport errors, and true size overflow still enter the same HTTP 413 rejection path.
-
-**Evidence / review locus:** `apps/olp/src/request_admission/validation.rs:57-65; apps/olp/src/request_admission.rs:416-428`
-
-**Mitigation / regression test:** Preserve typed body errors and map only overflow to 413; map disconnect/I/O to an appropriate transport response. Add each failure mode.
-
-### E-011 — Duplicate Content-Type and Content-Encoding fields are accepted with first-value semantics
-
-**Medium · Confirmed** — Different proxies/framework layers may combine or select duplicate headers differently. A request can be admitted under one interpretation and decoded under another.
-
-**Evidence / review locus:** `apps/olp/src/request_admission.rs:337-370`
-
-**Mitigation / regression test:** Reject duplicate singleton headers before routing/decoding and test split/combined header forms.
-
-### E-012 — Management singleton headers use first-value semantics
-
-**Medium · Confirmed** — Origin, CSRF, Idempotency-Key, and If-Match are read with HeaderMap::get(). Duplicate values can be interpreted differently by an upstream proxy, WAF, or later middleware.
-
-**Evidence / review locus:** `apps/olp/src/management_api/common.rs:218-233,261-277,322-373`
-
-**Mitigation / regression test:** Require exactly one valid value for security- and concurrency-sensitive singleton headers.
-
-### E-013 — Missing static assets fall back to index.html with 200
-
-**Low · Confirmed** — A partial deployment or stale HTML can request a nonexistent JS/CSS asset and receive HTML under a successful status, obscuring rollout failures and enabling bad cache entries.
-
-**Evidence / review locus:** `apps/olp/src/static_console.rs:47-55`
-
-**Mitigation / regression test:** Only SPA-fallback extensionless navigation routes; return 404 for asset-like paths and set nosniff.
-
-## 2. Admission, authentication headers, rate limits, and circuit breaking
-
-### E-016 — Provider-reported usage above total reservation is not charged
-
-**High · Confirmed** — The gateway reserves an HTTP estimate plus a parsed-operation delta, but reconciliation only refunds over-reservation. If actual provider usage exceeds the combined estimate, TPM accounting remains low.
-
-**Evidence / review locus:** `crates/storage/src/limits.rs:96-120; apps/olp/src/gateway/limits.rs:12-102; apps/olp/src/gateway/telemetry.rs:118-149`
-
-**Mitigation / regression test:** Reconcile signed delta: refund excess or atomically charge the shortfall, with a bounded debt policy. Test actual > HTTP + parsed estimate.
+## 2. Admission, limits, and route policy
 
 ### E-018 — Limit release and reconciliation are one-shot short operations
 
-**Medium · Confirmed** — A transient Valkey stall beyond 250 ms leaves concurrency leased until TTL and estimated tokens charged until bucket expiry. Repeated faults can create false throttling.
+**Medium · Confirmed residual** — Reconciliation is now signed and idempotent, but a transient Valkey stall beyond 250 ms still leaves concurrency leased until TTL and estimated tokens charged until bucket expiry. Repeated faults can create false throttling.
 
 **Evidence / review locus:** `apps/olp/src/request_admission/limits.rs:40-92; apps/olp/src/gateway/limits.rs:199-222`
 
 **Mitigation / regression test:** Queue idempotent release/reconcile work for retry, or execute a bounded background retry with metrics and durable uncertainty accounting.
 
-### E-019 — Concurrency lease TTL derives from the maximum allowed route timeout
+### E-019 — Multipart concurrency lease TTL derives from the maximum allowed route timeout
 
-**Medium · Confirmed** — One API key permitted to use a pathological long-timeout route gets a long abandonment TTL even when calling a short route. Crashes retain scarce concurrency much longer than necessary.
+**Medium · Confirmed residual** — JSON admission now uses the selected route's timeout. Multipart admission reserves before the route is parsed and still derives its lease TTL from the maximum timeout among every allowed runtime route, so one long-lived route can lengthen leaked leases for unrelated multipart traffic.
 
-**Evidence / review locus:** `apps/olp/src/request_admission/limits.rs:286-315; apps/olp/src/request_admission.rs:431-446`
+**Evidence / review locus:** `apps/olp/src/request_admission/limits.rs; apps/olp/src/request_admission/multipart.rs`
 
-**Mitigation / regression test:** Extract and authorize the actual route before reservation, then use its timeout plus a bounded grace period.
+**Mitigation / regression test:** Parse or otherwise identify the multipart route before reservation, or use a separately bounded provisional lease that is atomically replaced after parsing.
 
 ### E-020 — Route timeout accepts practically unbounded positive i32 milliseconds
 
-**Medium · Confirmed** — A valid value can approach 24.8 days. It expands request deadlines and distributed lease TTLs and can pin resources across maintenance windows.
+**Medium · Contract-dependent** — A valid value can approach 24.8 days. Long streams are an intentional supported use case, but no separate product contract bounds the request deadline and distributed lease TTL across maintenance windows.
 
 **Evidence / review locus:** `crates/storage/src/configuration/route_lifecycle.rs:68-75`
 
 **Mitigation / regression test:** Set product-level minimum/maximum timeouts and separately cap lease TTL.
 
-### E-021 — Duplicate API credential headers are not rejected
-
-**Medium · Confirmed** — Authorization, x-api-key, and x-goog-api-key are selected with first-value semantics. Proxy combination/reordering can authenticate a different credential than the application expects.
-
-**Evidence / review locus:** `apps/olp/src/request_admission/limits.rs:216-234,414-419`
-
-**Mitigation / regression test:** Reject duplicates and reject requests carrying more than one credential mechanism unless a documented precedence rule requires it.
-
-### E-024 — Inference methods with ignored bodies can still pay JSON-admission costs
-
-**Low · High confidence** — A GET/DELETE endpoint carrying JSON may be buffered, depth-checked, and charged even if the eventual handler ignores its body. This creates surprising quota and latency behavior.
-
-**Evidence / review locus:** `apps/olp/src/request_admission.rs:414-475`
-
-**Mitigation / regression test:** Declare body policy per endpoint/method and reject unsupported bodies before reservation.
-
-### E-025 — Token reservation occurs before all request validation completes
-
-**Medium · Confirmed** — JSON depth or typed-decoding failure after hard-limit reservation releases concurrency but can retain the token estimate. Malformed traffic can consume TPM without reaching a provider.
-
-**Evidence / review locus:** `apps/olp/src/request_admission.rs:414-475`
-
-**Mitigation / regression test:** Validate bounded structure and typed operation before committing token reservation, or reliably reconcile invalid requests to zero.
-
 ### E-026 — API-key expiration uses each node’s application clock
 
-**Medium · Confirmed** — Clock skew around expires_at can make one node accept a key while another rejects it. The same issue affects abrupt expiry during rolling deployments with time drift.
+**Medium · Contract-dependent** — Clock skew around `expires_at` can make one node accept a key while another rejects it. Invitation expiry now uses database time; the residual is the API-key hot path's documented dependence on synchronized node clocks.
 
 **Evidence / review locus:** `apps/olp/src/request_admission/limits.rs:251-255; apps/olp/src/request_admission/multipart.rs:185`
 
 **Mitigation / regression test:** Use database time for credential validity or enforce clock-health/readiness and include skew tolerance explicitly.
 
-### E-028 — Tenant-scoped rate limits can poison a target-wide circuit
-
-**Medium · Confirmed** — A 429 caused by one tenant/account can count as a target failure and suppress healthy traffic for unrelated tenants.
-
-**Evidence / review locus:** `apps/olp/src/circuit.rs:149-156`
-
-**Mitigation / regression test:** Classify rate-limit scope from provider metadata; do not trip global target health on caller-scoped quota errors.
-
 ### E-033 — Very long allowed-route sets increase admission CPU work
 
-**Low · High confidence** — Computing maximum timeout and authorization scans the in-memory runtime policy map, making every request's CPU work sensitive to control-plane cardinality.
+**Low · High confidence residual** — JSON admission now looks up the selected route directly. Multipart admission still lacks a parsed route at reservation time and scans allowed routes to compute the fallback lease TTL, so its CPU work remains sensitive to policy cardinality.
 
 **Evidence / review locus:** `apps/olp/src/request_admission/limits.rs:286-315`
 
-**Mitigation / regression test:** Bound policy cardinality and precompute effective admission policy in the runtime generation.
+**Mitigation / regression test:** Bound allowed-route cardinality or precompute the multipart fallback timeout in the runtime generation.
 
 ## 3. Multipart input, media spool, generated files, and streaming responses
-
-### E-036 — Bracketed and unbracketed multipart aliases can coexist ambiguously
-
-**Medium · Confirmed** — Fields such as name and name[] are not merged or rejected consistently; one is consumed and the other may remain as an extension/unknown field.
-
-**Evidence / review locus:** `apps/olp/src/gateway/multipart.rs:112-117`
-
-**Mitigation / regression test:** Canonicalize aliases before extraction and reject mixed forms.
-
-### E-037 — Prefix matching accepts malformed indexed field names
-
-**Medium · Confirmed** — Names like image[, image[evil, or image[0]suffix can enter repeated-file handling even though they are not valid indexed forms.
-
-**Evidence / review locus:** `apps/olp/src/gateway/multipart.rs:134-143`
-
-**Mitigation / regression test:** Parse the full field-name grammar and require a closing bracket with a decimal index or an exact documented alias.
-
-### E-038 — Lexicographic multipart ordering misorders numeric indices
-
-**Low · Confirmed** — BTree ordering places image[10] before image[2]. Order-sensitive multimodal prompts can be silently rearranged.
-
-**Evidence / review locus:** `apps/olp/src/gateway/multipart.rs:134-143`
-
-**Mitigation / regression test:** Parse numeric indices and sort numerically; reject duplicate indices and gaps if order is semantically meaningful.
 
 ### E-040 — Crash or SIGKILL leaves private media spool trees forever
 
@@ -395,431 +203,114 @@ This is a deduplicated static-analysis backlog, not runtime proof. Duplicate fin
 
 **Mitigation / regression test:** Track live open-file ownership until close, and enforce/alert on filesystem free space independently of logical accounting.
 
-### E-044 — Image response has no aggregate output/file-descriptor bound
+### E-045 — Image producer failures occur after success telemetry is committed
 
-**High · Confirmed** — Per-image size is bounded, but an arbitrary response count can open many handles and build a very large aggregate JSON/stream. This can exhaust FDs, memory, or response time.
+**Medium · Confirmed residual** — A dropped or failed detached producer now makes the response body fail instead of ending as clean truncated JSON. The handler has already marked the response successful before body production, however, so request outcome telemetry does not retain the producer failure.
 
-**Evidence / review locus:** `apps/olp/src/image_response.rs:80-108`
+**Evidence / review locus:** `apps/olp/src/image_response.rs; apps/olp/src/gateway/media.rs`
 
-**Mitigation / regression test:** Bound image count and aggregate bytes before opening handles; stream with a small open-file window.
+**Mitigation / regression test:** Feed terminal producer status into request finalization and distinguish I/O failure, panic/task loss, and client cancellation after response commitment.
 
-### E-045 — Detached image producer failure becomes a truncated response
+### E-047 — Streaming producer loss is classified as client cancellation
 
-**Medium · Confirmed** — A panic or I/O failure after response headers are committed can terminate the producer without a structured terminal error, leaving invalid/truncated JSON.
+**Medium · Confirmed residual** — A dropped terminal channel now produces a body error, so clients no longer see clean EOF. If the producer task panics or disappears before finalization, metadata cleanup still falls back to `client_cancelled` instead of recording an explicit producer-loss outcome.
 
-**Evidence / review locus:** `apps/olp/src/image_response.rs:80-108`
+**Evidence / review locus:** `apps/olp/src/streaming_response.rs; apps/olp/src/gateway/execution.rs`
 
-**Mitigation / regression test:** Wrap producer completion in an explicit terminal frame/trailer protocol and record failure in request outcome telemetry.
+**Mitigation / regression test:** Carry a structured producer terminal outcome into accounting and test panic/task abort separately from a client dropping the body.
 
-### E-047 — Streaming producer cancellation/panic can look like clean EOF
+## 4. Provider and protocol translation
 
-**Medium · Confirmed** — When the detached producer’s terminal channel is cancelled, the body emits no terminal tail and simply ends. Clients may interpret a partial answer as a successful complete stream.
+### E-128 — Recognized OpenAI Responses stream events lose same-surface extras
 
-**Evidence / review locus:** `apps/olp/src/streaming_response.rs:163-181`
+**Medium · Confirmed residual** — Unknown event kinds are preserved and replayed through `/stream/...` source extensions, but recognized events decode only canonical fields. Vendor or forward-compatible extra fields on supported lifecycle, output-item, delta, and terminal events are therefore lost on an OpenAI Responses stream round trip.
 
-**Mitigation / regression test:** Emit/record an explicit abnormal termination where protocol permits, and make accounting distinguish producer loss from normal EOF.
+**Evidence / review locus:** `crates/protocols/src/openai/responses/stream.rs; crates/protocols/src/openai/client.rs`
 
-## 4. Provider transport, failover, codecs, and SSE protocol edges
-
-### E-053 — [Disputed] Side-effecting media operations may fail over after an ambiguous HTTP error
-
-**Disputed · Reproduction required** — Connected timeout failures are reclassified as ambiguous and blocked from failover. An HTTP 5xx after a provider accepted work, however, maps to an uncommitted `UpstreamServer` failure that remains failover-eligible. If the provider created the job before returning 500, the gateway may send it to a second target.
-
-**Evidence / review locus:** `apps/olp/src/gateway/failover.rs:214-263,371-393,437-468; crates/domain/src/ports.rs:167-178`
-
-**Regression test:** Make a media provider accept work and then return 500 or lose the response. Confirm the gateway does not send the operation to a second target before filing this finding.
-
-### E-056 — Unary provider body attempt deadline is reported as idle timeout
-
-**Medium · Confirmed** — In the unary bounded-body reader, expiry of the total attempt deadline maps to a body-idle error, obscuring whether bytes were flowing. The streaming `DeadlineByteStream` path already distinguishes absolute attempt expiry.
-
-**Evidence / review locus:** `crates/providers/src/transport_io.rs:214-229`
-
-**Mitigation / regression test:** Preserve separate absolute-attempt and inter-chunk-idle error variants in the unary reader and throughout transport classification.
-
-### E-057 — Zero-length chunks affect first-byte and idle semantics
-
-**Medium · High confidence** — An empty DATA chunk can count as first response activity and reset idle timing despite delivering no payload. It can bypass empty-body detection or prolong a trickling response.
-
-**Evidence / review locus:** `crates/providers/src/transport_io.rs:99-117,203-258,386-411`
-
-**Mitigation / regression test:** Only non-empty payload bytes should satisfy first-byte/idle progress unless protocol metadata explicitly counts as progress.
-
-### E-058 — Duplicate provider Content-Type headers use first-value semantics
-
-**Medium · Confirmed** — An upstream/proxy can supply conflicting media types. Different layers may choose differently, yielding decoder confusion or inconsistent retry classification.
-
-**Evidence / review locus:** `crates/providers/src/transport_io.rs:45-67`
-
-**Mitigation / regression test:** Reject duplicate singleton response headers and normalize parameters with a media-type parser.
-
-### E-059 — Vertex OAuth refresh can be held indefinitely by a trickling body
-
-**Medium · Confirmed** — Each chunk has a timeout, but no total response deadline exists. A token endpoint sending one small chunk inside every idle window holds the shared refresh mutex indefinitely and queues all token consumers.
-
-**Evidence / review locus:** `crates/providers/src/vertex/oauth.rs:333-351`
-
-**Mitigation / regression test:** Apply a total response deadline and a small body cap independent of chunk progress; do not hold a global mutex across unbounded I/O.
-
-### E-060 — Vertex refresh failure does not use a still-valid cached token
-
-**Medium · Confirmed** — Once refresh_at is reached, a transient OAuth outage fails requests even if expires_at remains in the future. This turns proactive refresh into an avoidable outage.
-
-**Evidence / review locus:** `crates/providers/src/vertex/oauth.rs:191-231`
-
-**Mitigation / regression test:** On refresh failure, use the cached token until a safety margin before actual expiry, while surfacing degraded refresh health.
-
-### E-061 — Vertex token_type comparison is exact
-
-**Low · Confirmed** — A standards-compatible casing/whitespace variation around Bearer may be rejected even though token types are conventionally case-insensitive.
-
-**Evidence / review locus:** `crates/providers/src/vertex/oauth.rs:179-183`
-
-**Mitigation / regression test:** Trim and compare ASCII case-insensitively, while rejecting unsupported schemes.
-
-### E-062 — SSE decoder rejects bare-CR line endings and initial BOM
-
-**Medium · Confirmed** — Legal or commonly tolerated event streams using CR separators or a UTF-8 BOM fail parsing.
-
-**Evidence / review locus:** `crates/protocols/src/sse.rs:128-147,175-196`
-
-**Mitigation / regression test:** Implement the full event-stream line grammar and add WHATWG-style conformance vectors.
-
-### E-064 — Pending SSE data is dispatched at EOF without a blank terminator
-
-**Low · Compatibility-sensitive** — Some implementations require a blank line to dispatch. OLP’s EOF dispatch can accept a partially transmitted terminal event that another client would discard.
-
-**Evidence / review locus:** `crates/protocols/src/sse.rs:150-161`
-
-**Mitigation / regression test:** Document the choice or make strictness configurable; add truncated-stream vectors.
-
-### E-066 — Response extension insertion order can shift array indices
-
-**Medium · High confidence** — Extensions are sorted primarily by depth, with same-depth pointer order inherited from a lexical map. Applying /10 before /2 to an array can change subsequent indices or yield order-dependent output.
-
-**Evidence / review locus:** `crates/protocols/src/extensions.rs:176-240`
-
-**Mitigation / regression test:** Group array edits by parent and apply removals/insertions in a defined numeric order; test 2 versus 10 and sibling operations.
-
-### E-069 — Transcription segment timestamps and duration are not normalized
-
-**Low · High confidence** — Negative duration, decreasing segment timestamps, end-before-start, or segments outside the total duration can pass the codec boundary.
-
-**Evidence / review locus:** `crates/domain/src/canonical/results.rs:62-79; crates/protocols/src/openai/audio.rs:441-478`
-
-**Mitigation / regression test:** Validate finite nonnegative duration and monotonic bounded segments before telemetry/storage or client response.
-
-### E-070 — Moderation scores are not constrained to 0..1
-
-**Low · Confirmed** — A syntactically valid JSON response can carry negative or greater-than-one category scores, and normalization copies them unchanged to the canonical result and client response.
-
-**Evidence / review locus:** `crates/protocols/src/openai/moderation.rs:134-183`
-
-**Mitigation / regression test:** Enforce the provider contract’s score range at normalization and add -0.1/1.1 fixtures.
-
-### E-071 — Embedding count and vector dimensions lack operation-level aggregate caps
-
-**Low · Confirmed** — A provider can return many vectors or unexpectedly huge dimensions within the raw body cap, causing allocation and downstream serialization amplification.
-
-**Evidence / review locus:** `crates/protocols/src/openai/embeddings.rs:154-216,278-301`
-
-**Mitigation / regression test:** Validate response count against input count and cap dimensions plus total scalar elements.
+**Mitigation / regression test:** Preserve unconsumed fields from recognized events as same-surface source extensions and round-trip a supported event containing an unknown nested field.
 
 ## 5. Metadata ingestion, Valkey/PostgreSQL durability, runtime loading, and pricing
 
-### E-072 — Request-metadata Valkey stream is unbounded
-
-**High · Confirmed** — Gateways XADD without MAXLEN/XTRIM. When Valkey is healthy but PostgreSQL or the consumer is unhealthy, accepted events accumulate until Valkey memory pressure affects limits, runtime hints, or the whole service.
-
-**Evidence / review locus:** `crates/storage/src/request_metadata/buffer.rs:187-203; crates/storage/src/valkey.rs:218-233`
-
-**Mitigation / regression test:** Set an explicit retention/memory policy, trim only after a durable loss contract, and alert on bytes/length/oldest age—not just lag.
-
-### E-073 — One valid-but-invalid-for-DB event can poison the entire metadata consumer
-
-**High · Confirmed** — Negative media units/tokens, invalid numeric range, or another DB constraint failure is not classified as InvalidRequestMetadataEvent. The consumer retries/breaks on the same entry forever, so later entries pile up.
-
-**Evidence / review locus:** `apps/olp/src/gateway/telemetry.rs:327-341; crates/storage/src/request_metadata/ingestion.rs:95-149; crates/storage/src/valkey.rs:143-209; crates/storage/migrations/0001_initial.sql:345-370`
-
-**Mitigation / regression test:** Validate every DB invariant before enqueue; classify permanent SQL constraint/range errors into a dead-letter stream and continue, with an alert and raw event retained.
-
-### E-074 — Negative provider duration can create the poison event
-
-**High · Confirmed** — Transcription duration or video seconds can be negative and become media_units < 0. Application validation accepts it while PostgreSQL CHECK rejects it.
-
-**Evidence / review locus:** `apps/olp/src/gateway/telemetry.rs:327-341; crates/domain/src/canonical/results.rs:62-79,107-121; crates/protocols/src/openai/audio.rs:441-478; crates/protocols/src/openai/video.rs:254-292`
-
-**Mitigation / regression test:** Validate finite nonnegative media measures at provider normalization and again at ingestion; add malformed-provider fixtures.
-
-### E-075 — Oversized Decimal values can poison ingestion
-
-**Medium · High confidence** — A syntactically valid arbitrary-precision Decimal can exceed a PostgreSQL NUMERIC precision/scale even when it passes current application checks.
-
-**Evidence / review locus:** `crates/storage/src/request_metadata/ingestion.rs:95-149; request metadata schema numeric columns`
-
-**Mitigation / regression test:** Bound precision, scale, sign, and magnitude before enqueue and before insert; classify numeric overflow as permanent.
-
-### E-076 — Metadata validation omits cross-field timing invariants
-
-**Medium · Confirmed** — first-byte latency can exceed total latency, attempt timestamps can fall outside request timestamps, token components can be inconsistent, and other relational errors can persist or fail late.
-
-**Evidence / review locus:** `crates/storage/src/request_metadata/ingestion.rs:95-149`
-
-**Mitigation / regression test:** Centralize a complete RequestMetadataFact invariant validator and property-test it against the SQL schema.
-
-### E-077 — Consumer health treats unknown lag as zero
-
-**Medium · Confirmed** — When the server cannot report lag, unwrap_or(0) can present a healthy-looking zero rather than unknown/degraded.
-
-**Evidence / review locus:** `crates/storage/src/valkey.rs:264-275`
-
-**Mitigation / regression test:** Expose lag as optional/unknown and make readiness/alerts distinguish unavailable metrics from an empty backlog.
-
-### E-079 — Consumer-group creation depends on matching BUSYGROUP text
-
-**Low · Confirmed** — Error classification is coupled to an English server string. Proxy/version localization or changed wording can turn an expected existing-group condition into startup failure.
-
-**Evidence / review locus:** `crates/storage/src/valkey.rs:95-106`
-
-**Mitigation / regression test:** Use structured Redis error kind/code where available and test supported server/proxy variants.
-
-### E-080 — Fresh-start runtime recovery only searches the newest 32 releases
-
-**High · Confirmed** — SQL LIMIT is applied before envelope/authentication/compatibility filtering. Thirty-two corrupt, undecryptable, or incompatible newest rows hide an older valid last-known-good runtime and keep a replacement node unready.
-
-**Evidence / review locus:** `apps/olp/src/cli/startup.rs:630-699; crates/storage/src/store/runtime.rs:19-63`
-
-**Mitigation / regression test:** Page backward until a valid release is found or a documented retention boundary is reached; quarantine bad rows and alert.
-
 ### E-082 — Pricing revision creation holds a global advisory lock during serial work
 
-**Medium · Confirmed** — A valid request can contain up to 10,000 entries. It performs provider validation and insertion serially inside one transaction/global lock, monopolizing a connection and blocking every pricing writer.
+**Medium · Confirmed residual** — Revisions are now capped at 1,000 entries and provider validation is batched. The implementation still performs one insert per price inside one transaction and a global pricing-writer lock, so a maximum valid request can monopolize a connection and block every pricing writer.
 
 **Evidence / review locus:** `crates/storage/src/operations/pricing.rs:83-85,127-159,287-340`
 
-**Mitigation / regression test:** Reduce the cap, validate providers in one set query, bulk insert, and minimize the locked critical section.
+**Mitigation / regression test:** Bulk insert and minimize the locked critical section; measure maximum-revision lock time against a bounded SLO.
 
-### E-087 — Database pool size accepts zero and extreme values
+### E-087 — Database pool size accepts extreme positive values
 
-**Medium · High confidence** — A zero or huge max-connections value can make startup fail unexpectedly or overwhelm PostgreSQL after a typo/templating error.
+**Medium · Contract-dependent residual** — Zero is now rejected by CLI validation, but a huge positive max-connections value can still overwhelm PostgreSQL after a typo or templating error. A safe upper bound depends on replica count and the deployment's PostgreSQL capacity.
 
 **Evidence / review locus:** `apps/olp/src/cli/config.rs:49-55; crates/storage/src/store.rs:60-68`
 
-**Mitigation / regression test:** Validate a sane nonzero range against deployment replica count and PostgreSQL capacity.
-
-### E-092 — Unknown permanent SQL errors are retried as transient indefinitely
-
-**Medium · High confidence** — The poison-event issue is broader than negative media: enum drift, string length, FK/config deletion, numeric overflow, or schema mismatch can all become permanent head-of-line blockers.
-
-**Evidence / review locus:** `crates/storage/src/valkey.rs:143-209`
-
-**Mitigation / regression test:** Classify SQLSTATEs into retryable versus permanent; dead-letter permanent failures with full audit data.
-
-### E-093 — Route creation has no operation/target cardinality cap and performs serial transaction work
-
-**Medium · Confirmed** — A syntactically valid route can contain a very large operation and target set. Validation, existence checks, and inserts run serially inside one transaction, tying up a connection and locks without malformed input.
-
-**Evidence / review locus:** `crates/storage/src/configuration/route_lifecycle.rs:51-134`
-
-**Mitigation / regression test:** Set explicit per-route caps, validate referenced IDs in bulk, and bulk insert after one set-based validation query. Add maximum-cardinality latency and cancellation tests.
-
-### E-094 — Route replacement combines unbounded serial work with an O(n²) target merge
-
-**Medium · Confirmed** — Replacement repeatedly scans existing targets with iter().find while processing an uncapped target list, then performs serial database changes. A valid operator request can self-DoS the control plane and hold locks for a long period.
-
-**Evidence / review locus:** `crates/storage/src/configuration/resources/routes.rs:114-177`
-
-**Mitigation / regression test:** Index existing targets by ID, cap collection sizes, use set-based diffs/bulk writes, and enforce a transaction-duration budget.
+**Mitigation / regression test:** Define and validate an operator-supported upper bound against deployment replica count and PostgreSQL capacity.
 
 ## 6. Media-job durability and reconciliation
 
 ### E-095 — Successful upstream create can lose its only recoverable ID
 
-**High · Confirmed** — After upstream create succeeds, attaching the upstream ID gets only three very short DB retries. If PostgreSQL remains down, the reservation has no ID; restart can only mark create ambiguous and cannot discover or delete the potentially billable job.
+**High · Confirmed residual** — Upstream-ID attachment now gets ten bounded retries with exponential delay and direct compensation attempts. Exhaustion or a crash while PostgreSQL is unavailable can still leave the reservation without the only provider ID; restart cannot discover or delete the potentially billable job.
 
 **Evidence / review locus:** `apps/olp/src/gateway/videos.rs:64-97,227-330; apps/olp/src/gateway/media_jobs.rs:62-81,182-220`
 
-**Mitigation / regression test:** Use an idempotency key plus provider lookup, or durably record intent/result in a local/independent WAL before returning. Keep retrying ID attachment beyond ~75 ms with a bounded recovery contract.
-
-### E-096 — Local and provider media-job ID validators disagree
-
-**High · Confirmed** — The local store accepts a much broader <=1024-character ID; the OpenAI transport accepts only <=256 ASCII alnum/-/_. A persisted locally valid ID can become permanently unqueryable/undeletable.
-
-**Evidence / review locus:** `apps/olp/src/gateway/media_jobs.rs:108-113; crates/providers/src/openai/transport/operations/video.rs:214-227`
-
-**Mitigation / regression test:** Use one provider-specific validator before persistence and during migration/reconciliation; quarantine invalid legacy IDs with an operator recovery path.
+**Mitigation / regression test:** Use an idempotency key plus provider lookup, or durably record intent/result in a local/independent WAL before returning. Test crash and outage after upstream acceptance and after retry exhaustion.
 
 ### E-097 — Create failure cleanup depends on another one-shot database write
 
-**Medium · Confirmed** — When ID attachment fails, marking cleanup-pending is itself one DB attempt. If that also fails, only logs retain the recovery gap.
+**Medium · Confirmed residual** — Cleanup-intent persistence now shares the bounded retry policy. If PostgreSQL remains unavailable through exhaustion, or the process crashes first, only logs and best-effort provider compensation retain the recovery gap.
 
 **Evidence / review locus:** `apps/olp/src/gateway/videos.rs:227-330`
 
 **Mitigation / regression test:** Persist state transition through a durable retry queue/WAL independent of the failing transaction path.
 
-### E-098 — Fixed reconciliation lease can expire during a slow provider call
-
-**Medium · Confirmed** — Claims have a fixed two-minute lease. A slow list/get/delete or network stall can outlive it, allowing another worker to reclaim and issue duplicate operations.
-
-**Evidence / review locus:** `crates/storage/src/media_jobs/reconciliation.rs:41-107`
-
-**Mitigation / regression test:** Heartbeat/extend claims while active or derive lease from bounded provider deadline plus margin. Test a call over two minutes.
-
-### E-099 — Reconciliation ordering can starve active jobs
-
-**Medium · Confirmed** — Non-active/problem states are ordered ahead of active jobs. A sustained backlog of cleanup/anomalous rows can delay status refresh for valid active jobs indefinitely.
-
-**Evidence / review locus:** `crates/storage/src/media_jobs/reconciliation.rs:74-86`
-
-**Mitigation / regression test:** Use fair queues/quotas by state and track oldest age per class.
-
-### E-101 — A page can trigger up to 100 serially bounded provider reads
-
-**Medium · Confirmed** — With concurrency four, one list request can occupy provider and gateway resources for many waves. Slow providers make management reads expensive and easy to amplify.
-
-**Evidence / review locus:** `apps/olp/src/gateway/videos.rs:342-415; apps/olp/src/gateway/media_jobs.rs:435-497`
-
-**Mitigation / regression test:** Use stored status by default, explicit refresh, smaller caps, and a total refresh budget.
-
-## 7. OIDC, sessions, identity, and management API
+## 7. Identity and OIDC
 
 ### E-104 — OIDC callbacks fetch JWKS fresh with no last-known-good cache
 
-**Medium · Confirmed** — A brief IdP JWKS outage disables every login and reauthentication even when the token uses a key previously fetched and still within a safe cache lifetime.
+**Medium · Contract-dependent** — A brief IdP JWKS outage disables every login and reauthentication even when the token uses a key previously fetched and still within a safe cache lifetime. Bounded stale-if-error improves availability but needs an explicit revocation/rotation freshness contract.
 
 **Evidence / review locus:** `apps/olp/src/oidc/callback.rs:274-297`
 
 **Mitigation / regression test:** Cache validated JWKS with issuer cache headers, bounded stale-if-error, unknown-kid refresh, and rotation tests.
 
-### E-105 — OIDC flow-cookie eviction ignores server-side flow existence
-
-**Low · Confirmed** — When the cookie count is capped, eviction uses cookie identity/order rather than checking which flows are expired/consumed server-side. Multiple legitimate concurrent tabs can evict the callback cookie still needed by another tab.
-
-**Evidence / review locus:** `apps/olp/src/oidc/session.rs:403-427`
-
-**Mitigation / regression test:** Evict expired/unknown server flows first and bind a clear maximum concurrent-login UX.
-
 ### E-107 — Logout reports success even when server-side revocation fails
 
-**Medium · Confirmed** — On database revoke failure, the browser cookie is cleared and 204 returned, but the session may remain valid if its cookie/token is replayed from another client or captured store.
+**Medium · Contract-dependent** — The browser intentionally fails closed by clearing its cookie and receiving 204 even when database revocation fails. The session may nevertheless remain valid if its credential is replayed from another client or a captured store, and the response does not communicate that residual.
 
 **Evidence / review locus:** `apps/olp/src/management_api/auth.rs:444-465`
 
 **Mitigation / regression test:** Return a failure or record durable revocation intent; at minimum communicate partial logout and alarm on the gap.
 
-### E-108 — Cookie deduplication is quadratic within the header budget
-
-**Low · Confirmed** — Repeated vector scans make many tiny cookie pairs O(n²). The 32 KiB bound limits impact but adversarial requests can waste CPU on every auth path.
-
-**Evidence / review locus:** `apps/olp/src/request_cookies.rs:28-49`
-
-**Mitigation / regression test:** Use a hash/indexed map while preserving explicit duplicate-security-cookie rejection.
-
-### E-110 — No-op role/access updates still revoke sessions
-
-**Medium · Confirmed** — Writing the same effective role/access state bumps the security version and invalidates sessions. Retried/idempotent operator automation can cause needless fleet-wide logouts.
-
-**Evidence / review locus:** `crates/storage/src/identity/accounts.rs:111-172`
-
-**Mitigation / regression test:** Compare effective state first and only bump security version on an actual privilege change.
-
-### E-111 — Some expiry checks differ under node clock skew
-
-**Medium · High confidence** — Ordinary session validity uses PostgreSQL time, but API-key expiry, invitation acceptance, and CSRF-recovery edge checks use each node's application clock. Replicas can therefore disagree near those boundaries.
-
-**Evidence / review locus:** `apps/olp/src/management_api/auth.rs:359; crates/storage/src/identity/invitations.rs:222-247; apps/olp/src/request_admission/limits.rs:251-255`
-
-**Mitigation / regression test:** Use database time for persisted validity decisions or strict clock-health gates with a documented skew allowance.
-
-## 8. Console state, observability, deployment, and operational edges
-
-### E-118 — Cross-tab cookie/principal changes are not pushed into the console
-
-**Medium · Confirmed** — Session/CSRF state is memory-only and revalidated mainly on focus/visibility or a freshness window. Another tab’s logout/login can leave stale principal data and CSRF state until a later trigger.
-
-**Evidence / review locus:** `console/src/lib/auth/lifecycle.ts:189-328; console/src/routes/(console)/+layout.svelte:55-62`
-
-**Mitigation / regression test:** Use BroadcastChannel/storage events plus server validation; clear principal-scoped caches immediately on any session-generation change.
-
-### E-119 — A 403 does not trigger session/CSRF revalidation
-
-**Medium · Confirmed** — Only 401 transitions auth state. A stale CSRF token or privilege downgrade often returns 403, causing repeated failed mutations while the UI still believes the old state.
-
-**Evidence / review locus:** `console/src/lib/auth/lifecycle.ts:321-328`
-
-**Mitigation / regression test:** Classify CSRF/session-generation 403 responses and force validation/token refresh without treating every authorization denial as logout.
-
-### E-120 — Mutation freshness window can use stale CSRF/session state
-
-**Medium · Confirmed** — When local validation is less than about 60 seconds old and a CSRF token exists, a mutation can skip revalidation even after another tab changes the session.
-
-**Evidence / review locus:** `console/src/lib/auth/lifecycle.ts:279-300`
-
-**Mitigation / regression test:** Bind CSRF to a session generation and propagate changes cross-tab; shorten or remove optimistic freshness for privilege-sensitive mutations.
-
-### E-121 — Principal-scoped query caches can briefly display the previous principal’s data
-
-**Low · High confidence** — If a cookie switches accounts while the SPA remains mounted, cached management responses can render until principal change is detected and caches are cleared.
-
-**Evidence / review locus:** `console/src/lib/auth/lifecycle.ts:189-328; console/src/routes/(console)/+layout.svelte:55-62`
-
-**Mitigation / regression test:** Namespace caches by immutable principal/session generation and blank protected views during revalidation.
-
-### E-125 — Helm monitoring rules page on intentionally disabled components
-
-**Medium · Confirmed** — Rules always expect both gateway and control metrics. A valid single-component deployment continuously alerts that the disabled component is absent.
-
-**Evidence / review locus:** `deploy/helm/templates/monitoring.yaml:1-55`
-
-**Mitigation / regression test:** Condition each rule on the component’s enabled value and add helm-template tests for all enablement combinations.
-
-### E-127 — Unknown-path and SPA traffic distort management admission metrics
-
-**Low · Confirmed** — Because non-inference traffic shares management classification, asset misses and internet scans count against the management admitted/rejected counters and obscure control-plane admission pressure.
-
-**Evidence / review locus:** `apps/olp/src/request_admission/public.rs:63-152,183-248; apps/olp/src/observability.rs:511`
-
-**Mitigation / regression test:** Tag route class before admission and keep separate unknown/static/management metrics.
-
 ## Regression-test matrix
 
-- **Connection retirement:** Start an HTTP/2 stream at connection age 4m59s and keep it valid beyond 6 minutes; verify policy does not truncate it unexpectedly.
-- **Late metadata emission:** Block stream limit cleanup after response EOF, initiate shutdown, then release it; prove the final request-metadata event is persisted or included in epoch loss accounting.
-- **Poison metadata event:** Inject negative media units, NUMERIC overflow, and FK failure; prove each is dead-lettered and the next entry persists.
-- **Valkey backlog:** Disable PostgreSQL while keeping Valkey healthy; verify bounded stream memory, oldest-age alerts, and explicit loss/degradation policy.
-- **Usage surcharge:** Return actual usage above both HTTP and parsed estimates; assert the shortfall is charged atomically.
-- **Media create crash matrix:** Crash after reserve, upstream create, ID receipt, each attach retry, cleanup-intent write, and response commit; assert recoverability.
-- **Media ID grammar:** Fuzz provider IDs at 255/256/257/1024 bytes, Unicode, controls, slash, and whitespace; local and transport validators must agree.
-- **Reconciliation lease:** Hold provider I/O over two minutes; prove only one worker owns the job through lease renewal.
-- **Runtime LKG pagination:** Insert 33 invalid newest releases followed by one valid release; a fresh node must recover the valid one.
-- **Pricing cardinality:** Submit maximum entries and measure lock/transaction duration; enforce a bounded SLO and no global writer starvation.
-- **Route replacement cardinality:** Use large operation/target sets, including target index 2 and 10; assert bounded runtime and deterministic ordering.
-- **Vertex trickle:** Send one OAuth byte every nine seconds; total refresh deadline must fire and a still-valid cached token must remain usable.
-- **JWKS outage/rotation:** Cache key A, take JWKS offline, validate A within stale window; then introduce unknown key B and require bounded refresh.
-- **Duplicate singleton headers:** Exercise split and comma-joined duplicates for credentials, Origin, CSRF, If-Match, Content-Type, and Content-Encoding.
-- **Multipart names:** Fuzz image[, image[evil, image[0]suffix, duplicate indices, name plus name[], and index 2/10 ordering.
-- **Spool SIGKILL:** Kill the process with open and closed spool files, restart, and prove safe stale-tree scavenging and accurate disk accounting.
-- **Image aggregate:** Return thousands of tiny images; enforce count, aggregate byte, and open-FD caps before response commitment.
-- **Detached producer panic:** Panic every streaming/image producer after headers and after partial output; telemetry must record abnormal termination.
-- **SSE conformance:** Cover BOM, CR, CRLF, LF, EOF without blank line, and empty chunks.
-- **Cross-tab console:** Log out and log in as a different principal in another tab; no protected cache from the old principal may remain visible.
-- **Helm component matrix:** Render gateway-only, control-only, both, and neither-invalid configurations; alerts must reference only enabled components.
+- **HTTP/2 establishment:** Hold later streams in incomplete header/body establishment on one reused connection; enforce a per-stream deadline.
+- **Limit cleanup:** Stall Valkey beyond 250 ms during release/reconciliation; prove bounded retry or explicit uncertainty without double-applying the signed delta.
+- **Multipart lease:** Give one allowed route a multi-day timeout and submit another multipart request; its provisional lease must remain independently bounded.
+- **API-key clock skew:** Exercise expiry across replicas with the supported maximum skew and prove a single documented acceptance boundary.
+- **Spool SIGKILL:** Kill the process with open and closed spool files, restart, and prove safe stale-tree scavenging plus physical-disk accounting.
+- **Producer termination:** Abort and panic image and SSE producers after headers and partial output; bodies must fail and telemetry must distinguish producer loss from client cancellation.
+- **Responses extras:** Round-trip a recognized OpenAI Responses stream event containing an unknown nested field without losing it.
+- **Pricing lock:** Submit 1,000 prices and enforce a bounded global-lock/transaction SLO without writer starvation.
+- **Pool sizing:** Reject or clearly diagnose a configured connection total beyond the deployment's supported PostgreSQL budget.
+- **Media create crash:** Crash after upstream acceptance, after each attachment/cleanup retry, and at retry exhaustion; the provider ID and cleanup intent must remain recoverable.
+- **JWKS outage/rotation:** Cache key A, take JWKS offline, validate A within the chosen stale window, then introduce unknown key B and require bounded refresh.
+- **Logout revocation:** Fail database revocation while retaining a copied session credential; the API must meet the documented partial-logout contract.
 
 ## Important non-findings / narrowed assumptions
 
-- The OIDC state, nonce, configuration-generation, and same-session security-operation bindings are comparatively strong; I did not find a direct state/nonce bypass in the reviewed path.
-- The metadata consumer’s stable group/consumer name is not itself a lost-pending bug: startup drains pending entries before new entries. The real risks are unbounded backlog and permanent poison entries.
-- Token accounting does include a second reservation after typed operation parsing. The finding is specifically actual provider usage above the **combined** reservation, not a missing parsed-operation reservation.
-- Production media spooling uses the private constructor; test-only/nonprivate construction should not be reported as the production default.
-- Readiness intentionally remains HTTP 200 for degraded subsystems when the gateway can still serve safe traffic; the health payload and Helm rules expose limiter and metadata degradation separately.
+- The OIDC state, nonce, configuration-generation, and same-session security-operation bindings remain comparatively strong; no direct state/nonce bypass was found in the reviewed path.
+- Production media spooling uses the private constructor; test-only/nonprivate construction is not the production default.
+- Readiness intentionally remains HTTP 200 for degraded subsystems when the gateway can still serve safe traffic; the health payload and enabled-component Helm rules expose limiter and metadata degradation separately.
 
 ## Suggested repair order
 
-1. Make metadata ingestion non-blocking on permanent bad events and bound the Valkey backlog.
-2. Close the media-create identity durability gap and unify provider job-ID validation.
-3. Fix connection retirement, join detached stream finalizers before metadata-epoch closure, and supervise essential workers.
-4. Make accounting reconcile signed deltas.
-5. Block side-effecting media failover on HTTP 5xx if E-053 is reproduced.
-6. Page runtime LKG without a fixed pre-filter limit.
-7. Bound high-cardinality control-plane and response paths (pricing, routes, image count/bytes/FDs).
-8. Add JWKS/token stale-if-error behavior, then harden duplicate headers, multipart grammar, console cross-tab state, and deployment alerts.
+1. Close the media-create identity and cleanup-intent durability gaps, then define forced credential containment for affected live jobs (`E-095`, `E-097`, `A-002`).
+2. Give limit release/reconciliation a durable bounded retry path now that reconciliation is idempotent (`E-018`).
+3. Address database growth and control-plane query/write amplification (`A-011`, `A-012`, `E-082`, `E-087`).
+4. Define key, IdP, expiry-clock, and logout-revocation contracts before implementing overlap or stale-if-error behavior (`A-009`, `A-014`, `E-026`, `E-104`, `E-107`).
+5. Add crash-safe spool ownership/scavenging and physical-disk accounting (`E-040`, `E-042`).
+6. Preserve recognized Responses stream extras (`E-128`).
+7. Resolve product/deployment policy choices: pricing time and cached rates, long route timeouts, login audit capacity, Unicode names, replica defaults, and topology spread (`A-004`, `A-015`, `A-016`, `A-018`, `A-019`, `A-028`, `E-020`).
+8. Finish the lower-amplification HTTP residuals (`E-002`, `E-019`, `E-033`, `E-045`, `E-047`, `A-030`).

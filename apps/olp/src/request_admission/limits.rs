@@ -10,7 +10,7 @@ use axum::{
     body::{Body, HttpBody},
     http::HeaderMap,
 };
-use olp_domain::{ApiKey, ApiKeyLookupId, ApiKeyStatus, Surface};
+use olp_domain::{ApiKey, ApiKeyLookupId, ApiKeyStatus, RouteSlug, Surface};
 use olp_protocols::openai::EmbeddingWireInput;
 use olp_storage::{DistributedLimiter, LimitError, LimitLease, LimitRequest};
 use serde::Deserialize;
@@ -219,8 +219,7 @@ pub(super) fn authenticate_inference_headers(
     surface: Surface,
 ) -> Result<InferencePrincipal, crate::Problem> {
     let token = match surface {
-        Surface::OpenAi => headers
-            .get(axum::http::header::AUTHORIZATION)
+        Surface::OpenAi => inference_header_value(headers, "authorization")
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.split_once(' '))
             .filter(|(scheme, token)| {
@@ -268,6 +267,7 @@ pub(super) async fn reserve_http_inference_limits(
     state: &GatewayState,
     principal: &InferencePrincipal,
     requested_tokens: i64,
+    route: Option<&RouteSlug>,
 ) -> Result<Option<InferenceReservation>, gateway::InferenceError> {
     if !principal.key().limits.has_hard_limits() {
         return Ok(None);
@@ -283,16 +283,28 @@ pub(super) async fn reserve_http_inference_limits(
         .map(|value| i64::try_from(value.get()))
         .transpose()
         .map_err(|_| gateway::InferenceError::unavailable("limit_configuration_invalid"))?;
-    let route_timeout = principal
-        .runtime
-        .routes
-        .iter()
-        .filter(|(slug, _)| {
+    let route_timeout = route
+        .filter(|route| {
             principal.key().allowed_routes.is_empty()
-                || principal.key().allowed_routes.contains(*slug)
+                || principal.key().allowed_routes.contains(*route)
         })
-        .map(|(_, route)| route.overall_timeout.as_duration())
-        .max()
+        .and_then(|route| principal.runtime.routes.get(route))
+        .map(|route| route.overall_timeout.as_duration())
+        .or_else(|| {
+            route.is_none().then(|| {
+                principal
+                    .runtime
+                    .routes
+                    .iter()
+                    .filter(|(slug, _)| {
+                        principal.key().allowed_routes.is_empty()
+                            || principal.key().allowed_routes.contains(*slug)
+                    })
+                    .map(|(_, route)| route.overall_timeout.as_duration())
+                    .max()
+                    .unwrap_or(Duration::from_secs(30))
+            })
+        })
         .unwrap_or(Duration::from_secs(30));
     let result = tokio::time::timeout(
         Duration::from_secs(1),
@@ -412,8 +424,16 @@ pub(super) const fn estimate_http_non_json_request_tokens(category: gateway::Tok
 }
 
 fn inference_header_token<'a>(headers: &'a HeaderMap, name: &'static str) -> Option<&'a str> {
-    headers
-        .get(name)
+    inference_header_value(headers, name)
         .and_then(|value| value.to_str().ok())
         .filter(|token| !token.is_empty() && !token.contains(char::is_whitespace))
+}
+
+fn inference_header_value<'a>(
+    headers: &'a HeaderMap,
+    name: &'static str,
+) -> Option<&'a axum::http::HeaderValue> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?;
+    values.next().is_none().then_some(value)
 }

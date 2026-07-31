@@ -77,8 +77,6 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-sweep_leftover_databases
-
 skip_args=()
 if [[ -z ${OLP_VALKEY_URL:-} ]]; then
   # `--skip` lives in nextest's emulated libtest section (after `--`) and

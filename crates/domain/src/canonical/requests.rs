@@ -54,17 +54,17 @@ impl Operation {
     }
 
     #[must_use]
-    pub fn extensions(&self) -> Option<&SourceExtensions> {
+    pub fn extensions(&self) -> &SourceExtensions {
         match self {
-            Self::Generation(request) => Some(&request.extensions),
-            Self::Embeddings(request) => Some(&request.extensions),
-            Self::TokenCount(request) => Some(&request.extensions),
-            Self::Images(operation) => Some(operation.extensions()),
-            Self::Speech(request) => Some(&request.extensions),
-            Self::Transcription(request) => Some(&request.extensions),
-            Self::Video(operation) => Some(operation.extensions()),
-            Self::Moderation(request) => Some(&request.extensions),
-            Self::Models(operation) => Some(operation.extensions()),
+            Self::Generation(request) => &request.extensions,
+            Self::Embeddings(request) => &request.extensions,
+            Self::TokenCount(request) => &request.extensions,
+            Self::Images(operation) => operation.extensions(),
+            Self::Speech(request) => &request.extensions,
+            Self::Transcription(request) => &request.extensions,
+            Self::Video(operation) => operation.extensions(),
+            Self::Moderation(request) => &request.extensions,
+            Self::Models(operation) => operation.extensions(),
         }
     }
 }

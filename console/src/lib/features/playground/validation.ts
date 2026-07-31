@@ -23,7 +23,9 @@ export function parseTools(value: string) {
         Reflect.get(tool, 'name').trim() !== '' &&
         (Reflect.get(tool, 'description') === undefined ||
           typeof Reflect.get(tool, 'description') === 'string') &&
-        Object.hasOwn(tool, 'input_schema')
+        typeof Reflect.get(tool, 'input_schema') === 'object' &&
+        Reflect.get(tool, 'input_schema') !== null &&
+        !Array.isArray(Reflect.get(tool, 'input_schema'))
     )
   ) {
     throw new Error('Tools must be an array of name, description, and input_schema objects.');

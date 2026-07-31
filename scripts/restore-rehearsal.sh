@@ -3,26 +3,29 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: OLP_RESTORE_DATABASE_URL=postgres://... restore-rehearsal.sh BACKUP [--replace]
+usage: OLP_DATABASE_URL=postgres://... OLP_RESTORE_DATABASE_URL=postgres://... \
+  restore-rehearsal.sh BACKUP [--replace]
 
-The destination must be an isolated rehearsal database. --replace is required
-when it contains application objects and irreversibly cleans that destination.
+OLP_DATABASE_URL identifies the protected production database. The destination
+must be an isolated rehearsal database. --replace is required when it contains
+application objects and irreversibly cleans that destination.
 USAGE
 }
 
-if [[ $# -lt 1 || ${1:-} == "--help" || ${1:-} == "-h" ]]; then
+if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
   usage
-  [[ $# -ge 1 ]] && exit 0 || exit 2
+  exit 0
+fi
+if (( $# < 1 || $# > 2 )); then
+  usage
+  exit 2
 fi
 
 : "${OLP_RESTORE_DATABASE_URL:?OLP_RESTORE_DATABASE_URL must identify an isolated destination}"
+: "${OLP_DATABASE_URL:?OLP_DATABASE_URL must identify the protected production database}"
 backup=$1
 replace=${2:-}
 [[ -f $backup ]] || { echo "backup does not exist: $backup" >&2; exit 1; }
-[[ -z ${OLP_DATABASE_URL:-} || $OLP_RESTORE_DATABASE_URL != "$OLP_DATABASE_URL" ]] || {
-  echo "refusing to restore over OLP_DATABASE_URL" >&2
-  exit 1
-}
 [[ -z $replace || $replace == "--replace" ]] || { usage; exit 2; }
 
 pg_restore_command=${OLP_PG_RESTORE:-pg_restore}
@@ -40,6 +43,30 @@ for command in "$pg_restore_command" "$psql_command"; do
   }
 done
 
+identity_sql="SELECT system_identifier::text || ':' || oid::text FROM pg_catalog.pg_control_system(), pg_catalog.pg_database WHERE datname = pg_catalog.current_database()"
+
+database_identity() {
+  local label=$1 url=$2 identity
+  if ! identity=$("$psql_command" "$url" -X --no-psqlrc --tuples-only --no-align \
+    --set=ON_ERROR_STOP=1 --command="$identity_sql"); then
+    echo "failed to establish $label database identity with pg_control_system()" >&2
+    return 1
+  fi
+  [[ $identity =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]] || {
+    echo "$label database returned an invalid PostgreSQL identity" >&2
+    return 1
+  }
+  printf '%s\n' "$identity"
+}
+
+protected_identity=$(database_identity protected "$OLP_DATABASE_URL")
+restore_identity=$(database_identity restore "$OLP_RESTORE_DATABASE_URL")
+[[ $restore_identity != "$protected_identity" ]] || {
+  echo "refusing to restore: OLP_DATABASE_URL and OLP_RESTORE_DATABASE_URL identify the same PostgreSQL database" >&2
+  exit 1
+}
+restore_identity_guard="DO \$olp_restore_guard\$ BEGIN IF ($identity_sql) IS DISTINCT FROM '$restore_identity' THEN RAISE EXCEPTION 'restore database identity changed after safety check'; END IF; END \$olp_restore_guard\$;"
+
 restore_expectations=$("$manifest_tool" validate "$backup")
 IFS=$'\t' read -r expected_migrations expected_generation <<< "$restore_expectations"
 "$pg_restore_command" --list "$backup" >/dev/null
@@ -47,7 +74,7 @@ IFS=$'\t' read -r expected_migrations expected_generation <<< "$restore_expectat
 user_objects=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
   --command="SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'" \
   | tr -d '[:space:]')
-restore_args=(--dbname="$OLP_RESTORE_DATABASE_URL" --no-owner --no-privileges --exit-on-error)
+restore_args=(--no-owner --no-privileges --file=-)
 if [[ $user_objects != 0 ]]; then
   [[ $replace == "--replace" ]] || {
     echo "destination is not empty; pass --replace only for an isolated rehearsal database" >&2
@@ -61,12 +88,16 @@ if [[ $user_objects != 0 ]]; then
     exit 1
   }
   "$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc -v ON_ERROR_STOP=1 \
+    --command="$restore_identity_guard" \
     --command='DROP SCHEMA public CASCADE' \
     --command='CREATE SCHEMA public AUTHORIZATION CURRENT_USER'
 fi
 
 started_at=$(date +%s)
-"$pg_restore_command" "${restore_args[@]}" "$backup"
+{
+  printf '%s\n' "$restore_identity_guard"
+  "$pg_restore_command" "${restore_args[@]}" "$backup"
+} | "$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc --set=ON_ERROR_STOP=1
 
 migration_count=$("$psql_command" "$OLP_RESTORE_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
   --command='SELECT count(*) FROM _sqlx_migrations WHERE success' | tr -d '[:space:]')

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use redis::{Client, RedisError, aio::ConnectionManager};
+use redis::{Client, RedisError, Script, aio::ConnectionManager};
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
@@ -9,6 +9,8 @@ use uuid::Uuid;
 use super::ingestion::RequestMetadataEvent;
 
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const APPEND_SCRIPT: &str = include_str!("../../scripts/append_request_metadata.lua");
+const MAX_STREAM_LENGTH: u64 = (1_u64 << 53) - 1;
 
 #[derive(Clone)]
 pub struct RequestMetadataEmitter {
@@ -89,8 +91,15 @@ impl RequestMetadataReceiver {
         mut self,
         valkey_url: &str,
         stream: &str,
+        stream_max_length: u64,
         mut shutdown: watch::Receiver<bool>,
     ) -> Result<(), crate::ValkeyAdapterError> {
+        if !(1..=MAX_STREAM_LENGTH).contains(&stream_max_length) {
+            self.record_abandoned(0).await;
+            return Err(crate::ValkeyAdapterError::InvalidState(
+                "request metadata stream maximum length is outside the Valkey Lua integer range",
+            ));
+        }
         let client = match Client::open(valkey_url) {
             Ok(client) => client,
             Err(error) => {
@@ -119,7 +128,7 @@ impl RequestMetadataReceiver {
                     .retrying
                     .store(false, std::sync::atomic::Ordering::Relaxed);
                 return self
-                    .run(connection, stream, shutdown)
+                    .run(connection, stream, stream_max_length, shutdown)
                     .await
                     .map_err(Into::into);
             }
@@ -144,6 +153,7 @@ impl RequestMetadataReceiver {
         mut self,
         mut connection: ConnectionManager,
         stream: &str,
+        stream_max_length: u64,
         mut shutdown: watch::Receiver<bool>,
     ) -> Result<(), RedisError> {
         let mut shutdown_open = true;
@@ -184,10 +194,11 @@ impl RequestMetadataReceiver {
             };
             let mut backoff = Duration::from_millis(25);
             loop {
-                let mut command = redis::cmd("XADD");
-                command.arg(stream).arg("*").arg("event").arg(&payload);
-                let write = command.query_async(&mut connection);
-                let result: Result<String, RedisError> =
+                let script = Script::new(APPEND_SCRIPT);
+                let mut invocation = script.prepare_invoke();
+                invocation.key(stream).arg(stream_max_length).arg(&payload);
+                let write = invocation.invoke_async(&mut connection);
+                let result: Result<bool, RedisError> =
                     match tokio::time::timeout(STREAM_WRITE_TIMEOUT, write).await {
                         Ok(result) => result,
                         Err(_) => Err(RedisError::from((
@@ -196,10 +207,14 @@ impl RequestMetadataReceiver {
                         ))),
                     };
                 match result {
-                    Ok(_) => {
+                    Ok(true) => {
                         self.health
                             .persisted
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        break;
+                    }
+                    Ok(false) => {
+                        self.health.record_abandoned(1);
                         break;
                     }
                     Err(_) => {
@@ -342,7 +357,7 @@ pub struct RequestMetadataBufferSnapshot {
     pub persisted: u64,
     /// Events rejected before entering the bounded queue.
     pub dropped: u64,
-    /// Events accepted into the queue but lost when the worker stopped.
+    /// Events accepted into the queue but not written to the stream.
     pub abandoned: u64,
     pub retrying: bool,
     /// The local stream writer has stopped and cannot accept more events.

@@ -5,12 +5,8 @@
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SseEvent {
-    /// Event type buffer; empty means the default `message` type.
-    pub event: String,
     /// Data lines joined with a single newline, per specification.
     pub data: String,
-    pub id: Option<String>,
-    pub retry: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -27,24 +23,16 @@ pub fn decode(bytes: &[u8]) -> Result<SseStream, String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
 
     let mut stream = SseStream::default();
-    let mut event_type = String::new();
     let mut data_lines: Vec<&str> = Vec::new();
-    let mut id = None;
-    let mut retry = None;
     let mut raw_since_dispatch: Vec<String> = Vec::new();
 
     for line in split_spec_lines(text) {
         if line.is_empty() {
             // Dispatch: with an empty data buffer the event is discarded and
             // both buffers reset, per specification.
-            if data_lines.is_empty() {
-                event_type.clear();
-            } else {
+            if !data_lines.is_empty() {
                 stream.events.push(SseEvent {
-                    event: std::mem::take(&mut event_type),
                     data: data_lines.join("\n"),
-                    id: id.clone(),
-                    retry: retry.take(),
                 });
                 data_lines.clear();
             }
@@ -59,14 +47,8 @@ pub fn decode(bytes: &[u8]) -> Result<SseStream, String> {
             Some((field, value)) => (field, value.strip_prefix(' ').unwrap_or(value)),
             None => (line, ""),
         };
-        match field {
-            "event" => event_type = value.to_owned(),
-            "data" => data_lines.push(value),
-            "id" if !value.contains('\0') => id = Some(value.to_owned()),
-            "retry" if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
-                retry = Some(value.to_owned());
-            }
-            _ => {}
+        if field == "data" {
+            data_lines.push(value);
         }
     }
     stream.undispatched_tail = raw_since_dispatch;

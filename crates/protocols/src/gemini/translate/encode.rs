@@ -23,6 +23,9 @@ pub fn encode_generate_content_request(
     if request.parameters.parallel_tool_calls.is_some() {
         return Err(EncodeError::ParallelToolCallsUnsupported);
     }
+    if request.parameters.max_output_tokens == Some(0) {
+        return Err(EncodeError::ZeroMaxOutputTokens);
+    }
     let mut system_parts = Vec::new();
     let mut contents = Vec::new();
     let mut conversation_started = false;

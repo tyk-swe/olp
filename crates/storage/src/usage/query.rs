@@ -140,7 +140,7 @@ fn push_usage_dimension_filters(query: &mut QueryBuilder<Postgres>, filters: &Us
 
 pub(crate) fn floor_usage_hour(value: DateTime<Utc>) -> DateTime<Utc> {
     let seconds = value.timestamp().div_euclid(60 * 60) * 60 * 60;
-    DateTime::from_timestamp(seconds, 0).expect("a truncated valid timestamp remains valid")
+    DateTime::from_timestamp(seconds, 0).unwrap_or(DateTime::<Utc>::MIN_UTC)
 }
 
 pub(crate) fn ceil_usage_hour(value: DateTime<Utc>) -> DateTime<Utc> {
@@ -148,7 +148,9 @@ pub(crate) fn ceil_usage_hour(value: DateTime<Utc>) -> DateTime<Utc> {
     if floor == value {
         floor
     } else {
-        floor + chrono::Duration::hours(1)
+        floor
+            .checked_add_signed(chrono::Duration::hours(1))
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
     }
 }
 

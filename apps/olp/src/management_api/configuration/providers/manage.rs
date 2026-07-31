@@ -364,7 +364,7 @@ fn validate_provider_update(
         credential_present: Some(provider.draft_credential_id.is_some()),
     }) {
         errors
-            .entry(violation.field.as_str().to_owned())
+            .entry(violation.field.to_owned())
             .or_default()
             .push(violation.detail.to_owned());
     }

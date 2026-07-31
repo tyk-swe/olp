@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, future::Future, time::Duration};
 
 use axum::http::StatusCode;
 use chrono::Utc;
@@ -7,11 +7,13 @@ use olp_domain::{
     ApiKey, CanonicalResult, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, OperationKind,
     RequestId, RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
 };
+use olp_protocols::openai::is_valid_video_job_id;
 use olp_storage::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
     MediaReconciliationPass,
 };
 use serde_json::Value;
+use tokio::sync::Semaphore;
 use tracing::{error, warn};
 
 use crate::{
@@ -20,10 +22,13 @@ use crate::{
 
 use super::{
     error::InferenceError,
-    execution::{RequiredTarget, authorize_principal, execute_routed_result},
+    execution::{RequiredTarget, authorize_principal},
     failover::{ExecutionOutput, FailoverContext, execute_with_failover},
     telemetry::{UsageCapture, elapsed_ms, emit_request_metadata_event, usage_from_result},
 };
+
+const MEDIA_JOB_PERSISTENCE_ATTEMPTS: u32 = 10;
+const MEDIA_RECONCILIATION_HEARTBEAT: Duration = Duration::from_secs(60);
 
 pub(super) fn select_video_create_target(
     state: &GatewayState,
@@ -66,19 +71,43 @@ pub(super) async fn attach_media_job_with_retry(
     update: MediaJobUpdate,
 ) -> Result<MediaJobRecord, MediaJobError> {
     let store = state.store();
-    for attempt in 0..3 {
-        match store
-            .attach_media_job_upstream(id, upstream_job_id, update.clone())
-            .await
-        {
-            Ok(record) => return Ok(record),
-            Err(MediaJobError::Database(_)) if attempt < 2 => {
-                tokio::time::sleep(Duration::from_millis(25 * (attempt + 1))).await;
+    retry_media_job_persistence(|| {
+        store.attach_media_job_upstream(id, upstream_job_id, update.clone())
+    })
+    .await
+}
+
+pub(super) async fn mark_media_job_create_cleanup_pending_with_retry(
+    state: &GatewayState,
+    id: uuid::Uuid,
+    upstream_job_id: &str,
+    reconciliation_error: &str,
+) -> Result<MediaJobRecord, MediaJobError> {
+    let store = state.store();
+    retry_media_job_persistence(|| {
+        store.mark_media_job_create_cleanup_pending(id, upstream_job_id, reconciliation_error)
+    })
+    .await
+}
+
+async fn retry_media_job_persistence<T, F, Fut>(mut operation: F) -> Result<T, MediaJobError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, MediaJobError>>,
+{
+    for attempt in 0..MEDIA_JOB_PERSISTENCE_ATTEMPTS {
+        match operation().await {
+            Err(MediaJobError::Database(_)) if attempt + 1 < MEDIA_JOB_PERSISTENCE_ATTEMPTS => {
+                tokio::time::sleep(media_job_persistence_retry_delay(attempt)).await;
             }
-            Err(error) => return Err(error),
+            result => return result,
         }
     }
-    unreachable!("bounded attach retry returns on every final attempt")
+    unreachable!("bounded persistence retry returns on every final attempt")
+}
+
+pub(super) fn media_job_persistence_retry_delay(attempt: u32) -> Duration {
+    Duration::from_millis((25_u64 * (1_u64 << attempt.min(7))).min(2_000))
 }
 
 pub(super) async fn media_job_deletion_finalized(
@@ -105,13 +134,6 @@ pub(super) fn mark_missing_delete_as_success(
     Ok(())
 }
 
-pub(super) fn valid_upstream_media_job_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 1_024
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
-}
-
 /// Claims and reconciles a bounded metadata-only batch without authenticating
 /// the API key that originally created each job. This is intentionally public
 /// for the single-binary process supervisor; it is not an HTTP endpoint.
@@ -124,9 +146,13 @@ pub async fn reconcile_media_jobs_once(
         .claim_media_reconciliation_jobs(Utc::now(), limit)
         .await?;
     let claimed = u16::try_from(records.len()).unwrap_or(u16::MAX);
+    let permits = Semaphore::new(4);
+    let claimed_capacity = records.len().max(1);
     let outcomes = stream::iter(records)
-        .map(|record| reconcile_claimed_media_job(state, record))
-        .buffer_unordered(4)
+        .map(|record| reconcile_claimed_media_job(state, record, &permits))
+        // Poll every claimed job immediately so queued jobs renew their lease;
+        // the semaphore still limits provider work to four concurrent calls.
+        .buffer_unordered(claimed_capacity)
         .collect::<Vec<_>>()
         .await;
     let completed =
@@ -138,13 +164,37 @@ pub async fn reconcile_media_jobs_once(
     })
 }
 
-async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobRecord) -> bool {
+async fn reconcile_claimed_media_job(
+    state: &GatewayState,
+    mut record: MediaJobRecord,
+    permits: &Semaphore,
+) -> bool {
     let Some(claim_id) = record.reconciliation_claim_id else {
         state.record_media_reconciliation_gap();
         return false;
     };
     let store = state.store();
-    let outcome = reconcile_media_job_operation(state, &mut record).await;
+    let job_id = record.id;
+    let outcome = {
+        let heartbeat = media_reconciliation_claim_renewal_failure(store, job_id, claim_id);
+        let operation = async {
+            let _permit = permits
+                .acquire()
+                .await
+                .expect("local media reconciliation semaphore remains open");
+            reconcile_media_job_operation(state, &mut record).await
+        };
+        tokio::pin!(heartbeat);
+        tokio::pin!(operation);
+        tokio::select! {
+            outcome = &mut operation => outcome,
+            error = &mut heartbeat => {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %job_id, %error, "failed to renew autonomous media reconciliation claim");
+                Err("persistence_unavailable")
+            }
+        }
+    };
     let now = Utc::now();
     let (next_attempt_at, error_class) = match outcome {
         Ok(()) => {
@@ -176,6 +226,27 @@ async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobR
         false
     } else {
         true
+    }
+}
+
+async fn media_reconciliation_claim_renewal_failure(
+    store: &olp_storage::PgStore,
+    id: uuid::Uuid,
+    claim_id: uuid::Uuid,
+) -> MediaJobError {
+    let mut interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + MEDIA_RECONCILIATION_HEARTBEAT,
+        MEDIA_RECONCILIATION_HEARTBEAT,
+    );
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        if let Err(error) = store
+            .renew_media_reconciliation_claim(id, claim_id, Utc::now())
+            .await
+        {
+            return error;
+        }
     }
 }
 
@@ -240,7 +311,7 @@ async fn reconcile_media_job_operation(
     let upstream_id = record
         .upstream_job_id
         .clone()
-        .filter(|value| valid_upstream_media_job_id(value))
+        .filter(|value| is_valid_video_job_id(value))
         .ok_or("media_job_upstream_id_unavailable")?;
     if record.lifecycle == MediaJobLifecycle::Active {
         let mut operation = olp_protocols::openai::decode_video_get(upstream_id);
@@ -430,71 +501,6 @@ async fn execute_media_reconciliation_result(
         operation_kind,
     );
     Ok(result)
-}
-
-pub(super) async fn refresh_video_list_record(
-    state: &GatewayState,
-    principal: &InferencePrincipal,
-    record: MediaJobRecord,
-) -> MediaJobRecord {
-    if !matches!(record.state, MediaJobState::Queued | MediaJobState::Running) {
-        return record;
-    }
-    let Some(upstream_id) = record.upstream_job_id.clone() else {
-        return record;
-    };
-    let mut operation = olp_protocols::openai::decode_video_get(upstream_id);
-    if set_video_route(&mut operation, &record.route_slug).is_err() {
-        return record;
-    }
-    let Ok(mut executed) = execute_routed_result(
-        state,
-        principal,
-        operation,
-        TransportMode::Unary,
-        Some(RequiredTarget {
-            provider_id: record.provider_id,
-            upstream_model: record.upstream_model.clone(),
-        }),
-    )
-    .await
-    else {
-        return record;
-    };
-    let result = match executed.result.as_ref() {
-        CanonicalResult::VideoJob(result) => result.clone(),
-        _ => {
-            executed.mark_provider_protocol_failure();
-            return record;
-        }
-    };
-    let state_update = match media_job_state(&result.status) {
-        Ok(state_update) => state_update,
-        Err(failure) => {
-            executed.mark_failure(&failure);
-            return record;
-        }
-    };
-    let update = MediaJobUpdate {
-        state: state_update,
-        progress_percent: result.progress_percent,
-        content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
-        expires_at: result
-            .expires_at
-            .and_then(chrono::DateTime::from_timestamp_secs),
-        error_class: result
-            .error
-            .as_ref()
-            .map(|error| format!("{:?}", error.class).to_lowercase()),
-        last_polled_at: Utc::now(),
-    };
-    let updated = state
-        .store()
-        .refresh_media_job(record.id, update)
-        .await
-        .unwrap_or(record);
-    executed.mark_success();
-    updated
 }
 
 pub(super) async fn owned_media_job(

@@ -338,7 +338,7 @@
         sync.snapshotEtag,
         buildUpdateProviderInput(editValues, providerSpec)
       );
-      sync = markSaved(sync, updated.etag);
+      sync = markSaved(updated.etag);
       clearCertificationResults();
       await installProviderWithModels(updated, true);
       await invalidateProviderSummaries(queryClient);

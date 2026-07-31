@@ -367,6 +367,12 @@ fn decode_tool_config(
         &function.extra,
         extensions,
     );
+    if !function.allowed_function_names.is_empty() && function.mode != "ANY" {
+        extensions.insert(
+            "/toolConfig/functionCallingConfig/allowedFunctionNames".into(),
+            serde_json::to_value(&function.allowed_function_names).map_err(DecodeError::Json)?,
+        );
+    }
     match function.mode.as_str() {
         "AUTO" | "MODE_UNSPECIFIED" => Ok(Some(CanonicalToolChoice::Auto)),
         "NONE" => Ok(Some(CanonicalToolChoice::None)),
@@ -417,6 +423,12 @@ fn decode_generation_config(
     if config.candidate_count == Some(0) {
         return Err(DecodeError::InvalidParameter {
             field: "candidateCount",
+            reason: "must be greater than zero",
+        });
+    }
+    if config.max_output_tokens == Some(0) {
+        return Err(DecodeError::InvalidParameter {
+            field: "maxOutputTokens",
             reason: "must be greater than zero",
         });
     }

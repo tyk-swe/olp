@@ -32,7 +32,7 @@ use crate::usage::query::{ceil_usage_hour, floor_usage_hour};
 #[cfg(test)]
 use health::provider_health_status;
 #[cfg(test)]
-use pricing::{validate_decimal, validate_prices};
+use pricing::{MAX_PRICES_PER_REVISION, validate_decimal, validate_prices};
 
 #[cfg(test)]
 mod tests;

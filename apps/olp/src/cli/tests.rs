@@ -17,8 +17,8 @@ use super::{
     commands::stop_worker_tasks,
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
     startup::{
-        coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
-        stop_background_tasks, wait_for_shutdown,
+        background_task_error, coordinate_shutdown, shutdown_reason, spawn_background_task,
+        spawn_fallible_background_task, stop_background_tasks, wait_for_shutdown,
     },
     validation::{
         check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
@@ -209,6 +209,50 @@ fn server_cli_rejects_invalid_admission_capacities() {
 }
 
 #[test]
+fn request_metadata_stream_length_is_bounded_and_configurable() {
+    let cli = Cli::try_parse_from([
+        "olp",
+        "gateway",
+        "--database-url",
+        "postgres://example/olp",
+        "--request-metadata-stream-max-length",
+        "17",
+    ])
+    .unwrap();
+    let Command::Gateway(args) = cli.command else {
+        panic!("expected gateway command");
+    };
+    assert_eq!(args.request_metadata_stream_max_length, 17);
+
+    assert!(
+        Cli::try_parse_from([
+            "olp",
+            "gateway",
+            "--database-url",
+            "postgres://example/olp",
+            "--request-metadata-stream-max-length",
+            "0",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
+fn database_pool_must_have_a_connection() {
+    assert!(
+        Cli::try_parse_from([
+            "olp",
+            "control",
+            "--database-url",
+            "postgres://example/olp",
+            "--database-max-connections",
+            "0",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
 fn migration_cli_parses_valkey_preflight_dependency() {
     let cli = Cli::try_parse_from([
         "olp",
@@ -324,11 +368,11 @@ async fn coordinated_shutdown_keeps_background_tasks_alive_while_http_drains() {
 }
 
 #[tokio::test]
-async fn request_metadata_writer_failure_stops_listeners_and_surfaces_error() {
+async fn background_task_failure_during_http_drain_surfaces_error() {
     let (listener_shutdown, listener_receiver) = watch::channel(false);
     let (background_shutdown, background_receiver) = watch::channel(false);
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
-    let (status_sender, status_receiver) = tokio::sync::oneshot::channel();
+    let (status_sender, mut status_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (drain_started, drain_started_receiver) = tokio::sync::oneshot::channel();
     let (release_drain, release_receiver) = watch::channel(false);
 
@@ -343,17 +387,21 @@ async fn request_metadata_writer_failure_stops_listeners_and_surfaces_error() {
         wait_for_shutdown(listener_receiver).await;
         wait_for_shutdown(release_receiver).await;
     };
-    let reporter = tokio::spawn(async move {
-        shutdown_sender.send(()).unwrap();
-        drain_started_receiver.await.unwrap();
-        status_sender
-            .send(Err(
-                std::io::Error::other("legacy stream is not drained").into()
-            ))
-            .unwrap();
+    let status_shutdown = background_receiver.clone();
+    let reporter = spawn_fallible_background_task(
+        "legacy stream",
+        async move {
+            shutdown_sender.send(()).unwrap();
+            drain_started_receiver.await.unwrap();
+            Err(std::io::Error::other("legacy stream is not drained").into())
+        },
+        status_sender,
+        status_shutdown,
+    );
+    let release = tokio::spawn(async move {
+        let _ = reporter.await;
         release_drain.send(true).unwrap();
     });
-    let mut status_receiver = status_receiver;
     let (_, _, terminal_error) = coordinate_shutdown(
         public_server,
         observability_server,
@@ -361,31 +409,36 @@ async fn request_metadata_writer_failure_stops_listeners_and_surfaces_error() {
             async {
                 let _ = shutdown_receiver.await;
             },
-            Some(&mut status_receiver),
+            &mut status_receiver,
         ),
         listener_shutdown,
         background_shutdown,
     )
     .await;
-    reporter.await.unwrap();
-    let error = resolve_request_metadata_writer_error(Some(status_receiver), terminal_error).await;
+    release.await.unwrap();
+    let error = terminal_error.or_else(|| background_task_error(&mut status_receiver));
 
     assert_eq!(error.unwrap().to_string(), "legacy stream is not drained");
     assert!(*background_receiver.borrow());
 }
 
 #[tokio::test]
-async fn request_metadata_writer_failure_wins_when_shutdown_is_also_ready() {
-    let (status_sender, mut status_receiver) = tokio::sync::oneshot::channel();
-    status_sender
-        .send(Err(std::io::Error::other("writer failed").into()))
-        .unwrap();
+async fn background_task_panic_wins_when_shutdown_is_also_ready() {
+    let (_shutdown, shutdown_receiver) = watch::channel(false);
+    let (status_sender, mut status_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let task = spawn_background_task(
+        "test worker",
+        async { panic!("worker failed") },
+        status_sender,
+        shutdown_receiver,
+    );
+    task.await.unwrap();
 
-    let error = shutdown_reason(async {}, Some(&mut status_receiver))
+    let error = shutdown_reason(async {}, &mut status_receiver)
         .await
         .unwrap();
 
-    assert_eq!(error.to_string(), "writer failed");
+    assert_eq!(error.to_string(), "background task `test worker` panicked");
 }
 
 #[tokio::test]

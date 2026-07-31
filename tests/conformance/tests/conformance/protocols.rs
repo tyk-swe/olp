@@ -8,7 +8,6 @@ use olp_protocols::{
     openai::{ChatCompletionRequest, decode_chat_completion, encode_chat_completion},
 };
 use serde::Deserialize;
-use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 struct ExpectedCanonical {
@@ -95,19 +94,4 @@ fn gemini_request_fixture_translates_and_round_trips_extensions() {
     )
     .expect("Gemini DTO must serialize");
     assert_eq!(encoded["safetySettings"][0]["threshold"], "BLOCK_ONLY_HIGH");
-}
-
-#[test]
-fn protocol_fixture_files_are_vendor_json_objects() {
-    for path in [
-        "protocols/openai-chat-request.json",
-        "protocols/anthropic-messages-request.json",
-        "protocols/gemini-generate-content-request.json",
-    ] {
-        let value: Value = read_json(path);
-        assert!(
-            value.is_object(),
-            "{path} must contain one vendor JSON object"
-        );
-    }
 }

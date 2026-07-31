@@ -146,6 +146,8 @@ config:
   # Hide password sign-in when every operator authenticates through OIDC.
   localLoginEnabled: true
   databaseMaxConnections: 20
+  # Global retained-event bound; matches one gateway's local metadata buffer.
+  requestMetadataStreamMaxLength: 8192
 
 nodeSelector: {}
 tolerations: []

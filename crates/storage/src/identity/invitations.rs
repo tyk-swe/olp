@@ -219,14 +219,18 @@ impl PgStore {
         {
             return Err(IdentityError::InvitationUnavailable);
         }
-        let session_expires_at = Utc::now()
-            .checked_add_signed(session_ttl)
-            .filter(|expires_at| *expires_at > Utc::now())
-            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
         let digest = InvitationMaterial::digest_token(&acceptance.token);
         let mut transaction = self.pool().begin().await?;
+        let now: DateTime<Utc> = sqlx::query_scalar!("SELECT now() AS \"now!\"")
+            .fetch_one(&mut *transaction)
+            .await?;
+        let session_expires_at = now
+            .checked_add_signed(session_ttl)
+            .filter(|expires_at| *expires_at > now)
+            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
         let invitation_email: String = sqlx::query_scalar!(
-            "SELECT email FROM invitations WHERE token_digest = $1",
+            "SELECT email FROM invitations WHERE token_digest = $1
+             AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()",
             digest.to_vec()
         )
         .fetch_optional(&mut *transaction)
@@ -234,26 +238,19 @@ impl PgStore {
         .ok_or(IdentityError::InvitationUnavailable)?;
         lock_identity_email(&mut transaction, &invitation_email).await?;
         let invitation = sqlx::query!(
-            "SELECT id, email, role::text AS \"role!\", expires_at, accepted_at, revoked_at \
-             FROM invitations WHERE token_digest = $1 FOR UPDATE",
+            "SELECT id, email, role::text AS \"role!\" FROM invitations
+             WHERE token_digest = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+               AND expires_at > now() FOR UPDATE",
             digest.to_vec()
         )
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(IdentityError::InvitationUnavailable)?;
-        let expires_at: DateTime<Utc> = invitation.expires_at;
-        if invitation.accepted_at.is_some()
-            || invitation.revoked_at.is_some()
-            || expires_at <= Utc::now()
-        {
-            return Err(IdentityError::InvitationUnavailable);
-        }
         let invitation_id: Uuid = invitation.id;
         let email: String = invitation.email;
         let role = parse_role(invitation.role)?;
         let user_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
-        let now = Utc::now();
         let user_row = match sqlx::query_as!(
             UserRow,
             "INSERT INTO users \
@@ -272,7 +269,7 @@ impl PgStore {
         };
         let updated = sqlx::query!(
             "UPDATE invitations SET accepted_at = $2, accepted_by = $3 \
-             WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL",
+             WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()",
             invitation_id,
             now,
             user_id

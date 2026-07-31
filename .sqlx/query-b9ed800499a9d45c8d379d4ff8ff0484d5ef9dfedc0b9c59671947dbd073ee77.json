@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM sessions WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED ) DELETE FROM sessions session USING expired WHERE session.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b9ed800499a9d45c8d379d4ff8ff0484d5ef9dfedc0b9c59671947dbd073ee77"
+}

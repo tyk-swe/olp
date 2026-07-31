@@ -1,4 +1,3 @@
-use http::header;
 use olp_domain::{
     CanonicalResult, Operation, ProviderOutput, ProviderRequest, TransportError, TransportMode,
 };
@@ -32,13 +31,15 @@ pub(super) async fn execute_speech(
             connector.raw_sse_response(response)?,
         ));
     }
-    let content_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
+    let content_type = crate::transport_common::single_content_type(response.headers())
         .and_then(|value| value.split(';').next())
         .map(str::trim)
-        .filter(|value| value.starts_with("audio/") || *value == "application/octet-stream")
+        .filter(|value| {
+            value.eq_ignore_ascii_case("application/octet-stream")
+                || value.split_once('/').is_some_and(|(kind, subtype)| {
+                    kind.eq_ignore_ascii_case("audio") && !subtype.is_empty()
+                })
+        })
         .ok_or_else(|| protocol_body_error("OpenAI speech response used an invalid content type"))?
         .to_owned();
     let spool = request.media.as_ref().ok_or_else(|| {
@@ -136,7 +137,10 @@ pub(super) async fn execute_transcription(
         parse_wire("transcription", &bytes)?
     };
     Ok(ProviderOutput::Result(Box::new(
-        CanonicalResult::Transcription(decode_transcription_response(response)),
+        CanonicalResult::Transcription(
+            decode_transcription_response(response)
+                .map_err(|error| protocol_decode_error("transcription", error))?,
+        ),
     )))
 }
 
@@ -144,18 +148,20 @@ fn require_transcription_text_content_type(
     response: &Response,
     format: TranscriptionResponseFormat,
 ) -> Result<(), TransportError> {
-    let actual = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
+    let actual = crate::transport_common::single_content_type(response.headers())
         .and_then(|value| value.split(';').next())
         .map(str::trim);
     let valid = match format {
-        TranscriptionResponseFormat::Text => actual == Some("text/plain"),
-        TranscriptionResponseFormat::Srt => {
-            matches!(actual, Some("application/x-subrip" | "text/plain"))
+        TranscriptionResponseFormat::Text => {
+            actual.is_some_and(|value| value.eq_ignore_ascii_case("text/plain"))
         }
-        TranscriptionResponseFormat::Vtt => matches!(actual, Some("text/vtt" | "text/plain")),
+        TranscriptionResponseFormat::Srt => actual.is_some_and(|value| {
+            value.eq_ignore_ascii_case("application/x-subrip")
+                || value.eq_ignore_ascii_case("text/plain")
+        }),
+        TranscriptionResponseFormat::Vtt => actual.is_some_and(|value| {
+            value.eq_ignore_ascii_case("text/vtt") || value.eq_ignore_ascii_case("text/plain")
+        }),
         _ => false,
     };
     if valid {

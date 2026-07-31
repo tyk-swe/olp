@@ -10,6 +10,13 @@ const valid = {
 describe('invitation acceptance validation', () => {
   it('accepts a complete invited-user profile', () => {
     expect(validateInvitationAcceptance(valid)).toEqual({});
+    expect(
+      validateInvitationAcceptance({
+        displayName: '😀'.repeat(100),
+        password: '🔐'.repeat(12),
+        confirmPassword: '🔐'.repeat(12)
+      })
+    ).toEqual({});
   });
 
   it('reports every actionable field error', () => {

@@ -25,7 +25,7 @@ export async function listApiKeyPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ApiKey>> {
   const response = await apiClient.GET('/api/v1/api-keys', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: 100, cursor } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);

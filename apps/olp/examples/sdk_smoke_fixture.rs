@@ -43,6 +43,7 @@ impl ProviderTransport for StaticCanonicalTransport {
                     phase: TransportPhase::Body,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,
+                    retry_after: None,
                     message: "SDK smoke fixture received an unexpected canonical operation"
                         .to_owned(),
                 });

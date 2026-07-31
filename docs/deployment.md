@@ -173,6 +173,7 @@ those bounds.
 
 Before issuing a proxy key or routing a client, require a successful
 migration Job, ready pods, runtime-generation convergence, and — when
-monitoring is enabled — healthy gateway and control ServiceMonitor targets.
+monitoring is enabled — healthy ServiceMonitor targets for every enabled
+gateway or control component.
 Once serving, continue with the monitoring, backup, and upgrade procedures
 in the [operations runbook](operations.md).

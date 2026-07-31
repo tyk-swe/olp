@@ -247,7 +247,7 @@
         etag && etag !== 'new' ? etag : undefined
       );
       oidcClientSecret = '';
-      oidcSync = markSaved(oidcSync, updated.etag);
+      oidcSync = markSaved(updated.etag);
       queryClient.setQueryData(['oidc-configuration'], updated);
       notice = updated.enabled ? 'OIDC configuration validated and enabled.' : 'OIDC configuration saved but disabled.';
     });

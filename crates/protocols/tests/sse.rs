@@ -3,7 +3,7 @@ use proptest::prelude::*;
 
 #[test]
 fn multiline_crlf_comments_and_persistent_ids_follow_sse_rules() {
-    let wire = b": keepalive\r\nid: event-7\r\nevent: message\r\ndata: first\r\ndata: second\r\nretry: 250\r\n\r\ndata: next\r\n\r\n";
+    let wire = b": keepalive\r\nid: event-7\r\nevent: message\r\ndata: first\r\ndata: second\r\nretry: 250\r\nretry: 999999999999999999999\r\n\r\nevent: stale\r\nevent:\r\ndata: next\r\n\r\n";
     let frames = SseDecoder::default().push(wire).unwrap();
     assert_eq!(
         frames,
@@ -71,13 +71,24 @@ fn event_limit_applies_per_event_not_per_transport_chunk() {
 }
 
 #[test]
-fn finish_does_not_count_an_unterminated_line_twice() {
+fn finish_discards_an_unterminated_event() {
     let mut decoder = SseDecoder::new(7);
     assert!(decoder.push(b"data: x").unwrap().is_empty());
+    assert!(decoder.finish().unwrap().is_empty());
+}
+
+#[test]
+fn bare_carriage_returns_and_initial_bom_are_valid_line_boundaries() {
+    let wire = b"\xef\xbb\xbfdata: first\rdata: second\r\revent: ignored\r";
+    let mut decoder = SseDecoder::default();
+    let mut frames = decoder.push(&wire[..9]).unwrap();
+    frames.extend(decoder.push(&wire[9..]).unwrap());
+    frames.extend(decoder.finish().unwrap());
+
     assert_eq!(
-        decoder.finish().unwrap(),
+        frames,
         vec![SseFrame {
-            data: "x".into(),
+            data: "first\nsecond".into(),
             ..SseFrame::default()
         }]
     );

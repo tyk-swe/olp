@@ -2,7 +2,7 @@
 //!
 //! Serves both the OpenAI-compatible surface (`/v1/*`) and the Azure OpenAI
 //! deployment surface (`/openai/deployments/{deployment}/*`). Every request
-//! is recorded (method, path, query, credentials, body) so the journey can
+//! is recorded (method, path, credentials, body) so the journey can
 //! assert exactly what the product sent upstream; unexpected paths are
 //! recorded and answered 404 so contract gaps surface instead of hanging.
 
@@ -47,7 +47,6 @@ pub const TOTAL_TOKENS: u64 = 12;
 pub struct RecordedRequest {
     pub method: String,
     pub path: String,
-    pub query: Option<String>,
     pub authorization: Option<String>,
     pub api_key_header: Option<String>,
     /// Every header, lowercased, in arrival order. The two credential fields
@@ -97,10 +96,6 @@ impl MockUpstream {
         }
     }
 
-    pub fn recorded(&self) -> Vec<RecordedRequest> {
-        self.state.requests.lock().unwrap().clone()
-    }
-
     /// The number of requests seen so far.
     ///
     /// Paired with [`Self::since`], this lets a test assert an *exact* upstream
@@ -124,7 +119,6 @@ impl MockUpstream {
 async fn dispatch(State(state): State<MockState>, request: Request) -> Response {
     let method = request.method().to_string();
     let path = request.uri().path().to_owned();
-    let query = request.uri().query().map(str::to_owned);
     let authorization = header_string(&request, header::AUTHORIZATION.as_str());
     let api_key_header = header_string(&request, "api-key");
     let headers = request
@@ -153,7 +147,6 @@ async fn dispatch(State(state): State<MockState>, request: Request) -> Response 
     state.requests.lock().unwrap().push(RecordedRequest {
         method: method.clone(),
         path: path.clone(),
-        query: query.clone(),
         authorization,
         api_key_header,
         headers,
@@ -342,6 +335,13 @@ fn responses_response(body: &Value, model: &str) -> Response {
     frames.push(format!(
         "event: response.created\ndata: {}",
         json!({"type": "response.created", "response": {"id": "resp_e2e", "model": model}})
+    ));
+    frames.push(format!(
+        "event: response.output_item.added\ndata: {}",
+        json!({
+            "type": "response.output_item.added", "output_index": 0,
+            "item": {"id": "msg_e2e", "type": "message", "role": "assistant", "content": []}
+        })
     ));
     for delta in deltas {
         frames.push(format!(

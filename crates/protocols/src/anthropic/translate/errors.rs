@@ -98,6 +98,8 @@ pub enum ResponseError {
     MissingStopReason,
     #[error("Anthropic response has too many content blocks")]
     TooManyContentBlocks,
+    #[error("Anthropic response usage counters overflow")]
+    UsageOverflow,
     #[error("Anthropic response JSON is invalid: {0}")]
     Json(serde_json::Error),
 }

@@ -15,7 +15,7 @@ const session = {
 };
 
 afterEach(async () => {
-  await authLifecycle.principalInvalidated();
+  await authLifecycle.signOut(async () => undefined);
   clearCsrfToken();
   vi.unstubAllGlobals();
 });

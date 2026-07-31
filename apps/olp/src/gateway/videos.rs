@@ -8,12 +8,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use futures::{StreamExt, stream};
 use olp_domain::{CanonicalResult, Operation, OperationKind, Surface, TransportMode};
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
     encode_video_delete_response, encode_video_list_response, encode_video_object,
+    is_valid_video_job_id,
 };
 use olp_storage::{
     MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobRecord,
@@ -29,10 +29,10 @@ use super::{
     limits::CleanupMediaStream,
     media::open_response_media,
     media_jobs::{
-        attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
-        media_job_error, media_job_result, media_job_state, owned_media_job,
-        refresh_video_list_record, select_video_create_target, set_video_route,
-        valid_upstream_media_job_id,
+        attach_media_job_with_retry, mark_media_job_create_cleanup_pending_with_retry,
+        mark_missing_delete_as_success, media_job_deletion_finalized, media_job_error,
+        media_job_result, media_job_state, owned_media_job, select_video_create_target,
+        set_video_route,
     },
     multipart::parse_multipart,
 };
@@ -171,7 +171,7 @@ async fn complete_video_create(
         }
     };
     let upstream_job_id = result.id.clone();
-    if !valid_upstream_media_job_id(&upstream_job_id) {
+    if !is_valid_video_job_id(&upstream_job_id) {
         let failure = InferenceError::bad_gateway(
             "provider_protocol_error",
             "The provider returned an invalid video job identity.",
@@ -195,14 +195,13 @@ async fn complete_video_create(
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
-            if let Err(error) = state
-                .store()
-                .mark_media_job_create_cleanup_pending(
-                    reserved.id,
-                    &upstream_job_id,
-                    "upstream_create_response_invalid_status",
-                )
-                .await
+            if let Err(error) = mark_media_job_create_cleanup_pending_with_retry(
+                &state,
+                reserved.id,
+                &upstream_job_id,
+                "upstream_create_response_invalid_status",
+            )
+            .await
             {
                 state.record_media_reconciliation_gap();
                 error!(job_id = %reserved.id, %error, "failed to schedule malformed video cleanup");
@@ -229,43 +228,39 @@ async fn complete_video_create(
         Ok(record) => record,
         Err(error) => {
             let identity_conflict = matches!(error, MediaJobError::UpstreamIdentityConflict);
-            // A compensation DELETE is only safe after PostgreSQL records the
-            // upstream identity and cleanup intent. An ambiguous attachment
-            // outcome can already have committed the active row.
-            let cleanup_intent_persisted = if identity_conflict {
-                false
-            } else {
-                match state
-                    .store()
-                    .mark_media_job_create_cleanup_pending(
-                        reserved.id,
-                        &upstream_job_id,
-                        "upstream_created_local_attach_failed",
-                    )
-                    .await
+            // Persist cleanup intent when possible, but a prolonged PostgreSQL
+            // outage must not prevent an in-memory compensation attempt.
+            if !identity_conflict {
+                match mark_media_job_create_cleanup_pending_with_retry(
+                    &state,
+                    reserved.id,
+                    &upstream_job_id,
+                    "upstream_created_local_attach_failed",
+                )
+                .await
                 {
                     Ok(record)
                         if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
                             && record.upstream_job_id.as_deref()
-                                == Some(upstream_job_id.as_str()) =>
-                    {
-                        true
-                    }
+                                == Some(upstream_job_id.as_str()) => {}
                     Ok(record) => {
                         error!(
                             job_id = %reserved.id,
                             lifecycle = record.lifecycle.as_str(),
                             "video cleanup intent did not retain the upstream identity"
                         );
-                        false
                     }
                     Err(persistence_error) => {
                         error!(job_id = %reserved.id, %persistence_error, "failed to persist video cleanup reconciliation metadata");
-                        false
+                        if let Err(delete_intent_error) =
+                            state.store().begin_media_job_deletion(reserved.id).await
+                        {
+                            error!(job_id = %reserved.id, %delete_intent_error, "failed to persist fallback video delete intent");
+                        }
                     }
                 }
-            };
-            let compensation_confirmed = if cleanup_intent_persisted {
+            }
+            let compensation_confirmed = if !identity_conflict {
                 let mut cleanup = decode_video_delete(upstream_job_id.clone());
                 if let Err(failure) = set_video_route(&mut cleanup, executed.route_slug.as_str()) {
                     executed.mark_failure(&failure);
@@ -396,12 +391,7 @@ pub(super) async fn video_list(
         )
         .await
         .map_err(media_job_error)?;
-    let refreshed = stream::iter(page.items)
-        .map(|record| refresh_video_list_record(&state, &principal, record))
-        .buffered(4)
-        .collect::<Vec<_>>()
-        .await;
-    let jobs = refreshed.iter().map(media_job_result).collect::<Vec<_>>();
+    let jobs = page.items.iter().map(media_job_result).collect::<Vec<_>>();
     let result = olp_domain::VideoListResult {
         first_id: jobs.first().map(|job| job.id.clone()),
         last_id: jobs.last().map(|job| job.id.clone()),

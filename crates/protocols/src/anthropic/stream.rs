@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use olp_domain::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, SourceExtensions,
-    Surface, Usage as CanonicalUsage,
+    Surface,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use super::{
     ContentBlock, MessagesResponse, Role,
-    translate::{anthropic_finish_reason, collect_extra},
+    translate::{anthropic_finish_reason, canonical_usage, collect_extra},
 };
 use crate::sse::{
     DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame, raw_sse_frame_event,
@@ -54,12 +54,7 @@ impl Default for AnthropicMessagesStreamDecoder {
 impl AnthropicMessagesStreamDecoder {
     #[must_use]
     pub fn new() -> Self {
-        Self::with_max_event_bytes(DEFAULT_MAX_EVENT_BYTES)
-    }
-
-    #[must_use]
-    pub fn with_max_event_bytes(max_event_bytes: usize) -> Self {
-        Self::with_max_event_bytes_and_raw_passthrough(max_event_bytes, false)
+        Self::with_max_event_bytes_and_raw_passthrough(DEFAULT_MAX_EVENT_BYTES, false)
     }
 
     #[must_use]
@@ -96,11 +91,6 @@ impl AnthropicMessagesStreamDecoder {
             return Err(StreamError::UnexpectedEof);
         }
         Ok(events)
-    }
-
-    #[must_use]
-    pub const fn is_done(&self) -> bool {
-        self.done
     }
 
     fn decode_frames(&mut self, frames: Vec<SseFrame>) -> Result<Vec<CanonicalEvent>, StreamError> {
@@ -427,25 +417,14 @@ impl AnthropicMessagesStreamDecoder {
             );
         }
         self.emit_extensions(events, extensions);
-        self.emit(
-            events,
-            CanonicalEventKind::Usage {
-                usage: CanonicalUsage {
-                    input_tokens: self
-                        .input_tokens
-                        .saturating_add(self.cache_creation_input_tokens)
-                        .saturating_add(self.cached_input_tokens.unwrap_or(0)),
-                    output_tokens: self.output_tokens,
-                    total_tokens: self
-                        .input_tokens
-                        .saturating_add(self.cache_creation_input_tokens)
-                        .saturating_add(self.cached_input_tokens.unwrap_or(0))
-                        .saturating_add(self.output_tokens),
-                    cached_input_tokens: self.cached_input_tokens,
-                    reasoning_tokens: None,
-                },
-            },
-        );
+        let usage = canonical_usage(
+            self.input_tokens,
+            self.output_tokens,
+            Some(self.cache_creation_input_tokens),
+            self.cached_input_tokens,
+        )
+        .ok_or(StreamError::UsageOverflow)?;
+        self.emit(events, CanonicalEventKind::Usage { usage });
         if let Some(reason) = event.delta.stop_reason {
             if self.finished {
                 return Err(StreamError::DuplicateFinishReason);
@@ -722,6 +701,8 @@ pub enum StreamError {
     DeltaBlockMismatch { index: u32, delta: String },
     #[error("Anthropic stream has too many tool calls")]
     TooManyToolCalls,
+    #[error("Anthropic stream usage counters overflow")]
+    UsageOverflow,
     #[error("Anthropic content event appeared after the message finish reason")]
     ContentAfterFinish,
     #[error("Anthropic stream emitted more than one finish reason")]

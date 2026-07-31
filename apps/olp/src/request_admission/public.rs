@@ -235,8 +235,10 @@ pub(crate) async fn admit_public_request(
         .flatten();
     let surface = if endpoint.is_some() {
         AdmissionSurface::Inference
-    } else {
+    } else if request.uri().path() == "/api" || request.uri().path().starts_with("/api/") {
         AdmissionSurface::Management
+    } else {
+        return next.run(request).await;
     };
     let permit = match state.admission.try_acquire(surface) {
         Ok(permit) => permit,

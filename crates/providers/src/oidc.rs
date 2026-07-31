@@ -154,14 +154,11 @@ async fn decode_json<T: DeserializeOwned>(
     if !response.status().is_success() {
         return Err(OidcNetworkError::Status);
     }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if !content_type.starts_with("application/json")
-        && !content_type.starts_with("application/jwk-set+json")
+    if !crate::transport_common::has_content_type(response.headers(), "application/json")
+        && !crate::transport_common::has_content_type(
+            response.headers(),
+            "application/jwk-set+json",
+        )
     {
         return Err(OidcNetworkError::ContentType);
     }

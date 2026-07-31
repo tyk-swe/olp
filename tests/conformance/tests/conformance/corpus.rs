@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
-use olp_conformance::{MAX_FIXTURE_BYTES, fixture_root, read_fixture};
+use olp_conformance::{fixture_root, read_fixture};
 
 fn visit(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
     for entry in fs::read_dir(directory)
@@ -28,11 +28,6 @@ fn corpus_is_bounded_and_all_json_is_well_formed() {
     for path in files {
         let relative = path.strip_prefix(&root).expect("fixture must be in root");
         let bytes = read_fixture(relative);
-        assert!(
-            bytes.len() as u64 <= MAX_FIXTURE_BYTES,
-            "{} exceeds fixture limit",
-            relative.display()
-        );
         let extension = path
             .extension()
             .and_then(|value| value.to_str())

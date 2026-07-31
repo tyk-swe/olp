@@ -28,13 +28,18 @@ cleanup() {
 trap cleanup EXIT
 
 curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+  --connect-timeout 10 --max-time 60 \
   --silent --show-error --output "$downloaded_key" \
   https://www.postgresql.org/media/keys/ACCC4CF8.asc
 
-fingerprint=$(gpg --batch --show-keys --with-colons "$downloaded_key" \
-  | awk -F: '$1 == "fpr" { print $10; exit }')
-if [[ $fingerprint != "$expected_fingerprint" ]]; then
-  echo "unexpected PostgreSQL Apt signing-key fingerprint: ${fingerprint:-missing}" >&2
+key_metadata=$(gpg --batch --show-keys --with-colons "$downloaded_key")
+mapfile -t primary_fingerprints < <(awk -F: '
+  $1 == "pub" { primary = 1; next }
+  primary && $1 == "fpr" { print $10; primary = 0 }
+' <<<"$key_metadata")
+if (( ${#primary_fingerprints[@]} != 1 )) ||
+  [[ ${primary_fingerprints[0]} != "$expected_fingerprint" ]]; then
+  echo "PostgreSQL Apt keyring must contain only the pinned primary key" >&2
   exit 1
 fi
 sudo install -d -m 0755 "$key_dir"

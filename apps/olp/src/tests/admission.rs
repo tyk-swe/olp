@@ -265,6 +265,82 @@ async fn json_body_read_has_its_own_deadline_outside_route_layers() {
 }
 
 #[tokio::test]
+async fn json_body_read_distinguishes_size_from_transport_failure() {
+    let oversized = read_json_body(Body::from("too large"), 1, Duration::from_secs(1)).await;
+    assert_eq!(oversized.unwrap_err(), JsonBodyReadError::TooLarge);
+
+    let broken = Body::from_stream(futures::stream::once(async {
+        Err::<bytes::Bytes, _>(std::io::Error::other("body transport failed"))
+    }));
+    let failed = read_json_body(broken, MAX_JSON_BODY_BYTES, Duration::from_secs(1)).await;
+    assert_eq!(failed.unwrap_err(), JsonBodyReadError::Read);
+}
+
+#[tokio::test]
+async fn duplicate_or_combined_singleton_content_headers_are_rejected() {
+    let app = public_router(
+        ApiState::new(
+            ApiMode::Gateway,
+            None,
+            Arc::new(RuntimeManager::empty()),
+            "https://olp.example.test",
+            PathBuf::from("missing-console"),
+        )
+        .gateway_state_for_test(),
+    );
+
+    for name in [
+        axum::http::header::CONTENT_TYPE,
+        axum::http::header::CONTENT_ENCODING,
+    ] {
+        let mut request = Request::post("/api/not-found")
+            .body(Body::from("{}"))
+            .unwrap();
+        request
+            .headers_mut()
+            .append(name.clone(), HeaderValue::from_static("identity"));
+        request
+            .headers_mut()
+            .append(name, HeaderValue::from_static("identity"));
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    let response = app
+        .oneshot(
+            Request::post("/api/not-found")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/json, text/plain",
+                )
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn inference_get_does_not_buffer_or_validate_an_ignored_body() {
+    let (state, key) = inference_state(false);
+    let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
+    let response = public_router(state.gateway_state_for_test())
+        .oneshot(
+            Request::get("/openai/v1/models")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(too_deep))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
 async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
     let app = public_router(
         ApiState::new(

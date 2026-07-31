@@ -47,37 +47,6 @@ enum BodyAdmission {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) enum EndpointId {
-    OpenAiChatCompletions,
-    OpenAiResponses,
-    OpenAiResponseInputTokens,
-    OpenAiEmbeddings,
-    OpenAiModerations,
-    OpenAiImageGenerations,
-    OpenAiImageEdits,
-    OpenAiImageVariations,
-    OpenAiSpeech,
-    OpenAiTranscriptions,
-    OpenAiVideoCreate,
-    OpenAiVideoList,
-    OpenAiVideoGet,
-    OpenAiVideoDelete,
-    OpenAiVideoContent,
-    OpenAiModelList,
-    OpenAiModelGet,
-    AnthropicMessages,
-    AnthropicCountTokens,
-    AnthropicModelList,
-    AnthropicModelGet,
-    GeminiV1ModelList,
-    GeminiV1ModelGet,
-    GeminiV1ModelAction,
-    GeminiV1BetaModelList,
-    GeminiV1BetaModelGet,
-    GeminiV1BetaModelAction,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EndpointMethod {
     Get,
@@ -175,7 +144,6 @@ enum Handler {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct EndpointSpec {
-    pub(crate) id: EndpointId,
     method: EndpointMethod,
     pub(crate) route_path: &'static str,
     matcher: PathMatcher,
@@ -189,13 +157,12 @@ pub(crate) struct EndpointSpec {
 
 macro_rules! fixed_endpoint {
     (
-        $id:expr, $method:expr, $route_path:expr, $matcher:expr, $surface:expr,
+        $method:expr, $route_path:expr, $matcher:expr, $surface:expr,
         $operation:expr, $fallback_route:expr, $always_emit:expr, $token_estimate:expr,
         $body_admission:expr, $route_extraction:expr, $handler:expr,
         $axum_body_limit:expr $(,)?
     ) => {
         EndpointSpec {
-            id: $id,
             method: $method,
             route_path: $route_path,
             matcher: $matcher,
@@ -215,29 +182,18 @@ macro_rules! fixed_endpoint {
 }
 
 const fn gemini(
-    id: EndpointId,
     method: EndpointMethod,
     route_path: &'static str,
     matcher: PathMatcher,
     policy: Policy,
-    operation: OperationKind,
     handler: Handler,
 ) -> EndpointSpec {
     EndpointSpec {
-        id,
         method,
         route_path,
         matcher,
         surface: Surface::Gemini,
-        policy: match policy {
-            Policy::GeminiAction => Policy::GeminiAction,
-            Policy::Fixed { .. } => Policy::Fixed {
-                operation,
-                fallback_route: "models",
-                always_emit: true,
-                token_estimate: TokenEstimate::Default,
-            },
-        },
+        policy,
         body_admission: BodyAdmission::Standard,
         route_extraction: if matches!(handler, Handler::GeminiModelList) {
             RouteExtraction::JsonModel
@@ -254,7 +210,6 @@ const INVALID_ROUTE: &str = "invalid-request";
 
 pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
     fixed_endpoint!(
-        EndpointId::OpenAiChatCompletions,
         EndpointMethod::Post,
         "/openai/v1/chat/completions",
         EXACT,
@@ -269,7 +224,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiResponses,
         EndpointMethod::Post,
         "/openai/v1/responses",
         EXACT,
@@ -284,7 +238,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiResponseInputTokens,
         EndpointMethod::Post,
         "/openai/v1/responses/input_tokens",
         EXACT,
@@ -299,7 +252,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiEmbeddings,
         EndpointMethod::Post,
         "/openai/v1/embeddings",
         EXACT,
@@ -314,7 +266,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiModerations,
         EndpointMethod::Post,
         "/openai/v1/moderations",
         EXACT,
@@ -329,7 +280,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiImageGenerations,
         EndpointMethod::Post,
         "/openai/v1/images/generations",
         EXACT,
@@ -344,7 +294,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiImageEdits,
         EndpointMethod::Post,
         "/openai/v1/images/edits",
         EXACT,
@@ -362,7 +311,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         Some(MAX_MEDIA_BODY_BYTES),
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiImageVariations,
         EndpointMethod::Post,
         "/openai/v1/images/variations",
         EXACT,
@@ -380,7 +328,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         Some(IMAGE_VARIATION_BODY_BYTES),
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiSpeech,
         EndpointMethod::Post,
         "/openai/v1/audio/speech",
         EXACT,
@@ -395,7 +342,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiTranscriptions,
         EndpointMethod::Post,
         "/openai/v1/audio/transcriptions",
         EXACT,
@@ -413,7 +359,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         Some(TRANSCRIPTION_BODY_BYTES),
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiVideoCreate,
         EndpointMethod::Post,
         "/openai/v1/videos",
         EXACT,
@@ -431,7 +376,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         Some(VIDEO_CREATE_BODY_BYTES),
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiVideoList,
         EndpointMethod::Get,
         "/openai/v1/videos",
         EXACT,
@@ -446,7 +390,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         Some(VIDEO_CREATE_BODY_BYTES),
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiVideoGet,
         EndpointMethod::Get,
         "/openai/v1/videos/{video_id}",
         PathMatcher::SingleSegment {
@@ -464,7 +407,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiVideoDelete,
         EndpointMethod::Delete,
         "/openai/v1/videos/{video_id}",
         PathMatcher::SingleSegment {
@@ -482,7 +424,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiVideoContent,
         EndpointMethod::Get,
         "/openai/v1/videos/{video_id}/content",
         PathMatcher::SingleSegment {
@@ -500,7 +441,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiModelList,
         EndpointMethod::Get,
         "/openai/v1/models",
         EXACT,
@@ -515,7 +455,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::OpenAiModelGet,
         EndpointMethod::Get,
         "/openai/v1/models/{id}",
         PathMatcher::SingleSegment {
@@ -533,7 +472,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::AnthropicMessages,
         EndpointMethod::Post,
         "/anthropic/v1/messages",
         EXACT,
@@ -548,7 +486,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::AnthropicCountTokens,
         EndpointMethod::Post,
         "/anthropic/v1/messages/count_tokens",
         EXACT,
@@ -563,7 +500,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::AnthropicModelList,
         EndpointMethod::Get,
         "/anthropic/v1/models",
         EXACT,
@@ -578,7 +514,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     fixed_endpoint!(
-        EndpointId::AnthropicModelGet,
         EndpointMethod::Get,
         "/anthropic/v1/models/{id}",
         PathMatcher::SingleSegment {
@@ -596,7 +531,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         None,
     ),
     gemini(
-        EndpointId::GeminiV1ModelList,
         EndpointMethod::Get,
         "/gemini/v1/models",
         EXACT,
@@ -606,11 +540,9 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             always_emit: true,
             token_estimate: TokenEstimate::Default,
         },
-        OperationKind::ModelList,
         Handler::GeminiModelList,
     ),
     gemini(
-        EndpointId::GeminiV1ModelGet,
         EndpointMethod::Get,
         "/gemini/v1/models/{*resource}",
         PathMatcher::Remainder {
@@ -622,22 +554,18 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             always_emit: true,
             token_estimate: TokenEstimate::Default,
         },
-        OperationKind::ModelGet,
         Handler::GeminiModelGet,
     ),
     gemini(
-        EndpointId::GeminiV1ModelAction,
         EndpointMethod::Post,
         "/gemini/v1/models/{*resource}",
         PathMatcher::Remainder {
             prefix: "/gemini/v1/models/",
         },
         Policy::GeminiAction,
-        OperationKind::Generation,
         Handler::GeminiModelAction,
     ),
     gemini(
-        EndpointId::GeminiV1BetaModelList,
         EndpointMethod::Get,
         "/gemini/v1beta/models",
         EXACT,
@@ -647,11 +575,9 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             always_emit: true,
             token_estimate: TokenEstimate::Default,
         },
-        OperationKind::ModelList,
         Handler::GeminiModelList,
     ),
     gemini(
-        EndpointId::GeminiV1BetaModelGet,
         EndpointMethod::Get,
         "/gemini/v1beta/models/{*resource}",
         PathMatcher::Remainder {
@@ -663,18 +589,15 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             always_emit: true,
             token_estimate: TokenEstimate::Default,
         },
-        OperationKind::ModelGet,
         Handler::GeminiModelGet,
     ),
     gemini(
-        EndpointId::GeminiV1BetaModelAction,
         EndpointMethod::Post,
         "/gemini/v1beta/models/{*resource}",
         PathMatcher::Remainder {
             prefix: "/gemini/v1beta/models/",
         },
         Policy::GeminiAction,
-        OperationKind::Generation,
         Handler::GeminiModelAction,
     ),
 ];
@@ -808,12 +731,19 @@ impl InferenceEndpoint {
         }
     }
 
-    pub(crate) fn route_from_json(self, path: &str, body: &[u8]) -> Option<String> {
+    pub(crate) const fn accepts_body(self) -> bool {
+        match self {
+            Self::Registered { spec, .. } => matches!(spec.method, EndpointMethod::Post),
+            Self::Unknown { .. } => true,
+        }
+    }
+
+    pub(crate) fn route_from_json(self, path: &str, body: &[u8]) -> Option<RouteSlug> {
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
             && let Some(model) = value.get("model").and_then(serde_json::Value::as_str)
-            && RouteSlug::parse(model).is_ok()
+            && let Ok(route) = RouteSlug::parse(model)
         {
-            return Some(model.to_owned());
+            return Some(route);
         }
         let Self::Registered { spec, .. } = self else {
             return None;
@@ -823,7 +753,7 @@ impl InferenceEndpoint {
         }
         let resource = path.split("/models/").nth(1)?;
         let model = resource.split(':').next()?;
-        RouteSlug::parse(model).is_ok().then(|| model.to_owned())
+        RouteSlug::parse(model).ok()
     }
 }
 
@@ -859,9 +789,10 @@ fn register(router: Router<GatewayState>, spec: &'static EndpointSpec) -> Router
         Handler::GeminiModelGet => on(filter, gemini::model),
         Handler::GeminiModelAction => on(filter, gemini::action),
     };
-    let method_router = spec.axum_body_limit.map_or(method_router.clone(), |limit| {
-        method_router.layer(DefaultBodyLimit::max(limit))
-    });
+    let method_router = match spec.axum_body_limit {
+        Some(limit) => method_router.layer(DefaultBodyLimit::max(limit)),
+        None => method_router,
+    };
     router.route(spec.route_path, method_router)
 }
 
@@ -964,15 +895,9 @@ mod tests {
     }
 
     #[test]
-    fn registry_identities_and_routes_are_unique() {
-        let mut identities = BTreeSet::new();
+    fn registry_routes_are_unique() {
         let mut routes = BTreeSet::new();
         for spec in ENDPOINTS {
-            assert!(
-                identities.insert(spec.id),
-                "duplicate identity: {:?}",
-                spec.id
-            );
             assert!(
                 routes.insert((spec.method as u8, spec.route_path)),
                 "duplicate route: {:?} {}",
@@ -992,9 +917,12 @@ mod tests {
                 spec: classified, ..
             } = endpoint
             else {
-                panic!("registered endpoint classified as unknown: {:?}", spec.id);
+                panic!(
+                    "registered endpoint classified as unknown: {}",
+                    spec.route_path
+                );
             };
-            assert_eq!(classified.id, spec.id);
+            assert!(std::ptr::eq(classified, spec));
             assert_eq!(endpoint.surface(), spec.surface);
             assert!(endpoint.metadata().is_some());
         }
@@ -1009,7 +937,7 @@ mod tests {
         assert_eq!(endpoint.metadata(), None);
         assert_eq!(
             endpoint.route_from_json("/gemini/v1/models/route-1:unsupported", b"{}"),
-            Some("route-1".to_owned())
+            RouteSlug::parse("route-1").ok()
         );
     }
 }

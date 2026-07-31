@@ -783,6 +783,7 @@ impl ProviderTransport for PostCommitFailureTransport {
                     phase: TransportPhase::Body,
                     class: AttemptFailureClass::UpstreamServer,
                     response_committed: true,
+                    retry_after: None,
                     message: "failed after commit".into(),
                 }),
             ];
@@ -804,6 +805,7 @@ impl ProviderTransport for NeverCalledTransport {
                 phase: TransportPhase::Connect,
                 class: AttemptFailureClass::Connect,
                 response_committed: false,
+                retry_after: None,
                 message: "secondary invoked".into(),
             })
         })

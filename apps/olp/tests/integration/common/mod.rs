@@ -1,16 +1,7 @@
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use olp::ApiState;
 use olp_storage::AuthHmacKey;
-
-/// URL of the empty PostgreSQL 18 database each integration test expects.
-/// `scripts/run-postgres-tests.sh` (`make db-test`) provisions one per test.
-pub fn test_database_url() -> String {
-    std::env::var("OLP_TEST_DATABASE_URL")
-        .expect("OLP_TEST_DATABASE_URL must point to an empty PostgreSQL 18 database")
-}
 
 pub const BOOTSTRAP_TOKEN: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 

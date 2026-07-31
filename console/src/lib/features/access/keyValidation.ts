@@ -1,4 +1,4 @@
-export type ApiKeyFormValue = {
+type ApiKeyFormValue = {
   name: string;
   requestsPerMinute?: number;
   tokensPerMinute?: number;
@@ -9,7 +9,7 @@ export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
   const errors: Record<string, string> = {};
   const name = value.name.trim();
   if (!name) errors.name = 'Enter a name.';
-  else if (name.length > 100) errors.name = 'Use 100 characters or fewer.';
+  else if (Array.from(name).length > 100) errors.name = 'Use 100 characters or fewer.';
 
   for (const field of ['requestsPerMinute', 'tokensPerMinute', 'maxConcurrency'] as const) {
     const limit = value[field];

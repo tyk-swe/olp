@@ -40,19 +40,10 @@ macro_rules! uuid_id {
                 self.0.fmt(formatter)
             }
         }
-
-        impl FromStr for $name {
-            type Err = uuid::Error;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Uuid::parse_str(value).map(Self)
-            }
-        }
     };
 }
 
 uuid_id!(ApiKeyId);
-uuid_id!(AttemptId);
 uuid_id!(CredentialVersionId);
 uuid_id!(ProviderId);
 uuid_id!(RequestId);
@@ -162,18 +153,6 @@ impl DurationMs {
     #[must_use]
     pub fn as_duration(self) -> Duration {
         Duration::from_millis(self.0)
-    }
-}
-
-impl From<DurationMs> for Duration {
-    fn from(value: DurationMs) -> Self {
-        value.as_duration()
-    }
-}
-
-impl From<Duration> for DurationMs {
-    fn from(value: Duration) -> Self {
-        Self(value.as_millis().try_into().unwrap_or(u64::MAX))
     }
 }
 

@@ -278,6 +278,43 @@ async fn executes_embeddings_as_a_typed_unary_result() {
 }
 
 #[tokio::test]
+async fn embeddings_reject_count_and_requested_dimension_mismatches() {
+    for (data, message) in [
+        (
+            serde_json::json!([
+                {"object": "embedding", "index": 0, "embedding": [0.25, -0.5]},
+                {"object": "embedding", "index": 1, "embedding": [0.5, -0.25]}
+            ]),
+            "expected 1 vectors, received 2",
+        ),
+        (
+            serde_json::json!([
+                {"object": "embedding", "index": 0, "embedding": [0.25]}
+            ]),
+            "expected vectors with 2 dimensions",
+        ),
+    ] {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "object": "list",
+            "model": "text-embedding-3-small",
+            "data": data,
+            "usage": {"prompt_tokens": 1, "total_tokens": 1}
+        }))
+        .unwrap();
+        let (base_url, _) = spawn_mock(MockResponse {
+            chunks: vec![(Duration::ZERO, http_response("application/json", &body))],
+        })
+        .await;
+        let connector = test_connector(&base_url, ConnectorTimeouts::default());
+
+        let failure = execute_error(&connector, embeddings_request()).await;
+        assert_eq!(failure.phase, TransportPhase::Body);
+        assert_eq!(failure.class, AttemptFailureClass::Protocol);
+        assert!(failure.message.contains(message));
+    }
+}
+
+#[tokio::test]
 #[ignore = "requires OLP_LIVE_OPENAI_API_KEY"]
 async fn live_provider_discovers_openai_models() {
     let key = std::env::var("OLP_LIVE_OPENAI_API_KEY")

@@ -232,6 +232,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
         phase: olp_domain::TransportPhase::FirstByte,
         class: AttemptFailureClass::Connect,
         response_committed: false,
+        retry_after: None,
         message: "connection closed before response headers".to_owned(),
     };
 
@@ -240,6 +241,20 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
     assert_eq!(media.class, AttemptFailureClass::Ambiguous);
     assert!(media.response_committed);
     assert!(!media.allows_failover());
+
+    let upstream_server = reclassify_ambiguous_transport_failure(
+        TransportError {
+            phase: olp_domain::TransportPhase::FirstByte,
+            class: AttemptFailureClass::UpstreamServer,
+            response_committed: false,
+            retry_after: None,
+            message: "provider returned HTTP 500".to_owned(),
+        },
+        OperationKind::ImageGeneration,
+    );
+    assert_eq!(upstream_server.class, AttemptFailureClass::Ambiguous);
+    assert!(upstream_server.response_committed);
+    assert!(!upstream_server.allows_failover());
 
     let generation = reclassify_ambiguous_transport_failure(failure, OperationKind::Generation);
     assert_eq!(generation.class, AttemptFailureClass::Connect);
@@ -251,6 +266,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
             phase: olp_domain::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
+            retry_after: None,
             message: "connection failed".to_owned(),
         },
         OperationKind::ImageGeneration,
@@ -326,17 +342,13 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
     .unwrap();
     let operation = decode_chat_completion(request).unwrap();
     let principal = test_principal(&state, Surface::OpenAi);
-    let error = match execute_event_operation_for_surface_inner(
-        &state,
-        &principal,
-        operation,
-        TransportMode::Unary,
-    )
-    .await
-    {
-        Ok(_) => panic!("missing limiter must fail closed before route selection"),
-        Err(error) => error,
-    };
+    let error =
+        match execute_event_operation_inner(&state, &principal, operation, TransportMode::Unary)
+            .await
+        {
+            Ok(_) => panic!("missing limiter must fail closed before route selection"),
+            Err(error) => error,
+        };
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error.code, "distributed_limits_unavailable");
 }
@@ -360,7 +372,7 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
     let operation = decode_response_input_tokens(request).unwrap();
     let principal = test_principal(&state, Surface::OpenAi);
 
-    let error = match execute_routed_result_for_surface_inner(
+    let error = match execute_routed_result_inner(
         &state,
         &principal,
         operation,

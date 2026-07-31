@@ -67,7 +67,7 @@ struct MockIdp {
 async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     let db = olp_storage::test_support::TestDb::create_migrated("oidc_http").await;
     let store = db.store(8).await;
-    let (idp, _idp_task) = spawn_mock_idp().await;
+    let (idp, idp_task) = spawn_mock_idp().await;
 
     let mut api_state = ApiState::new(
         ApiMode::Control,
@@ -801,6 +801,14 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     .await;
     assert_eq!(unlinked.status(), StatusCode::NO_CONTENT);
     assert!(unlinked.headers().contains_key("x-csrf-token"));
+    owner_csrf = unlinked
+        .headers()
+        .get("x-csrf-token")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    owner_cookies = apply_response_cookies(&owner_cookies, &unlinked);
     let remaining: i64 =
         sqlx::query_scalar("SELECT count(*) FROM oidc_identities WHERE user_id = $1")
             .bind(owner_uuid)
@@ -834,6 +842,50 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
             .await
             .unwrap();
     assert_eq!(login_flow_rows, 0);
+
+    let current_configuration = send_empty(
+        &app,
+        Method::GET,
+        "/api/v1/oidc/configuration",
+        Some(&owner_cookies),
+        None,
+    )
+    .await;
+    assert_eq!(current_configuration.status(), StatusCode::OK);
+    let configuration_etag = current_configuration
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    idp_task.abort();
+    let _ = idp_task.await;
+    let disabled = send_json(
+        &app,
+        Method::PUT,
+        "/api/v1/oidc/configuration",
+        json!({
+            "discovery_url": format!("{}/.well-known/openid-configuration", idp.issuer),
+            "issuer": idp.issuer,
+            "client_id": CLIENT_ID,
+            "enabled": false,
+            "scopes": ["openid", "email", "profile", "groups"],
+            "group_role_mappings": [{"claim_value": "engineering", "role": "developer"}]
+        }),
+        Some(&owner_cookies),
+        Some(&owner_csrf),
+        Some(&configuration_etag),
+    )
+    .await;
+    assert_eq!(disabled.status(), StatusCode::OK);
+    let disabled_capabilities =
+        send_empty(&app, Method::GET, "/api/v1/auth/capabilities", None, None).await;
+    assert_eq!(disabled_capabilities.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(disabled_capabilities).await,
+        json!({"local_login_enabled": true, "oidc_login_enabled": false})
+    );
 }
 
 struct BrowserFlow {

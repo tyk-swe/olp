@@ -3,8 +3,6 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::{Extension, Path, State},
-    http::{HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
 };
 use chrono::Utc;
 use olp_domain::{ApiKeyAuthorizationError, OperationKind, RouteSlug, Surface, authorize_api_key};
@@ -18,14 +16,12 @@ use crate::{
 pub(super) async fn list_models(
     State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
-) -> Result<Json<ModelList>, OpenAiModelError> {
+) -> Result<Json<ModelList>, InferenceError> {
     let runtime = Arc::clone(principal.runtime());
     let key = principal.key();
     authorize_api_key(key, None, OperationKind::ModelList, Utc::now())
         .map_err(map_authorization_error)?;
-    let lease = reserve_model_limits(&state, &principal)
-        .await
-        .map_err(OpenAiModelError::from_inference)?;
+    let lease = reserve_model_limits(&state, &principal).await?;
 
     let created = runtime.generation.activated_at.timestamp().max(0);
     let data = runtime
@@ -48,23 +44,21 @@ pub(super) async fn get_model(
     State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     Path(model_id): Path<String>,
-) -> Result<Json<ModelObject>, OpenAiModelError> {
+) -> Result<Json<ModelObject>, InferenceError> {
     let runtime = Arc::clone(principal.runtime());
     let key = principal.key();
     authorize_api_key(key, None, OperationKind::ModelGet, Utc::now())
         .map_err(map_authorization_error)?;
-    let lease = reserve_model_limits(&state, &principal)
-        .await
-        .map_err(OpenAiModelError::from_inference)?;
+    let lease = reserve_model_limits(&state, &principal).await?;
 
     let result = (|| {
         let slug = RouteSlug::parse(model_id.clone())
-            .map_err(|_| OpenAiModelError::model_not_found(&model_id))?;
+            .map_err(|_| InferenceError::model_not_found(&model_id))?;
         if !runtime.routes.contains_key(&slug)
             || (!key.allowed_routes.is_empty() && !key.allowed_routes.contains(&slug))
             || !route_is_visible(&runtime, &slug)
         {
-            return Err(OpenAiModelError::model_not_found(&model_id));
+            return Err(InferenceError::model_not_found(&model_id));
         }
 
         Ok(Json(ModelObject::new(
@@ -99,13 +93,15 @@ fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug) -> bool {
     })
 }
 
-fn map_authorization_error(error: ApiKeyAuthorizationError) -> OpenAiModelError {
+fn map_authorization_error(error: ApiKeyAuthorizationError) -> InferenceError {
     match error {
         ApiKeyAuthorizationError::Revoked | ApiKeyAuthorizationError::Expired => {
-            OpenAiModelError::unauthorized()
+            InferenceError::unauthorized()
         }
         ApiKeyAuthorizationError::MissingScope { .. }
-        | ApiKeyAuthorizationError::RouteNotAllowed { .. } => OpenAiModelError::forbidden(),
+        | ApiKeyAuthorizationError::RouteNotAllowed { .. } => {
+            InferenceError::forbidden("The API key does not have the models_read scope.".to_owned())
+        }
     }
 }
 
@@ -134,106 +130,6 @@ impl ModelObject {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct OpenAiModelError {
-    status: StatusCode,
-    code: &'static str,
-    kind: &'static str,
-    message: String,
-    retry_after: Option<std::time::Duration>,
-}
-
-impl OpenAiModelError {
-    fn unauthorized() -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            code: "invalid_api_key",
-            kind: "authentication_error",
-            message: "The API key is invalid or unavailable.".to_owned(),
-            retry_after: None,
-        }
-    }
-
-    fn forbidden() -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            code: "permission_denied",
-            kind: "permission_error",
-            message: "The API key does not have the models_read scope.".to_owned(),
-            retry_after: None,
-        }
-    }
-
-    fn model_not_found(id: &str) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            code: "model_not_found",
-            kind: "invalid_request_error",
-            message: format!("The model `{id}` does not exist or you do not have access to it."),
-            retry_after: None,
-        }
-    }
-
-    fn from_inference(error: InferenceError) -> Self {
-        let status = error.status();
-        let (code, kind) = if status == StatusCode::TOO_MANY_REQUESTS {
-            ("rate_limit_exceeded", "rate_limit_error")
-        } else {
-            ("service_unavailable", "service_unavailable_error")
-        };
-        Self {
-            status,
-            code,
-            kind,
-            message: error.message().to_owned(),
-            retry_after: error.retry_after(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct OpenAiErrorEnvelope<'a> {
-    error: OpenAiErrorBody<'a>,
-}
-
-#[derive(Serialize)]
-struct OpenAiErrorBody<'a> {
-    message: &'a str,
-    #[serde(rename = "type")]
-    kind: &'a str,
-    param: Option<&'a str>,
-    code: &'a str,
-}
-
-impl IntoResponse for OpenAiModelError {
-    fn into_response(self) -> Response {
-        let is_unauthorized = self.status == StatusCode::UNAUTHORIZED;
-        let mut response = (
-            self.status,
-            Json(OpenAiErrorEnvelope {
-                error: OpenAiErrorBody {
-                    message: &self.message,
-                    kind: self.kind,
-                    param: None,
-                    code: self.code,
-                },
-            }),
-        )
-            .into_response();
-        if is_unauthorized {
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-        }
-        if let Some(retry_after) = self.retry_after {
-            let value = HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
-                .expect("retry-after seconds are a valid header value");
-            response.headers_mut().insert(header::RETRY_AFTER, value);
-        }
-        response
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -242,7 +138,11 @@ mod tests {
         sync::Arc,
     };
 
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+        response::Response,
+    };
     use chrono::{TimeZone, Utc};
     use futures::stream;
     use http_body_util::BodyExt;

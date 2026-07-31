@@ -26,7 +26,6 @@ fn event() -> RequestMetadataEvent {
         cached_input_tokens: None,
         media_units: None,
         usage_complete: true,
-        unpriced: true,
         attempts: vec![RequestAttemptMetadata {
             id: Uuid::now_v7(),
             ordinal: 1,
@@ -41,6 +40,27 @@ fn event() -> RequestMetadataEvent {
             first_byte_ms: Some(3),
         }],
     }
+}
+
+#[test]
+fn request_metadata_validation_matches_database_and_timing_invariants() {
+    assert!(validate_request_metadata_event(&event()).is_ok());
+
+    let mut invalid = event();
+    invalid.cached_input_tokens = Some(2);
+    assert!(validate_request_metadata_event(&invalid).is_err());
+
+    let mut invalid = event();
+    invalid.media_units = Some(Decimal::new(-1, 0));
+    assert!(validate_request_metadata_event(&invalid).is_err());
+
+    let mut invalid = event();
+    invalid.attempts[0].first_byte_ms = Some(11);
+    assert!(validate_request_metadata_event(&invalid).is_err());
+
+    let mut invalid = event();
+    invalid.attempts[0].started_at = invalid.request_started_at - chrono::Duration::milliseconds(1);
+    assert!(validate_request_metadata_event(&invalid).is_err());
 }
 
 #[test]
@@ -144,7 +164,7 @@ async fn invalid_valkey_configuration_accounts_for_queued_events() {
 
     assert!(
         receiver
-            .run_connecting("://invalid", "request-metadata", shutdown)
+            .run_connecting("://invalid", "request-metadata", 1, shutdown)
             .await
             .is_err()
     );

@@ -1,13 +1,15 @@
-use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet, future::Future, panic::AssertUnwindSafe, sync::Arc, time::Duration,
+};
 
-use futures::future::select_all;
+use futures::{FutureExt as _, future::select_all};
 use olp_storage::{
     DistributedLimiter, MasterKey, PgStore, REQUEST_METADATA_STREAM, RequestMetadataEmitter,
     RuntimeHintSubscriber,
 };
 use tokio::{
     net::TcpListener,
-    sync::{oneshot, watch},
+    sync::{mpsc, watch},
     task::JoinHandle,
 };
 use tracing::{error, info, warn};
@@ -33,6 +35,53 @@ use super::{
         load_master_key,
     },
 };
+
+pub(super) struct BackgroundTaskStatus {
+    name: &'static str,
+    result: AppResult<()>,
+}
+
+pub(super) fn spawn_fallible_background_task<F>(
+    name: &'static str,
+    future: F,
+    status: mpsc::UnboundedSender<BackgroundTaskStatus>,
+    shutdown: watch::Receiver<bool>,
+) -> JoinHandle<()>
+where
+    F: Future<Output = AppResult<()>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let result = AssertUnwindSafe(future)
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                Err(std::io::Error::other(format!("background task `{name}` panicked")).into())
+            });
+        if result.is_err() || !*shutdown.borrow() {
+            let _ = status.send(BackgroundTaskStatus { name, result });
+        }
+    })
+}
+
+pub(super) fn spawn_background_task<F>(
+    name: &'static str,
+    future: F,
+    status: mpsc::UnboundedSender<BackgroundTaskStatus>,
+    shutdown: watch::Receiver<bool>,
+) -> JoinHandle<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    spawn_fallible_background_task(
+        name,
+        async move {
+            future.await;
+            Ok(())
+        },
+        status,
+        shutdown,
+    )
+}
 
 pub(super) async fn serve(
     mode: ApiMode,
@@ -141,32 +190,47 @@ pub(super) async fn serve(
     let observability_listener = TcpListener::bind(args.observability_listen_addr).await?;
     let (background_shutdown_sender, background_shutdown_receiver) = watch::channel(false);
     let (listener_shutdown_sender, listener_shutdown_receiver) = watch::channel(false);
-    let mut request_metadata_writer_status = None;
+    let (background_status_sender, mut background_status_receiver) = mpsc::unbounded_channel();
     let mut background_tasks: Vec<JoinHandle<()>> = Vec::new();
-    background_tasks.push(spawn_runtime_poller(
-        Arc::clone(&state.runtime),
-        store.clone(),
-        state.transports.clone(),
-        state.circuits.clone(),
-        state.master_key.clone(),
-        background_shutdown_receiver.clone(),
-    ));
-    if let Some(url) = &args.valkey_url {
-        background_tasks.push(tokio::spawn(runtime_hint_supervisor(
+    background_tasks.push(spawn_background_task(
+        "runtime poller",
+        runtime_poller(
             Arc::clone(&state.runtime),
             store.clone(),
             state.transports.clone(),
             state.circuits.clone(),
             state.master_key.clone(),
-            url.clone(),
             background_shutdown_receiver.clone(),
-        )));
+        ),
+        background_status_sender.clone(),
+        background_shutdown_receiver.clone(),
+    ));
+    if let Some(url) = &args.valkey_url {
+        background_tasks.push(spawn_background_task(
+            "runtime hint subscriber",
+            runtime_hint_supervisor(
+                Arc::clone(&state.runtime),
+                store.clone(),
+                state.transports.clone(),
+                state.circuits.clone(),
+                state.master_key.clone(),
+                url.clone(),
+                background_shutdown_receiver.clone(),
+            ),
+            background_status_sender.clone(),
+            background_shutdown_receiver.clone(),
+        ));
         state.limiter.mark_configured();
-        background_tasks.push(tokio::spawn(limiter_supervisor(
-            state.limiter.clone(),
-            url.clone(),
+        background_tasks.push(spawn_background_task(
+            "distributed limiter",
+            limiter_supervisor(
+                state.limiter.clone(),
+                url.clone(),
+                background_shutdown_receiver.clone(),
+            ),
+            background_status_sender.clone(),
             background_shutdown_receiver.clone(),
-        )));
+        ));
 
         if mode.serves_gateway() {
             // Install the bounded local emitter even when Valkey is not up yet.
@@ -179,66 +243,98 @@ pub(super) async fn serve(
                 std::env::var("HOSTNAME").unwrap_or_else(|_| "olp".to_owned()),
                 args.listen_addr
             );
-            background_tasks.push(tokio::spawn(request_metadata_loss_reporter(
-                store.clone(),
-                emitter,
-                gateway_instance,
+            background_tasks.push(spawn_background_task(
+                "request metadata loss reporter",
+                request_metadata_loss_reporter(
+                    store.clone(),
+                    emitter,
+                    gateway_instance,
+                    background_shutdown_receiver.clone(),
+                ),
+                background_status_sender.clone(),
                 background_shutdown_receiver.clone(),
-            )));
+            ));
             let request_metadata_writer_url = url.clone();
             let request_metadata_writer_shutdown = background_shutdown_receiver.clone();
-            let (status_sender, status_receiver) = oneshot::channel();
-            request_metadata_writer_status = Some(status_receiver);
-            background_tasks.push(tokio::spawn(async move {
-                let result: AppResult<()> = receiver
-                    .run_connecting(
-                        &request_metadata_writer_url,
-                        REQUEST_METADATA_STREAM,
-                        request_metadata_writer_shutdown,
-                    )
-                    .await
-                    .map_err(Into::into);
-                if let Err(error) = &result {
-                    error!(%error, "request metadata stream writer stopped");
-                }
-                let _ = status_sender.send(result);
-            }));
+            let request_metadata_stream_max_length = args.request_metadata_stream_max_length;
+            background_tasks.push(spawn_fallible_background_task(
+                "request metadata stream writer",
+                async move {
+                    let result: AppResult<()> = receiver
+                        .run_connecting(
+                            &request_metadata_writer_url,
+                            REQUEST_METADATA_STREAM,
+                            request_metadata_stream_max_length,
+                            request_metadata_writer_shutdown,
+                        )
+                        .await
+                        .map_err(Into::into);
+                    if let Err(error) = &result {
+                        error!(%error, "request metadata stream writer stopped");
+                    }
+                    result
+                },
+                background_status_sender.clone(),
+                background_shutdown_receiver.clone(),
+            ));
         }
         if run_worker_in_process {
-            background_tasks.push(tokio::spawn(outbox_supervisor(
-                store.clone(),
-                url.clone(),
+            background_tasks.push(spawn_background_task(
+                "outbox publisher",
+                outbox_supervisor(
+                    store.clone(),
+                    url.clone(),
+                    background_shutdown_receiver.clone(),
+                ),
+                background_status_sender.clone(),
                 background_shutdown_receiver.clone(),
-            )));
-            background_tasks.push(tokio::spawn(request_metadata_consumer_supervisor(
-                store.clone(),
-                url.clone(),
+            ));
+            background_tasks.push(spawn_background_task(
+                "request metadata consumer",
+                request_metadata_consumer_supervisor(
+                    store.clone(),
+                    url.clone(),
+                    background_shutdown_receiver.clone(),
+                ),
+                background_status_sender.clone(),
                 background_shutdown_receiver.clone(),
-            )));
+            ));
         }
     }
     if run_worker_in_process {
-        background_tasks.push(tokio::spawn(maintenance_supervisor(
-            store.clone(),
+        background_tasks.push(spawn_background_task(
+            "maintenance worker",
+            maintenance_supervisor(store.clone(), background_shutdown_receiver.clone()),
+            background_status_sender.clone(),
             background_shutdown_receiver.clone(),
-        )));
-        background_tasks.push(tokio::spawn(request_metadata_epoch_supervisor(
-            store.clone(),
+        ));
+        background_tasks.push(spawn_background_task(
+            "request metadata epoch worker",
+            request_metadata_epoch_supervisor(store.clone(), background_shutdown_receiver.clone()),
+            background_status_sender.clone(),
             background_shutdown_receiver.clone(),
-        )));
+        ));
     }
     let dependencies = state.mode_dependencies()?;
     let observability_state = dependencies.observability();
     if let Some(gateway_state) = dependencies.gateway() {
-        background_tasks.push(tokio::spawn(media_reconciliation_supervisor(
-            gateway_state,
+        background_tasks.push(spawn_background_task(
+            "media reconciliation",
+            media_reconciliation_supervisor(gateway_state, background_shutdown_receiver.clone()),
+            background_status_sender.clone(),
             background_shutdown_receiver.clone(),
-        )));
+        ));
     }
-    background_tasks.push(crate::spawn_observability_cache(
-        observability_state.clone(),
+    background_tasks.push(spawn_background_task(
+        "observability cache",
+        crate::run_observability_cache(
+            observability_state.clone(),
+            background_shutdown_receiver.clone(),
+        ),
+        background_status_sender.clone(),
         background_shutdown_receiver.clone(),
     ));
+    drop(background_status_sender);
 
     info!(address = %args.listen_addr, ?mode, "OLP public listener ready");
     info!(address = %args.observability_listen_addr, ?mode, "OLP observability listener ready");
@@ -260,14 +356,14 @@ pub(super) async fn serve(
     let (public_result, observability_result, terminal_error) = coordinate_shutdown(
         public_server,
         observability_server,
-        shutdown_reason(shutdown_signal(), request_metadata_writer_status.as_mut()),
+        shutdown_reason(shutdown_signal(), &mut background_status_receiver),
         listener_shutdown_sender,
         background_shutdown_sender,
     )
     .await;
     stop_background_tasks(background_tasks, BACKGROUND_SHUTDOWN_TIMEOUT).await;
     let terminal_error =
-        resolve_request_metadata_writer_error(request_metadata_writer_status, terminal_error).await;
+        terminal_error.or_else(|| background_task_error(&mut background_status_receiver));
     public_result?;
     observability_result?;
     if let Some(error) = terminal_error {
@@ -278,48 +374,38 @@ pub(super) async fn serve(
 
 pub(super) async fn shutdown_reason<Signal>(
     signal: Signal,
-    request_metadata_writer_status: Option<&mut oneshot::Receiver<AppResult<()>>>,
+    background_status: &mut mpsc::UnboundedReceiver<BackgroundTaskStatus>,
 ) -> Option<AppError>
 where
     Signal: Future<Output = ()>,
 {
-    let Some(request_metadata_writer_status) = request_metadata_writer_status else {
-        signal.await;
-        return None;
-    };
     tokio::select! {
         biased;
-        status = request_metadata_writer_status => match status {
-            Ok(Err(error)) => Some(error),
-            Ok(Ok(())) => Some(std::io::Error::other(
-                "request metadata stream writer stopped unexpectedly",
+        status = background_status.recv() => match status {
+            Some(BackgroundTaskStatus { result: Err(error), .. }) => Some(error),
+            Some(BackgroundTaskStatus { name, result: Ok(()) }) => Some(std::io::Error::other(
+                format!("background task `{name}` stopped unexpectedly"),
             ).into()),
-            Err(error) => Some(std::io::Error::other(format!(
-                "request metadata stream writer failed without reporting status: {error}",
-            )).into()),
+            None => Some(std::io::Error::other(
+                "background task monitors stopped unexpectedly",
+            ).into()),
         },
         () = signal => None,
     }
 }
 
-pub(super) async fn resolve_request_metadata_writer_error(
-    request_metadata_writer_status: Option<oneshot::Receiver<AppResult<()>>>,
-    terminal_error: Option<AppError>,
+pub(super) fn background_task_error(
+    background_status: &mut mpsc::UnboundedReceiver<BackgroundTaskStatus>,
 ) -> Option<AppError> {
-    if terminal_error.is_some() {
-        return terminal_error;
-    }
-    let request_metadata_writer_status = request_metadata_writer_status?;
-    match request_metadata_writer_status.await {
-        Ok(Ok(())) => None,
-        Ok(Err(error)) => Some(error),
-        Err(error) => Some(
-            std::io::Error::other(format!(
-                "request metadata stream writer failed without reporting status: {error}",
-            ))
-            .into(),
-        ),
-    }
+    let status = background_status.try_recv().ok()?;
+    Some(match status.result {
+        Err(error) => error,
+        Ok(()) => std::io::Error::other(format!(
+            "background task `{}` stopped unexpectedly",
+            status.name
+        ))
+        .into(),
+    })
 }
 
 pub(super) async fn coordinate_shutdown<Public, Observability, Signal>(
@@ -496,51 +582,49 @@ async fn runtime_hint_supervisor(
     }
 }
 
-fn spawn_runtime_poller(
+async fn runtime_poller(
     runtime: Arc<RuntimeManager>,
     store: PgStore,
     transports: TransportRegistry,
     circuits: crate::circuit::CircuitBreaker,
     master_key: Option<Arc<MasterKey>>,
     mut shutdown: watch::Receiver<bool>,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    match activate_latest_runtime(
-                        &runtime,
-                        &store,
-                        &transports,
-                        &circuits,
-                        master_key.as_deref(),
-                    )
-                        .await
-                    {
-                        Ok(true) => {
-                            info!(
-                                generation = ?runtime.active_generation_ordinal(),
-                                "runtime generation activated"
-                            );
-                        }
-                        Ok(false) => {}
-                        Err(error) => {
-                            // Keep serving the last-known-good Arc. A bad release never
-                            // partially changes live indexes.
-                            error!(%error, "runtime poll rejected release; retaining last-known-good")
-                        }
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                match activate_latest_runtime(
+                    &runtime,
+                    &store,
+                    &transports,
+                    &circuits,
+                    master_key.as_deref(),
+                )
+                    .await
+                {
+                    Ok(true) => {
+                        info!(
+                            generation = ?runtime.active_generation_ordinal(),
+                            "runtime generation activated"
+                        );
                     }
-                }
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
-                        return;
+                    Ok(false) => {}
+                    Err(error) => {
+                        // Keep serving the last-known-good Arc. A bad release never
+                        // partially changes live indexes.
+                        error!(%error, "runtime poll rejected release; retaining last-known-good")
                     }
                 }
             }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
         }
-    })
+    }
 }
 
 pub(super) async fn stop_background_tasks(mut tasks: Vec<JoinHandle<()>>, timeout: Duration) {
@@ -627,6 +711,20 @@ async fn limiter_supervisor(
     }
 }
 
+const MAX_RUNTIME_REJECTION_DIAGNOSTICS: usize = 32;
+
+fn record_runtime_rejection(
+    rejected: &mut Vec<String>,
+    rejected_count: &mut usize,
+    sequence: i64,
+    error: &dyn std::fmt::Display,
+) {
+    *rejected_count = (*rejected_count).saturating_add(1);
+    if rejected.len() < MAX_RUNTIME_REJECTION_DIAGNOSTICS {
+        rejected.push(format!("{sequence}: {error}"));
+    }
+}
+
 async fn activate_latest_runtime(
     runtime: &RuntimeManager,
     store: &PgStore,
@@ -634,67 +732,113 @@ async fn activate_latest_runtime(
     circuits: &crate::circuit::CircuitBreaker,
     master_key: Option<&MasterKey>,
 ) -> AppResult<bool> {
-    let releases = store
-        .recent_valid_runtime_releases_after(32, runtime.active_generation_ordinal())
-        .await?;
-    if releases.is_empty() {
-        return Ok(false);
-    }
-    let current_api_keys = store.current_runtime_api_keys().await?;
+    const PAGE_SIZE: u16 = 32;
+    let installed_sequence = runtime.active_generation_ordinal();
+    let mut before_sequence = None;
+    let mut current_api_keys = None;
     let mut rejected = Vec::new();
-    for release in releases {
-        let snapshot = match runtime.decode_release_candidate(&release, current_api_keys.clone()) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                rejected.push(format!("{}: {error}", release.sequence));
+    let mut rejected_count = 0usize;
+    loop {
+        let releases = store
+            .valid_runtime_releases_before(PAGE_SIZE, installed_sequence, before_sequence)
+            .await?;
+        if releases.is_empty() {
+            break;
+        }
+        let page_exhausted = releases.len() < usize::from(PAGE_SIZE);
+        before_sequence = releases.last().map(|release| release.sequence);
+        if current_api_keys.is_none() {
+            current_api_keys = Some(store.current_runtime_api_keys().await?);
+        }
+        let current_api_keys = current_api_keys
+            .as_ref()
+            .expect("runtime API keys were loaded above");
+        for release in releases {
+            let snapshot =
+                match runtime.decode_release_candidate(&release, current_api_keys.clone()) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        record_runtime_rejection(
+                            &mut rejected,
+                            &mut rejected_count,
+                            release.sequence,
+                            &error,
+                        );
+                        continue;
+                    }
+                };
+            // Provider transports are assembled from normalized secret storage, not
+            // the public runtime payload. Require the release-time sidecar to match
+            // every current transport-affecting field before accepting an LKG.
+            if let Err(error) = store.runtime_provider_configurations(&snapshot).await {
+                record_runtime_rejection(
+                    &mut rejected,
+                    &mut rejected_count,
+                    release.sequence,
+                    &error,
+                );
                 continue;
             }
-        };
-        // Provider transports are assembled from normalized secret storage, not
-        // the public runtime payload. Require the release-time sidecar to match
-        // every current transport-affecting field before accepting an LKG.
-        if let Err(error) = store.runtime_provider_configurations(&snapshot).await {
-            rejected.push(format!("{}: {error}", release.sequence));
-            continue;
-        }
-        let mut candidate_transports = transports.snapshot();
-        if let Some(master_key) = master_key
-            && let Err(error) =
-                load_runtime_transports(store, master_key, &snapshot, &mut candidate_transports)
-                    .await
-        {
-            rejected.push(format!("{}: {error}", release.sequence));
-            continue;
-        }
-        candidate_transports.retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
-        let live_targets = snapshot
-            .routes
-            .values()
-            .flat_map(|route| route.targets.iter().map(|target| target.id))
-            .collect::<BTreeSet<_>>();
-        match runtime.install(snapshot, candidate_transports) {
-            Ok(installed) => {
-                if installed {
-                    circuits.retain_targets(&live_targets);
-                }
-                if !rejected.is_empty() {
-                    warn!(
-                        rejected = ?rejected,
-                        selected_sequence = release.sequence,
-                        "installed previous verified runtime release after rejecting newer candidates"
-                    );
-                }
-                return Ok(installed);
+            let mut candidate_transports = transports.snapshot();
+            if let Some(master_key) = master_key
+                && let Err(error) =
+                    load_runtime_transports(store, master_key, &snapshot, &mut candidate_transports)
+                        .await
+            {
+                record_runtime_rejection(
+                    &mut rejected,
+                    &mut rejected_count,
+                    release.sequence,
+                    &error,
+                );
+                continue;
             }
-            Err(error) => rejected.push(format!("{}: {error}", release.sequence)),
+            candidate_transports
+                .retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
+            let live_targets = snapshot
+                .routes
+                .values()
+                .flat_map(|route| route.targets.iter().map(|target| target.id))
+                .collect::<BTreeSet<_>>();
+            match runtime.install(snapshot, candidate_transports) {
+                Ok(installed) => {
+                    if installed {
+                        circuits.retain_targets(&live_targets);
+                    }
+                    if !rejected.is_empty() {
+                        warn!(
+                            rejected = ?rejected,
+                            rejected_count,
+                            selected_sequence = release.sequence,
+                            "installed previous verified runtime release after rejecting newer candidates"
+                        );
+                    }
+                    return Ok(installed);
+                }
+                Err(error) => record_runtime_rejection(
+                    &mut rejected,
+                    &mut rejected_count,
+                    release.sequence,
+                    &error,
+                ),
+            }
+        }
+        if page_exhausted {
+            break;
         }
     }
-    if rejected.is_empty() {
+    if rejected_count == 0 {
         return Ok(false);
     }
+    let omitted = rejected_count.saturating_sub(rejected.len());
+    let omitted = if omitted == 0 {
+        String::new()
+    } else {
+        format!("; {omitted} more omitted")
+    };
     Err(std::io::Error::other(format!(
-        "no verified runtime release could be installed: {}",
-        rejected.join("; ")
+        "no verified runtime release could be installed: {}{omitted}",
+        rejected.join("; "),
     ))
     .into())
 }
@@ -721,5 +865,21 @@ pub(super) async fn shutdown_signal() {
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod rejection_tests {
+    use super::{MAX_RUNTIME_REJECTION_DIAGNOSTICS, record_runtime_rejection};
+
+    #[test]
+    fn runtime_rejection_diagnostics_are_bounded() {
+        let mut rejected = Vec::new();
+        let mut count = 0;
+        for sequence in 0..=MAX_RUNTIME_REJECTION_DIAGNOSTICS as i64 {
+            record_runtime_rejection(&mut rejected, &mut count, sequence, &"invalid");
+        }
+        assert_eq!(count, MAX_RUNTIME_REJECTION_DIAGNOSTICS + 1);
+        assert_eq!(rejected.len(), MAX_RUNTIME_REJECTION_DIAGNOSTICS);
     }
 }

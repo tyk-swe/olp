@@ -35,7 +35,9 @@ use limits::{
     reserve_http_inference_limits,
 };
 use multipart::preauthorize_multipart;
-use validation::{is_json_content_type, payload_too_large, request_body_timeout};
+use validation::{
+    is_json_content_type, payload_too_large, request_body_read_failed, request_body_timeout,
+};
 
 pub(crate) use limits::InferencePrincipal;
 pub(crate) use limits::InferenceReservation;
@@ -238,7 +240,6 @@ impl LocalRequestMetadata {
             cached_input_tokens: None,
             media_units: None,
             usage_complete: false,
-            unpriced: true,
             attempts: Vec::new(),
         };
         if let Err(error) = request_metadata.emit(event) {
@@ -255,6 +256,7 @@ async fn enforce_request_limits_inner(
 ) -> Result<Response, RequestLimitRejection> {
     let request_started_at = chrono::Utc::now();
     let metadata_policy = endpoint.and_then(gateway::InferenceEndpoint::metadata);
+    let accepts_body = endpoint.is_none_or(gateway::InferenceEndpoint::accepts_body);
     if request.uri().to_string().len() > MAX_URI_BYTES {
         return Err(Problem::new(
             axum::http::StatusCode::URI_TOO_LONG,
@@ -334,14 +336,28 @@ async fn enforce_request_limits_inner(
         )
         .into());
     }
-    if request
-        .headers()
-        .get(axum::http::header::CONTENT_ENCODING)
-        .is_some_and(|value| {
-            !value
-                .to_str()
-                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("identity"))
-        })
+    if [
+        axum::http::header::CONTENT_TYPE,
+        axum::http::header::CONTENT_ENCODING,
+    ]
+    .into_iter()
+    .any(|name| request.headers().get_all(name).iter().nth(1).is_some())
+    {
+        return Err(Problem::bad_request(
+            "ambiguous_content_headers",
+            "Content-Type and Content-Encoding must appear at most once.",
+        )
+        .into());
+    }
+    if accepts_body
+        && request
+            .headers()
+            .get(axum::http::header::CONTENT_ENCODING)
+            .is_some_and(|value| {
+                !value
+                    .to_str()
+                    .is_ok_and(|value| value.trim().eq_ignore_ascii_case("identity"))
+            })
     {
         return Err(Problem::new(
             axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -356,8 +372,15 @@ async fn enforce_request_limits_inner(
         let content_type = request
             .headers()
             .get(axum::http::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_str())
+            .transpose()
+            .map_err(|_| Problem::bad_request("content_type_invalid", "Content-Type is invalid."))?
             .unwrap_or_default();
+        if !content_type.is_empty() && content_type.parse::<mime::Mime>().is_err() {
+            return Err(
+                Problem::bad_request("content_type_invalid", "Content-Type is invalid.").into(),
+            );
+        }
         (
             endpoint
                 .map(|endpoint| endpoint.body_limit(content_type))
@@ -370,12 +393,13 @@ async fn enforce_request_limits_inner(
             is_json_content_type(content_type),
         )
     };
-    if request
-        .headers()
-        .get(axum::http::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .is_some_and(|value| value > maximum as u64)
+    if accepts_body
+        && request
+            .headers()
+            .get(axum::http::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some_and(|value| value > maximum as u64)
     {
         return Err(payload_too_large(maximum).into());
     }
@@ -400,6 +424,17 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
+    if !accepts_body {
+        return Ok(run_request_with_reservation(
+            request,
+            next,
+            None,
+            local_metadata,
+            principal,
+            None,
+        )
+        .await);
+    }
     let multipart_policy = endpoint.and_then(gateway::InferenceEndpoint::multipart);
     if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
@@ -415,11 +450,17 @@ async fn enforce_request_limits_inner(
         let (parts, body) = request.into_parts();
         let bytes = match read_json_body(body, MAX_JSON_BODY_BYTES, REQUEST_BODY_TIMEOUT).await {
             Ok(bytes) => bytes,
-            Err(JsonBodyReadError::Rejected) => {
+            Err(JsonBodyReadError::TooLarge) => {
                 if let Some(metadata) = local_metadata.clone() {
                     metadata.emit(axum::http::StatusCode::PAYLOAD_TOO_LARGE);
                 }
                 return Err(payload_too_large(MAX_JSON_BODY_BYTES).into());
+            }
+            Err(JsonBodyReadError::Read) => {
+                if let Some(metadata) = local_metadata.clone() {
+                    metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+                }
+                return Err(request_body_read_failed().into());
             }
             Err(JsonBodyReadError::Timeout) => {
                 if let Some(metadata) = local_metadata.clone() {
@@ -428,14 +469,20 @@ async fn enforce_request_limits_inner(
                 return Err(request_body_timeout().into());
             }
         };
+        let route =
+            endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes));
         let local_metadata = local_metadata.map(|mut metadata| {
-            if let Some(route) =
-                endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes))
-            {
-                metadata.route_slug = route;
+            if let Some(route) = &route {
+                metadata.route_slug = route.as_str().to_owned();
             }
             metadata
         });
+        if let Err(problem) = validate_json_depth(&bytes) {
+            if let Some(metadata) = local_metadata {
+                metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+            }
+            return Err(problem.into());
+        }
         let requested_tokens = estimate_http_json_request_tokens(
             endpoint
                 .map(gateway::InferenceEndpoint::token_estimate)
@@ -443,7 +490,9 @@ async fn enforce_request_limits_inner(
             &bytes,
         );
         let reservation = if let Some(principal) = &principal {
-            match reserve_http_inference_limits(state, principal, requested_tokens).await {
+            match reserve_http_inference_limits(state, principal, requested_tokens, route.as_ref())
+                .await
+            {
                 Ok(reservation) => reservation,
                 Err(error) => {
                     if let Some(metadata) = local_metadata.clone() {
@@ -455,13 +504,6 @@ async fn enforce_request_limits_inner(
         } else {
             None
         };
-        if let Err(problem) = validate_json_depth(&bytes) {
-            release_reservation(reservation).await;
-            if let Some(metadata) = local_metadata {
-                metadata.emit(axum::http::StatusCode::BAD_REQUEST);
-            }
-            return Err(problem.into());
-        }
         let request = Request::from_parts(parts, Body::from(bytes));
         let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
         return Ok(run_request_with_reservation(
@@ -481,7 +523,7 @@ async fn enforce_request_limits_inner(
             .unwrap_or(gateway::TokenEstimate::Default),
     );
     let reservation = if let Some(principal) = &principal {
-        match reserve_http_inference_limits(state, principal, requested_tokens).await {
+        match reserve_http_inference_limits(state, principal, requested_tokens, None).await {
             Ok(reservation) => reservation,
             Err(error) => {
                 if let Some(metadata) = local_metadata.clone() {
@@ -663,6 +705,9 @@ async fn run_request_with_reservation(
         }
     }
     if let Some(reservation) = reservation {
+        if response.status().is_client_error() {
+            reservation.reconcile(0).await;
+        }
         let (parts, body) = response.into_parts();
         Response::from_parts(
             parts,
@@ -678,6 +723,7 @@ async fn run_request_with_reservation(
 
 async fn release_reservation(reservation: Option<InferenceReservation>) {
     if let Some(reservation) = reservation {
+        reservation.reconcile(0).await;
         reservation.release().await;
     }
 }

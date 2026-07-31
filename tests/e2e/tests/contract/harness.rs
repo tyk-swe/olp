@@ -131,6 +131,22 @@ fn binary() -> Result<PathBuf, String> {
     Ok(path)
 }
 
+pub(super) fn process_start_time(stat: &str) -> Option<&str> {
+    let (_, fields) = stat.rsplit_once(") ")?;
+    fields
+        .split_ascii_whitespace()
+        .nth(19)
+        .filter(|value| value.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn process_identity(pid: u32) -> Result<String, String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .map_err(|error| format!("failed to read process {pid} identity: {error}"))?;
+    let started = process_start_time(&stat)
+        .ok_or_else(|| format!("process {pid} has malformed /proc stat data"))?;
+    Ok(format!("{pid} {started}\n"))
+}
+
 fn random_hex(bytes: usize) -> String {
     let mut buffer = vec![0_u8; bytes];
     rand::rng().fill_bytes(&mut buffer);
@@ -225,7 +241,7 @@ async fn drop_database(admin: &str, name: &str) {
     }
 }
 
-fn database_url(admin: &str, name: &str) -> Result<String, String> {
+pub(super) fn database_url(admin: &str, name: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(admin)
         .map_err(|error| format!("invalid OLP_E2E_DATABASE_ADMIN_URL: {error}"))?;
     if url.cannot_be_a_base() || url.path().trim_matches('/').is_empty() {
@@ -335,7 +351,7 @@ impl LaunchGuard {
             }
             self.child = Some(child);
             let pid = self.child.as_ref().expect("child was just installed").id();
-            std::fs::write(self.run_dir.join("olp.pid"), format!("{pid}\n"))
+            std::fs::write(self.run_dir.join("olp.pid"), process_identity(pid)?)
                 .map_err(|error| format!("failed to write olp pid file: {error}"))?;
 
             let startup = await_live(
@@ -488,9 +504,16 @@ impl Server {
                         self.additional_children.len() + 2
                     ));
                     let pid = child.id();
+                    let identity = match process_identity(pid) {
+                        Ok(identity) => identity,
+                        Err(error) => {
+                            terminate_child(&mut child).await;
+                            return Err(error);
+                        }
+                    };
                     self.additional_children.push(child);
                     self.additional_stderr.push(Arc::clone(&stderr));
-                    std::fs::write(pid_file, format!("{pid}\n"))
+                    std::fs::write(pid_file, identity)
                         .map_err(|error| format!("failed to write gateway pid file: {error}"))?;
                     return Ok(GatewayProcess {
                         public_origin,
@@ -627,7 +650,7 @@ async fn terminate_child(child: &mut Child) {
 /// The suite's shared `Server` lives in a static and therefore has no process
 /// exit destructor. `scripts/run-e2e-tests.sh` owns that case with its
 /// run-scoped process/database trap, including panics, filters that exclude the
-/// graceful teardown test, and interruptions.
+/// graceful teardown test, and catchable INT/TERM interruptions.
 impl Drop for Server {
     fn drop(&mut self) {
         for child in &mut self.additional_children {
@@ -640,29 +663,5 @@ impl Drop for Server {
             self.child.kill().ok();
             self.child.wait().ok();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::database_url;
-
-    #[test]
-    fn database_url_replaces_only_the_database_path() {
-        let actual = database_url(
-            "postgres://user:pass@db.example:5432/postgres?sslmode=require&application_name=e2e",
-            "olp_e2e_abc",
-        )
-        .expect("valid database URL");
-        assert_eq!(
-            actual,
-            "postgres://user:pass@db.example:5432/olp_e2e_abc?sslmode=require&application_name=e2e"
-        );
-    }
-
-    #[test]
-    fn database_url_rejects_malformed_or_pathless_admin_urls() {
-        assert!(database_url("not a URL", "olp_e2e_abc").is_err());
-        assert!(database_url("postgres://db.example", "olp_e2e_abc").is_err());
     }
 }

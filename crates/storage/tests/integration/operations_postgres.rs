@@ -167,7 +167,6 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             cached_input_tokens: Some(10),
             media_units: None,
             usage_complete: true,
-            unpriced: true,
             attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
@@ -489,7 +488,6 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             cached_input_tokens: None,
             media_units: None,
             usage_complete: false,
-            unpriced: true,
             attempts: Vec::new(),
         })
         .await
@@ -577,7 +575,6 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             cached_input_tokens: None,
             media_units: None,
             usage_complete: true,
-            unpriced: true,
             attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
@@ -688,7 +685,6 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             cached_input_tokens: Some(2),
             media_units: None,
             usage_complete: true,
-            unpriced: true,
             attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,
@@ -1018,7 +1014,6 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         cached_input_tokens: Some(1),
         media_units: None,
         usage_complete: true,
-        unpriced: true,
         attempts: vec![RequestAttemptMetadata {
             id: Uuid::now_v7(),
             ordinal: 1,
@@ -1157,7 +1152,6 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             cached_input_tokens: None,
             media_units: Some(Decimal::new(3, 0)),
             usage_complete: true,
-            unpriced: true,
             attempts: vec![RequestAttemptMetadata {
                 id: Uuid::now_v7(),
                 ordinal: 1,

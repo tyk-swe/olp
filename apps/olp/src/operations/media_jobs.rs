@@ -5,7 +5,6 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_domain::Surface;
 use olp_storage::{
     MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobRecord, MediaJobState,
     TimestampCursor,
@@ -77,7 +76,7 @@ impl From<MediaJobRecord> for MediaJobItem {
             provider_model: record.upstream_model,
             route: record.route_slug,
             operation: record.operation.to_string(),
-            surface: media_job_surface_wire_value(record.surface).to_owned(),
+            surface: record.surface.as_str().to_owned(),
             state: record.state.as_str().to_owned(),
             lifecycle: record.lifecycle.as_str().to_owned(),
             progress_percent: record.progress_percent,
@@ -93,10 +92,6 @@ impl From<MediaJobRecord> for MediaJobItem {
             updated_at: record.updated_at,
         }
     }
-}
-
-pub(super) const fn media_job_surface_wire_value(surface: Surface) -> &'static str {
-    surface.as_str()
 }
 
 #[derive(Debug, Serialize, ToSchema)]

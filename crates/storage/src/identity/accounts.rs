@@ -50,64 +50,6 @@ impl PgStore {
         row.map(user_from_row).transpose()
     }
 
-    pub async fn update_user_role(
-        &self,
-        id: Uuid,
-        role: Role,
-        expected_etag: Uuid,
-        actor: Uuid,
-    ) -> Result<UserRecord, IdentityError> {
-        let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(IdentityError::NotFound)?;
-        if current.etag != expected_etag {
-            return Err(IdentityError::PreconditionFailed);
-        }
-
-        let etag = Uuid::now_v7();
-        let row = match sqlx::query_as!(
-            UserRow,
-            "UPDATE users SET role = CAST($2::text AS user_role), security_version = security_version + 1, \
-                 etag = $3, updated_at = now() \
-             WHERE id = $1 \
-             RETURNING id, email, display_name, role::text AS \"role!\", active, etag, created_at, updated_at",
-        id, role.as_str(), etag)
-        .fetch_one(&mut *transaction)
-        .await
-        {
-            Ok(row) => row,
-            Err(error) if is_last_owner_violation(&error) => return Err(IdentityError::LastOwner),
-            Err(error) => return Err(error.into()),
-        };
-
-        let revoked = sqlx::query!("DELETE FROM sessions WHERE user_id = $1", id)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected();
-        insert_audit(
-            &mut transaction,
-            actor,
-            "user.role_update",
-            "user",
-            &id.to_string(),
-        )
-        .await?;
-        if revoked > 0 {
-            insert_audit(
-                &mut transaction,
-                actor,
-                "session.revoke_for_role_change",
-                "user",
-                &id.to_string(),
-            )
-            .await?;
-        }
-        transaction.commit().await?;
-        user_from_row(row)
-    }
-
     pub async fn update_user_access(
         &self,
         id: Uuid,
@@ -122,12 +64,24 @@ impl PgStore {
             ));
         }
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
+        let current = sqlx::query_as!(
+            UserRow,
+            "SELECT id, email, display_name, role::text AS \"role!\", active, etag, created_at, updated_at \
+             FROM users WHERE id = $1 FOR UPDATE",
+            id
+        )
             .fetch_optional(&mut *transaction)
             .await?
             .ok_or(IdentityError::NotFound)?;
         if current.etag != expected_etag {
             return Err(IdentityError::PreconditionFailed);
+        }
+        let current = user_from_row(current)?;
+        if role.is_none_or(|role| role == current.role)
+            && active.is_none_or(|active| active == current.active)
+        {
+            transaction.commit().await?;
+            return Ok(current);
         }
         let etag = Uuid::now_v7();
         let row = match sqlx::query_as!(

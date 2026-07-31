@@ -94,20 +94,14 @@ async fn execute_operation(
         .cloned()
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
     let operation_kind = operation.kind();
-    authorize_api_key(
-        principal.key(),
-        Some(&route_slug),
-        operation_kind,
-        Utc::now(),
-    )
-    .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+    let key = authorize_principal(principal, operation_kind, Some(&route_slug))?;
 
     let request_id = RequestId::new();
     let request_started_at = Utc::now();
     let request_started = tokio::time::Instant::now();
     let lease = reserve_limits(
         state,
-        principal.key(),
+        key,
         &operation,
         principal.lookup_id().as_str(),
         principal
@@ -249,16 +243,7 @@ fn emit_early_failure(
     );
 }
 
-pub(super) async fn execute_event_operation(
-    state: &GatewayState,
-    principal: &InferencePrincipal,
-    operation: Operation,
-    mode: TransportMode,
-) -> Result<RoutedEventExecution, InferenceError> {
-    execute_event_operation_for_surface(state, principal, operation, mode).await
-}
-
-pub(crate) async fn execute_event_operation_for_surface(
+pub(crate) async fn execute_event_operation(
     state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
@@ -268,12 +253,12 @@ pub(crate) async fn execute_event_operation_for_surface(
         state.media_spool.clone(),
         operation_media_handles(&operation),
     );
-    let result = execute_event_operation_for_surface_inner(state, principal, operation, mode).await;
+    let result = execute_event_operation_inner(state, principal, operation, mode).await;
     request_media.cleanup().await;
     result
 }
 
-pub(super) async fn execute_event_operation_for_surface_inner(
+pub(super) async fn execute_event_operation_inner(
     state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
@@ -388,17 +373,7 @@ pub(super) async fn execute_unary_result(
     execute_routed_result(state, principal, operation, TransportMode::Unary, None).await
 }
 
-pub(super) async fn execute_routed_result(
-    state: &GatewayState,
-    principal: &InferencePrincipal,
-    operation: Operation,
-    mode: TransportMode,
-    required_target: Option<RequiredTarget>,
-) -> Result<RoutedUnaryResult, InferenceError> {
-    execute_routed_result_for_surface(state, principal, operation, mode, required_target).await
-}
-
-pub(crate) async fn execute_routed_result_for_surface(
+pub(crate) async fn execute_routed_result(
     state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,
@@ -410,13 +385,12 @@ pub(crate) async fn execute_routed_result_for_surface(
         operation_media_handles(&operation),
     );
     let result =
-        execute_routed_result_for_surface_inner(state, principal, operation, mode, required_target)
-            .await;
+        execute_routed_result_inner(state, principal, operation, mode, required_target).await;
     request_media.cleanup().await;
     result
 }
 
-pub(super) async fn execute_routed_result_for_surface_inner(
+pub(super) async fn execute_routed_result_inner(
     state: &GatewayState,
     principal: &InferencePrincipal,
     operation: Operation,

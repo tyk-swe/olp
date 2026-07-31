@@ -84,12 +84,7 @@ pub(crate) fn validated_public_router(dependencies: ModeDependencies) -> Router 
 
 #[cfg(test)]
 pub(crate) fn gateway_router_for_test(state: GatewayState) -> Router {
-    compose_public_router(Some(state.clone()), None, state)
-}
-
-#[cfg(test)]
-pub(crate) fn management_router_for_test(state: ManagementState) -> Router {
-    compose_public_router(None, Some(state.clone()), state.gateway_state())
+    public_router(state)
 }
 
 fn compose_public_router(
@@ -125,7 +120,10 @@ fn compose_public_router(
             .route("/openapi.json", any(api_not_found))
             .merge(management_api::router())
             .route("/api/{*path}", any(api_not_found))
-            .layer(middleware::from_fn(normalize_management_rejection))
+            .layer(SetResponseHeaderLayer::if_not_present(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store, private"),
+            ))
             .with_state(state.clone());
         router = router
             .merge(control)
@@ -409,7 +407,7 @@ mod tests {
             ),
             (
                 crate::ApiMode::Control,
-                "/metrics",
+                "/api/v1/openapi.json",
                 "/api/v1/sessions",
                 "application/problem+json",
             ),
@@ -479,5 +477,38 @@ mod tests {
             );
             drop(held_response);
         }
+    }
+
+    #[tokio::test]
+    async fn management_api_responses_default_to_no_store() {
+        let state = ApiState::new(
+            crate::ApiMode::Control,
+            None,
+            std::sync::Arc::new(crate::RuntimeManager::empty()),
+            "https://console.example.test",
+            std::path::PathBuf::from("missing-console"),
+        );
+        let router = public_router(state.management_state_for_test());
+
+        let api = router
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(api.status(), StatusCode::OK);
+        assert_eq!(
+            api.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store, private"
+        );
+
+        let non_api = router
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert!(!non_api.headers().contains_key(header::CACHE_CONTROL));
     }
 }

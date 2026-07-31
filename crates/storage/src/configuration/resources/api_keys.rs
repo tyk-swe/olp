@@ -126,10 +126,14 @@ impl PgStore {
             })?;
         if requests_per_minute == Some(0)
             || tokens_per_minute == Some(0)
+            || input
+                .tokens_per_minute
+                .is_some_and(|value| value > MAX_API_KEY_TOKENS_PER_MINUTE)
             || max_concurrency == Some(0)
         {
             return Err(ConfigurationError::Invalid(
-                "hard limits must be positive when configured".to_owned(),
+                "hard limits must be positive and within the supported range when configured"
+                    .to_owned(),
             ));
         }
 

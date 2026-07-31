@@ -65,21 +65,27 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
             provider_model: None,
         },
     );
+    let acquire = |target| {
+        circuits
+            .try_acquire(target, tokio::time::Instant::now() + Duration::from_secs(1))
+            .unwrap()
+    };
 
     for _ in 0..5 {
-        assert!(circuits.try_acquire(target));
+        let permit = acquire(target);
         let mut validator = EventSequenceValidator::new();
         validator.push(&first).unwrap();
         let provider: EventStream = Box::pin(stream::iter([Err(TransportError {
             phase: olp_domain::TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: false,
+            retry_after: None,
             message: "stream failed after its first event".to_owned(),
         })]));
         let mut events = circuit_accounted_event_stream(
             validated_event_stream(provider, validator),
             circuits.clone(),
-            target,
+            permit,
             false,
         );
         let error = events.next().await.unwrap().unwrap_err();
@@ -88,7 +94,9 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     assert!(!circuits.is_selectable(target));
 
     let recovered_target = TargetId::new();
-    circuits.record_failure(recovered_target, AttemptFailureClass::UpstreamServer);
+    let permit = acquire(recovered_target);
+    circuits.record_failure(permit, AttemptFailureClass::UpstreamServer);
+    let permit = acquire(recovered_target);
     let mut validator = EventSequenceValidator::new();
     validator.push(&first).unwrap();
     let provider: EventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
@@ -98,7 +106,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     let mut events = circuit_accounted_event_stream(
         validated_event_stream(provider, validator),
         circuits.clone(),
-        recovered_target,
+        permit,
         false,
     );
     assert!(matches!(
@@ -109,7 +117,8 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
         }))
     ));
     for _ in 0..4 {
-        circuits.record_failure(recovered_target, AttemptFailureClass::UpstreamServer);
+        let permit = acquire(recovered_target);
+        circuits.record_failure(permit, AttemptFailureClass::UpstreamServer);
     }
     assert!(circuits.is_selectable(recovered_target));
 }

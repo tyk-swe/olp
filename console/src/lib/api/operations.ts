@@ -328,5 +328,3 @@ export async function runPlayground(input: PlaygroundRequest): Promise<Playgroun
   });
   return result(data, error, response);
 }
-
-export const operationsTesting = { compact };

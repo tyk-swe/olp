@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ApiProblem, ETAG_MISMATCH_TYPE, isEtagMismatch } from './http';
+import { ApiProblem, isEtagMismatch } from './http';
+
+const ETAG_MISMATCH_TYPE = 'https://openllmproxy.dev/problems/etag_mismatch';
 
 describe('isEtagMismatch', () => {
   it('recognizes only the typed 412 problem', () => {

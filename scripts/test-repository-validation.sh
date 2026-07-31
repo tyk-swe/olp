@@ -275,6 +275,56 @@ test_external_cargo_patch_path_is_rejected() {
     'Cargo.toml has a path dependency outside the workspace: ../external'
 }
 
+test_restore_rejects_database_alias() {
+  local fixture="$test_root/restore-database-alias"
+  local fake_bin="$fixture/bin"
+  local command_log="$fixture/commands.log"
+  local output="$fixture/output.log"
+  local status
+  mkdir -p "$fake_bin"
+  printf 'fixture\n' > "$fixture/backup.dump"
+  for command in psql pg_restore; do
+    {
+      printf '#!%s\n' "$real_bash"
+      printf "printf \"%%s %%s\\\\n\" \"\${0##*/}\" \"\$*\" >> \"\$OLP_TEST_COMMAND_LOG\"\n"
+      if [[ $command == psql ]]; then
+        printf "printf '7666930900268930418:16384\\n'\n"
+      fi
+    } > "$fake_bin/$command"
+    chmod +x "$fake_bin/$command"
+  done
+
+  if PATH="$fake_bin:$original_path" \
+    OLP_TEST_COMMAND_LOG="$command_log" \
+    OLP_DATABASE_URL='postgres://olp@production/olp' \
+    OLP_RESTORE_DATABASE_URL='postgres://olp@production-alias/olp' \
+    "$script_dir/restore-rehearsal.sh" "$fixture/backup.dump" --replace \
+      >"$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" \
+    'OLP_DATABASE_URL and OLP_RESTORE_DATABASE_URL identify the same PostgreSQL database' || return
+  assert_contains "$command_log" 'pg_control_system()' || return
+  [[ $("$real_grep" -c '^psql ' "$command_log") == 2 ]] || return 1
+  if "$real_grep" -q '^pg_restore ' "$command_log"; then
+    return 1
+  fi
+}
+
+test_postgres_keyring_rejects_extra_primary_key() {
+  local installer="$script_dir/ci/install-postgres-client.sh"
+
+  assert_contains "$installer" "\$1 == \"pub\" { primary = 1; next }" || return
+  assert_contains "$installer" \
+    "primary && \$1 == \"fpr\" { print \$10; primary = 0 }" || return
+  assert_contains "$installer" "(( \${#primary_fingerprints[@]} != 1 ))" || return
+  assert_contains "$installer" \
+    "[[ \${primary_fingerprints[0]} != \"\$expected_fingerprint\" ]]"
+}
+
 test_actual_repository_checks() {
   local output="$test_root/actual-checks.log"
 
@@ -303,6 +353,10 @@ run_test "supply-chain success is suppressed after scan error" \
   test_supply_chain_scan_error_has_no_success
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
+run_test "restore rejects aliased URLs for the protected database" \
+  test_restore_rejects_database_alias
+run_test "PostgreSQL Apt keyring rejects an appended primary key" \
+  test_postgres_keyring_rejects_extra_primary_key
 run_test "actual repository invariant checks pass" test_actual_repository_checks
 
 printf 'repository validation regression tests passed: %d\n' "$tests_run"

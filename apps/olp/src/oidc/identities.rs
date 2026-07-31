@@ -21,7 +21,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct OidcIdentityResponse {
+pub(super) struct OidcIdentityResponse {
     pub id: Uuid,
     pub issuer: String,
     pub email_at_link: Option<String>,
@@ -44,7 +44,7 @@ impl From<OidcIdentityRecord> for OidcIdentityResponse {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct OidcIdentityListResponse {
+pub(super) struct OidcIdentityListResponse {
     pub data: Vec<OidcIdentityResponse>,
     pub linking_available: bool,
     pub has_local_password: bool,

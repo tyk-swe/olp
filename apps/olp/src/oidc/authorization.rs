@@ -37,12 +37,12 @@ use crate::{
 };
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct OidcAuthorizationResponse {
+pub(super) struct OidcAuthorizationResponse {
     pub authorization_url: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct OidcLoginRequest {
+pub(super) struct OidcLoginRequest {
     /// Same-origin absolute-path destination used only after a successful callback.
     pub return_to: Option<String>,
 }
@@ -53,7 +53,7 @@ pub(super) struct OidcLoginQuery {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct OidcReauthenticationRequest {
+pub(super) struct OidcReauthenticationRequest {
     /// Exact durable security operation that the resulting one-time grant may authorize.
     pub purpose: String,
     /// Required only when unlinking one specific OIDC identity.
@@ -350,7 +350,7 @@ async fn begin_authorization(
         }
     };
 
-    let callback_uri = callback_url(state)?;
+    let callback_uri = callback_url(state);
     let scopes = configuration.scopes.join(" ");
     let challenge = material.pkce_challenge();
     let mut authorization_url =

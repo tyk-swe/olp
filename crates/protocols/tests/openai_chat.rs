@@ -205,7 +205,6 @@ fn fragmented_unicode_sse_and_tool_deltas_decode_without_corruption() {
     events.extend(decoder.finish().unwrap());
 
     validate_event_sequence(&events).unwrap();
-    assert!(decoder.is_done());
     assert!(events.iter().any(|event| matches!(
         &event.kind,
         CanonicalEventKind::TextDelta { text, .. } if text == "héllø 🌍"
@@ -376,7 +375,6 @@ fn provider_error_frame_is_terminal_and_canonical() {
     let wire = b"data: {\"error\":{\"message\":\"slow down\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit\"}}\n\n";
     let mut decoder = OpenAiChatStreamDecoder::new();
     let events = decoder.push(wire).unwrap();
-    assert!(decoder.is_done());
     assert!(matches!(events[0].kind, CanonicalEventKind::Error { .. }));
     assert!(matches!(events[1].kind, CanonicalEventKind::Done));
 }

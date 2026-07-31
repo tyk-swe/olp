@@ -9,35 +9,6 @@ use super::{
 };
 
 impl PgStore {
-    pub async fn pending_media_reconciliation_jobs(
-        &self,
-        api_key_id: Uuid,
-        limit: u16,
-    ) -> Result<Vec<MediaJobRecord>, MediaJobError> {
-        let rows = sqlx::query_as!(
-            MediaJobRow,
-            "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
-                    p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS \"state!\", j.lifecycle_state,
-                    j.progress_percent::real AS \"progress_percent?\",
-                    j.content_available, j.expires_at, j.error_class,
-                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
-                    j.reconciliation_attempts, j.next_reconciliation_at,
-                    j.last_reconciliation_at, j.etag,
-                    j.created_at, j.updated_at
-             FROM async_media_jobs j JOIN providers p ON p.id = j.provider_id
-             WHERE j.api_key_id = $1
-               AND j.lifecycle_state IN ('create_cleanup_pending', 'delete_pending')
-             ORDER BY j.updated_at ASC, j.id ASC LIMIT $2",
-            api_key_id,
-            i64::from(limit.clamp(1, 32))
-        )
-        .fetch_all(self.pool())
-        .await?;
-        rows.into_iter().map(media_job_from_row).collect()
-    }
-
     /// Claims a bounded cross-replica batch for autonomous lifecycle work.
     /// The database lease is deliberately longer than an ordinary route
     /// deadline; an expired lease can be recovered after process death.
@@ -71,9 +42,7 @@ impl PgStore {
                           OR created_at <= $1 - interval '30 days'
                         ))
                   )
-                ORDER BY
-                    CASE WHEN lifecycle_state = 'active' THEN 1 ELSE 0 END,
-                    next_reconciliation_at, created_at, id
+                ORDER BY next_reconciliation_at, created_at, id
                 FOR UPDATE SKIP LOCKED
                 LIMIT $2
              ), claimed AS (
@@ -105,6 +74,30 @@ impl PgStore {
         .fetch_all(self.pool())
         .await?;
         rows.into_iter().map(media_job_from_row).collect()
+    }
+
+    /// Extends an in-flight reconciliation lease. The claim ID fences a stale
+    /// worker after another replica has reclaimed the job.
+    pub async fn renew_media_reconciliation_claim(
+        &self,
+        id: Uuid,
+        claim_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<(), MediaJobError> {
+        let result = sqlx::query!(
+            "UPDATE async_media_jobs
+             SET reconciliation_claimed_until = $3::timestamptz + interval '2 minutes'
+             WHERE id = $1 AND reconciliation_claim_id = $2",
+            id,
+            claim_id,
+            now
+        )
+        .execute(self.pool())
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(self.missing_or_changed(id).await?);
+        }
+        Ok(())
     }
 
     /// Releases one reconciliation lease and records only a bounded error

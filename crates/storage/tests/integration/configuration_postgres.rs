@@ -605,6 +605,25 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
             .await,
         Err(olp_storage::ConfigurationError::Invalid(_))
     ));
+    assert!(matches!(
+        store
+            .update_api_key(
+                key.id,
+                initial_key_record.etag,
+                &UpdateApiKeyInput {
+                    name: "oversized TPM".to_owned(),
+                    scopes: vec!["inference".to_owned()],
+                    allowed_routes: Vec::new(),
+                    requests_per_minute: None,
+                    tokens_per_minute: Some(olp_domain::MAX_API_KEY_TOKENS_PER_MINUTE + 1,),
+                    max_concurrency: None,
+                    expires_at: None,
+                },
+                actor,
+            )
+            .await,
+        Err(olp_storage::ConfigurationError::Invalid(_))
+    ));
     let key_update = store
         .update_api_key(
             key.id,
@@ -705,29 +724,36 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     historical_runtime.api_keys = current_api_keys;
     assert!(historical_runtime.api_keys.is_empty());
 
-    let corrupt_generation_id = Uuid::now_v7();
-    let corrupt_sequence: i64 = sqlx::query_scalar(
-        "INSERT INTO runtime_generations \
-         (id, compiled_release, release_sha256, created_by) VALUES ($1, $2, $3, $4) \
-         RETURNING sequence",
-    )
-    .bind(corrupt_generation_id)
-    .bind(b"corrupt runtime envelope".as_slice())
-    .bind([0_u8; 32].as_slice())
-    .bind(actor)
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert!(corrupt_sequence > key_revocation.release.sequence);
-    let recent_valid = store.recent_valid_runtime_releases(16).await.unwrap();
+    let mut corrupt_generation_ids = Vec::new();
+    for _ in 0..33 {
+        let corrupt_generation_id = Uuid::now_v7();
+        let corrupt_sequence: i64 = sqlx::query_scalar(
+            "INSERT INTO runtime_generations \
+             (id, compiled_release, release_sha256, created_by) VALUES ($1, $2, $3, $4) \
+             RETURNING sequence",
+        )
+        .bind(corrupt_generation_id)
+        .bind(b"corrupt runtime envelope".as_slice())
+        .bind([0_u8; 32].as_slice())
+        .bind(actor)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert!(corrupt_sequence > key_revocation.release.sequence);
+        corrupt_generation_ids.push(corrupt_generation_id);
+    }
+    let recent_valid = store
+        .valid_runtime_releases_before(16, None, None)
+        .await
+        .unwrap();
     assert_eq!(recent_valid[0].sequence, key_revocation.release.sequence);
     assert!(
         recent_valid
             .iter()
-            .all(|release| release.generation_id != corrupt_generation_id)
+            .all(|release| !corrupt_generation_ids.contains(&release.generation_id))
     );
-    sqlx::query("DELETE FROM runtime_generations WHERE id = $1")
-        .bind(corrupt_generation_id)
+    sqlx::query("DELETE FROM runtime_generations WHERE id = ANY($1)")
+        .bind(&corrupt_generation_ids)
         .execute(store.pool())
         .await
         .unwrap();

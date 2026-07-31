@@ -1,10 +1,6 @@
 //! Shared oracles for the fuzz targets.
 //!
-//! Included with `mod oracle;` from each target that needs it. Every target
-//! compiles its own copy, so helpers a given target does not use are expected
-//! to be dead there.
-
-#![allow(dead_code)]
+//! Included with `mod oracle;` from each target that needs it.
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;

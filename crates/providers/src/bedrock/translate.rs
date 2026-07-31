@@ -481,6 +481,7 @@ pub(crate) fn protocol_error(message: impl Into<String>) -> TransportError {
         phase: olp_domain::TransportPhase::Connect,
         class: olp_domain::AttemptFailureClass::Protocol,
         response_committed: false,
+        retry_after: None,
         message: message.into(),
     }
 }
@@ -490,6 +491,7 @@ pub(crate) fn protocol_body_error(message: impl Into<String>) -> TransportError 
         phase: olp_domain::TransportPhase::Body,
         class: olp_domain::AttemptFailureClass::Protocol,
         response_committed: true,
+        retry_after: None,
         message: message.into(),
     }
 }

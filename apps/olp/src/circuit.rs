@@ -1,10 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use olp_domain::{AttemptFailureClass, TargetId};
+use tokio::time::Instant;
 
 const DEFAULT_FAILURE_THRESHOLD: u32 = 5;
 const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
@@ -20,10 +21,25 @@ pub(crate) struct CircuitBreaker {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub(crate) struct CircuitPermit {
+    target: TargetId,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
 enum CircuitState {
-    Closed { consecutive_failures: u32 },
-    Open { until: Instant },
-    HalfOpen { probe_started: Instant },
+    Closed {
+        consecutive_failures: u32,
+        generation: u64,
+    },
+    Open {
+        until: Instant,
+        generation: u64,
+    },
+    HalfOpen {
+        lease_until: Instant,
+        generation: u64,
+    },
 }
 
 impl Default for CircuitBreaker {
@@ -48,41 +64,72 @@ impl CircuitBreaker {
         let states = self.inner.lock().expect("circuit state lock poisoned");
         match states.get(&target) {
             None | Some(CircuitState::Closed { .. }) => true,
-            Some(CircuitState::Open { until }) => now >= *until,
-            Some(CircuitState::HalfOpen { probe_started }) => {
-                now.duration_since(*probe_started) >= self.open_duration
-            }
+            Some(CircuitState::Open { until, .. }) => now >= *until,
+            Some(CircuitState::HalfOpen { lease_until, .. }) => now >= *lease_until,
         }
     }
 
     /// Claims permission to execute this target. An expired open circuit moves
     /// to half-open and admits one caller; concurrent callers skip it.
-    pub(crate) fn try_acquire(&self, target: TargetId) -> bool {
+    pub(crate) fn try_acquire(
+        &self,
+        target: TargetId,
+        attempt_deadline: Instant,
+    ) -> Option<CircuitPermit> {
         let now = Instant::now();
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
-        match states.get(&target).copied() {
-            None | Some(CircuitState::Closed { .. }) => true,
-            Some(CircuitState::Open { until }) if now >= until => {
-                states.insert(target, CircuitState::HalfOpen { probe_started: now });
-                true
+        let generation = match states.get(&target).copied() {
+            None => 0,
+            Some(CircuitState::Closed { generation, .. }) => generation,
+            Some(CircuitState::Open { until, generation }) if now >= until => {
+                states.insert(
+                    target,
+                    CircuitState::HalfOpen {
+                        lease_until: attempt_deadline,
+                        generation,
+                    },
+                );
+                generation
             }
-            Some(CircuitState::HalfOpen { probe_started })
-                if now.duration_since(probe_started) >= self.open_duration =>
-            {
+            Some(CircuitState::HalfOpen {
+                lease_until,
+                generation,
+            }) if now >= lease_until => {
                 // Recover if a probing request was cancelled before reporting
                 // an outcome; otherwise a circuit could remain stuck forever.
-                states.insert(target, CircuitState::HalfOpen { probe_started: now });
-                true
+                let generation = generation.wrapping_add(1);
+                states.insert(
+                    target,
+                    CircuitState::HalfOpen {
+                        lease_until: attempt_deadline,
+                        generation,
+                    },
+                );
+                generation
             }
-            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => false,
-        }
+            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => return None,
+        };
+        Some(CircuitPermit { target, generation })
     }
 
-    pub(crate) fn record_success(&self, target: TargetId) {
-        self.inner
-            .lock()
-            .expect("circuit state lock poisoned")
-            .remove(&target);
+    pub(crate) fn record_success(&self, permit: CircuitPermit) {
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        let Some(state) = states.get_mut(&permit.target) else {
+            return;
+        };
+        let generation = match *state {
+            CircuitState::Closed { generation, .. } if generation == permit.generation => {
+                generation
+            }
+            CircuitState::HalfOpen { generation, .. } if generation == permit.generation => {
+                generation.wrapping_add(1)
+            }
+            _ => return,
+        };
+        *state = CircuitState::Closed {
+            consecutive_failures: 0,
+            generation,
+        };
     }
 
     pub(crate) fn retain_targets(&self, live: &BTreeSet<TargetId>) {
@@ -92,43 +139,52 @@ impl CircuitBreaker {
             .retain(|target, _| live.contains(target));
     }
 
-    pub(crate) fn record_failure(&self, target: TargetId, class: AttemptFailureClass) {
+    pub(crate) fn record_failure(&self, permit: CircuitPermit, class: AttemptFailureClass) {
         if !counts_toward_circuit(class) {
             return;
         }
         let now = Instant::now();
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
-        let next = match states.get(&target).copied() {
-            Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. }) => CircuitState::Open {
-                until: now + self.open_duration,
-            },
+        let next = match states.get(&permit.target).copied() {
+            Some(CircuitState::HalfOpen { generation, .. }) if generation == permit.generation => {
+                CircuitState::Open {
+                    until: now + self.open_duration,
+                    generation: generation.wrapping_add(1),
+                }
+            }
             Some(CircuitState::Closed {
                 consecutive_failures,
-            }) => {
+                generation,
+            }) if generation == permit.generation => {
                 let failures = consecutive_failures.saturating_add(1);
                 if failures >= self.failure_threshold {
                     CircuitState::Open {
                         until: now + self.open_duration,
+                        generation: generation.wrapping_add(1),
                     }
                 } else {
                     CircuitState::Closed {
                         consecutive_failures: failures,
+                        generation,
                     }
                 }
             }
-            None => {
+            None if permit.generation == 0 => {
                 if self.failure_threshold == 1 {
                     CircuitState::Open {
                         until: now + self.open_duration,
+                        generation: 1,
                     }
                 } else {
                     CircuitState::Closed {
                         consecutive_failures: 1,
+                        generation: 0,
                     }
                 }
             }
+            _ => return,
         };
-        states.insert(target, next);
+        states.insert(permit.target, next);
     }
 
     pub(crate) fn open_count(&self) -> usize {
@@ -138,7 +194,7 @@ impl CircuitBreaker {
             .expect("circuit state lock poisoned")
             .values()
             .filter(|state| match state {
-                CircuitState::Open { until } => now < *until,
+                CircuitState::Open { until, .. } => now < *until,
                 CircuitState::HalfOpen { .. } => true,
                 CircuitState::Closed { .. } => false,
             })
@@ -151,7 +207,6 @@ const fn counts_toward_circuit(class: AttemptFailureClass) -> bool {
         class,
         AttemptFailureClass::Connect
             | AttemptFailureClass::Timeout
-            | AttemptFailureClass::RateLimit
             | AttemptFailureClass::UpstreamServer
     )
 }
@@ -164,33 +219,65 @@ mod tests {
     fn opens_half_opens_and_recovers() {
         let breaker = CircuitBreaker::new(2, Duration::from_millis(5));
         let target = TargetId::new();
-        assert!(breaker.try_acquire(target));
-        breaker.record_failure(target, AttemptFailureClass::Connect);
-        assert!(breaker.try_acquire(target));
-        breaker.record_failure(target, AttemptFailureClass::UpstreamServer);
+        let deadline = || Instant::now() + Duration::from_secs(1);
+        let permit = breaker.try_acquire(target, deadline()).unwrap();
+        breaker.record_failure(permit, AttemptFailureClass::Connect);
+        let permit = breaker.try_acquire(target, deadline()).unwrap();
+        breaker.record_failure(permit, AttemptFailureClass::UpstreamServer);
         assert!(!breaker.is_selectable(target));
-        assert!(!breaker.try_acquire(target));
+        assert!(breaker.try_acquire(target, deadline()).is_none());
         std::thread::sleep(Duration::from_millis(8));
         assert!(breaker.is_selectable(target));
-        assert!(breaker.try_acquire(target));
-        assert!(!breaker.try_acquire(target));
-        breaker.record_success(target);
-        assert!(breaker.try_acquire(target));
+        let permit = breaker.try_acquire(target, deadline()).unwrap();
+        assert!(breaker.try_acquire(target, deadline()).is_none());
+        breaker.record_success(permit);
+        assert!(breaker.try_acquire(target, deadline()).is_some());
     }
 
     #[test]
-    fn client_protocol_and_ambiguous_failures_do_not_trip_circuit() {
+    fn stale_probe_cannot_complete_a_new_probe() {
         let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
         let target = TargetId::new();
+        breaker.inner.lock().unwrap().insert(
+            target,
+            CircuitState::Open {
+                until: Instant::now(),
+                generation: 1,
+            },
+        );
+
+        let stale = breaker.try_acquire(target, Instant::now()).unwrap();
+        let current = breaker
+            .try_acquire(target, Instant::now() + Duration::from_secs(1))
+            .unwrap();
+        breaker.record_success(stale);
+        assert!(
+            breaker
+                .try_acquire(target, Instant::now() + Duration::from_secs(1))
+                .is_none()
+        );
+        breaker.record_success(current);
+        breaker.record_failure(stale, AttemptFailureClass::Connect);
+        assert!(breaker.is_selectable(target));
+        assert_eq!(breaker.open_count(), 0);
+    }
+
+    #[test]
+    fn non_health_failures_do_not_trip_circuit() {
+        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let target = TargetId::new();
+        let deadline = || Instant::now() + Duration::from_secs(1);
         for class in [
             AttemptFailureClass::UpstreamClient,
             AttemptFailureClass::Protocol,
             AttemptFailureClass::Cancelled,
             AttemptFailureClass::Ambiguous,
+            AttemptFailureClass::RateLimit,
         ] {
-            breaker.record_failure(target, class);
-            assert!(breaker.try_acquire(target));
+            let permit = breaker.try_acquire(target, deadline()).unwrap();
+            breaker.record_failure(permit, class);
         }
+        assert!(breaker.try_acquire(target, deadline()).is_some());
     }
 
     #[test]
@@ -198,8 +285,11 @@ mod tests {
         let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
         let retained = TargetId::new();
         let removed = TargetId::new();
-        breaker.record_failure(retained, AttemptFailureClass::Connect);
-        breaker.record_failure(removed, AttemptFailureClass::Connect);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let retained_permit = breaker.try_acquire(retained, deadline).unwrap();
+        let removed_permit = breaker.try_acquire(removed, deadline).unwrap();
+        breaker.record_failure(retained_permit, AttemptFailureClass::Connect);
+        breaker.record_failure(removed_permit, AttemptFailureClass::Connect);
         assert_eq!(breaker.open_count(), 2);
 
         breaker.retain_targets(&BTreeSet::from([retained]));

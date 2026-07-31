@@ -94,13 +94,15 @@ records encrypted with that version unrecoverable.
 
 At least weekly, restore the newest dump to an isolated database with
 `scripts/restore-rehearsal.sh`. It requires the checksum and a contract-valid
-manifest, refuses the production URL, requires `--replace` for a nonempty
-destination, and verifies the restored migration count and
-runtime-generation ordinal against the manifest. Record duration, both
-counts, and the checksum. Start control and gateway processes with a fresh
-Valkey, then verify setup, session login, runtime loading, and a
-mock-provider request. Do not reuse production OIDC redirects or provider
-credentials.
+manifest. Set `OLP_DATABASE_URL` to the protected production database and
+`OLP_RESTORE_DATABASE_URL` to the rehearsal target; the script compares their
+PostgreSQL system identifiers and database OIDs before any destructive SQL, so
+URL aliases cannot bypass the check. It requires `--replace` for a nonempty
+destination and verifies the restored migration count and runtime-generation
+ordinal against the manifest. Record duration, both counts, and the checksum.
+Start control and gateway processes with a fresh Valkey, then verify setup,
+session login, runtime loading, and a mock-provider request. Do not reuse
+production OIDC redirects or provider credentials.
 
 ## Upgrade
 
@@ -186,6 +188,15 @@ cleanup lag. During a delivery incident, restore or reconcile the Stream
 within seven days; do not extend the window by suspending database
 maintenance.
 
+The request-metadata Stream never trims unconsumed entries. It retains at
+most `OLP_REQUEST_METADATA_STREAM_MAX_LENGTH` events (default `8192`, matching
+one gateway's local metadata buffer); once full, each atomic append rejects
+the new event, marks it abandoned, and continues so later events can resume
+when the worker frees capacity. The loss reporter records those accepted but
+unwritten events in the durable gap ledger. Set the same cap on every gateway,
+size Valkey for that many maximum-size metadata envelopes, and page on the
+abandoned-event alert before treating usage or cost reports as complete.
+
 Migrations are forward-only. Once any migration beyond the last released
 baseline (`release-metadata.env`) applies, an N-1 binary rollback is
 unsupported: its runtime, usage-maintenance, and OIDC writes fail closed.
@@ -270,10 +281,11 @@ idempotency replays. Back up the database and key file first.
 
 Use a three-stage keyring rollout:
 
-1. Add the new key with the old version still active. Restart every `all`,
-   `gateway`, `control`, and `worker` replica and confirm readiness.
-2. Set `active_version` to the new version. Restart and verify every replica
-   writes with it.
+1. Add the new key with the old version still active. Restart every
+   master-key-consuming `all`, `gateway`, and `control` replica and confirm
+   readiness.
+2. Set `active_version` to the new version. Restart those replicas and verify
+   new encrypted writes use it.
 3. Re-encrypt and verify before removing the old key.
 
 Obtain key values from the secret manager; never put them in shell history

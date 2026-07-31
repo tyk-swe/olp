@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::{helpers::audit_in_transaction, *};
 
 impl PgStore {
@@ -117,7 +119,21 @@ impl PgStore {
             draft_id
         )
         .fetch_all(&mut *transaction)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|target| {
+            (
+                (
+                    target.position,
+                    target.provider_model_id,
+                    target.priority,
+                    target.weight,
+                    target.timeout_ms,
+                ),
+                target.routing_id,
+            )
+        })
+        .collect::<HashMap<_, _>>();
         sqlx::query!(
             "DELETE FROM route_draft_operations WHERE route_draft_id = $1",
             draft_id
@@ -158,15 +174,15 @@ impl PgStore {
                 )));
             }
             let routing_id = previous_targets
-                .iter()
-                .find(|target| {
-                    target.position == position
-                        && target.provider_model_id == *provider_model_id
-                        && target.priority == *priority
-                        && target.weight == *weight
-                        && target.timeout_ms == *timeout_ms
-                })
-                .map_or_else(Uuid::now_v7, |target| target.routing_id);
+                .get(&(
+                    position,
+                    *provider_model_id,
+                    *priority,
+                    *weight,
+                    *timeout_ms,
+                ))
+                .copied()
+                .unwrap_or_else(Uuid::now_v7);
             sqlx::query!(
                 "INSERT INTO route_draft_targets \
                   (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \

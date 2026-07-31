@@ -26,14 +26,14 @@ use crate::bedrock::{
     },
 };
 
-pub struct BedrockConnector {
+pub(crate) struct BedrockConnector {
     runtime: aws_sdk_bedrockruntime::Client,
     control: aws_sdk_bedrock::Client,
     timeouts: crate::bedrock::ConnectorTimeouts,
 }
 
 impl BedrockConnector {
-    pub async fn new(config: ConnectorConfig, credentials: BedrockCredentials) -> Self {
+    pub(crate) async fn new(config: ConnectorConfig, credentials: BedrockCredentials) -> Self {
         let shared = sdk_config(&config, credentials).await;
         let mut runtime_config = aws_sdk_bedrockruntime::config::Builder::from(&shared);
         let mut control_config = aws_sdk_bedrock::config::Builder::from(&shared);
@@ -51,7 +51,9 @@ impl BedrockConnector {
     /// Discovers text-output foundation model IDs using the official Bedrock
     /// control-plane SDK. The returned model ID is preserved byte-for-byte for
     /// route target configuration.
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+    pub(crate) async fn discover_models(
+        &self,
+    ) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         let response = timeout(
             self.timeouts.first_byte,
             self.control
@@ -506,6 +508,7 @@ fn deadline_error(phase: TransportPhase, committed: bool) -> TransportError {
         phase,
         class: AttemptFailureClass::Timeout,
         response_committed: committed,
+        retry_after: None,
         message: "Bedrock request deadline exceeded".to_owned(),
     }
 }
@@ -532,6 +535,7 @@ where
         phase,
         class,
         response_committed: committed,
+        retry_after: None,
         message: "Bedrock SDK request failed".to_owned(),
     }
 }

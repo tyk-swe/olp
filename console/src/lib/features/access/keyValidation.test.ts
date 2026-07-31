@@ -11,5 +11,6 @@ describe('API key validation', () => {
 
   it('accepts an unlimited key when limit fields are omitted', () => {
     expect(validateApiKey({ name: 'production SDK' })).toEqual({});
+    expect(validateApiKey({ name: '😀'.repeat(100) })).toEqual({});
   });
 });

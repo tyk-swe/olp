@@ -39,7 +39,6 @@ pub struct RequestMetadataEvent {
     pub cached_input_tokens: Option<i64>,
     pub media_units: Option<Decimal>,
     pub usage_complete: bool,
-    pub unpriced: bool,
     pub attempts: Vec<RequestAttemptMetadata>,
 }
 
@@ -97,32 +96,8 @@ impl PgStore {
         event: &RequestMetadataEvent,
         event_sha256: [u8; 32],
     ) -> Result<RequestMetadataPersistenceOutcome, PersistenceError> {
+        validate_request_metadata_event(event)?;
         let has_attempts = !event.attempts.is_empty();
-        let final_target_matches = event.attempts.last().is_none_or(|attempt| {
-            event.provider_id == Some(attempt.provider_id)
-                && event.upstream_model.as_deref() == Some(attempt.upstream_model.as_str())
-                && attempt.committed == event.committed
-        });
-        let empty_attempt_metadata_is_valid = has_attempts
-            || (event.provider_id.is_none()
-                && event.upstream_model.is_none()
-                && !event.committed
-                && event.first_byte_ms.is_none()
-                && event.input_tokens.is_none()
-                && event.output_tokens.is_none()
-                && event.cached_input_tokens.is_none()
-                && event.media_units.is_none()
-                && !event.usage_complete);
-        if event.request_completed_at < event.request_started_at
-            || event.route_slug.trim().is_empty()
-            || event
-                .status_code
-                .is_some_and(|status| !(100..=599).contains(&status))
-            || !final_target_matches
-            || !empty_attempt_metadata_is_valid
-        {
-            return Err(PersistenceError::InvalidRequestMetadataEvent);
-        }
         let latency_ms = i32::try_from(event.latency_ms)
             .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?;
         let first_byte_ms = event
@@ -133,20 +108,6 @@ impl PgStore {
         let status_code = event.status_code.map(i32::from);
         let attempt_count = i16::try_from(event.attempts.len())
             .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?;
-        for (index, attempt) in event.attempts.iter().enumerate() {
-            if usize::from(attempt.ordinal) != index + 1
-                || attempt.completed_at < attempt.started_at
-                || attempt
-                    .status_code
-                    .is_some_and(|status| !(100..=599).contains(&status))
-                || i32::try_from(attempt.latency_ms).is_err()
-                || attempt
-                    .first_byte_ms
-                    .is_some_and(|value| i32::try_from(value).is_err())
-            {
-                return Err(PersistenceError::InvalidRequestMetadataEvent);
-            }
-        }
         let mut transaction = self.pool().begin().await?;
         let receipt: Option<Uuid> = sqlx::query_scalar!(
             "INSERT INTO request_metadata_event_receipts \
@@ -368,4 +329,83 @@ impl PgStore {
         transaction.commit().await?;
         Ok(RequestMetadataPersistenceOutcome::Persisted)
     }
+}
+
+pub(super) fn validate_request_metadata_event(
+    event: &RequestMetadataEvent,
+) -> Result<(), PersistenceError> {
+    let invalid_status =
+        |status: Option<u16>| status.is_some_and(|status| !(100..=599).contains(&status));
+    let invalid_tokens = [
+        event.input_tokens,
+        event.output_tokens,
+        event.cached_input_tokens,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|tokens| tokens < 0);
+    let invalid_cached_tokens = event
+        .cached_input_tokens
+        .is_some_and(|cached| event.input_tokens.is_none_or(|input| cached > input));
+    let invalid_media = event.media_units.is_some_and(|units| {
+        units.is_sign_negative()
+            || units.scale() > 6
+            || units >= Decimal::from(1_000_000_000_000_000_000_u64)
+    });
+    let has_attempts = !event.attempts.is_empty();
+    let final_target_matches = event.attempts.last().is_none_or(|attempt| {
+        event.provider_id == Some(attempt.provider_id)
+            && event.upstream_model.as_deref() == Some(attempt.upstream_model.as_str())
+            && attempt.committed == event.committed
+    });
+    let empty_attempt_metadata_is_valid = has_attempts
+        || (event.provider_id.is_none()
+            && event.upstream_model.is_none()
+            && !event.committed
+            && event.first_byte_ms.is_none()
+            && event.input_tokens.is_none()
+            && event.output_tokens.is_none()
+            && event.cached_input_tokens.is_none()
+            && event.media_units.is_none()
+            && !event.usage_complete);
+    if event.request_completed_at < event.request_started_at
+        || event.observed_at < event.request_started_at
+        || event.route_slug.trim().is_empty()
+        || invalid_status(event.status_code)
+        || event
+            .first_byte_ms
+            .is_some_and(|value| value > event.latency_ms)
+        || i32::try_from(event.latency_ms).is_err()
+        || event
+            .first_byte_ms
+            .is_some_and(|value| i32::try_from(value).is_err())
+        || invalid_tokens
+        || invalid_cached_tokens
+        || invalid_media
+        || !final_target_matches
+        || !empty_attempt_metadata_is_valid
+        || i16::try_from(event.attempts.len()).is_err()
+    {
+        return Err(PersistenceError::InvalidRequestMetadataEvent);
+    }
+    for (index, attempt) in event.attempts.iter().enumerate() {
+        if usize::from(attempt.ordinal) != index + 1
+            || attempt.upstream_model.trim().is_empty()
+            || attempt.started_at < event.request_started_at
+            || attempt.completed_at < attempt.started_at
+            || attempt.completed_at > event.request_completed_at
+            || invalid_status(attempt.status_code)
+            || attempt
+                .first_byte_ms
+                .is_some_and(|value| value > attempt.latency_ms)
+            || i32::try_from(attempt.latency_ms).is_err()
+            || attempt
+                .first_byte_ms
+                .is_some_and(|value| i32::try_from(value).is_err())
+            || (attempt.committed && index + 1 != event.attempts.len())
+        {
+            return Err(PersistenceError::InvalidRequestMetadataEvent);
+        }
+    }
+    Ok(())
 }

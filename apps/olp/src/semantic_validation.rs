@@ -10,26 +10,6 @@ use crate::gateway::InferenceError;
 /// loss. Capability tuples are the coarse model boundary; this request-level
 /// check covers structured output, tools, source-scoped vendor fields, and
 /// media forms before credentials or transport are used.
-#[cfg(test)]
-pub(crate) fn select_representable_attempts(
-    snapshot: &RuntimeSnapshot,
-    route_slug: &RouteSlug,
-    operation: &Operation,
-    surface: Surface,
-    mode: TransportMode,
-    affinity_key: &[u8],
-) -> Result<Vec<AttemptPlan>, InferenceError> {
-    select_representable_attempts_filtered(
-        snapshot,
-        route_slug,
-        operation,
-        surface,
-        mode,
-        affinity_key,
-        |_, _| true,
-    )
-}
-
 /// Applies runtime eligibility (circuit state or an async-job target pin)
 /// together with semantic validation before deterministic ordering and the
 /// route's maximum-attempt truncation.
@@ -132,7 +112,6 @@ fn validate_for_provider(
 fn validate_openai(operation: &Operation, upstream_model: &str) -> Result<(), String> {
     operation
         .extensions()
-        .ok_or_else(|| "operation extensions are unavailable".to_owned())?
         .ensure_representable_on(Surface::OpenAi)
         .map_err(|error| error.to_string())?;
     match operation {
@@ -532,13 +511,14 @@ mod tests {
             routes: BTreeMap::from([(route_slug.clone(), route)]),
             api_keys: BTreeMap::new(),
         };
-        let attempts = select_representable_attempts(
+        let attempts = select_representable_attempts_filtered(
             &snapshot,
             &route_slug,
             &operation,
             Surface::OpenAi,
             TransportMode::Unary,
             b"affinity",
+            |_, _| true,
         )
         .unwrap();
         assert_eq!(attempts.len(), 1);

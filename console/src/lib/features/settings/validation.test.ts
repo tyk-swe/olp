@@ -4,6 +4,7 @@ import { optionalDecimal, validateDisplayName, validateNewPassword, validatePass
 describe('settings validation', () => {
   it('normalizes display names', () => {
     expect(validateDisplayName('  Ada Operator ')).toBe('Ada Operator');
+    expect(validateDisplayName('😀'.repeat(100))).toBe('😀'.repeat(100));
   });
 
   it('requires a distinct confirmed password', () => {
@@ -17,6 +18,7 @@ describe('settings validation', () => {
     expect(validateNewPassword('local password for testing', 'local password for testing')).toBe(
       'local password for testing'
     );
+    expect(validateNewPassword('🔐'.repeat(12), '🔐'.repeat(12))).toBe('🔐'.repeat(12));
   });
 
   it('accepts exact decimal text and preserves missing prices', () => {

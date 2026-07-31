@@ -7,12 +7,10 @@
 use std::{
     io,
     net::SocketAddr,
-    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    task::{Context, Poll},
     time::Duration,
 };
 
@@ -23,7 +21,6 @@ use hyper_util::{
     service::TowerToHyperService,
 };
 use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpListener,
     sync::{Notify, Semaphore, watch},
     task::JoinSet,
@@ -37,101 +34,13 @@ const HTTP2_MAX_CONCURRENT_STREAMS: u32 = 100;
 const HTTP2_MAX_HEADER_LIST_BYTES: u32 = 32 * 1024;
 const HTTP2_MAX_PENDING_RESET_STREAMS: usize = 32;
 const HTTP2_MAX_LOCAL_ERROR_RESET_STREAMS: usize = 32;
-const HTTP2_MAX_CONNECTION_AGE: Duration = Duration::from_secs(5 * 60);
 const HTTP_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Hyper's HTTP/1 `max_buf_size` protects its parser, but it may read beyond
-/// the configured threshold before checking it. This wrapper makes the
-/// externally visible header limit exact, independent of that read-ahead.
-/// The HTTP/2 prior-knowledge preface contains `\r\n\r\n`, so it stops tracking
-/// before Hyper takes over HTTP/2 frame/header-list enforcement.
-struct HeaderLimitedStream {
-    inner: tokio::net::TcpStream,
-    initial_header_bytes: usize,
-    terminator_match_bytes: u8,
-    initial_header_complete: bool,
-}
-
-impl HeaderLimitedStream {
-    fn new(inner: tokio::net::TcpStream) -> Self {
-        Self {
-            inner,
-            initial_header_bytes: 0,
-            terminator_match_bytes: 0,
-            initial_header_complete: false,
-        }
-    }
-
-    fn observe_initial_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if self.initial_header_complete {
-            return Ok(());
-        }
-        for &byte in bytes {
-            self.initial_header_bytes = self.initial_header_bytes.saturating_add(1);
-            if self.initial_header_bytes > HTTP1_MAX_HEADER_BYTES {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "HTTP/1 headers exceed the 32 KiB limit",
-                ));
-            }
-            self.terminator_match_bytes = match (self.terminator_match_bytes, byte) {
-                (0, b'\r') | (1 | 3, b'\r') => 1,
-                (1, b'\n') => 2,
-                (2, b'\r') => 3,
-                (3, b'\n') => 4,
-                _ => 0,
-            };
-            if self.terminator_match_bytes == 4 {
-                self.initial_header_complete = true;
-                return Ok(());
-            }
-        }
-        Ok(())
-    }
-}
-
-impl AsyncRead for HeaderLimitedStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffer: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let filled = buffer.filled().len();
-        match Pin::new(&mut self.inner).poll_read(context, buffer) {
-            Poll::Ready(Ok(())) => {
-                let bytes = &buffer.filled()[filled..];
-                self.observe_initial_bytes(bytes)?;
-                Poll::Ready(Ok(()))
-            }
-            other => other,
-        }
-    }
-}
-
-impl AsyncWrite for HeaderLimitedStream {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffer: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.inner).poll_write(context, buffer)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(context)
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(context)
-    }
-}
 
 /// Per-listener controls applied before a request reaches Axum.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HttpServerConfig {
     max_connections: usize,
     http1_header_timeout: Duration,
-    connection_max_age: Duration,
 }
 
 impl HttpServerConfig {
@@ -139,7 +48,6 @@ impl HttpServerConfig {
         Self {
             max_connections,
             http1_header_timeout: Duration::from_secs(10),
-            connection_max_age: HTTP2_MAX_CONNECTION_AGE,
         }
     }
 
@@ -148,7 +56,6 @@ impl HttpServerConfig {
         Self {
             max_connections,
             http1_header_timeout,
-            connection_max_age: Duration::from_secs(60),
         }
     }
 }
@@ -277,10 +184,6 @@ async fn serve_connection(
     let mut builder = Builder::new(TokioExecutor::new());
     builder
         .http1()
-        // One request per connection keeps the exact raw-header bound in
-        // HeaderLimitedStream authoritative; Hyper exposes no per-request raw
-        // byte hook for later keep-alive requests.
-        .keep_alive(false)
         .max_headers(HTTP1_MAX_HEADERS)
         .max_buf_size(HTTP1_MAX_HEADER_BYTES)
         .timer(TokioTimer::new())
@@ -293,15 +196,10 @@ async fn serve_connection(
         .max_local_error_reset_streams(Some(HTTP2_MAX_LOCAL_ERROR_RESET_STREAMS))
         .timer(TokioTimer::new());
 
-    let connection = builder.serve_connection_with_upgrades(
-        TokioIo::new(HeaderLimitedStream::new(stream)),
-        hyper_service,
-    );
+    let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), hyper_service);
     tokio::pin!(connection);
     let first_request_deadline = tokio::time::sleep(config.http1_header_timeout);
     tokio::pin!(first_request_deadline);
-    let connection_deadline = tokio::time::sleep(config.connection_max_age);
-    tokio::pin!(connection_deadline);
     let mut draining = false;
     let mut drain_deadline = None;
     let mut first_request_seen = false;
@@ -319,12 +217,6 @@ async fn serve_connection(
             () = &mut first_request_deadline, if !first_request_seen => {
                 debug!(%peer, "closing connection before its first request exceeded the header/protocol deadline");
                 return;
-            }
-            () = &mut connection_deadline, if !draining => {
-                debug!(%peer, "gracefully draining connection at its maximum age");
-                draining = true;
-                connection.as_mut().graceful_shutdown();
-                drain_deadline = Some(Box::pin(tokio::time::sleep(HTTP_CONNECTION_DRAIN_TIMEOUT)));
             }
             changed = shutdown.changed(), if !draining => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -442,95 +334,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http2_connection_starts_graceful_drain_at_its_maximum_age() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (shutdown, shutdown_receiver) = watch::channel(false);
-        let task = tokio::spawn(serve_http(
-            listener,
-            Router::new().route("/", get(|| async { "ok" })),
-            HttpServerConfig {
-                max_connections: 1,
-                http1_header_timeout: Duration::from_secs(1),
-                connection_max_age: Duration::from_millis(100),
-            },
-            shutdown_receiver,
-        ));
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(
-                b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\
-                  \x00\x00\x00\x04\x00\x00\x00\x00\x00\
-                  \x00\x00\x03\x01\x05\x00\x00\x00\x01\x82\x86\x84",
-            )
-            .await
-            .unwrap();
-        // A graceful H2 drain sends GOAWAY but waits for the peer to close the
-        // connection. It must not force EOF while a peer can still finish an
-        // in-flight stream.
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        let mut response = [0_u8; 128];
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), stream.read(&mut response))
-                .await
-                .unwrap()
-                .unwrap()
-                > 0
-        );
-        drop(stream);
-        let _ = shutdown.send(true);
-        task.await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn connection_age_drains_an_active_http1_request() {
-        let entered = Arc::new(Notify::new());
-        let release = Arc::new(Notify::new());
-        let app = Router::new().route(
-            "/",
-            get({
-                let entered = Arc::clone(&entered);
-                let release = Arc::clone(&release);
-                move || {
-                    let entered = Arc::clone(&entered);
-                    let release = Arc::clone(&release);
-                    async move {
-                        entered.notify_one();
-                        release.notified().await;
-                        "ok"
-                    }
-                }
-            }),
-        );
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (shutdown, shutdown_receiver) = watch::channel(false);
-        let task = tokio::spawn(serve_http(
-            listener,
-            app,
-            HttpServerConfig {
-                max_connections: 1,
-                http1_header_timeout: Duration::from_secs(1),
-                connection_max_age: Duration::from_millis(50),
-            },
-            shutdown_receiver,
-        ));
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(b"GET / HTTP/1.1\r\nHost: example\r\n\r\n")
-            .await
-            .unwrap();
-        entered.notified().await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        release.notify_one();
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).await.unwrap();
-        assert!(response.starts_with(b"HTTP/1.1 200"));
-        let _ = shutdown.send(true);
-        task.await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
     async fn oversized_http1_headers_are_rejected_before_reaching_axum() {
         let reached_axum = Arc::new(AtomicBool::new(false));
         let app = Router::new().route(
@@ -563,6 +366,45 @@ mod tests {
         // EOF. The invariant is that the request never reaches Axum.
         assert!(!reached_axum.load(Ordering::Acquire));
         assert!(!response.starts_with(b"HTTP/1.1 200"));
+        let _ = shutdown.send(true);
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn http1_connection_can_be_reused() {
+        let (address, shutdown, task) = test_server(1, Duration::from_secs(1)).await;
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: example\r\n\r\n")
+            .await
+            .unwrap();
+        let mut first = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut buffer = [0_u8; 256];
+            while !first.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).await.unwrap();
+                assert!(read > 0);
+                first.extend_from_slice(&buffer[..read]);
+            }
+        })
+        .await
+        .unwrap();
+
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut second = Vec::new();
+        stream.read_to_end(&mut second).await.unwrap();
+        first.extend(second);
+        assert_eq!(
+            first
+                .windows(b"HTTP/1.1 200".len())
+                .filter(|window| *window == b"HTTP/1.1 200")
+                .count(),
+            2
+        );
+
         let _ = shutdown.send(true);
         task.await.unwrap().unwrap();
     }

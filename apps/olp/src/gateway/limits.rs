@@ -279,17 +279,17 @@ async fn cleanup_request_media(spool: &Arc<dyn MediaSpool>, handles: Vec<MediaHa
     }
 }
 
-pub(super) struct RequestMediaGuard {
+pub(crate) struct RequestMediaGuard {
     spool: Arc<dyn MediaSpool>,
     handles: Vec<MediaHandle>,
 }
 
 impl RequestMediaGuard {
-    pub(super) fn new(spool: Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) -> Self {
+    pub(crate) fn new(spool: Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) -> Self {
         Self { spool, handles }
     }
 
-    pub(super) async fn cleanup(mut self) {
+    pub(crate) async fn cleanup(mut self) {
         if self.handles.is_empty() {
             return;
         }

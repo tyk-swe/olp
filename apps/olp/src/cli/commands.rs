@@ -214,7 +214,12 @@ pub(super) async fn request_metadata_consumer_supervisor(
         }
         match request_metadata_consumer_loop(store.clone(), &valkey_url, shutdown.clone()).await {
             Ok(()) => return,
-            Err(error) => error!(%error, "request metadata persistence worker failed; restarting"),
+            Err(error) => {
+                error!(
+                    ?error,
+                    "request metadata persistence worker failed; restarting"
+                )
+            }
         }
         tokio::select! {
             changed = shutdown.changed() => {

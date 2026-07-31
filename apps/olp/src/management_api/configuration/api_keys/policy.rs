@@ -4,7 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use olp_domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
+use olp_domain::{ApiKeyLimits, ApiKeyScope, MAX_API_KEY_TOKENS_PER_MINUTE, RouteSlug};
 use olp_storage::UpdateApiKeyInput;
 
 use crate::{FieldErrors, Problem};
@@ -13,7 +13,6 @@ use super::{CreateApiKeyRequest, UpdateApiKeyRequest};
 
 const MAX_NAME_CHARACTERS: usize = 100;
 const MAX_U32_DATABASE_LIMIT: u32 = i32::MAX as u32;
-const MAX_U64_DATABASE_LIMIT: u64 = i64::MAX as u64;
 
 pub(super) struct RawApiKeyPolicy<'a> {
     name: &'a str,
@@ -69,7 +68,7 @@ pub(super) struct NormalizedApiKeyPolicy {
 }
 
 impl NormalizedApiKeyPolicy {
-    pub fn into_update_input(self) -> UpdateApiKeyInput {
+    pub(super) fn into_update_input(self) -> UpdateApiKeyInput {
         UpdateApiKeyInput {
             name: self.name,
             scopes: self
@@ -218,11 +217,11 @@ fn normalize_u64_limit(
             );
             None
         }
-        Some(value) if value > MAX_U64_DATABASE_LIMIT => {
+        Some(value) if value > MAX_API_KEY_TOKENS_PER_MINUTE => {
             errors.insert(
                 field.to_owned(),
                 vec![format!(
-                    "Use a limit no greater than {MAX_U64_DATABASE_LIMIT} or null."
+                    "Use a limit no greater than {MAX_API_KEY_TOKENS_PER_MINUTE} or null."
                 )],
             );
             None
@@ -421,16 +420,16 @@ mod tests {
     }
 
     #[test]
-    fn limits_must_fit_the_positive_database_range() {
+    fn limits_must_fit_the_positive_runtime_range() {
         let now = Utc::now();
         let mut create = create_request();
         create.requests_per_minute = Some(MAX_U32_DATABASE_LIMIT);
-        create.tokens_per_minute = Some(MAX_U64_DATABASE_LIMIT);
+        create.tokens_per_minute = Some(MAX_API_KEY_TOKENS_PER_MINUTE);
         create.max_concurrency = Some(MAX_U32_DATABASE_LIMIT);
         assert!(normalize_create(&create).is_ok());
 
         create.requests_per_minute = Some(MAX_U32_DATABASE_LIMIT + 1);
-        create.tokens_per_minute = Some(MAX_U64_DATABASE_LIMIT + 1);
+        create.tokens_per_minute = Some(MAX_API_KEY_TOKENS_PER_MINUTE + 1);
         create.max_concurrency = Some(MAX_U32_DATABASE_LIMIT + 1);
         let update = update_request(&create);
         let create_problem = normalize_create(&create).unwrap_err();
@@ -443,7 +442,7 @@ mod tests {
         );
         assert_eq!(
             create_problem.errors["tokens_per_minute"],
-            ["Use a limit no greater than 9223372036854775807 or null."]
+            ["Use a limit no greater than 9007199254740991 or null."]
         );
         assert_eq!(
             create_problem.errors["max_concurrency"],

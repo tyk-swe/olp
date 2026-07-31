@@ -22,9 +22,7 @@ use libfuzzer_sys::fuzz_target;
 use olp_protocols::{
     anthropic::AnthropicMessagesStreamDecoder,
     gemini::GeminiGenerateContentStreamDecoder,
-    openai::{
-        OpenAiChatStreamDecoder, OpenAiResponsesStreamDecoder, OpenAiTranscriptionStreamDecoder,
-    },
+    openai::{OpenAiChatStreamDecoder, OpenAiResponsesStreamDecoder},
     sse::{SseDecodeError, SseDecoder, SseFrame, encode_frame},
 };
 
@@ -171,7 +169,6 @@ fuzz_target!(|data: &[u8]| {
     }
     drive_vendor_decoder!(OpenAiChatStreamDecoder::new());
     drive_vendor_decoder!(OpenAiResponsesStreamDecoder::new());
-    drive_vendor_decoder!(OpenAiTranscriptionStreamDecoder::new());
     drive_vendor_decoder!(AnthropicMessagesStreamDecoder::new());
     drive_vendor_decoder!(GeminiGenerateContentStreamDecoder::new());
 });

@@ -28,7 +28,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 #[derive(Clone, Debug)]
-pub struct ConnectorConfig {
+pub(crate) struct ConnectorConfig {
     inner: OpenAiConnectorConfig,
     resource_endpoint: Url,
     deployment: String,
@@ -36,7 +36,7 @@ pub struct ConnectorConfig {
 }
 
 impl ConnectorConfig {
-    pub fn new(
+    pub(crate) fn new(
         resource_endpoint: &str,
         deployment: impl Into<String>,
         api_version: impl Into<String>,
@@ -53,7 +53,7 @@ impl ConnectorConfig {
     /// Accepts plain-HTTP and non-public resource endpoints. Exists only for
     /// test builds; release binaries never compile this constructor.
     #[cfg(any(test, feature = "test-util"))]
-    pub fn new_unsafe_test_target(
+    pub(crate) fn new_unsafe_test_target(
         resource_endpoint: &str,
         deployment: impl Into<String>,
         api_version: impl Into<String>,
@@ -113,10 +113,10 @@ impl ConnectorConfig {
     }
 }
 
-pub struct AzureOpenAiApiKey(Zeroizing<String>);
+pub(crate) struct AzureOpenAiApiKey(Zeroizing<String>);
 
 impl AzureOpenAiApiKey {
-    pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
+    pub(crate) fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
         let value = value.into();
         if value.trim().is_empty() {
             return Err(ConnectorBuildError::EmptyApiKey);
@@ -134,7 +134,7 @@ impl fmt::Debug for AzureOpenAiApiKey {
     }
 }
 
-pub struct AzureOpenAiConnector {
+pub(crate) struct AzureOpenAiConnector {
     resource_endpoint: Url,
     deployment: String,
     api_version: String,
@@ -143,7 +143,7 @@ pub struct AzureOpenAiConnector {
 
 impl AzureOpenAiConnector {
     #[must_use]
-    pub fn new(config: ConnectorConfig, api_key: AzureOpenAiApiKey) -> Self {
+    pub(crate) fn new(config: ConnectorConfig, api_key: AzureOpenAiApiKey) -> Self {
         let inference_key = OpenAiApiKey::new(api_key.0.as_str().to_owned())
             .expect("Azure key validation is at least as strict as OpenAI key validation");
         let inner = OpenAiConnector::new_with_api_key_header(config.inner, inference_key);
@@ -160,7 +160,9 @@ impl AzureOpenAiConnector {
     /// plane request that proves a deployment can serve inference, so chat is
     /// attempted first and embeddings second. A 404, invalid API version, or
     /// deployment that supports neither operation fails closed.
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+    pub(crate) async fn discover_models(
+        &self,
+    ) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         let chat = self
             .inner
             .certify_chat_completions_capability(&self.deployment, TransportMode::Unary)
@@ -191,7 +193,7 @@ impl AzureOpenAiConnector {
     /// Cross-origin generation uses Chat Completions, the translation path
     /// selected when no OpenAI endpoint hint exists. Media/job tuples are not
     /// certified until a safe content-minimal probe exists.
-    pub async fn certify_deployment_capability(
+    pub(crate) async fn certify_deployment_capability(
         &self,
         upstream_model: &str,
         capability: CompatibleCapability,
@@ -235,6 +237,7 @@ fn deployment_probe_error(
         phase,
         class,
         response_committed: false,
+        retry_after: None,
         message: format!(
             "configured Azure deployment rejected bounded chat and embedding probes ({chat}; {embeddings})"
         ),
@@ -264,6 +267,7 @@ impl ProviderTransport for AzureOpenAiConnector {
                     phase: TransportPhase::Connect,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,
+                    retry_after: None,
                     message: "Azure OpenAI connector received a different provider kind".into(),
                 })
             });
@@ -355,7 +359,7 @@ fn deployment_base_url(
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ConnectorBuildError {
+pub(crate) enum ConnectorBuildError {
     #[error(
         "Azure OpenAI resource endpoint must be an HTTPS origin without credentials, query, fragment, or path"
     )]

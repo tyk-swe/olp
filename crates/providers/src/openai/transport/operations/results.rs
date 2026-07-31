@@ -59,10 +59,33 @@ pub(super) async fn execute(
     let result = match result_kind {
         ResultKind::Embeddings => {
             let wire: EmbeddingResponse = parse_wire("embeddings", &response)?;
-            CanonicalResult::Embeddings(
-                decode_embedding_response(wire)
-                    .map_err(|error| protocol_decode_error("embeddings", error))?,
-            )
+            let result = decode_embedding_response(wire)
+                .map_err(|error| protocol_decode_error("embeddings", error))?;
+            let Operation::Embeddings(operation) = &request.operation else {
+                unreachable!("result kind was selected from this operation")
+            };
+            if result.data.len() != operation.input.len() {
+                return Err(protocol_decode_error(
+                    "embeddings",
+                    format!(
+                        "expected {} vectors, received {}",
+                        operation.input.len(),
+                        result.data.len()
+                    ),
+                ));
+            }
+            if let Some(dimensions) = operation.dimensions
+                && result
+                    .data
+                    .iter()
+                    .any(|item| item.values.len() != dimensions as usize)
+            {
+                return Err(protocol_decode_error(
+                    "embeddings",
+                    format!("expected vectors with {dimensions} dimensions"),
+                ));
+            }
+            CanonicalResult::Embeddings(result)
         }
         ResultKind::TokenCount => {
             let wire: ResponseInputTokensResponse = parse_wire("input-token count", &response)?;
@@ -70,7 +93,10 @@ pub(super) async fn execute(
         }
         ResultKind::Moderation => {
             let wire: OpenAiModerationResponse = parse_wire("moderation", &response)?;
-            CanonicalResult::Moderation(decode_moderation_response(wire))
+            CanonicalResult::Moderation(
+                decode_moderation_response(wire)
+                    .map_err(|error| protocol_decode_error("moderation", error))?,
+            )
         }
     };
     Ok(ProviderOutput::Result(Box::new(result)))

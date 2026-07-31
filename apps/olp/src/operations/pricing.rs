@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum PriceOperation {
     Generation,
@@ -68,7 +68,7 @@ impl From<PriceOperation> for OperationKind {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(super) struct PriceRequest {
     provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
@@ -96,10 +96,16 @@ impl From<PriceRequest> for PriceInput {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(super) struct PricingRevisionRequest {
     effective_at: DateTime<Utc>,
     prices: Vec<PriceRequest>,
+}
+
+#[derive(Serialize)]
+struct PricingRevisionFingerprint<'a> {
+    effective_at: &'a DateTime<Utc>,
+    prices: &'a [PriceInput],
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -214,16 +220,21 @@ pub(super) async fn create_pricing_revision(
     require_permission(&principal, Permission::ManagePricing)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
+    let prices = request
+        .prices
+        .into_iter()
+        .map(PriceInput::from)
+        .map(PriceInput::normalized)
+        .collect::<Vec<_>>();
+    let request_fingerprint = idempotency_fingerprint(&PricingRevisionFingerprint {
+        effective_at: &request.effective_at,
+        prices: &prices,
+    })
+    .map_err(map_persistence)?;
     let master_key = state
         .master_key
         .as_deref()
         .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
-    let prices = request
-        .prices
-        .into_iter()
-        .map(Into::into)
-        .collect::<Vec<_>>();
     let revision = state
         .store()
         .create_pricing_revision(

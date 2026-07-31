@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT ctid FROM async_media_jobs WHERE lifecycle_state = 'deleted' AND deleted_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED ) DELETE FROM async_media_jobs job USING expired WHERE job.ctid = expired.ctid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7c73e6c3bf0e0106fa5c9967cfabb1844530062af2744f93ce780551d61a30bf"
+}

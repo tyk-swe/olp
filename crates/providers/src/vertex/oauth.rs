@@ -15,11 +15,11 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant, time::timeout};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
-const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 const MAX_TOKEN_RESPONSE_BYTES: usize = 64 * 1024;
+const TOKEN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 32;
 
@@ -55,7 +55,7 @@ impl BearerTokenProvider for ApplicationDefaultTokenProvider {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct ServiceAccountCredential {
+struct ServiceAccountCredential {
     #[serde(rename = "type")]
     credential_type: String,
     private_key_id: String,
@@ -71,21 +71,14 @@ impl fmt::Debug for ServiceAccountCredential {
     }
 }
 
-impl Drop for ServiceAccountCredential {
-    fn drop(&mut self) {
-        self.private_key_id.zeroize();
-        self.client_email.zeroize();
-        self.token_uri.zeroize();
-    }
-}
-
 struct CachedToken {
     value: Zeroizing<String>,
     refresh_at: Instant,
+    expires_at: Instant,
 }
 
 pub(crate) struct ServiceAccountTokenProvider {
-    credential: Arc<ServiceAccountCredential>,
+    credential: ServiceAccountCredential,
     endpoint: OAuthEndpoint,
     cache: ArcSwapOption<CachedToken>,
     refresh_lock: Mutex<()>,
@@ -112,7 +105,7 @@ impl ServiceAccountTokenProvider {
         EncodingKey::from_rsa_pem(credential.private_key.as_bytes())
             .map_err(|_| ServiceAccountError::InvalidPrivateKey)?;
         Ok(Self {
-            credential: Arc::new(credential),
+            credential,
             endpoint,
             cache: ArcSwapOption::empty(),
             refresh_lock: Mutex::new(()),
@@ -131,7 +124,7 @@ impl ServiceAccountTokenProvider {
             .as_secs();
         let claims = ServiceAccountClaims {
             iss: &self.credential.client_email,
-            scope: CLOUD_PLATFORM_SCOPE,
+            scope: super::DEFAULT_SCOPE,
             aud: self.endpoint.url.as_str(),
             iat: now,
             exp: now.saturating_add(3_600),
@@ -164,47 +157,58 @@ impl ServiceAccountTokenProvider {
         if response.status() != StatusCode::OK {
             return Err(BearerTokenError);
         }
-        let content_type_ok = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"));
-        if !content_type_ok {
+        if !crate::transport_common::has_content_type(response.headers(), "application/json") {
             return Err(BearerTokenError);
         }
-        let bytes = read_bounded_token_response(response).await?;
+        let bytes = read_bounded_token_response(response, TOKEN_RESPONSE_TIMEOUT).await?;
         let response: TokenResponse =
             serde_json::from_slice(&bytes).map_err(|_| BearerTokenError)?;
-        if response.token_type != "Bearer"
+        if !response.token_type.eq_ignore_ascii_case("Bearer")
             || response.expires_in < 30
             || response.access_token.trim().is_empty()
         {
             return Err(BearerTokenError);
         }
+        let (refresh_at, expires_at) = token_deadlines(response.expires_in)?;
         Ok(CachedToken {
             value: Zeroizing::new(response.access_token),
-            refresh_at: token_refresh_deadline(response.expires_in)?,
+            refresh_at,
+            expires_at,
         })
     }
 
-    fn cached_token(&self) -> Result<Option<SecretBearerToken>, BearerTokenError> {
+    fn cached_token(
+        &self,
+        allow_refresh_due: bool,
+    ) -> Result<Option<SecretBearerToken>, BearerTokenError> {
+        let now = Instant::now();
         self.cache
             .load()
             .as_ref()
-            .filter(|token| token.refresh_at > Instant::now())
+            .filter(|token| {
+                if allow_refresh_due {
+                    token.expires_at > now
+                } else {
+                    token.refresh_at > now
+                }
+            })
             .map(|token| SecretBearerToken::new(token.value.as_str().to_owned()))
             .transpose()
     }
 }
 
-fn token_refresh_deadline(expires_in: u64) -> Result<Instant, BearerTokenError> {
+fn token_deadlines(expires_in: u64) -> Result<(Instant, Instant), BearerTokenError> {
     let refresh_margin = 300_u64.min(expires_in / 2);
-    Instant::now()
+    let now = Instant::now();
+    let expires_at = now
+        .checked_add(Duration::from_secs(expires_in))
+        .ok_or(BearerTokenError)?;
+    let refresh_at = now
         .checked_add(Duration::from_secs(
             expires_in.saturating_sub(refresh_margin),
         ))
-        .ok_or(BearerTokenError)
+        .ok_or(BearerTokenError)?;
+    Ok((refresh_at, expires_at))
 }
 
 impl fmt::Debug for ServiceAccountTokenProvider {
@@ -218,14 +222,17 @@ impl BearerTokenProvider for ServiceAccountTokenProvider {
         &'a self,
     ) -> olp_domain::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
         Box::pin(async move {
-            if let Some(token) = self.cached_token()? {
+            if let Some(token) = self.cached_token(false)? {
                 return Ok(token);
             }
             let _refresh = self.refresh_lock.lock().await;
-            if let Some(token) = self.cached_token()? {
+            if let Some(token) = self.cached_token(false)? {
                 return Ok(token);
             }
-            let refreshed = Arc::new(self.refresh().await?);
+            let refreshed = match self.refresh().await {
+                Ok(token) => Arc::new(token),
+                Err(error) => return self.cached_token(true)?.ok_or(error),
+            };
             let value = SecretBearerToken::new(refreshed.value.as_str().to_owned())?;
             self.cache.store(Some(refreshed));
             Ok(value)
@@ -332,23 +339,25 @@ fn map_pinned_client_error(error: PinnedClientError) -> ServiceAccountError {
 
 async fn read_bounded_token_response(
     response: reqwest::Response,
+    total_timeout: Duration,
 ) -> Result<Vec<u8>, BearerTokenError> {
-    let mut source = response.bytes_stream();
-    let mut output = Vec::new();
-    while let Some(chunk) = timeout(Duration::from_secs(10), source.next())
-        .await
-        .map_err(|_| BearerTokenError)?
-    {
-        let chunk = chunk.map_err(|_| BearerTokenError)?;
-        if output.len().saturating_add(chunk.len()) > MAX_TOKEN_RESPONSE_BYTES {
+    timeout(total_timeout, async move {
+        let mut source = response.bytes_stream();
+        let mut output = Vec::new();
+        while let Some(chunk) = source.next().await {
+            let chunk = chunk.map_err(|_| BearerTokenError)?;
+            if output.len().saturating_add(chunk.len()) > MAX_TOKEN_RESPONSE_BYTES {
+                return Err(BearerTokenError);
+            }
+            output.extend_from_slice(&chunk);
+        }
+        if output.is_empty() {
             return Err(BearerTokenError);
         }
-        output.extend_from_slice(&chunk);
-    }
-    if output.is_empty() {
-        return Err(BearerTokenError);
-    }
-    Ok(output)
+        Ok(output)
+    })
+    .await
+    .map_err(|_| BearerTokenError)?
 }
 
 fn validate_credential(
@@ -369,7 +378,7 @@ fn validate_credential(
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceAccountError {
+pub(crate) enum ServiceAccountError {
     #[error("credential JSON exceeds 64 KiB")]
     CredentialTooLarge,
     #[error("credential JSON is malformed or missing required service-account fields")]
@@ -385,11 +394,83 @@ pub enum ServiceAccountError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::{io::AsyncWriteExt, net::TcpListener};
 
     #[test]
     fn token_lifetime_cannot_overflow_the_runtime_clock() {
-        assert!(token_refresh_deadline(3_600).is_ok());
-        assert!(token_refresh_deadline(u64::MAX).is_err());
+        let (refresh_at, expires_at) = token_deadlines(3_600).unwrap();
+        assert!(refresh_at < expires_at);
+        assert!(token_deadlines(u64::MAX).is_err());
+    }
+
+    fn test_provider(token_uri: &str) -> ServiceAccountTokenProvider {
+        let credential = serde_json::json!({
+            "type": "service_account",
+            "private_key_id": "test-key",
+            "private_key": include_str!("../../testdata/vertex/test_only_private_key.pem"),
+            "client_email": "test@test-project.iam.gserviceaccount.com",
+            "token_uri": token_uri,
+        });
+        ServiceAccountTokenProvider::from_json_for_test(&credential.to_string()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_uses_only_an_unexpired_cached_token() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (socket, _) = listener.accept().await.unwrap();
+                drop(socket);
+            }
+        });
+        let provider = test_provider(&endpoint);
+        let now = Instant::now();
+        provider.cache.store(Some(Arc::new(CachedToken {
+            value: Zeroizing::new("cached-token".to_owned()),
+            refresh_at: now - Duration::from_secs(1),
+            expires_at: now + Duration::from_secs(30),
+        })));
+        assert!(provider.token().await.is_ok());
+
+        provider.cache.store(Some(Arc::new(CachedToken {
+            value: Zeroizing::new("expired-token".to_owned()),
+            refresh_at: now - Duration::from_secs(2),
+            expires_at: now - Duration::from_secs(1),
+        })));
+        assert!(provider.token().await.is_err());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn token_response_timeout_is_total_not_per_chunk() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            loop {
+                if socket.write_all(b"x").await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            read_bounded_token_response(response, Duration::from_millis(25))
+                .await
+                .is_err()
+        );
     }
 
     #[test]

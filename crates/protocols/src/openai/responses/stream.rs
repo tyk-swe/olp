@@ -11,14 +11,14 @@ use crate::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecoder, SseFrame};
 use super::super::extensions::escape_json_pointer;
 use super::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::errors::ResponsesCodecError;
-use super::response::{ResponseUsage, canonical_response_usage};
+use super::response::{ResponseUsage, canonical_response_usage, response_incomplete_reason};
 
 pub struct OpenAiResponsesStreamDecoder {
     sse: SseDecoder,
     sequence: u64,
     response_started: bool,
     started_outputs: BTreeSet<u32>,
-    finished_outputs: BTreeSet<u32>,
+    finished_outputs: BTreeMap<u32, FinishReason>,
     done: bool,
 }
 
@@ -54,7 +54,7 @@ impl OpenAiResponsesStreamDecoder {
             sequence: 0,
             response_started: false,
             started_outputs: BTreeSet::new(),
-            finished_outputs: BTreeSet::new(),
+            finished_outputs: BTreeMap::new(),
             done: false,
         }
     }
@@ -73,11 +73,6 @@ impl OpenAiResponsesStreamDecoder {
         Ok(events)
     }
 
-    #[must_use]
-    pub const fn is_done(&self) -> bool {
-        self.done
-    }
-
     fn decode_frames(
         &mut self,
         frames: Vec<SseFrame>,
@@ -88,7 +83,8 @@ impl OpenAiResponsesStreamDecoder {
                 return Err(ResponsesCodecError::DataAfterDone);
             }
             if frame.data.trim() == "[DONE]" {
-                self.finish_open_outputs(&mut events);
+                self.require_response_started()?;
+                self.finish_open_outputs(None, &mut events);
                 self.emit(&mut events, CanonicalEventKind::Done);
                 self.done = true;
                 continue;
@@ -112,48 +108,55 @@ impl OpenAiResponsesStreamDecoder {
         events: &mut Vec<CanonicalEvent>,
     ) -> Result<(), ResponsesCodecError> {
         match kind {
-            "response.created" | "response.in_progress" => {
+            "response.created" => {
+                if self.response_started {
+                    return Err(ResponsesCodecError::InvalidResponse(
+                        "duplicate response.created".into(),
+                    ));
+                }
                 let response = value.get("response").unwrap_or(value);
                 self.ensure_response_started(response, events);
             }
+            "response.in_progress" => self.require_response_started()?,
             "response.output_item.added" => {
-                self.ensure_response_started(value, events);
+                self.require_response_started()?;
                 let output_index = stream_index(value, "output_index")?;
                 let item = value
                     .get("item")
                     .ok_or_else(|| ResponsesCodecError::InvalidResponse("stream item".into()))?;
-                let role = item.get("role").and_then(Value::as_str).map_or(
-                    MessageRole::Assistant,
-                    |role| match role {
-                        "assistant" => MessageRole::Assistant,
-                        _ => MessageRole::Assistant,
-                    },
-                );
-                self.ensure_output_started(output_index, role, events);
-                if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                    self.emit(
-                        events,
-                        CanonicalEventKind::ToolCallDelta {
-                            output_index,
-                            tool_index: 0,
-                            id: item
-                                .get("call_id")
-                                .or_else(|| item.get("id"))
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                            name: item.get("name").and_then(Value::as_str).map(str::to_owned),
-                            arguments_delta: item
-                                .get("arguments")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                        },
-                    );
+                match stream_string(item, "type")?.as_str() {
+                    "message" => {
+                        if stream_string(item, "role")? != "assistant" {
+                            return Err(ResponsesCodecError::InvalidResponse(
+                                "stream message role".into(),
+                            ));
+                        }
+                        self.start_output(output_index, events)?;
+                    }
+                    "function_call" => {
+                        self.start_output(output_index, events)?;
+                        self.emit(
+                            events,
+                            CanonicalEventKind::ToolCallDelta {
+                                output_index,
+                                tool_index: 0,
+                                id: Some(stream_string(item, "call_id")?),
+                                name: Some(stream_string(item, "name")?),
+                                arguments_delta: item
+                                    .get("arguments")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                            },
+                        );
+                    }
+                    _ => self.preserve_stream_event(kind, value, events),
                 }
             }
             "response.output_text.delta" => {
+                self.require_response_started()?;
                 let output_index = stream_index(value, "output_index")?;
-                self.ensure_output_started(output_index, MessageRole::Assistant, events);
+                self.require_output_open(output_index)?;
                 self.emit(
                     events,
                     CanonicalEventKind::TextDelta {
@@ -163,8 +166,9 @@ impl OpenAiResponsesStreamDecoder {
                 );
             }
             "response.refusal.delta" => {
+                self.require_response_started()?;
                 let output_index = stream_index(value, "output_index")?;
-                self.ensure_output_started(output_index, MessageRole::Assistant, events);
+                self.require_output_open(output_index)?;
                 self.emit(
                     events,
                     CanonicalEventKind::RefusalDelta {
@@ -174,54 +178,72 @@ impl OpenAiResponsesStreamDecoder {
                 );
             }
             "response.function_call_arguments.delta" => {
+                self.require_response_started()?;
                 let output_index = stream_index(value, "output_index")?;
-                self.ensure_output_started(output_index, MessageRole::Assistant, events);
+                self.require_output_open(output_index)?;
                 self.emit(
                     events,
                     CanonicalEventKind::ToolCallDelta {
                         output_index,
                         tool_index: 0,
-                        id: value
-                            .get("item_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
+                        id: None,
                         name: None,
                         arguments_delta: stream_string(value, "delta")?,
                     },
                 );
             }
             "response.output_item.done" => {
+                self.require_response_started()?;
                 let output_index = stream_index(value, "output_index")?;
-                if self.finished_outputs.insert(output_index) {
-                    let reason = if value
-                        .get("item")
-                        .and_then(|item| item.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("function_call")
+                let item = value
+                    .get("item")
+                    .ok_or_else(|| ResponsesCodecError::InvalidResponse("stream item".into()))?;
+                let reason = match stream_string(item, "type")?.as_str() {
+                    "message" => Some(FinishReason::Stop),
+                    "function_call" => Some(FinishReason::ToolCalls),
+                    _ => None,
+                };
+                if let Some(reason) = reason {
+                    if !self.started_outputs.contains(&output_index)
+                        || self.finished_outputs.insert(output_index, reason).is_some()
                     {
-                        FinishReason::ToolCalls
-                    } else {
-                        FinishReason::Stop
-                    };
-                    self.emit(
-                        events,
-                        CanonicalEventKind::Finish {
-                            output_index,
-                            reason,
-                        },
-                    );
+                        return Err(ResponsesCodecError::InvalidResponse(
+                            "Responses output lifecycle".into(),
+                        ));
+                    }
+                } else {
+                    self.preserve_stream_event(kind, value, events);
                 }
             }
             "response.completed" | "response.incomplete" => {
+                self.require_response_started()?;
                 let response = value.get("response").unwrap_or(value);
-                self.ensure_response_started(response, events);
-                self.finish_open_outputs(events);
-                let raw_output = raw_response_output_extensions(response)?;
-                if !raw_output.is_empty() {
+                let incomplete = kind == "response.incomplete";
+                if let Some(status) = response.get("status") {
+                    let status = status.as_str().ok_or_else(|| {
+                        ResponsesCodecError::InvalidResponse("response status".into())
+                    })?;
+                    if (status == "incomplete") != incomplete {
+                        return Err(ResponsesCodecError::InvalidResponse(
+                            "response terminal status".into(),
+                        ));
+                    }
+                }
+                let terminal_reason = incomplete
+                    .then(|| response_incomplete_reason(response.get("incomplete_details")));
+                self.finish_open_outputs(terminal_reason.as_ref(), events);
+                let mut extensions = raw_response_output_extensions(response)?;
+                if incomplete {
+                    extensions.insert("/status".into(), Value::String("incomplete".into()));
+                    if let Some(details) = response.get("incomplete_details") {
+                        extensions.insert("/incomplete_details".into(), details.clone());
+                    }
+                }
+                if !extensions.is_empty() {
                     self.emit(
                         events,
                         CanonicalEventKind::SourceExtension {
-                            extensions: SourceExtensions::new(Surface::OpenAi, raw_output),
+                            extensions: SourceExtensions::new(Surface::OpenAi, extensions),
                         },
                     );
                 }
@@ -238,6 +260,7 @@ impl OpenAiResponsesStreamDecoder {
                 self.done = true;
             }
             "response.failed" | "error" => {
+                self.require_response_started()?;
                 let error = value
                     .get("response")
                     .and_then(|response| response.get("error"))
@@ -267,7 +290,7 @@ impl OpenAiResponsesStreamDecoder {
                         },
                     },
                 );
-                self.finish_open_outputs(events);
+                self.finish_open_outputs(Some(&FinishReason::Error), events);
                 self.emit(events, CanonicalEventKind::Done);
                 self.done = true;
             }
@@ -276,20 +299,7 @@ impl OpenAiResponsesStreamDecoder {
             | "response.content_part.done"
             | "response.output_text.done"
             | "response.function_call_arguments.done" => {}
-            _ => {
-                self.emit(
-                    events,
-                    CanonicalEventKind::SourceExtension {
-                        extensions: SourceExtensions::new(
-                            Surface::OpenAi,
-                            BTreeMap::from([(
-                                format!("/stream/{}", escape_json_pointer(kind)),
-                                value.clone(),
-                            )]),
-                        ),
-                    },
-                );
-            }
+            _ => self.preserve_stream_event(kind, value, events),
         }
         Ok(())
     }
@@ -315,33 +325,84 @@ impl OpenAiResponsesStreamDecoder {
         self.response_started = true;
     }
 
-    fn ensure_output_started(
+    fn preserve_stream_event(
         &mut self,
-        output_index: u32,
-        role: MessageRole,
+        kind: &str,
+        value: &Value,
         events: &mut Vec<CanonicalEvent>,
     ) {
-        if self.started_outputs.insert(output_index) {
-            self.emit(
-                events,
-                CanonicalEventKind::MessageStart { output_index, role },
-            );
+        self.emit(
+            events,
+            CanonicalEventKind::SourceExtension {
+                extensions: SourceExtensions::new(
+                    Surface::OpenAi,
+                    BTreeMap::from([(
+                        format!("/stream/{}/{}", escape_json_pointer(kind), self.sequence),
+                        value.clone(),
+                    )]),
+                ),
+            },
+        );
+    }
+
+    fn require_response_started(&self) -> Result<(), ResponsesCodecError> {
+        if self.response_started {
+            Ok(())
+        } else {
+            Err(ResponsesCodecError::InvalidResponse(
+                "Responses event before response start".into(),
+            ))
         }
     }
 
-    fn finish_open_outputs(&mut self, events: &mut Vec<CanonicalEvent>) {
-        let unfinished = self
-            .started_outputs
-            .difference(&self.finished_outputs)
-            .copied()
-            .collect::<Vec<_>>();
-        for output_index in unfinished {
-            self.finished_outputs.insert(output_index);
+    fn start_output(
+        &mut self,
+        output_index: u32,
+        events: &mut Vec<CanonicalEvent>,
+    ) -> Result<(), ResponsesCodecError> {
+        if !self.started_outputs.insert(output_index) {
+            return Err(ResponsesCodecError::InvalidResponse(
+                "duplicate Responses output item".into(),
+            ));
+        }
+        self.emit(
+            events,
+            CanonicalEventKind::MessageStart {
+                output_index,
+                role: MessageRole::Assistant,
+            },
+        );
+        Ok(())
+    }
+
+    fn require_output_open(&self, output_index: u32) -> Result<(), ResponsesCodecError> {
+        if self.started_outputs.contains(&output_index)
+            && !self.finished_outputs.contains_key(&output_index)
+        {
+            Ok(())
+        } else {
+            Err(ResponsesCodecError::InvalidResponse(
+                "Responses delta outside an open output".into(),
+            ))
+        }
+    }
+
+    fn finish_open_outputs(
+        &mut self,
+        terminal_reason: Option<&FinishReason>,
+        events: &mut Vec<CanonicalEvent>,
+    ) {
+        let outputs = self.started_outputs.iter().copied().collect::<Vec<_>>();
+        for output_index in outputs {
+            let reason = terminal_reason
+                .cloned()
+                .or_else(|| self.finished_outputs.get(&output_index).cloned())
+                .unwrap_or(FinishReason::Stop);
             self.emit(
                 events,
                 CanonicalEventKind::Finish {
                     output_index,
-                    reason: FinishReason::Stop,
+                    reason,
                 },
             );
         }
@@ -401,6 +462,8 @@ mod tests {
         let events = decoder
             .push(
                 concat!(
+                    "event: response.created\n",
+                    "data: {\"type\":\"response.created\"}\n\n",
                     "event: response.failed\n",
                     "data: {\"type\":\"response.failed\",\"response\":{\"error\":",
                     "{\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\",",
@@ -419,5 +482,36 @@ mod tests {
             .expect("failed response event must emit a canonical error");
         assert_eq!(error.class, ErrorClass::RateLimit);
         assert!(error.retryable);
+    }
+
+    #[test]
+    fn rejects_invalid_output_lifecycle() {
+        let frame = |value: Value| format!("data: {value}\n\n");
+        let created = frame(serde_json::json!({"type": "response.created"}));
+        let added = frame(serde_json::json!({
+            "type": "response.output_item.added", "output_index": 0,
+            "item": {"type": "message", "role": "assistant"}
+        }));
+        let delta = frame(serde_json::json!({
+            "type": "response.output_text.delta", "output_index": 0, "delta": "x"
+        }));
+        let done = frame(serde_json::json!({
+            "type": "response.output_item.done", "output_index": 0,
+            "item": {"type": "message"}
+        }));
+        let cases = [
+            delta.clone(),
+            format!("{created}{delta}"),
+            format!("{created}{done}"),
+            format!("{created}{added}{delta}{done}{delta}"),
+            format!("{created}{created}"),
+        ];
+        for wire in cases {
+            assert!(
+                OpenAiResponsesStreamDecoder::new()
+                    .push(wire.as_bytes())
+                    .is_err()
+            );
+        }
     }
 }

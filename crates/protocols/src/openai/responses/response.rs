@@ -76,6 +76,13 @@ pub fn decode_response_object(
         return Err(ResponsesCodecError::InvalidResponse(response.object));
     }
     let mut builder = ResponsesEventBuilder::default();
+    let terminal_reason = match response.status.as_str() {
+        "incomplete" => Some(response_incomplete_reason(
+            response.incomplete_details.as_ref(),
+        )),
+        "failed" => Some(FinishReason::Error),
+        _ => None,
+    };
     builder.push(CanonicalEventKind::ResponseStart {
         response_id: Some(response.id),
         provider_model: Some(response.model),
@@ -94,6 +101,7 @@ pub fn decode_response_object(
                 .try_into()
                 .map_err(|_| ResponsesCodecError::TooManyOutputItems)?,
             item,
+            terminal_reason.as_ref(),
             &mut extensions,
             &mut builder,
         )?;
@@ -135,6 +143,7 @@ pub fn decode_response_object(
 fn decode_response_output_item(
     output_index: u32,
     item: Value,
+    terminal_reason: Option<&FinishReason>,
     extensions: &mut BTreeMap<String, Value>,
     builder: &mut ResponsesEventBuilder,
 ) -> Result<(), ResponsesCodecError> {
@@ -150,10 +159,11 @@ fn decode_response_output_item(
                 "assistant" => MessageRole::Assistant,
                 value => return Err(ResponsesCodecError::UnsupportedRole(value.into())),
             };
-            let content = object
-                .remove("content")
-                .and_then(|value| value.as_array().cloned())
-                .ok_or_else(|| ResponsesCodecError::InvalidResponse("message content".into()))?;
+            let Some(Value::Array(content)) = object.remove("content") else {
+                return Err(ResponsesCodecError::InvalidResponse(
+                    "message content".into(),
+                ));
+            };
             builder.push(CanonicalEventKind::MessageStart { output_index, role });
             for (part_index, part) in content.into_iter().enumerate() {
                 let Value::Object(mut part) = part else {
@@ -182,14 +192,11 @@ fn decode_response_output_item(
             collect_object_extra(&format!("/output/{output_index}"), object, extensions);
             builder.push(CanonicalEventKind::Finish {
                 output_index,
-                reason: FinishReason::Stop,
+                reason: terminal_reason.cloned().unwrap_or(FinishReason::Stop),
             });
         }
         "function_call" => {
-            let id = object
-                .remove("call_id")
-                .or_else(|| object.remove("id"))
-                .and_then(|value| value.as_str().map(str::to_owned));
+            let id = Some(take_required_output_string(&mut object, "call_id")?);
             let name = Some(take_required_output_string(&mut object, "name")?);
             let arguments_delta = take_required_output_string(&mut object, "arguments")?;
             builder.push(CanonicalEventKind::MessageStart {
@@ -206,7 +213,7 @@ fn decode_response_output_item(
             collect_object_extra(&format!("/output/{output_index}"), object, extensions);
             builder.push(CanonicalEventKind::Finish {
                 output_index,
-                reason: FinishReason::ToolCalls,
+                reason: terminal_reason.cloned().unwrap_or(FinishReason::ToolCalls),
             });
         }
         _ => {
@@ -218,6 +225,18 @@ fn decode_response_output_item(
         }
     }
     Ok(())
+}
+
+pub(super) fn response_incomplete_reason(details: Option<&Value>) -> FinishReason {
+    match details
+        .and_then(|value| value.get("reason"))
+        .and_then(Value::as_str)
+    {
+        Some("max_output_tokens") => FinishReason::Length,
+        Some("content_filter") => FinishReason::ContentFilter,
+        Some(reason) => FinishReason::Other(reason.to_owned()),
+        None => FinishReason::Other("incomplete".to_owned()),
+    }
 }
 
 fn take_required_output_string(

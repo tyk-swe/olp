@@ -1,6 +1,6 @@
 <script lang="ts">
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import '../app.css';
 
@@ -15,9 +15,15 @@
     }
   });
   const detachQueryClient = authLifecycle.attachQueryClient(queryClient);
+  let detachCrossTabSync = () => {};
+
+  onMount(() => {
+    detachCrossTabSync = authLifecycle.attachCrossTabSync();
+  });
 
   onDestroy(() => {
     authLifecycle.abortAuthenticationWork();
+    detachCrossTabSync();
     detachQueryClient();
     queryClient.clear();
   });

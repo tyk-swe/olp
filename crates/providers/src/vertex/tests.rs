@@ -154,7 +154,7 @@ async fn streams_from_regional_publisher_path_with_oauth() {
 
 #[tokio::test]
 async fn service_account_uses_hardened_token_exchange_and_cached_token() {
-    let token_body = r#"{"access_token":"oauth-secret","token_type":"Bearer","expires_in":3600}"#;
+    let token_body = r#"{"access_token":"oauth-secret","token_type":"bearer","expires_in":3600}"#;
     let (token_origin, token_request) =
         spawn_server(http_response("application/json", token_body)).await;
     let count_body = r#"{"totalTokens":1}"#;

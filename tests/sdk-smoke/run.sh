@@ -17,13 +17,6 @@ for setting in \
   fi
 done
 
-for command in cargo node timeout; do
-  command -v "$command" >/dev/null 2>&1 || {
-    echo "required command is unavailable: $command" >&2
-    exit 1
-  }
-done
-
 if [[ ! -d "$script_dir/node_modules" ]]; then
   echo "SDK dependencies are missing; run 'pnpm install --frozen-lockfile' in $script_dir" >&2
   exit 1
@@ -76,10 +69,6 @@ trap 'exit 143' TERM
 source "$repo_dir/scripts/lib/cargo-target-dir.sh"
 target_dir=$(cargo_target_dir "$repo_dir")
 fixture_bin="$target_dir/debug/examples/sdk_smoke_fixture"
-[[ -x $fixture_bin ]] || {
-  echo "SDK smoke fixture binary is missing after compilation: $fixture_bin" >&2
-  exit 1
-}
 
 (
   cd -- "$repo_dir"

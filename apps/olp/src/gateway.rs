@@ -25,15 +25,15 @@ mod videos;
 pub(crate) use endpoint_policy::{InferenceEndpoint, TokenEstimate};
 pub(crate) use error::InferenceError;
 pub(crate) use execution::{
-    RoutedEventExecution, RoutedUnaryResult, authorize_model_access,
-    execute_event_operation_for_surface, execute_routed_result_for_surface,
-    execute_session_generation, release_model_limits, reserve_model_limits,
+    RoutedEventExecution, RoutedUnaryResult, authorize_model_access, execute_event_operation,
+    execute_routed_result, execute_session_generation, release_model_limits, reserve_model_limits,
 };
+pub(crate) use limits::RequestMediaGuard;
 pub use media_jobs::reconcile_media_jobs_once;
 pub(crate) use protocol_error::{inference_error_response, problem_response};
 pub(crate) use telemetry::{UsageCapture, emit_event_execution_metadata};
 
-pub fn router() -> Router<GatewayState> {
+pub(crate) fn router() -> Router<GatewayState> {
     endpoint_policy::router()
 }
 

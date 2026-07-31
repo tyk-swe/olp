@@ -50,12 +50,7 @@ impl Default for GeminiGenerateContentStreamDecoder {
 impl GeminiGenerateContentStreamDecoder {
     #[must_use]
     pub fn new() -> Self {
-        Self::with_max_event_bytes(DEFAULT_MAX_EVENT_BYTES)
-    }
-
-    #[must_use]
-    pub fn with_max_event_bytes(max_event_bytes: usize) -> Self {
-        Self::with_max_event_bytes_and_raw_passthrough(max_event_bytes, false)
+        Self::with_max_event_bytes_and_raw_passthrough(DEFAULT_MAX_EVENT_BYTES, false)
     }
 
     #[must_use]
@@ -95,11 +90,6 @@ impl GeminiGenerateContentStreamDecoder {
         self.emit(&mut events, CanonicalEventKind::Done);
         self.done = true;
         Ok(events)
-    }
-
-    #[must_use]
-    pub const fn is_done(&self) -> bool {
-        self.done
     }
 
     fn decode_frames(&mut self, frames: Vec<SseFrame>) -> Result<Vec<CanonicalEvent>, StreamError> {

@@ -12,6 +12,14 @@ const validOwner = {
 describe('owner setup validation', () => {
   it('accepts a complete owner account', () => {
     expect(validateOwner(validOwner)).toEqual({});
+    expect(
+      validateOwner({
+        ...validOwner,
+        displayName: '😀'.repeat(100),
+        password: '🔐'.repeat(12),
+        confirmPassword: '🔐'.repeat(12)
+      })
+    ).toEqual({});
   });
 
   it('reports invalid identity fields and a short password together', () => {
@@ -35,5 +43,11 @@ describe('owner setup validation', () => {
     expect(
       validateOwner({ ...validOwner, confirmPassword: 'a different secure phrase' })
     ).toEqual({ confirmPassword: 'Passwords do not match.' });
+  });
+
+  it('enforces the API email byte limit', () => {
+    expect(validateOwner({ ...validOwner, email: `${'é'.repeat(125)}@x.io` })).toMatchObject({
+      email: 'Use 254 UTF-8 bytes or fewer.'
+    });
   });
 });

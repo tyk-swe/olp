@@ -62,6 +62,39 @@ fn accepts_unit_only_media_pricing() {
 }
 
 #[test]
+fn pricing_revision_cardinality_is_bounded() {
+    let price = PriceInput {
+        provider_kind: ProviderKind::OpenAi,
+        provider_id: None,
+        model: "model".to_owned(),
+        operation: OperationKind::Generation,
+        input_per_million: Some("1".to_owned()),
+        output_per_million: None,
+        unit_price: None,
+        currency: "USD".to_owned(),
+    };
+    assert!(validate_prices(&vec![price; MAX_PRICES_PER_REVISION + 1]).is_err());
+}
+
+#[test]
+fn pricing_input_normalization_is_stable() {
+    let normalized = PriceInput {
+        provider_kind: ProviderKind::OpenAi,
+        provider_id: None,
+        model: " model ".to_owned(),
+        operation: OperationKind::Generation,
+        input_per_million: Some(" 1.25 ".to_owned()),
+        output_per_million: None,
+        unit_price: None,
+        currency: " usd ".to_owned(),
+    }
+    .normalized();
+    assert_eq!(normalized.model, "model");
+    assert_eq!(normalized.input_per_million.as_deref(), Some("1.25"));
+    assert_eq!(normalized.currency, "USD");
+}
+
+#[test]
 fn rejects_noncanonical_pricing_dimensions() {
     assert!("open_ai".parse::<ProviderKind>().is_err());
     assert!("chat".parse::<OperationKind>().is_err());
@@ -76,6 +109,14 @@ fn retained_hour_boundaries_are_never_rounded_down() {
     assert_eq!(
         ceil_usage_hour(partial),
         "2026-07-12T11:00:00Z".parse::<DateTime<Utc>>().unwrap()
+    );
+    assert_eq!(
+        floor_usage_hour(DateTime::<Utc>::MIN_UTC),
+        DateTime::<Utc>::MIN_UTC
+    );
+    assert_eq!(
+        ceil_usage_hour(DateTime::<Utc>::MAX_UTC),
+        DateTime::<Utc>::MAX_UTC
     );
 }
 

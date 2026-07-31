@@ -79,7 +79,8 @@
         "trustedProxyCidrs",
         "publicOrigin",
         "localLoginEnabled",
-        "databaseMaxConnections"
+        "databaseMaxConnections",
+        "requestMetadataStreamMaxLength"
       ],
       "properties": {
         "databaseSecretName": { "type": "string", "minLength": 1 },
@@ -95,7 +96,8 @@
         "trustedProxyCidrs": { "type": "string" },
         "publicOrigin": { "type": "string", "format": "uri", "minLength": 1 },
         "localLoginEnabled": { "type": "boolean" },
-        "databaseMaxConnections": { "type": "integer", "minimum": 1 }
+        "databaseMaxConnections": { "type": "integer", "minimum": 1 },
+        "requestMetadataStreamMaxLength": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
       }
     },
     "serviceAccount": {

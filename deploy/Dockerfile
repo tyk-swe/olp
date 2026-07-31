@@ -22,8 +22,7 @@ RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sh
 WORKDIR /src
 
 FROM chef AS planner
-COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
-COPY .sqlx ./.sqlx
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY apps ./apps
 COPY crates ./crates
 COPY tests/conformance ./tests/conformance
@@ -35,13 +34,13 @@ ENV SQLX_OFFLINE=true
 COPY --from=planner /src/recipe.json recipe.json
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo chef cook --locked --release --recipe-path recipe.json --package olp
-COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .sqlx ./.sqlx
 COPY apps ./apps
 COPY crates ./crates
 # Cargo resolves every workspace member even when only `olp` is selected.
 # Copy the conformance crate manifest/source required for that resolution, but
-# keep SDK, HA, and generated test artifacts out of the production build.
+# keep SDK and generated test artifacts out of the production build.
 COPY tests/conformance ./tests/conformance
 COPY tests/e2e ./tests/e2e
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \

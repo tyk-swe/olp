@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CanonicalError, MediaHandle, MediaSource, SourceExtensions, Usage};
+use super::{
+    CanonicalError, MediaHandle, MediaSource, SourceExtensions, Usage, UsageValidationError,
+};
 
 /// A provider-neutral result from an embeddings operation.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -180,4 +182,24 @@ pub enum CanonicalResult {
     VideoDelete(VideoDeleteResult),
     ModelList(ModelListResult),
     Model(ModelDescriptor),
+}
+
+impl CanonicalResult {
+    pub fn validate(&self) -> Result<(), UsageValidationError> {
+        match self {
+            Self::Embeddings(result) => result.usage.as_ref(),
+            Self::Images(result) => result.usage.as_ref(),
+            Self::TokenCount(_)
+            | Self::Speech(_)
+            | Self::Transcription(_)
+            | Self::Moderation(_)
+            | Self::VideoJob(_)
+            | Self::VideoList(_)
+            | Self::VideoContent(_)
+            | Self::VideoDelete(_)
+            | Self::ModelList(_)
+            | Self::Model(_) => None,
+        }
+        .map_or(Ok(()), Usage::validate)
+    }
 }

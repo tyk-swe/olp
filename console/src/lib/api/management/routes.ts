@@ -27,7 +27,7 @@ export async function listRouteDraftPage(
   signal?: AbortSignal
 ): Promise<CursorPage<RouteDraft>> {
   const response = await apiClient.GET('/api/v1/route-drafts', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: 100, cursor } },
     signal
   });
   const page = requireResponseData(response.data, response.error, response.response);

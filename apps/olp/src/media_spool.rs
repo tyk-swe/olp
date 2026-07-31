@@ -25,7 +25,7 @@ pub(crate) const DEFAULT_CAPACITY_BYTES: u64 = 1024 * 1024 * 1024;
 /// The smallest supported production spool. Multipart admission reserves
 /// fixed worst-case endpoint budgets, so a smaller volume cannot safely serve
 /// the public media API.
-pub const MIN_MEDIA_SPOOL_CAPACITY_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const MIN_MEDIA_SPOOL_CAPACITY_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 struct SpoolEntry {

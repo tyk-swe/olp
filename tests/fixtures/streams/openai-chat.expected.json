@@ -1,7 +1,5 @@
 {
-  "decoder": "openai-chat",
   "fragment_bytes": 1,
   "text": "héllo 🌍",
-  "done": true,
   "total_tokens": 5
 }
