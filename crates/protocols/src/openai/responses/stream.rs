@@ -18,7 +18,7 @@ pub struct OpenAiResponsesStreamDecoder {
     sequence: u64,
     response_started: bool,
     started_outputs: BTreeSet<u32>,
-    finished_outputs: BTreeMap<u32, FinishReason>,
+    finished_outputs: BTreeMap<u32, Option<FinishReason>>,
     done: bool,
 }
 
@@ -204,6 +204,16 @@ impl OpenAiResponsesStreamDecoder {
                     _ => None,
                 };
                 if let Some(reason) = reason {
+                    let reason = match item.get("status") {
+                        None => Some(reason),
+                        Some(Value::String(status)) if status == "completed" => Some(reason),
+                        Some(Value::String(status)) if status == "incomplete" => None,
+                        _ => {
+                            return Err(ResponsesCodecError::InvalidResponse(
+                                "Responses output item status".into(),
+                            ));
+                        }
+                    };
                     if !self.started_outputs.contains(&output_index)
                         || self.finished_outputs.insert(output_index, reason).is_some()
                     {
@@ -394,9 +404,12 @@ impl OpenAiResponsesStreamDecoder {
     ) {
         let outputs = self.started_outputs.iter().copied().collect::<Vec<_>>();
         for output_index in outputs {
-            let reason = terminal_reason
+            let reason = self
+                .finished_outputs
+                .get(&output_index)
                 .cloned()
-                .or_else(|| self.finished_outputs.get(&output_index).cloned())
+                .flatten()
+                .or_else(|| terminal_reason.cloned())
                 .unwrap_or(FinishReason::Stop);
             self.emit(
                 events,

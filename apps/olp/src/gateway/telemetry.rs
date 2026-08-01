@@ -381,7 +381,7 @@ pub(super) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
 }
 
 fn valid_media_units(value: Decimal) -> Option<Decimal> {
-    (!value.is_sign_negative()).then_some(value)
+    (!value.is_sign_negative()).then(|| value.round_dp(6))
 }
 
 #[derive(Clone, Default)]
@@ -484,7 +484,6 @@ pub(super) fn emit_request_metadata_event(
             final_attempt.error_class.clone_from(&error_class);
             final_attempt.committed = committed;
             final_attempt.latency_ms = elapsed_ms(started.elapsed());
-            final_attempt.first_byte_ms = first_byte_ms;
         }
         let provider_id = attempts.last().map(|attempt| attempt.provider_id);
         let upstream_model = attempts
@@ -554,5 +553,8 @@ mod tests {
         ] {
             assert_eq!(valid_media_units(value), expected);
         }
+        let fractional = valid_media_units(Decimal::from_f64_retain(0.1).unwrap()).unwrap();
+        assert_eq!(fractional, Decimal::new(1, 1));
+        assert!(fractional.scale() <= 6);
     }
 }

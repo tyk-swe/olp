@@ -63,23 +63,29 @@ pub(super) fn validated_event_stream(
 pub(super) fn circuit_accounted_event_stream(
     events: EventStream,
     circuits: crate::circuit::CircuitBreaker,
-    permit: crate::circuit::CircuitPermit,
+    permit: Option<crate::circuit::CircuitPermit>,
     initial_failure: bool,
 ) -> EventStream {
     Box::pin(stream::unfold(
-        (events, circuits, initial_failure),
-        move |(mut events, circuits, mut failed)| async move {
+        (events, circuits, permit, initial_failure),
+        move |(mut events, circuits, mut permit, mut failed)| async move {
             let item = events.next().await?;
             let item = match item {
                 Ok(event) => {
                     match &event.kind {
                         CanonicalEventKind::Error { error } => {
-                            if let Some(class) = canonical_error_circuit_class(error.class) {
+                            if let (Some(class), Some(permit)) =
+                                (canonical_error_circuit_class(error.class), permit.take())
+                            {
                                 circuits.record_failure(permit, class);
                             }
                             failed = true;
                         }
-                        CanonicalEventKind::Done if !failed => circuits.record_success(permit),
+                        CanonicalEventKind::Done if !failed => {
+                            if let Some(permit) = permit.take() {
+                                circuits.record_success(permit);
+                            }
+                        }
                         _ => {}
                     }
                     Ok(event)
@@ -89,12 +95,14 @@ pub(super) fn circuit_accounted_event_stream(
                     // owns it. Terminal transport failures still affect target
                     // health, but must never trigger request failover.
                     error.response_committed = true;
-                    circuits.record_failure(permit, error.class);
+                    if let Some(permit) = permit.take() {
+                        circuits.record_failure(permit, error.class);
+                    }
                     failed = true;
                     Err(error)
                 }
             };
-            Some((item, (events, circuits, failed)))
+            Some((item, (events, circuits, permit, failed)))
         },
     ))
 }
@@ -389,6 +397,7 @@ pub(super) async fn execute_with_failover(
                 attempts: traces,
             });
         }
+        let mut permit = Some(permit);
         let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
             if error.retryable
                 && attempt_index + 1 < attempt_count
@@ -408,19 +417,26 @@ pub(super) async fn execute_with_failover(
                     attempt_started,
                     &transport_error,
                 ));
-                circuits.record_failure(permit, class);
+                if let Some(permit) = permit.take() {
+                    circuits.record_failure(permit, class);
+                }
                 last_error = Some(transport_error);
                 last_canonical_error = Some((traces.len(), error.clone()));
                 continue;
             }
-            if let Some(class) = canonical_error_circuit_class(error.class) {
+            if let (Some(class), Some(permit)) =
+                (canonical_error_circuit_class(error.class), permit.take())
+            {
                 circuits.record_failure(permit, class);
             }
             true
         } else {
             false
         };
-        if matches!(first.kind, CanonicalEventKind::Done) && !initial_failure {
+        if matches!(first.kind, CanonicalEventKind::Done)
+            && !initial_failure
+            && let Some(permit) = permit.take()
+        {
             circuits.record_success(permit);
         }
         let events = circuit_accounted_event_stream(

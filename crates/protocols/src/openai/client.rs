@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use olp_domain::{CanonicalEvent, CanonicalEventKind, Surface};
+use olp_domain::{CanonicalEvent, CanonicalEventKind, FinishReason, Surface};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -19,6 +19,15 @@ pub fn encode_response_object(
     client_model: &str,
     fallback_id: &str,
 ) -> Result<ResponseObject, OpenAiClientEncodeError> {
+    encode_response_object_with_order(events, client_model, fallback_id, None)
+}
+
+fn encode_response_object_with_order(
+    events: &[CanonicalEvent],
+    client_model: &str,
+    fallback_id: &str,
+    wire_output_indices: Option<&BTreeMap<(u32, Option<u32>), u32>>,
+) -> Result<ResponseObject, OpenAiClientEncodeError> {
     let mut output_order = response_output_order(events);
     let mut aggregate = aggregate_generation(events, Surface::OpenAi)?;
     let raw_output = take_raw_response_output(&mut aggregate.extensions)?;
@@ -30,25 +39,27 @@ pub fn encode_response_object(
         };
         Some(json!({"reason": reason}))
     });
-    let response_incomplete = aggregate
+    let response_incomplete = aggregate.outputs.values().any(|output| {
+        output
+            .finish
+            .as_ref()
+            .is_some_and(response_output_is_incomplete)
+    }) || aggregate
         .extensions
         .get("/status")
         .and_then(Value::as_str)
-        .map_or(inferred_incomplete_details.is_some(), |status| {
-            status == "incomplete"
-        });
-    let mut output = Vec::new();
+        .is_some_and(|status| status == "incomplete");
+    let mut semantic_output = Vec::new();
     for (output_index, mut item) in aggregate.outputs {
+        let output_incomplete = item
+            .finish
+            .as_ref()
+            .map_or(response_incomplete, response_output_is_incomplete);
         let has_message =
             !item.text.is_empty() || !item.refusal.is_empty() || item.tools.is_empty();
         let components = output_order.entry(output_index).or_default();
         if has_message && !components.contains(&None) {
             components.insert(0, None);
-        }
-        for tool_index in item.tools.keys() {
-            if !components.contains(&Some(*tool_index)) {
-                components.push(Some(*tool_index));
-            }
         }
         for component in components.iter().copied() {
             let status = take_string_extension(
@@ -56,7 +67,7 @@ pub fn encode_response_object(
                 &format!("/output/{output_index}/status"),
             )
             .unwrap_or_else(|| {
-                if response_incomplete {
+                if output_incomplete {
                     "incomplete".into()
                 } else {
                     "completed".into()
@@ -66,15 +77,18 @@ pub fn encode_response_object(
                 let Some(tool) = item.tools.remove(&tool_index) else {
                     continue;
                 };
-                output.push(json!({
-                    "id": take_string_extension(&mut aggregate.extensions, &format!("/output/{output_index}/id"))
-                        .map(Value::String),
-                    "type": "function_call",
-                    "call_id": tool.id.ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?,
-                    "name": tool.name.ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?,
-                    "arguments": tool.arguments,
-                    "status": status,
-                }));
+                semantic_output.push((
+                    (output_index, Some(tool_index)),
+                    json!({
+                        "id": take_string_extension(&mut aggregate.extensions, &format!("/output/{output_index}/id"))
+                            .map(Value::String),
+                        "type": "function_call",
+                        "call_id": tool.id.ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?,
+                        "name": tool.name.ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?,
+                        "arguments": tool.arguments,
+                        "status": status,
+                    }),
+                ));
             } else if has_message {
                 let mut content = Vec::new();
                 if !item.text.is_empty() {
@@ -91,17 +105,46 @@ pub fn encode_response_object(
                         json!({"type": "refusal", "refusal": std::mem::take(&mut item.refusal)}),
                     );
                 }
-                output.push(json!({
-                    "id": take_string_extension(&mut aggregate.extensions, &format!("/output/{output_index}/id"))
-                        .map(Value::String),
-                    "type": "message",
-                    "role": "assistant",
-                    "status": status,
-                    "content": content,
-                }));
+                semantic_output.push((
+                    (output_index, None),
+                    json!({
+                        "id": take_string_extension(&mut aggregate.extensions, &format!("/output/{output_index}/id"))
+                            .map(Value::String),
+                        "type": "message",
+                        "role": "assistant",
+                        "status": status,
+                        "content": content,
+                    }),
+                ));
             }
         }
     }
+    if let Some(wire_output_indices) = wire_output_indices {
+        let mut indices = Vec::with_capacity(semantic_output.len() + raw_output.len());
+        for (key, _) in &semantic_output {
+            let index = wire_output_indices
+                .get(key)
+                .ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+            indices.push(
+                usize::try_from(*index).map_err(|_| OpenAiClientEncodeError::TooManyOutputItems)?,
+            );
+        }
+        indices.extend(raw_output.iter().map(|(index, _)| *index));
+        indices.sort_unstable();
+        if indices
+            .iter()
+            .enumerate()
+            .any(|(expected, actual)| expected != *actual)
+        {
+            return Err(OpenAiClientEncodeError::InvalidOutputOrder);
+        }
+        semantic_output
+            .sort_by_key(|(key, _)| wire_output_indices.get(key).copied().unwrap_or(u32::MAX));
+    }
+    let mut output = semantic_output
+        .into_iter()
+        .map(|(_, item)| item)
+        .collect::<Vec<_>>();
     for (index, item) in raw_output {
         if index > output.len() {
             return Err(OpenAiClientEncodeError::InvalidExtension(format!(
@@ -169,8 +212,13 @@ pub fn encode_response_object(
     .map_err(OpenAiClientEncodeError::InvalidExtension)
 }
 
+fn response_output_is_incomplete(reason: &FinishReason) -> bool {
+    !matches!(reason, FinishReason::Stop | FinishReason::ToolCalls)
+}
+
 fn response_output_order(events: &[CanonicalEvent]) -> BTreeMap<u32, Vec<Option<u32>>> {
     let mut order = BTreeMap::<u32, Vec<Option<u32>>>::new();
+    let mut seen = BTreeSet::new();
     for event in events {
         let component = match &event.kind {
             CanonicalEventKind::TextDelta { output_index, .. }
@@ -182,11 +230,10 @@ fn response_output_order(events: &[CanonicalEvent]) -> BTreeMap<u32, Vec<Option<
             } => Some((*output_index, Some(*tool_index))),
             _ => None,
         };
-        if let Some((output_index, component)) = component {
-            let components = order.entry(output_index).or_default();
-            if !components.contains(&component) {
-                components.push(component);
-            }
+        if let Some((output_index, component)) = component
+            && seen.insert((output_index, component))
+        {
+            order.entry(output_index).or_default().push(component);
         }
     }
     order
@@ -200,8 +247,25 @@ pub struct OpenAiResponsesStreamEncoder {
     events: Vec<CanonicalEvent>,
     collected_event_bytes: usize,
     outputs: BTreeMap<(u32, Option<u32>), u32>,
-    next_output_index: u32,
+    output_keys: Vec<Option<(u32, Option<u32>)>>,
+    pending_output_starts: BTreeSet<u32>,
+    finished_outputs: BTreeMap<(u32, Option<u32>), FinishReason>,
+    pending_frames: VecDeque<PendingResponseFrame>,
+    tools: BTreeMap<(u32, u32), StreamingTool>,
+    next_output_to_emit: usize,
     done: bool,
+}
+
+struct PendingResponseFrame {
+    output_index: Option<usize>,
+    adds_output: bool,
+    frame: SseFrame,
+}
+
+#[derive(Default)]
+struct StreamingTool {
+    id: Option<String>,
+    name: Option<String>,
 }
 
 impl std::fmt::Debug for OpenAiResponsesStreamEncoder {
@@ -231,7 +295,12 @@ impl OpenAiResponsesStreamEncoder {
             events: Vec::new(),
             collected_event_bytes: 0,
             outputs: BTreeMap::new(),
-            next_output_index: 0,
+            output_keys: Vec::new(),
+            pending_output_starts: BTreeSet::new(),
+            finished_outputs: BTreeMap::new(),
+            pending_frames: VecDeque::new(),
+            tools: BTreeMap::new(),
+            next_output_to_emit: 0,
             done: false,
         }
     }
@@ -280,75 +349,106 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::MessageStart { .. } => {}
-            CanonicalEventKind::TextDelta { output_index, text } => {
-                let wire_output_index = self.ensure_output(*output_index, None, &mut frames)?;
-                frames.push(response_sse_frame(
-                    "response.output_text.delta",
-                    json!({"output_index": wire_output_index, "content_index": 0, "delta": text}),
-                )?);
+            CanonicalEventKind::MessageStart { output_index, .. } => {
+                let key = (*output_index, None);
+                if self
+                    .outputs
+                    .range((*output_index, None)..=(*output_index, Some(u32::MAX)))
+                    .next()
+                    .is_none()
+                {
+                    self.reserve_output(key)?;
+                    self.pending_output_starts.insert(*output_index);
+                }
             }
-            CanonicalEventKind::RefusalDelta { output_index, text } => {
-                let wire_output_index = self.ensure_output(*output_index, None, &mut frames)?;
-                frames.push(response_sse_frame(
-                    "response.refusal.delta",
-                    json!({"output_index": wire_output_index, "content_index": 0, "delta": text}),
-                )?);
+            CanonicalEventKind::TextDelta { text, .. } if text.is_empty() => {}
+            CanonicalEventKind::TextDelta { output_index, .. } => {
+                let key = (*output_index, None);
+                self.pending_output_starts.remove(output_index);
+                let wire_output_index = self.reserve_output(key)?;
+                self.queue_output_delta(&event, key, wire_output_index)?;
+            }
+            CanonicalEventKind::RefusalDelta { text, .. } if text.is_empty() => {}
+            CanonicalEventKind::RefusalDelta { output_index, .. } => {
+                let key = (*output_index, None);
+                self.pending_output_starts.remove(output_index);
+                let wire_output_index = self.reserve_output(key)?;
+                self.queue_output_delta(&event, key, wire_output_index)?;
             }
             CanonicalEventKind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
                 name,
-                arguments_delta,
+                arguments_delta: _,
             } => {
-                let wire_output_index = self.ensure_output(
-                    *output_index,
-                    Some((*tool_index, id.as_deref(), name.as_deref())),
-                    &mut frames,
-                )?;
-                frames.push(response_sse_frame(
-                    "response.function_call_arguments.delta",
-                    json!({
-                        "output_index": wire_output_index,
-                        "item_id": format!("fc_{wire_output_index}"),
-                        "delta": arguments_delta
-                    }),
-                )?);
+                let key = (*output_index, Some(*tool_index));
+                let wire_output_index = if self.pending_output_starts.remove(output_index) {
+                    let placeholder = (*output_index, None);
+                    let wire_output_index = self
+                        .outputs
+                        .remove(&placeholder)
+                        .ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+                    let slot = self
+                        .output_keys
+                        .get_mut(
+                            usize::try_from(wire_output_index)
+                                .map_err(|_| OpenAiClientEncodeError::TooManyOutputItems)?,
+                        )
+                        .ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+                    *slot = Some(key);
+                    self.outputs.insert(key, wire_output_index);
+                    wire_output_index
+                } else {
+                    self.reserve_output(key)?
+                };
+                let tool = self.tools.entry((*output_index, *tool_index)).or_default();
+                if let Some(id) = id {
+                    if tool.id.as_ref().is_some_and(|previous| previous != id) {
+                        return Err(OpenAiClientEncodeError::ConflictingToolCallIdentity);
+                    }
+                    tool.id.get_or_insert_with(|| id.clone());
+                }
+                if let Some(name) = name {
+                    if tool.name.as_ref().is_some_and(|previous| previous != name) {
+                        return Err(OpenAiClientEncodeError::ConflictingToolCallIdentity);
+                    }
+                    tool.name.get_or_insert_with(|| name.clone());
+                }
+                self.queue_output_delta(&event, key, wire_output_index)?;
             }
-            CanonicalEventKind::Finish { output_index, .. } => {
+            CanonicalEventKind::Finish {
+                output_index,
+                reason,
+            } => {
+                self.pending_output_starts.remove(output_index);
                 let mut finished = self
                     .outputs
-                    .iter()
-                    .filter(|((canonical_output_index, _), _)| {
-                        canonical_output_index == output_index
-                    })
-                    .map(|((_, tool_index), wire_output_index)| {
-                        (
-                            *wire_output_index,
-                            if tool_index.is_some() {
-                                "function_call"
-                            } else {
-                                "message"
-                            },
-                        )
-                    })
+                    .range((*output_index, None)..=(*output_index, Some(u32::MAX)))
+                    .map(|(key, wire_output_index)| (*wire_output_index, *key))
                     .collect::<Vec<_>>();
                 if finished.is_empty() {
-                    finished.push((
-                        self.ensure_output(*output_index, None, &mut frames)?,
-                        "message",
-                    ));
+                    let key = (*output_index, None);
+                    finished.push((self.reserve_output(key)?, key));
                 }
                 finished.sort_unstable_by_key(|(wire_output_index, _)| *wire_output_index);
-                for (wire_output_index, kind) in finished {
-                    frames.push(response_sse_frame(
-                        "response.output_item.done",
-                        json!({
-                            "output_index": wire_output_index,
-                            "item": {"type": kind}
-                        }),
-                    )?);
+                if finished.iter().any(|(_, key)| !self.output_ready(*key)) {
+                    return Err(OpenAiClientEncodeError::IncompleteToolCall("identity"));
+                }
+                for (wire_output_index, key) in finished {
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        self.finished_outputs.entry(key)
+                    {
+                        let output_index = usize::try_from(wire_output_index)
+                            .map_err(|_| OpenAiClientEncodeError::TooManyOutputItems)?;
+                        let frame = Self::output_done_frame(key, wire_output_index, reason)?;
+                        entry.insert(reason.clone());
+                        self.pending_frames.push_back(PendingResponseFrame {
+                            output_index: Some(output_index),
+                            adds_output: false,
+                            frame,
+                        });
+                    }
                 }
             }
             CanonicalEventKind::Usage { .. } => {}
@@ -361,7 +461,24 @@ impl OpenAiResponsesStreamEncoder {
                         let kind = value.get("type").and_then(Value::as_str).ok_or_else(|| {
                             OpenAiClientEncodeError::InvalidExtension(path.clone())
                         })?;
-                        frames.push(response_sse_frame(kind, value.clone())?);
+                        let output_index = value
+                            .get("output_index")
+                            .and_then(Value::as_u64)
+                            .and_then(|index| usize::try_from(index).ok());
+                        if kind == "response.output_item.added" {
+                            let output_index =
+                                output_index.ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+                            if output_index != self.output_keys.len() {
+                                return Err(OpenAiClientEncodeError::InvalidOutputOrder);
+                            }
+                            self.output_keys.push(None);
+                        }
+                        let frame = response_sse_frame(kind, value.clone())?;
+                        self.pending_frames.push_back(PendingResponseFrame {
+                            output_index,
+                            adds_output: kind == "response.output_item.added",
+                            frame,
+                        });
                     }
                 }
             }
@@ -380,9 +497,23 @@ impl OpenAiResponsesStreamEncoder {
                 )?);
             }
             CanonicalEventKind::Done => {
+                self.emit_ready_outputs(&mut frames)?;
+                if self.next_output_to_emit != self.output_keys.len()
+                    || !self.pending_frames.is_empty()
+                    || self
+                        .outputs
+                        .keys()
+                        .any(|key| !self.finished_outputs.contains_key(key))
+                {
+                    return Err(OpenAiClientEncodeError::InvalidOutputOrder);
+                }
                 let normalized = self.normalized_events_with(event.clone());
-                let response =
-                    encode_response_object(&normalized, &self.client_model, &self.fallback_id)?;
+                let response = encode_response_object_with_order(
+                    &normalized,
+                    &self.client_model,
+                    &self.fallback_id,
+                    Some(&self.outputs),
+                )?;
                 let event = if response.status == "incomplete" {
                     "response.incomplete"
                 } else {
@@ -392,50 +523,118 @@ impl OpenAiResponsesStreamEncoder {
                 self.done = true;
             }
         }
+        self.emit_ready_outputs(&mut frames)?;
         self.events.push(event);
         Ok(frames)
     }
 
-    fn ensure_output(
-        &mut self,
-        canonical_output_index: u32,
-        tool: Option<(u32, Option<&str>, Option<&str>)>,
-        frames: &mut Vec<SseFrame>,
-    ) -> Result<u32, OpenAiClientEncodeError> {
-        let key = (canonical_output_index, tool.map(|(index, _, _)| index));
+    fn reserve_output(&mut self, key: (u32, Option<u32>)) -> Result<u32, OpenAiClientEncodeError> {
         if let Some(output_index) = self.outputs.get(&key) {
-            if let Some((tool_index, id, name)) = tool {
-                let previous = self.events.iter().find_map(|event| match &event.kind {
-                    CanonicalEventKind::ToolCallDelta {
-                        output_index,
-                        tool_index: previous_tool_index,
-                        id,
-                        name,
-                        ..
-                    } if *output_index == canonical_output_index
-                        && *previous_tool_index == tool_index =>
-                    {
-                        Some((id.as_deref(), name.as_deref()))
-                    }
-                    _ => None,
-                });
-                if previous.is_some_and(|(previous_id, previous_name)| {
-                    id.is_some_and(|id| previous_id != Some(id))
-                        || name.is_some_and(|name| previous_name != Some(name))
-                }) {
-                    return Err(OpenAiClientEncodeError::ConflictingToolCallIdentity);
-                }
-            }
             return Ok(*output_index);
         }
-        let output_index = self.allocate_output_index(canonical_output_index)?;
-        let item = if let Some((_, call_id, name)) = tool {
+        let output_index = u32::try_from(self.output_keys.len())
+            .map_err(|_| OpenAiClientEncodeError::TooManyOutputItems)?;
+        self.output_keys.push(Some(key));
+        self.outputs.insert(key, output_index);
+        Ok(output_index)
+    }
+
+    fn output_ready(&self, key: (u32, Option<u32>)) -> bool {
+        if key.1.is_none() && self.pending_output_starts.contains(&key.0) {
+            return false;
+        }
+        key.1.is_none_or(|tool_index| {
+            self.tools
+                .get(&(key.0, tool_index))
+                .is_some_and(|tool| tool.id.is_some() && tool.name.is_some())
+        })
+    }
+
+    fn emit_ready_outputs(
+        &mut self,
+        frames: &mut Vec<SseFrame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        loop {
+            if self.pending_frames.front().is_some_and(|pending| {
+                !pending.adds_output
+                    && pending
+                        .output_index
+                        .is_none_or(|index| index < self.next_output_to_emit)
+            }) {
+                let pending = self
+                    .pending_frames
+                    .pop_front()
+                    .ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+                frames.push(pending.frame);
+                continue;
+            }
+            if self.pending_frames.front().is_some_and(|pending| {
+                pending.adds_output
+                    && pending.output_index == Some(self.next_output_to_emit)
+                    && self.output_keys.get(self.next_output_to_emit) == Some(&None)
+            }) {
+                let pending = self
+                    .pending_frames
+                    .pop_front()
+                    .ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+                frames.push(pending.frame);
+                self.next_output_to_emit = self
+                    .next_output_to_emit
+                    .checked_add(1)
+                    .ok_or(OpenAiClientEncodeError::TooManyOutputItems)?;
+                continue;
+            }
+            let Some(Some(key)) = self.output_keys.get(self.next_output_to_emit).copied() else {
+                break;
+            };
+            if !self.output_ready(key) {
+                break;
+            }
+            self.emit_output_added(key, frames)?;
+        }
+        Ok(())
+    }
+
+    fn queue_output_delta(
+        &mut self,
+        event: &CanonicalEvent,
+        key: (u32, Option<u32>),
+        output_index: u32,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        self.pending_frames.push_back(PendingResponseFrame {
+            output_index: Some(
+                usize::try_from(output_index)
+                    .map_err(|_| OpenAiClientEncodeError::TooManyOutputItems)?,
+            ),
+            adds_output: false,
+            frame: Self::output_delta_frame(event, key, output_index)?,
+        });
+        Ok(())
+    }
+
+    fn emit_output_added(
+        &mut self,
+        key: (u32, Option<u32>),
+        frames: &mut Vec<SseFrame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        let output_index = *self
+            .outputs
+            .get(&key)
+            .ok_or(OpenAiClientEncodeError::InvalidOutputOrder)?;
+        if usize::try_from(output_index).ok() != Some(self.next_output_to_emit) {
+            return Err(OpenAiClientEncodeError::InvalidOutputOrder);
+        }
+        let item = if let Some(tool_index) = key.1 {
+            let tool = self
+                .tools
+                .get(&(key.0, tool_index))
+                .ok_or(OpenAiClientEncodeError::IncompleteToolCall("identity"))?;
             json!({
                 "id": format!("fc_{output_index}"),
                 "type": "function_call",
                 "status": "in_progress",
-                "call_id": call_id.ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?,
-                "name": name.ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?,
+                "call_id": tool.id.as_deref().ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?,
+                "name": tool.name.as_deref().ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?,
                 "arguments": ""
             })
         } else {
@@ -451,30 +650,69 @@ impl OpenAiResponsesStreamEncoder {
             "response.output_item.added",
             json!({"output_index": output_index, "item": item}),
         )?);
-        self.outputs.insert(key, output_index);
-        Ok(output_index)
+        self.next_output_to_emit = self
+            .next_output_to_emit
+            .checked_add(1)
+            .ok_or(OpenAiClientEncodeError::TooManyOutputItems)?;
+        Ok(())
     }
 
-    fn allocate_output_index(&mut self, preferred: u32) -> Result<u32, OpenAiClientEncodeError> {
-        let output_index = if self.outputs.values().any(|index| *index == preferred) {
-            while self
-                .outputs
-                .values()
-                .any(|index| *index == self.next_output_index)
-            {
-                self.next_output_index = self
-                    .next_output_index
-                    .checked_add(1)
-                    .ok_or(OpenAiClientEncodeError::TooManyOutputItems)?;
-            }
-            self.next_output_index
-        } else {
-            preferred
-        };
-        if let Some(next) = output_index.checked_add(1) {
-            self.next_output_index = next.max(self.next_output_index);
+    fn output_delta_frame(
+        event: &CanonicalEvent,
+        key: (u32, Option<u32>),
+        output_index: u32,
+    ) -> Result<SseFrame, OpenAiClientEncodeError> {
+        match &event.kind {
+            CanonicalEventKind::TextDelta {
+                output_index: canonical_output_index,
+                text,
+            } if key == (*canonical_output_index, None) => response_sse_frame(
+                "response.output_text.delta",
+                json!({"output_index": output_index, "content_index": 0, "delta": text}),
+            ),
+            CanonicalEventKind::RefusalDelta {
+                output_index: canonical_output_index,
+                text,
+            } if key == (*canonical_output_index, None) => response_sse_frame(
+                "response.refusal.delta",
+                json!({"output_index": output_index, "content_index": 0, "delta": text}),
+            ),
+            CanonicalEventKind::ToolCallDelta {
+                output_index: canonical_output_index,
+                tool_index,
+                arguments_delta,
+                ..
+            } if key == (*canonical_output_index, Some(*tool_index)) => response_sse_frame(
+                "response.function_call_arguments.delta",
+                json!({
+                    "output_index": output_index,
+                    "item_id": format!("fc_{output_index}"),
+                    "delta": arguments_delta
+                }),
+            ),
+            _ => Err(OpenAiClientEncodeError::InvalidOutputOrder),
         }
-        Ok(output_index)
+    }
+
+    fn output_done_frame(
+        key: (u32, Option<u32>),
+        output_index: u32,
+        reason: &FinishReason,
+    ) -> Result<SseFrame, OpenAiClientEncodeError> {
+        response_sse_frame(
+            "response.output_item.done",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "type": if key.1.is_some() { "function_call" } else { "message" },
+                    "status": if response_output_is_incomplete(reason) {
+                        "incomplete"
+                    } else {
+                        "completed"
+                    }
+                }
+            }),
+        )
     }
 
     fn normalized_events_with(&self, terminal: CanonicalEvent) -> Vec<CanonicalEvent> {
@@ -557,6 +795,8 @@ pub enum OpenAiClientEncodeError {
     ConflictingToolCallIdentity,
     #[error("canonical response contains too many output items")]
     TooManyOutputItems,
+    #[error("canonical stream output indexes are inconsistent")]
+    InvalidOutputOrder,
     #[error("invalid source extension path: {0}")]
     InvalidExtension(String),
     #[error("canonical source extensions came from a different protocol")]

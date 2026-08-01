@@ -1,27 +1,29 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use olp_domain::{
-    CanonicalEvent, CanonicalEventKind, FinishReason, GenerationParameters, GenerationRequest,
-    ImageOperation, MediaHandle, MediaSource, Message, MessageRole, Operation, RouteSlug,
-    SourceExtensions, Surface, VideoOperation, validate_event_sequence,
+    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason,
+    GenerationParameters, GenerationRequest, ImageOperation, MediaHandle, MediaSource, Message,
+    MessageRole, Operation, RouteSlug, SourceExtensions, Surface, VideoOperation,
+    validate_event_sequence,
 };
 use olp_protocols::openai::{
     BoundedMediaPart, EmbeddingData, EmbeddingRequest, EmbeddingResponse, EmbeddingUsage,
-    EmbeddingWireVector, OpenAiImageEditRequest, OpenAiImageGenerationRequest, OpenAiImageResponse,
-    OpenAiModerationRequest, OpenAiModerationResponse, OpenAiResponsesStreamDecoder,
-    OpenAiResponsesStreamEncoder, OpenAiSpeechRequest, OpenAiTranscriptionRequest,
-    OpenAiTranscriptionResponse, OpenAiVideoCreateRequest, OpenAiVideoDeleteResponse,
-    OpenAiVideoListQuery, OpenAiVideoListResponse, OpenAiVideoObject, ResponseCreateRequest,
-    ResponseInputTokensRequest, ResponseInputTokensResponse, ResponseObject,
-    decode_embedding_request, decode_embedding_response, decode_image_edit,
-    decode_image_generation, decode_image_response, decode_moderation, decode_moderation_response,
-    decode_response_create, decode_response_input_tokens, decode_response_input_tokens_result,
-    decode_response_object, decode_speech, decode_transcription, decode_transcription_response,
-    decode_video_create, decode_video_delete_response, decode_video_list,
-    decode_video_list_response, decode_video_object, encode_embedding_request,
-    encode_embedding_response, encode_image_generation, encode_image_response,
-    encode_moderation_response, encode_response_create, encode_response_object,
-    encode_transcription_response, encode_video_delete_response, encode_video_list_response,
-    encode_video_object, is_valid_video_job_id,
+    EmbeddingWireVector, OpenAiClientEncodeError, OpenAiImageEditRequest,
+    OpenAiImageGenerationRequest, OpenAiImageResponse, OpenAiModerationRequest,
+    OpenAiModerationResponse, OpenAiResponsesStreamDecoder, OpenAiResponsesStreamEncoder,
+    OpenAiSpeechRequest, OpenAiTranscriptionRequest, OpenAiTranscriptionResponse,
+    OpenAiVideoCreateRequest, OpenAiVideoDeleteResponse, OpenAiVideoListQuery,
+    OpenAiVideoListResponse, OpenAiVideoObject, ResponseCreateRequest, ResponseInputTokensRequest,
+    ResponseInputTokensResponse, ResponseObject, decode_embedding_request,
+    decode_embedding_response, decode_image_edit, decode_image_generation, decode_image_response,
+    decode_moderation, decode_moderation_response, decode_response_create,
+    decode_response_input_tokens, decode_response_input_tokens_result, decode_response_object,
+    decode_speech, decode_transcription, decode_transcription_response, decode_video_create,
+    decode_video_delete_response, decode_video_list, decode_video_list_response,
+    decode_video_object, encode_embedding_request, encode_embedding_response,
+    encode_image_generation, encode_image_response, encode_moderation_response,
+    encode_response_create, encode_response_object, encode_transcription_response,
+    encode_video_delete_response, encode_video_list_response, encode_video_object,
+    is_valid_video_job_id,
 };
 use serde_json::json;
 
@@ -345,6 +347,828 @@ fn responses_emit_distinct_items_for_mixed_text_and_multiple_tools() {
             .map(|item| item["id"].as_str().unwrap())
             .collect::<Vec<_>>(),
         ["fc_0", "msg_1", "fc_2"]
+    );
+}
+
+#[test]
+fn responses_stream_ignores_empty_message_deltas_before_tools() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    let mut frames = Vec::new();
+    for (sequence, kind) in [
+        (
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ),
+        (
+            1,
+            CanonicalEventKind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        (
+            2,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: String::new(),
+            },
+        ),
+        (
+            3,
+            CanonicalEventKind::RefusalDelta {
+                output_index: 0,
+                text: String::new(),
+            },
+        ),
+        (
+            4,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: Some("call_empty".into()),
+                name: Some("lookup".into()),
+                arguments_delta: "{}".into(),
+            },
+        ),
+        (
+            5,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::ToolCalls,
+            },
+        ),
+        (6, CanonicalEventKind::Done),
+    ] {
+        frames.extend(encoder.push(CanonicalEvent::new(sequence, kind)).unwrap());
+    }
+    let values = frames
+        .iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["type"] == "response.output_item.added")
+            .count(),
+        1
+    );
+    let terminal = values
+        .iter()
+        .find(|value| value["type"] == "response.completed")
+        .unwrap();
+    assert_eq!(terminal["response"]["output"].as_array().unwrap().len(), 1);
+    assert_eq!(terminal["response"]["output"][0]["type"], "function_call");
+}
+
+#[test]
+fn responses_stream_lifts_unknown_output_finish_to_incomplete_response() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    let mut frames = Vec::new();
+    for (sequence, kind) in [
+        (
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ),
+        (
+            1,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "partial".into(),
+            },
+        ),
+        (
+            2,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::Other("provider_limit".into()),
+            },
+        ),
+        (3, CanonicalEventKind::Done),
+    ] {
+        frames.extend(encoder.push(CanonicalEvent::new(sequence, kind)).unwrap());
+    }
+    let terminal = frames
+        .iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .find(|value| value["type"] == "response.incomplete")
+        .unwrap();
+
+    assert_eq!(terminal["response"]["status"], "incomplete");
+    assert_eq!(terminal["response"]["output"][0]["status"], "incomplete");
+}
+
+#[test]
+fn responses_stream_buffers_tool_arguments_until_identity_arrives() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    encoder
+        .push(CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: Some("resp_late_identity".into()),
+                provider_model: None,
+            },
+        ))
+        .unwrap();
+    assert!(
+        encoder
+            .push(CanonicalEvent::new(
+                1,
+                CanonicalEventKind::ToolCallDelta {
+                    output_index: 0,
+                    tool_index: 0,
+                    id: None,
+                    name: None,
+                    arguments_delta: "{\"x\":".into(),
+                },
+            ))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        encoder
+            .push(CanonicalEvent::new(
+                2,
+                CanonicalEventKind::ToolCallDelta {
+                    output_index: 0,
+                    tool_index: 0,
+                    id: Some("call_late".into()),
+                    name: None,
+                    arguments_delta: "1".into(),
+                },
+            ))
+            .unwrap()
+            .is_empty()
+    );
+    let mut frames = encoder
+        .push(CanonicalEvent::new(
+            3,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: None,
+                name: Some("lookup".into()),
+                arguments_delta: "}".into(),
+            },
+        ))
+        .unwrap();
+    frames.extend(
+        encoder
+            .push(CanonicalEvent::new(
+                4,
+                CanonicalEventKind::Finish {
+                    output_index: 0,
+                    reason: FinishReason::ToolCalls,
+                },
+            ))
+            .unwrap(),
+    );
+    frames.extend(
+        encoder
+            .push(CanonicalEvent::new(5, CanonicalEventKind::Done))
+            .unwrap(),
+    );
+    let values = frames
+        .iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .collect::<Vec<_>>();
+
+    let added = values
+        .iter()
+        .find(|value| value["type"] == "response.output_item.added")
+        .unwrap();
+    assert_eq!(added["item"]["call_id"], "call_late");
+    assert_eq!(added["item"]["name"], "lookup");
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["type"] == "response.function_call_arguments.delta")
+            .map(|value| value["delta"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["{\"x\":", "1", "}"]
+    );
+    let terminal = values
+        .iter()
+        .find(|value| value["type"] == "response.completed")
+        .unwrap();
+    assert_eq!(terminal["response"]["output"][0]["arguments"], "{\"x\":1}");
+}
+
+#[test]
+fn responses_stream_reserves_order_for_pending_tools() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    let mut push = |sequence, kind| encoder.push(CanonicalEvent::new(sequence, kind)).unwrap();
+    push(
+        0,
+        CanonicalEventKind::ResponseStart {
+            response_id: None,
+            provider_model: None,
+        },
+    );
+    assert!(
+        push(
+            1,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: None,
+                name: None,
+                arguments_delta: "{".into(),
+            },
+        )
+        .is_empty()
+    );
+    assert!(
+        push(
+            2,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 1,
+                id: Some("call_b".into()),
+                name: Some("tool_b".into()),
+                arguments_delta: "{".into(),
+            },
+        )
+        .is_empty()
+    );
+    assert!(
+        push(
+            3,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 1,
+                id: None,
+                name: None,
+                arguments_delta: "}".into(),
+            },
+        )
+        .is_empty()
+    );
+    let frames = push(
+        4,
+        CanonicalEventKind::ToolCallDelta {
+            output_index: 0,
+            tool_index: 0,
+            id: Some("call_a".into()),
+            name: Some("tool_a".into()),
+            arguments_delta: "}".into(),
+        },
+    );
+    let terminal = push(
+        5,
+        CanonicalEventKind::Finish {
+            output_index: 0,
+            reason: FinishReason::ToolCalls,
+        },
+    )
+    .into_iter()
+    .chain(push(6, CanonicalEventKind::Done))
+    .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+    .find(|value| value["type"] == "response.completed")
+    .unwrap();
+
+    let emitted = frames
+        .iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .map(|value| {
+            (
+                value["type"].as_str().unwrap().to_owned(),
+                value["output_index"].as_u64().unwrap(),
+                value["delta"].as_str().map(str::to_owned),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        emitted,
+        [
+            ("response.output_item.added".into(), 0, None),
+            (
+                "response.function_call_arguments.delta".into(),
+                0,
+                Some("{".into())
+            ),
+            ("response.output_item.added".into(), 1, None),
+            (
+                "response.function_call_arguments.delta".into(),
+                1,
+                Some("{".into())
+            ),
+            (
+                "response.function_call_arguments.delta".into(),
+                1,
+                Some("}".into())
+            ),
+            (
+                "response.function_call_arguments.delta".into(),
+                0,
+                Some("}".into())
+            ),
+        ]
+    );
+    assert_eq!(terminal["response"]["output"][0]["call_id"], "call_a");
+    assert_eq!(terminal["response"]["output"][1]["call_id"], "call_b");
+}
+
+#[test]
+fn responses_stream_queues_raw_outputs_behind_pending_tools() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    encoder
+        .push(CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ))
+        .unwrap();
+    assert!(
+        encoder
+            .push(CanonicalEvent::new(
+                1,
+                CanonicalEventKind::ToolCallDelta {
+                    output_index: 0,
+                    tool_index: 0,
+                    id: Some("call_a".into()),
+                    name: None,
+                    arguments_delta: "{".into(),
+                },
+            ))
+            .unwrap()
+            .is_empty()
+    );
+    for (sequence, kind) in [
+        (
+            2,
+            CanonicalEventKind::SourceExtension {
+                extensions: SourceExtensions::new(
+                    Surface::OpenAi,
+                    std::collections::BTreeMap::from([(
+                        "/stream/response.output_item.added/2".into(),
+                        json!({
+                            "type": "response.output_item.added",
+                            "output_index": 1,
+                            "item": {"id": "rs_1", "type": "reasoning", "status": "in_progress"}
+                        }),
+                    )]),
+                ),
+            },
+        ),
+        (
+            3,
+            CanonicalEventKind::TextDelta {
+                output_index: 2,
+                text: "later".into(),
+            },
+        ),
+        (
+            4,
+            CanonicalEventKind::SourceExtension {
+                extensions: SourceExtensions::new(
+                    Surface::OpenAi,
+                    std::collections::BTreeMap::from([(
+                        "/stream/response.output_item.done/4".into(),
+                        json!({
+                            "type": "response.output_item.done",
+                            "output_index": 1,
+                            "item": {"id": "rs_1", "type": "reasoning", "status": "completed"}
+                        }),
+                    )]),
+                ),
+            },
+        ),
+    ] {
+        assert!(
+            encoder
+                .push(CanonicalEvent::new(sequence, kind))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    let frames = encoder
+        .push(CanonicalEvent::new(
+            5,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: None,
+                name: Some("tool_a".into()),
+                arguments_delta: "}".into(),
+            },
+        ))
+        .unwrap();
+    let emitted = frames
+        .iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .map(|value| {
+            (
+                value["type"].as_str().unwrap().to_owned(),
+                value["output_index"].as_u64().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        emitted,
+        [
+            ("response.output_item.added".into(), 0),
+            ("response.function_call_arguments.delta".into(), 0),
+            ("response.output_item.added".into(), 1),
+            ("response.output_item.added".into(), 2),
+            ("response.output_text.delta".into(), 2),
+            ("response.output_item.done".into(), 1),
+            ("response.function_call_arguments.delta".into(), 0),
+        ]
+    );
+
+    encoder
+        .push(CanonicalEvent::new(
+            6,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::ToolCalls,
+            },
+        ))
+        .unwrap();
+    encoder
+        .push(CanonicalEvent::new(
+            7,
+            CanonicalEventKind::Finish {
+                output_index: 2,
+                reason: FinishReason::Stop,
+            },
+        ))
+        .unwrap();
+    encoder
+        .push(CanonicalEvent::new(
+            8,
+            CanonicalEventKind::SourceExtension {
+                extensions: SourceExtensions::new(
+                    Surface::OpenAi,
+                    std::collections::BTreeMap::from([(
+                        "/__olp/openai_responses_raw_output/1".into(),
+                        json!({"id": "rs_1", "type": "reasoning", "status": "completed"}),
+                    )]),
+                ),
+            },
+        ))
+        .unwrap();
+    let terminal = encoder
+        .push(CanonicalEvent::new(9, CanonicalEventKind::Done))
+        .unwrap()
+        .into_iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .find(|value| value["type"] == "response.completed")
+        .unwrap();
+    assert_eq!(terminal["response"]["output"][0]["call_id"], "call_a");
+    assert_eq!(terminal["response"]["output"][1]["id"], "rs_1");
+    assert_eq!(
+        terminal["response"]["output"][2]["content"][0]["text"],
+        "later"
+    );
+}
+
+#[test]
+fn responses_stream_reserves_started_messages_before_raw_outputs() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    for (sequence, kind) in [
+        (
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ),
+        (
+            1,
+            CanonicalEventKind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        (
+            2,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: String::new(),
+            },
+        ),
+        (
+            3,
+            CanonicalEventKind::SourceExtension {
+                extensions: SourceExtensions::new(
+                    Surface::OpenAi,
+                    std::collections::BTreeMap::from([(
+                        "/stream/response.output_item.added/3".into(),
+                        json!({
+                            "type": "response.output_item.added",
+                            "output_index": 1,
+                            "item": {"id": "rs_1", "type": "reasoning", "status": "completed"}
+                        }),
+                    )]),
+                ),
+            },
+        ),
+    ] {
+        let frames = encoder.push(CanonicalEvent::new(sequence, kind)).unwrap();
+        if sequence != 0 {
+            assert!(frames.is_empty());
+        }
+    }
+
+    let emitted = encoder
+        .push(CanonicalEvent::new(
+            4,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "hello".into(),
+            },
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .map(|value| {
+            (
+                value["type"].as_str().unwrap().to_owned(),
+                value["output_index"].as_u64().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        emitted,
+        [
+            ("response.output_item.added".into(), 0),
+            ("response.output_item.added".into(), 1),
+            ("response.output_text.delta".into(), 0),
+        ]
+    );
+
+    encoder
+        .push(CanonicalEvent::new(
+            5,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::Stop,
+            },
+        ))
+        .unwrap();
+    encoder
+        .push(CanonicalEvent::new(
+            6,
+            CanonicalEventKind::SourceExtension {
+                extensions: SourceExtensions::new(
+                    Surface::OpenAi,
+                    std::collections::BTreeMap::from([(
+                        "/__olp/openai_responses_raw_output/1".into(),
+                        json!({"id": "rs_1", "type": "reasoning", "status": "completed"}),
+                    )]),
+                ),
+            },
+        ))
+        .unwrap();
+    let terminal = encoder
+        .push(CanonicalEvent::new(7, CanonicalEventKind::Done))
+        .unwrap()
+        .into_iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .find(|value| value["type"] == "response.completed")
+        .unwrap();
+    assert_eq!(terminal["response"]["output"][0]["type"], "message");
+    assert_eq!(terminal["response"]["output"][1]["type"], "reasoning");
+}
+
+#[test]
+fn responses_stream_rejects_unresolved_tool_at_finish() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    encoder
+        .push(CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: None,
+                name: None,
+                arguments_delta: "{}".into(),
+            },
+        ))
+        .unwrap();
+    let error = encoder
+        .push(CanonicalEvent::new(
+            1,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::ToolCalls,
+            },
+        ))
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        OpenAiClientEncodeError::IncompleteToolCall("identity")
+    ));
+}
+
+#[test]
+fn responses_stream_emits_errors_after_partial_tool_identity() {
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    encoder
+        .push(CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: Some("call_partial".into()),
+                name: None,
+                arguments_delta: "{".into(),
+            },
+        ))
+        .unwrap();
+    let frames = encoder
+        .push(CanonicalEvent::new(
+            1,
+            CanonicalEventKind::Error {
+                error: CanonicalError {
+                    class: ErrorClass::Upstream,
+                    message: "provider failed".into(),
+                    provider_code: Some("upstream_error".into()),
+                    retryable: false,
+                },
+            },
+        ))
+        .unwrap();
+
+    assert_eq!(frames.len(), 1);
+    let value: serde_json::Value = serde_json::from_str(&frames[0].data).unwrap();
+    assert_eq!(value["type"], "response.failed");
+    assert_eq!(value["response"]["error"]["code"], "upstream_error");
+}
+
+#[test]
+fn responses_stream_terminal_output_keeps_live_item_indexes() {
+    let events = [
+        CanonicalEventKind::ResponseStart {
+            response_id: Some("resp_interleaved".into()),
+            provider_model: None,
+        },
+        CanonicalEventKind::ToolCallDelta {
+            output_index: 0,
+            tool_index: 0,
+            id: Some("call_a".into()),
+            name: Some("tool_a".into()),
+            arguments_delta: "{\"a\":1}".into(),
+        },
+        CanonicalEventKind::TextDelta {
+            output_index: 1,
+            text: "one".into(),
+        },
+        CanonicalEventKind::TextDelta {
+            output_index: 0,
+            text: "zero".into(),
+        },
+        CanonicalEventKind::ToolCallDelta {
+            output_index: 1,
+            tool_index: 0,
+            id: Some("call_b".into()),
+            name: Some("tool_b".into()),
+            arguments_delta: "{\"b\":2}".into(),
+        },
+        CanonicalEventKind::Finish {
+            output_index: 0,
+            reason: FinishReason::ToolCalls,
+        },
+        CanonicalEventKind::Finish {
+            output_index: 1,
+            reason: FinishReason::ToolCalls,
+        },
+        CanonicalEventKind::Done,
+    ];
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    let values = events
+        .into_iter()
+        .enumerate()
+        .flat_map(|(sequence, kind)| {
+            encoder
+                .push(CanonicalEvent::new(sequence.try_into().unwrap(), kind))
+                .unwrap()
+        })
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .collect::<Vec<_>>();
+    let output = &values
+        .iter()
+        .find(|value| value["type"] == "response.completed")
+        .unwrap()["response"]["output"];
+
+    assert_eq!(output[0]["call_id"], "call_a");
+    assert_eq!(output[1]["content"][0]["text"], "one");
+    assert_eq!(output[2]["content"][0]["text"], "zero");
+    assert_eq!(output[3]["call_id"], "call_b");
+}
+
+#[test]
+fn responses_keep_completed_item_reasons_when_the_response_is_incomplete() {
+    let response: ResponseObject = serde_json::from_value(json!({
+        "id": "resp_partial",
+        "object": "response",
+        "created_at": 1,
+        "status": "incomplete",
+        "model": "provider-model",
+        "output": [
+            {
+                "id": "fc_0", "type": "function_call", "status": "completed",
+                "call_id": "call_0", "name": "lookup", "arguments": "{}"
+            },
+            {
+                "id": "msg_1", "type": "message", "role": "assistant",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "partial", "annotations": []}]
+            }
+        ],
+        "incomplete_details": {"reason": "max_output_tokens"}
+    }))
+    .unwrap();
+    let unary = decode_response_object(response).unwrap();
+    let finish_reasons = |events: &[CanonicalEvent]| {
+        events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                CanonicalEventKind::Finish {
+                    output_index,
+                    reason,
+                } => Some((*output_index, reason.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        finish_reasons(&unary),
+        [(0, FinishReason::ToolCalls), (1, FinishReason::Length)]
+    );
+    let encoded =
+        serde_json::to_value(encode_response_object(&unary, "team-route", "fallback").unwrap())
+            .unwrap();
+    assert_eq!(encoded["output"][0]["status"], "completed");
+    assert_eq!(encoded["output"][1]["status"], "incomplete");
+
+    let wire = [
+        json!({"type":"response.created","response":{"id":"resp_partial","model":"provider-model"}}),
+        json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_0","name":"lookup"}}),
+        json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","status":"completed"}}),
+        json!({"type":"response.output_item.added","output_index":1,"item":{"type":"message","role":"assistant"}}),
+        json!({"type":"response.output_text.delta","output_index":1,"delta":"partial"}),
+        json!({"type":"response.output_item.done","output_index":1,"item":{"type":"message","status":"incomplete"}}),
+        json!({"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}),
+    ]
+    .into_iter()
+    .map(|frame| format!("event: {}\ndata: {frame}\n\n", frame["type"].as_str().unwrap()))
+    .collect::<String>();
+    let streamed = OpenAiResponsesStreamDecoder::new()
+        .push(wire.as_bytes())
+        .unwrap();
+    assert_eq!(
+        finish_reasons(&streamed),
+        [(0, FinishReason::ToolCalls), (1, FinishReason::Length)]
+    );
+
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1);
+    let frames = streamed
+        .iter()
+        .cloned()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    let values = frames
+        .iter()
+        .map(|frame| serde_json::from_str::<serde_json::Value>(&frame.data).unwrap())
+        .collect::<Vec<_>>();
+    let done_statuses = values
+        .iter()
+        .filter(|value| value["type"] == "response.output_item.done")
+        .map(|value| value["item"]["status"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(done_statuses, [Some("completed"), Some("incomplete")]);
+    let terminal_output = &values.last().unwrap()["response"]["output"];
+    assert_eq!(terminal_output[0]["status"], "completed");
+    assert_eq!(terminal_output[1]["status"], "incomplete");
+
+    let wire = frames
+        .iter()
+        .map(|frame| {
+            format!(
+                "event: {}\ndata: {}\n\n",
+                frame.event.as_deref().unwrap(),
+                frame.data
+            )
+        })
+        .collect::<String>();
+    let round_trip = OpenAiResponsesStreamDecoder::new()
+        .push(wire.as_bytes())
+        .unwrap();
+    assert_eq!(
+        finish_reasons(&round_trip),
+        [(0, FinishReason::ToolCalls), (1, FinishReason::Length)]
     );
 }
 

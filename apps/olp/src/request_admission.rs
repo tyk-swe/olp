@@ -424,17 +424,6 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
-    if !accepts_body {
-        return Ok(run_request_with_reservation(
-            request,
-            next,
-            None,
-            local_metadata,
-            principal,
-            None,
-        )
-        .await);
-    }
     let multipart_policy = endpoint.and_then(gateway::InferenceEndpoint::multipart);
     if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
@@ -446,7 +435,7 @@ async fn enforce_request_limits_inner(
         .into());
     }
 
-    if is_json {
+    if accepts_body && is_json {
         let (parts, body) = request.into_parts();
         let bytes = match read_json_body(body, MAX_JSON_BODY_BYTES, REQUEST_BODY_TIMEOUT).await {
             Ok(bytes) => bytes,
@@ -517,11 +506,15 @@ async fn enforce_request_limits_inner(
         .await);
     }
 
-    let requested_tokens = estimate_http_non_json_request_tokens(
-        endpoint
-            .map(gateway::InferenceEndpoint::token_estimate)
-            .unwrap_or(gateway::TokenEstimate::Default),
-    );
+    let requested_tokens = if accepts_body {
+        estimate_http_non_json_request_tokens(
+            endpoint
+                .map(gateway::InferenceEndpoint::token_estimate)
+                .unwrap_or(gateway::TokenEstimate::Default),
+        )
+    } else {
+        1
+    };
     let reservation = if let Some(principal) = &principal {
         match reserve_http_inference_limits(state, principal, requested_tokens, None).await {
             Ok(reservation) => reservation,
@@ -535,6 +528,18 @@ async fn enforce_request_limits_inner(
     } else {
         None
     };
+    if !accepts_body {
+        let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
+        return Ok(run_request_with_reservation(
+            request,
+            next,
+            reservation,
+            local_metadata,
+            principal,
+            reserved_tokens,
+        )
+        .await);
+    }
     let multipart_preauthorization = if let Some(content_type) = multipart_content_type {
         if let Err(problem) = validate_multipart_boundary(&content_type) {
             release_reservation(reservation).await;

@@ -445,6 +445,28 @@ async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode
 }
 
 #[tokio::test]
+async fn bodyless_inference_requests_with_hard_limits_fail_closed() {
+    let (state, key) = inference_state(true);
+    let response = public_router(state.gateway_state_for_test())
+        .oneshot(
+            Request::get("/openai/v1/videos")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["error"]["code"], "distributed_limits_unavailable");
+}
+
+#[tokio::test]
 async fn malformed_inference_json_without_hard_limits_reaches_native_decoder() {
     let (mut state, key) = inference_state(false);
     let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(2);

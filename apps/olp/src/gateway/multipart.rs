@@ -142,18 +142,23 @@ impl MultipartFormData {
         prefix: &str,
     ) -> Result<Vec<BoundedMediaPart>, InferenceError> {
         let exact = self.files.remove(prefix);
+        let repeated = self.files.remove(&format!("{prefix}[]"));
         let indexed_keys = self
             .files
             .keys()
             .filter(|name| name.starts_with(&format!("{prefix}[")))
             .cloned()
             .collect::<Vec<_>>();
-        if exact.is_some() && !indexed_keys.is_empty() {
+        if usize::from(exact.is_some())
+            + usize::from(repeated.is_some())
+            + usize::from(!indexed_keys.is_empty())
+            > 1
+        {
             return Err(InferenceError::invalid_request(format!(
-                "The {prefix} file and indexed {prefix} files cannot be mixed."
+                "The {prefix}, {prefix}[], and indexed {prefix} files cannot be mixed."
             )));
         }
-        if let Some(files) = exact {
+        if let Some(files) = exact.or(repeated) {
             return Ok(files);
         }
 
@@ -511,6 +516,20 @@ mod tests {
         repeated.text.insert("include".into(), vec!["a".into()]);
         repeated.text.insert("include[]".into(), vec!["b".into()]);
         assert!(repeated.take_repeated("include").is_err());
+
+        let mut repeated_files = form();
+        repeated_files
+            .files
+            .insert("image[]".into(), vec![part(0), part(1)]);
+        assert_eq!(
+            repeated_files
+                .take_files_with_prefix("image")
+                .unwrap()
+                .into_iter()
+                .map(|file| file.filename)
+                .collect::<Vec<_>>(),
+            ["file-0", "file-1"]
+        );
 
         let mut indexed = form();
         for index in (0..=10).rev() {

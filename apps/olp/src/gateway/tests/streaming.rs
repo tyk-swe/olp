@@ -85,7 +85,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
         let mut events = circuit_accounted_event_stream(
             validated_event_stream(provider, validator),
             circuits.clone(),
-            permit,
+            Some(permit),
             false,
         );
         let error = events.next().await.unwrap().unwrap_err();
@@ -106,7 +106,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     let mut events = circuit_accounted_event_stream(
         validated_event_stream(provider, validator),
         circuits.clone(),
-        permit,
+        Some(permit),
         false,
     );
     assert!(matches!(

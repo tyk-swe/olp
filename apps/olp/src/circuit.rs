@@ -20,10 +20,19 @@ pub(crate) struct CircuitBreaker {
     open_duration: Duration,
 }
 
-#[derive(Clone, Copy, Debug)]
 pub(crate) struct CircuitPermit {
+    breaker: CircuitBreaker,
     target: TargetId,
     generation: u64,
+    active: bool,
+}
+
+impl Drop for CircuitPermit {
+    fn drop(&mut self) {
+        if self.active {
+            self.breaker.record_abandoned(self.target, self.generation);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -109,10 +118,16 @@ impl CircuitBreaker {
             }
             Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => return None,
         };
-        Some(CircuitPermit { target, generation })
+        Some(CircuitPermit {
+            breaker: self.clone(),
+            target,
+            generation,
+            active: true,
+        })
     }
 
-    pub(crate) fn record_success(&self, permit: CircuitPermit) {
+    pub(crate) fn record_success(&self, mut permit: CircuitPermit) {
+        permit.active = false;
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
         let Some(state) = states.get_mut(&permit.target) else {
             return;
@@ -139,8 +154,10 @@ impl CircuitBreaker {
             .retain(|target, _| live.contains(target));
     }
 
-    pub(crate) fn record_failure(&self, permit: CircuitPermit, class: AttemptFailureClass) {
+    pub(crate) fn record_failure(&self, mut permit: CircuitPermit, class: AttemptFailureClass) {
+        permit.active = false;
         if !counts_toward_circuit(class) {
+            self.record_abandoned(permit.target, permit.generation);
             return;
         }
         let now = Instant::now();
@@ -185,6 +202,23 @@ impl CircuitBreaker {
             _ => return,
         };
         states.insert(permit.target, next);
+    }
+
+    fn record_abandoned(&self, target: TargetId, permit_generation: u64) {
+        let now = Instant::now();
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        let Some(CircuitState::HalfOpen { generation, .. }) = states.get(&target).copied() else {
+            return;
+        };
+        if generation == permit_generation {
+            states.insert(
+                target,
+                CircuitState::Open {
+                    until: now + self.open_duration,
+                    generation: generation.wrapping_add(1),
+                },
+            );
+        }
     }
 
     pub(crate) fn open_count(&self) -> usize {
@@ -236,7 +270,40 @@ mod tests {
 
     #[test]
     fn stale_probe_cannot_complete_a_new_probe() {
-        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        for stale_succeeds in [true, false] {
+            let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+            let target = TargetId::new();
+            breaker.inner.lock().unwrap().insert(
+                target,
+                CircuitState::Open {
+                    until: Instant::now(),
+                    generation: 1,
+                },
+            );
+
+            let stale = breaker.try_acquire(target, Instant::now()).unwrap();
+            let current = breaker
+                .try_acquire(target, Instant::now() + Duration::from_secs(1))
+                .unwrap();
+            if stale_succeeds {
+                breaker.record_success(stale);
+            } else {
+                breaker.record_failure(stale, AttemptFailureClass::Connect);
+            }
+            assert!(
+                breaker
+                    .try_acquire(target, Instant::now() + Duration::from_secs(1))
+                    .is_none()
+            );
+            breaker.record_success(current);
+            assert!(breaker.is_selectable(target));
+            assert_eq!(breaker.open_count(), 0);
+        }
+    }
+
+    #[test]
+    fn abandoned_half_open_probe_reopens_for_backoff() {
+        let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
         let target = TargetId::new();
         breaker.inner.lock().unwrap().insert(
             target,
@@ -246,20 +313,18 @@ mod tests {
             },
         );
 
-        let stale = breaker.try_acquire(target, Instant::now()).unwrap();
-        let current = breaker
-            .try_acquire(target, Instant::now() + Duration::from_secs(1))
-            .unwrap();
-        breaker.record_success(stale);
+        drop(
+            breaker
+                .try_acquire(target, Instant::now() + Duration::from_secs(86_400))
+                .unwrap(),
+        );
+        assert!(!breaker.is_selectable(target));
+        std::thread::sleep(Duration::from_millis(8));
         assert!(
             breaker
                 .try_acquire(target, Instant::now() + Duration::from_secs(1))
-                .is_none()
+                .is_some()
         );
-        breaker.record_success(current);
-        breaker.record_failure(stale, AttemptFailureClass::Connect);
-        assert!(breaker.is_selectable(target));
-        assert_eq!(breaker.open_count(), 0);
     }
 
     #[test]

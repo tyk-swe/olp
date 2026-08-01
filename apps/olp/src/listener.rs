@@ -34,6 +34,9 @@ const HTTP2_MAX_CONCURRENT_STREAMS: u32 = 100;
 const HTTP2_MAX_HEADER_LIST_BYTES: u32 = 32 * 1024;
 const HTTP2_MAX_PENDING_RESET_STREAMS: usize = 32;
 const HTTP2_MAX_LOCAL_ERROR_RESET_STREAMS: usize = 32;
+const HTTP2_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(60);
+const HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
+const HTTP_CONNECTION_MAX_AGE: Duration = Duration::from_secs(5 * 60);
 const HTTP_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Per-listener controls applied before a request reaches Axum.
@@ -41,6 +44,7 @@ const HTTP_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) struct HttpServerConfig {
     max_connections: usize,
     http1_header_timeout: Duration,
+    connection_max_age: Duration,
 }
 
 impl HttpServerConfig {
@@ -48,6 +52,7 @@ impl HttpServerConfig {
         Self {
             max_connections,
             http1_header_timeout: Duration::from_secs(10),
+            connection_max_age: HTTP_CONNECTION_MAX_AGE,
         }
     }
 
@@ -56,6 +61,7 @@ impl HttpServerConfig {
         Self {
             max_connections,
             http1_header_timeout,
+            connection_max_age: HTTP_CONNECTION_MAX_AGE,
         }
     }
 }
@@ -194,12 +200,17 @@ async fn serve_connection(
         .max_header_list_size(HTTP2_MAX_HEADER_LIST_BYTES)
         .max_pending_accept_reset_streams(Some(HTTP2_MAX_PENDING_RESET_STREAMS))
         .max_local_error_reset_streams(Some(HTTP2_MAX_LOCAL_ERROR_RESET_STREAMS))
+        .keep_alive_interval(Some(HTTP2_KEEP_ALIVE_INTERVAL))
+        .keep_alive_timeout(HTTP2_KEEP_ALIVE_TIMEOUT)
         .timer(TokioTimer::new());
 
     let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), hyper_service);
     tokio::pin!(connection);
     let first_request_deadline = tokio::time::sleep(config.http1_header_timeout);
     tokio::pin!(first_request_deadline);
+    let connection_retirement = tokio::time::sleep(config.connection_max_age);
+    tokio::pin!(connection_retirement);
+    let mut retiring = false;
     let mut draining = false;
     let mut drain_deadline = None;
     let mut first_request_seen = false;
@@ -218,10 +229,18 @@ async fn serve_connection(
                 debug!(%peer, "closing connection before its first request exceeded the header/protocol deadline");
                 return;
             }
+            () = &mut connection_retirement, if !retiring => {
+                debug!(%peer, "gracefully retiring connection at its maximum age");
+                retiring = true;
+                connection.as_mut().graceful_shutdown();
+            }
             changed = shutdown.changed(), if !draining => {
                 if changed.is_err() || *shutdown.borrow() {
                     draining = true;
-                    connection.as_mut().graceful_shutdown();
+                    if !retiring {
+                        retiring = true;
+                        connection.as_mut().graceful_shutdown();
+                    }
                     drain_deadline = Some(Box::pin(tokio::time::sleep(HTTP_CONNECTION_DRAIN_TIMEOUT)));
                 }
             }
@@ -281,15 +300,25 @@ mod tests {
         watch::Sender<bool>,
         tokio::task::JoinHandle<io::Result<()>>,
     ) {
+        test_server_with_config(
+            HttpServerConfig::for_test(max_connections, header_timeout),
+            app,
+        )
+        .await
+    }
+
+    async fn test_server_with_config(
+        config: HttpServerConfig,
+        app: Router,
+    ) -> (
+        SocketAddr,
+        watch::Sender<bool>,
+        tokio::task::JoinHandle<io::Result<()>>,
+    ) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (shutdown_sender, shutdown_receiver) = watch::channel(false);
-        let task = tokio::spawn(serve_http(
-            listener,
-            app,
-            HttpServerConfig::for_test(max_connections, header_timeout),
-            shutdown_receiver,
-        ));
+        let task = tokio::spawn(serve_http(listener, app, config, shutdown_receiver));
         (address, shutdown_sender, task)
     }
 
@@ -404,6 +433,64 @@ mod tests {
                 .count(),
             2
         );
+
+        let _ = shutdown.send(true);
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn maximum_age_gracefully_retires_an_http2_connection() {
+        use http_body_util::BodyExt as _;
+
+        let app = Router::new().route(
+            "/",
+            get(|| async {
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                "ok"
+            }),
+        );
+        let (address, shutdown, task) = test_server_with_config(
+            HttpServerConfig {
+                max_connections: 1,
+                http1_header_timeout: Duration::from_secs(1),
+                connection_max_age: Duration::from_millis(40),
+            },
+            app,
+        )
+        .await;
+        let stream = TcpStream::connect(address).await.unwrap();
+        let (mut sender, connection) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+                .await
+                .unwrap();
+        let connection = tokio::spawn(connection);
+
+        let response = sender
+            .send_request(
+                hyper::Request::get("http://localhost/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            "ok"
+        );
+        tokio::time::timeout(Duration::from_secs(1), connection)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        let mut next = TcpStream::connect(address).await.unwrap();
+        next.write_all(b"GET / HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        next.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200"));
 
         let _ = shutdown.send(true);
         task.await.unwrap().unwrap();

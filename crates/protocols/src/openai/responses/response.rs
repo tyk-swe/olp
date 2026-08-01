@@ -153,6 +153,11 @@ fn decode_response_output_item(
         ));
     };
     let kind = take_required_output_string(&mut object, "type")?;
+    let terminal_reason = if object.get("status").and_then(Value::as_str) == Some("completed") {
+        None
+    } else {
+        terminal_reason
+    };
     match kind.as_str() {
         "message" => {
             let role = match take_required_output_string(&mut object, "role")?.as_str() {

@@ -31,23 +31,41 @@ source "$repo_root/scripts/lib/cargo-target-dir.sh"
 : "${OLP_E2E_DATABASE_ADMIN_URL:=postgres://olp_test:olp_test@localhost:5433/postgres}"
 export OLP_E2E_DATABASE_ADMIN_URL
 
-for command in cargo flock psql sha256sum timeout; do
+for command in cargo flock git psql sync timeout; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "required command is unavailable: $command" >&2
     exit 1
   }
 done
 
-# One checkout owns one deterministic namespace. Descendants inherit the lock,
-# preventing a new run from sweeping resources while any old process is alive.
-run_token=$(printf '%s' "$repo_root" | sha256sum)
-run_token=${run_token:0:10}
-export OLP_E2E_RUN_TOKEN="$run_token"
-exec {run_lock_fd}<"$repo_root/tests/e2e"
+# Each checkout owns one persistent namespace and lock. Descendants inherit the
+# lock, preventing a new run from sweeping resources while any old process is
+# alive.
+git_dir=$(git -C "$repo_root" rev-parse --absolute-git-dir)
+run_state="$git_dir/olp-e2e-run-state"
+exec {run_lock_fd}<>"$run_state"
 flock --exclusive --nonblock "$run_lock_fd" || {
   echo "another E2E run already owns this checkout" >&2
   exit 75
 }
+if [[ ! -s $run_state ]]; then
+  IFS= read -r run_token </proc/sys/kernel/random/uuid || true
+  run_token=${run_token//-/}
+  run_token=${run_token:0:10}
+  [[ $run_token =~ ^[a-f0-9]{10}$ ]] || {
+    echo "failed to generate an E2E database namespace" >&2
+    exit 1
+  }
+  printf '%s\n' "$run_token" >&"$run_lock_fd"
+  sync --file-system "$run_state"
+else
+  run_token=$(<"$run_state")
+fi
+[[ $run_token =~ ^[a-f0-9]{10}$ ]] || {
+  echo "invalid E2E database namespace: $run_state" >&2
+  exit 1
+}
+export OLP_E2E_RUN_TOKEN="$run_token"
 
 sweep_leftover_databases() {
   local leftovers database
