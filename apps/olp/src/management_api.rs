@@ -30,7 +30,7 @@ pub(crate) use configuration::common::{map_configuration_resource, validation};
 pub(crate) use olp_domain::Permission;
 use utoipa::OpenApi;
 
-use crate::{ManagementState, Problem};
+use crate::{ManagementState, Problem, public_auth_routes::PublicAuthRoute};
 
 pub fn router() -> Router<ManagementState> {
     Router::new()
@@ -40,8 +40,11 @@ pub fn router() -> Router<ManagementState> {
             get(authentication_capabilities),
         )
         .route("/api/v1/setup/status", get(setup_status))
-        .route("/api/v1/setup", post(setup))
-        .route("/api/v1/sessions", get(list_sessions).post(login))
+        .route(PublicAuthRoute::FirstOwnerSetup.path(), post(setup))
+        .route(
+            PublicAuthRoute::PasswordLogin.path(),
+            get(list_sessions).post(login),
+        )
         .route(
             "/api/v1/sessions/current",
             get(current_session).delete(logout),
@@ -66,7 +69,10 @@ pub fn router() -> Router<ManagementState> {
             "/api/v1/invitations",
             get(list_invitations).post(create_invitation),
         )
-        .route("/api/v1/invitations/accept", post(accept_invitation))
+        .route(
+            PublicAuthRoute::InvitationAcceptance.path(),
+            post(accept_invitation),
+        )
         .route(
             "/api/v1/invitations/{invitation_id}",
             axum::routing::delete(revoke_invitation),

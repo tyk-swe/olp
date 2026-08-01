@@ -13,7 +13,7 @@ islands with their own lockfiles: `console/` (pnpm), `tests/sdk-smoke/` (pnpm),
 
 | Task | Command |
 |---|---|
-| Full PR gate | `make check` |
+| Broad local gate | `make check-local` (`make check` remains an alias) |
 | Rust format / lint | `make fmt` (`fmt-fix`), `make clippy` |
 | Rust unit tests | `make test` |
 | CI's real Rust gate | `make coverage` — llvm-cov nextest with a **51% line floor**. Plain `cargo test` is not what CI enforces. The workspace has zero doctests by policy; if you add one, restore a `cargo test --doc` gate. |
@@ -21,6 +21,8 @@ islands with their own lockfiles: `console/` (pnpm), `tests/sdk-smoke/` (pnpm),
 | Console | `make console-install`, `make console-verify`, `make console-e2e` |
 | Regenerate contracts | `make openapi`, `make sqlx-prepare`, `make screenshots` |
 
+The CI required tier additionally runs service-, browser-, image-, and
+coverage-dependent jobs that `make check-local` does not reproduce.
 CI tiers: pull requests run the required tier; cross-browser, HA, arm64,
 upgrade-rehearsal, and fuzz campaigns run only on push/schedule/dispatch.
 

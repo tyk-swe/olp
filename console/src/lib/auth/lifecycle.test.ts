@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken } from '$lib/api/session';
-import { AuthenticationLifecycle, type AuthenticatedSession } from './lifecycle';
+import {
+  AuthenticationLifecycle,
+  isAuthenticationEndpoint,
+  type AuthenticatedSession
+} from './lifecycle';
 
 const session = (csrfToken = 'csrf-session'): AuthenticatedSession => ({
   user: {
@@ -241,14 +245,43 @@ describe('authentication lifecycle', () => {
   });
 
   it.each([
+    ['GET', '/api/v1/setup/status'],
+    ['POST', '/api/v1/setup'],
+    ['POST', '/api/v1/sessions'],
+    ['POST', '/api/v1/invitations/accept'],
     ['GET', '/api/v1/auth/capabilities'],
     ['GET', '/api/v1/oidc/login'],
-    ['POST', '/api/v1/oidc/login']
+    ['POST', '/api/v1/oidc/login'],
+    ['GET', '/api/v1/oidc/callback']
   ])('allows public authentication request %s %s without a session', async (method, pathname) => {
     const lifecycle = new AuthenticationLifecycle();
     const request = new Request(`https://console.example.test${pathname}`, { method });
 
+    expect(isAuthenticationEndpoint(request)).toBe(true);
     await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
+  });
+
+  it.each([
+    ['GET', '/api/v1/setup'],
+    ['HEAD', '/api/v1/setup/status'],
+    ['OPTIONS', '/api/v1/sessions'],
+    ['POST', '/api/v1/sessions/'],
+    ['POST', '/api/v1/sessions/nested'],
+    ['POST', '/api/v1/oidc/link'],
+    ['GET', '/api/v1/oidc/callback/extra']
+  ])('does not widen authentication request matching for %s %s', async (method, pathname) => {
+    const request = new Request(`https://console.example.test${pathname}`, { method });
+
+    expect(isAuthenticationEndpoint(request)).toBe(false);
+  });
+
+  it('classifies authentication endpoints by pathname without query-string widening', () => {
+    const request = new Request(
+      'https://console.example.test/api/v1/oidc/login?return_to=%2Fproviders',
+      { method: 'GET' }
+    );
+
+    expect(isAuthenticationEndpoint(request)).toBe(true);
   });
 
   it('shares one freshness validation between concurrent stale-session mutations', async () => {

@@ -26,24 +26,33 @@ export type CreateProviderInput = Schemas['CreateProviderRequest'];
 export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
 export type CapabilityDeclaration = Schemas['CapabilityInput'];
-export type ProviderCapabilityOptions = Schemas['ProviderCapabilityOptionsResponse'];
+export type ProviderCapabilityOptions =
+  Schemas['ProviderCapabilityOptionsResponse'];
 export type ProviderKindCapability = Schemas['ProviderKindCapabilityResponse'];
-export type CapabilityCertification = Schemas['CapabilityCertificationResponse'];
+export type CapabilityCertification =
+  Schemas['CapabilityCertificationResponse'];
 export type ProviderRevision = Schemas['ProviderRevisionSummaryResponse'];
 export type ProviderRevisionDiff = Schemas['ProviderRevisionDiffResponse'];
 
-export async function listProviders(signal?: ReadSignal): Promise<ProviderSummary[]> {
-  return collectCursorPages((cursor) => listProviderPage(cursor, getAbortSignal(signal)));
+export async function listProviders(
+  signal?: ReadSignal
+): Promise<ProviderSummary[]> {
+  return collectCursorPages((cursor) =>
+    listProviderPage(cursor, getAbortSignal(signal))
+  );
 }
 
 export async function getProviderCapabilityOptions(
   providerKind: ProviderKind,
   signal?: AbortSignal
 ): Promise<ProviderCapabilityOptions> {
-  const response = await apiClient.GET('/api/v1/provider-kinds/{provider_kind}/capabilities', {
-    params: { path: { provider_kind: providerKind } },
-    signal
-  });
+  const response = await apiClient.GET(
+    '/api/v1/provider-kinds/{provider_kind}/capabilities',
+    {
+      params: { path: { provider_kind: providerKind } },
+      signal
+    }
+  );
   return requireResponseData(
     response.data,
     response.error,
@@ -51,9 +60,12 @@ export async function getProviderCapabilityOptions(
   ) as ProviderCapabilityOptions;
 }
 
-export async function listProviderKinds(signal?: AbortSignal): Promise<ProviderKindCapability[]> {
+export async function listProviderKinds(
+  signal?: AbortSignal
+): Promise<ProviderKindCapability[]> {
   const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
-  return requireResponseData(response.data, response.error, response.response).items;
+  return requireResponseData(response.data, response.error, response.response)
+    .items;
 }
 
 export async function listProviderPage(
@@ -64,7 +76,11 @@ export async function listProviderPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = requireResponseData(response.data, response.error, response.response);
+  const page = requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  );
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -73,11 +89,21 @@ export async function listProviderModelPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderModel>> {
-  const response = await apiClient.GET('/api/v1/providers/{provider_id}/models', {
-    params: { path: { provider_id: providerId }, query: { limit: 50, cursor } },
-    signal
-  });
-  const page = requireResponseData(response.data, response.error, response.response);
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/models',
+    {
+      params: {
+        path: { provider_id: providerId },
+        query: { limit: 50, cursor }
+      },
+      signal
+    }
+  );
+  const page = requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  );
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -90,7 +116,11 @@ export async function listProviderModelInventoryPage(
     params: { query: { limit: 50, cursor, enabled } },
     signal
   });
-  const page = requireResponseData(response.data, response.error, response.response);
+  const page = requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  );
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -98,71 +128,115 @@ export async function listProviderModelInventory(
   enabled?: boolean,
   signal?: AbortSignal
 ): Promise<ProviderModelInventory[]> {
-  return collectCursorPages((cursor) => listProviderModelInventoryPage(cursor, enabled, signal));
+  return collectCursorPages((cursor) =>
+    listProviderModelInventoryPage(cursor, enabled, signal)
+  );
 }
 
-export async function getProvider(id: string, signal?: AbortSignal): Promise<Provider> {
+export async function getProvider(
+  id: string,
+  signal?: AbortSignal
+): Promise<Provider> {
   const response = await apiClient.GET('/api/v1/providers/{provider_id}', {
     params: { path: { provider_id: id } },
     signal
   });
-  return requireResponseData(response.data, response.error, response.response) as Provider;
+  return requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  ) as Provider;
 }
 
-export async function createProvider(input: CreateProviderInput): Promise<string> {
+export async function createProvider(
+  input: CreateProviderInput
+): Promise<string> {
   const response = await apiClient.POST('/api/v1/providers', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return requireResponseData(response.data, response.error, response.response).id;
+  return requireResponseData(response.data, response.error, response.response)
+    .id;
 }
 
-export async function updateProvider(id: string, etag: string, input: UpdateProviderInput): Promise<Provider> {
+export async function updateProvider(
+  id: string,
+  etag: string,
+  input: UpdateProviderInput
+): Promise<Provider> {
   const response = await apiClient.PATCH('/api/v1/providers/{provider_id}', {
     params: { path: { provider_id: id }, header: { 'If-Match': etag } },
     body: input
   });
-  return requireResponseData(response.data, response.error, response.response) as Provider;
+  return requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  ) as Provider;
 }
 
-export async function probeProvider(provider: Provider): Promise<ProviderProbe> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/probe', {
-    params: {
-      path: { provider_id: provider.id },
-      header: { 'If-Match': provider.etag }
-    } as never
-  });
+export async function probeProvider(
+  provider: Provider
+): Promise<ProviderProbe> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/probe',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      }
+    }
+  );
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function discoverProviderModels(provider: Provider): Promise<Provider> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/discovery', {
-    params: {
-      path: { provider_id: provider.id },
-      header: { 'If-Match': provider.etag }
-    },
-    body: { models: [] }
-  });
-  return requireResponseData(response.data, response.error, response.response) as Provider;
+export async function discoverProviderModels(
+  provider: Provider
+): Promise<Provider> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/discovery',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      },
+      body: { models: [] }
+    }
+  );
+  return requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  ) as Provider;
 }
 
 /** Manual inventory fallback for compatible endpoints without a model-list API. */
-export async function declareProviderModels(provider: Provider, modelNames: string[]): Promise<Provider> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/discovery', {
-    params: {
-      path: { provider_id: provider.id },
-      header: { 'If-Match': provider.etag }
-    },
-    body: {
-      models: modelNames.map((model) => ({
-        upstream_model: model,
-        display_name: model,
-        enabled: false,
-        capabilities: []
-      }))
+export async function declareProviderModels(
+  provider: Provider,
+  modelNames: string[]
+): Promise<Provider> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/discovery',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      },
+      body: {
+        models: modelNames.map((model) => ({
+          upstream_model: model,
+          display_name: model,
+          enabled: false,
+          capabilities: []
+        }))
+      }
     }
-  });
-  return requireResponseData(response.data, response.error, response.response) as Provider;
+  );
+  return requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  ) as Provider;
 }
 
 export async function setProviderModel(
@@ -171,44 +245,54 @@ export async function setProviderModel(
   enabled: boolean,
   capabilities: CapabilityDeclaration[]
 ): Promise<Provider> {
-  const response = await apiClient.PATCH('/api/v1/providers/{provider_id}/models/{model_id}', {
-    params: {
-      path: { provider_id: provider.id, model_id: modelId },
-      header: { 'If-Match': provider.etag }
-    },
-    body: { enabled, capabilities }
-  });
-  return requireResponseData(response.data, response.error, response.response) as Provider;
+  const response = await apiClient.PATCH(
+    '/api/v1/providers/{provider_id}/models/{model_id}',
+    {
+      params: {
+        path: { provider_id: provider.id, model_id: modelId },
+        header: { 'If-Match': provider.etag }
+      },
+      body: { enabled, capabilities }
+    }
+  );
+  return requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  ) as Provider;
 }
 
 export async function certifyProviderModel(
   provider: Provider,
   modelId: string
 ): Promise<CapabilityCertification> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/models/{model_id}/certify', {
-    params: {
-      path: { provider_id: provider.id, model_id: modelId },
-      header: { 'If-Match': provider.etag }
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/models/{model_id}/certify',
+    {
+      params: {
+        path: { provider_id: provider.id, model_id: modelId },
+        header: { 'If-Match': provider.etag }
+      }
     }
-  });
+  );
   return requireResponseData(response.data, response.error, response.response);
 }
 
 export async function activateProvider(provider: Provider): Promise<number> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/activate', {
-    params: {
-      path: { provider_id: provider.id },
-      header: {
-        'If-Match': provider.etag,
-        'Idempotency-Key': crypto.randomUUID()
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/activate',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
       }
     }
-  });
-  return requireResponseData(
-    response.data,
-    response.error,
-    response.response
-  ).runtime_generation.sequence;
+  );
+  return requireResponseData(response.data, response.error, response.response)
+    .runtime_generation.sequence;
 }
 
 export async function listProviderRevisionPage(
@@ -216,11 +300,21 @@ export async function listProviderRevisionPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderRevision>> {
-  const response = await apiClient.GET('/api/v1/providers/{provider_id}/revisions', {
-    params: { path: { provider_id: providerId }, query: { cursor, limit: 25 } },
-    signal
-  });
-  const page = requireResponseData(response.data, response.error, response.response);
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/revisions',
+    {
+      params: {
+        path: { provider_id: providerId },
+        query: { cursor, limit: 25 }
+      },
+      signal
+    }
+  );
+  const page = requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  );
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -230,10 +324,13 @@ export async function diffProviderRevisions(
   to: string,
   signal?: AbortSignal
 ): Promise<ProviderRevisionDiff> {
-  const response = await apiClient.GET('/api/v1/providers/{provider_id}/revisions/diff', {
-    params: { path: { provider_id: providerId }, query: { from, to } },
-    signal
-  });
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/revisions/diff',
+    {
+      params: { path: { provider_id: providerId }, query: { from, to } },
+      signal
+    }
+  );
   return requireResponseData(response.data, response.error, response.response);
 }
 
@@ -246,18 +343,24 @@ export async function restoreProviderRevision(
     {
       params: {
         path: { provider_id: provider.id, revision_id: revisionId },
-        header: { 'If-Match': provider.etag, 'Idempotency-Key': crypto.randomUUID() }
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
       }
     }
   );
-  return requireResponseData(response.data, response.error, response.response).provider as Provider;
+  return requireResponseData(response.data, response.error, response.response)
+    .provider as Provider;
 }
 
 export async function listProviderCredentials(
   id: string,
   signal?: AbortSignal
 ): Promise<ProviderCredential[]> {
-  return collectCursorPages((cursor) => listProviderCredentialPage(id, cursor, signal));
+  return collectCursorPages((cursor) =>
+    listProviderCredentialPage(id, cursor, signal)
+  );
 }
 
 async function listProviderCredentialPage(
@@ -265,31 +368,56 @@ async function listProviderCredentialPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderCredential>> {
-  const response = await apiClient.GET('/api/v1/providers/{provider_id}/credentials', {
-    params: { path: { provider_id: id }, query: { cursor, limit: 100 } },
-    signal
-  });
-  const page = requireResponseData(response.data, response.error, response.response);
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/credentials',
+    {
+      params: { path: { provider_id: id }, query: { cursor, limit: 100 } },
+      signal
+    }
+  );
+  const page = requireResponseData(
+    response.data,
+    response.error,
+    response.response
+  );
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
-export async function rotateProviderCredential(provider: Provider, secret: string): Promise<void> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/credentials', {
-    params: {
-      path: { provider_id: provider.id },
-      header: { 'If-Match': provider.etag, 'Idempotency-Key': crypto.randomUUID() }
-    },
-    body: { credential: secret }
-  });
+export async function rotateProviderCredential(
+  provider: Provider,
+  secret: string
+): Promise<void> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/credentials',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      },
+      body: { credential: secret }
+    }
+  );
   requireResponseData(response.data, response.error, response.response);
 }
 
-export async function revokeProviderCredential(provider: Provider, credentialId: string): Promise<void> {
-  const response = await apiClient.POST('/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke', {
-    params: {
-      path: { provider_id: provider.id, credential_id: credentialId },
-      header: { 'If-Match': provider.etag, 'Idempotency-Key': crypto.randomUUID() }
+export async function revokeProviderCredential(
+  provider: Provider,
+  credentialId: string
+): Promise<void> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke',
+    {
+      params: {
+        path: { provider_id: provider.id, credential_id: credentialId },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      }
     }
-  });
+  );
   requireResponseData(response.data, response.error, response.response);
 }

@@ -22,7 +22,8 @@ use olp_storage::{RequestMetadataEmitter, RequestMetadataEvent};
 
 use crate::{
     GatewayState, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem,
-    gateway, management_api, proxy::public_auth_source, router::REQUEST_BODY_TIMEOUT,
+    gateway, management_api, proxy::public_auth_source, public_auth_routes::PublicAuthRoute,
+    router::REQUEST_BODY_TIMEOUT,
 };
 
 mod limits;
@@ -255,130 +256,18 @@ async fn enforce_request_limits_inner(
 ) -> Result<Response, RequestLimitRejection> {
     let request_started_at = chrono::Utc::now();
     let metadata_policy = endpoint.and_then(gateway::InferenceEndpoint::metadata);
-    if request.uri().to_string().len() > MAX_URI_BYTES {
-        return Err(Problem::new(
-            axum::http::StatusCode::URI_TOO_LONG,
-            "uri_too_long",
-            "Request URI too long",
-            "The request URI exceeds the gateway limit.",
-        )
-        .into());
-    }
-    let header_bytes = request
-        .headers()
-        .iter()
-        .fold(0_usize, |size, (name, value)| {
-            size.saturating_add(name.as_str().len())
-                .saturating_add(value.as_bytes().len())
-                .saturating_add(4)
-        });
-    if request.headers().len() > MAX_HTTP_HEADER_COUNT
-        || header_bytes > MAX_HTTP_HEADER_BYTES
-        || request
-            .headers()
-            .values()
-            .any(|value| value.as_bytes().len() > MAX_HEADER_VALUE_BYTES)
-    {
-        return Err(Problem::new(
-            axum::http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
-            "headers_too_large",
-            "Request headers too large",
-            "Request headers exceed the gateway limit.",
-        )
-        .into());
-    }
-    // Public authentication endpoints must reject a malformed forwarding
-    // chain before their extractors consume a JSON body.  This keeps the
-    // trusted-proxy boundary uniform even for syntactically invalid login or
-    // invitation payloads, which otherwise return before source admission.
-    if public_auth_source_required(&request) {
-        public_auth_source(
-            state,
-            request.headers(),
-            request
-                .extensions()
-                .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                .map(|connect_info| connect_info.0),
-        )?;
-    }
+    validate_target_and_headers(&request)?;
+    enforce_public_auth_source(state, &request)?;
     let mut request = request;
-    if is_first_owner_setup(&request) {
-        let authorization = preauthorize_first_owner_setup(state, request.headers()).await?;
-        request.extensions_mut().insert(authorization);
-    }
-    let count = request
-        .headers()
-        .get_all(axum::http::header::CONTENT_LENGTH)
-        .iter()
-        .count();
-    let transfer_encoding = request
-        .headers()
-        .get_all(axum::http::header::TRANSFER_ENCODING)
-        .iter()
-        .collect::<Vec<_>>();
-    if count > 1
-        || !transfer_encoding.is_empty()
-            && request
-                .headers()
-                .contains_key(axum::http::header::CONTENT_LENGTH)
-        || transfer_encoding.len() > 1
-        || transfer_encoding.first().is_some_and(|value| {
-            !value
-                .to_str()
-                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("chunked"))
-        })
-    {
-        return Err(Problem::bad_request(
-            "ambiguous_body_length",
-            "The request has ambiguous framing headers.",
-        )
-        .into());
-    }
-    if request
-        .headers()
-        .get(axum::http::header::CONTENT_ENCODING)
-        .is_some_and(|value| {
-            !value
-                .to_str()
-                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("identity"))
-        })
-    {
-        return Err(Problem::new(
-            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_encoding_unsupported",
-            "Content encoding unsupported",
-            "Compressed request bodies are not accepted.",
-        )
-        .into());
-    }
-
-    let (maximum, multipart_content_type, is_json) = {
-        let content_type = request
-            .headers()
-            .get(axum::http::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        (
-            endpoint
-                .map(|endpoint| endpoint.body_limit(content_type))
-                .unwrap_or(MAX_JSON_BODY_BYTES),
-            content_type
-                .split(';')
-                .next()
-                .is_some_and(|value| value.trim().eq_ignore_ascii_case("multipart/form-data"))
-                .then(|| content_type.to_owned()),
-            is_json_content_type(content_type),
-        )
-    };
-    if request
-        .headers()
-        .get(axum::http::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .is_some_and(|value| value > maximum as u64)
-    {
-        return Err(payload_too_large(maximum).into());
-    }
+    preauthorize_setup_if_needed(state, &mut request).await?;
+    validate_body_framing_and_encoding(&request)?;
+    let body_admission = BodyAdmission::classify(&request, endpoint);
+    body_admission.enforce_declared_size(&request)?;
+    let BodyAdmission {
+        multipart_content_type,
+        is_json,
+        ..
+    } = body_admission;
 
     let principal = endpoint
         .map(|endpoint| {
@@ -455,24 +344,16 @@ async fn enforce_request_limits_inner(
         } else {
             None
         };
+        let finalization =
+            RequestFinalization::new(reservation, local_metadata, principal, requested_tokens);
         if let Err(problem) = validate_json_depth(&bytes) {
-            release_reservation(reservation).await;
-            if let Some(metadata) = local_metadata {
-                metadata.emit(axum::http::StatusCode::BAD_REQUEST);
-            }
+            finalization
+                .finish_rejection(axum::http::StatusCode::BAD_REQUEST)
+                .await;
             return Err(problem.into());
         }
         let request = Request::from_parts(parts, Body::from(bytes));
-        let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
-        return Ok(run_request_with_reservation(
-            request,
-            next,
-            reservation,
-            local_metadata,
-            principal,
-            reserved_tokens,
-        )
-        .await);
+        return Ok(finalization.dispatch(request, next).await);
     }
 
     let requested_tokens = estimate_http_non_json_request_tokens(
@@ -493,15 +374,16 @@ async fn enforce_request_limits_inner(
     } else {
         None
     };
+    let finalization =
+        RequestFinalization::new(reservation, local_metadata, principal, requested_tokens);
     let multipart_preauthorization = if let Some(content_type) = multipart_content_type {
         if let Err(problem) = validate_multipart_boundary(&content_type) {
-            release_reservation(reservation).await;
-            if let Some(metadata) = local_metadata.clone() {
-                metadata.emit(axum::http::StatusCode::BAD_REQUEST);
-            }
+            finalization
+                .finish_rejection(axum::http::StatusCode::BAD_REQUEST)
+                .await;
             return Err(problem.into());
         }
-        match (multipart_policy, principal.as_ref()) {
+        match (multipart_policy, finalization.principal()) {
             (Some((operation, reservation_bytes)), Some(principal)) => {
                 match preauthorize_multipart(
                     request.headers(),
@@ -511,10 +393,7 @@ async fn enforce_request_limits_inner(
                 ) {
                     Ok(admission) => Some(admission),
                     Err(error) => {
-                        release_reservation(reservation).await;
-                        if let Some(metadata) = local_metadata.clone() {
-                            metadata.emit(error.status());
-                        }
+                        finalization.finish_rejection(error.status()).await;
                         return Err(error.into());
                     }
                 }
@@ -527,18 +406,19 @@ async fn enforce_request_limits_inner(
         None
     };
     let multipart_admission = if let Some((route, reservation_bytes)) = multipart_preauthorization {
-        let Some(principal) = principal.as_ref() else {
-            release_reservation(reservation).await;
+        let Some(principal) = finalization.principal() else {
+            finalization
+                .finish_rejection(axum::http::StatusCode::UNAUTHORIZED)
+                .await;
             return Err(gateway::InferenceError::unauthorized().into());
         };
         let Some(lease) = state
             .multipart_admission
             .try_admit(principal.key().id.as_uuid(), reservation_bytes)
         else {
-            release_reservation(reservation).await;
-            if let Some(metadata) = local_metadata.clone() {
-                metadata.emit(axum::http::StatusCode::SERVICE_UNAVAILABLE);
-            }
+            finalization
+                .finish_rejection(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+                .await;
             return Err(
                 gateway::InferenceError::unavailable("multipart_admission_exhausted").into(),
             );
@@ -553,31 +433,173 @@ async fn enforce_request_limits_inner(
     if let Some(admission) = multipart_admission {
         request.extensions_mut().insert(admission);
     }
-    let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
-    Ok(run_request_with_reservation(
-        request,
-        next,
-        reservation,
-        local_metadata,
-        principal,
-        reserved_tokens,
-    )
-    .await)
+    Ok(finalization.dispatch(request, next).await)
+}
+
+fn validate_target_and_headers(request: &Request<Body>) -> Result<(), RequestLimitRejection> {
+    if request.uri().to_string().len() > MAX_URI_BYTES {
+        return Err(Problem::new(
+            axum::http::StatusCode::URI_TOO_LONG,
+            "uri_too_long",
+            "Request URI too long",
+            "The request URI exceeds the gateway limit.",
+        )
+        .into());
+    }
+    let header_bytes = request
+        .headers()
+        .iter()
+        .fold(0_usize, |size, (name, value)| {
+            size.saturating_add(name.as_str().len())
+                .saturating_add(value.as_bytes().len())
+                .saturating_add(4)
+        });
+    if request.headers().len() > MAX_HTTP_HEADER_COUNT
+        || header_bytes > MAX_HTTP_HEADER_BYTES
+        || request
+            .headers()
+            .values()
+            .any(|value| value.as_bytes().len() > MAX_HEADER_VALUE_BYTES)
+    {
+        return Err(Problem::new(
+            axum::http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            "headers_too_large",
+            "Request headers too large",
+            "Request headers exceed the gateway limit.",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn enforce_public_auth_source(
+    state: &GatewayState,
+    request: &Request<Body>,
+) -> Result<(), RequestLimitRejection> {
+    // This stage deliberately precedes setup authorization and every body
+    // extractor so malformed trusted forwarding retains error precedence.
+    if public_auth_source_required(request) {
+        public_auth_source(
+            state,
+            request.headers(),
+            request
+                .extensions()
+                .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                .map(|connect_info| connect_info.0),
+        )?;
+    }
+    Ok(())
+}
+
+async fn preauthorize_setup_if_needed(
+    state: &GatewayState,
+    request: &mut Request<Body>,
+) -> Result<(), RequestLimitRejection> {
+    if is_first_owner_setup(request) {
+        let authorization = preauthorize_first_owner_setup(state, request.headers()).await?;
+        request.extensions_mut().insert(authorization);
+    }
+    Ok(())
+}
+
+fn validate_body_framing_and_encoding(
+    request: &Request<Body>,
+) -> Result<(), RequestLimitRejection> {
+    let content_length_count = request
+        .headers()
+        .get_all(axum::http::header::CONTENT_LENGTH)
+        .iter()
+        .count();
+    let transfer_encoding = request
+        .headers()
+        .get_all(axum::http::header::TRANSFER_ENCODING)
+        .iter()
+        .collect::<Vec<_>>();
+    if content_length_count > 1
+        || !transfer_encoding.is_empty()
+            && request
+                .headers()
+                .contains_key(axum::http::header::CONTENT_LENGTH)
+        || transfer_encoding.len() > 1
+        || transfer_encoding.first().is_some_and(|value| {
+            !value
+                .to_str()
+                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("chunked"))
+        })
+    {
+        return Err(Problem::bad_request(
+            "ambiguous_body_length",
+            "The request has ambiguous framing headers.",
+        )
+        .into());
+    }
+    if request
+        .headers()
+        .get(axum::http::header::CONTENT_ENCODING)
+        .is_some_and(|value| {
+            !value
+                .to_str()
+                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("identity"))
+        })
+    {
+        return Err(Problem::new(
+            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "content_encoding_unsupported",
+            "Content encoding unsupported",
+            "Compressed request bodies are not accepted.",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+struct BodyAdmission {
+    maximum: usize,
+    multipart_content_type: Option<String>,
+    is_json: bool,
+}
+
+impl BodyAdmission {
+    fn classify(request: &Request<Body>, endpoint: Option<gateway::InferenceEndpoint>) -> Self {
+        let content_type = request
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        Self {
+            maximum: endpoint
+                .map(|endpoint| endpoint.body_limit(content_type))
+                .unwrap_or(MAX_JSON_BODY_BYTES),
+            multipart_content_type: content_type
+                .split(';')
+                .next()
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("multipart/form-data"))
+                .then(|| content_type.to_owned()),
+            is_json: is_json_content_type(content_type),
+        }
+    }
+
+    fn enforce_declared_size(&self, request: &Request<Body>) -> Result<(), RequestLimitRejection> {
+        if request
+            .headers()
+            .get(axum::http::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some_and(|value| value > self.maximum as u64)
+        {
+            return Err(payload_too_large(self.maximum).into());
+        }
+        Ok(())
+    }
 }
 
 fn public_auth_source_required(request: &Request<Body>) -> bool {
-    matches!(
-        (request.method(), request.uri().path()),
-        (&axum::http::Method::POST, "/api/v1/setup")
-            | (&axum::http::Method::POST, "/api/v1/sessions")
-            | (&axum::http::Method::POST, "/api/v1/invitations/accept")
-            | (&axum::http::Method::GET, "/api/v1/oidc/login")
-            | (&axum::http::Method::POST, "/api/v1/oidc/login")
-    )
+    PublicAuthRoute::classify(request.method(), request.uri().path()).is_some()
 }
 
 fn is_first_owner_setup(request: &Request<Body>) -> bool {
-    request.method() == axum::http::Method::POST && request.uri().path() == "/api/v1/setup"
+    PublicAuthRoute::classify(request.method(), request.uri().path())
+        == Some(PublicAuthRoute::FirstOwnerSetup)
 }
 
 async fn preauthorize_first_owner_setup(
@@ -615,69 +637,101 @@ async fn preauthorize_first_owner_setup(
     Ok(FirstOwnerSetupAuthorized)
 }
 
-async fn run_request_with_reservation(
-    request: Request<Body>,
-    next: middleware::Next,
+/// Owns all post-reservation cleanup. Explicit rejection paths await release;
+/// successful dispatch transfers release ownership to the response body. If
+/// either future is cancelled, `InferenceReservation` retains its Drop
+/// fallback and starts the same idempotent release operation.
+pub(crate) struct RequestFinalization {
     reservation: Option<InferenceReservation>,
     local_metadata: Option<LocalRequestMetadata>,
     principal: Option<InferencePrincipal>,
     reserved_tokens: Option<i64>,
-) -> Response {
-    let metadata_claimed = principal.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
-    let run = async move {
-        // Only suppress the canonical fallback when this exact HTTP request
-        // actually acquired a hard-limit reservation. Unlimited keys retain
-        // the same pinned generation and therefore remain unlimited throughout
-        // this request even if a newer release activates concurrently.
-        if let Some(reserved_tokens) = reserved_tokens {
-            HTTP_INFERENCE_LIMITS_RESERVED
-                .scope(reserved_tokens, next.run(request))
-                .await
-        } else {
-            next.run(request).await
-        }
-    };
-    let run: Pin<Box<dyn Future<Output = Response> + Send>> =
-        if let Some(reservation_hold) = reservation.clone() {
-            Box::pin(HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation_hold, run))
-        } else {
-            Box::pin(run)
-        };
-    let response = match (principal, metadata_claimed.as_ref()) {
-        (Some(principal), Some(claimed)) => {
-            HTTP_INFERENCE_METADATA_CLAIMED
-                .scope(
-                    Arc::clone(claimed),
-                    HTTP_INFERENCE_PRINCIPAL.scope(principal, run),
-                )
-                .await
-        }
-        _ => run.await,
-    };
-    if let Some(metadata) = local_metadata {
-        let claimed = metadata_claimed
-            .as_ref()
-            .is_some_and(|claimed| claimed.load(Ordering::Acquire));
-        if metadata.always_emit || !claimed {
-            metadata.emit(response.status());
-        }
-    }
-    if let Some(reservation) = reservation {
-        let (parts, body) = response.into_parts();
-        Response::from_parts(
-            parts,
-            Body::new(ReleaseReservationBody {
-                inner: body,
-                reservation,
-            }),
-        )
-    } else {
-        response
-    }
 }
 
-async fn release_reservation(reservation: Option<InferenceReservation>) {
-    if let Some(reservation) = reservation {
-        reservation.release().await;
+impl RequestFinalization {
+    pub(crate) fn new(
+        reservation: Option<InferenceReservation>,
+        local_metadata: Option<LocalRequestMetadata>,
+        principal: Option<InferencePrincipal>,
+        requested_tokens: i64,
+    ) -> Self {
+        let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
+        Self {
+            reservation,
+            local_metadata,
+            principal,
+            reserved_tokens,
+        }
+    }
+
+    fn principal(&self) -> Option<&InferencePrincipal> {
+        self.principal.as_ref()
+    }
+
+    pub(crate) async fn finish_rejection(mut self, status: axum::http::StatusCode) {
+        if let Some(metadata) = self.local_metadata.take() {
+            metadata.emit(status);
+        }
+        if let Some(reservation) = self.reservation.take() {
+            reservation.release().await;
+        }
+    }
+
+    async fn dispatch(mut self, request: Request<Body>, next: middleware::Next) -> Response {
+        let metadata_claimed = self
+            .principal
+            .as_ref()
+            .map(|_| Arc::new(AtomicBool::new(false)));
+        let reserved_tokens = self.reserved_tokens;
+        let run = async move {
+            // Only suppress the canonical fallback when this exact HTTP request
+            // actually acquired a hard-limit reservation. Unlimited keys retain
+            // the same pinned generation and therefore remain unlimited throughout
+            // this request even if a newer release activates concurrently.
+            if let Some(reserved_tokens) = reserved_tokens {
+                HTTP_INFERENCE_LIMITS_RESERVED
+                    .scope(reserved_tokens, next.run(request))
+                    .await
+            } else {
+                next.run(request).await
+            }
+        };
+        let run: Pin<Box<dyn Future<Output = Response> + Send>> =
+            if let Some(reservation_hold) = self.reservation.clone() {
+                Box::pin(HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation_hold, run))
+            } else {
+                Box::pin(run)
+            };
+        let response = match (self.principal.take(), metadata_claimed.as_ref()) {
+            (Some(principal), Some(claimed)) => {
+                HTTP_INFERENCE_METADATA_CLAIMED
+                    .scope(
+                        Arc::clone(claimed),
+                        HTTP_INFERENCE_PRINCIPAL.scope(principal, run),
+                    )
+                    .await
+            }
+            _ => run.await,
+        };
+        if let Some(metadata) = self.local_metadata.take() {
+            let claimed = metadata_claimed
+                .as_ref()
+                .is_some_and(|claimed| claimed.load(Ordering::Acquire));
+            if metadata.always_emit || !claimed {
+                metadata.emit(response.status());
+            }
+        }
+        if let Some(reservation) = self.reservation.take() {
+            let (parts, body) = response.into_parts();
+            Response::from_parts(
+                parts,
+                Body::new(ReleaseReservationBody {
+                    inner: body,
+                    reservation,
+                }),
+            )
+        } else {
+            response
+        }
     }
 }

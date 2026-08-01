@@ -20,6 +20,24 @@ pub(super) fn outcome_status_code(failure: Option<&InferenceError>) -> Option<u1
     })
 }
 
+pub(super) struct RequestMetadataInput<'a> {
+    pub(super) generation_id: uuid::Uuid,
+    pub(super) api_key_id: uuid::Uuid,
+    pub(super) request_id: uuid::Uuid,
+    pub(super) route_slug: &'a RouteSlug,
+    pub(super) attempts: &'a [RequestAttemptMetadata],
+    pub(super) request_started_at: chrono::DateTime<Utc>,
+    pub(super) request_started: tokio::time::Instant,
+    pub(super) final_attempt_started: Option<tokio::time::Instant>,
+    pub(super) first_byte_ms: Option<u64>,
+    pub(super) status_code: Option<u16>,
+    pub(super) error_class: Option<String>,
+    pub(super) committed: bool,
+    pub(super) usage: &'a UsageCapture,
+    pub(super) surface: Surface,
+    pub(super) operation: OperationKind,
+}
+
 pub(crate) fn emit_event_execution_metadata(
     state: &GatewayState,
     execution: &RoutedEventExecution,
@@ -28,21 +46,23 @@ pub(crate) fn emit_event_execution_metadata(
 ) {
     emit_request_metadata_event(
         state,
-        execution.generation_id,
-        execution.api_key_id,
-        execution.request_id,
-        &execution.route_slug,
-        &execution.attempts,
-        execution.request_started_at,
-        execution.request_started,
-        Some(execution.attempt_started),
-        Some(execution.first_byte_ms),
-        outcome_status_code(failure),
-        failure.map(|error| error.code.to_owned()),
-        true,
-        usage,
-        execution.surface,
-        execution.operation_kind,
+        RequestMetadataInput {
+            generation_id: execution.generation_id,
+            api_key_id: execution.api_key_id,
+            request_id: execution.request_id,
+            route_slug: &execution.route_slug,
+            attempts: &execution.attempts,
+            request_started_at: execution.request_started_at,
+            request_started: execution.request_started,
+            final_attempt_started: Some(execution.attempt_started),
+            first_byte_ms: Some(execution.first_byte_ms),
+            status_code: outcome_status_code(failure),
+            error_class: failure.map(|error| error.code.to_owned()),
+            committed: true,
+            usage,
+            surface: execution.surface,
+            operation: execution.operation_kind,
+        },
     );
 }
 
@@ -66,21 +86,23 @@ impl UnaryRequestMetadataFinalizer {
     pub(super) fn finalize(self, failure: Option<&InferenceError>) {
         emit_request_metadata_event(
             &self.state,
-            self.generation_id,
-            self.api_key_id,
-            self.request_id,
-            &self.route_slug,
-            &self.attempts,
-            self.request_started_at,
-            self.request_started,
-            Some(self.attempt_started),
-            Some(self.first_byte_ms),
-            outcome_status_code(failure),
-            failure.map(|error| error.code.to_owned()),
-            true,
-            &self.usage,
-            self.surface,
-            self.operation,
+            RequestMetadataInput {
+                generation_id: self.generation_id,
+                api_key_id: self.api_key_id,
+                request_id: self.request_id,
+                route_slug: &self.route_slug,
+                attempts: &self.attempts,
+                request_started_at: self.request_started_at,
+                request_started: self.request_started,
+                final_attempt_started: Some(self.attempt_started),
+                first_byte_ms: Some(self.first_byte_ms),
+                status_code: outcome_status_code(failure),
+                error_class: failure.map(|error| error.code.to_owned()),
+                committed: true,
+                usage: &self.usage,
+                surface: self.surface,
+                operation: self.operation,
+            },
         );
     }
 }
@@ -105,6 +127,17 @@ pub(crate) struct RequestAccountingGuard {
     http_reserved_tokens: Option<i64>,
     active_attempt: Option<ActiveRequestAttempt>,
     armed: bool,
+}
+
+pub(super) struct RequestAccountingInput {
+    pub(super) generation_id: uuid::Uuid,
+    pub(super) api_key_id: uuid::Uuid,
+    pub(super) request_id: uuid::Uuid,
+    pub(super) route_slug: RouteSlug,
+    pub(super) request_started_at: chrono::DateTime<Utc>,
+    pub(super) request_started: tokio::time::Instant,
+    pub(super) surface: Surface,
+    pub(super) operation: OperationKind,
 }
 
 struct ActiveRequestAttempt {
@@ -149,20 +182,22 @@ fn split_actual_tokens(
 }
 
 impl RequestAccountingGuard {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         state: &GatewayState,
-        generation_id: uuid::Uuid,
-        api_key_id: uuid::Uuid,
-        request_id: uuid::Uuid,
-        route_slug: RouteSlug,
-        request_started_at: chrono::DateTime<Utc>,
-        request_started: tokio::time::Instant,
-        surface: Surface,
-        operation: OperationKind,
+        input: RequestAccountingInput,
         lease: Option<LimitLease>,
     ) -> Self {
         crate::claim_http_inference_metadata();
+        let RequestAccountingInput {
+            generation_id,
+            api_key_id,
+            request_id,
+            route_slug,
+            request_started_at,
+            request_started,
+            surface,
+            operation,
+        } = input;
         Self {
             state: state.clone(),
             generation_id,
@@ -282,21 +317,23 @@ impl RequestAccountingGuard {
         }
         emit_request_metadata_event(
             &self.state,
-            self.generation_id,
-            self.api_key_id,
-            self.request_id,
-            &self.route_slug,
-            &attempts,
-            self.request_started_at,
-            self.request_started,
-            finalize_attempt.then_some(self.attempt_started).flatten(),
-            self.first_byte_ms,
-            outcome_status_code(failure),
-            failure.map(|error| error.code.to_owned()),
-            self.committed,
-            &self.usage,
-            self.surface,
-            self.operation,
+            RequestMetadataInput {
+                generation_id: self.generation_id,
+                api_key_id: self.api_key_id,
+                request_id: self.request_id,
+                route_slug: &self.route_slug,
+                attempts: &attempts,
+                request_started_at: self.request_started_at,
+                request_started: self.request_started,
+                final_attempt_started: finalize_attempt.then_some(self.attempt_started).flatten(),
+                first_byte_ms: self.first_byte_ms,
+                status_code: outcome_status_code(failure),
+                error_class: failure.map(|error| error.code.to_owned()),
+                committed: self.committed,
+                usage: &self.usage,
+                surface: self.surface,
+                operation: self.operation,
+            },
         );
     }
 }
@@ -447,25 +484,24 @@ impl UsageCapture {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_request_metadata_event(
-    state: &GatewayState,
-    generation_id: uuid::Uuid,
-    api_key_id: uuid::Uuid,
-    request_id: uuid::Uuid,
-    route_slug: &RouteSlug,
-    attempts: &[RequestAttemptMetadata],
-    request_started_at: chrono::DateTime<Utc>,
-    request_started: tokio::time::Instant,
-    final_attempt_started: Option<tokio::time::Instant>,
-    first_byte_ms: Option<u64>,
-    status_code: Option<u16>,
-    error_class: Option<String>,
-    committed: bool,
-    usage: &UsageCapture,
-    surface: Surface,
-    operation: OperationKind,
-) {
+pub(super) fn emit_request_metadata_event(state: &GatewayState, input: RequestMetadataInput<'_>) {
+    let RequestMetadataInput {
+        generation_id,
+        api_key_id,
+        request_id,
+        route_slug,
+        attempts,
+        request_started_at,
+        request_started,
+        final_attempt_started,
+        first_byte_ms,
+        status_code,
+        error_class,
+        committed,
+        usage,
+        surface,
+        operation,
+    } = input;
     crate::claim_http_inference_metadata();
     if let Some(emitter) = &state.request_metadata {
         let request_completed_at = Utc::now();

@@ -92,6 +92,37 @@ async fn response_completion_and_drop_release_the_http_concurrency_reservation()
 }
 
 #[tokio::test]
+async fn rejection_finalization_awaits_one_release_and_emits_metadata_once() {
+    let release_count = Arc::new(AtomicUsize::new(0));
+    let released = Arc::clone(&release_count);
+    let reservation = InferenceReservation::for_test(async move {
+        tokio::task::yield_now().await;
+        released.fetch_add(1, Ordering::AcqRel);
+    });
+    let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(2);
+    let metadata = LocalRequestMetadata {
+        request_metadata: Some(request_metadata),
+        request_started_at: chrono::Utc::now(),
+        runtime_generation_id: uuid::Uuid::now_v7(),
+        api_key_id: uuid::Uuid::now_v7(),
+        route_slug: "invalid-request".to_owned(),
+        operation: OperationKind::Generation,
+        surface: Surface::OpenAi,
+        always_emit: true,
+    };
+
+    RequestFinalization::new(Some(reservation), Some(metadata), None, 128)
+        .finish_rejection(axum::http::StatusCode::BAD_REQUEST)
+        .await;
+
+    assert_eq!(release_count.load(Ordering::Acquire), 1);
+    let event = receiver.recv_next().await.unwrap();
+    assert_eq!(event.status_code, Some(400));
+    assert_eq!(event.error_class.as_deref(), Some("client_error"));
+    assert!(receiver.recv_next().await.is_none());
+}
+
+#[tokio::test]
 async fn concurrent_final_reservation_drops_release_once() {
     let released = Arc::new(AtomicBool::new(false));
     let release_signal = Arc::clone(&released);

@@ -20,7 +20,7 @@ pub use identities::{OidcIdentityListResponse, OidcIdentityResponse};
 use identities::{list_identities, unlink_identity};
 use utoipa::OpenApi;
 
-use crate::{ManagementState, Problem};
+use crate::{ManagementState, Problem, public_auth_routes::PublicAuthRoute};
 
 pub(crate) use error::map_oidc;
 
@@ -31,7 +31,7 @@ pub(crate) fn router() -> Router<ManagementState> {
             get(get_configuration).put(put_configuration),
         )
         .route(
-            "/api/v1/oidc/login",
+            PublicAuthRoute::OidcLoginGet.path(),
             get(begin_login).post(begin_login_post),
         )
         .route("/api/v1/oidc/link", post(begin_link))

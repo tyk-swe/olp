@@ -24,11 +24,13 @@
     "test:integration": "pnpm build && playwright test --config playwright.integration.config.ts",
     "test:integration:prebuilt": "svelte-kit sync && playwright test --config playwright.integration.config.ts",
     "screenshots": "svelte-kit sync && playwright test --config playwright.screenshots.config.ts",
+    "format": "prettier --write prettier.config.js src/lib/auth/lifecycle.ts src/lib/api/management/providers.ts src/lib/features/gateway/ProviderDetail.svelte src/lib/features/gateway/Provider*Section.svelte",
+    "format:check": "prettier --check prettier.config.js src/lib/auth/lifecycle.ts src/lib/api/management/providers.ts src/lib/features/gateway/ProviderDetail.svelte src/lib/features/gateway/Provider*Section.svelte",
     "storybook": "storybook dev -p 6006",
     "test:storybook": "storybook build && playwright test --config playwright.storybook.config.ts",
     "api:generate": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts",
     "api:check": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts --check",
-    "verify": "pnpm api:check && pnpm test && pnpm check && pnpm build"
+    "verify": "pnpm api:check && pnpm format:check && pnpm test && pnpm check && pnpm build"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -51,6 +53,8 @@
     "globals": "^17.8.0",
     "jsdom": "^29.1.1",
     "openapi-typescript": "^7.13.0",
+    "prettier": "3.8.1",
+    "prettier-plugin-svelte": "3.5.1",
     "storybook": "^10.5.5",
     "svelte": "^5.56.8",
     "svelte-check": "^4.7.4",

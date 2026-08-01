@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -38,10 +38,11 @@ use super::*;
 use super::{
     gateway::{InferenceEndpoint, TokenEstimate},
     observability::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label},
+    public_auth_routes::PublicAuthRoute,
     request_admission::{
         HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,
         HTTP_INFERENCE_RESERVATION_HOLD, InferenceReservation, JsonBodyReadError,
-        LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody,
+        LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody, RequestFinalization,
         enforce_request_limits, estimate_http_json_request_tokens, http_inference_principal,
         read_json_body, validate_json_depth, validate_multipart_boundary,
     },

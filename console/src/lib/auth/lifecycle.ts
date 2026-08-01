@@ -1,5 +1,6 @@
 import { hashKey, type QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from '$lib/api/session';
+import type { paths } from '$lib/api/schema';
 import type { FixedRole } from './authorization';
 
 export type AuthenticatedUser = {
@@ -21,13 +22,32 @@ export type AuthenticationPhase =
   | 'transitioning'
   | 'unavailable';
 
-export type AuthenticationSnapshot = {
-  phase: AuthenticationPhase;
-  user: AuthenticatedUser | null;
+type PrincipalAbsentSnapshot = {
+  phase: Exclude<AuthenticationPhase, 'authenticated'>;
+  user: null;
   error: string;
   principalExitError: string;
-  lastValidatedAt: number | null;
+  lastValidatedAt: null;
 };
+
+type AuthenticatedSnapshot = {
+  phase: 'authenticated';
+  user: AuthenticatedUser;
+  error: string;
+  principalExitError: string;
+  lastValidatedAt: number;
+};
+
+export type AuthenticationSnapshot =
+  | PrincipalAbsentSnapshot
+  | AuthenticatedSnapshot;
+
+type AuthenticationAction =
+  | { type: 'gate'; phase: PrincipalAbsentSnapshot['phase']; error?: string }
+  | { type: 'anonymous' }
+  | { type: 'authenticated'; session: AuthenticatedSession }
+  | { type: 'validation-error'; error: string }
+  | { type: 'principal-exit-error'; error: string };
 
 type Boundary = {
   loadSession(signal: AbortSignal): Promise<AuthenticatedSession>;
@@ -39,13 +59,85 @@ type Boundary = {
 type ValidateOptions = { passive?: boolean };
 
 type PrincipalExitRequest = (signal: AbortSignal) => Promise<void>;
-type AuthenticationRequest = (signal: AbortSignal) => Promise<AuthenticatedSession>;
+type AuthenticationRequest = (
+  signal: AbortSignal
+) => Promise<AuthenticatedSession>;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SESSION_FRESHNESS_MS = 60_000;
 
+type AuthenticationPath = Extract<
+  keyof paths,
+  | '/api/v1/setup/status'
+  | '/api/v1/setup'
+  | '/api/v1/sessions'
+  | '/api/v1/invitations/accept'
+  | '/api/v1/auth/capabilities'
+  | '/api/v1/oidc/login'
+  | '/api/v1/oidc/callback'
+>;
+
+type AuthenticationRoute = Readonly<{
+  method: 'GET' | 'POST';
+  path: AuthenticationPath;
+}>;
+
+const AUTHENTICATION_ROUTES = [
+  { method: 'GET', path: '/api/v1/setup/status' },
+  { method: 'POST', path: '/api/v1/setup' },
+  { method: 'POST', path: '/api/v1/sessions' },
+  { method: 'POST', path: '/api/v1/invitations/accept' },
+  { method: 'GET', path: '/api/v1/auth/capabilities' },
+  { method: 'GET', path: '/api/v1/oidc/login' },
+  { method: 'POST', path: '/api/v1/oidc/login' },
+  { method: 'GET', path: '/api/v1/oidc/callback' }
+] as const satisfies readonly AuthenticationRoute[];
+
+const ANONYMOUS_SNAPSHOT: PrincipalAbsentSnapshot = {
+  phase: 'anonymous',
+  user: null,
+  error: '',
+  principalExitError: '',
+  lastValidatedAt: null
+};
+
+function reduceAuthentication(
+  snapshot: AuthenticationSnapshot,
+  action: AuthenticationAction
+): AuthenticationSnapshot {
+  switch (action.type) {
+    case 'gate':
+      return {
+        phase: action.phase,
+        user: null,
+        error: action.error ?? '',
+        principalExitError: '',
+        lastValidatedAt: null
+      };
+    case 'anonymous':
+      return { ...ANONYMOUS_SNAPSHOT };
+    case 'authenticated':
+      return {
+        phase: 'authenticated',
+        user: action.session.user,
+        error: '',
+        principalExitError: snapshot.principalExitError,
+        lastValidatedAt: Date.now()
+      };
+    case 'validation-error':
+      return snapshot.phase === 'authenticated'
+        ? { ...snapshot, error: action.error }
+        : snapshot;
+    case 'principal-exit-error':
+      return { ...snapshot, principalExitError: action.error };
+  }
+}
+
 function unauthorizedError(error: unknown): boolean {
-  return (error as { problem?: { status?: unknown } } | null)?.problem?.status === 401;
+  return (
+    (error as { problem?: { status?: unknown } } | null)?.problem?.status ===
+    401
+  );
 }
 
 function abortError(error: unknown): boolean {
@@ -57,16 +149,10 @@ function endpoint(request: Request): { method: string; pathname: string } {
   return { method: request.method.toUpperCase(), pathname: url.pathname };
 }
 
-function isAuthenticationEndpoint(request: Request): boolean {
+export function isAuthenticationEndpoint(request: Request): boolean {
   const { method, pathname } = endpoint(request);
-  return (
-    (method === 'GET' && pathname === '/api/v1/setup/status') ||
-    (method === 'POST' && pathname === '/api/v1/setup') ||
-    (method === 'POST' && pathname === '/api/v1/sessions') ||
-    (method === 'POST' && pathname === '/api/v1/invitations/accept') ||
-    (method === 'GET' && pathname === '/api/v1/auth/capabilities') ||
-    ((method === 'GET' || method === 'POST') && pathname === '/api/v1/oidc/login') ||
-    (method === 'GET' && pathname === '/api/v1/oidc/callback')
+  return AUTHENTICATION_ROUTES.some(
+    (route) => route.method === method && route.path === pathname
   );
 }
 
@@ -88,7 +174,9 @@ function combineSignals(...signals: AbortSignal[]): AbortSignal {
       controller.abort(signal.reason);
       break;
     }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    signal.addEventListener('abort', () => controller.abort(signal.reason), {
+      once: true
+    });
   }
   return controller.signal;
 }
@@ -98,13 +186,7 @@ export class AuthenticationLifecycle {
   private boundary: Boundary | null = null;
   private boundaryGeneration = 0;
   private listeners = new Set<(snapshot: AuthenticationSnapshot) => void>();
-  private snapshotValue: AuthenticationSnapshot = {
-    phase: 'anonymous',
-    user: null,
-    error: '',
-    principalExitError: '',
-    lastValidatedAt: null
-  };
+  private snapshotValue: AuthenticationSnapshot = { ...ANONYMOUS_SNAPSHOT };
   private partitionGeneration = 0;
   private partition = 'anonymous:0';
   private sessionController: AbortController | null = null;
@@ -149,20 +231,16 @@ export class AuthenticationLifecycle {
   }
 
   markProtectedBoundaryChecking(): void {
-    this.setSnapshot({
-      phase: 'checking',
-      user: null,
-      error: '',
-      principalExitError: '',
-      lastValidatedAt: null
-    });
+    this.apply({ type: 'gate', phase: 'checking' });
   }
 
   queryKeyHash(key: readonly unknown[]): string {
     return `${this.partition}|${hashKey(key)}`;
   }
 
-  async authenticate(request: AuthenticationRequest): Promise<AuthenticatedSession> {
+  async authenticate(
+    request: AuthenticationRequest
+  ): Promise<AuthenticatedSession> {
     const generation = ++this.authenticationGeneration;
     this.authenticationController?.abort();
     this.abortSessionValidation();
@@ -173,13 +251,19 @@ export class AuthenticationLifecycle {
     this.gateProtectedContent('transitioning');
     this.rotateAuthenticatedRequests();
     await this.cancelAndClearQueries();
-    if (generation !== this.authenticationGeneration || controller.signal.aborted) {
+    if (
+      generation !== this.authenticationGeneration ||
+      controller.signal.aborted
+    ) {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     clearCsrfToken();
     this.rotatePartition();
     const session = await request(controller.signal);
-    if (generation !== this.authenticationGeneration || controller.signal.aborted) {
+    if (
+      generation !== this.authenticationGeneration ||
+      controller.signal.aborted
+    ) {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     this.establishSession(session);
@@ -192,16 +276,12 @@ export class AuthenticationLifecycle {
     if (session.csrf_token) setCsrfToken(session.csrf_token);
     else clearCsrfToken();
     this.unauthorizedHandled = false;
-    this.setSnapshot({
-      phase: 'authenticated',
-      user: session.user,
-      error: '',
-      principalExitError: this.snapshotValue.principalExitError,
-      lastValidatedAt: Date.now()
-    });
+    this.apply({ type: 'authenticated', session });
   }
 
-  async validateSession(options: ValidateOptions = {}): Promise<AuthenticatedSession | null> {
+  async validateSession(
+    options: ValidateOptions = {}
+  ): Promise<AuthenticatedSession | null> {
     const boundary = this.boundary;
     if (!boundary) return null;
     if (options.passive && this.activeValidation) return this.activeValidation;
@@ -215,42 +295,56 @@ export class AuthenticationLifecycle {
     const generation = this.validationGeneration;
     this.unauthorizedHandled = false;
     const authenticatedSnapshot =
-      this.snapshotValue.phase === 'authenticated' && this.snapshotValue.user
-        ? this.snapshotValue
-        : null;
+      this.snapshotValue.phase === 'authenticated' ? this.snapshotValue : null;
     if (authenticatedSnapshot) {
       this.setSnapshot({ ...authenticatedSnapshot, error: '' });
     } else {
-      this.setSnapshot({ ...this.snapshotValue, phase: 'checking', error: '' });
+      this.apply({ type: 'gate', phase: 'checking' });
     }
 
     const validation = (async (): Promise<AuthenticatedSession | null> => {
       try {
         const session = await boundary.loadSession(controller.signal);
-        if (controller.signal.aborted || generation !== this.validationGeneration) return null;
+        if (
+          controller.signal.aborted ||
+          generation !== this.validationGeneration
+        )
+          return null;
         const nextPartition = this.principalPartition(session.user);
         if (nextPartition !== this.partition) {
           this.gateProtectedContent('checking');
           this.rotateAuthenticatedRequests();
           await this.cancelAndClearQueries();
-          if (controller.signal.aborted || generation !== this.validationGeneration) return null;
+          if (
+            controller.signal.aborted ||
+            generation !== this.validationGeneration
+          )
+            return null;
           clearCsrfToken();
           this.partition = nextPartition;
         }
         this.establishSession(session);
         return session;
       } catch (error) {
-        if (controller.signal.aborted || generation !== this.validationGeneration || abortError(error)) {
+        if (
+          controller.signal.aborted ||
+          generation !== this.validationGeneration ||
+          abortError(error)
+        ) {
           return null;
         }
         if (unauthorizedError(error)) {
           await this.transitionToAnonymous();
           return null;
         }
-        if (this.unauthorizedHandled && this.snapshotValue.phase !== 'authenticated') return null;
+        if (
+          this.unauthorizedHandled &&
+          this.snapshotValue.phase !== 'authenticated'
+        )
+          return null;
         if (authenticatedSnapshot) {
-          this.setSnapshot({
-            ...authenticatedSnapshot,
+          this.apply({
+            type: 'validation-error',
             error:
               error instanceof Error
                 ? error.message
@@ -258,17 +352,27 @@ export class AuthenticationLifecycle {
           });
           return null;
         }
-        this.gateProtectedContent('unavailable', error instanceof Error ? error.message : 'The current session could not be loaded.');
+        this.gateProtectedContent(
+          'unavailable',
+          error instanceof Error
+            ? error.message
+            : 'The current session could not be loaded.'
+        );
         this.rotateAuthenticatedRequests();
         await this.cancelAndClearQueries();
-        if (controller.signal.aborted || generation !== this.validationGeneration) return null;
+        if (
+          controller.signal.aborted ||
+          generation !== this.validationGeneration
+        )
+          return null;
         clearCsrfToken();
         this.rotatePartition();
         return null;
       } finally {
         if (generation === this.validationGeneration) {
           this.activeValidation = null;
-          if (this.sessionController === controller) this.sessionController = null;
+          if (this.sessionController === controller)
+            this.sessionController = null;
         }
       }
     })();
@@ -277,14 +381,24 @@ export class AuthenticationLifecycle {
   }
 
   async ensureFreshSession(): Promise<void> {
-    if (!this.snapshotValue.user || this.snapshotValue.phase !== 'authenticated') {
-      throw new DOMException('No authenticated principal is active.', 'AbortError');
+    if (
+      !this.snapshotValue.user ||
+      this.snapshotValue.phase !== 'authenticated'
+    ) {
+      throw new DOMException(
+        'No authenticated principal is active.',
+        'AbortError'
+      );
     }
     const startingPartition = this.partition;
     const age = Date.now() - (this.snapshotValue.lastValidatedAt ?? 0);
     if (getCsrfToken() && age <= SESSION_FRESHNESS_MS) return;
     const session = await (this.activeValidation ?? this.validateSession());
-    if (!session) throw new DOMException('Session validation did not complete.', 'AbortError');
+    if (!session)
+      throw new DOMException(
+        'Session validation did not complete.',
+        'AbortError'
+      );
     if (startingPartition !== this.partition) {
       throw new DOMException(
         'The authenticated principal changed while the request was being prepared.',
@@ -300,13 +414,20 @@ export class AuthenticationLifecycle {
   }
 
   async prepareRequest(request: Request): Promise<Request> {
-    if (isAuthenticationEndpoint(request) || isSessionValidationEndpoint(request)) {
+    if (
+      isAuthenticationEndpoint(request) ||
+      isSessionValidationEndpoint(request)
+    ) {
       return request;
     }
     const mutation = !SAFE_METHODS.has(request.method.toUpperCase());
-    if (mutation && !isCurrentSessionDeletion(request)) await this.ensureFreshSession();
+    if (mutation && !isCurrentSessionDeletion(request))
+      await this.ensureFreshSession();
     const generation = this.authenticatedRequestGeneration;
-    const signal = combineSignals(request.signal, this.authenticatedRequestController.signal);
+    const signal = combineSignals(
+      request.signal,
+      this.authenticatedRequestController.signal
+    );
     const headers = new Headers(request.headers);
     if (mutation) {
       const csrf = getCsrfToken();
@@ -356,7 +477,10 @@ export class AuthenticationLifecycle {
     await this.transitionToAnonymous();
   }
 
-  async signOut(request: PrincipalExitRequest, destination = '/login'): Promise<void> {
+  async signOut(
+    request: PrincipalExitRequest,
+    destination = '/login'
+  ): Promise<void> {
     if (!(await this.runPrincipalExit(request))) return;
     const boundary = this.boundary;
     if (boundary) await boundary.navigate(destination);
@@ -375,7 +499,9 @@ export class AuthenticationLifecycle {
     this.rotateAuthenticatedRequests();
   }
 
-  private async runPrincipalExit(request: PrincipalExitRequest): Promise<boolean> {
+  private async runPrincipalExit(
+    request: PrincipalExitRequest
+  ): Promise<boolean> {
     this.principalExitController?.abort();
     this.abortSessionValidation();
     const controller = new AbortController();
@@ -388,26 +514,27 @@ export class AuthenticationLifecycle {
       await request(controller.signal);
       if (controller.signal.aborted) return false;
       clearCsrfToken();
-      this.setSnapshot({
-        phase: 'anonymous',
-        user: null,
-        error: '',
-        principalExitError: '',
-        lastValidatedAt: null
-      });
+      this.apply({ type: 'anonymous' });
       return true;
     } catch (error) {
       if (controller.signal.aborted || abortError(error)) return false;
       await this.validateSession();
-      if (controller.signal.aborted || (this.unauthorizedHandled && !this.snapshotValue.user)) return false;
-      this.setSnapshot({
-        ...this.snapshotValue,
-        principalExitError:
-          error instanceof Error ? error.message : 'The sign-out request could not be completed.'
+      if (
+        controller.signal.aborted ||
+        (this.unauthorizedHandled && !this.snapshotValue.user)
+      )
+        return false;
+      this.apply({
+        type: 'principal-exit-error',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'The sign-out request could not be completed.'
       });
       throw error;
     } finally {
-      if (this.principalExitController === controller) this.principalExitController = null;
+      if (this.principalExitController === controller)
+        this.principalExitController = null;
     }
   }
 
@@ -429,29 +556,34 @@ export class AuthenticationLifecycle {
     this.transitionController = controller;
     this.unauthorizedTransition = (async () => {
       await this.cancelAndClearQueries();
-      if (controller.signal.aborted || boundaryGeneration !== this.boundaryGeneration) return;
+      if (
+        controller.signal.aborted ||
+        boundaryGeneration !== this.boundaryGeneration
+      )
+        return;
       if (!boundary) {
-        this.setSnapshot({
-          phase: 'anonymous',
-          user: null,
-          error: '',
-          principalExitError: '',
-          lastValidatedAt: null
-        });
+        this.apply({ type: 'anonymous' });
         return;
       }
-      const destination = await boundary.unauthenticatedDestination(controller.signal);
-      if (controller.signal.aborted || boundaryGeneration !== this.boundaryGeneration) return;
+      const destination = await boundary.unauthenticatedDestination(
+        controller.signal
+      );
+      if (
+        controller.signal.aborted ||
+        boundaryGeneration !== this.boundaryGeneration
+      )
+        return;
       await boundary.navigate(destination);
     })()
       .catch((error) => {
         if (!controller.signal.aborted && !abortError(error)) {
-          this.setSnapshot({
+          this.apply({
+            type: 'gate',
             phase: 'unavailable',
-            user: null,
-            error: error instanceof Error ? error.message : 'The login destination could not be loaded.',
-            principalExitError: '',
-            lastValidatedAt: null
+            error:
+              error instanceof Error
+                ? error.message
+                : 'The login destination could not be loaded.'
           });
         }
       })
@@ -492,8 +624,15 @@ export class AuthenticationLifecycle {
     this.authenticatedRequestGeneration++;
   }
 
-  private gateProtectedContent(phase: AuthenticationPhase, error = ''): void {
-    this.setSnapshot({ phase, user: null, error, principalExitError: '', lastValidatedAt: null });
+  private gateProtectedContent(
+    phase: PrincipalAbsentSnapshot['phase'],
+    error = ''
+  ): void {
+    this.apply({ type: 'gate', phase, error });
+  }
+
+  private apply(action: AuthenticationAction): void {
+    this.setSnapshot(reduceAuthentication(this.snapshotValue, action));
   }
 
   private setSnapshot(snapshot: AuthenticationSnapshot): void {

@@ -32,8 +32,47 @@ use super::{
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     openai_chat_response::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response},
     openai_http::error_sse as openai_error_sse,
-    telemetry::{RequestAccountingGuard, UsageCapture, elapsed_ms, emit_request_metadata_event},
+    telemetry::{
+        RequestAccountingGuard, RequestAccountingInput, RequestMetadataInput, UsageCapture,
+        elapsed_ms, emit_request_metadata_event,
+    },
 };
+
+struct ChatMetadataContext<'a> {
+    state: &'a GatewayState,
+    generation_id: uuid::Uuid,
+    api_key_id: uuid::Uuid,
+    request_id: uuid::Uuid,
+    request_started_at: chrono::DateTime<Utc>,
+    request_started: tokio::time::Instant,
+}
+
+fn emit_chat_failure(
+    context: &ChatMetadataContext<'_>,
+    route_slug: &RouteSlug,
+    failure: &InferenceError,
+) {
+    emit_request_metadata_event(
+        context.state,
+        RequestMetadataInput {
+            generation_id: context.generation_id,
+            api_key_id: context.api_key_id,
+            request_id: context.request_id,
+            route_slug,
+            attempts: &[],
+            request_started_at: context.request_started_at,
+            request_started: context.request_started,
+            final_attempt_started: None,
+            first_byte_ms: None,
+            status_code: Some(failure.status.as_u16()),
+            error_class: Some(failure.code.to_owned()),
+            committed: false,
+            usage: &UsageCapture::default(),
+            surface: Surface::OpenAi,
+            operation: OperationKind::Generation,
+        },
+    );
+}
 
 pub(super) async fn chat_completions(
     State(state): State<GatewayState>,
@@ -47,30 +86,21 @@ pub(super) async fn chat_completions(
     let request_started = tokio::time::Instant::now();
     let invalid_route = RouteSlug::parse("invalid-request")
         .expect("the internal invalid-request route slug is valid");
+    let metadata_context = ChatMetadataContext {
+        state: &state,
+        generation_id: snapshot.generation.id.as_uuid(),
+        api_key_id: key.id.as_uuid(),
+        request_id: request_id.as_uuid(),
+        request_started_at,
+        request_started,
+    };
 
     let Json(mut wire_request) = match payload {
         Ok(payload) => payload,
         Err(error) => {
             let failure =
                 InferenceError::invalid_request(format!("The JSON request is invalid: {error}"));
-            emit_request_metadata_event(
-                &state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &invalid_route,
-                &[],
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.status.as_u16()),
-                Some(failure.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                Surface::OpenAi,
-                OperationKind::Generation,
-            );
+            emit_chat_failure(&metadata_context, &invalid_route, &failure);
             return Err(failure);
         }
     };
@@ -81,24 +111,7 @@ pub(super) async fn chat_completions(
         Err(error) => {
             cleanup_admitted(&state, admitted).await;
             let failure = InferenceError::invalid_request(error.to_string());
-            emit_request_metadata_event(
-                &state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &invalid_route,
-                &[],
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.status.as_u16()),
-                Some(failure.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                Surface::OpenAi,
-                OperationKind::Generation,
-            );
+            emit_chat_failure(&metadata_context, &invalid_route, &failure);
             return Err(failure);
         }
     };
@@ -112,24 +125,7 @@ pub(super) async fn chat_completions(
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
     if let Err(error) = authorize_api_key(key, Some(&route_slug), operation.kind(), Utc::now()) {
         let failure = InferenceError::forbidden(error.to_string());
-        emit_request_metadata_event(
-            &state,
-            snapshot.generation.id.as_uuid(),
-            key.id.as_uuid(),
-            request_id.as_uuid(),
-            &route_slug,
-            &[],
-            request_started_at,
-            request_started,
-            None,
-            None,
-            Some(failure.status.as_u16()),
-            Some(failure.code.to_owned()),
-            false,
-            &UsageCapture::default(),
-            Surface::OpenAi,
-            OperationKind::Generation,
-        );
+        emit_chat_failure(&metadata_context, &route_slug, &failure);
         return Err(failure);
     }
     let mode = if streaming {
@@ -161,24 +157,7 @@ pub(super) async fn chat_completions(
     ) {
         Ok(attempts) => attempts,
         Err(failure) => {
-            emit_request_metadata_event(
-                &state,
-                snapshot.generation.id.as_uuid(),
-                key.id.as_uuid(),
-                request_id.as_uuid(),
-                &route_slug,
-                &[],
-                request_started_at,
-                request_started,
-                None,
-                None,
-                Some(failure.status.as_u16()),
-                Some(failure.code.to_owned()),
-                false,
-                &UsageCapture::default(),
-                Surface::OpenAi,
-                OperationKind::Generation,
-            );
+            emit_chat_failure(&metadata_context, &route_slug, &failure);
             release_limits(&state, lease.as_ref(), None).await;
             return Err(failure);
         }
@@ -189,14 +168,16 @@ pub(super) async fn chat_completions(
         .expect("attempt selection returned a known route");
     let mut accounting = RequestAccountingGuard::new(
         &state,
-        snapshot.generation.id.as_uuid(),
-        key.id.as_uuid(),
-        request_id.as_uuid(),
-        route_slug.clone(),
-        request_started_at,
-        request_started,
-        Surface::OpenAi,
-        OperationKind::Generation,
+        RequestAccountingInput {
+            generation_id: snapshot.generation.id.as_uuid(),
+            api_key_id: key.id.as_uuid(),
+            request_id: request_id.as_uuid(),
+            route_slug: route_slug.clone(),
+            request_started_at,
+            request_started,
+            surface: Surface::OpenAi,
+            operation: OperationKind::Generation,
+        },
         lease.take(),
     );
 

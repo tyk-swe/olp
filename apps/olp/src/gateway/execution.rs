@@ -19,8 +19,9 @@ use super::{
     failover::{ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover},
     limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
     telemetry::{
-        RequestAccountingGuard, UnaryRequestMetadataFinalizer, UsageCapture, elapsed_ms,
-        emit_request_metadata_event, usage_from_result,
+        RequestAccountingGuard, RequestAccountingInput, RequestMetadataInput,
+        UnaryRequestMetadataFinalizer, UsageCapture, elapsed_ms, emit_request_metadata_event,
+        usage_from_result,
     },
 };
 
@@ -75,6 +76,21 @@ struct ExecutionContext {
     request_started: tokio::time::Instant,
     lease: Option<LimitLease>,
     surface: Surface,
+}
+
+impl ExecutionContext {
+    fn accounting_input(&self) -> RequestAccountingInput {
+        RequestAccountingInput {
+            generation_id: self.generation_id,
+            api_key_id: self.api_key_id,
+            request_id: self.request_id.as_uuid(),
+            route_slug: self.route_slug.clone(),
+            request_started_at: self.request_started_at,
+            request_started: self.request_started,
+            surface: self.surface,
+            operation: self.operation_kind,
+        }
+    }
 }
 
 struct CompletedExecution {
@@ -163,18 +179,8 @@ async fn execute_operation(
         .routes
         .get(&context.route_slug)
         .expect("attempt selection returned a known route");
-    let mut accounting = RequestAccountingGuard::new(
-        state,
-        context.generation_id,
-        context.api_key_id,
-        context.request_id.as_uuid(),
-        context.route_slug.clone(),
-        context.request_started_at,
-        context.request_started,
-        context.surface,
-        context.operation_kind,
-        context.lease.take(),
-    );
+    let mut accounting =
+        RequestAccountingGuard::new(state, context.accounting_input(), context.lease.take());
     let execution = {
         let mut record_attempt_started =
             |completed: &[RequestAttemptMetadata],
@@ -231,21 +237,23 @@ fn emit_early_failure(
 ) {
     emit_request_metadata_event(
         state,
-        context.generation_id,
-        context.api_key_id,
-        context.request_id.as_uuid(),
-        &context.route_slug,
-        attempts,
-        context.request_started_at,
-        context.request_started,
-        None,
-        None,
-        Some(failure.status.as_u16()),
-        Some(failure.code.to_owned()),
-        false,
-        &UsageCapture::default(),
-        context.surface,
-        context.operation_kind,
+        RequestMetadataInput {
+            generation_id: context.generation_id,
+            api_key_id: context.api_key_id,
+            request_id: context.request_id.as_uuid(),
+            route_slug: &context.route_slug,
+            attempts,
+            request_started_at: context.request_started_at,
+            request_started: context.request_started,
+            final_attempt_started: None,
+            first_byte_ms: None,
+            status_code: Some(failure.status.as_u16()),
+            error_class: Some(failure.code.to_owned()),
+            committed: false,
+            usage: &UsageCapture::default(),
+            surface: context.surface,
+            operation: context.operation_kind,
+        },
     );
 }
 
@@ -290,18 +298,8 @@ pub(super) async fn execute_event_operation_for_surface_inner(
         attempt_started,
     } = success;
     let first_byte_ms = elapsed_ms(context.request_started.elapsed());
-    let mut accounting = RequestAccountingGuard::new(
-        state,
-        context.generation_id,
-        context.api_key_id,
-        context.request_id.as_uuid(),
-        context.route_slug.clone(),
-        context.request_started_at,
-        context.request_started,
-        context.surface,
-        context.operation_kind,
-        context.lease.take(),
-    );
+    let mut accounting =
+        RequestAccountingGuard::new(state, context.accounting_input(), context.lease.take());
     accounting.record_attempts(
         attempts.clone(),
         Some(attempt_started),
@@ -434,18 +432,8 @@ pub(super) async fn execute_routed_result_for_surface_inner(
         ..
     } = success;
     let first_byte_ms = elapsed_ms(context.request_started.elapsed());
-    let mut accounting = RequestAccountingGuard::new(
-        state,
-        context.generation_id,
-        context.api_key_id,
-        context.request_id.as_uuid(),
-        context.route_slug.clone(),
-        context.request_started_at,
-        context.request_started,
-        context.surface,
-        context.operation_kind,
-        context.lease.take(),
-    );
+    let mut accounting =
+        RequestAccountingGuard::new(state, context.accounting_input(), context.lease.take());
     accounting.record_attempts(
         attempts.clone(),
         Some(attempt_started),

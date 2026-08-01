@@ -11,7 +11,7 @@ local suite. The Compose stack supplies PostgreSQL 18 and Valkey 9.1 for
 integration work. The stable Rust toolchain (1.97.0) installs automatically
 via `rust-toolchain.toml`.
 
-The standard gate (`make check`) needs ripgrep (for
+The broad local gate (`make check-local`, with `make check` retained as an alias) needs ripgrep (for
 `scripts/check-boundaries.sh`) and cargo-nextest
 (`cargo install --locked cargo-nextest@0.9.140`, the `make test` runner).
 Matching CI's full validation additionally needs, at the versions CI pins:
@@ -84,7 +84,7 @@ Run the full suite before requesting review (first time:
 `make console-install`):
 
 ```sh
-make check
+make check-local
 ```
 
 which expands to:

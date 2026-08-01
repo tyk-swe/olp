@@ -10,6 +10,19 @@ use super::{
     MediaJobRecord, MediaJobState,
 };
 
+const MEDIA_JOB_SELECT: &str = "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
+            p.name AS provider_name, j.provider_model, j.route_slug,
+            j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
+            j.progress_percent::real AS progress_percent,
+            j.content_available, j.expires_at, j.error_class,
+            j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
+            j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
+            j.reconciliation_attempts, j.next_reconciliation_at,
+            j.last_reconciliation_at, j.etag,
+            j.created_at, j.updated_at
+     FROM async_media_jobs j
+     JOIN providers p ON p.id = j.provider_id";
+
 impl PgStore {
     pub async fn media_job(&self, id: Uuid) -> Result<MediaJobRecord, MediaJobError> {
         let row = sqlx::query_as!(
@@ -42,21 +55,8 @@ impl PgStore {
         limit: u16,
     ) -> Result<OperationsPage<MediaJobRecord>, MediaJobError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
-        let mut query = QueryBuilder::<Postgres>::new(
-            "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
-                    p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
-                    j.progress_percent::real AS progress_percent,
-                    j.content_available, j.expires_at, j.error_class,
-                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
-                    j.reconciliation_attempts, j.next_reconciliation_at,
-                    j.last_reconciliation_at, j.etag,
-                    j.created_at, j.updated_at
-             FROM async_media_jobs j
-             JOIN providers p ON p.id = j.provider_id
-             WHERE TRUE",
-        );
+        let mut query = QueryBuilder::<Postgres>::new(MEDIA_JOB_SELECT);
+        query.push(" WHERE TRUE");
         push_filters(&mut query, filters);
         if let Some(value) = cursor {
             query
@@ -119,21 +119,8 @@ impl PgStore {
         } else {
             None
         };
-        let mut query = QueryBuilder::<Postgres>::new(
-            "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
-                    p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
-                    j.progress_percent::real AS progress_percent,
-                    j.content_available, j.expires_at, j.error_class,
-                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
-                    j.reconciliation_attempts, j.next_reconciliation_at,
-                    j.last_reconciliation_at, j.etag,
-                    j.created_at, j.updated_at
-             FROM async_media_jobs j
-             JOIN providers p ON p.id = j.provider_id
-             WHERE j.lifecycle_state = 'active'",
-        );
+        let mut query = QueryBuilder::<Postgres>::new(MEDIA_JOB_SELECT);
+        query.push(" WHERE j.lifecycle_state = 'active'");
         push_filters(&mut query, filters);
         if let Some((created_at, id)) = position {
             query.push(" AND (j.created_at, j.id) ");
@@ -279,4 +266,129 @@ pub(super) fn media_job_from_row(row: MediaJobRow) -> Result<MediaJobRecord, Med
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MEDIA_JOB_SELECT, MediaJobRow};
+
+    #[test]
+    fn canonical_media_job_projection_matches_the_typed_row() {
+        const EXPECTED: &[&str] = &[
+            "id",
+            "upstream_job_id",
+            "api_key_id",
+            "provider_id",
+            "provider_name",
+            "provider_model",
+            "route_slug",
+            "operation",
+            "surface",
+            "state",
+            "lifecycle_state",
+            "progress_percent",
+            "content_available",
+            "expires_at",
+            "error_class",
+            "completed_at",
+            "last_polled_at",
+            "reconciliation_error",
+            "deleted_at",
+            "runtime_generation_id",
+            "provider_revision_id",
+            "reconciliation_claim_id",
+            "reconciliation_attempts",
+            "next_reconciliation_at",
+            "last_reconciliation_at",
+            "etag",
+            "created_at",
+            "updated_at",
+        ];
+
+        let select_list = MEDIA_JOB_SELECT
+            .strip_prefix("SELECT ")
+            .and_then(|sql| {
+                sql.split_once(" FROM async_media_jobs")
+                    .map(|(list, _)| list)
+            })
+            .expect("canonical projection has a SELECT and FROM clause");
+        let actual = select_list
+            .split(',')
+            .map(|expression| {
+                let expression = expression.trim();
+                expression
+                    .rsplit_once(" AS ")
+                    .map_or(expression, |(_, alias)| alias)
+                    .rsplit('.')
+                    .next()
+                    .expect("projection expression has a column or alias")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, EXPECTED);
+
+        fn row_shape_is_exhaustive(row: MediaJobRow) {
+            let MediaJobRow {
+                id,
+                upstream_job_id,
+                api_key_id,
+                provider_id,
+                provider_name,
+                provider_model,
+                route_slug,
+                operation,
+                surface,
+                state,
+                lifecycle_state,
+                progress_percent,
+                content_available,
+                expires_at,
+                error_class,
+                completed_at,
+                last_polled_at,
+                reconciliation_error,
+                deleted_at,
+                runtime_generation_id,
+                provider_revision_id,
+                reconciliation_claim_id,
+                reconciliation_attempts,
+                next_reconciliation_at,
+                last_reconciliation_at,
+                etag,
+                created_at,
+                updated_at,
+            } = row;
+            let _ = (
+                id,
+                upstream_job_id,
+                api_key_id,
+                provider_id,
+                provider_name,
+                provider_model,
+                route_slug,
+                operation,
+                surface,
+                state,
+                lifecycle_state,
+                progress_percent,
+                content_available,
+                expires_at,
+                error_class,
+                completed_at,
+                last_polled_at,
+                reconciliation_error,
+                deleted_at,
+                runtime_generation_id,
+                provider_revision_id,
+                reconciliation_claim_id,
+                reconciliation_attempts,
+                next_reconciliation_at,
+                last_reconciliation_at,
+                etag,
+                created_at,
+                updated_at,
+            );
+        }
+        let _ = row_shape_is_exhaustive;
+    }
 }

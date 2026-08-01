@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn public_auth_source_policy_is_exact_and_complete() {
+    let expected = [
+        (axum::http::Method::POST, "/api/v1/setup"),
+        (axum::http::Method::POST, "/api/v1/sessions"),
+        (axum::http::Method::POST, "/api/v1/invitations/accept"),
+        (axum::http::Method::GET, "/api/v1/oidc/login"),
+        (axum::http::Method::POST, "/api/v1/oidc/login"),
+    ];
+
+    assert_eq!(PublicAuthRoute::ALL.len(), expected.len());
+    for (method, path) in expected {
+        let route = PublicAuthRoute::classify(&method, path)
+            .unwrap_or_else(|| panic!("missing source policy for {method} {path}"));
+        assert_eq!(route.method(), method);
+        assert_eq!(route.path(), path);
+        assert_eq!(
+            PublicAuthRoute::classify(&method, &format!("{path}?ignored=true")),
+            None,
+            "classification accepts URI paths, not path-and-query strings"
+        );
+    }
+
+    for (method, path) in [
+        (axum::http::Method::GET, "/api/v1/setup"),
+        (axum::http::Method::GET, "/api/v1/sessions"),
+        (axum::http::Method::HEAD, "/api/v1/oidc/login"),
+        (axum::http::Method::OPTIONS, "/api/v1/oidc/login"),
+        (axum::http::Method::PUT, "/api/v1/oidc/login"),
+        (axum::http::Method::POST, "/api/v1/sessions/"),
+        (axum::http::Method::POST, "/api/v1/sessions/current"),
+        (axum::http::Method::POST, "/api/v1/sessions-extra"),
+        (axum::http::Method::POST, "/prefix/api/v1/sessions"),
+        (axum::http::Method::POST, "/api/v1/%73essions"),
+        (axum::http::Method::POST, "/api/v1/oidc//login"),
+        (axum::http::Method::POST, "/api/v1/oidc/../oidc/login"),
+        (axum::http::Method::POST, "/api/v1/profile/reauthenticate"),
+        (axum::http::Method::POST, "/api/v1/oidc/link"),
+    ] {
+        assert_eq!(
+            PublicAuthRoute::classify(&method, path),
+            None,
+            "unexpected source policy for {method} {path}"
+        );
+    }
+
+    let unknown = axum::http::Method::from_bytes(b"BREW").unwrap();
+    assert_eq!(
+        PublicAuthRoute::classify(&unknown, "/api/v1/sessions"),
+        None
+    );
+}
+
+#[test]
+fn public_auth_query_strings_do_not_change_source_policy() {
+    let request = Request::get("/api/v1/oidc/login?return_to=%2Fproviders")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(request.uri().path(), PublicAuthRoute::OidcLoginGet.path());
+    assert_eq!(
+        PublicAuthRoute::classify(request.method(), request.uri().path()),
+        Some(PublicAuthRoute::OidcLoginGet)
+    );
+}
+
+#[test]
 fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
     let mut state = ApiState::new(
         ApiMode::Control,

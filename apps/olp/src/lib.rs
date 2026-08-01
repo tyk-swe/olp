@@ -7,6 +7,7 @@
 // Transport: listener, proxy trust, admission, cookies.
 mod listener;
 mod proxy;
+mod public_auth_routes;
 mod request_admission;
 mod request_cookies;
 
