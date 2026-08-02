@@ -17,6 +17,9 @@ RUN pnpm build
 # not mount contents.
 FROM rust:1.97-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa AS chef
 ENV CARGO_INCREMENTAL=0
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends mold=1.10.1+dfsg-1 && \
+    rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo install cargo-chef --locked --version 0.1.77
 WORKDIR /src
@@ -32,6 +35,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS rust-build
 ENV SQLX_OFFLINE=true
+COPY .cargo ./.cargo
 COPY --from=planner /src/recipe.json recipe.json
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo chef cook --locked --release --recipe-path recipe.json --package olp

@@ -125,9 +125,9 @@ changes with `pnpm --dir console screenshots`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture boundaries,
 source-of-truth ownership, toolchain prerequisites, and the validation
-matrix. Use Rust 1.97.0, Node.js 24 or newer, pnpm 11, and ripgrep; the
-Compose stack supplies PostgreSQL 18 and Valkey 9.1. Then run the standard
-checks:
+matrix. Use Rust 1.97.0, Node.js 24 or newer, pnpm 11, mold, and ripgrep;
+Linux builds also require GCC 12.1 or newer. The Compose stack supplies
+PostgreSQL 18 and Valkey 9.1. Then run the standard checks:
 
 ```bash
 make console-install

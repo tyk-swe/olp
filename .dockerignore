@@ -13,6 +13,7 @@
 **/.config/gcloud/**
 **/credentials
 **/credentials/**
+**/.cargo/credentials.toml
 **/secrets
 **/secrets/**
 **/*.key

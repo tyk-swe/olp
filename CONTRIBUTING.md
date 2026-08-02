@@ -6,10 +6,11 @@ validation required before review.
 
 ## Development environment
 
-Use Rust 1.97, Node.js 24 or newer, pnpm 11, and PostgreSQL 18 for the full
-local suite. The Compose stack supplies PostgreSQL 18 and Valkey 9.1 for
-integration work. The stable Rust toolchain (1.97.0) installs automatically
-via `rust-toolchain.toml`.
+Use Rust 1.97, Node.js 24 or newer, pnpm 11, mold, and PostgreSQL 18 for the
+full local suite. Linux builds select mold through `.cargo/config.toml` and
+require GCC 12.1 or newer as the linker driver. The Compose stack supplies
+PostgreSQL 18 and Valkey 9.1 for integration work. The stable Rust toolchain
+(1.97.0) installs automatically via `rust-toolchain.toml`.
 
 The broad local gate (`make check-local`, with `make check` retained as an alias) needs ripgrep (for
 `scripts/check-boundaries.sh`) and cargo-nextest

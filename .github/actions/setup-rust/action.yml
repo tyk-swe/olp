@@ -1,7 +1,8 @@
 name: Setup Rust
 description: >-
-  Pinned Rust toolchain, cargo build cache, and optional cargo tools. Keep the
-  action SHAs below in lockstep with scripts/check-supply-chain-pins.sh.
+  Mold linker, pinned Rust toolchain, cargo build cache, and optional cargo
+  tools. Keep the action SHAs below in lockstep with
+  scripts/check-supply-chain-pins.sh.
 
 inputs:
   components:
@@ -29,6 +30,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Install mold linker
+      shell: bash
+      run: |
+        if ! command -v mold >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends mold
+        fi
     - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
       with:
         toolchain: "1.97.0"
