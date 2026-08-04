@@ -7,7 +7,7 @@ async fn activate_runtime_inside_handler(
     let pinned_before_activation = principal.runtime();
     let pinned_generation = pinned_before_activation.generation.id;
     state
-        .runtime
+        .runtime()
         .install(
             RuntimeSnapshot {
                 generation: RuntimeGeneration {
@@ -22,8 +22,8 @@ async fn activate_runtime_inside_handler(
             BTreeMap::new(),
         )
         .unwrap();
-    assert_ne!(state.runtime.pin().generation.id, pinned_generation);
-    let detached_principal = spawn_http_inference_task(&state, async move {
+    assert_ne!(state.runtime().pin().generation.id, pinned_generation);
+    let detached_principal = spawn_http_inference_task(async move {
         http_inference_principal()
             .expect("admitted principal must cross the detached task boundary")
             .runtime()
@@ -40,14 +40,14 @@ async fn activate_runtime_inside_handler(
 async fn inference_http_boundary_pins_one_generation_across_activation() {
     let (state, key) = inference_state(false);
     let state = state.gateway_state_for_test();
-    let original_generation = state.runtime.pin().generation.id;
+    let original_generation = state.runtime().pin().generation.id;
     let app = Router::new()
         .route(
             "/openai/test-generation-pin",
             get(activate_runtime_inside_handler),
         )
         .layer(middleware::from_fn_with_state(
-            state.clone(),
+            state.request_boundary().clone(),
             enforce_request_limits,
         ))
         .with_state(state.clone());
@@ -64,7 +64,7 @@ async fn inference_http_boundary_pins_one_generation_across_activation() {
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(body.as_ref(), original_generation.to_string().as_bytes());
-    assert_ne!(state.runtime.pin().generation.id, original_generation);
+    assert_ne!(state.runtime().pin().generation.id, original_generation);
 }
 
 #[tokio::test]
@@ -162,28 +162,18 @@ async fn detached_inference_task_holds_the_http_reservation_after_request_cancel
     let reservation = InferenceReservation::for_test(async move {
         release_signal.store(true, Ordering::Release);
     });
-    let runtime = Arc::new(RuntimeManager::empty());
-    let state = ApiState::new(
-        ApiMode::Gateway,
-        None,
-        runtime,
-        "https://olp.example.test",
-        PathBuf::from("missing-console"),
-    );
-    let state = state.gateway_state_for_test();
     let started = Arc::new(tokio::sync::Notify::new());
     let release_child = Arc::new(tokio::sync::Notify::new());
     let (completed_sender, completed) = tokio::sync::oneshot::channel();
     let started_wait = started.notified();
     let outer = tokio::spawn({
-        let state = state.clone();
         let reservation = reservation.clone();
         let started = Arc::clone(&started);
         let release_child = Arc::clone(&release_child);
         async move {
             HTTP_INFERENCE_RESERVATION_HOLD
                 .scope(reservation, async move {
-                    let _task = spawn_http_inference_task(&state, async move {
+                    let _task = spawn_http_inference_task(async move {
                         started.notify_one();
                         release_child.notified().await;
                         let _ = completed_sender.send(());
@@ -217,12 +207,12 @@ async fn detached_inference_task_holds_the_http_reservation_after_request_cancel
 async fn spawned_inference_task_inherits_the_http_execution_context() {
     let (state, _) = inference_state(false);
     let state = state.gateway_state_for_test();
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
     let principal =
-        InferencePrincipal::for_test(Arc::clone(&pinned), lookup_id.clone(), Surface::OpenAi);
+        InferencePrincipal::new(Arc::clone(&pinned), lookup_id.clone(), Surface::OpenAi);
     state
-        .runtime
+        .runtime()
         .install(
             RuntimeSnapshot {
                 generation: RuntimeGeneration {
@@ -239,7 +229,6 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
         .unwrap();
     let metadata_claimed = Arc::new(AtomicBool::new(false));
     let reservation = InferenceReservation::for_test(async {});
-    let spawn_state = state.clone();
     let (principal_generation, principal_surface, reserved_tokens, has_reservation_hold) =
         HTTP_INFERENCE_PRINCIPAL
             .scope(
@@ -249,7 +238,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
                     HTTP_INFERENCE_LIMITS_RESERVED.scope(
                         2_000,
                         HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
-                            let task = spawn_http_inference_task(&spawn_state, async move {
+                            let task = spawn_http_inference_task(async move {
                                 claim_http_inference_metadata();
                                 let principal = http_inference_principal()
                                     .expect("the detached task inherits the admitted principal");
@@ -268,7 +257,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
             .await;
     assert_eq!(principal_generation, pinned.generation.id);
     assert_eq!(principal_surface, Surface::OpenAi);
-    assert_ne!(state.runtime.pin().generation.id, pinned.generation.id);
+    assert_ne!(state.runtime().pin().generation.id, pinned.generation.id);
     assert_eq!(reserved_tokens, Some(2_000));
     assert!(has_reservation_hold);
     assert!(metadata_claimed.load(Ordering::Acquire));

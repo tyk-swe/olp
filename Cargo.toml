@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "apps/olp",
     "crates/domain",
+    "crates/inference",
     "crates/protocols",
     "crates/providers",
     "crates/storage",
@@ -78,6 +79,7 @@ uuid = { version = "1", features = ["serde", "v7"] }
 zeroize = { version = "1", features = ["derive"] }
 
 olp-domain = { path = "crates/domain", version = "2.0.0" }
+olp-inference = { path = "crates/inference", version = "2.0.0" }
 olp-protocols = { path = "crates/protocols", version = "2.0.0" }
 olp-providers = { path = "crates/providers", version = "2.0.0" }
 olp-storage = { path = "crates/storage", version = "2.0.0" }
@@ -98,7 +100,7 @@ undocumented_unsafe_blocks = "deny"
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
 
-# Debug-mode Argon2id (m=19456, t=2; crates/storage/src/security.rs) runs
+# Debug-mode Argon2id (m=19456, t=2; crates/storage/src/security/passwords.rs) runs
 # dozens of times across the DB suites; keep hot crypto crates optimized.
 [profile.dev.package.argon2]
 opt-level = 3

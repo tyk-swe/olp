@@ -69,7 +69,7 @@ trap 'exit 143' TERM
 
 (
   cd -- "$repo_dir"
-  cargo build --locked -p olp --example sdk_smoke_fixture
+  cargo build --locked -p olp --example sdk_smoke_fixture --features test-util
 )
 
 # shellcheck source=scripts/lib/cargo-target-dir.sh

@@ -1,35 +1,37 @@
-# crates/ — library crate guide
+# crates/ — production library guide
 
-- **domain** — canonical model: provider configuration
-  (`provider_configuration.rs`), routing eligibility + weighted rendezvous
-  scoring (`routing.rs`), ports. Must never gain infrastructure dependencies.
-- **protocols** — vendor wire translation: OpenAI/Anthropic/Gemini DTOs,
-  request/response translation, SSE stream decoding. Mirrored per-provider
-  trees (`translate/`, plus `openai/responses/` for the Responses API).
-- **providers** — outbound networking: per-provider transports
-  (openai/anthropic/gemini/azure_openai/bedrock/vertex), OIDC network calls,
-  egress IP policy (`http_egress.rs`). Only crate allowed `reqwest`, `aws-*`,
-  `google-cloud-auth`. Bedrock specifics: `providers/BEDROCK.md`.
-- **storage** — PostgreSQL via sqlx (typed macros only — no string-key
-  `Row::get`; enforced by `scripts/check-storage-sqlx.sh`), Valkey, Lua
-  scripts in `storage/scripts/`, forward-only migrations in
-  `storage/migrations/`. Query metadata lives in `/.sqlx` —
-  regenerate with `make sqlx-prepare` after query/schema changes.
+- `domain` — infrastructure-free canonical model, provider configuration, and
+  routing. `routing.rs` is a narrow facade over provider, route, snapshot, and
+  selection owners.
+- `protocols` — OpenAI/Anthropic/Gemini wire DTOs, canonical translation, and
+  bounded streaming codecs.
+- `providers` — all outbound provider/OIDC networking, authentication, egress
+  policy, endpoint construction, and vendor error mapping. Its factory API is
+  explicit; never restore wildcard exports.
+- `storage` — PostgreSQL, Valkey, encryption, migrations, and direct subsystem
+  queries. Public callers import through namespaces such as `authentication`,
+  `configuration`, `identity`, `idempotency`, `media_jobs`, `oidc`,
+  `operations`, `request_metadata`, `runtime`, `security`, and `usage`.
+- `inference` — transport-neutral application execution: generation pinning,
+  selection, circuits, failover, distributed limit leases, event collection,
+  terminal accounting, telemetry, and the shared `InferenceService`. It must
+  not depend on Axum/Tower/Clap, SQLx/Redis, or concrete provider constructors.
 
-The per-provider trees in `protocols` and `providers` mirror each other in
-file shape (`translate/`, `transport/`) on purpose. Cross-provider helpers
-already live in `providers/src/transport_common.rs` and `transport_io.rs`;
-what remains per-provider (endpoint URL policy, error-body mapping, stream
-decoding) diverges in behavior — do not blind-merge files that merely look
-alike, and add new shared logic to `transport_common` rather than copying
-it into a provider tree.
+Dependencies are one-way: domain is the base; protocols depends on domain;
+providers on domain/protocols; storage on domain; inference on all four; the
+delivery app composes them. `scripts/check-boundaries.sh` enforces this graph
+and infrastructure dependency ownership.
 
-Conventions:
+Static PostgreSQL uses SQLx checked macros and committed `/.sqlx` metadata.
+Dynamic filters decode through typed subsystem records; string-key `Row::get`
+is forbidden by `scripts/check-storage-sqlx.sh`. Migrations remain sequential
+and forward-only.
 
-- The `test-util` cargo feature exposes internals to tests; prefer it over
-  new `pub` surface area.
-- Unit tests are `src/**/tests.rs` submodules; `tests/*_postgres.rs`
-  integration tests are `#[ignore]`d and run via `make db-test`.
-- The dependency DAG and per-crate dependency ownership are asserted by
-  `scripts/check-boundaries.sh` — adding a dependency to the wrong crate
-  fails CI.
+Service-backed configuration and operations contracts retain a single ordered
+database lifecycle, with provider eligibility, query, and retention phases in
+named sibling modules under `tests/integration/`.
+
+Keep divergent vendor policy inside provider trees. Shared bounded response
+bodies live in `providers/src/transport_io.rs`; deadline/event stream mechanics
+live under `providers/src/transport_io/`. Unit tests stay beside their owner,
+and ignored service-backed tests run with `make db-test`.

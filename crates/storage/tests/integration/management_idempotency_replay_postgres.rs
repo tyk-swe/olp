@@ -1,10 +1,13 @@
 use chrono::{Duration, Utc};
 use olp_domain::{OperationKind, ProviderKind};
 use olp_storage::{
-    ConfigurationError, IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, MasterKey,
-    NewProviderDraft, NewRouteDraft, NewRouteTarget, OperationsError, PriceInput,
-    ReplayableIdempotency, RotateCredentialInput, credential_aad, hash_password,
-    idempotency_fingerprint,
+    configuration::ConfigurationError, configuration::NewProviderDraft,
+    configuration::NewRouteDraft, configuration::NewRouteTarget,
+    configuration::RotateCredentialInput, idempotency::IdempotencyOutcome,
+    idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
+    idempotency::idempotency_fingerprint, identity::InstallationSetupInput,
+    operations::OperationsError, operations::PriceInput, security::MasterKey,
+    security::credential_aad, security::hash_password,
 };
 use serde_json::json;
 use sqlx::Executor as _;
@@ -509,7 +512,7 @@ fn provider_input(
     provider_id: Uuid,
     credential_id: Uuid,
     model_id: Uuid,
-    credential: olp_storage::EncryptedSecret,
+    credential: olp_storage::security::EncryptedSecret,
     actor: Uuid,
     idempotency_key: &str,
     name: &str,

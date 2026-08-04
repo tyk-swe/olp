@@ -32,8 +32,9 @@ Matching CI's full validation additionally needs, at the versions CI pins:
 Keep changes within the component that owns the behavior: `domain` owns
 canonical policy, `protocols` owns wire translation, `providers` owns
 outbound provider/OIDC networking, `storage` owns PostgreSQL and Valkey, and
-`apps/olp` owns delivery and process composition. The console remains a
-static client-only application.
+`inference` owns transport-neutral runtime pinning, selection, failover,
+limits, and terminal accounting. `apps/olp` owns HTTP delivery and process
+composition. The console remains a static client-only application.
 
 ### Dependency rules
 
@@ -41,6 +42,25 @@ Dependencies point toward `crates/domain`, which must not acquire
 infrastructure dependencies. Cargo path dependencies stay in this workspace.
 Do not add console server routes or a production Node adapter. Keep
 dependencies locked and third-party Actions and container images pinned.
+
+The production Cargo DAG is:
+
+```text
+olp-domain
+olp-protocols -> olp-domain
+olp-providers -> {olp-domain, olp-protocols}
+olp-storage -> olp-domain
+olp-inference -> {olp-domain, olp-protocols, olp-providers, olp-storage}
+olp -> {olp-domain, olp-protocols, olp-providers, olp-storage, olp-inference}
+```
+
+Axum, Tower, and Clap stay in `olp`; SQLx/Redis in storage; Reqwest, AWS, and
+Google authentication in providers. The app has only `bootstrap`,
+`public_http`, `gateway`, `management`, `observability`, and `console`
+production roots. Boundary checks reject a return to flat app modules or
+production wildcard re-exports. The optional `ProcessComposition` assembly
+input stays private to bootstrap in normal builds; integration fixtures use
+the `test-util`-gated `olp::test_support` namespace.
 
 ### Sources of truth
 
@@ -67,9 +87,13 @@ dependencies locked and third-party Actions and container images pinned.
 - `apps/olp/src/gateway/endpoint_policy.rs` owns the inference endpoint
   registry: method, path, surface, operation, handler, admission, routing,
   and token-estimation association.
-- `crates/domain/src/routing.rs` owns runtime capability eligibility and
-  weighted rendezvous scoring. Connector certification filters those domain
-  capabilities before activation.
+- `crates/domain/src/routing/` owns runtime capability eligibility and weighted
+  rendezvous scoring behind the narrow `routing.rs` facade. Connector
+  certification filters those domain capabilities before activation.
+- `crates/inference/src/` owns runtime generation pinning, selection/failover,
+  circuit state, distributed limit lease lifetime, canonical event collection,
+  and terminal request/attempt/usage accounting. HTTP adapters must call the
+  shared `InferenceService` instead of duplicating this orchestration.
 - `crates/providers/src/http_egress.rs` owns public IP classification.
   Provider and OIDC modules own URL policy, DNS pinning, bounded bodies, and
   error mapping.
@@ -117,6 +141,13 @@ manifest. A failure means the product and its documentation disagree; resolve
 it by fixing one of them, never by weakening the assertion.
 The runner requires `psql` so its process-exit trap can sweep only the
 run-scoped databases left by a panic, filter, or interruption.
+Contract assertions are split under `tests/e2e/tests/contract/` by public
+surface, management, provider lifecycle, gateway dialect, data safety,
+telemetry, and distributed limits; `contract.rs` owns only the shared
+installation lifecycle and final teardown.
+The longest PostgreSQL contracts likewise keep their single ordered database
+lifecycle while moving provider/route/API-key, OIDC harness, query, and
+retention phases into named sibling modules under each integration test.
 
 The suite needs an isolated PostgreSQL **and an isolated Valkey**: the
 request-metadata stream key is a fixed global name, so a second `olp` worker

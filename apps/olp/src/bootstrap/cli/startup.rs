@@ -1,0 +1,277 @@
+use std::sync::Arc;
+
+use olp_storage::{request_metadata::RequestMetadataEmitter, valkey::REQUEST_METADATA_STREAM};
+use tokio::{
+    net::TcpListener,
+    sync::{oneshot, watch},
+    task::JoinHandle,
+};
+use tracing::{error, info, warn};
+
+use olp_inference::runtime::RuntimeManager;
+
+use crate::{ApiMode, ProcessComposition, create_media_spool};
+use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
+
+use super::{
+    AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
+    commands::{
+        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_supervisor,
+        request_metadata_epoch_supervisor,
+    },
+    config::ServeArgs,
+    lifecycle::{
+        coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
+        shutdown_signal, stop_background_tasks,
+    },
+    runtime_activation::{activate_latest_runtime, runtime_hint_supervisor, spawn_runtime_poller},
+    service_supervisors::{
+        limiter_supervisor, media_reconciliation_supervisor, request_metadata_loss_reporter,
+    },
+    validation::{
+        check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
+        load_master_key,
+    },
+};
+
+pub(super) async fn serve(
+    mode: ApiMode,
+    args: ServeArgs,
+    run_worker_in_process: bool,
+) -> AppResult<()> {
+    if args.http_max_connections == 0 {
+        return Err(
+            std::io::Error::other("OLP_HTTP_MAX_CONNECTIONS must be greater than zero").into(),
+        );
+    }
+    if args.auth_hmac_key_file.is_none() {
+        return Err(std::io::Error::other(
+            "OLP_AUTH_HMAC_KEY_FILE is required when serving an HTTP mode",
+        )
+        .into());
+    }
+    let store = connect_store(&args.database).await?;
+    let runtime = Arc::new(RuntimeManager::empty());
+    let media_spool_dir = args
+        .assets
+        .media_spool_dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir);
+    let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
+    let mut state = ProcessComposition::new_with_media_spool(
+        mode,
+        Some(store.clone()),
+        runtime,
+        args.public_origin.as_str(),
+        args.assets.console_dir,
+        media_spool,
+    );
+    state.set_public_admission_limits(
+        args.http_max_in_flight_inference_requests,
+        args.http_max_in_flight_management_requests,
+    );
+    state.local_login_enabled = args.local_login_enabled;
+    // The browser integration fixture uses a loopback mock identity
+    // provider. This branch is compiled out of release binaries, so no
+    // deployment setting can weaken the production HTTPS/SSRF policy.
+    #[cfg(debug_assertions)]
+    if std::env::var("OLP_ALLOW_INSECURE_OIDC_FOR_TESTS").as_deref() == Ok("test-only") {
+        state.oidc_allow_insecure_test_endpoints = true;
+        warn!("test-only loopback OIDC endpoints are enabled");
+    }
+    // The E2E harness points providers at a loopback mock upstream. Same
+    // posture as the OIDC override above: compiled out of release binaries.
+    #[cfg(all(debug_assertions, feature = "test-util"))]
+    if crate::bootstrap::provider_adapter::insecure_provider_endpoints_for_tests() {
+        warn!("test-only insecure provider endpoints are enabled");
+    }
+    if let Some(path) = &args.auth_hmac_key_file {
+        check_secret_permissions(path).await?;
+        state.auth_hmac_key = Some(Arc::new(load_auth_hmac_key(path).await?));
+    }
+    state.set_trusted_proxy_cidrs(args.trusted_proxy_cidrs.0.clone());
+    let setup_required = if mode.serves_control() {
+        store.setup_required().await?
+    } else {
+        false
+    };
+    let bootstrap_token_digest = if let Some(path) = &args.bootstrap_token_file {
+        check_secret_permissions(path).await?;
+        let auth_hmac_key = state.auth_hmac_key.as_deref().ok_or_else(|| {
+            std::io::Error::other(
+                "OLP_BOOTSTRAP_TOKEN_FILE requires OLP_AUTH_HMAC_KEY_FILE for digest verification",
+            )
+        })?;
+        Some(load_bootstrap_token_digest(path, auth_hmac_key).await?)
+    } else {
+        None
+    };
+    if setup_required {
+        let digest = bootstrap_token_digest.ok_or_else(|| {
+            std::io::Error::other(
+                "database setup is incomplete; OLP_BOOTSTRAP_TOKEN_FILE is required before serving the control plane",
+            )
+        })?;
+        state.set_bootstrap_token_digest(digest);
+    }
+    if let Some(path) = &args.master_key_file {
+        check_secret_permissions(path).await?;
+        state.master_key = Some(Arc::new(load_master_key(path).await?));
+    }
+    if let Some(path) = &args.assets.connector_config_file {
+        register_mounted_connectors(path, &state.transports).await?;
+    }
+    match activate_latest_runtime(
+        &state.runtime,
+        &store,
+        &state.transports,
+        &state.circuits,
+        state.master_key.as_deref(),
+    )
+    .await
+    {
+        Ok(true) => info!(
+            generation = ?state.runtime.active_generation_ordinal(),
+            "loaded runtime generation"
+        ),
+        Ok(false) => warn!("no active runtime generation; gateway will remain unready"),
+        Err(error) => error!(%error, "initial runtime release was rejected"),
+    }
+    let listener = TcpListener::bind(args.listen_addr).await?;
+    let observability_listener = TcpListener::bind(args.observability_listen_addr).await?;
+    let (background_shutdown_sender, background_shutdown_receiver) = watch::channel(false);
+    let (listener_shutdown_sender, listener_shutdown_receiver) = watch::channel(false);
+    let mut request_metadata_writer_status = None;
+    let mut background_tasks: Vec<JoinHandle<()>> = Vec::new();
+    background_tasks.push(spawn_runtime_poller(
+        Arc::clone(&state.runtime),
+        store.clone(),
+        state.transports.clone(),
+        state.circuits.clone(),
+        state.master_key.clone(),
+        background_shutdown_receiver.clone(),
+    ));
+    if let Some(url) = &args.valkey_url {
+        background_tasks.push(tokio::spawn(runtime_hint_supervisor(
+            Arc::clone(&state.runtime),
+            store.clone(),
+            state.transports.clone(),
+            state.circuits.clone(),
+            state.master_key.clone(),
+            url.clone(),
+            background_shutdown_receiver.clone(),
+        )));
+        state.limiter.mark_configured();
+        background_tasks.push(tokio::spawn(limiter_supervisor(
+            state.limiter.clone(),
+            url.clone(),
+            background_shutdown_receiver.clone(),
+        )));
+
+        if mode.serves_gateway() {
+            // Install the bounded local emitter even when Valkey is not up yet.
+            // Its connection loop exposes retry/pending state and preserves events
+            // until the configured bound is reached.
+            let (emitter, receiver) = RequestMetadataEmitter::bounded(8_192);
+            state.request_metadata = Some(emitter.clone());
+            let gateway_instance = format!(
+                "{}:{}",
+                std::env::var("HOSTNAME").unwrap_or_else(|_| "olp".to_owned()),
+                args.listen_addr
+            );
+            background_tasks.push(tokio::spawn(request_metadata_loss_reporter(
+                store.clone(),
+                emitter,
+                gateway_instance,
+                background_shutdown_receiver.clone(),
+            )));
+            let request_metadata_writer_url = url.clone();
+            let request_metadata_writer_shutdown = background_shutdown_receiver.clone();
+            let (status_sender, status_receiver) = oneshot::channel();
+            request_metadata_writer_status = Some(status_receiver);
+            background_tasks.push(tokio::spawn(async move {
+                let result: AppResult<()> = receiver
+                    .run_connecting(
+                        &request_metadata_writer_url,
+                        REQUEST_METADATA_STREAM,
+                        request_metadata_writer_shutdown,
+                    )
+                    .await
+                    .map_err(Into::into);
+                if let Err(error) = &result {
+                    error!(%error, "request metadata stream writer stopped");
+                }
+                let _ = status_sender.send(result);
+            }));
+        }
+        if run_worker_in_process {
+            background_tasks.push(tokio::spawn(outbox_supervisor(
+                store.clone(),
+                url.clone(),
+                background_shutdown_receiver.clone(),
+            )));
+            background_tasks.push(tokio::spawn(request_metadata_consumer_supervisor(
+                store.clone(),
+                url.clone(),
+                background_shutdown_receiver.clone(),
+            )));
+        }
+    }
+    if run_worker_in_process {
+        background_tasks.push(tokio::spawn(maintenance_supervisor(
+            store.clone(),
+            background_shutdown_receiver.clone(),
+        )));
+        background_tasks.push(tokio::spawn(request_metadata_epoch_supervisor(
+            store.clone(),
+            background_shutdown_receiver.clone(),
+        )));
+    }
+    let dependencies = state.mode_dependencies()?;
+    let observability_state = dependencies.observability();
+    if let Some(gateway_state) = dependencies.gateway() {
+        background_tasks.push(tokio::spawn(media_reconciliation_supervisor(
+            gateway_state,
+            background_shutdown_receiver.clone(),
+        )));
+    }
+    background_tasks.push(crate::spawn_observability_cache(
+        observability_state.clone(),
+        background_shutdown_receiver.clone(),
+    ));
+
+    info!(address = %args.listen_addr, ?mode, "OLP public listener ready");
+    info!(address = %args.observability_listen_addr, ?mode, "OLP observability listener ready");
+    let public_server = listener::serve_http(
+        listener,
+        crate::public_http::router::validated_public_router(dependencies),
+        listener::HttpServerConfig::standard(args.http_max_connections),
+        listener_shutdown_receiver.clone(),
+    );
+    // This listener has its own router-level concurrency cap. Constrain its
+    // connection envelope too so metrics traffic cannot occupy the public
+    // listener's entire process-level resource budget.
+    let observability_server = listener::serve_http(
+        observability_listener,
+        crate::observability::observability_router(observability_state),
+        listener::HttpServerConfig::standard(args.http_max_connections.clamp(1, 32)),
+        listener_shutdown_receiver,
+    );
+    let (public_result, observability_result, terminal_error) = coordinate_shutdown(
+        public_server,
+        observability_server,
+        shutdown_reason(shutdown_signal(), request_metadata_writer_status.as_mut()),
+        listener_shutdown_sender,
+        background_shutdown_sender,
+    )
+    .await;
+    stop_background_tasks(background_tasks, BACKGROUND_SHUTDOWN_TIMEOUT).await;
+    let terminal_error =
+        resolve_request_metadata_writer_error(request_metadata_writer_status, terminal_error).await;
+    public_result?;
+    observability_result?;
+    if let Some(error) = terminal_error {
+        return Err(error);
+    }
+    Ok(())
+}

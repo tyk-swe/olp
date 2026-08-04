@@ -5,11 +5,39 @@ use olp_domain::Role;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{InvitationMaterial, PersistenceError};
+use crate::{PersistenceError, security::InvitationMaterial};
 
 mod accounts;
 mod auth_admission;
 mod invitations;
+mod setup;
+
+pub struct InstallationSetupInput {
+    pub installation_name: String,
+    pub email: String,
+    pub display_name: String,
+    pub password_hash: String,
+}
+
+impl fmt::Debug for InstallationSetupInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("InstallationSetupInput")
+            .field("installation_name", &self.installation_name)
+            .field("email", &self.email)
+            .field("display_name", &self.display_name)
+            .field("password_hash", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InstallationSetupResult {
+    pub user_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub created_at: DateTime<Utc>,
+}
 
 #[derive(Debug, Error)]
 pub enum IdentityError {

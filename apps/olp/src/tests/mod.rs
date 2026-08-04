@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use olp_storage::{AuthHmacKey, RequestMetadataEmitter};
+use olp_storage::{request_metadata::RequestMetadataEmitter, security::AuthHmacKey};
 
 use axum::{
     Router,
@@ -27,6 +27,7 @@ use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     OperationKind, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface,
 };
+use olp_inference::runtime::RuntimeManager;
 use tower::{ServiceBuilder, ServiceExt, service_fn};
 use tower_http::{
     sensitive_headers::{SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer},
@@ -38,15 +39,15 @@ use super::*;
 use super::{
     gateway::{InferenceEndpoint, TokenEstimate},
     observability::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label},
-    public_auth_routes::PublicAuthRoute,
-    request_admission::{
+    public_http::public_auth_routes::PublicAuthRoute,
+    public_http::request_admission::{
         HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,
         HTTP_INFERENCE_RESERVATION_HOLD, InferenceReservation, JsonBodyReadError,
         LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody, RequestFinalization,
         enforce_request_limits, estimate_http_json_request_tokens, http_inference_principal,
         read_json_body, validate_json_depth, validate_multipart_boundary,
     },
-    router::{
+    public_http::router::{
         http_request_span, request_trace_path, sensitive_request_headers,
         sensitive_response_headers,
     },
@@ -57,7 +58,7 @@ mod authentication;
 mod observability;
 mod reservations;
 
-fn inference_state(limited: bool) -> (ApiState, String) {
+fn inference_state(limited: bool) -> (ProcessComposition, String) {
     let auth_hmac_key = Arc::new(AuthHmacKey::new([19; 32]));
     let material = auth_hmac_key.generate_api_key();
     let plaintext = material.expose_once().to_owned();
@@ -94,7 +95,7 @@ fn inference_state(limited: bool) -> (ApiState, String) {
             BTreeMap::new(),
         )
         .unwrap();
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Gateway,
         None,
         runtime,

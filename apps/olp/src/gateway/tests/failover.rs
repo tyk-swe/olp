@@ -41,7 +41,7 @@ impl ProviderTransport for CountingFiniteTransport {
 }
 
 fn install_hard_limits(state: &GatewayState) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys
         .values_mut()
@@ -58,8 +58,8 @@ fn install_two_target_streams(
     operation: OperationKind,
     first: Arc<dyn ProviderTransport>,
     second: Arc<dyn ProviderTransport>,
-) -> (Arc<crate::RuntimeBundle>, Vec<olp_domain::AttemptPlan>) {
-    let pinned = state.runtime.pin();
+) -> (Arc<RuntimeBundle>, Vec<olp_domain::AttemptPlan>) {
+    let pinned = state.runtime().pin();
     let first_provider_id = *pinned.providers.keys().next().unwrap();
     let second_provider_id = ProviderId::new();
     let mut providers = pinned.providers.clone();
@@ -102,13 +102,13 @@ fn install_two_target_streams(
         api_keys: pinned.api_keys.clone(),
     };
     state
-        .runtime
+        .runtime()
         .install(
             snapshot,
             BTreeMap::from([(first_provider_id, first), (second_provider_id, second)]),
         )
         .unwrap();
-    let runtime = state.runtime.pin();
+    let runtime = state.runtime().pin();
     let attempts = select_attempts(
         &runtime,
         &route_slug,
@@ -171,8 +171,8 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
         FailoverContext {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
-            media_spool: media_state.media_spool.clone(),
-            circuits: &crate::circuit::CircuitBreaker::default(),
+            media_spool: media_state.media_spool().clone(),
+            circuits: &CircuitBreaker::default(),
             on_attempt_started: None,
         },
         attempts,
@@ -184,7 +184,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
         Ok(_) => panic!("a committed media timeout must be terminal"),
         Err(failure) => failure,
     };
-    assert_eq!(failure.error.code, "ambiguous_upstream_result");
+    assert_eq!(failure.error.code(), "ambiguous_upstream_result");
     assert_eq!(failure.attempts.len(), 1);
     assert!(failure.attempts[0].committed);
     assert_eq!(media_first_calls.load(Ordering::SeqCst), 1);
@@ -207,8 +207,8 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
         FailoverContext {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
-            media_spool: generation_state.media_spool.clone(),
-            circuits: &crate::circuit::CircuitBreaker::default(),
+            media_spool: generation_state.media_spool().clone(),
+            circuits: &CircuitBreaker::default(),
             on_attempt_started: None,
         },
         attempts,
@@ -293,8 +293,8 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
         FailoverContext {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
-            media_spool: state.media_spool.clone(),
-            circuits: &crate::circuit::CircuitBreaker::default(),
+            media_spool: state.media_spool().clone(),
+            circuits: &CircuitBreaker::default(),
             on_attempt_started: None,
         },
         attempts,
@@ -384,9 +384,9 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
 async fn http_pre_reservation_marker_reuses_the_full_reservation() {
     let (state, key) = test_state(false);
     install_hard_limits(&state);
-    let snapshot = state.runtime.pin();
+    let snapshot = state.runtime().pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
-    let lookup = state.auth_hmac_key.as_ref().lookup_id(&key).unwrap();
+    let lookup = state.auth_hmac_key().as_ref().lookup_id(&key).unwrap();
     let operation = decode_chat_completion(
         serde_json::from_value(json!({
             "model": "default",
@@ -398,7 +398,14 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
     let lease = crate::HTTP_INFERENCE_LIMITS_RESERVED
         .scope(
             10_000,
-            reserve_limits(&state, api_key, &operation, lookup, Duration::from_secs(30)),
+            reserve_limits(
+                state.limiter(),
+                api_key,
+                &operation,
+                lookup,
+                Duration::from_secs(30),
+                Some(10_000),
+            ),
         )
         .await
         .expect("the canonical executor must reuse the HTTP reservation");
@@ -408,7 +415,7 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
 #[tokio::test]
 async fn http_request_above_baseline_requires_token_delta_reservation() {
     let (state, key) = test_state(false);
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys
         .values_mut()
@@ -417,9 +424,9 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
         .limits
         .tokens_per_minute = std::num::NonZeroU64::new(2_200);
     reinstall_api_keys(&state, api_keys);
-    let snapshot = state.runtime.pin();
+    let snapshot = state.runtime().pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
-    let lookup = state.auth_hmac_key.as_ref().lookup_id(&key).unwrap();
+    let lookup = state.auth_hmac_key().as_ref().lookup_id(&key).unwrap();
     let operation = Operation::Images(olp_domain::ImageOperation::Edit(
         olp_domain::ImageEditRequest {
             route: RouteSlug::parse("default").unwrap(),
@@ -433,9 +440,17 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
     let error = crate::HTTP_INFERENCE_LIMITS_RESERVED
         .scope(
             2_000,
-            reserve_limits(&state, api_key, &operation, lookup, Duration::from_secs(30)),
+            reserve_limits(
+                state.limiter(),
+                api_key,
+                &operation,
+                lookup,
+                Duration::from_secs(30),
+                Some(2_000),
+            ),
         )
         .await
+        .map_err(InferenceError::from)
         .expect_err("missing delta limiter must fail closed above the HTTP baseline");
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error.code, "distributed_limits_unavailable");

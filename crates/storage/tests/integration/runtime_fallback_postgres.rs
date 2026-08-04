@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use chrono::{Duration, Utc};
 use olp_domain::{ApiKeyScope, RuntimeSnapshot};
-use olp_storage::{InstallationSetupInput, SessionMaterial};
+use olp_storage::{identity::InstallationSetupInput, security::SessionMaterial};
 use uuid::Uuid;
 
 #[tokio::test]

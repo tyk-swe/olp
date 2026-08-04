@@ -18,7 +18,7 @@ async fn public_router_serves_console_health_and_hides_observability_paths() {
         "<!doctype html><title>OLP console</title>",
     )
     .unwrap();
-    let state = ApiState::new(
+    let state = ProcessComposition::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
@@ -174,7 +174,7 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
                 HeaderValue::from_static("session=secret"),
             );
             response.headers_mut().insert(
-                HeaderName::from_static(management_api::CSRF_HEADER),
+                HeaderName::from_static(management::CSRF_HEADER),
                 HeaderValue::from_static("csrf-secret"),
             );
             Ok::<_, Infallible>(response)
@@ -190,11 +190,11 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
         HeaderValue::from_static("session=secret"),
     );
     request.headers_mut().insert(
-        HeaderName::from_static(management_api::CSRF_HEADER),
+        HeaderName::from_static(management::CSRF_HEADER),
         HeaderValue::from_static("csrf-secret"),
     );
     request.headers_mut().insert(
-        HeaderName::from_static(management_api::SETUP_TOKEN_HEADER),
+        HeaderName::from_static(management::SETUP_TOKEN_HEADER),
         HeaderValue::from_static("bootstrap-secret"),
     );
     request.headers_mut().insert(
@@ -213,7 +213,7 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
     assert!(
         response
             .headers()
-            .get(HeaderName::from_static(management_api::CSRF_HEADER))
+            .get(HeaderName::from_static(management::CSRF_HEADER))
             .unwrap()
             .is_sensitive(),
         "TraceLayer must observe rotated CSRF credentials only after they are marked sensitive"
@@ -236,7 +236,7 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
     )
     .unwrap();
     let app = public_router(
-        ApiState::new(
+        ProcessComposition::new(
             ApiMode::Control,
             None,
             Arc::new(RuntimeManager::empty()),
@@ -268,7 +268,7 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
 #[tokio::test]
 async fn management_extractor_rejections_are_rfc9457_without_query_reflection() {
     let app = public_router(
-        ApiState::new(
+        ProcessComposition::new(
             ApiMode::Control,
             None,
             Arc::new(RuntimeManager::empty()),

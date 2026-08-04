@@ -13,11 +13,12 @@ fn inference_error_debug_redacts_client_message() {
 #[tokio::test]
 async fn unary_openai_route_authenticates_routes_and_encodes() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(4);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(4);
+    state.replace_request_metadata_for_test(emitter);
     let response = tokio::time::timeout(
         Duration::from_millis(250),
-        crate::router::gateway_router_for_test(state).oneshot(
+        crate::public_http::router::gateway_router_for_test(state).oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
                 .header(header::CONTENT_TYPE, "application/json")
@@ -45,7 +46,7 @@ async fn unary_openai_route_authenticates_routes_and_encodes() {
 #[tokio::test]
 async fn openai_json_audio_and_responses_pdf_reach_same_protocol_transport() {
     let (state, key) = test_state(false);
-    let app = crate::router::gateway_router_for_test(state);
+    let app = crate::public_http::router::gateway_router_for_test(state);
     let response = app
         .clone()
         .oneshot(
@@ -79,7 +80,7 @@ async fn openai_json_audio_and_responses_pdf_reach_same_protocol_transport() {
 #[tokio::test]
 async fn invalid_proxy_key_gets_native_openai_error() {
     let (state, _) = test_state(false);
-    let response = crate::router::gateway_router_for_test(state)
+    let response = crate::public_http::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(header::AUTHORIZATION, "Bearer olp_v2_deadbeef0000_bad")
@@ -98,7 +99,7 @@ async fn invalid_proxy_key_gets_native_openai_error() {
 #[tokio::test]
 async fn responses_surface_encodes_responses_object_not_chat_object() {
     let (state, key) = test_state(false);
-    let response = crate::router::gateway_router_for_test(state)
+    let response = crate::public_http::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/responses")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -138,7 +139,7 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
             extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         }),
     );
-    let response = crate::router::gateway_router_for_test(state)
+    let response = crate::public_http::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/embeddings")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -159,8 +160,9 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
 #[tokio::test]
 async fn incompatible_unary_result_is_finalized_as_protocol_failure() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     install_result(
         &state,
         OperationKind::TokenCount,
@@ -315,7 +317,7 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
 async fn speech_surface_streams_bounded_spooled_result() {
     let (state, key) = test_state(false);
     let artifact = state
-        .media_spool
+        .media_spool()
         .put(olp_domain::MediaUpload {
             filename: "speech.mp3".into(),
             content_type: Some("audio/mpeg".into()),

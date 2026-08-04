@@ -13,11 +13,12 @@ use olp_protocols::gemini::{
 };
 use serde::{Deserialize, Serialize};
 
+use olp_inference::{CompletedEventExecution, runtime::RuntimeBundle};
+
 use crate::{
-    GatewayState, InferencePrincipal, RuntimeBundle,
-    event_completion::{CompletedEventExecution, collect_event_execution},
-    json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
-    streaming_response::{
+    GatewayState, InferencePrincipal,
+    public_http::json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
+    public_http::streaming_response::{
         ProtocolStreamEncoder, encode_server_sse_frame, encode_sse_frame,
         protocol_streaming_response,
     },
@@ -65,8 +66,10 @@ pub(super) async fn action(
         )
         .await
         .map_err(ProtocolError::gemini)?;
-        let completed = collect_event_execution(&state, execution)
+        let completed = execution
+            .collect()
             .await
+            .map_err(InferenceError::from)
             .map_err(ProtocolError::gemini)?;
         return unary_response(completed);
     }
@@ -217,7 +220,7 @@ pub(super) async fn models(
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
-    let (runtime, key) = authorize_model_access(&principal, OperationKind::ModelList)
+    let (runtime, key) = authorize_model_access(&state, &principal, OperationKind::ModelList)
         .map_err(ProtocolError::gemini)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
@@ -280,7 +283,7 @@ pub(super) async fn model(
     Extension(principal): Extension<InferencePrincipal>,
     Path(resource): Path<String>,
 ) -> Result<Response, ProtocolError> {
-    let (runtime, key) = authorize_model_access(&principal, OperationKind::ModelGet)
+    let (runtime, key) = authorize_model_access(&state, &principal, OperationKind::ModelGet)
         .map_err(ProtocolError::gemini)?;
     let lease = reserve_model_limits(&state, &principal)
         .await

@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken } from '$lib/api/session';
-import {
-  AuthenticationLifecycle,
-  isAuthenticationEndpoint,
-  type AuthenticatedSession
-} from './lifecycle';
+import { AuthenticationLifecycle } from './lifecycle';
+import { isAuthenticationEndpoint } from './requestPolicy';
+import type { AuthenticatedSession } from './state';
 
 const session = (csrfToken = 'csrf-session'): AuthenticatedSession => ({
   user: {
@@ -36,7 +34,9 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function boundary(loadSession: (signal: AbortSignal) => Promise<AuthenticatedSession>) {
+function boundary(
+  loadSession: (signal: AbortSignal) => Promise<AuthenticatedSession>
+) {
   return {
     loadSession,
     unauthenticatedDestination: vi.fn(async () => '/login'),
@@ -68,10 +68,14 @@ describe('authentication lifecycle', () => {
     const firstRequest = vi.fn(async () => session());
     const secondRequest = vi.fn(async () => session('csrf-second'));
 
-    const firstAuthentication = lifecycle.authenticate(firstRequest).catch((error: unknown) => error);
+    const firstAuthentication = lifecycle
+      .authenticate(firstRequest)
+      .catch((error: unknown) => error);
     const secondAuthentication = lifecycle.authenticate(secondRequest);
 
-    await expect(secondAuthentication).resolves.toMatchObject({ csrf_token: 'csrf-second' });
+    await expect(secondAuthentication).resolves.toMatchObject({
+      csrf_token: 'csrf-second'
+    });
     releaseFirstCancellation();
     const firstError = await firstAuthentication;
 
@@ -100,13 +104,19 @@ describe('authentication lifecycle', () => {
 
     const transition = lifecycle.principalInvalidated();
     await vi.waitFor(() => expect(cancelQueries).toHaveBeenCalledOnce());
-    const authenticated = lifecycle.authenticate(async () => session('csrf-new'));
+    const authenticated = lifecycle.authenticate(async () =>
+      session('csrf-new')
+    );
 
-    await expect(authenticated).resolves.toMatchObject({ csrf_token: 'csrf-new' });
+    await expect(authenticated).resolves.toMatchObject({
+      csrf_token: 'csrf-new'
+    });
     transitionCancellation.resolve(undefined);
     await transition;
 
-    expect(registeredBoundary.unauthenticatedDestination).not.toHaveBeenCalled();
+    expect(
+      registeredBoundary.unauthenticatedDestination
+    ).not.toHaveBeenCalled();
     expect(lifecycle.snapshot()).toMatchObject({
       phase: 'authenticated',
       user: session().user
@@ -170,7 +180,9 @@ describe('authentication lifecycle', () => {
       user: currentSession.user
     });
     expect(getCsrfToken()).toBe('csrf-current');
-    expect(lifecycle.queryKeyHash(['current'])).toContain('principal:current-principal:operator');
+    expect(lifecycle.queryKeyHash(['current'])).toContain(
+      'principal:current-principal:operator'
+    );
   });
 
   it('does not run obsolete validation error cleanup after authentication', async () => {
@@ -184,7 +196,9 @@ describe('authentication lifecycle', () => {
       cancelQueries,
       clear: vi.fn()
     } as unknown as QueryClient);
-    lifecycle.registerBoundary(boundary(async () => Promise.reject(new Error('Unavailable'))));
+    lifecycle.registerBoundary(
+      boundary(async () => Promise.reject(new Error('Unavailable')))
+    );
     const currentSession = sessionFor('current-principal', 'csrf-current');
 
     const validation = lifecycle.validateSession();
@@ -198,7 +212,9 @@ describe('authentication lifecycle', () => {
       user: currentSession.user
     });
     expect(getCsrfToken()).toBe('csrf-current');
-    expect(lifecycle.queryKeyHash(['current'])).toContain('principal:current-principal:operator');
+    expect(lifecycle.queryKeyHash(['current'])).toContain(
+      'principal:current-principal:operator'
+    );
   });
 
   it('keeps the authenticated snapshot mounted during passive validation', async () => {
@@ -235,7 +251,9 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const preparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+      new Request('https://console.example.test/api/v1/profile', {
+        method: 'PATCH'
+      })
     );
 
     expect(lifecycle.snapshot().phase).toBe('authenticated');
@@ -253,13 +271,18 @@ describe('authentication lifecycle', () => {
     ['GET', '/api/v1/oidc/login'],
     ['POST', '/api/v1/oidc/login'],
     ['GET', '/api/v1/oidc/callback']
-  ])('allows public authentication request %s %s without a session', async (method, pathname) => {
-    const lifecycle = new AuthenticationLifecycle();
-    const request = new Request(`https://console.example.test${pathname}`, { method });
+  ])(
+    'allows public authentication request %s %s without a session',
+    async (method, pathname) => {
+      const lifecycle = new AuthenticationLifecycle();
+      const request = new Request(`https://console.example.test${pathname}`, {
+        method
+      });
 
-    expect(isAuthenticationEndpoint(request)).toBe(true);
-    await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
-  });
+      expect(isAuthenticationEndpoint(request)).toBe(true);
+      await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
+    }
+  );
 
   it.each([
     ['GET', '/api/v1/setup'],
@@ -269,11 +292,16 @@ describe('authentication lifecycle', () => {
     ['POST', '/api/v1/sessions/nested'],
     ['POST', '/api/v1/oidc/link'],
     ['GET', '/api/v1/oidc/callback/extra']
-  ])('does not widen authentication request matching for %s %s', async (method, pathname) => {
-    const request = new Request(`https://console.example.test${pathname}`, { method });
+  ])(
+    'does not widen authentication request matching for %s %s',
+    async (method, pathname) => {
+      const request = new Request(`https://console.example.test${pathname}`, {
+        method
+      });
 
-    expect(isAuthenticationEndpoint(request)).toBe(false);
-  });
+      expect(isAuthenticationEndpoint(request)).toBe(false);
+    }
+  );
 
   it('classifies authentication endpoints by pathname without query-string widening', () => {
     const request = new Request(
@@ -298,10 +326,14 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const firstPreparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/providers/one', { method: 'PATCH' })
+      new Request('https://console.example.test/api/v1/providers/one', {
+        method: 'PATCH'
+      })
     );
     const secondPreparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/providers/two', { method: 'DELETE' })
+      new Request('https://console.example.test/api/v1/providers/two', {
+        method: 'DELETE'
+      })
     );
 
     expect(loadSession).toHaveBeenCalledOnce();
@@ -329,14 +361,19 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const preparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+      new Request('https://console.example.test/api/v1/profile', {
+        method: 'PATCH'
+      })
     );
     vi.advanceTimersByTime(501);
     const passiveValidation = lifecycle.validateSession({ passive: true });
 
     expect(loadSession).toHaveBeenCalledOnce();
     resolveSession(session('csrf-refreshed'));
-    const [request, passiveSession] = await Promise.all([preparation, passiveValidation]);
+    const [request, passiveSession] = await Promise.all([
+      preparation,
+      passiveValidation
+    ]);
 
     expect(passiveSession).toMatchObject({ csrf_token: 'csrf-refreshed' });
     expect(request.headers.get('x-csrf-token')).toBe('csrf-refreshed');
@@ -355,7 +392,9 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const preparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+      new Request('https://console.example.test/api/v1/profile', {
+        method: 'PATCH'
+      })
     );
     resolveSession(sessionFor('second-principal', 'csrf-second'));
     const error = await preparation.catch((value: unknown) => value);
@@ -392,7 +431,9 @@ describe('authentication lifecycle', () => {
     const lifecycle = new AuthenticationLifecycle();
     lifecycle.establishSession(session('csrf-original'));
     const request = await lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+      new Request('https://console.example.test/api/v1/profile', {
+        method: 'PATCH'
+      })
     );
 
     await lifecycle.handleResponse(
@@ -407,7 +448,9 @@ describe('authentication lifecycle', () => {
     const lifecycle = new AuthenticationLifecycle();
     lifecycle.establishSession(session('csrf-original'));
     const staleRequest = await lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+      new Request('https://console.example.test/api/v1/profile', {
+        method: 'PATCH'
+      })
     );
     await lifecycle.authenticate(async () => session('csrf-current'));
 
@@ -429,7 +472,10 @@ describe('authentication lifecycle', () => {
       new Request('https://console.example.test/api/v1/profile')
     );
 
-    await lifecycle.handleResponse(staleRequest, new Response(null, { status: 401 }));
+    await lifecycle.handleResponse(
+      staleRequest,
+      new Response(null, { status: 401 })
+    );
 
     expect(loadSession).toHaveBeenCalledOnce();
     expect(registeredBoundary.navigate).not.toHaveBeenCalled();
@@ -451,7 +497,10 @@ describe('authentication lifecycle', () => {
     );
     await lifecycle.authenticate(async () => session('csrf-current'));
 
-    await lifecycle.handleResponse(staleRequest, new Response(null, { status: 401 }));
+    await lifecycle.handleResponse(
+      staleRequest,
+      new Response(null, { status: 401 })
+    );
 
     expect(loadSession).not.toHaveBeenCalled();
     expect(registeredBoundary.navigate).not.toHaveBeenCalled();
@@ -473,7 +522,10 @@ describe('authentication lifecycle', () => {
     loaded.resolve(session('csrf-stale'));
     await validation;
 
-    expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'anonymous',
+      user: null
+    });
     expect(getCsrfToken()).toBeNull();
   });
 
@@ -489,7 +541,10 @@ describe('authentication lifecycle', () => {
     loaded.resolve(session('csrf-stale'));
     await validation;
 
-    expect(lifecycle.snapshot()).toMatchObject({ phase: 'anonymous', user: null });
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'anonymous',
+      user: null
+    });
     expect(getCsrfToken()).toBeNull();
     expect(registeredBoundary.navigate).toHaveBeenCalledWith('/login');
   });
@@ -525,7 +580,9 @@ describe('authentication lifecycle', () => {
 
     const error = await lifecycle
       .prepareRequest(
-        new Request('https://console.example.test/api/v1/profile', { method: 'PATCH' })
+        new Request('https://console.example.test/api/v1/profile', {
+          method: 'PATCH'
+        })
       )
       .catch((value: unknown) => value);
 

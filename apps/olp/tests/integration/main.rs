@@ -1,3 +1,5 @@
+#![cfg(feature = "test-util")]
+
 //! Single integration-test binary for the olp app. The `*_postgres`
 //! suites stay `#[ignore]`d and run via `make db-test`
 //! (`scripts/run-postgres-tests.sh`) with one database per test from

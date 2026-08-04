@@ -3,7 +3,11 @@ use olp_domain::{OperationKind, ProviderAuthMode, ProviderId, ProviderKind, Rout
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{EncryptedSecret, PersistenceError, PublishedRuntimeRelease, RuntimeCompileError};
+use crate::{
+    PersistenceError,
+    runtime::{PublishedRuntimeRelease, RuntimeCompileError},
+    security::EncryptedSecret,
+};
 
 mod provider_lifecycle;
 mod resources;

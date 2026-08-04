@@ -3,14 +3,15 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    IdempotencyOutcome, IdempotencyResponse, InvitationMaterial, PersistenceError, PgStore,
-    ReplayableIdempotency, SessionMaterial,
+    PersistenceError, PgStore,
     authentication::insert_versioned_session,
-    split_page,
-    store::{
-        ReplayableIdempotencyClaim, claim_idempotency, claim_replayable_idempotency,
-        complete_idempotency, complete_replayable_idempotency,
+    idempotency::{
+        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
+        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
+        complete_replayable_idempotency,
     },
+    security::{InvitationMaterial, SessionMaterial},
+    split_page,
 };
 
 use super::{

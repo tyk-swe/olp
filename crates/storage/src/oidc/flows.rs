@@ -4,8 +4,8 @@ use uuid::Uuid;
 use super::helpers::{encrypted_from_row, require_current_enabled_configuration, token_digest};
 use super::{NewOidcFlow, OidcError, OidcFlowPurpose, OidcFlowRecord};
 use crate::{
-    PgStore, RecentAuthPurpose,
-    authentication::{consume_recent_authentication, insert_security_audit},
+    PgStore,
+    authentication::{RecentAuthPurpose, consume_recent_authentication, insert_security_audit},
 };
 
 const OIDC_FLOW_CAPACITY_LOCK_ID: i64 = 0x4f4c_505f_4f46; // "OLP_OF"

@@ -1,7 +1,9 @@
 use chrono::{Duration, Utc};
 use olp_storage::{
-    ConfigurationError, InstallationSetupInput, MediaJobError, MediaJobFilters, MediaJobLifecycle,
-    MediaJobOrder, MediaJobState, MediaJobUpdate, NewMediaJobReservation, hash_password,
+    configuration::ConfigurationError, identity::InstallationSetupInput, media_jobs::MediaJobError,
+    media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder,
+    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
+    security::hash_password,
 };
 use uuid::Uuid;
 
@@ -160,7 +162,9 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .unwrap();
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].id, second.id);
-    let cursor = olp_storage::TimestampCursor::parse(page.next_cursor.as_deref().unwrap()).unwrap();
+    let cursor =
+        olp_storage::operations::TimestampCursor::parse(page.next_cursor.as_deref().unwrap())
+            .unwrap();
     let next = store
         .media_jobs(&MediaJobFilters::default(), Some(&cursor), 1)
         .await

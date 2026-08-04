@@ -5,7 +5,8 @@
   import { onMount } from 'svelte';
   import { currentSession, logout } from '$lib/api/auth';
   import { getSetupStatus } from '$lib/api/setup';
-  import { authLifecycle, type AuthenticationSnapshot } from '$lib/auth/lifecycle';
+  import { authLifecycle } from '$lib/auth/lifecycle';
+  import type { AuthenticationSnapshot } from '$lib/auth/state';
   import AppShell from '$lib/components/AppShell.svelte';
 
   let { children } = $props();
@@ -24,10 +25,15 @@
     signingOut = true;
     signOutError = '';
     try {
-      await authLifecycle.signOut((signal) => logout(signal), resolve('/login'));
+      await authLifecycle.signOut(
+        (signal) => logout(signal),
+        resolve('/login')
+      );
     } catch (error) {
       signOutError =
-        error instanceof Error ? error.message : 'The sign-out request could not be completed.';
+        error instanceof Error
+          ? error.message
+          : 'The sign-out request could not be completed.';
     } finally {
       signingOut = false;
     }
@@ -53,7 +59,10 @@
     });
 
     const revalidate = () => {
-      if (document.visibilityState === 'visible' && authLifecycle.snapshot().phase === 'authenticated') {
+      if (
+        document.visibilityState === 'visible' &&
+        authLifecycle.snapshot().phase === 'authenticated'
+      ) {
         void authLifecycle.validateSession({ passive: true });
       }
     };
@@ -80,14 +89,25 @@
       <div class="problem-banner" role="alert">
         <div>
           <strong>Session verification unavailable</strong>
-          <p>{authentication.error} Protected console content has not been loaded.</p>
+          <p>
+            {authentication.error} Protected console content has not been loaded.
+          </p>
         </div>
-        <button class="button button-secondary" type="button" onclick={() => authLifecycle.validateSession()}>Retry</button>
+        <button
+          class="button button-secondary"
+          type="button"
+          onclick={() => authLifecycle.validateSession()}>Retry</button
+        >
       </div>
     {/if}
   </main>
 {:else}
-  <AppShell user={authentication.user} {signingOut} signOutError={signOutError || authentication.principalExitError} onSignOut={signOut}>
+  <AppShell
+    user={authentication.user}
+    {signingOut}
+    signOutError={signOutError || authentication.principalExitError}
+    onSignOut={signOut}
+  >
     {@render children()}
   </AppShell>
 {/if}
@@ -118,7 +138,13 @@
     animation: session-spin 700ms linear infinite;
   }
 
-  .session-gate .problem-banner { width: min(100%, 42rem); }
+  .session-gate .problem-banner {
+    width: min(100%, 42rem);
+  }
 
-  @keyframes session-spin { to { transform: rotate(360deg); } }
+  @keyframes session-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 </style>

@@ -9,7 +9,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::configuration::OIDC_CONFIGURATION_LOCK_ID;
 use super::{OidcAuthenticatedUser, OidcError};
-use crate::{EncryptedSecret, SessionMaterial, authentication::insert_versioned_session};
+use crate::{
+    authentication::insert_versioned_session,
+    security::{EncryptedSecret, SessionMaterial},
+};
 
 pub(super) fn encrypted_from_row(
     key_version: i32,

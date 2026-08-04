@@ -4,7 +4,7 @@
   import {
     routeListStateContext,
     type RouteListState
-  } from '$lib/features/gateway/routeListState';
+  } from '$lib/features/gateway/routes/routeListState';
 
   let { children } = $props();
   const listState = $state<RouteListState>({

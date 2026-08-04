@@ -3,7 +3,7 @@ use chrono::Utc;
 use olp_domain::Role;
 use uuid::Uuid;
 
-use crate::EncryptedSecret;
+use crate::security::EncryptedSecret;
 
 fn mapping(value: &str, role: Role) -> OidcRoleMapping {
     OidcRoleMapping {

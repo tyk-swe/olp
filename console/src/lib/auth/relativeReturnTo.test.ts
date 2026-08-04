@@ -8,7 +8,10 @@ describe('relativeReturnTo', () => {
     ['/settings', '/settings'],
     ['/settings?tab=security', '/settings?tab=security'],
     ['/files/a%20b', '/files/a%20b'],
-    ['/search?q=hello%20world&next=%2Fmodels', '/search?q=hello%20world&next=%2Fmodels'],
+    [
+      '/search?q=hello%20world&next=%2Fmodels',
+      '/search?q=hello%20world&next=%2Fmodels'
+    ],
     ['/settings?tab=security#sessions', '/settings?tab=security#sessions'],
     ['/a/../settings', '/settings']
   ])('accepts and canonicalizes %s', (input, expected) => {
