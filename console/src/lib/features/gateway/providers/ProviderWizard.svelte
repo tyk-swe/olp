@@ -566,8 +566,7 @@
           ><textarea
             id="manual-models-wizard"
             bind:value={manualModelNames}
-            placeholder="model-a&#10;model-b"
-          ></textarea>
+            placeholder="model-a&#10;model-b"></textarea>
         </div>
         <button
           class="button button-secondary"
