@@ -13,11 +13,7 @@ export type AuthenticatedSession = {
 };
 
 export type AuthenticationPhase =
-  | 'anonymous'
-  | 'checking'
-  | 'authenticated'
-  | 'transitioning'
-  | 'unavailable';
+  'anonymous' | 'checking' | 'authenticated' | 'transitioning' | 'unavailable';
 
 export type PrincipalAbsentSnapshot = {
   phase: Exclude<AuthenticationPhase, 'authenticated'>;
@@ -36,8 +32,7 @@ type AuthenticatedSnapshot = {
 };
 
 export type AuthenticationSnapshot =
-  | PrincipalAbsentSnapshot
-  | AuthenticatedSnapshot;
+  PrincipalAbsentSnapshot | AuthenticatedSnapshot;
 
 export type AuthenticationAction =
   | { type: 'gate'; phase: PrincipalAbsentSnapshot['phase']; error?: string }
