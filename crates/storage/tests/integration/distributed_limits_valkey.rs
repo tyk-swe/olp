@@ -1,7 +1,10 @@
 use std::{collections::HashMap, time::Duration};
 
 use futures::future::join_all;
-use olp_storage::{DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest};
+use olp_storage::{
+    limits::DistributedLimiter, limits::LimitDimension, limits::LimitError, limits::LimitLease,
+    limits::LimitRequest,
+};
 use redis::{AsyncCommands, aio::MultiplexedConnection};
 use uuid::Uuid;
 

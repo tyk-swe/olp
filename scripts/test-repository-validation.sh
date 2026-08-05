@@ -238,10 +238,31 @@ test_external_cargo_patch_path_is_rejected() {
   local status
 
   mkdir -p \
-    "$workspace/scripts/lib" "$workspace/apps/olp/src" \
+    "$workspace/scripts/lib" \
+    "$workspace/apps/olp/src/bootstrap" "$workspace/apps/olp/src/console" \
+    "$workspace/apps/olp/src/gateway" "$workspace/apps/olp/src/management" \
+    "$workspace/apps/olp/src/observability" "$workspace/apps/olp/src/public_http" \
+    "$workspace/apps/olp/src/tests" \
     "$workspace/crates/domain" "$workspace/crates/protocols" \
-    "$workspace/crates/providers" "$workspace/crates/storage" \
-    "$workspace/console/src/routes" "$fixture_root/external" "$fake_bin"
+    "$workspace/crates/providers" "$workspace/crates/inference" \
+    "$workspace/crates/storage" \
+    "$workspace/console/src/routes" \
+    "$workspace/console/src/lib/features/gateway/models" \
+    "$workspace/console/src/lib/features/gateway/providers" \
+    "$workspace/console/src/lib/features/gateway/routes" \
+    "$workspace/console/src/lib/features/access/api-keys" \
+    "$workspace/console/src/lib/features/access/invitations" \
+    "$workspace/console/src/lib/features/access/oidc" \
+    "$workspace/console/src/lib/features/access/sessions" \
+    "$workspace/console/src/lib/features/access/users" \
+    "$workspace/console/src/lib/features/operations/audit" \
+    "$workspace/console/src/lib/features/operations/health" \
+    "$workspace/console/src/lib/features/operations/media-jobs" \
+    "$workspace/console/src/lib/features/operations/requests" \
+    "$workspace/console/src/lib/features/operations/usage" \
+    "$workspace/console/src/lib/features/settings/installation" \
+    "$workspace/console/src/lib/features/settings/profile" \
+    "$fixture_root/external" "$fake_bin"
   cp "$script_dir/check-boundaries.sh" "$workspace/scripts/check-boundaries.sh"
   cp "$helper" "$workspace/scripts/lib/repository-validation.sh"
   printf '%s\n' \
@@ -253,6 +274,8 @@ test_external_cargo_patch_path_is_rejected() {
   printf '{}\n' > "$workspace/console/package.json"
   printf '@sveltejs/adapter-static\n' > "$workspace/console/svelte.config.js"
   printf 'export const ssr = false;\n' > "$workspace/console/src/routes/+layout.ts"
+  printf '' > "$workspace/apps/olp/src/lib.rs"
+  printf '' > "$workspace/apps/olp/src/main.rs"
   printf '%s\n' \
     '[package]' \
     'name = "serde"' \

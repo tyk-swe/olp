@@ -1,6 +1,6 @@
 use olp_domain::{ApiKey, OperationKind, RouteSlug, Surface, TransportMode, select_attempts};
 
-use crate::RuntimeBundle;
+use olp_inference::runtime::RuntimeBundle;
 
 use super::protocol_error::ProtocolError;
 

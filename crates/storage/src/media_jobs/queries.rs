@@ -3,7 +3,11 @@ use olp_domain::OperationKind;
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
-use crate::{OperationsPage, PgStore, TimestampCursor, split_page};
+use crate::{
+    PgStore,
+    operations::{OperationsPage, TimestampCursor},
+    split_page,
+};
 
 use super::{
     MAX_PAGE_SIZE, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,

@@ -44,15 +44,22 @@ crates/domain   canonical model, routing policy — no infrastructure deps
 crates/protocols vendor wire translation (OpenAI/Anthropic/Gemini DTOs, SSE)
 crates/providers outbound provider + OIDC networking (reqwest, aws-*, google-cloud-auth)
 crates/storage  PostgreSQL (sqlx) + Valkey; migrations; Lua scripts
+crates/inference transport-neutral runtime pinning, selection, execution, failover, accounting
 tests/conformance cross-protocol conformance harness over tests/fixtures/
 ```
 
 Dependencies point toward `crates/domain`:
-`olp → {domain, protocols, providers, storage}`, `storage → domain`,
+`olp → {domain, protocols, providers, storage, inference}`,
+`inference → {domain, protocols, providers, storage}`, `storage → domain`,
 `providers → {domain, protocols}`, `protocols → domain`.
-`scripts/check-boundaries.sh` enforces the DAG, the exact package set, and
+`scripts/check-boundaries.sh` enforces the DAG, the exact package set, the
+responsibility-oriented app/console roots, and
 dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
-`google-cloud-auth` only in providers; `axum`/`clap` only in apps/olp).
+`google-cloud-auth` only in providers; `axum`/`tower*`/`clap` only in apps/olp).
+
+The app source has six production roots: `bootstrap/`, `public_http/`,
+`gateway/`, `management/`, `observability/`, and `console/`. Transport-neutral
+inference behavior belongs in `crates/inference`, never in an Axum handler.
 
 ## Where does X live
 
@@ -60,7 +67,8 @@ dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
 |---|---|
 | Provider kinds, auth choices, field applicability, validation | `crates/domain/src/provider_configuration.rs` |
 | Inference endpoint registry (method, path, admission, routing) | `apps/olp/src/gateway/endpoint_policy.rs` |
-| Runtime capability eligibility, weighted rendezvous scoring | `crates/domain/src/routing.rs` |
+| Runtime capability eligibility, weighted rendezvous scoring | `crates/domain/src/routing/{selection,route}.rs` via the `routing` facade |
+| Runtime pinning, failover, limits, terminal accounting | `crates/inference/src/` |
 | Public IP classification / egress policy | `crates/providers/src/http_egress.rs` |
 | SQL migrations (forward-only, sequential) | `crates/storage/migrations/` |
 | Management API contract | `openapi/management.json` → `make openapi` after endpoint changes |
@@ -82,7 +90,7 @@ dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
 
 - Never move `apps/`, `crates/*`, or `console/src/routes`, and never add or
   remove a workspace package, without co-updating `scripts/check-boundaries.sh`
-  and the COPY list in `deploy/Dockerfile`.
+  and verifying the workspace COPY scope in `deploy/Dockerfile`.
 - Two dockerignore files exist; BuildKit uses `deploy/Dockerfile.dockerignore`
   for the production image. Keep the root `.dockerignore` a synchronized copy.
 - Migrations are forward-only; `release-metadata.env` pins the last released

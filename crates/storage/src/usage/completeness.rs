@@ -5,8 +5,12 @@ use super::{
     query::{push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
-    OperationsError, PgStore, RequestMetadataConsumerStatus,
-    operations::cursor::{checked_u64, trimmed_optional},
+    PgStore,
+    operations::{
+        OperationsError,
+        cursor::{checked_u64, trimmed_optional},
+    },
+    request_metadata::RequestMetadataConsumerStatus,
 };
 
 #[derive(Clone, Debug)]

@@ -3,7 +3,7 @@
   import {
     mediaJobListStateContext,
     type MediaJobListState
-  } from '$lib/features/operations/mediaJobListState';
+  } from '$lib/features/operations/media-jobs/mediaJobListState';
 
   let { children } = $props();
   const listState = $state<MediaJobListState>({

@@ -19,6 +19,11 @@ mod vertex;
 
 pub use anthropic::validate_operation as validate_anthropic_operation;
 pub use bedrock::validate_operation as validate_bedrock_operation;
-pub use factory::*;
+pub use factory::{
+    CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
+    CredentialKind, OpenAiConnector, OpenAiConnectorOverrideRegistry, ProviderConfig,
+    ProviderCredential, ProviderError, ProviderFacade, ProviderFactory, certifiable_capabilities,
+    supports_capability_certification,
+};
 pub use gemini::validate_operation as validate_gemini_operation;
 pub use oidc::{OidcNetworkError, OidcNetworkPolicy};

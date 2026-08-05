@@ -8,7 +8,9 @@ use zeroize::Zeroizing;
 
 use super::helpers::{random_token, role_rank, token_digest};
 use crate::{
-    EncryptedSecret, PersistenceError, RecentAuthMaterial, RecentAuthPurpose, SessionMaterial,
+    PersistenceError,
+    authentication::RecentAuthPurpose,
+    security::{EncryptedSecret, RecentAuthMaterial, SessionMaterial},
 };
 
 #[derive(Debug, Error)]

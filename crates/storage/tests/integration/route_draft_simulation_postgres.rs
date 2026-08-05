@@ -2,7 +2,10 @@ use crate::support::route_fixtures::{DraftFixture, insert_provider};
 use olp_domain::{
     OperationKind, RouteSlug, RuntimeSnapshot, Surface, TransportMode, select_attempts,
 };
-use olp_storage::{InstallationSetupInput, ReplaceRouteDraftInput, SessionMaterial};
+use olp_storage::{
+    configuration::ReplaceRouteDraftInput, identity::InstallationSetupInput,
+    security::SessionMaterial,
+};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 

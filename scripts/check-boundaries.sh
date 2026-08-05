@@ -16,11 +16,58 @@ for required_file in \
 done
 for required_directory in \
   apps apps/olp/src crates crates/domain crates/protocols crates/providers \
-  crates/storage console/src console/src/routes; do
+  crates/inference crates/storage console/src console/src/routes; do
   validation_require_directory "$required_directory"
 done
 
 violations=0
+
+actual_app_root="$(find apps/olp/src -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
+expected_app_root="$(printf '%s\n' \
+  bootstrap console gateway lib.rs main.rs management observability public_http tests | sort)"
+if [[ "$actual_app_root" != "$expected_app_root" ]]; then
+  echo "apps/olp/src must expose only the responsibility-oriented delivery roots:" >&2
+  printf '%s\n' "$actual_app_root" >&2
+  violations=1
+fi
+
+actual_console_slices="$(find \
+  console/src/lib/features/gateway \
+  console/src/lib/features/access \
+  console/src/lib/features/operations \
+  console/src/lib/features/settings \
+  -mindepth 1 -maxdepth 1 -type d -printf '%p\n' | sort)"
+expected_console_slices="$(printf '%s\n' \
+  console/src/lib/features/gateway/models \
+  console/src/lib/features/gateway/providers \
+  console/src/lib/features/gateway/routes \
+  console/src/lib/features/access/api-keys \
+  console/src/lib/features/access/invitations \
+  console/src/lib/features/access/oidc \
+  console/src/lib/features/access/sessions \
+  console/src/lib/features/access/users \
+  console/src/lib/features/operations/audit \
+  console/src/lib/features/operations/health \
+  console/src/lib/features/operations/media-jobs \
+  console/src/lib/features/operations/requests \
+  console/src/lib/features/operations/usage \
+  console/src/lib/features/settings/installation \
+  console/src/lib/features/settings/profile | sort)"
+if [[ "$actual_console_slices" != "$expected_console_slices" ]]; then
+  echo "console product slices do not match the responsibility-oriented layout:" >&2
+  printf '%s\n' "$actual_console_slices" >&2
+  violations=1
+fi
+
+flat_console_features="$(find \
+  console/src/lib/features/gateway \
+  console/src/lib/features/settings \
+  -mindepth 1 -maxdepth 1 -type f -print)"
+if [[ -n $flat_console_features ]]; then
+  echo "gateway and settings console files must live in product subfeatures:" >&2
+  printf '%s\n' "$flat_console_features" >&2
+  violations=1
+fi
 
 report_matches() {
   local message="$1"
@@ -50,6 +97,19 @@ report_matches \
   "Cargo.toml apps crates" \
   Cargo.toml apps crates \
   --glob 'Cargo.toml'
+
+report_matches \
+  "production crates must not expose wildcard re-export surfaces:" \
+  'pub(\([^)]*\))?[[:space:]]+use[^;]*::\*;' \
+  "apps crates" \
+  apps crates \
+  --glob '*.rs'
+
+report_matches \
+  "bootstrap composition types must not be exported from the production olp API:" \
+  '^pub[[:space:]]+use[[:space:]]+bootstrap::(state|mode_dependencies)' \
+  "apps/olp/src/lib.rs" \
+  apps/olp/src/lib.rs
 
 server_routes_output=
 if server_routes_output=$(find console/src/routes -type f \
@@ -161,17 +221,18 @@ fi
 
 actual_packages="$(awk -F'\t' '$1 == "package" { print $2 }' <<<"$metadata_rows" | sort)"
 expected_packages="$(printf '%s\n' \
-  olp olp-conformance olp-domain olp-e2e olp-protocols olp-providers olp-storage | sort)"
+  olp olp-conformance olp-domain olp-e2e olp-inference olp-protocols olp-providers olp-storage | sort)"
 if [[ "$actual_packages" != "$expected_packages" ]]; then
-  echo "workspace packages do not match the five production crates plus the conformance and e2e harnesses:" >&2
+  echo "workspace packages do not match the six production crates plus the conformance and e2e harnesses:" >&2
   printf '%s\n' "$actual_packages" >&2
   violations=1
 fi
 
 actual_dag="$(awk -F'\t' '$1 == "dag" { print $2 "\t" $3 }' <<<"$metadata_rows" | sort)"
 expected_dag="$(printf '%s\n' \
-  $'olp\tolp-domain,olp-protocols,olp-providers,olp-storage' \
+  $'olp\tolp-domain,olp-inference,olp-protocols,olp-providers,olp-storage' \
   $'olp-domain\t' \
+  $'olp-inference\tolp-domain,olp-protocols,olp-providers,olp-storage' \
   $'olp-protocols\tolp-domain' \
   $'olp-providers\tolp-domain,olp-protocols' \
   $'olp-storage\tolp-domain' | sort)"
@@ -191,7 +252,7 @@ if [[ -n $dependency_rows ]]; then
       reqwest|aws-*|google-cloud-auth)
         expected_owner='olp-providers'
         ;;
-      axum|clap)
+      axum|tower|tower-http|clap)
         expected_owner='olp'
         ;;
       *)
@@ -208,8 +269,8 @@ fi
 report_matches \
   "concrete provider construction escaped olp-providers:" \
   '(OpenAiConnector|AnthropicConnector|GeminiConnector|VertexConnector|BedrockConnector|AzureOpenAiConnector)::(new|with_application_default|with_service_account_json)' \
-  "apps/olp/src crates/domain crates/protocols crates/storage" \
-  apps/olp/src crates/domain crates/protocols crates/storage \
+  "apps/olp/src crates/domain crates/inference crates/protocols crates/storage" \
+  apps/olp/src crates/domain crates/inference crates/protocols crates/storage \
   --glob '*.rs'
 
 if (( violations )); then

@@ -1,0 +1,133 @@
+use axum::{
+    Json,
+    extract::{Path, State, rejection::JsonRejection},
+    http::HeaderMap,
+    response::Response,
+};
+use chrono::{DateTime, Utc};
+use olp_storage::operations::SettingRecord;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use super::helpers::{map_operations, not_found};
+use crate::{
+    ManagementState, Problem,
+    management::{
+        Permission, if_match, json_payload, require_mutation_session, require_permission,
+        require_read_session, with_etag,
+    },
+};
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct SettingResponse {
+    key: String,
+    value: String,
+    #[schema(value_type = String, format = Uuid)]
+    etag: Uuid,
+    #[schema(value_type = String, format = Uuid)]
+    updated_by: Uuid,
+    updated_at: DateTime<Utc>,
+}
+
+impl From<SettingRecord> for SettingResponse {
+    fn from(record: SettingRecord) -> Self {
+        Self {
+            key: record.key,
+            value: record.value,
+            etag: record.etag,
+            updated_by: record.updated_by,
+            updated_at: record.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct SettingsResponse {
+    data: Vec<SettingResponse>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings",
+    tag = "settings",
+    responses((status = 200, description = "Installation settings", body = SettingsResponse))
+)]
+pub(super) async fn list_settings(
+    State(state): State<ManagementState>,
+    headers: HeaderMap,
+) -> Result<Json<SettingsResponse>, Problem> {
+    let principal = require_read_session(&state, &headers).await?;
+    require_permission(&principal, Permission::ReadOperations)?;
+    let settings = state.store().settings().await.map_err(map_operations)?;
+    Ok(Json(SettingsResponse {
+        data: settings.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/{key}",
+    tag = "settings",
+    params(("key" = String, Path, description = "Setting key")),
+    responses((status = 200, description = "Setting with ETag", body = SettingResponse))
+)]
+pub(super) async fn get_setting(
+    State(state): State<ManagementState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Response, Problem> {
+    let principal = require_read_session(&state, &headers).await?;
+    require_permission(&principal, Permission::ReadOperations)?;
+    let setting = state
+        .store()
+        .settings()
+        .await
+        .map_err(map_operations)?
+        .into_iter()
+        .find(|setting| setting.key == key)
+        .ok_or_else(not_found)?;
+    setting_response(setting)
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(super) struct UpdateSettingRequest {
+    value: String,
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/settings/{key}",
+    tag = "settings",
+    params(
+        ("key" = String, Path, description = "Setting key"),
+        ("If-Match" = String, Header, description = "Quoted setting ETag")
+    ),
+    request_body = UpdateSettingRequest,
+    responses(
+        (status = 200, description = "Updated setting", body = SettingResponse),
+        (status = 412, description = "ETag mismatch", body = Problem)
+    )
+)]
+pub(super) async fn update_setting(
+    State(state): State<ManagementState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+    payload: Result<Json<UpdateSettingRequest>, JsonRejection>,
+) -> Result<Response, Problem> {
+    let principal = require_mutation_session(&state, &headers).await?;
+    require_permission(&principal, Permission::ManageSettings)?;
+    let etag = if_match(&headers)?;
+    let request = json_payload(payload)?;
+    let setting = state
+        .store()
+        .update_setting(&key, &request.value, etag, principal.user_id)
+        .await
+        .map_err(map_operations)?;
+    setting_response(setting)
+}
+
+fn setting_response(setting: SettingRecord) -> Result<Response, Problem> {
+    let etag = setting.etag;
+    with_etag(Json(SettingResponse::from(setting)), etag)
+}

@@ -11,6 +11,7 @@ use futures::{StreamExt, stream};
 use olp_domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, MediaHandle, Surface, TransportMode,
 };
+use olp_inference::limits::CleanupMediaStream;
 use olp_protocols::openai::{
     EmbeddingRequest, OpenAiImageEditRequest, OpenAiImageGenerationRequest,
     OpenAiImageVariationRequest, OpenAiModerationRequest, OpenAiSpeechRequest,
@@ -23,17 +24,16 @@ use tracing::warn;
 
 use crate::{
     GatewayState, InferencePrincipal, MultipartRequestAdmission,
-    image_response::streaming_image_json_response,
-    streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
+    public_http::image_response::streaming_image_json_response,
+    public_http::streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
 };
 
 use super::{
     error::{InferenceError, valid_json},
     execution::{
         RoutedEventExecution, RoutedUnaryResult, execute_event_operation, execute_unary_result,
-        incompatible_result,
+        incompatible_result, mark_unary_outcome,
     },
-    limits::CleanupMediaStream,
     multipart::{media_spool_error, parse_multipart},
     openai_http::error_sse as openai_error_sse,
 };
@@ -58,7 +58,7 @@ pub(super) async fn embeddings(
         encoding_format.as_deref(),
     )
     .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
-    executed.mark_outcome(&response);
+    mark_unary_outcome(&mut executed, &response);
     let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }
@@ -82,7 +82,7 @@ pub(super) async fn moderations(
         &format!("modr-{}", executed.request_id),
     )
     .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
-    executed.mark_outcome(&response);
+    mark_unary_outcome(&mut executed, &response);
     let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }
@@ -107,8 +107,8 @@ pub(super) async fn image_generations(
         executed.mark_provider_protocol_failure();
         return Err(incompatible_result("image generation"));
     };
-    let outcome = streaming_image_json_response(Arc::clone(&state.media_spool), result).await;
-    executed.mark_outcome(&outcome);
+    let outcome = streaming_image_json_response(Arc::clone(state.media_spool()), result).await;
+    mark_unary_outcome(&mut executed, &outcome);
     outcome
 }
 
@@ -193,8 +193,8 @@ async fn encode_executed_images(
         executed.mark_provider_protocol_failure();
         return Err(incompatible_result("image"));
     };
-    let outcome = streaming_image_json_response(Arc::clone(&state.media_spool), result).await;
-    executed.mark_outcome(&outcome);
+    let outcome = streaming_image_json_response(Arc::clone(state.media_spool()), result).await;
+    mark_unary_outcome(&mut executed, &outcome);
     outcome
 }
 
@@ -225,7 +225,7 @@ pub(super) async fn speech(
         let opened = open_response_media(&state, &body.media.handle).await?;
         let cleanup = CleanupMediaStream::new(
             opened.bytes,
-            state.media_spool.clone(),
+            state.media_spool().clone(),
             opened.artifact.handle.clone(),
         );
         let mut response = Response::new(Body::from_stream(cleanup));
@@ -254,7 +254,7 @@ pub(super) async fn speech(
         Ok(response)
     }
     .await;
-    executed.mark_outcome(&outcome);
+    mark_unary_outcome(&mut executed, &outcome);
     outcome
 }
 
@@ -345,17 +345,14 @@ pub(super) async fn transcriptions(
                 InferenceError::bad_gateway("provider_protocol_error", error.to_string())
             })
     };
-    executed.mark_outcome(&outcome);
+    mark_unary_outcome(&mut executed, &outcome);
     outcome
 }
 
 fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
-        let mut accounting = execution
-            .accounting
-            .take()
-            .expect("routed event execution owns request accounting");
+        let mut accounting = execution.take_accounting();
         let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
         let mut next = Some(Ok(execution.first.clone()));
         let mut failure = None;
@@ -408,7 +405,11 @@ fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response
         writer.finish_stream(terminal, &mut failure, |error| {
             TerminalFrames::one(openai_error_sse(error))
         });
-        accounting.finish(failure.as_ref()).await;
+        let outcome = failure.as_ref().map_or_else(
+            olp_inference::RequestOutcome::success,
+            InferenceError::accounting_outcome,
+        );
+        accounting.finish(outcome).await;
     });
     response
 }
@@ -473,11 +474,11 @@ pub(super) async fn open_response_media(
     state: &GatewayState,
     handle: &MediaHandle,
 ) -> Result<olp_domain::OpenedMedia, InferenceError> {
-    match state.media_spool.open(handle).await {
+    match state.media_spool().open(handle).await {
         Ok(opened) => Ok(opened),
         Err(error) => {
             let mapped = media_spool_error(error);
-            if let Err(cleanup_error) = state.media_spool.remove(handle).await
+            if let Err(cleanup_error) = state.media_spool().remove(handle).await
                 && cleanup_error != olp_domain::MediaSpoolError::NotFound
             {
                 warn!(%cleanup_error, "failed to remove unreadable response media");

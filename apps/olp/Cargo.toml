@@ -8,6 +8,10 @@ rust-version.workspace = true
 [features]
 test-util = ["olp-providers/test-util"]
 
+[[example]]
+name = "sdk_smoke_fixture"
+required-features = ["test-util"]
+
 [dependencies]
 arc-swap.workspace = true
 axum.workspace = true
@@ -24,6 +28,7 @@ ipnet.workspace = true
 jsonwebtoken.workspace = true
 mime.workspace = true
 olp-domain.workspace = true
+olp-inference.workspace = true
 olp-protocols.workspace = true
 olp-providers.workspace = true
 olp-storage.workspace = true

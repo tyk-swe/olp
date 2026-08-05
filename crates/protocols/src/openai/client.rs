@@ -189,8 +189,8 @@ impl OpenAiResponsesStreamEncoder {
                 actual: event.sequence,
             });
         }
-        // Keep this aligned with the unary collection ceiling in
-        // apps/olp/src/event_completion.rs.
+        // Keep this aligned with the transport-neutral collection ceiling in
+        // crates/inference/src/events.rs.
         const MAX_COLLECTED_CANONICAL_EVENT_BYTES: usize = 16 * 1024 * 1024;
         let event_bytes = serde_json::to_vec(&event)?.len();
         self.collected_event_bytes = self

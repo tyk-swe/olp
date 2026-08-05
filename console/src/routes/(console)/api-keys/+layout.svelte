@@ -4,7 +4,7 @@
   import {
     apiKeyListStateContext,
     type ApiKeyListState
-  } from '$lib/features/access/apiKeyListState';
+  } from '$lib/features/access/api-keys/apiKeyListState';
 
   let { children } = $props();
   const listState = $state<ApiKeyListState>(emptyCursorHistory());

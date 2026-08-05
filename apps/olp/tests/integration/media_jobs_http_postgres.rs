@@ -11,7 +11,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt as _;
-use olp::{ApiMode, ApiState, RuntimeManager, public_router, reconcile_media_jobs_once};
+use olp::test_support::{ApiMode, ProcessComposition, public_router, reconcile_media_jobs_once};
 use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     BoxFuture, CanonicalResult, Capability, DurationMs, MediaSpool, MediaUpload, Operation,
@@ -20,7 +20,11 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode,
     VideoContentResult, VideoDeleteResult, VideoJobResult, VideoOperation, VideoStatus,
 };
-use olp_storage::{AuthHmacKey, MediaJobState, MediaJobUpdate, NewMediaJobReservation};
+use olp_inference::runtime::RuntimeManager;
+use olp_storage::{
+    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
+    security::AuthHmacKey,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -137,7 +141,7 @@ fn video_job(id: &str, status: VideoStatus) -> VideoJobResult {
 async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let db = olp_storage::test_support::TestDb::create_migrated("media_jobs_http").await;
     let store = db.store(5).await;
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
         Arc::new(RuntimeManager::empty()),
@@ -322,7 +326,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         ),
     ]);
     let runtime = Arc::new(RuntimeManager::empty());
-    let mut gateway_state = ApiState::new(
+    let mut gateway_state = ProcessComposition::new(
         ApiMode::Gateway,
         Some(store.clone()),
         runtime.clone(),
@@ -530,7 +534,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
             .await
             .unwrap()
             .lifecycle,
-        olp_storage::MediaJobLifecycle::DeletePending
+        olp_storage::media_jobs::MediaJobLifecycle::DeletePending
     );
     sqlx::query("DROP TRIGGER fail_test_media_finalize ON async_media_jobs")
         .execute(store.pool())

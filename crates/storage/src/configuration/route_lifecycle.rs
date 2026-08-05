@@ -3,12 +3,13 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    IdempotencyOutcome, IdempotencyResponse, PersistenceError, PgStore, ReplayableIdempotency,
-    runtime_compiler::{compile_and_publish_runtime_in_transaction, lock_runtime_publication},
-    store::{
-        ReplayableIdempotencyClaim, claim_idempotency, claim_replayable_idempotency,
-        complete_idempotency, complete_replayable_idempotency,
+    PersistenceError, PgStore,
+    idempotency::{
+        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
+        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
+        complete_replayable_idempotency,
     },
+    runtime::{compile_and_publish_runtime_in_transaction, lock_runtime_publication},
 };
 
 use super::{ConfigurationError, NewRouteDraft, RouteActivated, RouteDraftCreated};
