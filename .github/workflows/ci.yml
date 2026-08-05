@@ -59,7 +59,7 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.3
-      - uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+      - uses: hadolint/hadolint-action@2a66e89f53d0771bb131a7fa31f3136336094aa6 # v3.4.0
         with:
           dockerfile: deploy/Dockerfile
           failure-threshold: warning
@@ -702,7 +702,9 @@ jobs:
           cache: "false"
           tools: "cargo-audit@0.22.2"
       - name: Audit Cargo advisories
-        run: cargo audit --deny warnings
+        # rkyv is present only as an inactive optional rust_decimal dependency;
+        # remove this exception once rust_decimal no longer locks rkyv 0.7.x.
+        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0235
       - name: Audit console advisories
         run: pnpm --dir console audit --audit-level high
       - name: Audit SDK smoke advisories
