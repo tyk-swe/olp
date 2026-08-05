@@ -105,7 +105,6 @@ impl PgStore {
             let row = sqlx::query!(
                 "SELECT created_at, id FROM async_media_jobs
                  WHERE id = $1
-                   AND lifecycle_state = 'active'
                    AND ($2::uuid IS NULL OR api_key_id = $2)
                    AND (cardinality($3::text[]) = 0 OR route_slug = ANY($3::text[]))
                    AND ($4::text IS NULL OR operation = $4)

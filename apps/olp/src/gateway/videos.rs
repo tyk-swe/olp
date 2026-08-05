@@ -28,8 +28,8 @@ use crate::{GatewayState, InferencePrincipal, MultipartRequestAdmission};
 use super::{
     error::InferenceError,
     execution::{
-        RequiredTarget, authorize_principal, execute_routed_result, incompatible_result,
-        mark_unary_outcome,
+        RequiredTarget, authorize_principal, defer_unary_outcome_to_body, execute_routed_result,
+        incompatible_result, mark_unary_outcome, mark_unary_outcome_with_status,
     },
     media::open_response_media,
     media_jobs::{
@@ -335,7 +335,7 @@ async fn complete_video_create(
     result.model = Some(executed.route_slug.to_string());
     let response = encode_video_object(&result, executed.route_slug.as_str())
         .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
-    mark_unary_outcome(&mut executed, &response);
+    mark_unary_outcome_with_status(&mut executed, &response, StatusCode::CREATED);
     let response = response?;
     Ok((StatusCode::CREATED, Json(response)).into_response())
 }
@@ -563,8 +563,7 @@ pub(super) async fn video_content(
             .headers_mut()
             .insert(header::CONTENT_LENGTH, content_length);
     }
-    executed.mark_success();
-    Ok(response)
+    defer_unary_outcome_to_body(&mut executed, Ok(response))
 }
 
 pub(super) async fn video_delete(

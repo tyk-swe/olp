@@ -115,6 +115,7 @@ impl DistributedLimiter {
             .key(&lease.rate_key)
             .arg(lease.rate_window_id)
             .arg(refund)
+            .arg(&lease.lease_id)
             .invoke_async(&mut connection)
             .await?;
         Ok(())

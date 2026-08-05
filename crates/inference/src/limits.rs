@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
     sync::{
@@ -21,6 +22,52 @@ use tracing::{error, warn};
 use crate::{InferenceError, runtime::RuntimeBundle};
 
 type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+const LIMIT_CLEANUP_ATTEMPTS: usize = 3;
+const LIMIT_CLEANUP_TIMEOUT: Duration = Duration::from_millis(250);
+
+async fn reconcile_distributed_limit(
+    limiter: &DistributedLimiter,
+    lease: &LimitLease,
+    actual_tokens: i64,
+) {
+    for attempt in 0..LIMIT_CLEANUP_ATTEMPTS {
+        match tokio::time::timeout(
+            LIMIT_CLEANUP_TIMEOUT,
+            limiter.reconcile(lease, actual_tokens),
+        )
+        .await
+        {
+            Ok(Ok(())) => return,
+            Ok(Err(error)) if attempt + 1 == LIMIT_CLEANUP_ATTEMPTS => {
+                warn!(%error, "failed to reconcile inference token reservation");
+            }
+            Err(_) if attempt + 1 == LIMIT_CLEANUP_ATTEMPTS => {
+                warn!("timed out reconciling inference token reservation");
+            }
+            Ok(Err(_)) | Err(_) => {
+                tokio::time::sleep(Duration::from_millis(25_u64 << attempt)).await;
+            }
+        }
+    }
+}
+
+async fn release_distributed_limit(limiter: &DistributedLimiter, lease: &LimitLease) {
+    for attempt in 0..LIMIT_CLEANUP_ATTEMPTS {
+        match tokio::time::timeout(LIMIT_CLEANUP_TIMEOUT, limiter.release(lease)).await {
+            Ok(Ok(())) => return,
+            Ok(Err(error)) if attempt + 1 == LIMIT_CLEANUP_ATTEMPTS => {
+                warn!(%error, "failed to release inference concurrency lease");
+            }
+            Err(_) if attempt + 1 == LIMIT_CLEANUP_ATTEMPTS => {
+                warn!("timed out releasing inference concurrency lease");
+            }
+            Ok(Err(_)) | Err(_) => {
+                tokio::time::sleep(Duration::from_millis(25_u64 << attempt)).await;
+            }
+        }
+    }
+}
 
 struct InferenceReservationInner {
     release: Mutex<Option<ReleaseFuture>>,
@@ -49,15 +96,7 @@ impl InferenceReservation {
         Self {
             inner: Arc::new(InferenceReservationInner {
                 release: Mutex::new(Some(Box::pin(async move {
-                    match tokio::time::timeout(Duration::from_millis(250), limiter.release(&lease))
-                        .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => {
-                            tracing::warn!(%error, "failed to release inference concurrency lease");
-                        }
-                        Err(_) => tracing::warn!("timed out releasing inference concurrency lease"),
-                    }
+                    release_distributed_limit(&limiter, &lease).await;
                 }))),
                 reconcile: Mutex::new(Some(reconcile)),
             }),
@@ -85,18 +124,7 @@ impl InferenceReservation {
         let Some(reconcile) = reconcile else {
             return;
         };
-        match tokio::time::timeout(
-            Duration::from_millis(250),
-            reconcile.limiter.reconcile(&reconcile.lease, actual_tokens),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::warn!(%error, "failed to reconcile inference token reservation");
-            }
-            Err(_) => tracing::warn!("timed out reconciling inference token reservation"),
-        }
+        reconcile_distributed_limit(&reconcile.limiter, &reconcile.lease, actual_tokens).await;
     }
 
     pub async fn release(self) {
@@ -137,6 +165,58 @@ impl Drop for InferenceReservationInner {
         };
         if spawn_release_future(release).is_none() {
             tracing::warn!("could not release inference concurrency lease outside a Tokio runtime");
+        }
+    }
+}
+
+/// A distributed limit lease paired with the exact limiter connection that
+/// created it. Cleanup never consults the hot-swappable limiter slot.
+pub struct DistributedLimitReservation {
+    limiter: Arc<DistributedLimiter>,
+    lease: Option<LimitLease>,
+}
+
+impl fmt::Debug for DistributedLimitReservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DistributedLimitReservation")
+            .field("active", &self.lease.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl DistributedLimitReservation {
+    fn new(limiter: Arc<DistributedLimiter>, lease: LimitLease) -> Self {
+        Self {
+            limiter,
+            lease: Some(lease),
+        }
+    }
+
+    async fn cleanup(mut self, actual_tokens: Option<i64>) {
+        let Some(lease) = self.lease.as_ref() else {
+            return;
+        };
+        if let Some(actual_tokens) = actual_tokens {
+            reconcile_distributed_limit(&self.limiter, lease, actual_tokens).await;
+        }
+        release_distributed_limit(&self.limiter, lease).await;
+        self.lease.take();
+    }
+}
+
+impl Drop for DistributedLimitReservation {
+    fn drop(&mut self) {
+        let Some(lease) = self.lease.take() else {
+            return;
+        };
+        let limiter = Arc::clone(&self.limiter);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                release_distributed_limit(&limiter, &lease).await;
+            });
+        } else {
+            warn!("could not release distributed limit lease outside a Tokio runtime");
         }
     }
 }
@@ -222,7 +302,7 @@ pub async fn reserve_limits(
     lookup_id: &str,
     lease_ttl: Duration,
     http_reserved_tokens: Option<i64>,
-) -> Result<Option<LimitLease>, InferenceError> {
+) -> Result<Option<DistributedLimitReservation>, InferenceError> {
     if let Some(reserved_tokens) = http_reserved_tokens {
         let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
             return Ok(None);
@@ -250,7 +330,7 @@ pub async fn reserve_limits(
         .await
         .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
         return match result {
-            Ok(lease) => Ok(Some(lease)),
+            Ok(lease) => Ok(Some(DistributedLimitReservation::new(limiter, lease))),
             Err(LimitError::Exceeded {
                 dimension,
                 retry_after,
@@ -292,7 +372,7 @@ pub async fn reserve_limits(
     .await
     .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
     match result {
-        Ok(lease) => Ok(Some(lease)),
+        Ok(lease) => Ok(Some(DistributedLimitReservation::new(limiter, lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
@@ -402,28 +482,11 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
 }
 
 pub async fn release_limits(
-    limiter: &ReloadableLimiter,
-    lease: Option<&LimitLease>,
+    reservation: Option<DistributedLimitReservation>,
     actual_tokens: Option<i64>,
 ) {
-    if let (Some(limiter), Some(lease)) = (limiter.current(), lease) {
-        if let Some(actual_tokens) = actual_tokens {
-            match tokio::time::timeout(
-                Duration::from_millis(250),
-                limiter.reconcile(lease, actual_tokens),
-            )
-            .await
-            {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => warn!(%error, "failed to reconcile token reservation"),
-                Err(_) => warn!("timed out reconciling token reservation"),
-            }
-        }
-        match tokio::time::timeout(Duration::from_millis(250), limiter.release(lease)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => warn!(%error, "failed to release concurrency lease"),
-            Err(_) => warn!("timed out releasing concurrency lease"),
-        }
+    if let Some(reservation) = reservation {
+        reservation.cleanup(actual_tokens).await;
     }
 }
 

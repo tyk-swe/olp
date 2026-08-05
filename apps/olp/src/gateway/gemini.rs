@@ -226,7 +226,7 @@ pub(super) async fn models(
         .await
         .map_err(ProtocolError::gemini)?;
     let result = models_response(runtime, key, query);
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease).await;
     result
 }
 
@@ -297,7 +297,7 @@ pub(super) async fn model(
         visible_route(runtime, key, &resource, Surface::Gemini)
             .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response())
     };
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease).await;
     result
 }
 

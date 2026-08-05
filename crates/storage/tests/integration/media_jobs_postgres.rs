@@ -187,6 +187,15 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .await
         .unwrap();
     assert_eq!(newer.items[0].id, second.id);
+
+    store.begin_media_job_deletion(first.id).await.unwrap();
+    assert!(store.finalize_media_job_deletion(first.id).await.unwrap());
+    let newer_after_cursor_deletion = store
+        .media_jobs_after_id(&client_filters, Some(first.id), MediaJobOrder::Ascending, 1)
+        .await
+        .unwrap();
+    assert_eq!(newer_after_cursor_deletion.items[0].id, second.id);
+
     assert!(matches!(
         store
             .media_jobs_after_id(

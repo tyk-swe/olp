@@ -315,7 +315,10 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
 
 #[tokio::test]
 async fn speech_surface_streams_bounded_spooled_result() {
-    let (state, key) = test_state(false);
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     let artifact = state
         .media_spool()
         .put(olp_domain::MediaUpload {
@@ -345,8 +348,65 @@ async fn speech_surface_streams_bounded_spooled_result() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[header::CONTENT_TYPE], "audio/mpeg");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), request_metadata.recv_next())
+            .await
+            .is_err(),
+        "lazy response metadata must not finalize before body delivery"
+    );
     assert_eq!(
         response.into_body().collect().await.unwrap().to_bytes(),
         Bytes::from_static(b"audio-result")
     );
+    let event = tokio::time::timeout(Duration::from_secs(1), request_metadata.recv_next())
+        .await
+        .expect("body EOF must finalize request metadata")
+        .expect("metadata channel must remain open");
+    assert_eq!(event.status_code, Some(StatusCode::OK.as_u16()));
+    assert_eq!(event.error_class, None);
+}
+
+#[tokio::test]
+async fn dropping_lazy_speech_body_records_client_cancellation() {
+    let (mut state, key) = test_state(false);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
+    let artifact = state
+        .media_spool()
+        .put(olp_domain::MediaUpload {
+            filename: "speech.mp3".into(),
+            content_type: Some("audio/mpeg".into()),
+            maximum_length: 32,
+            bytes: Box::pin(stream::once(async {
+                Ok(Bytes::from_static(b"audio-result"))
+            })),
+        })
+        .await
+        .unwrap();
+    install_result(
+        &state,
+        OperationKind::Speech,
+        CanonicalResult::Speech(olp_domain::SpeechResult {
+            audio: artifact,
+            extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        }),
+    );
+
+    let response = post_json(
+        &state,
+        &key,
+        "/openai/v1/audio/speech",
+        r#"{"model":"default","input":"hello","voice":"coral"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
+
+    let event = tokio::time::timeout(Duration::from_secs(1), request_metadata.recv_next())
+        .await
+        .expect("body drop must finalize request metadata")
+        .expect("metadata channel must remain open");
+    assert_eq!(event.status_code, None);
+    assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
 }

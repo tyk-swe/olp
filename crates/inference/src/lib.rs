@@ -20,7 +20,7 @@ pub use accounting::{RequestAccountingGuard, RequestOutcome, UsageCapture};
 pub use error::{InferenceError, InferenceErrorKind};
 pub use execution::{
     CompletedEventExecution, RequestAdmission, RequiredTarget, RoutedEventExecution,
-    RoutedUnaryResult,
+    RoutedUnaryFinalizer, RoutedUnaryResult,
 };
 pub use limits::{InferencePrincipal, InferenceReservation};
 pub use service::{InferenceService, SessionGenerationExecution};

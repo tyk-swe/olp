@@ -3,8 +3,7 @@ use olp_domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
 };
 use olp_storage::{
-    limits::LimitLease, request_metadata::RequestAttemptMetadata,
-    request_metadata::RequestMetadataEvent,
+    request_metadata::RequestAttemptMetadata, request_metadata::RequestMetadataEvent,
 };
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
 use serde_json::Value;
@@ -12,7 +11,7 @@ use tracing::error;
 
 use crate::{
     InferenceError, InferenceService,
-    limits::{InferenceReservation, release_limits},
+    limits::{DistributedLimitReservation, InferenceReservation, release_limits},
     telemetry::{elapsed_ms, metadata_status_code},
 };
 
@@ -27,8 +26,13 @@ pub struct RequestOutcome {
 impl RequestOutcome {
     #[must_use]
     pub const fn success() -> Self {
+        Self::success_with_status(200)
+    }
+
+    #[must_use]
+    pub const fn success_with_status(status_code: u16) -> Self {
         Self {
-            status_code: Some(200),
+            status_code: Some(status_code),
             error_class: None,
         }
     }
@@ -80,8 +84,7 @@ struct ActiveRequestAttempt {
 }
 
 struct LimitCleanup {
-    service: InferenceService,
-    delta_lease: Option<LimitLease>,
+    delta_lease: Option<DistributedLimitReservation>,
     admission_reservation: Option<InferenceReservation>,
     admission_reserved_tokens: Option<i64>,
     actual_tokens: Option<i64>,
@@ -94,12 +97,7 @@ impl LimitCleanup {
         if let (Some(reservation), Some(actual)) = (self.admission_reservation, admission_actual) {
             reservation.reconcile(actual).await;
         }
-        release_limits(
-            self.service.limiter(),
-            self.delta_lease.as_ref(),
-            delta_actual,
-        )
-        .await;
+        release_limits(self.delta_lease, delta_actual).await;
     }
 }
 
@@ -134,7 +132,7 @@ pub struct RequestAccountingGuard {
     usage: UsageCapture,
     surface: Surface,
     operation: OperationKind,
-    lease: Option<LimitLease>,
+    lease: Option<DistributedLimitReservation>,
     admission_reservation: Option<InferenceReservation>,
     admission_reserved_tokens: Option<i64>,
     active_attempt: Option<ActiveRequestAttempt>,
@@ -145,7 +143,7 @@ impl RequestAccountingGuard {
     pub(crate) fn new(
         service: InferenceService,
         input: RequestAccountingInput,
-        lease: Option<LimitLease>,
+        lease: Option<DistributedLimitReservation>,
         admission_reservation: Option<InferenceReservation>,
         admission_reserved_tokens: Option<i64>,
     ) -> Self {
@@ -257,7 +255,6 @@ impl RequestAccountingGuard {
             return None;
         }
         Some(LimitCleanup {
-            service: self.service.clone(),
             delta_lease,
             admission_reservation,
             admission_reserved_tokens: self.admission_reserved_tokens,
@@ -558,7 +555,14 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
 
 #[cfg(test)]
 mod tests {
-    use super::split_actual_tokens;
+    use super::{RequestOutcome, split_actual_tokens};
+
+    #[test]
+    fn successful_outcome_preserves_the_http_status() {
+        let outcome = RequestOutcome::success_with_status(201);
+        assert_eq!(outcome.status_code, Some(201));
+        assert_eq!(outcome.error_class, None);
+    }
 
     #[test]
     fn actual_tokens_are_split_across_admission_and_delta_reservations() {

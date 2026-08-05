@@ -6,6 +6,7 @@ use std::{
         Arc, RwLock,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use bytes::Bytes;
@@ -17,10 +18,15 @@ use olp_domain::{
 use tokio::{
     fs::{self, File, OpenOptions},
     io::{AsyncReadExt as _, AsyncWriteExt as _},
+    sync::Semaphore,
 };
+use tracing::warn;
 use uuid::Uuid;
 
 const READ_CHUNK_BYTES: usize = 64 * 1024;
+const CLEANUP_CONCURRENCY: usize = 4;
+const CLEANUP_INITIAL_BACKOFF: Duration = Duration::from_millis(25);
+const CLEANUP_MAX_BACKOFF: Duration = Duration::from_secs(2);
 pub(crate) const DEFAULT_CAPACITY_BYTES: u64 = 1024 * 1024 * 1024;
 /// The smallest supported production spool. Multipart admission reserves
 /// fixed worst-case endpoint budgets, so a smaller volume cannot safely serve
@@ -41,6 +47,7 @@ pub(crate) struct FileMediaSpool {
     root: PathBuf,
     entries: Arc<RwLock<BTreeMap<String, SpoolEntry>>>,
     used_bytes: Arc<AtomicU64>,
+    janitor: Arc<SpoolJanitor>,
     capacity_bytes: u64,
 }
 
@@ -78,6 +85,7 @@ impl FileMediaSpool {
             root,
             entries: Arc::new(RwLock::new(BTreeMap::new())),
             used_bytes: Arc::new(AtomicU64::new(0)),
+            janitor: SpoolJanitor::new(),
             capacity_bytes,
         }))
     }
@@ -130,8 +138,25 @@ impl PendingSpoolWrite<'_> {
 impl Drop for PendingSpoolWrite<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.spool.release_capacity(self.reserved);
-            let _ = std::fs::remove_file(&self.path);
+            match std::fs::remove_file(&self.path) {
+                Ok(()) => self.spool.release_capacity(self.reserved),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.spool.release_capacity(self.reserved);
+                }
+                Err(error) => {
+                    warn!(
+                        %error,
+                        "failed to remove an incomplete media spool write; scheduled for retry"
+                    );
+                    self.spool
+                        .janitor
+                        .enqueue_detached(SpoolCleanupJob::Partial(PartialSpoolRemoval {
+                            path: self.path.clone(),
+                            used_bytes: Arc::clone(&self.spool.used_bytes),
+                            reserved: self.reserved,
+                        }));
+                }
+            }
         }
     }
 }
@@ -153,19 +178,6 @@ impl PendingSpoolRemoval {
             .expect("pending media removal always owns an entry");
         release_used_bytes(&self.used_bytes, entry.content_length);
     }
-
-    fn restore_entry(&mut self) -> Result<(), MediaSpoolError> {
-        let mut entries = self
-            .entries
-            .write()
-            .map_err(|_| MediaSpoolError::Unavailable)?;
-        let entry = self
-            .entry
-            .take()
-            .expect("pending media removal always owns an entry");
-        entries.insert(self.handle.clone(), entry);
-        Ok(())
-    }
 }
 
 impl Drop for PendingSpoolRemoval {
@@ -176,6 +188,134 @@ impl Drop for PendingSpoolRemoval {
         if let Ok(mut entries) = self.entries.write() {
             entries.insert(self.handle.clone(), entry);
         }
+    }
+}
+
+struct PartialSpoolRemoval {
+    path: PathBuf,
+    used_bytes: Arc<AtomicU64>,
+    reserved: u64,
+}
+
+enum SpoolCleanupJob {
+    Partial(PartialSpoolRemoval),
+    Completed {
+        path: PathBuf,
+        pending: PendingSpoolRemoval,
+    },
+}
+
+impl SpoolCleanupJob {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Partial(removal) => &removal.path,
+            Self::Completed { path, .. } => path,
+        }
+    }
+
+    fn commit(self) {
+        match self {
+            Self::Partial(removal) => {
+                release_used_bytes(&removal.used_bytes, removal.reserved);
+            }
+            Self::Completed { pending, .. } => pending.commit_removal(),
+        }
+    }
+
+    async fn run(self, concurrency: Arc<Semaphore>) {
+        let path = self.path().to_owned();
+        let mut backoff = CLEANUP_INITIAL_BACKOFF;
+        let mut attempts = 0_u64;
+        loop {
+            let removal = {
+                let permit = Arc::clone(&concurrency)
+                    .acquire_owned()
+                    .await
+                    .expect("media spool janitor semaphore is never closed");
+                let removal = fs::remove_file(&path).await;
+                drop(permit);
+                removal
+            };
+            match removal {
+                Ok(()) => {
+                    self.commit();
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.commit();
+                    return;
+                }
+                Err(error) => {
+                    attempts = attempts.saturating_add(1);
+                    if attempts == 1 || attempts % 60 == 0 {
+                        warn!(%error, attempts, "media spool janitor could not remove an artifact");
+                    }
+                    tokio::time::sleep(backoff).await;
+                    backoff = backoff.saturating_mul(2).min(CLEANUP_MAX_BACKOFF);
+                }
+            }
+        }
+    }
+
+    fn run_blocking(self) {
+        let path = self.path().to_owned();
+        let mut backoff = CLEANUP_INITIAL_BACKOFF;
+        let mut attempts = 0_u64;
+        loop {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    self.commit();
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.commit();
+                    return;
+                }
+                Err(error) => {
+                    attempts = attempts.saturating_add(1);
+                    if attempts == 1 || attempts % 60 == 0 {
+                        warn!(
+                            %error,
+                            attempts,
+                            "media spool fallback janitor could not remove an artifact"
+                        );
+                    }
+                    std::thread::sleep(backoff);
+                    backoff = backoff.saturating_mul(2).min(CLEANUP_MAX_BACKOFF);
+                }
+            }
+        }
+    }
+}
+
+struct SpoolJanitor {
+    concurrency: Arc<Semaphore>,
+}
+
+impl SpoolJanitor {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            concurrency: Arc::new(Semaphore::new(CLEANUP_CONCURRENCY)),
+        })
+    }
+
+    fn enqueue_detached(&self, job: SpoolCleanupJob) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            spawn_blocking_cleanup(job);
+            return;
+        };
+        let concurrency = Arc::clone(&self.concurrency);
+        runtime.spawn(job.run(concurrency));
+    }
+}
+
+fn spawn_blocking_cleanup(job: SpoolCleanupJob) {
+    if std::thread::Builder::new()
+        .name("olp-media-janitor".to_owned())
+        .spawn(move || job.run_blocking())
+        .is_err()
+    {
+        warn!("failed to start the media spool fallback janitor");
     }
 }
 
@@ -345,12 +485,12 @@ impl FileMediaSpool {
             handle: handle.as_str().to_owned(),
             entry: Some(entry),
         };
+        let janitor = Arc::clone(&self.janitor);
         // Tokio's filesystem work can continue in its blocking pool after an
         // awaiting request is canceled. Keep the entry guard in this detached
         // task so successful unlink and capacity release stay coupled.
         tokio::spawn(async move {
-            let mut pending_removal = pending_removal;
-            match unlink(path).await {
+            match unlink(path.clone()).await {
                 Ok(()) => {
                     pending_removal.commit_removal();
                     Ok(())
@@ -359,11 +499,12 @@ impl FileMediaSpool {
                     pending_removal.commit_removal();
                     Err(MediaSpoolError::NotFound)
                 }
-                Err(_) => {
-                    // Preserve both the handle and its capacity reservation so
-                    // a transient filesystem error cannot silently overbook
-                    // the configured spool budget.
-                    pending_removal.restore_entry()?;
+                Err(error) => {
+                    warn!(%error, "failed to remove a media spool artifact; scheduled for retry");
+                    janitor.enqueue_detached(SpoolCleanupJob::Completed {
+                        path,
+                        pending: pending_removal,
+                    });
                     Err(MediaSpoolError::Unavailable)
                 }
             }
@@ -493,6 +634,92 @@ mod tests {
             .await
             .unwrap();
         spool.remove(&second.handle).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_partial_cleanup_keeps_capacity_until_physical_deletion() {
+        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let blocked_path = spool.root.join("blocked-partial");
+        std::fs::create_dir(&blocked_path).unwrap();
+        assert!(spool.try_reserve_capacity(4));
+        drop(PendingSpoolWrite {
+            spool: spool.as_ref(),
+            path: blocked_path.clone(),
+            reserved: 4,
+            committed: false,
+        });
+
+        assert_eq!(spool.used_bytes.load(Ordering::Acquire), 4);
+        assert_eq!(
+            spool
+                .put(MediaUpload {
+                    filename: "rejected.bin".into(),
+                    content_type: None,
+                    maximum_length: 1,
+                    bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"x"))])),
+                })
+                .await
+                .unwrap_err(),
+            MediaSpoolError::Unavailable
+        );
+
+        std::fs::remove_dir(blocked_path).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while spool.used_bytes.load(Ordering::Acquire) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("partial cleanup must release capacity after deletion succeeds");
+    }
+
+    #[tokio::test]
+    async fn failed_completed_cleanup_is_owned_by_the_janitor() {
+        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let artifact = spool
+            .put(MediaUpload {
+                filename: "first.bin".into(),
+                content_type: None,
+                maximum_length: 4,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"data"))])),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            spool
+                .remove_with(&artifact.handle, |_| async {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "injected unlink failure",
+                    ))
+                })
+                .await
+                .unwrap_err(),
+            MediaSpoolError::Unavailable
+        );
+        assert_eq!(
+            spool.open(&artifact.handle).await.unwrap_err(),
+            MediaSpoolError::NotFound
+        );
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while spool.used_bytes.load(Ordering::Acquire) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("janitor must release capacity after retrying the unlink");
+
+        let replacement = spool
+            .put(MediaUpload {
+                filename: "replacement.bin".into(),
+                content_type: None,
+                maximum_length: 4,
+                bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"data"))])),
+            })
+            .await
+            .unwrap();
+        spool.remove(&replacement.handle).await.unwrap();
     }
 
     #[tokio::test]

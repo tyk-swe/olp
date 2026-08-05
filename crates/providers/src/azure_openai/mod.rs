@@ -329,7 +329,14 @@ fn validate_api_version(value: &str) -> Result<(), ConnectorBuildError> {
     let day = date[8..10]
         .parse::<u8>()
         .map_err(|_| ConnectorBuildError::InvalidApiVersion)?;
-    if year < 2020 || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    let maximum_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 400 == 0 || (year % 4 == 0 && year % 100 != 0) => 29,
+        2 => 28,
+        _ => 0,
+    };
+    if year < 2020 || day == 0 || day > maximum_day {
         return Err(ConnectorBuildError::InvalidApiVersion);
     }
     Ok(())

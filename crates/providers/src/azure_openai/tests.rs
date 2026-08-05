@@ -16,6 +16,35 @@ use tokio::{
 
 use super::*;
 
+#[test]
+fn api_version_requires_a_real_calendar_date() {
+    for valid in [
+        "2020-02-29",
+        "2024-10-21",
+        "2024-02-29-preview",
+        "2100-02-28",
+    ] {
+        assert!(validate_api_version(valid).is_ok(), "rejected {valid}");
+    }
+    for invalid in [
+        "2019-12-31",
+        "2025-00-01",
+        "2025-01-00",
+        "2025-02-29",
+        "2026-02-31",
+        "2025-04-31",
+        "2100-02-29",
+    ] {
+        assert!(
+            matches!(
+                validate_api_version(invalid),
+                Err(ConnectorBuildError::InvalidApiVersion)
+            ),
+            "accepted {invalid}"
+        );
+    }
+}
+
 async fn spawn_server(response: Vec<u8>) -> (String, oneshot::Receiver<Vec<u8>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

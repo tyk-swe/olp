@@ -31,8 +31,8 @@ use crate::{
 use super::{
     error::{InferenceError, valid_json},
     execution::{
-        RoutedEventExecution, RoutedUnaryResult, execute_event_operation, execute_unary_result,
-        incompatible_result, mark_unary_outcome,
+        RoutedEventExecution, RoutedUnaryResult, defer_unary_outcome_to_body,
+        execute_event_operation, execute_unary_result, incompatible_result, mark_unary_outcome,
     },
     multipart::{media_spool_error, parse_multipart},
     openai_http::error_sse as openai_error_sse,
@@ -108,8 +108,7 @@ pub(super) async fn image_generations(
         return Err(incompatible_result("image generation"));
     };
     let outcome = streaming_image_json_response(Arc::clone(state.media_spool()), result).await;
-    mark_unary_outcome(&mut executed, &outcome);
-    outcome
+    defer_unary_outcome_to_body(&mut executed, outcome)
 }
 
 pub(super) async fn image_edits(
@@ -194,8 +193,7 @@ async fn encode_executed_images(
         return Err(incompatible_result("image"));
     };
     let outcome = streaming_image_json_response(Arc::clone(state.media_spool()), result).await;
-    mark_unary_outcome(&mut executed, &outcome);
-    outcome
+    defer_unary_outcome_to_body(&mut executed, outcome)
 }
 
 pub(super) async fn speech(
@@ -254,8 +252,7 @@ pub(super) async fn speech(
         Ok(response)
     }
     .await;
-    mark_unary_outcome(&mut executed, &outcome);
-    outcome
+    defer_unary_outcome_to_body(&mut executed, outcome)
 }
 
 pub(super) async fn transcriptions(

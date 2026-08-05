@@ -175,7 +175,7 @@ pub(super) async fn models(
         .await
         .map_err(ProtocolError::anthropic)?;
     let result = models_response(runtime, key, query);
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease).await;
     result
 }
 
@@ -192,24 +192,9 @@ fn models_response(
         ));
     }
     let all = visible_routes(runtime, key, Surface::Anthropic);
-    let start = after_cursor_start(
-        &all,
-        query.after_id.as_deref(),
-        Surface::Anthropic,
-        "The after_id cursor is stale or unknown.",
-    )?;
-    let end = before_cursor_end(
-        &all,
-        query.before_id.as_deref(),
-        Surface::Anthropic,
-        "The before_id cursor is stale or unknown.",
-    )?;
-    let end = end.max(start).min(all.len());
-    let selected = &all[start.min(end)..end];
-    let has_more = selected.len() > limit;
+    let (selected, has_more) = model_page(&all, &query, limit)?;
     let models = selected
         .iter()
-        .take(limit)
         .map(|slug| model_object(runtime, slug))
         .collect::<Vec<_>>();
     let response = ModelList {
@@ -219,6 +204,32 @@ fn models_response(
         has_more,
     };
     Ok((StatusCode::OK, Json(response)).into_response())
+}
+
+fn model_page<'a>(
+    routes: &'a [RouteSlug],
+    query: &ModelsQuery,
+    limit: usize,
+) -> Result<(&'a [RouteSlug], bool), ProtocolError> {
+    if query.before_id.is_some() {
+        let end = before_cursor_end(
+            routes,
+            query.before_id.as_deref(),
+            Surface::Anthropic,
+            "The before_id cursor is stale or unknown.",
+        )?;
+        let start = end.saturating_sub(limit);
+        return Ok((&routes[start..end], start != 0));
+    }
+
+    let start = after_cursor_start(
+        routes,
+        query.after_id.as_deref(),
+        Surface::Anthropic,
+        "The after_id cursor is stale or unknown.",
+    )?;
+    let end = start.saturating_add(limit).min(routes.len());
+    Ok((&routes[start..end], end != routes.len()))
 }
 
 pub(super) async fn model(
@@ -233,7 +244,7 @@ pub(super) async fn model(
         .map_err(ProtocolError::anthropic)?;
     let result = visible_route(runtime, key, &id, Surface::Anthropic)
         .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response());
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease).await;
     result
 }
 
@@ -273,5 +284,51 @@ impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
             id: None,
             retry_ms: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn routes() -> Vec<RouteSlug> {
+        ["a", "b", "c", "d", "e"]
+            .into_iter()
+            .map(|value| RouteSlug::parse(value).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn before_id_returns_the_adjacent_preceding_page() {
+        let routes = routes();
+        let query = ModelsQuery {
+            before_id: Some("e".to_owned()),
+            after_id: None,
+            limit: Some(2),
+        };
+
+        let (page, has_more) = model_page(&routes, &query, 2).unwrap();
+        assert_eq!(
+            page.iter().map(RouteSlug::as_str).collect::<Vec<_>>(),
+            vec!["c", "d"]
+        );
+        assert!(has_more);
+    }
+
+    #[test]
+    fn before_id_reports_no_more_items_at_the_start() {
+        let routes = routes();
+        let query = ModelsQuery {
+            before_id: Some("c".to_owned()),
+            after_id: None,
+            limit: Some(2),
+        };
+
+        let (page, has_more) = model_page(&routes, &query, 2).unwrap();
+        assert_eq!(
+            page.iter().map(RouteSlug::as_str).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert!(!has_more);
     }
 }

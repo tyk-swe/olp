@@ -168,6 +168,7 @@ async fn minute_rollover_resets_once_and_retry_matches_server_window() {
         .hset(&rate_key, "window", current_window - 1)
         .hset(&rate_key, "rpm", 9)
         .hset(&rate_key, "tpm", 900)
+        .hset(&rate_key, "reconciled:stale-lease", 1)
         .pexpire(&rate_key, 120_000)
         .query_async(&mut connection)
         .await
@@ -389,6 +390,7 @@ async fn token_reconciliation_refunds_only_unused_reservation() {
         })
         .await
         .unwrap();
+    limiter.reconcile(&lease, 3).await.unwrap();
     limiter.reconcile(&lease, 3).await.unwrap();
     let state = rate_state(&mut connection, &rate_key).await;
     assert_eq!(state["rpm"], 1);

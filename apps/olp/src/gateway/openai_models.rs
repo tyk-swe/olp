@@ -42,7 +42,7 @@ pub(super) async fn list_models(
         object: "list",
         data,
     });
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease).await;
     Ok(response)
 }
 
@@ -74,7 +74,7 @@ pub(super) async fn get_model(
             runtime.generation.activated_at.timestamp().max(0),
         )))
     })();
-    release_model_limits(&state, lease.as_ref()).await;
+    release_model_limits(&state, lease).await;
     result
 }
 

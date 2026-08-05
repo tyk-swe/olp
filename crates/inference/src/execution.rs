@@ -12,7 +12,7 @@ use olp_domain::{
     ApiKey, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId, RequestMetadata,
     RouteSlug, Surface, TransportMode, authorize_api_key,
 };
-use olp_storage::{limits::LimitLease, request_metadata::RequestAttemptMetadata};
+use olp_storage::request_metadata::RequestAttemptMetadata;
 
 use crate::{
     InferenceError, InferenceService,
@@ -23,8 +23,8 @@ use crate::{
     events::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collect_provider_events_with_observer},
     failover::{ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover},
     limits::{
-        InferencePrincipal, InferenceReservation, RequestMediaGuard, operation_media_handles,
-        release_limits, reserve_limits,
+        DistributedLimitReservation, InferencePrincipal, InferenceReservation, RequestMediaGuard,
+        operation_media_handles, release_limits, reserve_limits,
     },
     runtime::RuntimeBundle,
     selection::select_representable_attempts_filtered,
@@ -184,10 +184,42 @@ pub struct RoutedUnaryResult {
     request_metadata_finalizer: Option<RequestMetadataFinalizer>,
 }
 
+/// Terminal metadata ownership transferred to an HTTP response body whose
+/// delivery completes after the canonical result has been rendered.
+pub struct RoutedUnaryFinalizer {
+    request_metadata_finalizer: Option<RequestMetadataFinalizer>,
+}
+
+impl RoutedUnaryFinalizer {
+    pub fn mark_success(mut self, status_code: u16) {
+        if let Some(finalizer) = self.request_metadata_finalizer.take() {
+            finalizer.finalize(&RequestOutcome::success_with_status(status_code));
+        }
+    }
+
+    pub fn mark_provider_protocol_failure(mut self) {
+        if let Some(finalizer) = self.request_metadata_finalizer.take() {
+            finalizer.finalize(&RequestOutcome::provider_protocol_failure());
+        }
+    }
+}
+
+impl Drop for RoutedUnaryFinalizer {
+    fn drop(&mut self) {
+        if let Some(finalizer) = self.request_metadata_finalizer.take() {
+            finalizer.finalize(&RequestOutcome::client_cancelled());
+        }
+    }
+}
+
 impl RoutedUnaryResult {
     pub fn mark_success(&mut self) {
+        self.mark_success_with_status(200);
+    }
+
+    pub fn mark_success_with_status(&mut self, status_code: u16) {
         if let Some(finalizer) = self.request_metadata_finalizer.take() {
-            finalizer.finalize(&RequestOutcome::success());
+            finalizer.finalize(&RequestOutcome::success_with_status(status_code));
         }
     }
 
@@ -199,6 +231,13 @@ impl RoutedUnaryResult {
 
     pub fn mark_provider_protocol_failure(&mut self) {
         self.mark_failure(RequestOutcome::provider_protocol_failure());
+    }
+
+    #[must_use]
+    pub fn take_body_finalizer(&mut self) -> RoutedUnaryFinalizer {
+        RoutedUnaryFinalizer {
+            request_metadata_finalizer: self.request_metadata_finalizer.take(),
+        }
     }
 }
 
@@ -674,7 +713,7 @@ impl InferenceService {
         &self,
         principal: &InferencePrincipal,
         admission_reserved_tokens: Option<i64>,
-    ) -> Result<Option<LimitLease>, InferenceError> {
+    ) -> Result<Option<DistributedLimitReservation>, InferenceError> {
         let operation = Operation::Models(olp_domain::ModelOperation::List {
             extensions: olp_domain::SourceExtensions::new(principal.surface(), BTreeMap::new()),
         });
@@ -689,7 +728,7 @@ impl InferenceService {
         .await
     }
 
-    pub async fn release_model_limits(&self, lease: Option<&LimitLease>) {
-        release_limits(self.limiter(), lease, None).await;
+    pub async fn release_model_limits(&self, lease: Option<DistributedLimitReservation>) {
+        release_limits(lease, None).await;
     }
 }

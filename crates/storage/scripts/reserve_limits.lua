@@ -182,6 +182,10 @@ end
 -- Mutate capacity only after every dimension has admitted the reservation.
 if rate_enabled then
   if not rate_is_current then
+    -- Reconciliation markers belong to the previous fixed window. Delete the
+    -- stale hash before initializing the new one so markers cannot accumulate
+    -- indefinitely on continuously active API keys.
+    redis.call("DEL", KEYS[1])
     redis.call(
       "HSET",
       KEYS[1],
