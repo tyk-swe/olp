@@ -702,7 +702,9 @@ jobs:
           cache: "false"
           tools: "cargo-audit@0.22.2"
       - name: Audit Cargo advisories
-        run: cargo audit --deny warnings
+        # rkyv is present only as an inactive optional rust_decimal dependency;
+        # remove this exception once rust_decimal no longer locks rkyv 0.7.x.
+        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0235
       - name: Audit console advisories
         run: pnpm --dir console audit --audit-level high
       - name: Audit SDK smoke advisories
