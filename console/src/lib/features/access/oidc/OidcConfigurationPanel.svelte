@@ -282,15 +282,13 @@
         <label for="email-mappings">Email mappings</label><textarea
           id="email-mappings"
           bind:value={emailMappings}
-          placeholder="owner@example.com=owner"
-        ></textarea>
+          placeholder="owner@example.com=owner"></textarea>
       </div>
       <div class="form-field">
         <label for="group-mappings">Group mappings</label><textarea
           id="group-mappings"
           bind:value={groupMappings}
-          placeholder="platform-team=operator"
-        ></textarea>
+          placeholder="platform-team=operator"></textarea>
       </div>
       <div class="oidc-actions">
         <button
