@@ -24,6 +24,7 @@
     run,
     onSave,
     onAcceptProvider,
+    onRefetchProvider,
     onNotice
   }: {
     current: Provider;
@@ -32,6 +33,7 @@
     run: RunProviderAction;
     onSave: () => void;
     onAcceptProvider: (provider: Provider) => void;
+    onRefetchProvider: () => Promise<boolean>;
     onNotice: (message: string) => void;
   } = $props();
 
@@ -50,8 +52,7 @@
   async function activate() {
     await run('detail-activate', async () => {
       const generation = await activateProvider(current);
-      const updated = await getProvider(current.id);
-      onAcceptProvider(updated);
+      const refreshed = await onRefetchProvider();
       await Promise.all([
         invalidateProviderSummaries(queryClient),
         invalidateProviderModelConsumers(queryClient),
@@ -62,7 +63,9 @@
           queryKey: ['provider-revisions', current.id]
         })
       ]);
-      onNotice(`Activated in runtime generation ${generation}.`);
+      if (refreshed) {
+        onNotice(`Activated in runtime generation ${generation}.`);
+      }
     });
   }
 </script>

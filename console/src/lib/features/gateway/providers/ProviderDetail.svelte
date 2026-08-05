@@ -9,6 +9,7 @@
     updateProvider,
     type Provider
   } from '$lib/api/management/providers';
+  import { emptyCursorHistory } from '$lib/api/pagination';
   import {
     acceptRemote,
     beginReload,
@@ -57,6 +58,7 @@
   let errorMessage = $state('');
   let notice = $state('');
   let reloadVersion = $state(0);
+  let modelPageState = $state(emptyCursorHistory());
   let editValues = $state<ProviderEditValues>({
     name: '',
     endpoint: '',
@@ -111,6 +113,18 @@
     notice = message;
   }
 
+  function resetModelPage() {
+    modelPageState.cursor = undefined;
+    modelPageState.history = [];
+  }
+
+  async function refetchProvider(): Promise<boolean> {
+    const result = await provider.refetch();
+    if (result.error || !result.data) return false;
+    sync = acceptRemote(sync, result.data.etag);
+    return true;
+  }
+
   async function reload() {
     if (busy) return;
     busy = 'reload';
@@ -149,7 +163,8 @@
         queryClient,
         updated,
         undefined,
-        acceptProvider
+        acceptProvider,
+        resetModelPage
       );
       await invalidateProviderSummaries(queryClient);
       reportNotice('Provider draft settings saved.');
@@ -233,6 +248,7 @@
       onTouch={touch}
       onSave={() => saveProvider(current)}
       onAcceptProvider={acceptProvider}
+      onRefetchProvider={refetchProvider}
       onNotice={reportNotice}
     />
     <ProviderCredentialsSection
@@ -241,6 +257,7 @@
       {busy}
       {run}
       onAcceptProvider={acceptProvider}
+      onResetModelPage={resetModelPage}
       onNotice={reportNotice}
     />
   </div>
@@ -249,6 +266,7 @@
     {busy}
     {run}
     {reloadVersion}
+    bind:pageState={modelPageState}
     onAcceptProvider={acceptProvider}
     onError={reportError}
     onNotice={reportNotice}
@@ -258,6 +276,7 @@
     {busy}
     {run}
     onAcceptProvider={acceptProvider}
+    onResetModelPage={resetModelPage}
     onNotice={reportNotice}
   />
 {/if}

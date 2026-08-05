@@ -15,6 +15,7 @@
     type Provider,
     type ProviderModel
   } from '$lib/api/management/providers';
+  import type { CursorHistory } from '$lib/api/pagination';
   import CapabilityReview from './CapabilityReview.svelte';
   import {
     activationReady,
@@ -36,6 +37,7 @@
     busy,
     run,
     reloadVersion,
+    pageState = $bindable(),
     onAcceptProvider,
     onError,
     onNotice
@@ -44,14 +46,13 @@
     busy: string;
     run: RunProviderAction;
     reloadVersion: number;
+    pageState: CursorHistory;
     onAcceptProvider: (provider: Provider) => void;
     onError: (message: string) => void;
     onNotice: (message: string) => void;
   } = $props();
 
   const queryClient = useQueryClient();
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
   let retainedModelPage = $state<CoordinatedModelPage>();
   let manualModelNames = $state('');
   let certificationResults = $state<Record<string, CapabilityCertification>>(
@@ -64,8 +65,9 @@
     queryFn: ({ signal }) => getProviderCapabilityOptions(current.kind, signal)
   }));
   const models = createQuery(() => ({
-    queryKey: providerModelPageKey(current.id, current, cursor),
-    queryFn: ({ signal }) => fetchCoordinatedModelPage(current, cursor, signal),
+    queryKey: providerModelPageKey(current.id, current, pageState.cursor),
+    queryFn: ({ signal }) =>
+      fetchCoordinatedModelPage(current, pageState.cursor, signal),
     placeholderData: (previous: CoordinatedModelPage | undefined) => previous
   }));
   const visibleModelPage = $derived(models.data ?? retainedModelPage);
@@ -81,7 +83,7 @@
   });
 
   async function install(updated: Provider, resetToFirstPage: boolean) {
-    const targetCursor = resetToFirstPage ? undefined : cursor;
+    const targetCursor = resetToFirstPage ? undefined : pageState.cursor;
     await installProviderWithModels(
       queryClient,
       updated,
@@ -89,12 +91,14 @@
       (provider) => {
         previousProviderEtag = provider.etag;
         onAcceptProvider(provider);
-      }
+      },
+      resetToFirstPage
+        ? () => {
+            pageState.cursor = undefined;
+            pageState.history = [];
+          }
+        : undefined
     );
-    if (resetToFirstPage) {
-      cursor = undefined;
-      history = [];
-    }
   }
 
   async function discover() {
@@ -173,13 +177,13 @@
   function nextPage() {
     const next = models.data?.page.nextCursor;
     if (!next) return;
-    history = [...history, cursor];
-    cursor = next;
+    pageState.history = [...pageState.history, pageState.cursor];
+    pageState.cursor = next;
   }
 
   function previousPage() {
-    cursor = history.at(-1);
-    history = history.slice(0, -1);
+    pageState.cursor = pageState.history.at(-1);
+    pageState.history = pageState.history.slice(0, -1);
   }
 </script>
 
@@ -308,8 +312,8 @@
       </table>
     </div>
     <CursorPagination
-      page={history.length + 1}
-      hasPrevious={history.length > 0}
+      page={pageState.history.length + 1}
+      hasPrevious={pageState.history.length > 0}
       hasNext={Boolean(modelPage.page.nextCursor)}
       onPrevious={previousPage}
       onNext={nextPage}

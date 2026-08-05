@@ -62,15 +62,21 @@ export function cacheCoordinatedModelPage(
  * Installs a provider snapshot only after its matching model page is cached.
  * This keeps model mutations pinned to the provider ETag they were rendered
  * from while background consumers transition to the new snapshot.
+ *
+ * The optional callback runs after the matching page is cached but before the
+ * provider ETag becomes visible to reactive consumers. Provider-wide
+ * mutations use it to reset pagination atomically.
  */
 export async function installProviderWithModels(
   queryClient: QueryClient,
   provider: Provider,
   cursor: string | undefined,
-  acceptProvider: (provider: Provider) => void
+  acceptProvider: (provider: Provider) => void,
+  beforeAcceptProvider?: () => void
 ) {
   const coordinated = await fetchCoordinatedModelPage(provider, cursor);
   cacheCoordinatedModelPage(queryClient, coordinated, cursor);
+  beforeAcceptProvider?.();
   acceptProvider(provider);
   await Promise.all([
     queryClient.invalidateQueries({

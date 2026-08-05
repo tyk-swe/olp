@@ -24,6 +24,7 @@
     onTouch,
     onSave,
     onAcceptProvider,
+    onRefetchProvider,
     onNotice
   }: {
     current: Provider;
@@ -34,6 +35,7 @@
     onTouch: () => void;
     onSave: () => void;
     onAcceptProvider: (provider: Provider) => void;
+    onRefetchProvider: () => Promise<boolean>;
     onNotice: (message: string) => void;
   } = $props();
 </script>
@@ -111,6 +113,7 @@
     {run}
     {onSave}
     {onAcceptProvider}
+    {onRefetchProvider}
     {onNotice}
   />
 </section>

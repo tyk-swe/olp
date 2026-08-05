@@ -20,12 +20,14 @@
     busy,
     run,
     onAcceptProvider,
+    onResetModelPage,
     onNotice
   }: {
     current: Provider;
     busy: string;
     run: RunProviderAction;
     onAcceptProvider: (provider: Provider) => void;
+    onResetModelPage: () => void;
     onNotice: (message: string) => void;
   } = $props();
 
@@ -72,7 +74,8 @@
         queryClient,
         restored,
         undefined,
-        onAcceptProvider
+        onAcceptProvider,
+        onResetModelPage
       );
       await invalidateProviderSummaries(queryClient);
       onNotice(
