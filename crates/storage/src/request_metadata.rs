@@ -16,8 +16,8 @@ pub use ingestion::{
 };
 pub use reconciliation::{
     REQUEST_METADATA_GATEWAY_EPOCH_STALE_AFTER_SECONDS, RequestMetadataEpochAcknowledgement,
-    RequestMetadataEpochDetection, RequestMetadataEpochHealth, RequestMetadataGatewayEpochRecord,
-    RequestMetadataGatewayEpochState, RequestMetadataLossReport,
+    RequestMetadataEpochDetection, RequestMetadataEpochHealth, RequestMetadataGap,
+    RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState, RequestMetadataLossReport,
 };
 
 pub(crate) const REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS: i32 = 7;

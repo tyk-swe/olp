@@ -10,8 +10,10 @@ use chrono::Utc;
 use olp_domain::{ApiKeyAuthorizationError, OperationKind, RouteSlug, Surface, authorize_api_key};
 use serde::Serialize;
 
+use olp_inference::runtime::RuntimeBundle;
+
 use crate::{
-    GatewayState, InferencePrincipal, RuntimeBundle,
+    GatewayState, InferencePrincipal,
     gateway::{InferenceError, release_model_limits, reserve_model_limits},
 };
 
@@ -252,7 +254,7 @@ mod tests {
         ProviderOutput, ProviderRequest, ProviderTransport, Route, RouteId, RuntimeGeneration,
         RuntimeGenerationId, RuntimeSnapshot, Target, TargetId, TransportError, TransportMode,
     };
-    use olp_storage::AuthHmacKey;
+    use olp_storage::security::AuthHmacKey;
     use serde_json::Value;
     use tower::ServiceExt;
 
@@ -354,7 +356,7 @@ mod tests {
                 },
             )]),
         };
-        let runtime = Arc::new(crate::RuntimeManager::empty());
+        let runtime = Arc::new(olp_inference::runtime::RuntimeManager::empty());
         let transport: Arc<dyn ProviderTransport> = Arc::new(UnusedTransport);
         runtime
             .install(snapshot, BTreeMap::from([(provider_id, transport)]))
@@ -366,7 +368,7 @@ mod tests {
             "https://olp.test",
             "console",
         );
-        state.auth_hmac_key = auth_hmac_key;
+        state.replace_auth_hmac_key_for_test(auth_hmac_key);
         (state, plaintext)
     }
 
@@ -378,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn list_returns_sorted_public_route_slugs_only() {
         let (state, key) = test_state(BTreeSet::from([ApiKeyScope::ModelsRead]), BTreeSet::new());
-        let response = crate::router::gateway_router_for_test(state)
+        let response = crate::public_http::router::gateway_router_for_test(state)
             .oneshot(
                 Request::get("/openai/v1/models")
                     .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -403,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn get_returns_route_slug_as_openai_model() {
         let (state, key) = test_state(BTreeSet::from([ApiKeyScope::ModelsRead]), BTreeSet::new());
-        let app = crate::router::gateway_router_for_test(state);
+        let app = crate::public_http::router::gateway_router_for_test(state);
         let response = app
             .clone()
             .oneshot(
@@ -437,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn models_read_scope_is_required_with_native_error_envelope() {
         let (state, key) = test_state(BTreeSet::from([ApiKeyScope::Inference]), BTreeSet::new());
-        let response = crate::router::gateway_router_for_test(state)
+        let response = crate::public_http::router::gateway_router_for_test(state)
             .oneshot(
                 Request::get("/openai/v1/models")
                     .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -456,7 +458,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_key_is_a_native_openai_authentication_error() {
         let (state, _) = test_state(BTreeSet::from([ApiKeyScope::ModelsRead]), BTreeSet::new());
-        let response = crate::router::gateway_router_for_test(state)
+        let response = crate::public_http::router::gateway_router_for_test(state)
             .oneshot(
                 Request::get("/openai/v1/models")
                     .header(header::AUTHORIZATION, "Bearer not-a-valid-key")
@@ -480,7 +482,7 @@ mod tests {
     async fn get_conceals_missing_and_disallowed_routes() {
         let allowed = BTreeSet::from([RouteSlug::parse("alpha").unwrap()]);
         let (state, key) = test_state(BTreeSet::from([ApiKeyScope::ModelsRead]), allowed);
-        let app = crate::router::gateway_router_for_test(state);
+        let app = crate::public_http::router::gateway_router_for_test(state);
 
         let list = app
             .clone()

@@ -1,0 +1,1 @@
+{"id":"msg_fuzz","type":"message","role":"assistant","content":[{"type":"text","type":"tuext","t":"text","text":"hello"}],"model":"claude-fuzz","stop_reason":"e*nd_tuArn","usage":{"input_tofens":1,"output_tokens":0}}

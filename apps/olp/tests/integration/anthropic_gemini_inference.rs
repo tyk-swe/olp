@@ -16,7 +16,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use futures::{Stream, stream};
 use http_body_util::BodyExt;
-use olp::{ApiMode, ApiState, GatewayState, RuntimeManager, public_router};
+use olp::test_support::{ApiMode, GatewayState, ProcessComposition, public_router};
 use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, CanonicalResult,
@@ -26,7 +26,8 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TokenCountResult, TransportError,
     TransportMode, TransportPhase, Usage,
 };
-use olp_storage::{AuthHmacKey, PgStore};
+use olp_inference::runtime::RuntimeManager;
+use olp_storage::{PgStore, security::AuthHmacKey};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -266,7 +267,7 @@ fn test_gateway() -> TestGateway {
     ]);
     let runtime = Arc::new(RuntimeManager::empty());
     runtime.install(snapshot, transports).unwrap();
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Gateway,
         Some(PgStore::from_pool(
             sqlx::postgres::PgPoolOptions::new()

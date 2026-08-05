@@ -1,10 +1,10 @@
 <script lang="ts">
   import { getContext } from 'svelte';
-  import RouteList from '$lib/features/gateway/RouteList.svelte';
+  import RouteList from '$lib/features/gateway/routes/RouteList.svelte';
   import {
     routeListStateContext,
     type RouteListState
-  } from '$lib/features/gateway/routeListState';
+  } from '$lib/features/gateway/routes/routeListState';
 
   let listState = getContext<RouteListState>(routeListStateContext);
 </script>

@@ -11,7 +11,12 @@ pub use count::{
     ANTHROPIC_COUNT_REQUEST_EXTENSION, CountDecodeError, CountEncodeError,
     decode_count_tokens_request, encode_count_tokens_result,
 };
-pub use dto::*;
+pub use dto::{
+    ContentBlock, CountTokensRequest, CountTokensResponse, ImageBlock, MediaSource, Message,
+    MessageContent, MessagesRequest, MessagesResponse, RedactedThinkingBlock, Role, SystemPrompt,
+    TextBlock, ThinkingBlock, Tool, ToolChoice, ToolResultBlock, ToolResultContent, ToolUseBlock,
+    Usage,
+};
 pub use stream::{AnthropicMessagesStreamDecoder, StreamError};
 pub use translate::{
     DecodeError, EncodeError, ResponseError, decode_messages_request, decode_messages_response,

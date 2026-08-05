@@ -213,7 +213,7 @@ pub(super) async fn parse_multipart(
     // reservation to the form, where it remains until execution takes the
     // media or cleanup finishes.
     let route_admission = admission.route.clone();
-    let mut output = MultipartFormData::new(state.media_spool.clone(), admission);
+    let mut output = MultipartFormData::new(state.media_spool().clone(), admission);
     let result = tokio::time::timeout(
         MULTIPART_TOTAL_DEADLINE,
         parse_multipart_fields(
@@ -282,7 +282,7 @@ async fn parse_multipart_fields(
             let stream = stream::unfold(receiver, |mut receiver| async move {
                 receiver.recv().await.map(|item| (item, receiver))
             });
-            let put = state.media_spool.put(olp_domain::MediaUpload {
+            let put = state.media_spool().put(olp_domain::MediaUpload {
                 filename: filename.clone(),
                 content_type: content_type.clone(),
                 maximum_length: maximum_file_bytes,

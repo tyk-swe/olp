@@ -1,6 +1,7 @@
 //! Build tooling, not a usage example: an in-memory OpenLLMProxy fixture
 //! server built by `tests/sdk-smoke/run.sh` (via `cargo build --example
-//! sdk_smoke_fixture`) so the official OpenAI/Anthropic/Gemini SDKs can be
+//! sdk_smoke_fixture --features test-util`) so the official
+//! OpenAI/Anthropic/Gemini SDKs can be
 //! exercised without PostgreSQL, Valkey, or live providers.
 
 use std::{
@@ -12,7 +13,7 @@ use std::{
 
 use chrono::Utc;
 use futures::stream;
-use olp::{ApiMode, ApiState, RuntimeManager, public_router};
+use olp::test_support::{ApiMode, ProcessComposition, public_router};
 use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, Capability, DurationMs,
@@ -21,7 +22,8 @@ use olp_domain::{
     RuntimeGenerationId, RuntimeSnapshot, Surface, Target, TargetId, TransportError, TransportMode,
     TransportPhase, Usage,
 };
-use olp_storage::{AuthHmacKey, PgStore};
+use olp_inference::runtime::RuntimeManager;
+use olp_storage::{PgStore, security::AuthHmacKey};
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 
@@ -208,7 +210,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = PgStore::from_pool(
         PgPoolOptions::new().connect_lazy("postgres://olp:olp@127.0.0.1/olp-sdk-smoke")?,
     );
-    let mut state = ApiState::new(ApiMode::Gateway, Some(store), runtime, &origin, "console");
+    let mut state =
+        ProcessComposition::new(ApiMode::Gateway, Some(store), runtime, &origin, "console");
     state.auth_hmac_key = Some(auth_hmac_key);
     let gateway_state = state.mode_dependencies()?.gateway().ok_or_else(|| {
         std::io::Error::other("gateway mode did not produce gateway dependencies")

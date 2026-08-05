@@ -4,10 +4,12 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    PgStore, RecentAuthPurpose, SessionMaterial, SessionSecurityContext,
+    PgStore,
     authentication::{
-        consume_recent_authentication, insert_versioned_session, revoke_user_sessions,
+        RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
+        insert_versioned_session, revoke_user_sessions,
     },
+    security::SessionMaterial,
     split_page,
 };
 

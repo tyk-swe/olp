@@ -26,11 +26,20 @@ use olp_domain::{
     Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot,
     SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode, select_attempts,
 };
+use olp_inference::{
+    circuit::CircuitBreaker,
+    failover::{
+        EventStream, FailoverContext, circuit_accounted_event_stream, execute_with_failover,
+        reclassify_ambiguous_transport_failure, validated_event_stream,
+    },
+    limits::reserve_limits,
+    runtime::{RuntimeBundle, RuntimeManager},
+};
 use olp_protocols::openai::{
     ChatCompletionRequest, ResponseInputTokensRequest, decode_chat_completion,
     decode_response_input_tokens,
 };
-use olp_storage::AuthHmacKey;
+use olp_storage::security::AuthHmacKey;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -40,11 +49,6 @@ use super::{
         RequiredTarget, execute_event_operation_for_surface_inner,
         execute_routed_result_for_surface_inner,
     },
-    failover::{
-        EventStream, FailoverContext, circuit_accounted_event_stream, execute_with_failover,
-        reclassify_ambiguous_transport_failure, validated_event_stream,
-    },
-    limits::reserve_limits,
     media_jobs::{media_job_state, valid_upstream_media_job_id},
     multipart::MultipartFormData,
 };
@@ -174,7 +178,7 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
             },
         )]),
     };
-    let runtime = Arc::new(crate::RuntimeManager::empty());
+    let runtime = Arc::new(RuntimeManager::empty());
     let transport: Arc<dyn ProviderTransport> = Arc::new(StaticTransport {
         events: vec![
             CanonicalEvent::new(
@@ -218,18 +222,18 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
         "https://olp.test",
         "console",
     );
-    state.auth_hmac_key = auth_hmac_key;
+    state.replace_auth_hmac_key_for_test(auth_hmac_key);
     (state, plaintext)
 }
 
 fn test_principal(state: &GatewayState, surface: Surface) -> crate::InferencePrincipal {
-    let runtime = state.runtime.pin();
+    let runtime = state.runtime().pin();
     let (lookup_id, _) = runtime.api_keys.iter().next().unwrap();
-    crate::InferencePrincipal::for_test(Arc::clone(&runtime), lookup_id.clone(), surface)
+    crate::InferencePrincipal::new(Arc::clone(&runtime), lookup_id.clone(), surface)
 }
 
 fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let snapshot = RuntimeSnapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
@@ -245,11 +249,11 @@ fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, A
         .keys()
         .map(|provider_id| (*provider_id, pinned.transport(*provider_id).unwrap()))
         .collect();
-    state.runtime.install(snapshot, transports).unwrap();
+    state.runtime().install(snapshot, transports).unwrap();
 }
 
 fn install_result(state: &GatewayState, operation: OperationKind, result: CanonicalResult) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
     let mut providers = pinned.providers.clone();
     providers.get_mut(&provider_id).unwrap().capabilities = BTreeSet::from([Capability::new(
@@ -275,13 +279,13 @@ fn install_result(state: &GatewayState, operation: OperationKind, result: Canoni
     };
     let transport: Arc<dyn ProviderTransport> = Arc::new(StaticResultTransport { result });
     state
-        .runtime
+        .runtime()
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
 }
 
 fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
     let snapshot = RuntimeSnapshot {
         generation: RuntimeGeneration {
@@ -294,7 +298,7 @@ fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>
         api_keys: pinned.api_keys.clone(),
     };
     state
-        .runtime
+        .runtime()
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
 }
@@ -346,7 +350,7 @@ fn generation_stream_events(text: &str) -> Vec<CanonicalEvent> {
 }
 
 async fn post_json(state: &GatewayState, key: &str, path: &str, body: &'static str) -> Response {
-    crate::router::gateway_router_for_test(state.clone())
+    crate::public_http::router::gateway_router_for_test(state.clone())
         .oneshot(
             Request::post(path)
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -359,7 +363,7 @@ async fn post_json(state: &GatewayState, key: &str, path: &str, body: &'static s
 }
 
 async fn post_multipart(state: &GatewayState, key: &str, path: &str, body: String) -> Response {
-    crate::router::gateway_router_for_test(state.clone())
+    crate::public_http::router::gateway_router_for_test(state.clone())
         .oneshot(
             Request::post(path)
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))

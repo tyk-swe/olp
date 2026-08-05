@@ -1,4 +1,8 @@
-const LOGIN_LOOP_PATHS = ['/login', '/api/v1/oidc/login', '/api/v1/oidc/callback'] as const;
+const LOGIN_LOOP_PATHS = [
+  '/login',
+  '/api/v1/oidc/login',
+  '/api/v1/oidc/callback'
+] as const;
 const MAX_RELATIVE_RETURN_TO_BYTES = 2_048;
 // The control ranges are intentional input-validation boundaries.
 // eslint-disable-next-line no-control-regex
@@ -33,7 +37,9 @@ function normalizeDecodedPath(pathname: string): string {
 }
 
 function isLoginLoop(pathname: string): boolean {
-  return LOGIN_LOOP_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  return LOGIN_LOOP_PATHS.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`)
+  );
 }
 
 /**
@@ -73,7 +79,9 @@ export function relativeReturnTo(
       return '/';
     }
     const canonical = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    return utf8Length(canonical) <= MAX_RELATIVE_RETURN_TO_BYTES ? canonical : '/';
+    return utf8Length(canonical) <= MAX_RELATIVE_RETURN_TO_BYTES
+      ? canonical
+      : '/';
   } catch {
     return '/';
   }

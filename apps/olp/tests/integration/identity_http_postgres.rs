@@ -6,8 +6,9 @@ use axum::{
     http::{Method, Request, Response, StatusCode, header},
 };
 use http_body_util::BodyExt as _;
-use olp::{ApiMode, ApiState, RuntimeManager, public_router};
-use olp_storage::MasterKey;
+use olp::test_support::{ApiMode, ProcessComposition, public_router};
+use olp_inference::runtime::RuntimeManager;
+use olp_storage::security::MasterKey;
 use serde_json::{Value, json};
 use sqlx::Row as _;
 use tower::ServiceExt as _;
@@ -21,7 +22,7 @@ const ORIGIN: &str = "https://olp.example.test";
 async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     let db = olp_storage::test_support::TestDb::create_migrated("identity_http").await;
     let store = db.store(5).await;
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
         Arc::new(RuntimeManager::empty()),

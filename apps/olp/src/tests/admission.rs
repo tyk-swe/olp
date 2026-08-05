@@ -67,7 +67,7 @@ fn public_auth_query_strings_do_not_change_source_policy() {
 
 #[test]
 fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
@@ -82,19 +82,29 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
         HeaderValue::from_static("198.51.100.24, 10.1.2.3"),
     );
     assert_eq!(
-        public_auth_source(&state, &forwarded, Some("10.2.3.4:443".parse().unwrap()),).unwrap(),
+        public_auth_source(
+            state.request_boundary(),
+            &forwarded,
+            Some("10.2.3.4:443".parse().unwrap()),
+        )
+        .unwrap(),
         "198.51.100.24"
     );
 
     let mut spoofed = HeaderMap::new();
     spoofed.insert("x-forwarded-for", HeaderValue::from_static("not-an-ip"));
     assert_eq!(
-        public_auth_source(&state, &spoofed, Some("203.0.113.30:443".parse().unwrap()),).unwrap(),
+        public_auth_source(
+            state.request_boundary(),
+            &spoofed,
+            Some("203.0.113.30:443".parse().unwrap()),
+        )
+        .unwrap(),
         "203.0.113.30"
     );
     assert_eq!(
         public_auth_source(
-            &state,
+            state.request_boundary(),
             &HeaderMap::new(),
             Some("10.2.3.4:443".parse().unwrap()),
         )
@@ -103,13 +113,17 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
         400
     );
     assert_eq!(
-        public_auth_source(&state, &spoofed, Some("10.2.3.4:443".parse().unwrap()),)
-            .unwrap_err()
-            .status,
+        public_auth_source(
+            state.request_boundary(),
+            &spoofed,
+            Some("10.2.3.4:443".parse().unwrap()),
+        )
+        .unwrap_err()
+        .status,
         400
     );
     assert_eq!(
-        public_auth_source(&state, &HeaderMap::new(), None)
+        public_auth_source(state.request_boundary(), &HeaderMap::new(), None)
             .unwrap_err()
             .status,
         503
@@ -149,7 +163,7 @@ fn multipart_admission_is_post_only_and_recovers_after_a_parser_drops() {
 
 #[tokio::test]
 async fn malformed_trusted_proxy_chain_is_rejected_before_public_auth_body_handling() {
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
@@ -175,7 +189,7 @@ async fn malformed_trusted_proxy_chain_is_rejected_before_public_auth_body_handl
 
 #[tokio::test]
 async fn malformed_trusted_proxy_chain_is_rejected_before_oidc_login_post_json_handling() {
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
@@ -332,7 +346,7 @@ async fn json_body_read_has_its_own_deadline_outside_route_layers() {
 #[tokio::test]
 async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
     let app = public_router(
-        ApiState::new(
+        ProcessComposition::new(
             ApiMode::Gateway,
             None,
             Arc::new(RuntimeManager::empty()),

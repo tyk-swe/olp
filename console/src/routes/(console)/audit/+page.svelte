@@ -1,5 +1,5 @@
 <script lang="ts">
-  import AuditPage from '$lib/features/operations/AuditPage.svelte';
+  import AuditPage from '$lib/features/operations/audit/AuditPage.svelte';
 </script>
 
 <AuditPage />

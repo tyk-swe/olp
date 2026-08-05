@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn bootstrap_token_digest_is_verified_then_cleared() {
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
         Arc::new(RuntimeManager::empty()),
@@ -28,7 +28,7 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
 
 #[tokio::test]
 async fn inference_authentication_precedes_body_decode_with_native_errors() {
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Gateway,
         None,
         Arc::new(RuntimeManager::empty()),

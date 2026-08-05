@@ -3,7 +3,9 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::reconciliation::{RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState};
 use crate::{
-    OperationsError, OperationsPage, PersistenceError, PgStore, TimestampCursor, split_page,
+    PersistenceError, PgStore,
+    operations::{OperationsError, OperationsPage, TimestampCursor},
+    split_page,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

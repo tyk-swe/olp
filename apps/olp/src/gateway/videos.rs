@@ -10,14 +10,16 @@ use axum::{
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{CanonicalResult, Operation, OperationKind, Surface, TransportMode};
+use olp_inference::limits::CleanupMediaStream;
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
     encode_video_delete_response, encode_video_list_response, encode_video_object,
 };
 use olp_storage::{
-    MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobRecord,
-    MediaJobUpdate, NewMediaJobReservation,
+    media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
+    media_jobs::MediaJobOrder, media_jobs::MediaJobRecord, media_jobs::MediaJobUpdate,
+    media_jobs::NewMediaJobReservation,
 };
 use tracing::error;
 
@@ -25,8 +27,10 @@ use crate::{GatewayState, InferencePrincipal, MultipartRequestAdmission};
 
 use super::{
     error::InferenceError,
-    execution::{RequiredTarget, authorize_principal, execute_routed_result, incompatible_result},
-    limits::CleanupMediaStream,
+    execution::{
+        RequiredTarget, authorize_principal, execute_routed_result, incompatible_result,
+        mark_unary_outcome,
+    },
     media::open_response_media,
     media_jobs::{
         attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
@@ -85,16 +89,13 @@ pub(super) async fn video_create(
     // The accepted upstream create must outlive client disconnects. Capture
     // the HTTP inference context before spawning so it keeps the original
     // runtime generation, limits reservation, and metadata ownership.
-    let task = crate::spawn_http_inference_task(
-        &state,
-        complete_video_create(
-            state.clone(),
-            principal,
-            operation,
-            reserved,
-            required_target,
-        ),
-    );
+    let task = crate::spawn_http_inference_task(complete_video_create(
+        state.clone(),
+        principal,
+        operation,
+        reserved,
+        required_target,
+    ));
     match task.await {
         Ok(result) => result,
         Err(error) => {
@@ -166,7 +167,7 @@ async fn complete_video_create(
                 state.record_media_reconciliation_gap();
                 error!(job_id = %reserved.id, %error, "failed to retire malformed video reservation");
             }
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
@@ -187,7 +188,7 @@ async fn complete_video_create(
             state.record_media_reconciliation_gap();
             error!(job_id = %reserved.id, %error, "failed to retire invalid video reservation");
         }
-        executed.mark_failure(&failure);
+        executed.mark_failure(failure.accounting_outcome());
         return Err(failure);
     }
     debug_assert_eq!(executed.provider_id, required_target.provider_id);
@@ -207,7 +208,7 @@ async fn complete_video_create(
                 state.record_media_reconciliation_gap();
                 error!(job_id = %reserved.id, %error, "failed to schedule malformed video cleanup");
             }
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
@@ -268,11 +269,11 @@ async fn complete_video_create(
             let compensation_confirmed = if cleanup_intent_persisted {
                 let mut cleanup = decode_video_delete(upstream_job_id.clone());
                 if let Err(failure) = set_video_route(&mut cleanup, executed.route_slug.as_str()) {
-                    executed.mark_failure(&failure);
+                    executed.mark_failure(failure.accounting_outcome());
                     return Err(failure);
                 }
                 if let Err(failure) = mark_missing_delete_as_success(&mut cleanup) {
-                    executed.mark_failure(&failure);
+                    executed.mark_failure(failure.accounting_outcome());
                     return Err(failure);
                 }
                 let mut compensation = execute_routed_result(
@@ -295,7 +296,7 @@ async fn complete_video_create(
                     }
                     Ok(compensation) => {
                         let failure = incompatible_result("video deletion");
-                        compensation.mark_failure(&failure);
+                        compensation.mark_failure(failure.accounting_outcome());
                         false
                     }
                     Err(_) => false,
@@ -326,7 +327,7 @@ async fn complete_video_create(
                 );
             }
             let failure = InferenceError::unavailable("media_job_create_reconciliation_pending");
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
@@ -334,7 +335,7 @@ async fn complete_video_create(
     result.model = Some(executed.route_slug.to_string());
     let response = encode_video_object(&result, executed.route_slug.as_str())
         .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
-    executed.mark_outcome(&response);
+    mark_unary_outcome(&mut executed, &response);
     let response = response?;
     Ok((StatusCode::CREATED, Json(response)).into_response())
 }
@@ -344,7 +345,7 @@ pub(super) async fn video_list(
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
-    let key = authorize_principal(&principal, OperationKind::VideoList, None)?;
+    let key = authorize_principal(&state, &principal, OperationKind::VideoList, None)?;
     if !query.extra.is_empty() {
         return Err(InferenceError::invalid_request(
             "Video list contains unsupported query parameters.",
@@ -450,7 +451,7 @@ pub(super) async fn video_get(
     let state_update = match media_job_state(&result.status) {
         Ok(state) => state,
         Err(failure) => {
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
@@ -471,7 +472,7 @@ pub(super) async fn video_get(
         Ok(updated) => updated,
         Err(error) => {
             let failure = media_job_error(error);
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
@@ -479,7 +480,7 @@ pub(super) async fn video_get(
     result.model = Some(updated.route_slug.clone());
     let response = encode_video_object(&result, &updated.route_slug)
         .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
-    executed.mark_outcome(&response);
+    mark_unary_outcome(&mut executed, &response);
     let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }
@@ -520,13 +521,13 @@ pub(super) async fn video_content(
     let opened = match open_response_media(&state, &result.media.handle).await {
         Ok(opened) => opened,
         Err(failure) => {
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
     let cleanup = CleanupMediaStream::new(
         opened.bytes,
-        state.media_spool.clone(),
+        state.media_spool().clone(),
         opened.artifact.handle.clone(),
     );
     let mut response = Response::new(Body::from_stream(cleanup));
@@ -538,7 +539,7 @@ pub(super) async fn video_content(
                     "provider_protocol_error",
                     "The provider returned an invalid video content type.",
                 );
-                executed.mark_failure(&failure);
+                executed.mark_failure(failure.accounting_outcome());
                 return Err(failure);
             }
         };
@@ -554,7 +555,7 @@ pub(super) async fn video_content(
                     "provider_protocol_error",
                     "The provider returned an invalid video length.",
                 );
-                executed.mark_failure(&failure);
+                executed.mark_failure(failure.accounting_outcome());
                 return Err(failure);
             }
         };
@@ -619,27 +620,27 @@ pub(super) async fn video_delete(
             "video_delete_not_confirmed",
             "The provider did not confirm video deletion.",
         );
-        executed.mark_failure(&failure);
+        executed.mark_failure(failure.accounting_outcome());
         return Err(failure);
     }
     let finalized = match media_job_deletion_finalized(state.store(), record.id).await {
         Ok(finalized) => finalized,
         Err(error) => {
             let failure = media_job_error(error);
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return Err(failure);
         }
     };
     if !finalized {
         state.record_media_reconciliation_gap();
         let failure = InferenceError::unavailable("media_job_delete_reconciliation_pending");
-        executed.mark_failure(&failure);
+        executed.mark_failure(failure.accounting_outcome());
         return Err(failure);
     }
     result.id = record.id.to_string();
     let response = encode_video_delete_response(&result)
         .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
-    executed.mark_outcome(&response);
+    mark_unary_outcome(&mut executed, &response);
     let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
 }

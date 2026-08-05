@@ -11,7 +11,12 @@ pub use count::{
     CountDecodeError, CountEncodeError, GEMINI_COUNT_REQUEST_EXTENSION,
     decode_count_tokens_request, encode_count_tokens_result,
 };
-pub use dto::*;
+pub use dto::{
+    Blob, Candidate, Content, CountTokensRequest, CountTokensResponse, FileData, FileDataPart,
+    FunctionCall, FunctionCallPart, FunctionCallingConfig, FunctionDeclaration, FunctionResponse,
+    FunctionResponsePart, GenerateContentRequest, GenerateContentResponse, GenerationConfig,
+    InlineDataPart, Part, TextPart, Tool, ToolConfig, UsageMetadata,
+};
 pub use stream::{GeminiGenerateContentStreamDecoder, StreamError};
 pub use translate::{
     CountTokensError, DecodeError, EncodeError, ResponseError, decode_generate_content_request,

@@ -100,7 +100,7 @@ async fn invalid_keys_cannot_spool_responses_media_before_authentication() {
     let (mut state, _) = test_state(false);
     let (_, invalid_key) = test_state(false);
     let spool = Arc::new(CountingAdmissionSpool::default());
-    state.media_spool = spool.clone();
+    state.replace_media_spool_for_test(spool.clone());
 
     for (path, body) in [
         (
@@ -122,7 +122,7 @@ async fn invalid_keys_cannot_spool_responses_media_before_authentication() {
 async fn responses_scope_authorization_precedes_json_errors_and_media_staging() {
     let (mut state, key) = test_state(false);
     let spool = Arc::new(CountingAdmissionSpool::default());
-    state.media_spool = spool.clone();
+    state.replace_media_spool_for_test(spool.clone());
     replace_api_key_scopes(&state, BTreeSet::from([ApiKeyScope::ModelsRead]));
 
     for path in ["/openai/v1/responses", "/openai/v1/responses/input_tokens"] {
@@ -153,7 +153,7 @@ async fn responses_scope_authorization_precedes_json_errors_and_media_staging() 
 async fn restricted_multipart_key_rejects_file_before_model_without_spooling() {
     let (mut state, key) = test_state(false);
     let spool = Arc::new(CountingAdmissionSpool::default());
-    state.media_spool = spool.clone();
+    state.replace_media_spool_for_test(spool.clone());
     restrict_api_key_to_route(&state, RouteSlug::parse("default").unwrap());
     let body = concat!(
         "--olp-test-boundary\r\n",
@@ -175,9 +175,9 @@ async fn restricted_multipart_key_rejects_file_before_model_without_spooling() {
 async fn multipart_route_header_mismatch_cleans_the_staged_file() {
     let (mut state, key) = test_state(false);
     let recording = RecordingSpool::new(
-        crate::media_spool::FileMediaSpool::create().unwrap() as Arc<dyn MediaSpool>
+        crate::bootstrap::media_spool::FileMediaSpool::create().unwrap() as Arc<dyn MediaSpool>,
     );
-    state.media_spool = recording.clone();
+    state.replace_media_spool_for_test(recording.clone());
     restrict_api_key_to_route(&state, RouteSlug::parse("default").unwrap());
     let body = concat!(
         "--olp-test-boundary\r\n",
@@ -192,7 +192,7 @@ async fn multipart_route_header_mismatch_cleans_the_staged_file() {
         "route mismatch\r\n",
         "--olp-test-boundary--\r\n"
     );
-    let response = crate::router::gateway_router_for_test(state.clone())
+    let response = crate::public_http::router::gateway_router_for_test(state.clone())
         .oneshot(
             Request::post("/openai/v1/images/edits")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -216,14 +216,14 @@ async fn multipart_route_header_mismatch_cleans_the_staged_file() {
 }
 
 fn restrict_api_key_to_route(state: &GatewayState, route: RouteSlug) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys.values_mut().next().unwrap().allowed_routes = BTreeSet::from([route]);
     reinstall_api_keys(state, api_keys);
 }
 
 fn replace_api_key_scopes(state: &GatewayState, scopes: BTreeSet<ApiKeyScope>) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let mut api_keys = pinned.api_keys.clone();
     api_keys.values_mut().next().unwrap().scopes = scopes;
     reinstall_api_keys(state, api_keys);
@@ -232,7 +232,7 @@ fn replace_api_key_scopes(state: &GatewayState, scopes: BTreeSet<ApiKeyScope>) {
 #[tokio::test]
 async fn malformed_multipart_is_rejected_before_routing() {
     let (state, key) = test_state(false);
-    let response = crate::router::gateway_router_for_test(state)
+    let response = crate::public_http::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/images/edits")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))
@@ -247,7 +247,7 @@ async fn malformed_multipart_is_rejected_before_routing() {
 
 #[tokio::test]
 async fn failed_multipart_validation_removes_staged_files() {
-    let spool = crate::media_spool::FileMediaSpool::create().unwrap();
+    let spool = crate::bootstrap::media_spool::FileMediaSpool::create().unwrap();
     let artifact = spool
         .put(olp_domain::MediaUpload {
             filename: "upload.png".to_owned(),

@@ -7,6 +7,63 @@ use crate::{PersistenceError, PgStore};
 
 const REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED: i64 = 0x4f4c_505f_5545;
 
+#[derive(Debug, Clone)]
+pub struct RequestMetadataGap {
+    pub gateway_instance: String,
+    pub event_count: i64,
+    pub reason: String,
+    pub first_observed_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
+}
+
+impl PgStore {
+    /// Records a gap exactly once for a durable source identity such as a
+    /// Valkey Stream entry or decoded event ID. This closes the
+    /// commit-before-acknowledgement crash window without storing content.
+    pub async fn report_request_metadata_gap_once(
+        &self,
+        gap: RequestMetadataGap,
+        deduplication_key: &str,
+    ) -> Result<bool, PersistenceError> {
+        if deduplication_key.is_empty() || deduplication_key.len() > 256 {
+            return Err(PersistenceError::InvalidRequestMetadataGap);
+        }
+        self.insert_request_metadata_gap(gap, Some(deduplication_key))
+            .await
+    }
+
+    async fn insert_request_metadata_gap(
+        &self,
+        gap: RequestMetadataGap,
+        deduplication_key: Option<&str>,
+    ) -> Result<bool, PersistenceError> {
+        if gap.event_count <= 0
+            || gap.gateway_instance.trim().is_empty()
+            || gap.reason.trim().is_empty()
+            || gap.last_observed_at < gap.first_observed_at
+        {
+            return Err(PersistenceError::InvalidRequestMetadataGap);
+        }
+        let result = sqlx::query!(
+            "INSERT INTO request_metadata_ingestion_gaps \
+             (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at, \
+              deduplication_key) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (deduplication_key) WHERE deduplication_key IS NOT NULL DO NOTHING",
+            Uuid::now_v7(),
+            gap.gateway_instance,
+            gap.event_count,
+            gap.reason,
+            gap.first_observed_at,
+            gap.last_observed_at,
+            deduplication_key
+        )
+        .execute(self.pool())
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestMetadataLossReport {
     pub reported_events: u64,

@@ -5,27 +5,21 @@ use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
     ApiKey, CanonicalResult, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, OperationKind,
-    RequestId, RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
+    RouteSlug, Surface, TransportMode, authorize_api_key,
 };
+use olp_inference::selection::select_representable_attempts_filtered;
 use olp_storage::{
-    MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
-    MediaReconciliationPass,
+    media_jobs::MediaJobError, media_jobs::MediaJobLifecycle, media_jobs::MediaJobRecord,
+    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::MediaReconciliationPass,
 };
 use serde_json::Value;
 use tracing::{error, warn};
 
-use crate::{
-    GatewayState, InferencePrincipal, semantic_validation::select_representable_attempts_filtered,
-};
+use crate::{GatewayState, InferencePrincipal};
 
 use super::{
     error::InferenceError,
     execution::{RequiredTarget, authorize_principal, execute_routed_result},
-    failover::{ExecutionOutput, FailoverContext, execute_with_failover},
-    telemetry::{
-        RequestMetadataInput, UsageCapture, elapsed_ms, emit_request_metadata_event,
-        usage_from_result,
-    },
 };
 
 pub(super) fn select_video_create_target(
@@ -38,7 +32,12 @@ pub(super) fn select_video_create_target(
         .route()
         .cloned()
         .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    let key = authorize_principal(principal, OperationKind::VideoCreate, Some(&route_slug))?;
+    let key = authorize_principal(
+        state,
+        principal,
+        OperationKind::VideoCreate,
+        Some(&route_slug),
+    )?;
     let snapshot = principal.runtime();
     let attempt = select_representable_attempts_filtered(
         snapshot,
@@ -47,7 +46,7 @@ pub(super) fn select_video_create_target(
         Surface::OpenAi,
         TransportMode::Async,
         local_job_id.as_bytes(),
-        |_, target| state.circuits.is_selectable(target.id),
+        |_, target| state.circuits().is_selectable(target.id),
     )?
     .into_iter()
     .next()
@@ -301,146 +300,19 @@ async fn execute_media_reconciliation_result(
     record: &MediaJobRecord,
     operation: Operation,
 ) -> Result<Box<CanonicalResult>, &'static str> {
-    let snapshot = state.runtime.pin();
-    let route_slug = operation
-        .route()
-        .cloned()
-        .ok_or("media_job_route_invalid")?;
-    let request_id = RequestId::new();
-    let request_started_at = Utc::now();
-    let request_started = tokio::time::Instant::now();
-    let operation_kind = operation.kind();
-    let attempts = match select_representable_attempts_filtered(
-        &snapshot,
-        &route_slug,
-        &operation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-        request_id.as_uuid().as_bytes(),
-        |_, target| {
-            target.provider_id.as_uuid() == record.provider_id
-                && target.upstream_model == record.upstream_model
-                && state.circuits.is_selectable(target.id)
-        },
-    ) {
-        Ok(attempts) => attempts,
-        Err(failure) => {
-            emit_request_metadata_event(
-                state,
-                RequestMetadataInput {
-                    generation_id: snapshot.generation.id.as_uuid(),
-                    api_key_id: record.api_key_id,
-                    request_id: request_id.as_uuid(),
-                    route_slug: &route_slug,
-                    attempts: &[],
-                    request_started_at,
-                    request_started,
-                    final_attempt_started: None,
-                    first_byte_ms: None,
-                    status_code: Some(failure.status.as_u16()),
-                    error_class: Some(failure.code.to_owned()),
-                    committed: false,
-                    usage: &UsageCapture::default(),
-                    surface: Surface::OpenAi,
-                    operation: operation_kind,
-                },
-            );
-            return Err(failure.code);
-        }
-    };
-    let route = snapshot
-        .routes
-        .get(&route_slug)
-        .ok_or("media_job_route_invalid")?;
-    let execution = execute_with_failover(
-        FailoverContext {
-            runtime: &snapshot,
-            overall_timeout: route.overall_timeout.as_duration(),
-            media_spool: state.media_spool.clone(),
-            circuits: &state.circuits,
-            on_attempt_started: None,
-        },
-        attempts,
-        RequestMetadata {
-            request_id,
-            operation: operation_kind,
-            surface: Surface::OpenAi,
-            mode: TransportMode::Unary,
-        },
-        operation,
-    )
-    .await;
-    let success = match execution {
-        Ok(success) => success,
-        Err(failure) => {
-            emit_request_metadata_event(
-                state,
-                RequestMetadataInput {
-                    generation_id: snapshot.generation.id.as_uuid(),
-                    api_key_id: record.api_key_id,
-                    request_id: request_id.as_uuid(),
-                    route_slug: &route_slug,
-                    attempts: &failure.attempts,
-                    request_started_at,
-                    request_started,
-                    final_attempt_started: None,
-                    first_byte_ms: None,
-                    status_code: Some(failure.error.status.as_u16()),
-                    error_class: Some(failure.error.code.to_owned()),
-                    committed: false,
-                    usage: &UsageCapture::default(),
-                    surface: Surface::OpenAi,
-                    operation: operation_kind,
-                },
-            );
-            return Err(failure.error.code);
-        }
-    };
-    let ExecutionOutput::Result(result) = success.output else {
-        emit_request_metadata_event(
-            state,
-            RequestMetadataInput {
-                generation_id: snapshot.generation.id.as_uuid(),
-                api_key_id: record.api_key_id,
-                request_id: request_id.as_uuid(),
-                route_slug: &route_slug,
-                attempts: &success.attempts,
-                request_started_at,
-                request_started,
-                final_attempt_started: Some(success.attempt_started),
-                first_byte_ms: Some(elapsed_ms(request_started.elapsed())),
-                status_code: Some(StatusCode::BAD_GATEWAY.as_u16()),
-                error_class: Some("provider_protocol_error".to_owned()),
-                committed: true,
-                usage: &UsageCapture::default(),
-                surface: Surface::OpenAi,
-                operation: operation_kind,
+    state
+        .inference()
+        .execute_reconciliation_result(
+            record.api_key_id,
+            operation,
+            Surface::OpenAi,
+            RequiredTarget {
+                provider_id: record.provider_id,
+                upstream_model: record.upstream_model.clone(),
             },
-        );
-        return Err("provider_protocol_error");
-    };
-    let first_byte_ms = elapsed_ms(request_started.elapsed());
-    emit_request_metadata_event(
-        state,
-        RequestMetadataInput {
-            generation_id: snapshot.generation.id.as_uuid(),
-            api_key_id: record.api_key_id,
-            request_id: request_id.as_uuid(),
-            route_slug: &route_slug,
-            attempts: &success.attempts,
-            request_started_at,
-            request_started,
-            final_attempt_started: Some(success.attempt_started),
-            first_byte_ms: Some(first_byte_ms),
-            status_code: Some(StatusCode::OK.as_u16()),
-            error_class: None,
-            committed: true,
-            usage: &usage_from_result(&result),
-            surface: Surface::OpenAi,
-            operation: operation_kind,
-        },
-    );
-    Ok(result)
+        )
+        .await
+        .map_err(|failure| failure.code())
 }
 
 pub(super) async fn refresh_video_list_record(
@@ -482,7 +354,7 @@ pub(super) async fn refresh_video_list_record(
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
-            executed.mark_failure(&failure);
+            executed.mark_failure(failure.accounting_outcome());
             return record;
         }
     };
@@ -514,7 +386,7 @@ pub(super) async fn owned_media_job(
     video_id: &str,
     operation: OperationKind,
 ) -> Result<(ApiKey, MediaJobRecord), InferenceError> {
-    let key = authorize_principal(principal, operation, None)?;
+    let key = authorize_principal(state, principal, operation, None)?;
     let id = uuid::Uuid::parse_str(video_id)
         .map_err(|_| InferenceError::resource_not_found("video_not_found"))?;
     let record = state.store().media_job(id).await.map_err(media_job_error)?;

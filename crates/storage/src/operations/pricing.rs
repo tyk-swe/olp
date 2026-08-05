@@ -10,11 +10,12 @@ use super::{
     cursor::{OperationsError, OperationsPage},
 };
 use crate::{
-    IdempotencyOutcome, IdempotencyResponse, PersistenceError, PgStore, ReplayableIdempotency,
-    split_page,
-    store::{
-        ReplayableIdempotencyClaim, claim_replayable_idempotency, complete_replayable_idempotency,
+    PersistenceError, PgStore,
+    idempotency::{
+        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
+        claim_replayable_idempotency, complete_replayable_idempotency,
     },
+    split_page,
 };
 
 const PRICING_LOCK_ID: i64 = 0x4f4c_505f_5052; // "OLP_PR"
