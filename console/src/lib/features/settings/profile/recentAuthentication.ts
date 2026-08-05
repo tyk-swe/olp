@@ -5,8 +5,7 @@ export const ENROLLMENT_GRANT_READY_MESSAGE =
   'Identity verified. Add your local password within five minutes.';
 
 export type PendingIdentityAction =
-  | { purpose: 'oidc_link' }
-  | { purpose: 'oidc_unlink'; resourceId: string };
+  { purpose: 'oidc_link' } | { purpose: 'oidc_unlink'; resourceId: string };
 
 export type RecentAuthenticationCallback = {
   purpose: RecentAuthenticationPurpose;
