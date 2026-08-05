@@ -39,7 +39,7 @@ runs:
         fi
     - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
       with:
-        toolchain: "1.97.0"
+        toolchain: "1.97.1"
         components: ${{ inputs.components }}
     - if: ${{ inputs.cache == 'true' }}
       uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
