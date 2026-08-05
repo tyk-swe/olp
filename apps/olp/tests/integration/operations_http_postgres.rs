@@ -7,12 +7,15 @@ use axum::{
 };
 use chrono::{Duration, SecondsFormat, Timelike, Utc};
 use http_body_util::BodyExt as _;
-use olp::{
-    ApiMode, ApiState, RuntimeManager, observability_router, public_router,
-    refresh_observability_cache,
+use olp::test_support::{
+    ApiMode, ProcessComposition, observability_router, public_router, refresh_observability_cache,
 };
 use olp_domain::Surface;
-use olp_storage::{MasterKey, RequestAttemptMetadata, RequestMetadataEvent, RequestMetadataGap};
+use olp_inference::runtime::RuntimeManager;
+use olp_storage::{
+    request_metadata::RequestAttemptMetadata, request_metadata::RequestMetadataEvent,
+    request_metadata::RequestMetadataGap, security::MasterKey,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -26,7 +29,7 @@ const ORIGIN: &str = "https://olp.example.test";
 async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_only() {
     let db = olp_storage::test_support::TestDb::create_migrated("operations_http").await;
     let store = db.store(5).await;
-    let mut state = ApiState::new(
+    let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
         Arc::new(RuntimeManager::empty()),

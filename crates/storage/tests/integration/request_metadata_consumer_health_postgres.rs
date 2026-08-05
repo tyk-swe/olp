@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use olp_storage::{PersistenceError, RequestMetadataConsumerState};
+use olp_storage::{PersistenceError, request_metadata::RequestMetadataConsumerState};
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]

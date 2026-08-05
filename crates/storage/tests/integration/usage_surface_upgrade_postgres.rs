@@ -1,5 +1,5 @@
 use chrono::{Duration, Timelike, Utc};
-use olp_storage::{MIGRATOR, RequestMetadataConsumerState, UsageFilters};
+use olp_storage::{MIGRATOR, request_metadata::RequestMetadataConsumerState, usage::UsageFilters};
 use uuid::Uuid;
 
 #[tokio::test]

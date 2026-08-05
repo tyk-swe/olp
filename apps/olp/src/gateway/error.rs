@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_domain::{AttemptFailureClass, CanonicalError, ErrorClass, TransportError};
-use olp_storage::LimitDimension;
+use olp_storage::limits::LimitDimension;
 use serde::Serialize;
 
 use crate::Problem;
@@ -42,6 +42,13 @@ impl fmt::Debug for InferenceError {
 }
 
 impl InferenceError {
+    pub(crate) fn accounting_outcome(&self) -> olp_inference::RequestOutcome {
+        olp_inference::RequestOutcome::failure(
+            (self.code != "client_cancelled").then_some(self.status.as_u16()),
+            self.code,
+        )
+    }
+
     pub(crate) fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
@@ -247,6 +254,55 @@ impl InferenceError {
             kind: super::openai_http::error_type(error.class),
             message: error.message.clone(),
             retry_after: None,
+        }
+    }
+}
+
+impl From<olp_inference::InferenceError> for InferenceError {
+    fn from(error: olp_inference::InferenceError) -> Self {
+        use olp_inference::InferenceErrorKind;
+
+        let (status, kind) = match error.kind() {
+            InferenceErrorKind::Authentication => {
+                (StatusCode::UNAUTHORIZED, "authentication_error")
+            }
+            InferenceErrorKind::Permission => (StatusCode::FORBIDDEN, "permission_error"),
+            InferenceErrorKind::InvalidRequest => {
+                (StatusCode::BAD_REQUEST, "invalid_request_error")
+            }
+            InferenceErrorKind::PayloadTooLarge => {
+                (StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error")
+            }
+            InferenceErrorKind::NotFound => (StatusCode::NOT_FOUND, "invalid_request_error"),
+            InferenceErrorKind::Conflict => (StatusCode::CONFLICT, "conflict_error"),
+            InferenceErrorKind::RateLimit => (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
+            InferenceErrorKind::Unavailable => {
+                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable_error")
+            }
+            InferenceErrorKind::RequestTimeout => (StatusCode::REQUEST_TIMEOUT, "timeout_error"),
+            InferenceErrorKind::GatewayTimeout => (StatusCode::GATEWAY_TIMEOUT, "timeout_error"),
+            InferenceErrorKind::Upstream => (StatusCode::BAD_GATEWAY, "upstream_error"),
+            InferenceErrorKind::Cancelled => (StatusCode::BAD_GATEWAY, "cancelled_error"),
+            InferenceErrorKind::Canonical(class) => {
+                let status = match class {
+                    ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
+                    ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
+                    ErrorClass::Authentication
+                    | ErrorClass::Authorization
+                    | ErrorClass::InvalidRequest
+                    | ErrorClass::Transport
+                    | ErrorClass::Upstream
+                    | ErrorClass::Internal => StatusCode::BAD_GATEWAY,
+                };
+                (status, super::openai_http::error_type(class))
+            }
+        };
+        Self {
+            status,
+            code: error.code(),
+            kind,
+            message: error.message().to_owned(),
+            retry_after: error.retry_after(),
         }
     }
 }

@@ -135,13 +135,13 @@ async fn cancelling_response_input_tokens_handler_cleans_admitted_media() {
         .await
         .expect("token-count request must reach its transport")
         .expect("transport must capture the admitted handle");
-    assert!(state.media_spool.open(&handle).await.is_ok());
+    assert!(state.media_spool().open(&handle).await.is_ok());
 
     task.abort();
     let _ = task.await;
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            match state.media_spool.open(&handle).await {
+            match state.media_spool().open(&handle).await {
                 Err(olp_domain::MediaSpoolError::NotFound) => break,
                 Ok(_) => tokio::task::yield_now().await,
                 Err(error) => panic!("unexpected media cleanup error: {error}"),
@@ -156,7 +156,7 @@ async fn cancelling_response_input_tokens_handler_cleans_admitted_media() {
 async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
     let (state, _) = test_state(false);
     let artifact = state
-        .media_spool
+        .media_spool()
         .put(olp_domain::MediaUpload {
             filename: "inline.wav".into(),
             content_type: Some("audio/wav".into()),
@@ -196,7 +196,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            match state.media_spool.open(&artifact.handle).await {
+            match state.media_spool().open(&artifact.handle).await {
                 Err(olp_domain::MediaSpoolError::NotFound) => break,
                 Ok(_) => tokio::task::yield_now().await,
                 Err(error) => panic!("unexpected media cleanup error: {error}"),
@@ -210,8 +210,9 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
 #[tokio::test]
 async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     let reached_pending = Arc::new(tokio::sync::Notify::new());
     install_transport(
         &state,
@@ -272,8 +273,9 @@ async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
 #[tokio::test]
 async fn cancelling_during_transport_wait_records_the_active_attempt() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     let started = Arc::new(tokio::sync::Notify::new());
     install_transport(
         &state,
@@ -314,13 +316,14 @@ async fn cancelling_during_transport_wait_records_the_active_attempt() {
 #[tokio::test]
 async fn cancelling_media_cleanup_preserves_the_completed_attempt_outcome() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     let remove_started = Arc::new(tokio::sync::Notify::new());
-    state.media_spool = Arc::new(BlockingRemoveSpool {
-        inner: crate::media_spool::FileMediaSpool::create().unwrap(),
+    state.replace_media_spool_for_test(Arc::new(BlockingRemoveSpool {
+        inner: crate::bootstrap::media_spool::FileMediaSpool::create().unwrap(),
         remove_started: remove_started.clone(),
-    });
+    }));
     install_transport(
         &state,
         Arc::new(FiniteStaticTransport {
@@ -359,8 +362,9 @@ async fn cancelling_media_cleanup_preserves_the_completed_attempt_outcome() {
 #[tokio::test]
 async fn cancelling_shared_event_collection_preserves_partial_usage() {
     let (mut state, key) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     let reached_pending = Arc::new(tokio::sync::Notify::new());
     install_transport(
         &state,
@@ -420,8 +424,9 @@ async fn cancelling_shared_event_collection_preserves_partial_usage() {
 #[tokio::test]
 async fn dropping_completed_unary_result_records_client_cancellation() {
     let (mut state, _) = test_state(false);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     install_result(
         &state,
         OperationKind::TokenCount,

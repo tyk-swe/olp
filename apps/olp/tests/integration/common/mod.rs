@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use olp::ApiState;
-use olp_storage::AuthHmacKey;
+use olp::test_support::ProcessComposition;
+use olp_storage::security::AuthHmacKey;
 
 /// URL of the empty PostgreSQL 18 database each integration test expects.
 /// `scripts/run-postgres-tests.sh` (`make db-test`) provisions one per test.
@@ -14,7 +14,7 @@ pub fn test_database_url() -> String {
 
 pub const BOOTSTRAP_TOKEN: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-pub fn configure_bootstrap(state: &mut ApiState, key: [u8; 32]) {
+pub fn configure_bootstrap(state: &mut ProcessComposition, key: [u8; 32]) {
     let auth_hmac_key = Arc::new(AuthHmacKey::new(key));
     state.set_bootstrap_token_digest(
         auth_hmac_key

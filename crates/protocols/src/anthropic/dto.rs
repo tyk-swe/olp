@@ -1,6 +1,9 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error as _, MapAccess, Visitor},
+};
 use serde_json::Value;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -80,7 +83,7 @@ pub enum SystemPrompt {
     Blocks(Vec<TextBlock>),
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ContentBlock {
     Text(TextBlock),
@@ -90,6 +93,69 @@ pub enum ContentBlock {
     Thinking(ThinkingBlock),
     RedactedThinking(RedactedThinkingBlock),
     Unknown(Value),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ContentBlockRepr {
+    Text(TextBlock),
+    Image(ImageBlock),
+    ToolUse(ToolUseBlock),
+    ToolResult(ToolResultBlock),
+    Thinking(ThinkingBlock),
+    RedactedThinking(RedactedThinkingBlock),
+    Unknown(Value),
+}
+
+impl From<ContentBlockRepr> for ContentBlock {
+    fn from(block: ContentBlockRepr) -> Self {
+        match block {
+            ContentBlockRepr::Text(block) => Self::Text(block),
+            ContentBlockRepr::Image(block) => Self::Image(block),
+            ContentBlockRepr::ToolUse(block) => Self::ToolUse(block),
+            ContentBlockRepr::ToolResult(block) => Self::ToolResult(block),
+            ContentBlockRepr::Thinking(block) => Self::Thinking(block),
+            ContentBlockRepr::RedactedThinking(block) => Self::RedactedThinking(block),
+            ContentBlockRepr::Unknown(value) => Self::Unknown(value),
+        }
+    }
+}
+
+struct ContentBlockVisitor;
+
+impl<'de> Visitor<'de> for ContentBlockVisitor {
+    type Value = ContentBlock;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("an Anthropic content block object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut fields = serde_json::Map::new();
+        while let Some((name, value)) = map.next_entry::<String, Value>()? {
+            if fields.insert(name.clone(), value).is_some() {
+                return Err(A::Error::custom(format_args!(
+                    "duplicate content block field `{name}`"
+                )));
+            }
+        }
+
+        serde_json::from_value::<ContentBlockRepr>(Value::Object(fields))
+            .map(Into::into)
+            .map_err(A::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContentBlock {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(ContentBlockVisitor)
+    }
 }
 
 impl ContentBlock {
@@ -254,4 +320,38 @@ pub struct Usage {
     pub cache_read_input_tokens: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_block_rejects_duplicate_fields() {
+        let error = serde_json::from_str::<ContentBlock>(
+            r#"{"type":"text","type":"tuext","t":"text","text":"hello"}"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate content block field `type`")
+        );
+    }
+
+    #[test]
+    fn content_block_preserves_unknown_fields() {
+        let block = serde_json::from_str::<ContentBlock>(
+            r#"{"type":"text","text":"hello","vendor_flag":true}"#,
+        )
+        .unwrap();
+
+        let ContentBlock::Text(block) = block else {
+            panic!("expected a text block");
+        };
+        assert_eq!(block.kind, "text");
+        assert_eq!(block.text, "hello");
+        assert_eq!(block.extra["vendor_flag"], true);
+    }
 }

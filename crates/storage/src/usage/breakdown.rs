@@ -4,7 +4,10 @@ use super::{
     UsageDimension, UsageFilters, UsageRangeCoverage,
     query::{push_usage_rows_cte, validate_usage_range},
 };
-use crate::{OperationsError, PgStore, operations::MAX_PAGE_SIZE};
+use crate::{
+    PgStore,
+    operations::{MAX_PAGE_SIZE, OperationsError},
+};
 
 #[derive(Clone, Debug)]
 pub struct UsageBreakdown {

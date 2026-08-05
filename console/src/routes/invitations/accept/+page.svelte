@@ -10,7 +10,7 @@
     type InvitationAcceptanceErrors,
     type InvitationAcceptanceValues,
     validateInvitationAcceptance
-  } from '$lib/features/access/invitationValidation';
+  } from '$lib/features/access/invitations/invitationValidation';
 
   let token = $state('');
   let view = $state<'checking' | 'ready' | 'invalid' | 'expired'>('checking');

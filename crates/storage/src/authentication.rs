@@ -1,8 +1,67 @@
+use std::fmt;
+
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::{PersistenceError, PgStore, RecentAuthMaterial, SessionMaterial};
+use crate::{
+    PersistenceError, PgStore,
+    security::{RecentAuthMaterial, SessionMaterial},
+};
+
+mod sessions;
+
+pub(crate) use sessions::checked_session_expiry;
+
+#[derive(Clone)]
+pub struct SessionPrincipal {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub role: String,
+    pub security_version: i64,
+    pub csrf_digest: Vec<u8>,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for SessionPrincipal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionPrincipal")
+            .field("session_id", &self.session_id)
+            .field("user_id", &self.user_id)
+            .field("email", &self.email)
+            .field("display_name", &self.display_name)
+            .field("role", &self.role)
+            .field("security_version", &self.security_version)
+            .field("csrf_digest", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub struct LocalPasswordUser {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub password_hash: String,
+    pub role: String,
+}
+
+impl fmt::Debug for LocalPasswordUser {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalPasswordUser")
+            .field("id", &self.id)
+            .field("email", &self.email)
+            .field("display_name", &self.display_name)
+            .field("password_hash", &"[REDACTED]")
+            .field("role", &self.role)
+            .finish()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecentAuthPurpose {
@@ -259,4 +318,36 @@ pub(crate) async fn insert_security_audit(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::{LocalPasswordUser, SessionPrincipal};
+
+    #[test]
+    fn sensitive_authentication_records_redact_debug_output() {
+        let password = LocalPasswordUser {
+            id: Uuid::now_v7(),
+            email: "owner@example.test".into(),
+            display_name: "Owner".into(),
+            password_hash: "secret-hash".into(),
+            role: "owner".into(),
+        };
+        assert!(!format!("{password:?}").contains("secret-hash"));
+
+        let principal = SessionPrincipal {
+            session_id: Uuid::now_v7(),
+            user_id: Uuid::now_v7(),
+            email: "owner@example.test".into(),
+            display_name: "Owner".into(),
+            role: "owner".into(),
+            security_version: 1,
+            csrf_digest: vec![1, 2, 3, 4],
+            expires_at: Utc::now(),
+        };
+        assert!(!format!("{principal:?}").contains("1, 2, 3, 4"));
+    }
 }

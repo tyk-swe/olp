@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{UsageFilters, UsageRangeCoverage};
-use crate::{OperationsError, PgStore};
+use crate::{PgStore, operations::OperationsError};
 
 #[derive(Debug, FromRow)]
 struct UsageBoundaryRow {

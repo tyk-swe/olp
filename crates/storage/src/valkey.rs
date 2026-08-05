@@ -15,8 +15,10 @@ use tokio::sync::watch;
 use tracing::{error, warn};
 
 use crate::{
-    PersistenceError, PgStore, RequestMetadataEvent, RequestMetadataGap,
-    RequestMetadataPersistenceOutcome,
+    PersistenceError, PgStore,
+    request_metadata::{
+        RequestMetadataEvent, RequestMetadataGap, RequestMetadataPersistenceOutcome,
+    },
 };
 
 const RUNTIME_HINT_CHANNEL: &str = "olp:v2:runtime";

@@ -5,7 +5,10 @@ use super::{
     UsageFilters, UsageGranularity, UsageRangeCoverage,
     query::{push_usage_rows_cte, validate_usage_range},
 };
-use crate::{OperationsError, PgStore, operations::cursor::checked_u64};
+use crate::{
+    PgStore,
+    operations::{OperationsError, cursor::checked_u64},
+};
 
 #[derive(Clone, Debug)]
 pub struct UsagePoint {

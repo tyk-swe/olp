@@ -5,24 +5,6 @@ allowBuilds:
 
 overrides:
   '@redocly/openapi-core>js-yaml': 4.3.0
+  'minimatch@5>brace-expansion': 2.1.4
+  'minimatch@10>brace-expansion': 5.0.9
   cookie: 0.7.2
-
-# GHSA-mh99-v99m-4gvg (brace-expansion <=5.0.7, unbounded expansion -> OOM).
-# Reached only via openapi-typescript > @redocly/openapi-core@1 > minimatch@5 >
-# brace-expansion@2. That is a devDependency used solely by `pnpm api:generate`
-# and `pnpm api:check`, which glob-match a first-party file (openapi/management.json);
-# it is never bundled into the client-only console build, so no untrusted input
-# reaches the expander.
-#
-# Every remediation available today breaks the toolchain, verified by experiment:
-#   - brace-expansion >=5.0.8 switches to a named `expand` export; minimatch@5.1.9
-#     calls the module itself as a function, so it throws "expand is not a function".
-#   - minimatch@10 (the only line depending on patched brace-expansion) uses named
-#     exports; @redocly/openapi-core@1.34.17 calls `minimatch(url, pattern)` directly.
-#   - @redocly/openapi-core@2 moves to minimatch@10 but drops a subpath export that
-#     openapi-typescript@7.13.0 imports -> ERR_PACKAGE_PATH_NOT_EXPORTED.
-# Drop this entry once openapi-typescript ships a release built on
-# @redocly/openapi-core@2 (none exists as of 7.13.0, the current latest).
-auditConfig:
-  ignoreGhsas:
-    - GHSA-mh99-v99m-4gvg

@@ -2,7 +2,7 @@
 
 Runtime configuration is environment-driven; every variable also exists as a
 CLI flag (`olp <subcommand> --help`). The definitions live in
-`apps/olp/src/cli/config.rs` — when this document and the code disagree, the
+`apps/olp/src/bootstrap/cli/config.rs` — when this document and the code disagree, the
 code wins and this file needs a patch.
 
 ## Runtime variables
@@ -50,8 +50,8 @@ Both require the exact value `test-only` and exist solely for test harnesses:
 
 | Variable | Effect |
 |---|---|
-| `OLP_ALLOW_INSECURE_OIDC_FOR_TESTS` | Permits plain-HTTP OIDC issuers (`apps/olp/src/cli/startup.rs`). |
-| `OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS` | Permits `migrate --through-version` to stop early to build N-1 upgrade fixtures (`apps/olp/src/cli/commands.rs`). |
+| `OLP_ALLOW_INSECURE_OIDC_FOR_TESTS` | Permits plain-HTTP OIDC issuers (`apps/olp/src/bootstrap/cli/startup.rs`). |
+| `OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS` | Permits `migrate --through-version` to stop early to build N-1 upgrade fixtures (`apps/olp/src/bootstrap/cli/commands.rs`). |
 
 ## Harness-only variable families
 

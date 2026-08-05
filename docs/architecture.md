@@ -11,22 +11,46 @@ routing, and ports without infrastructure dependencies. `olp-protocols` maps
 vendor wire formats to canonical operations. `olp-providers` implements
 upstream transports, discovery, authentication, and outbound network policy.
 `olp-storage` owns PostgreSQL, the outbox, encryption, request-metadata
-ingestion, usage accounting, and Valkey integration. The `olp` package in
-`apps/olp` owns the HTTP API, process modes, and dependency wiring.
+ingestion, usage accounting, and Valkey integration. `olp-inference` owns the
+transport-neutral application workflow: immutable generation pinning,
+selection, circuits, failover, limit lease lifetime, canonical event
+collection, terminal accounting, and shared playground execution. The `olp`
+package in `apps/olp` owns only HTTP delivery, process modes, and dependency
+wiring.
 
 ```text
-apps/olp (olp) ─┬─> olp-domain
-                ├─> olp-protocols ──> olp-domain
-                ├─> olp-providers ──> olp-protocols
-                │       └───────────> olp-domain
-                └─> olp-storage ────> olp-domain
+olp-domain
+├── olp-protocols ───────────────────────────────> olp-domain
+├── olp-providers ───────────────> {domain, protocols}
+├── olp-storage ────────────────────────────────> domain
+├── olp-inference ───────> {domain, protocols, providers, storage}
+└── apps/olp (olp) ─> {domain, protocols, providers, storage, inference}
 ```
 
 `olp-conformance` is a test-only workspace package that exercises
 `olp-domain`, `olp-protocols`, and `olp-providers` against the conformance
-corpus, outside the production dependency graph. The console is a
+corpus, outside the production dependency graph. `olp-e2e` is likewise a
+test-only harness. The console is a
 client-only static application with no server routes or production Node
 adapter.
+
+The delivery crate exposes six responsibility roots:
+
+```text
+apps/olp/src/
+  bootstrap/      CLI, construction, mode finalization, workers, supervision
+  public_http/    listener/router and shared HTTP boundary policy
+  gateway/        protocol-specific inference adapters and endpoint registry
+  management/     auth, access, configuration, operations, OIDC, playground
+  observability/  private readiness/metrics listener
+  console/        embedded static asset delivery
+```
+
+Storage similarly exposes subsystem namespaces instead of a flat `PgStore`
+method/export soup. Pool lifecycle stays in `store.rs`; session, setup,
+idempotency, runtime release/outbox, security, and request-metadata behavior
+live under their owning `authentication`, `identity`, `idempotency`, `runtime`,
+`security`, and `request_metadata` modules.
 
 ## Typed HTTP composition
 
@@ -34,9 +58,26 @@ Startup finalizes mode-specific dependency bundles before building routers.
 Gateway, management, and observability surfaces have immutable state types
 whose mandatory stores, keys, emitters, and runtime services are
 non-optional; Axum `FromRef` exposes narrower capabilities to handlers, and
-the startup assembly object is never an endpoint service locator. A routed
-handler therefore cannot represent a mode missing one of its required
-dependencies.
+the private `ProcessComposition` bootstrap input is never an endpoint service
+locator. It is exposed only by the explicitly gated `olp::test_support`
+namespace for integration fixtures.
+`GatewayState` composes gateway HTTP dependencies with `InferenceService`;
+`ManagementState` contains control-plane dependencies plus only the explicit
+playground inference capability; `ObservabilityState` contains only readiness
+and metrics inputs. Neither control-plane state dereferences to gateway state.
+A routed handler therefore cannot represent a mode missing one of its required
+dependencies or silently acquire another surface's capabilities.
+
+## Transport-neutral inference service
+
+Both public gateway adapters and the authenticated management playground call
+the same cloneable `olp_inference::InferenceService`. It pins a runtime
+generation before selection, retains the matching transport and credential
+registry for the request lifetime, owns cancellation-safe distributed lease
+release, and finalizes exactly one terminal metadata envelope. Axum extraction,
+HTTP status/problem mapping, protocol response rendering, and multipart/body
+admission remain in `apps/olp`; provider construction remains in
+`olp-providers`; concrete persistence remains in `olp-storage`.
 
 ## Canonical endpoint and provider policy
 

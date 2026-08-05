@@ -1,40 +1,51 @@
-# apps/olp — delivery crate map
+# apps/olp — delivery crate guide
 
-The 30 top-level modules in `src/` are flat but layered:
+`olp` owns process composition and HTTP delivery. Transport-neutral request
+execution belongs in `olp-inference`; SQL and provider networking remain in
+their designated library crates.
 
-- **Transport**: `listener` (bind/serve), `proxy` (trusted-proxy handling),
-  `request_admission/` (capacity + body limits), `request_cookies`.
-- **HTTP surfaces**: `gateway/` (inference data plane; `endpoint_policy.rs` is
-  the endpoint registry), `management_api/` (`/api/v1` CRUD + auth),
-  `operations/` (requests/usage/audit/settings read APIs), `oidc/`,
-  `playground`, `static_console` (embedded SPA), `router` (composition),
-  `observability` (private `127.0.0.1:9090` listener: health + metrics).
-- **Infrastructure**: `circuit`, `connectors`, `media_spool`, `runtime`,
-  `mode_dependencies`, `provider_adapter`, `cli/` (subcommands: all, gateway,
-  control, worker, migrate, doctor, master-key, health-probe).
-- **Shared utilities**: `event_completion`, `image_response`, `json_media`,
-  `problem`, `public_origin`, `relative_url`, `semantic_validation`,
-  `streaming_response`.
+## Source ownership
 
-## Same-name modules — pick the right one
+- `bootstrap/` — CLI/configuration, process-mode validation, dependency and
+  provider construction, runtime activation, listeners, workers, supervision,
+  shutdown, and the private optional assembly state.
+- `public_http/` — listener/router composition and shared HTTP-boundary policy:
+  admission, trusted proxies, cookies, public origin, media/body policing,
+  problems, and response rendering.
+- `gateway/` — protocol-specific Axum adapters and the canonical inference
+  endpoint registry in `endpoint_policy.rs`. Execution delegates to the narrow
+  `InferenceService`.
+- `management/` — the complete `/api/v1` control plane: auth/session policy,
+  `access/{profile,users,invitations}`, configuration resources, operations,
+  OIDC, playground, and OpenAPI.
+- `observability/` — the private health/metrics listener and its narrow state.
+- `console/` — embedded static-console fallback and asset delivery.
 
-- `gateway/limits.rs` = per-route/key limit enforcement during inference;
-  `request_admission/limits.rs` = process-wide admission capacity;
-  `crates/storage/src/limits.rs` = persisted limit state.
-- `gateway/media_jobs.rs` = inference-side job handling;
-  `operations/media_jobs.rs` = read API; `crates/storage/src/media_jobs.rs` =
-  persistence.
-- `operations/usage/{breakdown,completeness,series,summary}.rs` = HTTP
-  delivery; the identically named files under `crates/storage/src/usage/` =
-  SQL queries.
-- `gateway/multipart.rs` = provider-bound multipart assembly;
-  `request_admission/multipart.rs` = inbound size policing.
+`bootstrap::mode_dependencies` defines fully required routed states.
+`ManagementState` and `ObservabilityState` do not inherit or dereference
+`GatewayState`; the playground receives only its explicit inference capability.
+The optional `ProcessComposition` input is private bootstrap machinery in
+normal builds; external fixtures reach it only through the `test-util`-gated
+`olp::test_support` namespace.
+
+## Similar names
+
+- Inference selection, failover, distributed leases, telemetry finalization,
+  circuits, and runtime snapshots are in `crates/inference/src/`.
+- `gateway/media_jobs.rs` is the HTTP adapter; inference-side media execution
+  and reconciliation are exposed by `InferenceService`; persistence is under
+  `crates/storage/src/media_jobs/`.
+- `management/operations/usage/*` renders HTTP responses; the matching
+  `crates/storage/src/usage/*` files own SQL reads.
+- `gateway/multipart.rs` assembles provider-bound requests;
+  `public_http/request_admission/multipart.rs` polices inbound sizes.
 
 ## Notes
 
-- `examples/` is build tooling, not documentation: `export_openapi` emits
-  `openapi/management.json` (`make openapi`); `sdk_smoke_fixture` is built by
-  `tests/sdk-smoke/run.sh`.
-- `tests/*_http_postgres.rs` are `#[ignore]`d; run via `make db-test`.
-- `apps/olp/src/gateway/endpoint_policy.rs` is the documented registry
-  (CONTRIBUTING change map) — extend it, don't parallel it.
+- `examples/export_openapi.rs` emits `openapi/management.json`; regenerate with
+  `make openapi` after endpoint or schema changes.
+- Ignored service-backed suites live under `tests/integration/` and run through
+  `make db-test`. Long configuration and OIDC lifecycles keep one database
+  transaction/order while placing resource phases and mock-browser/IdP
+  harnesses in sibling modules.
+- Extend `gateway/endpoint_policy.rs`; never add a parallel endpoint registry.

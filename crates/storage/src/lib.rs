@@ -3,80 +3,28 @@
 //! This crate deliberately owns SQL, encryption, and durable event delivery. It
 //! does not expose SQLx types through the core ports.
 
-mod access;
-mod authentication;
-mod configuration;
-mod identity;
-mod limits;
-mod maintenance;
-mod media_jobs;
-mod oidc;
-mod operations;
-mod reencryption;
-mod request_metadata;
-mod runtime_compiler;
-mod security;
+pub mod access;
+pub mod authentication;
+pub mod configuration;
+mod error;
+pub mod idempotency;
+pub mod identity;
+pub mod limits;
+pub mod maintenance;
+pub mod media_jobs;
+pub mod oidc;
+pub mod operations;
+pub mod request_metadata;
+pub mod runtime;
+pub mod security;
 mod store;
 #[cfg(feature = "test-util")]
 pub mod test_support;
-mod usage;
-mod valkey;
+pub mod usage;
+pub mod valkey;
 
-pub use authentication::{RecentAuthPurpose, SessionSecurityContext};
-pub use identity::{
-    AcceptInvitation, AcceptedInvitation, IdentityError, InvitationCreated, InvitationRecord,
-    NewInvitation, PasswordSessionRotation, SessionRecord, UserRecord,
-};
-pub use limits::{DistributedLimiter, LimitDimension, LimitError, LimitLease, LimitRequest};
-pub use maintenance::{MaintenanceError, MaintenanceReport};
-pub use media_jobs::{
-    MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobRecord,
-    MediaJobState, MediaJobUpdate, MediaReconciliationPass, MediaReconciliationSummary,
-    NewMediaJobReservation,
-};
-pub use oidc::{
-    CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, NewOidcFlow,
-    OidcAuthenticatedUser, OidcConfiguration, OidcError, OidcFlowMaterial, OidcFlowPurpose,
-    OidcFlowRecord, OidcIdentityRecord, OidcRoleMapping, UnlinkOidcIdentity,
-    UpsertOidcConfiguration,
-};
-pub use operations::{
-    AttemptRecord, AuditRecord, OperationsError, OperationsPage, PriceInput, PricingRevisionRecord,
-    PrometheusOperationsSummary, ProviderHealthRecord, RequestDetail, RequestFilters,
-    RequestRecord, RuntimeGenerationRecord, SettingRecord, TimestampCursor, UsageBreakdown,
-    UsageBreakdownReport, UsageCompleteness, UsageDimension, UsageFilters, UsageGranularity,
-    UsagePoint, UsageRangeCoverage, UsageSeries, UsageSummary,
-};
-pub use reencryption::{
-    EncryptedTable, KeyVersionReference, MasterKeyEncryptionStatus, MasterKeyReencryptionBatch,
-    MasterKeyVerification, ReencryptionError,
-};
-pub use request_metadata::{
-    REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS,
-    REQUEST_METADATA_GATEWAY_EPOCH_STALE_AFTER_SECONDS, RequestAttemptMetadata,
-    RequestMetadataBufferSnapshot, RequestMetadataConsumerHealth, RequestMetadataConsumerState,
-    RequestMetadataConsumerStatus, RequestMetadataEmitError, RequestMetadataEmitter,
-    RequestMetadataEpochAcknowledgement, RequestMetadataEpochDetection, RequestMetadataEpochHealth,
-    RequestMetadataEvent, RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState,
-    RequestMetadataLossReport, RequestMetadataPersistenceOutcome, RequestMetadataReceiver,
-};
-pub use runtime_compiler::RuntimeCompileError;
-pub use security::{
-    ApiKeyMaterial, AuthHmacKey, CsrfMaterial, EncryptedSecret, InvitationMaterial, MasterKey,
-    ParsedApiKey, RecentAuthMaterial, SecurityError, SessionMaterial, constant_time_eq,
-    credential_aad, hash_password, idempotency_replay_aad, idempotency_replay_scope,
-    oidc_client_secret_aad, oidc_flow_payload_aad, verify_password,
-};
-pub use store::{
-    IdempotencyOutcome, IdempotencyResponse, InstallationSetupInput, InstallationSetupResult,
-    LocalPasswordUser, OutboxRecord, PersistenceError, PgStore, PublishedRuntimeRelease,
-    ReplayableIdempotency, RequestMetadataGap, SessionPrincipal, idempotency_fingerprint,
-    idempotency_secret_digest,
-};
-pub use valkey::{
-    REQUEST_METADATA_STREAM, RuntimeHintPublisher, RuntimeHintSubscriber, ValkeyAdapterError,
-    run_request_metadata_consumer,
-};
+pub use error::PersistenceError;
+pub use store::PgStore;
 
 /// Truncates a query result fetched with `limit + 1` and derives the cursor
 /// from the last visible item only when another page exists.
@@ -98,19 +46,6 @@ fn split_page<T, C>(
 /// SQLx embeds and checks every migration at compile time. Migrations execute
 /// only in `migrate`/`all` mode, never implicitly in a gateway process.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-pub use access::{AccessError, ApiKeyCreated, ApiKeyRevoked, NewApiKeyRecord};
-pub use configuration::{
-    ApiKeyMutationResult, ApiKeyRecord, ApiKeyRotationResult, CapabilityCertificationApplied,
-    CapabilityCertificationOutcome, CapabilityRecord, ConfigurationError, ConfigurationPage,
-    CredentialVersionRecord, DiscoveredModelInput, NewProviderDraft, NewRouteDraft, NewRouteTarget,
-    ProviderActivated, ProviderDraftCreated, ProviderModelInventoryRecord, ProviderModelRecord,
-    ProviderMutationResult, ProviderRecord, ProviderRevisionDiff, ProviderRevisionRecord,
-    ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput, RouteActivated,
-    RouteDraftCreated, RouteDraftRecord, RouteRecord, RouteRevisionDiff, RouteRevisionRecord,
-    RouteSimulation, RouteSimulationTarget, RouteTargetRecord, RuntimeProviderConfiguration,
-    StoredCredentialSecret, UpdateApiKeyInput, UpdateProvider,
-};
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

@@ -56,7 +56,7 @@ async fn canonical_event_stream_wrapper_rejects_gaps_and_missing_done() {
 
 #[tokio::test]
 async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting() {
-    let circuits = crate::circuit::CircuitBreaker::default();
+    let circuits = CircuitBreaker::default();
     let target = TargetId::new();
     let first = CanonicalEvent::new(
         0,
@@ -170,7 +170,7 @@ fn install_event_stream(
     events: Vec<CanonicalEvent>,
     finite: bool,
 ) {
-    let pinned = state.runtime.pin();
+    let pinned = state.runtime().pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
     let mut providers = pinned.providers.clone();
     providers.get_mut(&provider_id).unwrap().capabilities = BTreeSet::from([Capability::new(
@@ -200,7 +200,7 @@ fn install_event_stream(
         Arc::new(StaticTransport { events })
     };
     state
-        .runtime
+        .runtime()
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
 }
@@ -223,8 +223,9 @@ fn raw_media_event(sequence: u64, event: &str, data: Value) -> CanonicalEvent {
 #[tokio::test]
 async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     let (mut state, key) = test_state(true);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(8);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(8);
+    state.replace_request_metadata_for_test(emitter);
 
     install_event_stream(
         &state,
@@ -284,8 +285,9 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
 #[tokio::test]
 async fn canonical_stream_error_is_not_persisted_as_success() {
     let (mut state, key) = test_state(true);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(2);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+    state.replace_request_metadata_for_test(emitter);
     install_event_stream(
         &state,
         OperationKind::Generation,
@@ -383,8 +385,9 @@ async fn real_router_generation_streams_report_truncation_in_native_envelopes() 
 #[tokio::test]
 async fn image_speech_and_transcription_stream_native_sse_and_usage_through_router() {
     let (mut state, key) = test_state(true);
-    let (emitter, mut request_metadata) = olp_storage::RequestMetadataEmitter::bounded(8);
-    state.request_metadata = Some(emitter);
+    let (emitter, mut request_metadata) =
+        olp_storage::request_metadata::RequestMetadataEmitter::bounded(8);
+    state.replace_request_metadata_for_test(emitter);
 
     install_event_stream(
         &state,
@@ -501,7 +504,7 @@ async fn dropping_client_stream_drops_upstream_within_one_second() {
             dropped: dropped.clone(),
         }),
     );
-    let response = crate::router::gateway_router_for_test(state)
+    let response = crate::public_http::router::gateway_router_for_test(state)
         .oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(header::AUTHORIZATION, format!("Bearer {key}"))

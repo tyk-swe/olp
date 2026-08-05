@@ -11,9 +11,10 @@ use super::{
     OidcError, OidcIdentityRecord, UnlinkOidcIdentity,
 };
 use crate::{
-    PgStore, RecentAuthPurpose, SessionSecurityContext,
+    PgStore,
     authentication::{
-        consume_recent_authentication, install_recent_authentication, revoke_user_sessions,
+        RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
+        install_recent_authentication, revoke_user_sessions,
     },
 };
 

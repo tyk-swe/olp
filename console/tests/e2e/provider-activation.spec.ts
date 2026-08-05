@@ -1,0 +1,286 @@
+import {
+  expect,
+  failUnexpectedApiRequest,
+  mockSession,
+  test
+} from '../playwright';
+import { mockProviderKinds } from './provider-capabilities';
+import {
+  certifiedModelRecord,
+  ids,
+  now,
+  providerRecord,
+  sessionOptions,
+  withProviderModels
+} from './gateway-access-fixtures';
+
+test.beforeEach(async ({ page }) => mockProviderKinds(page));
+
+test('provider detail keeps the live revision and credential until a certified draft activates', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  const nextCredential = '01980000-0000-7000-8000-000000000104';
+  let currentProvider = providerRecord('active', [certifiedModelRecord], {
+    kind: 'openai_compatible',
+    endpoint: 'https://models.example.test/v1/',
+    active_revision: 1,
+    pending_activation: false
+  });
+  let versions: Array<{
+    id: string;
+    version: number;
+    active: boolean;
+    draft_selected: boolean;
+    created_at: string;
+    revoked_at: string | null;
+  }> = [
+    {
+      id: ids.credential,
+      version: 1,
+      active: true,
+      draft_selected: false,
+      created_at: now,
+      revoked_at: null
+    }
+  ];
+  let rotatedCredential = '';
+  let certificationEtag = '';
+  let probeEtag = '';
+  let activationEtag = '';
+  let revisionRequests = 0;
+
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/v1/providers') {
+      await route.fulfill({
+        json: { items: [currentProvider], next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      revisionRequests += 1;
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
+    if (
+      pathname === `/api/v1/providers/${ids.provider}/models` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({
+        json: { items: currentProvider.models, next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: versions } });
+      return;
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'POST') {
+      rotatedCredential = (request.postDataJSON() as { credential: string })
+        .credential;
+      versions = [
+        {
+          id: nextCredential,
+          version: 2,
+          active: false,
+          draft_selected: true,
+          created_at: '2026-07-12T12:10:00Z',
+          revoked_at: null
+        },
+        { ...versions[0], active: true, draft_selected: false }
+      ];
+      currentProvider = providerRecord(
+        'draft',
+        [
+          {
+            ...certifiedModelRecord,
+            capabilities: certifiedModelRecord.capabilities.map(
+              (capability) => ({
+                ...capability,
+                source: 'declared',
+                certified_at: null
+              })
+            )
+          }
+        ],
+        {
+          kind: 'openai_compatible',
+          endpoint: 'https://models.example.test/v1/',
+          active_revision: 1,
+          pending_activation: true,
+          draft_credential_id: nextCredential,
+          draft_credential_version: 2,
+          runtime_credential_id: ids.credential,
+          runtime_credential_version: 1,
+          etag: '01980000-0000-7000-8000-000000000201',
+          updated_at: '2026-07-12T12:10:00Z',
+          last_probe_at: null,
+          last_probe_status: null,
+          last_probe_detail: null
+        }
+      );
+      await route.fulfill({
+        status: 201,
+        json: {
+          provider_id: ids.provider,
+          credential_id: nextCredential,
+          credential_version: 2,
+          etag: currentProvider.etag,
+          runtime_generation: null
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith(`/models/${ids.model}/certify`)) {
+      certificationEtag = (await request.allHeaders())['if-match'];
+      currentProvider = withProviderModels(
+        currentProvider,
+        [certifiedModelRecord],
+        {
+          etag: '01980000-0000-7000-8000-000000000202',
+          updated_at: '2026-07-12T12:12:00Z'
+        }
+      );
+      await route.fulfill({
+        json: {
+          provider_id: ids.provider,
+          model_id: ids.model,
+          status: 'succeeded',
+          checked_at: '2026-07-12T12:12:00Z',
+          certified_count: 2,
+          attempted_count: 2,
+          results: certifiedModelRecord.capabilities.map((capability) => ({
+            ...capability,
+            succeeded: true,
+            error_code: null,
+            detail: 'Live tuple certified'
+          }))
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/probe')) {
+      probeEtag = (await request.allHeaders())['if-match'];
+      currentProvider = {
+        ...currentProvider,
+        last_probe_at: '2026-07-12T12:13:00Z',
+        last_probe_status: 'succeeded',
+        last_probe_detail: 'Compatible endpoint reachable'
+      };
+      await route.fulfill({
+        json: {
+          provider_id: ids.provider,
+          succeeded: true,
+          checked_at: '2026-07-12T12:13:00Z',
+          probe_type: 'connector_connectivity',
+          detail: 'Compatible endpoint reachable'
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/activate')) {
+      activationEtag = (await request.allHeaders())['if-match'];
+      currentProvider = providerRecord('active', [certifiedModelRecord], {
+        kind: 'openai_compatible',
+        endpoint: 'https://models.example.test/v1/',
+        active_revision: 2,
+        pending_activation: false,
+        draft_credential_id: nextCredential,
+        draft_credential_version: 2,
+        runtime_credential_id: nextCredential,
+        runtime_credential_version: 2,
+        etag: '01980000-0000-7000-8000-000000000203',
+        updated_at: '2026-07-12T12:13:00Z',
+        last_probe_at: '2026-07-12T12:13:00Z',
+        last_probe_status: 'succeeded',
+        last_probe_detail: 'Compatible endpoint reachable'
+      });
+      versions = [
+        {
+          id: nextCredential,
+          version: 2,
+          active: true,
+          draft_selected: false,
+          created_at: '2026-07-12T12:10:00Z',
+          revoked_at: null
+        },
+        {
+          id: ids.credential,
+          version: 1,
+          active: false,
+          draft_selected: false,
+          created_at: now,
+          revoked_at: '2026-07-12T12:13:00Z'
+        }
+      ];
+      await route.fulfill({
+        json: {
+          id: ids.provider,
+          state: 'active',
+          etag: currentProvider.etag,
+          runtime_generation: { id: ids.generation, sequence: 4 }
+        }
+      });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}`) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+  await expect(
+    page.getByRole('heading', { name: 'Credential versions' })
+  ).toBeVisible();
+  await page
+    .getByPlaceholder('New credential')
+    .fill('rotated-write-only-secret');
+  await page.getByRole('button', { name: 'Stage rotation' }).click();
+  await expect(page.getByText(/Credential version staged/)).toBeVisible();
+  await expect(page.getByPlaceholder('New credential')).toHaveValue('');
+  await expect(page.getByText('rotated-write-only-secret')).toHaveCount(0);
+  expect(rotatedCredential).toBe('rotated-write-only-secret');
+  await expect(page.getByText('Revision 1 remains live.')).toBeVisible();
+  await expect(
+    page.getByText('revision 1 live · changes pending')
+  ).toBeVisible();
+  await expect(page.getByText('runtime active', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('pending activation', { exact: true })
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Revoke' })).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Activate changes' })
+  ).toBeDisabled();
+
+  await page
+    .getByRole('button', { name: 'Server-certify capabilities' })
+    .click();
+  await expect(
+    page.getByText(/reviewed tuples passed server certification/)
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Activate changes' })
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Test completed draft' }).click();
+  await expect(page.getByText(/Connection succeeded/)).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Activate changes' })
+  ).toBeEnabled();
+  await page.getByRole('button', { name: 'Activate changes' }).click();
+
+  await expect(page.getByText('revision 2 active')).toBeVisible();
+  await expect(page.getByText('Revision 1 remains live.')).toHaveCount(0);
+  await expect(page.getByText('runtime active', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('pending activation', { exact: true })
+  ).toHaveCount(0);
+  await expect.poll(() => revisionRequests).toBeGreaterThanOrEqual(2);
+  expect(certificationEtag).toBe('"01980000-0000-7000-8000-000000000201"');
+  expect(probeEtag).toBe('"01980000-0000-7000-8000-000000000202"');
+  expect(activationEtag).toBe('"01980000-0000-7000-8000-000000000202"');
+});

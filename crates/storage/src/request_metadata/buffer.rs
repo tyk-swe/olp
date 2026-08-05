@@ -90,7 +90,7 @@ impl RequestMetadataReceiver {
         valkey_url: &str,
         stream: &str,
         mut shutdown: watch::Receiver<bool>,
-    ) -> Result<(), crate::ValkeyAdapterError> {
+    ) -> Result<(), crate::valkey::ValkeyAdapterError> {
         let client = match Client::open(valkey_url) {
             Ok(client) => client,
             Err(error) => {

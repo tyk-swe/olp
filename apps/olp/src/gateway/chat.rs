@@ -1,5 +1,3 @@
-use std::{sync::Arc, time::Duration};
-
 use axum::{
     Json,
     body::Bytes,
@@ -7,101 +5,35 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
-use futures::StreamExt;
-use olp_domain::{
-    CanonicalEvent, CanonicalEventKind, OperationKind, RequestId, RequestMetadata, RouteSlug,
-    Surface, TransportMode, authorize_api_key,
-};
+use futures::{StreamExt, stream};
+use olp_domain::{CanonicalEventKind, TransportMode};
+use olp_inference::{RequestOutcome, RoutedEventExecution};
 use olp_protocols::openai::{ChatCompletionRequest, decode_chat_completion};
-use olp_storage::RequestAttemptMetadata;
 
 use crate::{
     GatewayState, InferencePrincipal,
-    event_completion::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collected_event_bytes},
-    json_media::{admit_openai_chat, cleanup_admitted},
-    semantic_validation::select_representable_attempts_filtered,
-    streaming_response::{TerminalFrames, sse_stream},
+    public_http::json_media::{admit_openai_chat, cleanup_admitted},
+    public_http::streaming_response::{TerminalFrames, sse_stream},
 };
 
 use super::{
     error::InferenceError,
-    failover::{
-        EventStream, ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover,
-    },
-    limits::{RequestMediaGuard, operation_media_handles, release_limits, reserve_limits},
+    execution::execute_event_operation,
     openai_chat_response::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response},
     openai_http::error_sse as openai_error_sse,
-    telemetry::{
-        RequestAccountingGuard, RequestAccountingInput, RequestMetadataInput, UsageCapture,
-        elapsed_ms, emit_request_metadata_event,
-    },
 };
-
-struct ChatMetadataContext<'a> {
-    state: &'a GatewayState,
-    generation_id: uuid::Uuid,
-    api_key_id: uuid::Uuid,
-    request_id: uuid::Uuid,
-    request_started_at: chrono::DateTime<Utc>,
-    request_started: tokio::time::Instant,
-}
-
-fn emit_chat_failure(
-    context: &ChatMetadataContext<'_>,
-    route_slug: &RouteSlug,
-    failure: &InferenceError,
-) {
-    emit_request_metadata_event(
-        context.state,
-        RequestMetadataInput {
-            generation_id: context.generation_id,
-            api_key_id: context.api_key_id,
-            request_id: context.request_id,
-            route_slug,
-            attempts: &[],
-            request_started_at: context.request_started_at,
-            request_started: context.request_started,
-            final_attempt_started: None,
-            first_byte_ms: None,
-            status_code: Some(failure.status.as_u16()),
-            error_class: Some(failure.code.to_owned()),
-            committed: false,
-            usage: &UsageCapture::default(),
-            surface: Surface::OpenAi,
-            operation: OperationKind::Generation,
-        },
-    );
-}
 
 pub(super) async fn chat_completions(
     State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ChatCompletionRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let snapshot = Arc::clone(principal.runtime());
-    let key = principal.key();
-    let request_id = RequestId::new();
-    let request_started_at = Utc::now();
-    let request_started = tokio::time::Instant::now();
-    let invalid_route = RouteSlug::parse("invalid-request")
-        .expect("the internal invalid-request route slug is valid");
-    let metadata_context = ChatMetadataContext {
-        state: &state,
-        generation_id: snapshot.generation.id.as_uuid(),
-        api_key_id: key.id.as_uuid(),
-        request_id: request_id.as_uuid(),
-        request_started_at,
-        request_started,
-    };
-
     let Json(mut wire_request) = match payload {
         Ok(payload) => payload,
         Err(error) => {
-            let failure =
-                InferenceError::invalid_request(format!("The JSON request is invalid: {error}"));
-            emit_chat_failure(&metadata_context, &invalid_route, &failure);
-            return Err(failure);
+            return Err(InferenceError::invalid_request(format!(
+                "The JSON request is invalid: {error}"
+            )));
         }
     };
     let admitted = admit_openai_chat(&state, &mut wire_request).await?;
@@ -110,179 +42,32 @@ pub(super) async fn chat_completions(
         Ok(operation) => operation,
         Err(error) => {
             cleanup_admitted(&state, admitted).await;
-            let failure = InferenceError::invalid_request(error.to_string());
-            emit_chat_failure(&metadata_context, &invalid_route, &failure);
-            return Err(failure);
+            return Err(InferenceError::invalid_request(error.to_string()));
         }
     };
-    let request_media = RequestMediaGuard::new(
-        state.media_spool.clone(),
-        operation_media_handles(&operation),
-    );
-    let route_slug = operation
-        .route()
-        .cloned()
-        .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    if let Err(error) = authorize_api_key(key, Some(&route_slug), operation.kind(), Utc::now()) {
-        let failure = InferenceError::forbidden(error.to_string());
-        emit_chat_failure(&metadata_context, &route_slug, &failure);
-        return Err(failure);
-    }
     let mode = if streaming {
         TransportMode::Streaming
     } else {
         TransportMode::Unary
     };
-    let mut lease = reserve_limits(
-        &state,
-        key,
-        &operation,
-        principal.lookup_id().as_str(),
-        snapshot
-            .routes
-            .get(&route_slug)
-            .map(|route| route.overall_timeout.as_duration())
-            .unwrap_or(Duration::from_secs(30))
-            .saturating_add(Duration::from_secs(30)),
-    )
-    .await?;
-    let attempts = match select_representable_attempts_filtered(
-        &snapshot,
-        &route_slug,
-        &operation,
-        Surface::OpenAi,
-        mode,
-        request_id.as_uuid().as_bytes(),
-        |_, target| state.circuits.is_selectable(target.id),
-    ) {
-        Ok(attempts) => attempts,
-        Err(failure) => {
-            emit_chat_failure(&metadata_context, &route_slug, &failure);
-            release_limits(&state, lease.as_ref(), None).await;
-            return Err(failure);
-        }
-    };
-    let route = snapshot
-        .routes
-        .get(&route_slug)
-        .expect("attempt selection returned a known route");
-    let mut accounting = RequestAccountingGuard::new(
-        &state,
-        RequestAccountingInput {
-            generation_id: snapshot.generation.id.as_uuid(),
-            api_key_id: key.id.as_uuid(),
-            request_id: request_id.as_uuid(),
-            route_slug: route_slug.clone(),
-            request_started_at,
-            request_started,
-            surface: Surface::OpenAi,
-            operation: OperationKind::Generation,
-        },
-        lease.take(),
-    );
-
-    let metadata = RequestMetadata {
-        request_id,
-        operation: OperationKind::Generation,
-        surface: Surface::OpenAi,
-        mode,
-    };
-    let execution = {
-        let mut record_attempt_started =
-            |completed: &[RequestAttemptMetadata],
-             attempt: &olp_domain::AttemptPlan,
-             ordinal: u16,
-             started_at: chrono::DateTime<chrono::Utc>,
-             started: tokio::time::Instant| {
-                accounting.record_attempt_started(
-                    completed,
-                    ordinal,
-                    attempt.provider_id.as_uuid(),
-                    &attempt.upstream_model,
-                    started_at,
-                    started,
-                );
-            };
-        execute_with_failover(
-            FailoverContext {
-                runtime: &snapshot,
-                overall_timeout: route.overall_timeout.as_duration(),
-                media_spool: state.media_spool.clone(),
-                circuits: &state.circuits,
-                on_attempt_started: Some(&mut record_attempt_started),
-            },
-            attempts,
-            metadata,
-            operation,
-        )
-        .await
-    };
-    let first_byte_ms = elapsed_ms(request_started.elapsed());
-    match &execution {
-        Ok(success) => accounting.record_attempts(
-            success.attempts.clone(),
-            Some(success.attempt_started),
-            Some(first_byte_ms),
-            true,
-        ),
-        Err(failure) => {
-            accounting.record_attempts(failure.attempts.clone(), None, None, false);
-        }
-    }
-    request_media.cleanup().await;
-    let ExecutionSuccess {
-        output, deadline, ..
-    } = match execution {
-        Ok(execution) => execution,
-        Err(failure) => {
-            accounting.finish(Some(&failure.error)).await;
-            return Err(failure.error);
-        }
-    };
-    let ExecutionOutput::Events { first, events } = output else {
-        let failure = InferenceError::bad_gateway(
-            "provider_protocol_error",
-            "The provider returned an incompatible unary result.",
-        );
-        accounting.finish(Some(&failure)).await;
-        return Err(failure);
-    };
-
+    let execution = execute_event_operation(&state, &principal, operation, mode).await?;
     if streaming {
-        crate::claim_http_inference_metadata();
-        Ok(streaming_response(
-            request_id.as_uuid(),
-            route_slug,
-            first,
-            events,
-            deadline,
-            accounting,
-        ))
+        Ok(streaming_response(execution))
     } else {
-        unary_response(
-            request_id.as_uuid(),
-            &route_slug,
-            first,
-            events,
-            deadline,
-            accounting,
-        )
-        .await
+        unary_response(execution).await
     }
 }
 
-fn streaming_response(
-    request_id: uuid::Uuid,
-    route_slug: RouteSlug,
-    first: CanonicalEvent,
-    mut events: EventStream,
-    deadline: tokio::time::Instant,
-    mut accounting: RequestAccountingGuard,
-) -> Response {
+fn streaming_response(mut execution: RoutedEventExecution) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
-        let mut encoder = OpenAiChatCompletionStreamEncoder::new(request_id, route_slug.as_str());
-        let mut next = Some(Ok(first));
+        let mut accounting = execution.take_accounting();
+        let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
+        let mut encoder = OpenAiChatCompletionStreamEncoder::new(
+            execution.request_id,
+            execution.route_slug.as_str(),
+        );
+        let mut next = Some(Ok(execution.first.clone()));
         let mut failure = None;
         let mut terminal = None;
         'provider: while let Some(item) = next {
@@ -314,7 +99,7 @@ fn streaming_response(
                         break 'provider;
                     }
                     for bytes in encoded {
-                        if let Err(error) = writer.send_or_fail(bytes, deadline).await {
+                        if let Err(error) = writer.send_or_fail(bytes, execution.deadline).await {
                             failure = Some(error);
                             break 'provider;
                         }
@@ -330,7 +115,7 @@ fn streaming_response(
                     failure = Some(InferenceError::client_cancelled());
                     break 'provider;
                 }
-                () = tokio::time::sleep_until(deadline) => {
+                () = tokio::time::sleep_until(execution.deadline) => {
                     failure = Some(InferenceError::timeout());
                     break 'provider;
                 }
@@ -350,88 +135,21 @@ fn streaming_response(
                 Bytes::from_static(b"data: [DONE]\n\n"),
             ])
         });
-        accounting.finish(failure.as_ref()).await;
+        let outcome = failure
+            .as_ref()
+            .map_or_else(RequestOutcome::success, InferenceError::accounting_outcome);
+        accounting.finish(outcome).await;
     });
     response
 }
 
-async fn unary_response(
-    request_id: uuid::Uuid,
-    route_slug: &RouteSlug,
-    first: CanonicalEvent,
-    mut events: EventStream,
-    deadline: tokio::time::Instant,
-    mut accounting: RequestAccountingGuard,
-) -> Result<Response, InferenceError> {
-    let mut collected_bytes =
-        match collected_event_bytes(0, &first, MAX_COLLECTED_CANONICAL_EVENT_BYTES) {
-            Ok(collected_bytes) => collected_bytes,
-            Err(failure) => {
-                accounting.finish(Some(&failure)).await;
-                return Err(failure);
-            }
-        };
-    let mut collected = vec![first];
-    accounting.usage_mut().observe(&collected[0]);
-    if !matches!(collected[0].kind, CanonicalEventKind::Done) {
-        loop {
-            let item = match tokio::time::timeout_at(deadline, events.next()).await {
-                Ok(item) => item,
-                Err(_) => {
-                    let failure = InferenceError::timeout();
-                    accounting.finish(Some(&failure)).await;
-                    return Err(failure);
-                }
-            };
-            let Some(item) = item else {
-                break;
-            };
-            let event = match item {
-                Ok(event) => event,
-                Err(error) => {
-                    let failure = InferenceError::from_transport(error);
-                    accounting.finish(Some(&failure)).await;
-                    return Err(failure);
-                }
-            };
-            let terminal = matches!(event.kind, CanonicalEventKind::Done);
-            accounting.usage_mut().observe(&event);
-            collected_bytes = match collected_event_bytes(
-                collected_bytes,
-                &event,
-                MAX_COLLECTED_CANONICAL_EVENT_BYTES,
-            ) {
-                Ok(collected_bytes) => collected_bytes,
-                Err(failure) => {
-                    accounting.finish(Some(&failure)).await;
-                    return Err(failure);
-                }
-            };
-            collected.push(event);
-            if terminal {
-                break;
-            }
-        }
-    }
-    if !matches!(
-        collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
-    ) {
-        let failure = InferenceError::bad_gateway(
-            "provider_protocol_error",
-            "The provider response ended without a terminal event.",
-        );
-        accounting.finish(Some(&failure)).await;
-        return Err(failure);
-    }
-    let response =
-        match aggregate_chat_completion_response(request_id, route_slug.as_str(), &collected) {
-            Ok(response) => response,
-            Err(failure) => {
-                accounting.finish(Some(&failure)).await;
-                return Err(failure);
-            }
-        };
-    accounting.finish(None).await;
+async fn unary_response(execution: RoutedEventExecution) -> Result<Response, InferenceError> {
+    let mut completed = execution.collect().await.map_err(InferenceError::from)?;
+    let response = aggregate_chat_completion_response(
+        completed.request_id,
+        completed.route_slug.as_str(),
+        &completed.events,
+    )?;
+    completed.mark_success();
     Ok((StatusCode::OK, Json(response)).into_response())
 }

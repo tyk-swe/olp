@@ -18,12 +18,22 @@ boundary check rejects them.
 
 ## Layout
 
-- `src/lib/features/{access,gateway,operations,overview,playground,settings,setup}` —
-  feature modules; route files under `src/routes/(console)/` are thin shims
-  that re-export a feature page (this is the intended pattern — SvelteKit
-  requires the `+page.svelte` files).
+- `src/lib/features/gateway/{providers,routes,models}` — provider lifecycle,
+  stable route drafts/revisions, and global model inventory.
+- `src/lib/features/access/{api-keys,users,invitations,sessions,oidc}` — each
+  access workflow owns its queries, mutations, pagination, and write-only
+  secret state. `AccessPage.svelte` only composes tabs.
+- `src/lib/features/operations/{requests,usage,media-jobs,audit,health}` and
+  `settings/{installation,profile}` — resource-oriented operations/settings
+  slices. Profile security and API-key secret workflows use focused components.
+- Route files under `src/routes/(console)/` remain thin shims; SvelteKit still
+  requires the `+page.svelte` files.
 - `src/lib/api/` — generated `schema.d.ts` + typed fetch wrappers.
 - `*.stories.ts` colocate with components; Storybook's glob picks up
   anything under `src/`.
 - Four Playwright configs at the root cover e2e / integration /
   screenshots / storybook — they are distinct suites, not duplicates.
+- Browser contracts are split by product and workflow under `tests/e2e/`;
+  provider wizard, endpoint, probe, model, activation, and inventory behavior
+  has its own spec. Shared provider record construction lives in
+  `gateway-access-fixtures.ts` only.
