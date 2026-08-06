@@ -247,7 +247,7 @@ impl SpoolCleanupJob {
                 }
                 Err(error) => {
                     attempts = attempts.saturating_add(1);
-                    if attempts == 1 || attempts % 60 == 0 {
+                    if attempts == 1 || attempts.is_multiple_of(60) {
                         warn!(%error, attempts, "media spool janitor could not remove an artifact");
                     }
                     tokio::time::sleep(backoff).await;
@@ -273,7 +273,7 @@ impl SpoolCleanupJob {
                 }
                 Err(error) => {
                     attempts = attempts.saturating_add(1);
-                    if attempts == 1 || attempts % 60 == 0 {
+                    if attempts == 1 || attempts.is_multiple_of(60) {
                         warn!(
                             %error,
                             attempts,

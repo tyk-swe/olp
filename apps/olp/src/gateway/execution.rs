@@ -263,10 +263,7 @@ pub(crate) fn defer_unary_outcome_to_body(
     outcome: Result<Response, InferenceError>,
 ) -> Result<Response, InferenceError> {
     match outcome {
-        Ok(response) => Ok(wrap_unary_body(
-            response,
-            execution.take_body_finalizer(),
-        )),
+        Ok(response) => Ok(wrap_unary_body(response, execution.take_body_finalizer())),
         Err(failure) => {
             execution.mark_failure(failure.accounting_outcome());
             Err(failure)
