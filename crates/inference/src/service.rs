@@ -12,7 +12,7 @@ use crate::{
     events::collect_provider_events,
     failover::{ExecutionOutput, FailoverContext, execute_with_failover},
     limits::ReloadableLimiter,
-    limits::{RequestMediaGuard, operation_media_handles},
+    media_lifecycle::{RequestMediaGuard, operation_media_handles},
     runtime::RuntimeManager,
     selection::select_representable_attempts_filtered,
     telemetry::elapsed_ms,

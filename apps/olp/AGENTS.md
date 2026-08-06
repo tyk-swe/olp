@@ -16,8 +16,8 @@ their designated library crates.
   endpoint registry in `endpoint_policy.rs`. Execution delegates to the narrow
   `InferenceService`.
 - `management/` — the complete `/api/v1` control plane: auth/session policy,
-  `access/{profile,users,invitations}`, configuration resources, operations,
-  OIDC, playground, and OpenAPI.
+  `access/{profile,users,invitations,sessions}`, configuration resources,
+  operations, OIDC, playground, and OpenAPI.
 - `observability/` — the private health/metrics listener and its narrow state.
 - `console/` — embedded static-console fallback and asset delivery.
 

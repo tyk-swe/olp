@@ -15,7 +15,6 @@ export type RequestMetadataGatewayEpoch =
   components['schemas']['RequestMetadataGatewayEpochResponse'];
 export type RequestMetadataEpochAcknowledgement =
   components['schemas']['RequestMetadataEpochAcknowledgementResponse'];
-export type Session = components['schemas']['SessionDetailResponse'];
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList = components['schemas']['OidcIdentityListResponse'];
 export type Readiness = components['schemas']['HealthResponse'];
@@ -287,13 +286,6 @@ export async function enrollPassword(
   const { data, error, response } = await apiClient.POST('/api/v1/profile/password/enroll', {
     params: { header: { 'If-Match': profile.etag } },
     body: input
-  });
-  return result(data, error, response);
-}
-
-export async function listSessions(cursor?: string): Promise<CursorPage<Session>> {
-  const { data, error, response } = await apiClient.GET('/api/v1/sessions', {
-    params: { query: compact({ cursor, limit: 50 }) }
   });
   return result(data, error, response);
 }

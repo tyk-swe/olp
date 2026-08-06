@@ -10,7 +10,7 @@ use axum::{
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{CanonicalResult, Operation, OperationKind, Surface, TransportMode};
-use olp_inference::limits::CleanupMediaStream;
+use olp_inference::CleanupMediaStream;
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,

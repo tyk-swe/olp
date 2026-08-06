@@ -23,8 +23,8 @@ use olp_storage::{
 };
 
 use crate::{
-    MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem,
-    RequestBoundaryState, gateway, management, public_http::proxy::public_auth_source,
+    MAX_JSON_BODY_BYTES, Problem, RequestBoundaryState, gateway, management,
+    public_http::proxy::public_auth_source,
     public_http::public_auth_routes::PublicAuthRoute, public_http::router::REQUEST_BODY_TIMEOUT,
 };
 
@@ -38,7 +38,10 @@ use limits::{
     reserve_http_inference_limits,
 };
 use multipart::preauthorize_multipart;
-use validation::{is_json_content_type, payload_too_large, request_body_timeout};
+use validation::{
+    BodyAdmission, payload_too_large, request_body_timeout,
+    validate_body_framing_and_encoding, validate_target_and_headers,
+};
 
 pub(crate) use limits::{ReleaseReservationBody, estimate_http_json_request_tokens};
 pub(crate) use multipart::{MultipartAdmissionState, validate_multipart_boundary};
@@ -49,9 +52,6 @@ pub(crate) use public::{
     MAX_ADMISSION_CAPACITY, PublicAdmission, PublicAdmissionMiddleware, admit_public_request,
 };
 pub(crate) use validation::{JsonBodyReadError, read_json_body, validate_json_depth};
-
-const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
-const MAX_URI_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy)]
 pub(crate) struct FirstOwnerSetupAuthorized;
@@ -439,42 +439,6 @@ async fn enforce_request_limits_inner(
     Ok(finalization.dispatch(request, next).await)
 }
 
-fn validate_target_and_headers(request: &Request<Body>) -> Result<(), RequestLimitRejection> {
-    if request.uri().to_string().len() > MAX_URI_BYTES {
-        return Err(Problem::new(
-            axum::http::StatusCode::URI_TOO_LONG,
-            "uri_too_long",
-            "Request URI too long",
-            "The request URI exceeds the gateway limit.",
-        )
-        .into());
-    }
-    let header_bytes = request
-        .headers()
-        .iter()
-        .fold(0_usize, |size, (name, value)| {
-            size.saturating_add(name.as_str().len())
-                .saturating_add(value.as_bytes().len())
-                .saturating_add(4)
-        });
-    if request.headers().len() > MAX_HTTP_HEADER_COUNT
-        || header_bytes > MAX_HTTP_HEADER_BYTES
-        || request
-            .headers()
-            .values()
-            .any(|value| value.as_bytes().len() > MAX_HEADER_VALUE_BYTES)
-    {
-        return Err(Problem::new(
-            axum::http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
-            "headers_too_large",
-            "Request headers too large",
-            "Request headers exceed the gateway limit.",
-        )
-        .into());
-    }
-    Ok(())
-}
-
 fn enforce_public_auth_source(
     state: &RequestBoundaryState,
     request: &Request<Body>,
@@ -503,97 +467,6 @@ async fn preauthorize_setup_if_needed(
         request.extensions_mut().insert(authorization);
     }
     Ok(())
-}
-
-fn validate_body_framing_and_encoding(
-    request: &Request<Body>,
-) -> Result<(), RequestLimitRejection> {
-    let content_length_count = request
-        .headers()
-        .get_all(axum::http::header::CONTENT_LENGTH)
-        .iter()
-        .count();
-    let transfer_encoding = request
-        .headers()
-        .get_all(axum::http::header::TRANSFER_ENCODING)
-        .iter()
-        .collect::<Vec<_>>();
-    if content_length_count > 1
-        || !transfer_encoding.is_empty()
-            && request
-                .headers()
-                .contains_key(axum::http::header::CONTENT_LENGTH)
-        || transfer_encoding.len() > 1
-        || transfer_encoding.first().is_some_and(|value| {
-            !value
-                .to_str()
-                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("chunked"))
-        })
-    {
-        return Err(Problem::bad_request(
-            "ambiguous_body_length",
-            "The request has ambiguous framing headers.",
-        )
-        .into());
-    }
-    if request
-        .headers()
-        .get(axum::http::header::CONTENT_ENCODING)
-        .is_some_and(|value| {
-            !value
-                .to_str()
-                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("identity"))
-        })
-    {
-        return Err(Problem::new(
-            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_encoding_unsupported",
-            "Content encoding unsupported",
-            "Compressed request bodies are not accepted.",
-        )
-        .into());
-    }
-    Ok(())
-}
-
-struct BodyAdmission {
-    maximum: usize,
-    multipart_content_type: Option<String>,
-    is_json: bool,
-}
-
-impl BodyAdmission {
-    fn classify(request: &Request<Body>, endpoint: Option<gateway::InferenceEndpoint>) -> Self {
-        let content_type = request
-            .headers()
-            .get(axum::http::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        Self {
-            maximum: endpoint
-                .map(|endpoint| endpoint.body_limit(content_type))
-                .unwrap_or(MAX_JSON_BODY_BYTES),
-            multipart_content_type: content_type
-                .split(';')
-                .next()
-                .is_some_and(|value| value.trim().eq_ignore_ascii_case("multipart/form-data"))
-                .then(|| content_type.to_owned()),
-            is_json: is_json_content_type(content_type),
-        }
-    }
-
-    fn enforce_declared_size(&self, request: &Request<Body>) -> Result<(), RequestLimitRejection> {
-        if request
-            .headers()
-            .get(axum::http::header::CONTENT_LENGTH)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
-            .is_some_and(|value| value > self.maximum as u64)
-        {
-            return Err(payload_too_large(self.maximum).into());
-        }
-        Ok(())
-    }
 }
 
 fn public_auth_source_required(request: &Request<Body>) -> bool {

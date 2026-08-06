@@ -27,15 +27,17 @@ use access::{
         UpdateProfileRequest, change_password, enroll_password, profile, recent_authentication,
         update_profile,
     },
+    sessions::{
+        SessionDetailResponse, SessionListResponse, list_sessions, revoke_session,
+    },
     users::{
         UpdateUserRoleRequest, UserDetailResponse, UserListResponse, get_user, list_users,
         update_user_role,
     },
 };
 use auth::{
-    AuthenticationCapabilities, LoginRequest, SessionDetailResponse, SessionListResponse,
-    SessionResponse, SetupRequest, SetupStatus, UserResponse, authentication_capabilities,
-    current_session, list_sessions, login, logout, revoke_session, setup, setup_status,
+    AuthenticationCapabilities, LoginRequest, SessionResponse, SetupRequest, SetupStatus,
+    UserResponse, authentication_capabilities, current_session, login, logout, setup, setup_status,
 };
 use axum::{Json, Router, routing::get, routing::post};
 pub(crate) use configuration::common::{map_configuration_resource, validation};
@@ -131,8 +133,8 @@ pub fn router() -> Router<ManagementState> {
         access::profile::recent_authentication,
         access::profile::change_password,
         access::profile::enroll_password,
-        auth::list_sessions,
-        auth::revoke_session,
+        access::sessions::list_sessions,
+        access::sessions::revoke_session,
         access::users::list_users,
         access::users::get_user,
         access::users::update_user_role,

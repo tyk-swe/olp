@@ -11,7 +11,7 @@ use futures::{StreamExt, stream};
 use olp_domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, MediaHandle, Surface, TransportMode,
 };
-use olp_inference::limits::CleanupMediaStream;
+use olp_inference::CleanupMediaStream;
 use olp_protocols::openai::{
     EmbeddingRequest, OpenAiImageEditRequest, OpenAiImageGenerationRequest,
     OpenAiImageVariationRequest, OpenAiModerationRequest, OpenAiSpeechRequest,

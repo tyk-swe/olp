@@ -10,16 +10,13 @@ use std::{
 };
 
 use arc_swap::ArcSwapOption;
-use bytes::Bytes;
-use olp_domain::{
-    ApiKey, ApiKeyLookupId, MediaByteStream, MediaHandle, MediaSpool, Operation, Surface,
-};
+use olp_domain::{ApiKey, Operation};
 use olp_storage::{
     limits::DistributedLimiter, limits::LimitError, limits::LimitLease, limits::LimitRequest,
 };
 use tracing::{error, warn};
 
-use crate::{InferenceError, runtime::RuntimeBundle};
+use crate::InferenceError;
 
 type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
@@ -218,49 +215,6 @@ impl Drop for DistributedLimitReservation {
         } else {
             warn!("could not release distributed limit lease outside a Tokio runtime");
         }
-    }
-}
-
-/// Authenticated API-key identity pinned to the runtime generation that
-/// performed credential verification.
-#[derive(Clone)]
-pub struct InferencePrincipal {
-    runtime: Arc<RuntimeBundle>,
-    lookup_id: ApiKeyLookupId,
-    surface: Surface,
-}
-
-impl InferencePrincipal {
-    #[must_use]
-    pub fn new(runtime: Arc<RuntimeBundle>, lookup_id: ApiKeyLookupId, surface: Surface) -> Self {
-        Self {
-            runtime,
-            lookup_id,
-            surface,
-        }
-    }
-
-    #[must_use]
-    pub fn runtime(&self) -> &Arc<RuntimeBundle> {
-        &self.runtime
-    }
-
-    #[must_use]
-    pub fn key(&self) -> &ApiKey {
-        self.runtime
-            .api_keys
-            .get(&self.lookup_id)
-            .expect("authenticated API key must remain in its pinned runtime")
-    }
-
-    #[must_use]
-    pub const fn lookup_id(&self) -> &ApiKeyLookupId {
-        &self.lookup_id
-    }
-
-    #[must_use]
-    pub const fn surface(&self) -> Surface {
-        self.surface
     }
 }
 
@@ -487,149 +441,5 @@ pub async fn release_limits(
 ) {
     if let Some(reservation) = reservation {
         reservation.cleanup(actual_tokens).await;
-    }
-}
-
-pub fn operation_media_handles(operation: &Operation) -> Vec<MediaHandle> {
-    let mut handles = Vec::new();
-    match operation {
-        Operation::Generation(request) => {
-            for message in &request.messages {
-                capture_content_handles(&message.content, &mut handles);
-            }
-        }
-        Operation::TokenCount(request) => capture_content_handles(&request.input, &mut handles),
-        Operation::Images(olp_domain::ImageOperation::Edit(request)) => {
-            handles.extend(request.images.iter().cloned());
-            handles.extend(request.mask.iter().cloned());
-        }
-        Operation::Images(olp_domain::ImageOperation::Variation(request)) => {
-            handles.push(request.image.clone());
-        }
-        Operation::Transcription(request) => handles.push(request.audio.clone()),
-        Operation::Video(olp_domain::VideoOperation::Create(request)) => {
-            handles.extend(request.input.iter().cloned());
-        }
-        Operation::Moderation(request) => capture_content_handles(&request.input, &mut handles),
-        Operation::Embeddings(_)
-        | Operation::Images(olp_domain::ImageOperation::Generation(_))
-        | Operation::Speech(_)
-        | Operation::Video(_)
-        | Operation::Models(_) => {}
-    }
-    handles.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-    handles.dedup_by(|left, right| left.as_str() == right.as_str());
-    handles
-}
-
-fn capture_content_handles(parts: &[olp_domain::ContentPart], handles: &mut Vec<MediaHandle>) {
-    for part in parts {
-        match part {
-            olp_domain::ContentPart::Image {
-                source: olp_domain::MediaSource::Handle(handle),
-                ..
-            }
-            | olp_domain::ContentPart::InputAudio { media: handle, .. }
-            | olp_domain::ContentPart::InputFile { media: handle, .. } => {
-                handles.push(handle.clone());
-            }
-            _ => {}
-        }
-    }
-}
-
-async fn cleanup_request_media(spool: &Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) {
-    for handle in handles {
-        match spool.remove(&handle).await {
-            Ok(()) | Err(olp_domain::MediaSpoolError::NotFound) => {}
-            Err(error) => warn!(%error, "failed to remove request media from the bounded spool"),
-        }
-    }
-}
-
-pub struct RequestMediaGuard {
-    spool: Arc<dyn MediaSpool>,
-    handles: Vec<MediaHandle>,
-}
-
-impl RequestMediaGuard {
-    pub fn new(spool: Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) -> Self {
-        Self { spool, handles }
-    }
-
-    pub async fn cleanup(mut self) {
-        if self.handles.is_empty() {
-            return;
-        }
-        let spool = self.spool.clone();
-        let handles = std::mem::take(&mut self.handles);
-        let cleanup = tokio::spawn(async move {
-            cleanup_request_media(&spool, handles).await;
-        });
-        let _ = cleanup.await;
-    }
-}
-
-impl Drop for RequestMediaGuard {
-    fn drop(&mut self) {
-        if self.handles.is_empty() {
-            return;
-        }
-        let spool = self.spool.clone();
-        let handles = std::mem::take(&mut self.handles);
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                cleanup_request_media(&spool, handles).await;
-            });
-        }
-    }
-}
-
-pub struct CleanupMediaStream {
-    inner: MediaByteStream,
-    spool: Arc<dyn MediaSpool>,
-    handle: Option<MediaHandle>,
-}
-
-impl CleanupMediaStream {
-    pub fn new(inner: MediaByteStream, spool: Arc<dyn MediaSpool>, handle: MediaHandle) -> Self {
-        Self {
-            inner,
-            spool,
-            handle: Some(handle),
-        }
-    }
-
-    fn schedule_cleanup(&mut self) {
-        let Some(handle) = self.handle.take() else {
-            return;
-        };
-        let spool = self.spool.clone();
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                let _ = spool.remove(&handle).await;
-            });
-        }
-    }
-}
-
-impl futures::Stream for CleanupMediaStream {
-    type Item = Result<Bytes, olp_domain::MediaSpoolError>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        context: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let next = self.inner.as_mut().poll_next(context);
-        if matches!(next, std::task::Poll::Ready(None)) {
-            self.schedule_cleanup();
-        }
-        next
-    }
-}
-
-impl Drop for CleanupMediaStream {
-    fn drop(&mut self) {
-        self.schedule_cleanup();
     }
 }

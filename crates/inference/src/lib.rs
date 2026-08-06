@@ -11,6 +11,8 @@ pub mod events;
 mod execution;
 pub mod failover;
 pub mod limits;
+mod media_lifecycle;
+mod principal;
 pub mod runtime;
 pub mod selection;
 mod service;
@@ -22,5 +24,7 @@ pub use execution::{
     CompletedEventExecution, RequestAdmission, RequiredTarget, RoutedEventExecution,
     RoutedUnaryFinalizer, RoutedUnaryResult,
 };
-pub use limits::{InferencePrincipal, InferenceReservation};
+pub use limits::InferenceReservation;
+pub use media_lifecycle::CleanupMediaStream;
+pub use principal::InferencePrincipal;
 pub use service::{InferenceService, SessionGenerationExecution};

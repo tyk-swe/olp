@@ -1,8 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { logout } from '$lib/api/auth';
-  import { revokeSession } from '$lib/api/management/access';
-  import { listSessions } from '$lib/api/operations';
+  import { listSessionPage, revokeSession } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import { formatDate } from '$lib/features/operations/format';
 
@@ -14,7 +13,7 @@
 
   const sessions = createQuery(() => ({
     queryKey: ['profile-sessions', cursor],
-    queryFn: () => listSessions(cursor)
+    queryFn: () => listSessionPage(undefined, cursor)
   }));
 
   async function endSession(id: string, current: boolean) {
@@ -39,9 +38,9 @@
   }
 
   function next() {
-    if (!sessions.data?.next_cursor) return;
-    history = [...history, sessions.data.next_cursor];
-    cursor = sessions.data.next_cursor;
+    if (!sessions.data?.nextCursor) return;
+    history = [...history, sessions.data.nextCursor];
+    cursor = sessions.data.nextCursor;
   }
 
   function previous() {
@@ -74,7 +73,7 @@
     <div class="inline-problem" role="alert">Sessions are unavailable.</div>
   {:else}
     <div class="session-list">
-      {#each sessions.data?.data ?? [] as session (session.id)}
+      {#each sessions.data?.items ?? [] as session (session.id)}
         <article class="card session-row">
           <div class="session-icon" aria-hidden="true">
             {session.current ? '●' : '○'}
@@ -110,7 +109,7 @@
         </article>
       {/each}
     </div>
-    {#if history.length > 0 || sessions.data?.next_cursor}<nav
+    {#if history.length > 0 || sessions.data?.nextCursor}<nav
         class="pagination"
         aria-label="Session pages"
       >
@@ -123,7 +122,7 @@
           class="button button-secondary"
           type="button"
           onclick={next}
-          disabled={!sessions.data?.next_cursor}>Next</button
+          disabled={!sessions.data?.nextCursor}>Next</button
         >
       </nav>{/if}
   {/if}
