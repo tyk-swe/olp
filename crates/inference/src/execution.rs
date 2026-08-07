@@ -22,9 +22,7 @@ use crate::{
     },
     events::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collect_provider_events_with_observer},
     failover::{ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover},
-    limits::{
-        DistributedLimitReservation, InferenceReservation, release_limits, reserve_limits,
-    },
+    limits::{DistributedLimitReservation, InferenceReservation, release_limits, reserve_limits},
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
     principal::InferencePrincipal,
     runtime::RuntimeBundle,

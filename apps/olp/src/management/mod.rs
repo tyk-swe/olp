@@ -27,9 +27,7 @@ use access::{
         UpdateProfileRequest, change_password, enroll_password, profile, recent_authentication,
         update_profile,
     },
-    sessions::{
-        SessionDetailResponse, SessionListResponse, list_sessions, revoke_session,
-    },
+    sessions::{SessionDetailResponse, SessionListResponse, list_sessions, revoke_session},
     users::{
         UpdateUserRoleRequest, UserDetailResponse, UserListResponse, get_user, list_users,
         update_user_role,

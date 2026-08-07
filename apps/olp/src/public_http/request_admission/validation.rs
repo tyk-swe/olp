@@ -5,9 +5,7 @@ use axum::{
     http::Request,
 };
 
-use crate::{
-    MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem, gateway,
-};
+use crate::{MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT, MAX_JSON_BODY_BYTES, Problem, gateway};
 
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
 const MAX_JSON_DEPTH: usize = 64;
@@ -47,9 +45,7 @@ pub(super) fn validate_target_and_headers(request: &Request<Body>) -> Result<(),
     Ok(())
 }
 
-pub(super) fn validate_body_framing_and_encoding(
-    request: &Request<Body>,
-) -> Result<(), Problem> {
+pub(super) fn validate_body_framing_and_encoding(request: &Request<Body>) -> Result<(), Problem> {
     let content_length_count = request
         .headers()
         .get_all(axum::http::header::CONTENT_LENGTH)
