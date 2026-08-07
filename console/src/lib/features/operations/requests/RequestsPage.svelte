@@ -5,7 +5,7 @@
     getRequest,
     listRequests
   } from '$lib/api/operations';
-  import { formatCompact, formatCost, formatDate, statusLabel, statusTone } from '../format';
+  import { formatCompact, formatCost, formatDate, statusLabel, statusTone } from '$lib/format';
   import type { RequestListState } from './requestListState';
 
   let {

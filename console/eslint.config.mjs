@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import { buildFeatureBoundaryConfigs } from './feature-boundaries.mjs';
 
 const tsFiles = ['**/*.{ts,tsx}'];
 
@@ -34,6 +35,7 @@ export default [
       globals: { ...globals.browser, ...globals.node }
     }
   },
+  ...buildFeatureBoundaryConfigs(new URL('src/lib/features', import.meta.url).pathname, new URL('.', import.meta.url).pathname),
   {
     files: ['src/**/*.svelte'],
     languageOptions: {

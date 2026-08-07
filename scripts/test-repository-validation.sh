@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 helper="$script_dir/lib/repository-validation.sh"
 
-for required_executable in bash rg grep mktemp mkdir chmod cargo cp; do
+for required_executable in bash rg grep mktemp mkdir chmod cargo cp sed; do
   command -v "$required_executable" >/dev/null || {
     echo "test-repository-validation.sh: $required_executable is required" >&2
     exit 1
@@ -230,6 +230,176 @@ test_supply_chain_scan_error_has_no_success() {
   fi
 }
 
+create_boundary_fixture() {
+  local workspace=$1
+  local domain_role=${2-domain}
+  mkdir -p \
+    "$workspace/scripts/lib" "$workspace/apps/olp/src" \
+    "$workspace/crates/domain/src" "$workspace/console/src/routes"
+  cp "$script_dir/check-boundaries.sh" "$workspace/scripts/check-boundaries.sh"
+  cp "$helper" "$workspace/scripts/lib/repository-validation.sh"
+  printf '%s\n' \
+    '[workspace]' \
+    'resolver = "3"' \
+    'members = ["apps/olp", "crates/domain"]' > "$workspace/Cargo.toml"
+  printf '%s\n' \
+    '[package]' \
+    'name = "olp"' \
+    'version = "0.0.0"' \
+    'edition = "2024"' \
+    '[package.metadata.olp]' \
+    'role = "delivery"' \
+    '[dependencies]' \
+    'olp-domain = { path = "../../crates/domain" }' > "$workspace/apps/olp/Cargo.toml"
+  printf 'pub fn delivery() {}\n' > "$workspace/apps/olp/src/lib.rs"
+  {
+    printf '%s\n' \
+      '[package]' \
+      'name = "olp-domain"' \
+      'version = "0.0.0"' \
+      'edition = "2024"'
+    if [[ -n $domain_role ]]; then
+      printf '%s\n' '[package.metadata.olp]' "role = \"$domain_role\""
+    fi
+  } > "$workspace/crates/domain/Cargo.toml"
+  printf 'pub fn domain() {}\n' > "$workspace/crates/domain/src/lib.rs"
+  printf '{}\n' > "$workspace/console/package.json"
+  printf '@sveltejs/adapter-static\n' > "$workspace/console/svelte.config.js"
+  printf 'export const ssr = false;\n' > "$workspace/console/src/routes/+layout.ts"
+  cargo generate-lockfile --manifest-path "$workspace/Cargo.toml" >/dev/null
+}
+
+run_boundary_failure() {
+  local workspace=$1
+  local expected=$2
+  local output="$workspace/output.log"
+  local status
+  if "$workspace/scripts/check-boundaries.sh" >"$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" "$expected"
+}
+
+test_missing_package_role_is_rejected() {
+  local workspace="$test_root/missing-role"
+  create_boundary_fixture "$workspace" ''
+  run_boundary_failure "$workspace" \
+    'olp-domain must declare [package.metadata.olp] role'
+}
+
+test_invalid_package_role_is_rejected() {
+  local workspace="$test_root/invalid-role"
+  create_boundary_fixture "$workspace" repository
+  run_boundary_failure "$workspace" \
+    'olp-domain declares unsupported OLP role: repository'
+}
+
+test_forbidden_cross_role_build_edge_is_rejected() {
+  local workspace="$test_root/cross-role"
+  create_boundary_fixture "$workspace"
+  mkdir -p "$workspace/crates/storage/src"
+  sed -i \
+    's/members = \[/members = ["crates\/storage", /' \
+    "$workspace/Cargo.toml"
+  printf '%s\n' \
+    '[package]' 'name = "olp-storage"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "storage"' \
+    '[build-dependencies]' 'olp = { path = "../../apps/olp" }' \
+    > "$workspace/crates/storage/Cargo.toml"
+  printf 'pub fn storage() {}\n' > "$workspace/crates/storage/src/lib.rs"
+  cargo generate-lockfile --manifest-path "$workspace/Cargo.toml" >/dev/null
+  run_boundary_failure "$workspace" \
+    'olp-storage (storage) must not depend on olp (delivery)'
+}
+
+test_production_to_test_edge_is_rejected() {
+  local workspace="$test_root/production-to-test"
+  create_boundary_fixture "$workspace"
+  mkdir -p "$workspace/tests/helper/src"
+  sed -i \
+    's/members = \[/members = ["tests\/helper", /' \
+    "$workspace/Cargo.toml"
+  printf '%s\n' \
+    '[package]' 'name = "olp-test-helper"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "test"' > "$workspace/tests/helper/Cargo.toml"
+  printf 'pub fn helper() {}\n' > "$workspace/tests/helper/src/lib.rs"
+  printf 'olp-test-helper = { path = "../../tests/helper" }\n' \
+    >> "$workspace/apps/olp/Cargo.toml"
+  cargo generate-lockfile --manifest-path "$workspace/Cargo.toml" >/dev/null
+  run_boundary_failure "$workspace" \
+    'olp (delivery) must not depend on olp-test-helper (test)'
+}
+
+test_role_based_infrastructure_ownership_is_enforced() {
+  local workspace="$test_root/infrastructure-role"
+  create_boundary_fixture "$workspace"
+  mkdir -p "$workspace/vendor/reqwest/src"
+  sed -i \
+    '/resolver/a exclude = ["vendor/reqwest"]' \
+    "$workspace/Cargo.toml"
+  printf '%s\n' \
+    '[package]' 'name = "reqwest"' 'version = "0.0.0"' 'edition = "2024"' \
+    > "$workspace/vendor/reqwest/Cargo.toml"
+  printf 'pub fn client() {}\n' > "$workspace/vendor/reqwest/src/lib.rs"
+  printf '%s\n' '[dependencies]' 'reqwest = { path = "../../vendor/reqwest" }' \
+    >> "$workspace/crates/domain/Cargo.toml"
+  cargo generate-lockfile --manifest-path "$workspace/Cargo.toml" >/dev/null
+  run_boundary_failure "$workspace" \
+    'reqwest is owned by the provider role, not olp-domain (domain)'
+}
+
+test_allowed_role_edges_and_extensible_topology_pass() {
+  local workspace="$test_root/extensible-topology"
+  create_boundary_fixture "$workspace"
+  mkdir -p \
+    "$workspace/crates/protocol-a/src" "$workspace/crates/protocol-b/src" \
+    "$workspace/crates/provider-a/src" \
+    "$workspace/tests/helper/src" "$workspace/extensions/admin/src" \
+    "$workspace/apps/olp/src/new_responsibility"
+  sed -i \
+    's/members = \[/members = ["crates\/protocol-a", "crates\/protocol-b", "crates\/provider-a", "tests\/helper", "extensions\/admin", /' \
+    "$workspace/Cargo.toml"
+  printf '%s\n' \
+    '[package]' 'name = "protocol-a"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "protocol"' \
+    '[dependencies]' 'olp-domain = { path = "../domain" }' \
+    > "$workspace/crates/protocol-a/Cargo.toml"
+  printf 'pub fn protocol_a() {}\n' > "$workspace/crates/protocol-a/src/lib.rs"
+  printf '%s\n' \
+    '[package]' 'name = "protocol-b"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "protocol"' \
+    '[dependencies]' 'protocol-a = { path = "../protocol-a" }' \
+    > "$workspace/crates/protocol-b/Cargo.toml"
+  printf 'pub fn protocol_b() {}\n' > "$workspace/crates/protocol-b/src/lib.rs"
+  printf '%s\n' \
+    '[package]' 'name = "provider-a"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "provider"' \
+    '[dependencies]' 'protocol-b = { path = "../protocol-b" }' \
+    > "$workspace/crates/provider-a/Cargo.toml"
+  printf 'pub fn provider_a() { OpenAiConnector::new(); }\n' \
+    > "$workspace/crates/provider-a/src/lib.rs"
+  printf '%s\n' \
+    '[package]' 'name = "olp-test-helper"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "test"' \
+    '[dependencies]' 'protocol-b = { path = "../../crates/protocol-b" }' \
+    > "$workspace/tests/helper/Cargo.toml"
+  printf 'pub fn helper() {}\n' > "$workspace/tests/helper/src/lib.rs"
+  printf '%s\n' \
+    '[package]' 'name = "admin-delivery"' 'version = "0.0.0"' 'edition = "2024"' \
+    '[package.metadata.olp]' 'role = "delivery"' \
+    '[dependencies]' 'protocol-b = { path = "../../crates/protocol-b" }' \
+    > "$workspace/extensions/admin/Cargo.toml"
+  printf 'pub fn admin() {}\n' > "$workspace/extensions/admin/src/lib.rs"
+  printf 'pub fn responsibility() {}\n' \
+    > "$workspace/apps/olp/src/new_responsibility/mod.rs"
+  cargo generate-lockfile --manifest-path "$workspace/Cargo.toml" >/dev/null
+  "$workspace/scripts/check-boundaries.sh" > "$workspace/output.log" 2>&1 || return
+  assert_contains "$workspace/output.log" 'architecture boundaries are clean'
+}
+
 test_external_cargo_patch_path_is_rejected() {
   local fixture_root="$test_root/external-cargo-patch"
   local workspace="$fixture_root/workspace"
@@ -324,6 +494,18 @@ run_test "match-only wrapper propagates producer failure" \
   test_match_only_wrapper_propagates_failure
 run_test "supply-chain success is suppressed after scan error" \
   test_supply_chain_scan_error_has_no_success
+run_test "missing workspace package role is rejected" \
+  test_missing_package_role_is_rejected
+run_test "invalid workspace package role is rejected" \
+  test_invalid_package_role_is_rejected
+run_test "forbidden build dependency role edge is rejected" \
+  test_forbidden_cross_role_build_edge_is_rejected
+run_test "production packages cannot depend on test packages" \
+  test_production_to_test_edge_is_rejected
+run_test "infrastructure ownership follows package roles" \
+  test_role_based_infrastructure_ownership_is_enforced
+run_test "same-role, test, and extensible delivery topology are allowed" \
+  test_allowed_role_edges_and_extensible_topology_pass
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
 run_test "actual repository invariant checks pass" test_actual_repository_checks

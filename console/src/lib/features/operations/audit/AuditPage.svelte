@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { listAudit } from '$lib/api/operations';
-  import { formatDate } from '../format';
+  import { formatDate } from '$lib/format';
 
   let cursor = $state<string | undefined>();
   let history = $state<string[]>([]);

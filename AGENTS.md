@@ -48,14 +48,13 @@ crates/inference transport-neutral runtime pinning, selection, execution, failov
 tests/conformance cross-protocol conformance harness over tests/fixtures/
 ```
 
-Dependencies point toward `crates/domain`:
-`olp → {domain, protocols, providers, storage, inference}`,
-`inference → {domain, protocols, providers, storage}`, `storage → domain`,
-`providers → {domain, protocols}`, `protocols → domain`.
-`scripts/check-boundaries.sh` enforces the DAG, the exact package set, the
-responsibility-oriented app/console roots, and
-dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
-`google-cloud-auth` only in providers; `axum`/`tower*`/`clap` only in apps/olp).
+Every workspace package declares `[package.metadata.olp] role = "…"` using
+`domain`, `protocol`, `provider`, `storage`, `inference`, `delivery`, or `test`.
+`scripts/check-boundaries.sh` enforces role-compatible non-dev/build edges and
+role-based dependency ownership (`sqlx`/`redis` in storage; `reqwest`/`aws-*`/
+`google-cloud-auth` in provider; `axum`/`tower*`/`clap` in delivery). Dev edges
+are excluded, production cannot depend on test, and same-role decomposition is
+allowed. Current package and source-root names are descriptive, not snapshots.
 
 The app source has six production roots: `bootstrap/`, `public_http/`,
 `gateway/`, `management/`, `observability/`, and `console/`. Transport-neutral
@@ -88,9 +87,9 @@ inference behavior belongs in `crates/inference`, never in an Axum handler.
 
 ## Hazards
 
-- Never move `apps/`, `crates/*`, or `console/src/routes`, and never add or
-  remove a workspace package, without co-updating `scripts/check-boundaries.sh`
-  and verifying the workspace COPY scope in `deploy/Dockerfile`.
+- When adding a workspace package, declare its OLP role and verify the workspace
+  COPY scope in `deploy/Dockerfile`; semantic boundary policy discovers it
+  automatically.
 - Two dockerignore files exist; BuildKit uses `deploy/Dockerfile.dockerignore`
   for the production image. Keep the root `.dockerignore` a synchronized copy.
 - Migrations are forward-only; `release-metadata.env` pins the last released

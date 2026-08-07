@@ -14,7 +14,7 @@
   import {
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
-  } from './providerCache';
+  } from '../providerCache';
   import type { RunProviderAction } from './providerDetailCoordination';
 
   let {

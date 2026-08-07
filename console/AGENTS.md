@@ -18,6 +18,13 @@ boundary check rejects them.
 
 ## Layout
 
+Immediate directories under `src/lib/features/` are isolated feature areas;
+their immediate child directories are isolated slices. ESLint discovers both
+levels automatically. Areas cannot import other areas. Child slices cannot
+import siblings through aliases or relative parent paths, but may use
+area-level shared files; area-level files may compose child slices. Put general
+shared utilities outside `features/`.
+
 - `src/lib/features/gateway/{providers,routes,models}` — provider lifecycle,
   stable route drafts/revisions, and global model inventory.
 - `src/lib/features/access/{api-keys,users,invitations,sessions,oidc}` — each

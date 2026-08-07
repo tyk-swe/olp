@@ -2,7 +2,7 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { invalidateProviderSummaries } from '../providers/providerCache';
+  import { invalidateProviderSummaries } from '../providerCache';
   import {
     getProvider,
     listProviderModelInventoryPage,

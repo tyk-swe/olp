@@ -4,7 +4,7 @@ type QueryInvalidator = {
   }): Promise<unknown>;
 };
 
-export function invalidateProviderSummaries(queryClient: QueryInvalidator) {
+export function invalidateProviderSummaries(queryClient: QueryInvalidator): Promise<unknown[]> {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: ['provider-page'] }),
     queryClient.invalidateQueries({ queryKey: ['providers'] })

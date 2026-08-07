@@ -3,12 +3,12 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import SetupChecklist from '$lib/features/setup/SetupChecklist.svelte';
+  import SetupChecklist from './SetupChecklist.svelte';
   import { copyText } from '$lib/clipboard';
   import { listProviders } from '$lib/api/management/providers';
   import { listRoutes } from '$lib/api/management/routes';
   import { listRequests } from '$lib/api/operations';
-  import { formatDate, statusLabel, statusTone } from '$lib/features/operations/format';
+  import { formatDate, statusLabel, statusTone } from '$lib/format';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();
   let endpoint = $state('/openai/v1');

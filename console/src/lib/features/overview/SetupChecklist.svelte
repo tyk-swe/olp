@@ -41,7 +41,7 @@
     status: completed[index] ? 'complete' : index === currentIndex ? 'current' : 'upcoming'
   })));
 
-  function refresh() {
+  function refresh(): void {
     void Promise.all([providers.refetch(), routes.refetch(), keys.refetch()]);
   }
 </script>

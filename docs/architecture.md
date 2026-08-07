@@ -18,6 +18,26 @@ collection, terminal accounting, and shared playground execution. The `olp`
 package in `apps/olp` owns only HTTP delivery, process modes, and dependency
 wiring.
 
+Every root-workspace package declares its architectural role in
+`[package.metadata.olp]`. Roles, rather than package names or directory
+locations, define the allowed non-dev workspace edges (including build
+dependencies):
+
+| Source role | Allowed target roles |
+|---|---|
+| `domain` | `domain` |
+| `protocol` | `domain`, `protocol` |
+| `provider` | `domain`, `protocol`, `provider` |
+| `storage` | `domain`, `storage` |
+| `inference` | `domain`, `protocol`, `provider`, `storage`, `inference` |
+| `delivery` | every production role |
+| `test` | every role |
+
+Production roles may never depend on `test`; dev dependencies are outside the
+production graph. Same-role edges allow a layer to be split into focused
+crates without changing boundary policy. The specifically named `olp-domain`
+package remains foundational and has no production workspace dependencies.
+
 ```text
 olp-domain
 ├── olp-protocols ───────────────────────────────> olp-domain
@@ -34,7 +54,7 @@ test-only harness. The console is a
 client-only static application with no server routes or production Node
 adapter.
 
-The delivery crate exposes six responsibility roots:
+The current delivery crate is organized into six responsibility roots:
 
 ```text
 apps/olp/src/
@@ -45,6 +65,21 @@ apps/olp/src/
   observability/  private readiness/metrics listener
   console/        embedded static asset delivery
 ```
+
+These names describe the present organization; they are not a frozen package
+or directory inventory. New workspace packages declare a role, and new
+responsibility roots remain subject to the same role, dependency-ownership,
+and source rules automatically.
+
+## Console feature boundaries
+
+Each immediate directory under `console/src/lib/features/` is a feature area;
+its immediate child directories are slices. ESLint discovers both levels from
+the filesystem. A feature area cannot import another feature area, and a child
+slice cannot import a sibling slice through either `$lib` aliases or relative
+parent paths. Area-level files may compose their child slices, and child slices
+may import shared modules located directly in their parent area. General shared
+utilities belong outside `features/`.
 
 Storage similarly exposes subsystem namespaces instead of a flat `PgStore`
 method/export soup. Pool lifecycle stays in `store.rs`; session, setup,

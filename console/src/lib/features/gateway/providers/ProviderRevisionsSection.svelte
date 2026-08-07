@@ -8,7 +8,7 @@
     type Provider,
     type ProviderRevisionDiff
   } from '$lib/api/management/providers';
-  import { invalidateProviderSummaries } from './providerCache';
+  import { invalidateProviderSummaries } from '../providerCache';
   import {
     installProviderWithModels,
     providerDetailError,

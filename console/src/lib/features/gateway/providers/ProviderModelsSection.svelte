@@ -30,7 +30,7 @@
     type CoordinatedModelPage,
     type RunProviderAction
   } from './providerDetailCoordination';
-  import { invalidateProviderSummaries } from './providerCache';
+  import { invalidateProviderSummaries } from '../providerCache';
 
   let {
     current,
