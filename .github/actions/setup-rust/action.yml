@@ -1,6 +1,6 @@
 name: Setup Rust
 description: >-
-  Mold linker, pinned Rust toolchain, cargo build cache, and optional cargo
+  Clang/LLD linker, pinned Rust toolchain, cargo build cache, and optional cargo
   tools. Keep the action SHAs below in lockstep with
   scripts/check-supply-chain-pins.sh.
 
@@ -30,12 +30,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install mold linker
+    - name: Install Clang and LLD linker
       shell: bash
       run: |
-        if ! command -v mold >/dev/null 2>&1; then
+        if ! command -v clang >/dev/null 2>&1 || ! command -v ld.lld >/dev/null 2>&1; then
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends mold
+          sudo apt-get install --yes --no-install-recommends clang lld
         fi
     - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
       with:

@@ -6,9 +6,9 @@ validation required before review.
 
 ## Development environment
 
-Use Rust 1.97, Node.js 24 or newer, pnpm 11, mold, and PostgreSQL 18 for the
-full local suite. Linux builds select mold through `.cargo/config.toml` and
-require GCC 12.1 or newer as the linker driver. The Compose stack supplies
+Use Rust 1.97, Node.js 24 or newer, pnpm 11, Clang with LLD, and PostgreSQL 18
+for the full local suite. Linux builds select Clang and LLD through
+`.cargo/config.toml`. The Compose stack supplies
 PostgreSQL 18 and Valkey 9.1 for integration work. The stable Rust toolchain
 (1.97.1) installs automatically via `rust-toolchain.toml`.
 

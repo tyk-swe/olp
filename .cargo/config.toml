@@ -1,2 +1,3 @@
 [target.'cfg(target_os = "linux")']
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
