@@ -11,7 +11,7 @@
     type ProviderKindCapability
   } from '$lib/api/management/providers';
   import { requiresCredential } from './providerEditor';
-  import { invalidateProviderSummaries } from '../providerCache';
+  import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
     type RunProviderAction

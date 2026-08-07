@@ -5,9 +5,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-[package.metadata.olp]
-role = "delivery"
-
 [features]
 test-util = ["olp-providers/test-util"]
 

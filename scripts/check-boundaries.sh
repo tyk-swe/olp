@@ -6,7 +6,7 @@ workspace_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "$workspace_root/scripts/lib/repository-validation.sh"
 cd "$workspace_root"
 
-for required_executable in rg find realpath cargo jq sort dirname awk; do
+for required_executable in rg find realpath cargo jq sort dirname; do
   validation_require_executable "$required_executable"
 done
 for required_file in \
@@ -14,11 +14,60 @@ for required_file in \
   console/src/routes/+layout.ts; do
   validation_require_file "$required_file"
 done
-for required_directory in apps crates console/src console/src/routes; do
+for required_directory in \
+  apps apps/olp/src crates crates/domain crates/protocols crates/providers \
+  crates/inference crates/storage console/src console/src/routes; do
   validation_require_directory "$required_directory"
 done
 
 violations=0
+
+actual_app_root="$(find apps/olp/src -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
+expected_app_root="$(printf '%s\n' \
+  bootstrap console gateway lib.rs main.rs management observability public_http tests | sort)"
+if [[ "$actual_app_root" != "$expected_app_root" ]]; then
+  echo "apps/olp/src must expose only the responsibility-oriented delivery roots:" >&2
+  printf '%s\n' "$actual_app_root" >&2
+  violations=1
+fi
+
+actual_console_slices="$(find \
+  console/src/lib/features/gateway \
+  console/src/lib/features/access \
+  console/src/lib/features/operations \
+  console/src/lib/features/settings \
+  -mindepth 1 -maxdepth 1 -type d -printf '%p\n' | sort)"
+expected_console_slices="$(printf '%s\n' \
+  console/src/lib/features/gateway/models \
+  console/src/lib/features/gateway/providers \
+  console/src/lib/features/gateway/routes \
+  console/src/lib/features/access/api-keys \
+  console/src/lib/features/access/invitations \
+  console/src/lib/features/access/oidc \
+  console/src/lib/features/access/sessions \
+  console/src/lib/features/access/users \
+  console/src/lib/features/operations/audit \
+  console/src/lib/features/operations/health \
+  console/src/lib/features/operations/media-jobs \
+  console/src/lib/features/operations/requests \
+  console/src/lib/features/operations/usage \
+  console/src/lib/features/settings/installation \
+  console/src/lib/features/settings/profile | sort)"
+if [[ "$actual_console_slices" != "$expected_console_slices" ]]; then
+  echo "console product slices do not match the responsibility-oriented layout:" >&2
+  printf '%s\n' "$actual_console_slices" >&2
+  violations=1
+fi
+
+flat_console_features="$(find \
+  console/src/lib/features/gateway \
+  console/src/lib/features/settings \
+  -mindepth 1 -maxdepth 1 -type f -print)"
+if [[ -n $flat_console_features ]]; then
+  echo "gateway and settings console files must live in product subfeatures:" >&2
+  printf '%s\n' "$flat_console_features" >&2
+  violations=1
+fi
 
 report_matches() {
   local message="$1"
@@ -34,6 +83,27 @@ report_matches() {
     violations=1
   fi
 }
+
+report_matches \
+  "workspace manifest enables an unsupported platform dependency:" \
+  '^[[:space:]]*"?(@sveltejs/adapter-(node|cloudflare)|@cloudflare/[^"[:space:]]+|@libsql/[^"[:space:]]+|wrangler|better-sqlite3|cloudflare|cloudflare-workers|rusqlite|libsql|sqlite3?|worker)["[:space:]]*[:=]' \
+  "Cargo.toml apps crates console/package.json" \
+  Cargo.toml apps crates console/package.json \
+  --glob 'Cargo.toml' --glob 'package.json'
+
+report_matches \
+  "PostgreSQL-only workspace enables the SQLite backend:" \
+  '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' \
+  "Cargo.toml apps crates" \
+  Cargo.toml apps crates \
+  --glob 'Cargo.toml'
+
+report_matches \
+  "production crates must not expose wildcard re-export surfaces:" \
+  'pub(\([^)]*\))?[[:space:]]+use[^;]*::\*;' \
+  "apps crates" \
+  apps crates \
+  --glob '*.rs'
 
 report_matches \
   "bootstrap composition types must not be exported from the production olp API:" \
@@ -96,64 +166,14 @@ if (( ! ssr_disabled_matched )); then
   violations=1
 fi
 
-metadata="$(cargo metadata --locked --no-deps --format-version 1)"
-# One jq pass emits package roles, manifests, source roots, and all non-dev
-# dependencies. Build dependencies are production edges; dev dependencies are
-# deliberately outside the production graph.
-metadata_rows=
-if metadata_rows=$(jq -r '
-  (.packages[]
-    | ["package", .name, (.metadata.olp.role // "__missing__"), .manifest_path] | @tsv),
-  (.packages[]
-    | select((.metadata.olp.role // "__missing__") != "test")
-    | .name as $package
-    | .targets[]
-    | select(any(.kind[]; . == "lib" or . == "bin" or . == "proc-macro"))
-    | .src_path
-    | sub("/[^/]+$"; "")
-    | ["source", $package, .] | @tsv),
-  (.packages[] as $package
-    | $package.dependencies[]
-    | select(.kind != "dev")
-    | ["dependency", $package.name, ($package.metadata.olp.role // "__missing__"), .name,
-       (if .path == null then "external" else "path" end)] | @tsv)
-' <<<"$metadata"); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=read workspace metadata path=%s exit=%d\n' \
-    "$(validation_script_name)" "cargo metadata" "$status" >&2
-  exit "$status"
-fi
-
-declare -A package_roles=()
-manifest_paths=(Cargo.toml console/package.json)
-while IFS=$'\t' read -r tag package role manifest; do
-  [[ $tag == package ]] || continue
-  case "$role" in
-    domain|protocol|provider|storage|inference|delivery|test) ;;
-    __missing__)
-      echo "$package must declare [package.metadata.olp] role" >&2
-      violations=1
-      ;;
-    *)
-      echo "$package declares unsupported OLP role: $role" >&2
-      violations=1
-      ;;
-  esac
-  package_roles["$package"]=$role
-  manifest_paths+=("$manifest")
-done <<< "$metadata_rows"
-
 # A path dependency may point to another workspace crate, but never escape the
-# repository workspace. Cargo metadata supplies the complete manifest set, so
-# crates outside today's apps/ and crates/ organization are covered too.
+# repository workspace.
 path_dependencies=
 path_dependencies_matched=
 checked_rg_capture path_dependencies path_dependencies_matched \
-  "scan workspace path dependencies" "workspace manifests" \
+  "scan workspace path dependencies" "Cargo.toml apps crates" \
   -n --no-heading -o 'path[[:space:]]*=[[:space:]]*"[^"]+"' \
-  "${manifest_paths[@]}" --glob 'Cargo.toml'
+  Cargo.toml apps crates --glob 'Cargo.toml'
 if (( path_dependencies_matched )); then
   while IFS= read -r match; do
     manifest="${match%%:*}"
@@ -172,86 +192,86 @@ if (( path_dependencies_matched )); then
   done <<< "$path_dependencies"
 fi
 
-production_source_roots=()
-while IFS=$'\t' read -r tag _package source_root; do
-  [[ $tag == source ]] || continue
-  production_source_roots+=("$source_root")
-done <<< "$metadata_rows"
-mapfile -t production_source_roots < <(printf '%s\n' "${production_source_roots[@]}" | sort -u)
-
-report_matches \
-  "workspace manifest enables an unsupported platform dependency:" \
-  '^[[:space:]]*"?(@sveltejs/adapter-(node|cloudflare)|@cloudflare/[^"[:space:]]+|@libsql/[^"[:space:]]+|wrangler|better-sqlite3|cloudflare|cloudflare-workers|rusqlite|libsql|sqlite3?|worker)["[:space:]]*[:=]' \
-  "workspace manifests and console/package.json" \
-  "${manifest_paths[@]}" --glob 'Cargo.toml' --glob 'package.json'
-
-report_matches \
-  "PostgreSQL-only workspace enables the SQLite backend:" \
-  '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' \
-  "workspace manifests" "${manifest_paths[@]}" --glob 'Cargo.toml'
-
-if (( ${#production_source_roots[@]} )); then
-  report_matches \
-    "production crates must not expose wildcard re-export surfaces:" \
-    'pub(\([^)]*\))?[[:space:]]+use[^;]*::\*;' \
-    "production workspace sources" "${production_source_roots[@]}" --glob '*.rs'
+metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+# One jq pass emits every fact the checks below need as tagged TSV rows:
+#   package <name>
+#   dag <package> <comma-joined non-dev path dependencies>
+#   dependency <package> <dependency>
+metadata_rows=
+if metadata_rows=$(jq -r '
+  (.packages[] | ["package", .name] | @tsv),
+  (.packages[]
+    | select(.name != "olp-conformance" and .name != "olp-e2e")
+    | .name as $package
+    | ([.dependencies[] | select(.path != null and .kind != "dev") | .name]
+       | unique | sort | join(",")) as $dependencies
+    | ["dag", $package, $dependencies] | @tsv),
+  (.packages[] as $package
+    | $package.dependencies[]
+    | select(.kind != "dev")
+    | ["dependency", $package.name, .name] | @tsv)
+' <<<"$metadata"); then
+  :
+else
+  status=$?
+  printf '%s: producer failed: operation=read workspace metadata path=%s exit=%d\n' \
+    "$(validation_script_name)" "cargo metadata" "$status" >&2
+  exit "$status"
 fi
 
-dependency_rows="$(awk -F'\t' '$1 == "dependency" { print $2 "\t" $3 "\t" $4 "\t" $5 }' <<<"$metadata_rows")"
-if [[ -n $dependency_rows ]]; then
-  while IFS=$'\t' read -r package role dependency dependency_type; do
-    if [[ $dependency_type == path && -v package_roles["$dependency"] ]]; then
-      target_role=${package_roles["$dependency"]}
-      allowed=0
-      case "$role:$target_role" in
-        domain:domain|protocol:domain|protocol:protocol|provider:domain|provider:protocol|provider:provider|storage:domain|storage:storage|inference:domain|inference:protocol|inference:provider|inference:storage|inference:inference|delivery:domain|delivery:protocol|delivery:provider|delivery:storage|delivery:inference|delivery:delivery|test:*)
-          allowed=1
-          ;;
-      esac
-      if (( ! allowed )); then
-        echo "$package ($role) must not depend on $dependency ($target_role)" >&2
-        violations=1
-      fi
-      if [[ $package == olp-domain && $target_role != test ]]; then
-        echo "olp-domain must not depend on production workspace crate $dependency" >&2
-        violations=1
-      fi
-    fi
+actual_packages="$(awk -F'\t' '$1 == "package" { print $2 }' <<<"$metadata_rows" | sort)"
+expected_packages="$(printf '%s\n' \
+  olp olp-conformance olp-domain olp-e2e olp-inference olp-protocols olp-providers olp-storage | sort)"
+if [[ "$actual_packages" != "$expected_packages" ]]; then
+  echo "workspace packages do not match the six production crates plus the conformance and e2e harnesses:" >&2
+  printf '%s\n' "$actual_packages" >&2
+  violations=1
+fi
 
+actual_dag="$(awk -F'\t' '$1 == "dag" { print $2 "\t" $3 }' <<<"$metadata_rows" | sort)"
+expected_dag="$(printf '%s\n' \
+  $'olp\tolp-domain,olp-inference,olp-protocols,olp-providers,olp-storage' \
+  $'olp-domain\t' \
+  $'olp-inference\tolp-domain,olp-protocols,olp-providers,olp-storage' \
+  $'olp-protocols\tolp-domain' \
+  $'olp-providers\tolp-domain,olp-protocols' \
+  $'olp-storage\tolp-domain' | sort)"
+if [[ "$actual_dag" != "$expected_dag" ]]; then
+  echo "production workspace dependency DAG is invalid:" >&2
+  printf '%s\n' "$actual_dag" >&2
+  violations=1
+fi
+
+dependency_rows="$(awk -F'\t' '$1 == "dependency" { print $2 "\t" $3 }' <<<"$metadata_rows")"
+if [[ -n $dependency_rows ]]; then
+  while IFS=$'\t' read -r package dependency; do
     case "$dependency" in
       sqlx|redis)
-        expected_role='storage'
+        expected_owner='olp-storage'
         ;;
       reqwest|aws-*|google-cloud-auth)
-        expected_role='provider'
+        expected_owner='olp-providers'
         ;;
       axum|tower|tower-http|clap)
-        expected_role='delivery'
+        expected_owner='olp'
         ;;
       *)
         continue
         ;;
     esac
-    if [[ "$role" != "$expected_role" ]]; then
-      echo "$dependency is owned by the $expected_role role, not $package ($role)" >&2
+    if [[ "$package" != "$expected_owner" ]]; then
+      echo "$dependency is owned by $expected_owner, not $package" >&2
       violations=1
     fi
   done <<< "$dependency_rows"
 fi
 
-constructor_scan_roots=()
-while IFS=$'\t' read -r tag package source_root; do
-  [[ $tag == source && ${package_roles["$package"]} != provider ]] || continue
-  constructor_scan_roots+=("$source_root")
-done <<< "$metadata_rows"
-mapfile -t constructor_scan_roots < <(printf '%s\n' "${constructor_scan_roots[@]}" | sort -u)
-if (( ${#constructor_scan_roots[@]} )); then
-  report_matches \
-    "concrete provider construction escaped provider-role packages:" \
-    '(OpenAiConnector|AnthropicConnector|GeminiConnector|VertexConnector|BedrockConnector|AzureOpenAiConnector)::(new|with_application_default|with_service_account_json)' \
-    "non-provider production workspace packages" \
-    "${constructor_scan_roots[@]}" --glob '*.rs'
-fi
+report_matches \
+  "concrete provider construction escaped olp-providers:" \
+  '(OpenAiConnector|AnthropicConnector|GeminiConnector|VertexConnector|BedrockConnector|AzureOpenAiConnector)::(new|with_application_default|with_service_account_json)' \
+  "apps/olp/src crates/domain crates/inference crates/protocols crates/storage" \
+  apps/olp/src crates/domain crates/inference crates/protocols crates/storage \
+  --glob '*.rs'
 
 if (( violations )); then
   exit 1

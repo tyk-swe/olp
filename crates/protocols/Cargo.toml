@@ -7,9 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[package.metadata.olp]
-role = "protocol"
-
 [dependencies]
 base64.workspace = true
 bytes.workspace = true

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { OidcIdentityList } from '$lib/api/operations';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '$lib/features/operations/format';
   import type { PendingIdentityAction } from './recentAuthentication';
 
   type Props = {

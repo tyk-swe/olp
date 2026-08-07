@@ -18,7 +18,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && node scripts/test-feature-boundaries.mjs && eslint .",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .",
     "test": "vitest run",
     "test:e2e": "svelte-kit sync && playwright test",
     "test:integration": "pnpm build && playwright test --config playwright.integration.config.ts",

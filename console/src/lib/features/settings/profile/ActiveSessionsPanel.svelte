@@ -3,7 +3,7 @@
   import { logout } from '$lib/api/auth';
   import { listSessionPage, revokeSession } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '$lib/features/operations/format';
 
   let cursor = $state<string | undefined>();
   let history = $state<string[]>([]);

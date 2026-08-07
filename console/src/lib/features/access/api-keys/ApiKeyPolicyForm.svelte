@@ -4,7 +4,7 @@
   import type { ApiKey } from '$lib/api/management/api-keys';
   import { listRoutes } from '$lib/api/management/routes';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import { dateTimeLocalValue } from '$lib/format';
+  import { dateTimeLocalValue } from '$lib/features/operations/format';
   import { validateApiKey } from './keyValidation';
   import type { ApiKeyPolicyInput } from './apiKeyPolicy';
 

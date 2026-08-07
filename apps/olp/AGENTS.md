@@ -6,10 +6,6 @@ their designated library crates.
 
 ## Source ownership
 
-These are the current responsibility roots, not a directory snapshot enforced
-by boundary policy. Additional delivery roots inherit the same source and
-dependency rules automatically.
-
 - `bootstrap/` — CLI/configuration, process-mode validation, dependency and
   provider construction, runtime activation, listeners, workers, supervision,
   shutdown, and the private optional assembly state.

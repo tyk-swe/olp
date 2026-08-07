@@ -34,7 +34,7 @@
     providerDetailError,
     type RunProviderAction
   } from './providerDetailCoordination';
-  import { invalidateProviderSummaries } from '../providerCache';
+  import { invalidateProviderSummaries } from './providerCache';
 
   let { providerId }: { providerId: string } = $props();
 

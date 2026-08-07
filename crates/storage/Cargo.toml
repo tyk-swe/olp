@@ -5,9 +5,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-[package.metadata.olp]
-role = "storage"
-
 [features]
 # Test-only helpers (per-test database provisioning). Never enabled by
 # production dependents; the repository gates build with --all-features.

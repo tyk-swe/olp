@@ -9,7 +9,7 @@
   import {
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
-  } from '../providerCache';
+  } from './providerCache';
   import { isEtagMismatch } from '$lib/api/http';
   import {
     activateProvider,

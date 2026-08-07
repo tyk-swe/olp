@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dateTimeLocalValue, formatCompact, formatCost, statusLabel, statusTone } from './format';
 
-describe('shared formatting', () => {
+describe('operations formatting', () => {
   it('never represents missing pricing as zero', () => {
     expect(formatCost(null)).toBe('Unpriced');
     expect(formatCost('0')).toContain('0');

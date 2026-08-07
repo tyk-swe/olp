@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { UsagePoint } from '$lib/api/operations';
-  import { formatCompact, formatCost, formatDate } from '$lib/format';
+  import { formatCompact, formatCost, formatDate } from '../format';
 
   let { points, title = 'Requests over time' }: { points: UsagePoint[]; title?: string } = $props();
   const bounds = { width: 640, height: 260, left: 52, right: 16, top: 12, bottom: 36 };

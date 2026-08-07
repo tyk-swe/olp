@@ -38,33 +38,27 @@ composition. The console remains a static client-only application.
 
 ### Dependency rules
 
-Each workspace package declares `package.metadata.olp.role` as `domain`,
-`protocol`, `provider`, `storage`, `inference`, `delivery`, or `test`.
-Dependencies point toward domain roles, and the specifically named
-`olp-domain` package must not acquire production workspace dependencies. Cargo
-path dependencies stay in this workspace.
+Dependencies point toward `crates/domain`, which must not acquire
+infrastructure dependencies. Cargo path dependencies stay in this workspace.
 Do not add console server routes or a production Node adapter. Keep
 dependencies locked and third-party Actions and container images pinned.
 
-The production role graph is:
+The production Cargo DAG is:
 
 ```text
-domain -> domain
-protocol -> {domain, protocol}
-provider -> {domain, protocol, provider}
-storage -> {domain, storage}
-inference -> {domain, protocol, provider, storage, inference}
-delivery -> every production role
-test -> every role
+olp-domain
+olp-protocols -> olp-domain
+olp-providers -> {olp-domain, olp-protocols}
+olp-storage -> olp-domain
+olp-inference -> {olp-domain, olp-protocols, olp-providers, olp-storage}
+olp -> {olp-domain, olp-protocols, olp-providers, olp-storage, olp-inference}
 ```
 
-Non-dev and build edges follow this graph; dev dependencies do not. Production
-roles cannot depend on `test`. Axum, Tower, and Clap stay in delivery roles;
-SQLx/Redis in storage roles; Reqwest, AWS, and Google authentication in
-provider roles. The current app organization uses `bootstrap`, `public_http`,
-`gateway`, `management`, `observability`, and `console`, but that directory set
-is descriptive rather than frozen. Boundary checks reject production wildcard
-re-exports. The optional `ProcessComposition` assembly
+Axum, Tower, and Clap stay in `olp`; SQLx/Redis in storage; Reqwest, AWS, and
+Google authentication in providers. The app has only `bootstrap`,
+`public_http`, `gateway`, `management`, `observability`, and `console`
+production roots. Boundary checks reject a return to flat app modules or
+production wildcard re-exports. The optional `ProcessComposition` assembly
 input stays private to bootstrap in normal builds; integration fixtures use
 the `test-util`-gated `olp::test_support` namespace.
 
