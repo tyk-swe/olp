@@ -14,6 +14,8 @@ pub enum PersistenceError {
     InvalidRuntimeSnapshot(#[from] olp_domain::SnapshotValidationError),
     #[error("runtime release serialization failed")]
     Serialize(#[from] serde_json::Error),
+    #[error("runtime outbox leadership was lost")]
+    RuntimeOutboxLeadershipLost,
     #[error("session lifetime must be positive and representable")]
     InvalidSessionTtl,
     #[error("recent-authentication metadata is invalid")]

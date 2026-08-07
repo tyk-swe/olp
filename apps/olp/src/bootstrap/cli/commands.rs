@@ -1,8 +1,12 @@
 use std::{path::Path, time::Duration};
 
 use olp_storage::{
-    PgStore, limits::DistributedLimiter, security::MasterKey, security::MasterKeyEncryptionStatus,
-    valkey::RuntimeHintPublisher, valkey::run_request_metadata_consumer,
+    PgStore,
+    limits::DistributedLimiter,
+    runtime::RuntimeOutboxLeader,
+    security::MasterKey,
+    security::MasterKeyEncryptionStatus,
+    valkey::{RuntimeHintPublisher, ValkeyAdapterError, run_request_metadata_consumer},
 };
 use serde_json::json;
 use tokio::{sync::watch, task::JoinSet};
@@ -204,6 +208,25 @@ pub(super) async fn outbox_supervisor(
     }
 }
 
+const OUTBOX_BATCH_SIZE: u16 = 100;
+const OUTBOX_IDLE_INTERVAL: Duration = Duration::from_millis(250);
+
+trait RuntimeHintPublication {
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError>;
+}
+
+impl RuntimeHintPublication for RuntimeHintPublisher {
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+        self.publish(payload).await
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum OutboxBatchOutcome {
+    Published(usize),
+    Shutdown,
+}
+
 pub(super) async fn request_metadata_consumer_supervisor(
     store: PgStore,
     valkey_url: String,
@@ -235,26 +258,177 @@ async fn outbox_loop(
     valkey_url: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
-    let mut publisher = RuntimeHintPublisher::connect(valkey_url).await?;
-    let mut interval = tokio::time::interval(Duration::from_millis(250));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    loop {
+    let mut leader = loop {
         tokio::select! {
-            _ = interval.tick() => {
-                for record in store.pending_outbox(100).await? {
-                    let subscribers = publisher.publish(&record.payload).await?;
-                    store.mark_outbox_published(record.id).await?;
-                    info!(outbox_id = %record.id, %subscribers, "published runtime hint");
-                }
-            }
+            result = store.acquire_runtime_outbox_leader() => break result?,
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return Ok(());
                 }
             }
         }
+    };
+    info!(
+        event = "runtime_outbox_leadership_acquired",
+        "acquired runtime outbox publication leadership"
+    );
+
+    let run_result = run_owned_outbox_loop(&mut leader, valkey_url, &mut shutdown).await;
+    match leader.release().await {
+        Ok(()) => info!(
+            event = "runtime_outbox_leadership_released",
+            "released runtime outbox publication leadership"
+        ),
+        Err(error) => {
+            warn!(
+                event = "runtime_outbox_leadership_release_failed",
+                %error,
+                "detached runtime outbox session will be closed after release failure"
+            );
+            if run_result.is_ok() {
+                return Err(error.into());
+            }
+        }
+    }
+    run_result
+}
+
+async fn run_owned_outbox_loop(
+    leader: &mut RuntimeOutboxLeader,
+    valkey_url: &str,
+    shutdown: &mut watch::Receiver<bool>,
+) -> AppResult<()> {
+    let mut publisher = loop {
+        tokio::select! {
+            result = RuntimeHintPublisher::connect(valkey_url) => break result?,
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return Ok(());
+                }
+            }
+        }
+    };
+    let mut wait_for_more = false;
+    loop {
+        if wait_for_more {
+            tokio::select! {
+                () = tokio::time::sleep(OUTBOX_IDLE_INTERVAL) => {}
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        return Ok(());
+                    }
+                }
+            }
+        } else if *shutdown.borrow() {
+            return Ok(());
+        }
+
+        match publish_outbox_batch(leader, &mut publisher, shutdown).await? {
+            OutboxBatchOutcome::Published(count) => {
+                // A full batch implies an existing backlog, so continue
+                // immediately. Partial batches use the idle cadence.
+                wait_for_more = count < usize::from(OUTBOX_BATCH_SIZE);
+            }
+            OutboxBatchOutcome::Shutdown => return Ok(()),
+        }
     }
 }
+
+async fn publish_outbox_batch<P: RuntimeHintPublication>(
+    leader: &mut RuntimeOutboxLeader,
+    publisher: &mut P,
+    shutdown: &mut watch::Receiver<bool>,
+) -> AppResult<OutboxBatchOutcome> {
+    let records = leader.pending(OUTBOX_BATCH_SIZE).await?;
+    let mut published = 0_usize;
+    for record in records {
+        info!(
+            event = "runtime_outbox_publication_attempt",
+            outbox_id = %record.id,
+            generation_id = %record.aggregate_id,
+            topic = %record.topic,
+            created_at = %record.created_at,
+            "attempting runtime hint publication"
+        );
+        let result = tokio::select! {
+            result = publisher.publish_runtime_hint(&record.payload) => result,
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    warn!(
+                        event = "runtime_outbox_publication_unconfirmed",
+                        outbox_id = %record.id,
+                        generation_id = %record.aggregate_id,
+                        outcome = "shutdown_during_publish",
+                        publish_may_have_succeeded = true,
+                        retry_required = true,
+                        "runtime hint publication was interrupted; leaving the outbox row pending"
+                    );
+                    return Ok(OutboxBatchOutcome::Shutdown);
+                }
+                continue;
+            }
+        };
+        let subscribers = match result {
+            Ok(subscribers) => subscribers,
+            Err(error) => {
+                warn!(
+                    event = "runtime_outbox_publication_unconfirmed",
+                    outbox_id = %record.id,
+                    generation_id = %record.aggregate_id,
+                    outcome = "valkey_error",
+                    publish_may_have_succeeded = true,
+                    retry_required = true,
+                    %error,
+                    "runtime hint publication failed or was ambiguous; leaving the outbox row pending"
+                );
+                return Err(error.into());
+            }
+        };
+        info!(
+            event = "runtime_outbox_publication_accepted",
+            outbox_id = %record.id,
+            generation_id = %record.aggregate_id,
+            durable_completion_pending = true,
+            %subscribers,
+            "Valkey accepted the runtime hint; durable outbox completion is pending"
+        );
+        match leader.mark_published(record.id).await {
+            Ok(true) => info!(
+                event = "runtime_outbox_publication_confirmed",
+                outbox_id = %record.id,
+                generation_id = %record.aggregate_id,
+                %subscribers,
+                "published runtime hint and durably completed its outbox row"
+            ),
+            Ok(false) => warn!(
+                event = "runtime_outbox_duplicate_publication",
+                outbox_id = %record.id,
+                generation_id = %record.aggregate_id,
+                duplicate_publication = true,
+                "runtime hint was published after its outbox row was already completed"
+            ),
+            Err(error) => {
+                warn!(
+                    event = "runtime_outbox_publication_unconfirmed",
+                    outbox_id = %record.id,
+                    generation_id = %record.aggregate_id,
+                    outcome = "publish_before_completion",
+                    publish_succeeded = true,
+                    retry_required = true,
+                    duplicate_publication_possible = true,
+                    %error,
+                    "runtime hint was published but durable completion failed; a new owner may publish it again"
+                );
+                return Err(error.into());
+            }
+        }
+        published = published.saturating_add(1);
+    }
+    Ok(OutboxBatchOutcome::Published(published))
+}
+
+#[cfg(test)]
+mod tests;
 
 async fn request_metadata_consumer_loop(
     store: PgStore,
