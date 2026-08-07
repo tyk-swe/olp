@@ -15,3 +15,4 @@ mod media_jobs_http_postgres;
 mod oidc_http_postgres;
 mod openapi_drift;
 mod operations_http_postgres;
+mod runtime_outbox_postgres;

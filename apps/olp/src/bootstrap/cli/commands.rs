@@ -211,7 +211,8 @@ pub(super) async fn outbox_supervisor(
 const OUTBOX_BATCH_SIZE: u16 = 100;
 const OUTBOX_IDLE_INTERVAL: Duration = Duration::from_millis(250);
 
-trait RuntimeHintPublication {
+#[allow(async_fn_in_trait)]
+pub trait RuntimeHintPublication {
     async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError>;
 }
 
@@ -222,8 +223,9 @@ impl RuntimeHintPublication for RuntimeHintPublisher {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum OutboxBatchOutcome {
+pub enum OutboxBatchOutcome {
     Published(usize),
+    Retry,
     Shutdown,
 }
 
@@ -329,6 +331,9 @@ async fn run_owned_outbox_loop(
                 // immediately. Partial batches use the idle cadence.
                 wait_for_more = count < usize::from(OUTBOX_BATCH_SIZE);
             }
+            OutboxBatchOutcome::Retry => {
+                wait_for_more = true;
+            }
             OutboxBatchOutcome::Shutdown => return Ok(()),
         }
     }
@@ -350,22 +355,32 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
             created_at = %record.created_at,
             "attempting runtime hint publication"
         );
-        let result = tokio::select! {
-            result = publisher.publish_runtime_hint(&record.payload) => result,
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
+        let result = loop {
+            tokio::select! {
+                result = publisher.publish_runtime_hint(&record.payload) => break result,
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        warn!(
+                            event = "runtime_outbox_publication_unconfirmed",
+                            outbox_id = %record.id,
+                            generation_id = %record.aggregate_id,
+                            outcome = "shutdown_during_publish",
+                            publish_may_have_succeeded = true,
+                            retry_required = true,
+                            "runtime hint publication was interrupted; leaving the outbox row pending"
+                        );
+                        return Ok(OutboxBatchOutcome::Shutdown);
+                    }
                     warn!(
                         event = "runtime_outbox_publication_unconfirmed",
                         outbox_id = %record.id,
                         generation_id = %record.aggregate_id,
-                        outcome = "shutdown_during_publish",
+                        outcome = "publish_cancelled_by_watch_change",
                         publish_may_have_succeeded = true,
                         retry_required = true,
-                        "runtime hint publication was interrupted; leaving the outbox row pending"
+                        "runtime hint publication was cancelled; retrying the same outbox row"
                     );
-                    return Ok(OutboxBatchOutcome::Shutdown);
                 }
-                continue;
             }
         };
         let subscribers = match result {
@@ -381,7 +396,7 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
                     %error,
                     "runtime hint publication failed or was ambiguous; leaving the outbox row pending"
                 );
-                return Err(error.into());
+                return Ok(OutboxBatchOutcome::Retry);
             }
         };
         info!(
@@ -427,8 +442,25 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
     Ok(OutboxBatchOutcome::Published(published))
 }
 
-#[cfg(test)]
-mod tests;
+#[cfg(feature = "test-util")]
+pub mod test_support {
+    use std::error::Error;
+
+    use olp_storage::runtime::RuntimeOutboxLeader;
+    use tokio::sync::watch;
+
+    pub use super::{OutboxBatchOutcome, RuntimeHintPublication};
+
+    pub const OUTBOX_BATCH_SIZE: u16 = super::OUTBOX_BATCH_SIZE;
+
+    pub async fn publish_outbox_batch<P: RuntimeHintPublication>(
+        leader: &mut RuntimeOutboxLeader,
+        publisher: &mut P,
+        shutdown: &mut watch::Receiver<bool>,
+    ) -> Result<OutboxBatchOutcome, Box<dyn Error + Send + Sync>> {
+        super::publish_outbox_batch(leader, publisher, shutdown).await
+    }
+}
 
 async fn request_metadata_consumer_loop(
     store: PgStore,

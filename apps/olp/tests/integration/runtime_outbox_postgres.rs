@@ -5,11 +5,12 @@ use std::{
 };
 
 use chrono::{TimeDelta, Utc};
+use olp::test_support::{
+    OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch,
+};
 use olp_storage::{PgStore, test_support::TestDb, valkey::ValkeyAdapterError};
 use tokio::sync::{Barrier, oneshot, watch};
 use uuid::Uuid;
-
-use super::{OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch};
 
 #[derive(Clone, Default)]
 struct RecordingPublisher {
@@ -61,6 +62,43 @@ impl RuntimeHintPublication for BlockingPublisher {
             let _ = started.send(());
         }
         std::future::pending().await
+    }
+}
+
+struct RetryAfterWatchChangePublisher {
+    state: Arc<Mutex<RetryAfterWatchChangeState>>,
+    first_started: Option<oneshot::Sender<()>>,
+}
+
+#[derive(Default)]
+struct RetryAfterWatchChangeState {
+    attempts: Vec<Vec<u8>>,
+}
+
+impl RetryAfterWatchChangePublisher {
+    fn new(first_started: oneshot::Sender<()>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(RetryAfterWatchChangeState::default())),
+            first_started: Some(first_started),
+        }
+    }
+}
+
+impl RuntimeHintPublication for RetryAfterWatchChangePublisher {
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+        let first_attempt = {
+            let mut state = self.state.lock().unwrap();
+            state.attempts.push(payload.to_vec());
+            state.attempts.len() == 1
+        };
+        if first_attempt {
+            if let Some(started) = self.first_started.take() {
+                let _ = started.send(());
+            }
+            std::future::pending().await
+        } else {
+            Ok(1)
+        }
     }
 }
 
@@ -136,6 +174,7 @@ async fn three_workers_publish_each_outbox_row_once_during_ordinary_operation() 
     }
     outcomes.sort_by_key(|outcome| match outcome {
         OutboxBatchOutcome::Published(count) => *count,
+        OutboxBatchOutcome::Retry => usize::MAX - 1,
         OutboxBatchOutcome::Shutdown => usize::MAX,
     });
 
@@ -272,21 +311,21 @@ async fn runtime_outbox_ambiguous_valkey_error_keeps_the_row_pending_for_retry()
     let (_shutdown_sender, mut shutdown) = watch::channel(false);
     let mut first_owner = store.acquire_runtime_outbox_leader().await.unwrap();
 
-    let error = publish_outbox_batch(&mut first_owner, &mut publisher, &mut shutdown)
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("invalid stream state"));
-    assert_eq!(unpublished_count(&store).await, 1);
-    first_owner.release().await.unwrap();
-
-    let mut takeover = store.acquire_runtime_outbox_leader().await.unwrap();
     assert_eq!(
-        publish_outbox_batch(&mut takeover, &mut publisher, &mut shutdown)
+        publish_outbox_batch(&mut first_owner, &mut publisher, &mut shutdown)
+            .await
+            .unwrap(),
+        OutboxBatchOutcome::Retry
+    );
+    assert_eq!(unpublished_count(&store).await, 1);
+
+    assert_eq!(
+        publish_outbox_batch(&mut first_owner, &mut publisher, &mut shutdown)
             .await
             .unwrap(),
         OutboxBatchOutcome::Published(1)
     );
-    takeover.release().await.unwrap();
+    first_owner.release().await.unwrap();
     assert_eq!(
         publisher.attempts(),
         vec![rows[0].payload.clone(), rows[0].payload.clone()]
@@ -390,4 +429,39 @@ async fn runtime_outbox_shutdown_during_publish_releases_ownership_without_marki
     .expect("clean shutdown must release leadership")
     .unwrap();
     takeover.release().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make db-test"]
+async fn runtime_outbox_non_shutdown_watch_change_retries_the_same_row() {
+    let db = TestDb::create_migrated("outbox_watch_change_retry").await;
+    let store = db.store(4).await;
+    let rows = insert_outbox_rows(&store, 2).await;
+    let (shutdown_sender, mut shutdown) = watch::channel(false);
+    let (started, started_receiver) = oneshot::channel();
+    let mut leader = store.acquire_runtime_outbox_leader().await.unwrap();
+    let publisher = RetryAfterWatchChangePublisher::new(started);
+    let publisher_state = Arc::clone(&publisher.state);
+    let publication = tokio::spawn(async move {
+        let mut publisher = publisher;
+        let outcome = publish_outbox_batch(&mut leader, &mut publisher, &mut shutdown)
+            .await
+            .unwrap();
+        leader.release().await.unwrap();
+        outcome
+    });
+    started_receiver.await.unwrap();
+
+    shutdown_sender.send(false).unwrap();
+
+    assert_eq!(publication.await.unwrap(), OutboxBatchOutcome::Published(2));
+    assert_eq!(
+        publisher_state.lock().unwrap().attempts.clone(),
+        vec![
+            rows[0].payload.clone(),
+            rows[0].payload.clone(),
+            rows[1].payload.clone(),
+        ]
+    );
+    assert_eq!(unpublished_count(&store).await, 0);
 }

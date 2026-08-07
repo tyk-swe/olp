@@ -1,4 +1,4 @@
-mod commands;
+pub(crate) mod commands;
 mod config;
 mod health_probe;
 mod lifecycle;

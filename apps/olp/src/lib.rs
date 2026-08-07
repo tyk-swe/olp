@@ -57,6 +57,9 @@ pub(crate) use public_http::request_admission::{
 #[cfg(feature = "test-util")]
 #[doc(hidden)]
 pub mod test_support {
+    pub use crate::bootstrap::cli::commands::test_support::{
+        OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch,
+    };
     pub use crate::bootstrap::media_spool::create_bounded_media_spool_for_test;
     pub use crate::bootstrap::mode_dependencies::{
         GatewayState, ManagementState, ModeDependencies, ModeDependencyError, ObservabilityState,
