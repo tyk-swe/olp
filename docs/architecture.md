@@ -117,6 +117,15 @@ Activation stores a byte-stable compiled release, its SHA-256 digest, and an
 outbox row in one transaction. The worker publishes only a generation hint
 to Valkey; gateways consume hints, poll PostgreSQL every five seconds,
 verify the digest, build indexes, and atomically replace the full snapshot.
+Worker replicas serialize hint delivery with a PostgreSQL session advisory
+leader. The owning session performs both ordered, bounded outbox reads and
+durable completion updates; session loss releases leadership automatically
+and prevents the stale connection from completing work. A crash after Valkey
+accepts `PUBLISH` but before `published_at` commits can produce an additional
+hint on retry, which is harmless because every hint only triggers an
+authoritative PostgreSQL read. The leader connection is always closed rather
+than returned locked to the pool. Each worker replica therefore uses one
+dedicated PostgreSQL session, including while it waits as a standby.
 Each request holds one `Arc` with its configuration, key indexes, and
 provider transports, so a stream cannot cross a generation or credential
 version.

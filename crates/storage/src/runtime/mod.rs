@@ -13,6 +13,7 @@ pub use compiler::RuntimeCompileError;
 pub(crate) use compiler::{
     compile_and_publish_runtime_in_transaction, lock_runtime_publication, prepare_runtime_mutation,
 };
+pub use outbox::RuntimeOutboxLeader;
 
 #[derive(Clone)]
 pub struct PublishedRuntimeRelease {

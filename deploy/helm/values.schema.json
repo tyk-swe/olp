@@ -46,8 +46,7 @@
         "replicas": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 1,
-          "description": "The current outbox reader is single-consumer."
+          "description": "Worker replicas use PostgreSQL leader election; extra replicas run as standby failover workers."
         },
         "resources": { "type": "object" }
       }

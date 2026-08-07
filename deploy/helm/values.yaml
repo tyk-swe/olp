@@ -109,8 +109,8 @@ ingress:
 
 worker:
   enabled: true
-  # The current outbox reader is single-consumer. Keep this at one until
-  # row claiming or leader election is implemented.
+  # Runtime outbox publication uses PostgreSQL leader election. Extra replicas
+  # are safe standby workers and take over when the active worker exits.
   replicas: 1
   resources:
     requests: { cpu: 100m, memory: 256Mi }
