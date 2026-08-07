@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 helper="$script_dir/lib/repository-validation.sh"
 
-for required_executable in bash rg grep mktemp mkdir chmod cargo cp; do
+for required_executable in bash rg grep mktemp mkdir chmod cargo cp cat jq sed; do
   command -v "$required_executable" >/dev/null || {
     echo "test-repository-validation.sh: $required_executable is required" >&2
     exit 1
@@ -12,7 +12,7 @@ for required_executable in bash rg grep mktemp mkdir chmod cargo cp; do
 done
 
 real_bash=$(command -v bash)
-real_cargo=$(command -v cargo)
+real_cat=$(command -v cat)
 real_grep=$(command -v grep)
 original_path=$PATH
 test_root=$(mktemp -d)
@@ -54,6 +54,104 @@ write_fake_rg() {
     printf '%s\n' "$body"
   } > "$directory/rg"
   chmod +x "$directory/rg"
+}
+
+write_boundary_fixture() {
+  local workspace=$1
+
+  mkdir -p "$workspace/scripts/lib" "$workspace/console/src/routes"
+  cp "$script_dir/check-boundaries.sh" "$workspace/scripts/check-boundaries.sh"
+  cp "$helper" "$workspace/scripts/lib/repository-validation.sh"
+  printf '%s\n' '[workspace]' 'members = []' 'resolver = "3"' > "$workspace/Cargo.toml"
+  printf 'version = 4\n' > "$workspace/Cargo.lock"
+  printf '{}\n' > "$workspace/console/package.json"
+  printf '@sveltejs/adapter-static\n' > "$workspace/console/svelte.config.js"
+  printf 'export const ssr = false;\n' > "$workspace/console/src/routes/+layout.ts"
+}
+
+write_fake_cargo_metadata() {
+  local fake_bin=$1
+  local metadata_file=$2
+
+  mkdir -p "$fake_bin"
+  {
+    printf '#!%s\n' "$real_bash"
+    printf 'exec %q %q\n' "$real_cat" "$metadata_file"
+  } > "$fake_bin/cargo"
+  chmod +x "$fake_bin/cargo"
+}
+
+write_two_role_fixture() {
+  local workspace=$1
+  local metadata_file=$2
+  local source_role=$3
+  local dependency_role=$4
+
+  mkdir -p "$workspace/packages/source/src" "$workspace/packages/dependency/src"
+  printf '%s\n' \
+    '[workspace]' \
+    'members = ["packages/source", "packages/dependency"]' \
+    'resolver = "3"' > "$workspace/Cargo.toml"
+  printf '%s\n' \
+    '[package]' \
+    'name = "fixture-source"' \
+    'version = "0.0.0"' \
+    'edition = "2024"' \
+    '[package.metadata.olp]' \
+    "role = \"$source_role\"" \
+    '[dependencies]' \
+    'fixture-dependency = { path = "../dependency" }' > \
+    "$workspace/packages/source/Cargo.toml"
+  printf '%s\n' \
+    '[package]' \
+    'name = "fixture-dependency"' \
+    'version = "0.0.0"' \
+    'edition = "2024"' \
+    '[package.metadata.olp]' \
+    "role = \"$dependency_role\"" > \
+    "$workspace/packages/dependency/Cargo.toml"
+  : > "$workspace/packages/source/src/lib.rs"
+  : > "$workspace/packages/dependency/src/lib.rs"
+
+  jq -n \
+    --arg workspace "$workspace" \
+    --arg source_role "$source_role" \
+    --arg dependency_role "$dependency_role" '
+      {
+        packages: [
+          {
+            name: "fixture-source",
+            manifest_path: ($workspace + "/packages/source/Cargo.toml"),
+            metadata: {olp: {role: $source_role}},
+            dependencies: [
+              {
+                name: "fixture-dependency",
+                path: ($workspace + "/packages/dependency"),
+                kind: null
+              }
+            ],
+            targets: [
+              {
+                kind: ["lib"],
+                src_path: ($workspace + "/packages/source/src/lib.rs")
+              }
+            ]
+          },
+          {
+            name: "fixture-dependency",
+            manifest_path: ($workspace + "/packages/dependency/Cargo.toml"),
+            metadata: {olp: {role: $dependency_role}},
+            dependencies: [],
+            targets: [
+              {
+                kind: ["lib"],
+                src_path: ($workspace + "/packages/dependency/src/lib.rs")
+              }
+            ]
+          }
+        ]
+      }
+    ' > "$metadata_file"
 }
 
 test_matching_scan() {
@@ -230,65 +328,157 @@ test_supply_chain_scan_error_has_no_success() {
   fi
 }
 
+test_semantic_role_edge_allows_new_packages() {
+  local fixture_root="$test_root/semantic-role-allowed"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local output="$fixture_root/output.log"
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" provider provider
+  write_fake_cargo_metadata "$fake_bin" "$metadata_file"
+
+  PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1 || return
+  assert_contains "$output" "architecture boundaries are clean"
+}
+
+test_forbidden_role_edge_is_rejected() {
+  local fixture_root="$test_root/semantic-role-rejected"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local output="$fixture_root/output.log"
+  local status
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" domain provider
+  write_fake_cargo_metadata "$fake_bin" "$metadata_file"
+
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" \
+    "fixture-source (domain) must not depend on fixture-dependency (provider)"
+}
+
+test_missing_architecture_role_is_rejected() {
+  local fixture_root="$test_root/missing-architecture-role"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local missing_metadata_file="$fixture_root/missing-metadata.json"
+  local output="$fixture_root/output.log"
+  local status
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" protocol domain
+  jq 'del(.packages[0].metadata.olp.role)' "$metadata_file" > "$missing_metadata_file"
+  write_fake_cargo_metadata "$fake_bin" "$missing_metadata_file"
+
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" \
+    "fixture-source must declare a valid architecture role"
+}
+
+test_infrastructure_dependency_wrong_role_is_rejected() {
+  local fixture_root="$test_root/infrastructure-role-rejected"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local ownership_metadata_file="$fixture_root/ownership-metadata.json"
+  local output="$fixture_root/output.log"
+  local status
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" domain domain
+  jq '.packages[0].dependencies += [{name: "reqwest", path: null, kind: null}]' \
+    "$metadata_file" > "$ownership_metadata_file"
+  write_fake_cargo_metadata "$fake_bin" "$ownership_metadata_file"
+
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" \
+    "reqwest is owned by the provider role, not fixture-source (domain)"
+}
+
+test_same_name_non_workspace_path_is_rejected() {
+  local fixture_root="$test_root/same-name-unclassified-path"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local spoofed_metadata_file="$fixture_root/spoofed-metadata.json"
+  local output="$fixture_root/output.log"
+  local status
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" provider domain
+  mkdir -p "$workspace/tools/spoof/src"
+  sed -i 's#path = "../dependency"#path = "../../tools/spoof"#' \
+    "$workspace/packages/source/Cargo.toml"
+  printf '%s\n' \
+    '[package]' \
+    'name = "fixture-dependency"' \
+    'version = "0.0.0"' \
+    'edition = "2024"' \
+    '[workspace]' > "$workspace/tools/spoof/Cargo.toml"
+  : > "$workspace/tools/spoof/src/lib.rs"
+  jq --arg path "$workspace/tools/spoof" \
+    '.packages[0].dependencies[0].path = $path' \
+    "$metadata_file" > "$spoofed_metadata_file"
+  write_fake_cargo_metadata "$fake_bin" "$spoofed_metadata_file"
+
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" \
+    'fixture-source (provider) has an unclassified path dependency on fixture-dependency'
+}
+
 test_external_cargo_patch_path_is_rejected() {
   local fixture_root="$test_root/external-cargo-patch"
   local workspace="$fixture_root/workspace"
   local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
   local output="$fixture_root/output.log"
   local status
 
-  mkdir -p \
-    "$workspace/scripts/lib" \
-    "$workspace/apps/olp/src/bootstrap" "$workspace/apps/olp/src/console" \
-    "$workspace/apps/olp/src/gateway" "$workspace/apps/olp/src/management" \
-    "$workspace/apps/olp/src/observability" "$workspace/apps/olp/src/public_http" \
-    "$workspace/apps/olp/src/tests" \
-    "$workspace/crates/domain" "$workspace/crates/protocols" \
-    "$workspace/crates/providers" "$workspace/crates/inference" \
-    "$workspace/crates/storage" \
-    "$workspace/console/src/routes" \
-    "$workspace/console/src/lib/features/gateway/models" \
-    "$workspace/console/src/lib/features/gateway/providers" \
-    "$workspace/console/src/lib/features/gateway/routes" \
-    "$workspace/console/src/lib/features/access/api-keys" \
-    "$workspace/console/src/lib/features/access/invitations" \
-    "$workspace/console/src/lib/features/access/oidc" \
-    "$workspace/console/src/lib/features/access/sessions" \
-    "$workspace/console/src/lib/features/access/users" \
-    "$workspace/console/src/lib/features/operations/audit" \
-    "$workspace/console/src/lib/features/operations/health" \
-    "$workspace/console/src/lib/features/operations/media-jobs" \
-    "$workspace/console/src/lib/features/operations/requests" \
-    "$workspace/console/src/lib/features/operations/usage" \
-    "$workspace/console/src/lib/features/settings/installation" \
-    "$workspace/console/src/lib/features/settings/profile" \
-    "$fixture_root/external" "$fake_bin"
-  cp "$script_dir/check-boundaries.sh" "$workspace/scripts/check-boundaries.sh"
-  cp "$helper" "$workspace/scripts/lib/repository-validation.sh"
+  write_boundary_fixture "$workspace"
+  mkdir -p "$fixture_root/external"
   printf '%s\n' \
     '[workspace]' \
     'members = []' \
     '[patch.crates-io]' \
-    'serde = { path = "../external" }' > "$workspace/Cargo.toml"
-  printf 'version = 4\n' > "$workspace/Cargo.lock"
-  printf '{}\n' > "$workspace/console/package.json"
-  printf '@sveltejs/adapter-static\n' > "$workspace/console/svelte.config.js"
-  printf 'export const ssr = false;\n' > "$workspace/console/src/routes/+layout.ts"
-  printf '' > "$workspace/apps/olp/src/lib.rs"
-  printf '' > "$workspace/apps/olp/src/main.rs"
+    "serde = { path = '../external' }" > "$workspace/Cargo.toml"
   printf '%s\n' \
     '[package]' \
     'name = "serde"' \
     'version = "0.0.0"' > "$fixture_root/external/Cargo.toml"
-  {
-    printf '#!%s\n' "$real_bash"
-    printf 'exec %q metadata --locked --no-deps --format-version 1 --manifest-path %q\n' \
-      "$real_cargo" "$script_dir/../Cargo.toml"
-  } > "$fake_bin/cargo"
-  chmod +x "$fake_bin/cargo"
+  printf '{"packages": []}\n' > "$metadata_file"
+  write_fake_cargo_metadata "$fake_bin" "$metadata_file"
 
   if PATH="$fake_bin:$original_path" \
-    "$workspace/scripts/check-boundaries.sh" >"$output" 2>&1; then
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
     return 1
   else
     status=$?
@@ -324,6 +514,16 @@ run_test "match-only wrapper propagates producer failure" \
   test_match_only_wrapper_propagates_failure
 run_test "supply-chain success is suppressed after scan error" \
   test_supply_chain_scan_error_has_no_success
+run_test "new packages are accepted through semantic role edges" \
+  test_semantic_role_edge_allows_new_packages
+run_test "forbidden semantic role edges are rejected" \
+  test_forbidden_role_edge_is_rejected
+run_test "missing architecture roles are rejected" \
+  test_missing_architecture_role_is_rejected
+run_test "infrastructure dependencies follow role ownership" \
+  test_infrastructure_dependency_wrong_role_is_rejected
+run_test "same-name non-workspace paths remain unclassified" \
+  test_same_name_non_workspace_path_is_rejected
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
 run_test "actual repository invariant checks pass" test_actual_repository_checks

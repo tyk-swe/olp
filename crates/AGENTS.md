@@ -17,10 +17,13 @@
   terminal accounting, telemetry, and the shared `InferenceService`. It must
   not depend on Axum/Tower/Clap, SQLx/Redis, or concrete provider constructors.
 
-Dependencies are one-way: domain is the base; protocols depends on domain;
-providers on domain/protocols; storage on domain; inference on all four; the
-delivery app composes them. `scripts/check-boundaries.sh` enforces this graph
-and infrastructure dependency ownership.
+Dependencies are one-way by architecture role: domain is the base;
+protocol and provider code point inward; storage stays separate from provider
+transport; inference composes the production library roles; delivery composes
+them at the process boundary. Same-role dependencies are allowed so a
+responsibility can be decomposed without changing policy. Every workspace
+package declares its role under `[package.metadata.olp]`, and
+`scripts/check-boundaries.sh` enforces role edges and infrastructure ownership.
 
 Static PostgreSQL uses SQLx checked macros and committed `/.sqlx` metadata.
 Dynamic filters decode through typed subsystem records; string-key `Row::get`

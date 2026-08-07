@@ -26,6 +26,10 @@ boundary check rejects them.
 - `src/lib/features/operations/{requests,usage,media-jobs,audit,health}` and
   `settings/{installation,profile}` — resource-oriented operations/settings
   slices. Profile security and API-key secret workflows use focused components.
+- Top-level directories below `src/lib/features/` are independent feature
+  slices. Their names are not enumerated, but ESLint rejects relative or
+  `$lib/features/…` imports into a different slice. Put genuinely shared code
+  in a neutral `$lib` module; route files may compose multiple slices.
 - Route files under `src/routes/(console)/` remain thin shims; SvelteKit still
   requires the `+page.svelte` files.
 - `src/lib/api/` — generated `schema.d.ts` + typed fetch wrappers.

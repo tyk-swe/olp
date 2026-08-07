@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[package.metadata.olp]
+role = "inference"
+
 [dependencies]
 arc-swap.workspace = true
 bytes.workspace = true

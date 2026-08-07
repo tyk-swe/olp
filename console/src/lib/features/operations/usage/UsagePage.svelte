@@ -9,7 +9,7 @@
     type UsageFilters
   } from '$lib/api/operations';
   import UsageChart from './UsageChart.svelte';
-  import { dateTimeLocalValue, formatCompact, formatCost } from '../format';
+  import { dateTimeLocalValue, formatCompact, formatCost } from '$lib/format';
 
   type Dimension = 'route' | 'provider' | 'model' | 'api_key' | 'operation';
 

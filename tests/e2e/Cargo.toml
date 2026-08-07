@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.olp]
+role = "test-harness"
+
 # Test-only edges keep the harness out of the production dependency DAG.
 [dev-dependencies]
 axum.workspace = true

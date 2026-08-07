@@ -38,29 +38,40 @@ composition. The console remains a static client-only application.
 
 ### Dependency rules
 
-Dependencies point toward `crates/domain`, which must not acquire
+Dependencies point toward the domain role, which must not acquire
 infrastructure dependencies. Cargo path dependencies stay in this workspace.
 Do not add console server routes or a production Node adapter. Keep
 dependencies locked and third-party Actions and container images pinned.
 
-The production Cargo DAG is:
+Each main-workspace package declares one architecture role under
+`[package.metadata.olp]`. The role policy is:
 
 ```text
-olp-domain
-olp-protocols -> olp-domain
-olp-providers -> {olp-domain, olp-protocols}
-olp-storage -> olp-domain
-olp-inference -> {olp-domain, olp-protocols, olp-providers, olp-storage}
-olp -> {olp-domain, olp-protocols, olp-providers, olp-storage, olp-inference}
+domain       -> {domain}
+protocol     -> {domain, protocol}
+provider     -> {domain, protocol, provider}
+storage      -> {domain, storage}
+inference    -> {domain, protocol, provider, storage, inference}
+delivery     -> {domain, protocol, provider, storage, inference, delivery}
+test-harness -> any declared role
 ```
 
-Axum, Tower, and Clap stay in `olp`; SQLx/Redis in storage; Reqwest, AWS, and
-Google authentication in providers. The app has only `bootstrap`,
-`public_http`, `gateway`, `management`, `observability`, and `console`
-production roots. Boundary checks reject a return to flat app modules or
-production wildcard re-exports. The optional `ProcessComposition` assembly
-input stays private to bootstrap in normal builds; integration fixtures use
-the `test-util`-gated `olp::test_support` namespace.
+Same-role edges allow a responsibility to be split into focused crates without
+changing architecture policy; Cargo still rejects cycles. No production role
+may depend on a test harness. Workspace path dependencies must target a
+classified workspace package and may not escape the repository.
+
+Axum, Tower, and Clap stay in delivery-role packages; SQLx/Redis in storage;
+Reqwest, AWS, and Google authentication in providers. The current delivery app
+groups `bootstrap`, `public_http`, `gateway`, `management`, `observability`, and
+`console` under `apps/olp/src`. Boundary checks reject forbidden role edges,
+infrastructure ownership leaks, and production wildcard re-exports without
+freezing those directory or package names. Console feature directories are
+also open-ended, while ESLint prevents one top-level feature from importing
+another; shared code belongs in a neutral `$lib` module. The optional
+`ProcessComposition`
+assembly input stays private to bootstrap in normal builds; integration
+fixtures use the `test-util`-gated `olp::test_support` namespace.
 
 ### Sources of truth
 

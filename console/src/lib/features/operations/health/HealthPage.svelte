@@ -9,7 +9,7 @@
     listRequestMetadataGatewayEpochs,
     usageCompleteness
   } from '$lib/api/operations';
-  import { formatDate } from '../format';
+  import { formatDate } from '$lib/format';
 
   let generationCursor = $state<string | undefined>();
   let generationHistory = $state<Array<string | undefined>>([]);

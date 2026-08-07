@@ -48,18 +48,24 @@ crates/inference transport-neutral runtime pinning, selection, execution, failov
 tests/conformance cross-protocol conformance harness over tests/fixtures/
 ```
 
-Dependencies point toward `crates/domain`:
-`olp → {domain, protocols, providers, storage, inference}`,
-`inference → {domain, protocols, providers, storage}`, `storage → domain`,
-`providers → {domain, protocols}`, `protocols → domain`.
-`scripts/check-boundaries.sh` enforces the DAG, the exact package set, the
-responsibility-oriented app/console roots, and
-dependency ownership (`sqlx`/`redis` only in storage; `reqwest`/`aws-*`/
-`google-cloud-auth` only in providers; `axum`/`tower*`/`clap` only in apps/olp).
+Every main-workspace package declares an architecture role in
+`[package.metadata.olp]`. `scripts/check-boundaries.sh` enforces permitted
+role-to-role edges rather than a package-name or directory snapshot: domain is
+the base; protocol and provider code point inward; storage remains separate
+from provider transport; inference may compose the production library roles;
+delivery may compose any production role; test harnesses may consume
+production crates but never enter their dependency graph. Multiple packages
+may share a role, so a responsibility can be split without editing the
+checker. Infrastructure ownership is role-based (`sqlx`/`redis` in storage;
+`reqwest`/`aws-*`/`google-cloud-auth` in providers;
+`axum`/`tower*`/`clap` in delivery). Console feature names are likewise
+open-ended; ESLint rejects imports across top-level feature boundaries instead
+of snapshotting the feature directory list.
 
-The app source has six production roots: `bootstrap/`, `public_http/`,
+The current app source groups delivery into `bootstrap/`, `public_http/`,
 `gateway/`, `management/`, `observability/`, and `console/`. Transport-neutral
-inference behavior belongs in `crates/inference`, never in an Axum handler.
+inference behavior belongs in an inference-role crate, never in an Axum
+handler.
 
 ## Where does X live
 
@@ -88,9 +94,10 @@ inference behavior belongs in `crates/inference`, never in an Axum handler.
 
 ## Hazards
 
-- Never move `apps/`, `crates/*`, or `console/src/routes`, and never add or
-  remove a workspace package, without co-updating `scripts/check-boundaries.sh`
-  and verifying the workspace COPY scope in `deploy/Dockerfile`.
+- When adding or moving a main-workspace package, declare its
+  `[package.metadata.olp]` role and verify the workspace COPY scope in
+  `deploy/Dockerfile`. The boundary checker discovers members from Cargo
+  metadata and should not need a topology update.
 - Two dockerignore files exist; BuildKit uses `deploy/Dockerfile.dockerignore`
   for the production image. Keep the root `.dockerignore` a synchronized copy.
 - Migrations are forward-only; `release-metadata.env` pins the last released

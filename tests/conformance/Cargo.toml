@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.olp]
+role = "test-harness"
+
 [dependencies]
 olp-domain.workspace = true
 olp-protocols.workspace = true

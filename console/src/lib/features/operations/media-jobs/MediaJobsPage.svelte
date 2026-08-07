@@ -7,7 +7,7 @@
     listMediaJobs
   } from '$lib/api/operations';
   import { popCursor, pushCursor } from '$lib/api/pagination';
-  import { formatDate } from '../format';
+  import { formatDate } from '$lib/format';
   import type { MediaJobListState } from './mediaJobListState';
 
   let {

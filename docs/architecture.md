@@ -30,9 +30,15 @@ olp-domain
 `olp-conformance` is a test-only workspace package that exercises
 `olp-domain`, `olp-protocols`, and `olp-providers` against the conformance
 corpus, outside the production dependency graph. `olp-e2e` is likewise a
-test-only harness. The console is a
-client-only static application with no server routes or production Node
-adapter.
+test-only harness. Each workspace member declares its semantic role under
+`[package.metadata.olp]`; the boundary checker validates allowed role edges and
+infrastructure ownership rather than freezing this concrete package list.
+Multiple packages may therefore share a role while production packages remain
+unable to depend on test harnesses. The console is a client-only static
+application with no server routes or production Node adapter. Its top-level
+feature slices are discovered by layout rather than enumerated; an ESLint rule
+forbids imports from one feature slice into another while permitting neutral
+`$lib` modules and route-level composition.
 
 The delivery crate exposes six responsibility roots:
 

@@ -10,7 +10,7 @@
     type PriceDraft,
     type Setting
   } from '$lib/api/operations';
-  import { dateTimeLocalValue, formatDate } from '$lib/features/operations/format';
+  import { dateTimeLocalValue, formatDate } from '$lib/format';
   import {
     listProviderKinds,
     type ProviderKind
