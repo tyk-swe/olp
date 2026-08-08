@@ -19,6 +19,8 @@ use crate::{
     TransportRegistry, bootstrap::connectors::register_mounted_connectors, create_media_spool,
 };
 
+const DATABASE_IDENTITY_QUERY_PARAMS: &[&str] = &["dbname", "host", "hostaddr", "port"];
+
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
     config::{
@@ -100,7 +102,19 @@ pub(super) fn legacy_request_metadata_stream_claim_token(database_url: &str) -> 
     identity_url.set_password(None).map_err(|()| {
         std::io::Error::other("database URL cannot be normalized for legacy stream claim")
     })?;
+    let mut identity_query_params = identity_url
+        .query_pairs()
+        .filter(|(key, _)| DATABASE_IDENTITY_QUERY_PARAMS.contains(&key.as_ref()))
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    identity_query_params.sort_unstable();
     identity_url.set_query(None);
+    if !identity_query_params.is_empty() {
+        let mut query_pairs = identity_url.query_pairs_mut();
+        for (key, value) in identity_query_params {
+            query_pairs.append_pair(&key, &value);
+        }
+    }
     identity_url.set_fragment(None);
     let digest = Sha256::digest(identity_url.as_str().as_bytes());
     Ok(format!(
