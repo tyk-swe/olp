@@ -229,6 +229,37 @@ async fn runtime_outbox_owner_death_before_reading_a_batch_allows_takeover() {
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL via make db-test"]
+async fn runtime_outbox_owner_panic_drops_its_session_and_allows_takeover() {
+    let db = TestDb::create_migrated("outbox_owner_panic").await;
+    let store = db.store(1).await;
+    let owner_store = store.clone();
+    let (acquired_sender, acquired_receiver) = oneshot::channel();
+    let owner: tokio::task::JoinHandle<()> = tokio::spawn(async move {
+        let mut leader = owner_store.acquire_runtime_outbox_leader().await.unwrap();
+        acquired_sender
+            .send(leader.backend_pid().await.unwrap())
+            .unwrap();
+        panic!("injected panic while holding runtime outbox leadership");
+    });
+    let owner_backend_pid = acquired_receiver.await.unwrap();
+
+    let panic = owner.await.expect_err("the owning task must panic");
+    assert!(panic.is_panic());
+
+    let mut takeover = tokio::time::timeout(
+        Duration::from_secs(2),
+        store.acquire_runtime_outbox_leader(),
+    )
+    .await
+    .expect("dropping the detached session during panic must release leadership")
+    .unwrap();
+    assert_ne!(takeover.backend_pid().await.unwrap(), owner_backend_pid);
+    takeover.release().await.unwrap();
+    store.ping().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make db-test"]
 async fn runtime_outbox_owner_death_after_read_before_publish_leaves_the_row_available() {
     let db = TestDb::create_migrated("outbox_death_before_publish").await;
     let store = db.store(4).await;
