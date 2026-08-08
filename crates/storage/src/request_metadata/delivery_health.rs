@@ -102,6 +102,42 @@ impl PgStore {
         lag_events: u64,
         oldest_pending_at: Option<DateTime<Utc>>,
     ) -> Result<RequestMetadataConsumerHealth, PersistenceError> {
+        self.report_request_metadata_consumer_health_sampled_at_inner(
+            pending_events,
+            lag_events,
+            oldest_pending_at,
+            Utc::now(),
+        )
+        .await
+    }
+
+    #[cfg(feature = "test-util")]
+    /// Records a request-metadata consumer health sample captured at a caller
+    /// supplied time. Production callers use
+    /// [`PgStore::report_request_metadata_consumer_health`].
+    pub async fn report_request_metadata_consumer_health_sampled_at(
+        &self,
+        pending_events: u64,
+        lag_events: u64,
+        oldest_pending_at: Option<DateTime<Utc>>,
+        checked_at: DateTime<Utc>,
+    ) -> Result<RequestMetadataConsumerHealth, PersistenceError> {
+        self.report_request_metadata_consumer_health_sampled_at_inner(
+            pending_events,
+            lag_events,
+            oldest_pending_at,
+            checked_at,
+        )
+        .await
+    }
+
+    async fn report_request_metadata_consumer_health_sampled_at_inner(
+        &self,
+        pending_events: u64,
+        lag_events: u64,
+        oldest_pending_at: Option<DateTime<Utc>>,
+        checked_at: DateTime<Utc>,
+    ) -> Result<RequestMetadataConsumerHealth, PersistenceError> {
         if (pending_events == 0) != oldest_pending_at.is_none() {
             return Err(PersistenceError::InvalidRequestMetadataGap);
         }
@@ -109,7 +145,6 @@ impl PgStore {
             .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
         let lag_events =
             i64::try_from(lag_events).map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
-        let checked_at = Utc::now();
         if oldest_pending_at
             .is_some_and(|oldest| oldest > checked_at + chrono::Duration::minutes(5))
         {
@@ -119,7 +154,7 @@ impl PgStore {
         let row = sqlx::query!(
             "INSERT INTO request_metadata_consumer_health \
              (singleton, pending_events, lag_events, oldest_pending_at, checked_at) \
-             VALUES (true, $1, $2, $3, clock_timestamp()) \
+             VALUES (true, $1, $2, $3, $4) \
              ON CONFLICT (singleton) DO UPDATE SET \
                pending_events = EXCLUDED.pending_events, \
                lag_events = EXCLUDED.lag_events, \
@@ -130,6 +165,7 @@ impl PgStore {
             pending_events,
             lag_events,
             oldest_pending_at,
+            checked_at,
         )
         .fetch_optional(&mut *transaction)
         .await?;
