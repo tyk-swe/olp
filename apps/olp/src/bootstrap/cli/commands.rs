@@ -56,7 +56,13 @@ pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
     let store = connect_store(&args.database).await?;
     let (sender, receiver) = watch::channel(false);
     let mut workers = JoinSet::new();
-    spawn_worker_supervisors(&mut workers, store, args.valkey_url, receiver);
+    spawn_worker_supervisors(
+        &mut workers,
+        store,
+        args.valkey_url,
+        request_metadata_consumer_name(),
+        receiver,
+    );
     let early_exit = tokio::select! {
         result = workers.join_next() => Some(result),
         () = shutdown_signal() => None,
@@ -112,6 +118,7 @@ fn spawn_worker_supervisors(
     workers: &mut JoinSet<()>,
     store: PgStore,
     valkey_url: String,
+    request_metadata_consumer: String,
     shutdown: watch::Receiver<bool>,
 ) {
     workers.spawn(outbox_supervisor(
@@ -122,6 +129,7 @@ fn spawn_worker_supervisors(
     workers.spawn(request_metadata_consumer_supervisor(
         store.clone(),
         valkey_url,
+        request_metadata_consumer,
         shutdown.clone(),
     ));
     workers.spawn(maintenance_supervisor(store.clone(), shutdown.clone()));
@@ -232,6 +240,7 @@ pub enum OutboxBatchOutcome {
 pub(super) async fn request_metadata_consumer_supervisor(
     store: PgStore,
     valkey_url: String,
+    consumer: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut backoff = Duration::from_millis(100);
@@ -239,7 +248,14 @@ pub(super) async fn request_metadata_consumer_supervisor(
         if *shutdown.borrow() {
             return;
         }
-        match request_metadata_consumer_loop(store.clone(), &valkey_url, shutdown.clone()).await {
+        match request_metadata_consumer_loop(
+            store.clone(),
+            &valkey_url,
+            &consumer,
+            shutdown.clone(),
+        )
+        .await
+        {
             Ok(()) => return,
             Err(error) => error!(%error, "request metadata persistence worker failed; restarting"),
         }
@@ -465,10 +481,47 @@ pub mod test_support {
 async fn request_metadata_consumer_loop(
     store: PgStore,
     valkey_url: &str,
+    consumer: &str,
     shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
-    run_request_metadata_consumer(&store, valkey_url, shutdown).await?;
+    run_request_metadata_consumer(
+        &store,
+        valkey_url,
+        olp_storage::valkey::REQUEST_METADATA_STREAM,
+        consumer,
+        shutdown,
+    )
+    .await?;
     Ok(())
+}
+
+/// Combines a bounded, log-safe host label with the OS process ID and a UUIDv7
+/// process epoch. The supervisor retains this name across transient reconnects.
+pub(super) fn request_metadata_consumer_name() -> String {
+    let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "olp".to_owned());
+    request_metadata_consumer_name_from(&host, std::process::id(), uuid::Uuid::now_v7())
+}
+
+pub(super) fn request_metadata_consumer_name_from(
+    host: &str,
+    process_id: u32,
+    epoch: uuid::Uuid,
+) -> String {
+    let mut host = host
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .take(48)
+        .collect::<String>();
+    if host.is_empty() {
+        host.push_str("olp");
+    }
+    format!("{host}-{process_id}-{}", epoch.simple())
 }
 
 pub(super) async fn master_key_command(args: MasterKeyArgs) -> AppResult<()> {

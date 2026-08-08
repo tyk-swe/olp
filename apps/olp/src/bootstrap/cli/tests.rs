@@ -15,7 +15,7 @@ use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
 
 use super::{
-    commands::stop_worker_tasks,
+    commands::{request_metadata_consumer_name_from, stop_worker_tasks},
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
     lifecycle::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
@@ -25,6 +25,20 @@ use super::{
         check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
     },
 };
+
+#[test]
+fn request_metadata_consumer_names_are_process_unique_and_bounded() {
+    let first_epoch = uuid::Uuid::parse_str("018f0000-0000-7000-8000-000000000001").unwrap();
+    let second_epoch = uuid::Uuid::parse_str("018f0000-0000-7000-8000-000000000002").unwrap();
+    let first = request_metadata_consumer_name_from("Worker Pod/One", 42, first_epoch);
+    let second = request_metadata_consumer_name_from("Worker Pod/One", 42, second_epoch);
+
+    assert_eq!(first, "worker-pod-one-42-018f0000000070008000000000000001");
+    assert_ne!(first, second);
+    assert!(
+        request_metadata_consumer_name_from(&"x".repeat(200), u32::MAX, first_epoch).len() <= 92
+    );
+}
 
 struct DropSignal(Arc<AtomicBool>);
 
