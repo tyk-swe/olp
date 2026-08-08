@@ -1,5 +1,6 @@
 use std::{path::Path, time::Duration};
 
+use base64::Engine as _;
 use olp_storage::{
     PgStore,
     limits::DistributedLimiter,
@@ -10,6 +11,7 @@ use olp_storage::{
     worker_health::{WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tokio::{sync::watch, task::JoinSet};
 use tracing::{error, info, warn};
 
@@ -47,17 +49,29 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
         olp_storage::MIGRATOR.run_to(target, store.pool()).await?;
         info!(target, "PostgreSQL migrations reached test target");
     } else {
+        let legacy_stream_claim_token =
+            legacy_request_metadata_stream_claim_token(&args.persistence.database.database_url)?;
         let should_claim_legacy_stream =
             store.should_claim_legacy_request_metadata_stream().await?;
+        let legacy_stream_claim_prepared = if should_claim_legacy_stream {
+            olp_storage::valkey::mark_legacy_request_metadata_stream_claim(
+                &args.persistence.valkey_url,
+                &legacy_stream_claim_token,
+            )
+            .await?
+        } else {
+            false
+        };
         store.migrate().await?;
         info!("PostgreSQL migrations are current");
         let keyspace = store.valkey_keyspace().await?;
-        if should_claim_legacy_stream {
-            let migrated = olp_storage::valkey::migrate_legacy_request_metadata_stream(
-                &args.persistence.valkey_url,
-                &keyspace.request_metadata_stream(),
-            )
-            .await?;
+        let migrated = olp_storage::valkey::migrate_claimed_legacy_request_metadata_stream(
+            &args.persistence.valkey_url,
+            &keyspace.request_metadata_stream(),
+            &legacy_stream_claim_token,
+        )
+        .await?;
+        if migrated || legacy_stream_claim_prepared {
             info!(
                 migrated,
                 stream = %keyspace.request_metadata_stream(),
@@ -72,6 +86,27 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+pub(super) fn legacy_request_metadata_stream_claim_token(database_url: &str) -> AppResult<String> {
+    let mut identity_url = url::Url::parse(database_url).map_err(|error| {
+        std::io::Error::other(format!(
+            "invalid database URL for legacy request metadata stream claim: {error}"
+        ))
+    })?;
+    identity_url.set_username("").map_err(|()| {
+        std::io::Error::other("database URL cannot be normalized for legacy stream claim")
+    })?;
+    identity_url.set_password(None).map_err(|()| {
+        std::io::Error::other("database URL cannot be normalized for legacy stream claim")
+    })?;
+    identity_url.set_query(None);
+    identity_url.set_fragment(None);
+    let digest = Sha256::digest(identity_url.as_str().as_bytes());
+    Ok(format!(
+        "database-url-sha256-v1:{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+    ))
 }
 
 pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {

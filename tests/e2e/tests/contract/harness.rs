@@ -20,6 +20,7 @@ pub struct Server {
     stderr: Arc<Mutex<String>>,
     additional_children: Vec<Child>,
     additional_stderr: Vec<Arc<Mutex<String>>>,
+    additional_pid_files: Vec<PathBuf>,
     /// Public listener origin, e.g. `http://127.0.0.1:41234`.
     pub public_origin: String,
     /// Observability listener base.
@@ -525,6 +526,7 @@ impl LaunchGuard {
             stderr: Arc::clone(&self.stderr),
             additional_children: Vec::new(),
             additional_stderr: Vec::new(),
+            additional_pid_files: Vec::new(),
             public_origin: prepared.public_origin,
             observability_base: prepared.observability_base,
             setup_token: prepared.setup_token,
@@ -688,10 +690,13 @@ impl Server {
                         self.additional_children.len() + 2
                     ));
                     let pid = child.id();
+                    if let Err(error) = std::fs::write(&pid_file, format!("{pid}\n")) {
+                        terminate_child(&mut child).await;
+                        return Err(format!("failed to write gateway pid file: {error}"));
+                    }
                     self.additional_children.push(child);
                     self.additional_stderr.push(Arc::clone(&stderr));
-                    std::fs::write(pid_file, format!("{pid}\n"))
-                        .map_err(|error| format!("failed to write gateway pid file: {error}"))?;
+                    self.additional_pid_files.push(pid_file);
                     return Ok(GatewayProcess {
                         public_origin,
                         observability_base,
@@ -748,12 +753,19 @@ impl Server {
         let mut child = command
             .spawn()
             .map_err(|error| format!("failed to spawn {label}: {error}"))?;
+        let pid_file = self.run_dir.join(format!("{label}.pid"));
+        let pid = child.id();
+        if let Err(error) = std::fs::write(&pid_file, format!("{pid}\n")) {
+            terminate_child(&mut child).await;
+            return Err(format!("failed to write {label} pid file: {error}"));
+        }
         if let Some(pipe) = child.stderr.take() {
             capture_stderr(pipe, Arc::clone(&stderr));
         }
         let child_index = self.additional_children.len();
         self.additional_children.push(child);
         self.additional_stderr.push(stderr);
+        self.additional_pid_files.push(pid_file);
         await_path_or_exit(
             &mut self.additional_children[child_index],
             &start_marker,
@@ -781,6 +793,9 @@ impl Server {
         child
             .wait()
             .map_err(|error| format!("failed to reap killed worker: {error}"))?;
+        if let Some(pid_file) = self.additional_pid_files.get(worker.child_index) {
+            std::fs::remove_file(pid_file).ok();
+        }
         Ok(())
     }
 
@@ -790,8 +805,11 @@ impl Server {
 
     /// SIGTERM, bounded wait, then SIGKILL as a last resort.
     pub async fn shutdown(mut self) -> String {
-        for child in &mut self.additional_children {
+        for (index, child) in self.additional_children.iter_mut().enumerate() {
             terminate_child(child).await;
+            if let Some(pid_file) = self.additional_pid_files.get(index) {
+                std::fs::remove_file(pid_file).ok();
+            }
         }
         self.terminate().await;
         if let Some(reservation) = self.valkey_reservation.take() {
@@ -929,10 +947,13 @@ async fn terminate_child(child: &mut Child) {
 /// graceful teardown test, and interruptions.
 impl Drop for Server {
     fn drop(&mut self) {
-        for child in &mut self.additional_children {
+        for (index, child) in self.additional_children.iter_mut().enumerate() {
             if matches!(child.try_wait(), Ok(None)) {
                 child.kill().ok();
                 child.wait().ok();
+            }
+            if let Some(pid_file) = self.additional_pid_files.get(index) {
+                std::fs::remove_file(pid_file).ok();
             }
         }
         if matches!(self.child.try_wait(), Ok(None)) {

@@ -15,7 +15,10 @@ use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
 
 use super::{
-    commands::{request_metadata_consumer_name_from, stop_worker_tasks},
+    commands::{
+        legacy_request_metadata_stream_claim_token, request_metadata_consumer_name_from,
+        stop_worker_tasks,
+    },
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
     lifecycle::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
@@ -38,6 +41,26 @@ fn request_metadata_consumer_names_are_process_unique_and_bounded() {
     assert!(
         request_metadata_consumer_name_from(&"x".repeat(200), u32::MAX, first_epoch).len() <= 92
     );
+}
+
+#[test]
+fn legacy_request_metadata_stream_claim_token_ignores_credentials_and_query() {
+    let first = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@db.example:5432/olp?sslmode=require&application_name=one",
+    )
+    .unwrap();
+    let second = legacy_request_metadata_stream_claim_token(
+        "postgres://other:rotated@db.example:5432/olp?sslmode=disable&application_name=two",
+    )
+    .unwrap();
+    let other_database =
+        legacy_request_metadata_stream_claim_token("postgres://user:secret@db.example:5432/other")
+            .unwrap();
+
+    assert_eq!(first, second);
+    assert_ne!(first, other_database);
+    assert!(first.starts_with("database-url-sha256-v1:"));
+    assert!(!first.contains("secret"));
 }
 
 struct DropSignal(Arc<AtomicBool>);

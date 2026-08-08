@@ -21,6 +21,7 @@ pub use request_metadata::{
 
 const KEYSPACE_VERSION: &str = "olp:v3";
 const INSTALLATION_IDENTITY_MIGRATION_VERSION: i64 = 32;
+const LEGACY_REQUEST_METADATA_STREAM_CLAIM_KEY: &str = "olp:v2:request-metadata:migration-claim";
 
 /// Installation-scoped Valkey resource names derived from PostgreSQL's durable
 /// identity. Restoring PostgreSQL therefore restores the same Valkey namespace.
@@ -152,26 +153,67 @@ impl RuntimeHintPublisher {
     }
 }
 
-/// Atomically moves the pre-namespace stream, including its consumer-group
-/// pending state, into this installation's durable namespace. Both keys being
-/// present is ambiguous and fails closed for operator intervention.
-pub async fn migrate_legacy_request_metadata_stream(
+/// Marks this database as the owner of a later legacy stream move before SQL
+/// migration 0032 can make the upgrade look like a current-schema database.
+pub async fn mark_legacy_request_metadata_stream_claim(
     url: &str,
-    target_stream: &str,
+    claim_token: &str,
 ) -> Result<bool, ValkeyAdapterError> {
     let mut connection = valkey_connection(url).await?;
     let script = redis::Script::new(
         "local legacy = redis.call('EXISTS', KEYS[1])\n\
-         if legacy == 0 then return 0 end\n\
+         if legacy == 0 then\n\
+           redis.call('DEL', KEYS[2])\n\
+           return 0\n\
+         end\n\
+         local claim = redis.call('GET', KEYS[2])\n\
+         if claim and claim ~= ARGV[1] then\n\
+           return redis.error_reply('legacy request metadata stream is already claimed by another database migration')\n\
+         end\n\
+         redis.call('SET', KEYS[2], ARGV[1])\n\
+         return 1",
+    );
+    let claimed: i64 = script
+        .key(LEGACY_REQUEST_METADATA_STREAM)
+        .key(LEGACY_REQUEST_METADATA_STREAM_CLAIM_KEY)
+        .arg(claim_token)
+        .invoke_async(&mut connection)
+        .await?;
+    Ok(claimed == 1)
+}
+
+/// Atomically moves a stream that was marked by this database before SQL
+/// migration 0032 completed. A post-0032 retry can safely finish only when the
+/// pre-SQL claim token still matches this database.
+pub async fn migrate_claimed_legacy_request_metadata_stream(
+    url: &str,
+    target_stream: &str,
+    claim_token: &str,
+) -> Result<bool, ValkeyAdapterError> {
+    let mut connection = valkey_connection(url).await?;
+    let script = redis::Script::new(
+        "local legacy = redis.call('EXISTS', KEYS[1])\n\
+         local claim = redis.call('GET', KEYS[3])\n\
+         if legacy == 0 then\n\
+           redis.call('DEL', KEYS[3])\n\
+           return 0\n\
+         end\n\
+         if not claim then return 0 end\n\
+         if claim ~= ARGV[1] then\n\
+           return redis.error_reply('legacy request metadata stream is claimed by another database migration')\n\
+         end\n\
          if redis.call('EXISTS', KEYS[2]) ~= 0 then\n\
            return redis.error_reply('legacy and installation-scoped request metadata streams both exist')\n\
          end\n\
          redis.call('RENAME', KEYS[1], KEYS[2])\n\
+         redis.call('DEL', KEYS[3])\n\
          return 1",
     );
     let migrated: i64 = script
         .key(LEGACY_REQUEST_METADATA_STREAM)
         .key(target_stream)
+        .key(LEGACY_REQUEST_METADATA_STREAM_CLAIM_KEY)
+        .arg(claim_token)
         .invoke_async(&mut connection)
         .await?;
     Ok(migrated == 1)
