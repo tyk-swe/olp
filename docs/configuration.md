@@ -11,7 +11,7 @@ code wins and this file needs a patch.
 |---|---|---|
 | `OLP_DATABASE_URL` | required | PostgreSQL connection URL. |
 | `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Connection pool size. |
-| `OLP_VALKEY_URL` | optional (serve), required (`worker`, `migrate`, `doctor`) | Valkey URL for distributed limits, hints, and streams. |
+| `OLP_VALKEY_URL` | optional (serve), required (`worker`, `migrate`, `doctor`) | Valkey URL for installation-scoped distributed limits, hints, and streams. Independent installations may use one logical database; the durable PostgreSQL identity supplies the namespace. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public HTTP listener. The CLI default is loopback on purpose; containers override to `0.0.0.0:8080` (see `deploy/compose.yaml`). Both are intentional — do not "align" them. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private listener for `/health/live`, `/health/ready`, `/metrics`. Keep loopback unless an internal network is deliberate. |
 | `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Max simultaneously admitted TCP connections per listener. |
@@ -68,6 +68,10 @@ These configure test/ops scripts, not the server process:
 - `OLP_E2E_DATABASE_APP_ADMIN_URL`, `OLP_E2E_VALKEY_APP_URL`,
   `OLP_E2E_TOXIPROXY_API`, `OLP_E2E_{DATABASE,VALKEY}_PROXY_NAME` —
   two-gateway HA proof (`tests/e2e`, full CI tier only).
+- `OLP_TEST_WORKER_START_MARKER`, `OLP_TEST_REQUEST_METADATA_OWNED_MARKER`,
+  and `OLP_TEST_OUTBOX_OWNED_MARKER` — debug/test-util-only real-worker
+  ownership barriers used by `make worker-ha`; release binaries contain no
+  barrier code.
 - `OLP_REHEARSAL_*`, `OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_DUMP`,
   `OLP_PG_RESTORE`, `OLP_PSQL` — backup/restore/upgrade rehearsal scripts
   (`docs/operations.md`).

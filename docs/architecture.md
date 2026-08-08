@@ -113,6 +113,16 @@ metadata against a freshly migrated PostgreSQL 18 database.
 
 ## Runtime publication
 
+Migration 0032 creates one immutable installation UUID in PostgreSQL before
+application setup. OLP derives an opaque `olp:v3:<installation>` Valkey
+prefix from that durable identity; the runtime-hint channel,
+request-metadata Stream, distributed RPM/TPM state, and concurrency leases
+are children of the prefix. The UUID is not a deployment setting. This lets
+independent PostgreSQL installations safely share the same Valkey logical
+database even when their API-key lookup identifiers match, while every
+replica of one installation resolves the same names. PostgreSQL backup and
+restore deliberately preserves the identity.
+
 Activation stores a byte-stable compiled release, its SHA-256 digest, and an
 outbox row in one transaction. The worker publishes only a generation hint
 to Valkey; gateways consume hints, poll PostgreSQL every five seconds,
@@ -124,7 +134,8 @@ and prevents the stale connection from completing work. A crash after Valkey
 accepts `PUBLISH` but before `published_at` commits can produce an additional
 hint on retry, which is harmless because every hint only triggers an
 authoritative PostgreSQL read. The leader connection is always closed rather
-than returned locked to the pool. Standby replicas use a bounded nonblocking
+than returned locked to the pool. Non-owning replicas continue their other
+responsibilities and use a bounded nonblocking
 advisory-lock probe every five seconds. A probe that cannot acquire an owner
 past its durable heartbeat window increments the shared failed-takeover
 counter; ordinary contention with a current owner is only a skipped task
@@ -139,6 +150,12 @@ the one row inside an active publication attempt are summarized separately;
 the session advisory lock remains authoritative. Maintenance retains its
 transaction advisory lock, epoch detection retains `FOR UPDATE SKIP LOCKED`,
 and Stream recovery retains `XAUTOCLAIM` plus idempotent PostgreSQL receipts.
+An entry owned by a failed consumer becomes reclaimable after 30 seconds;
+the five-second recovery scan bounds normal takeover detection to about 35
+seconds. PostgreSQL event receipts and usage-fact uniqueness make replay one
+logical request and usage fact. Outbox leadership is released with its
+PostgreSQL session and surviving replicas probe every five seconds; repeated
+Pub/Sub hints are safe because PostgreSQL remains authoritative.
 Each request holds one `Arc` with its configuration, key indexes, and
 provider transports, so a stream cannot cross a generation or credential
 version.

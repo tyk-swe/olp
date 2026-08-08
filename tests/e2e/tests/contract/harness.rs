@@ -39,19 +39,30 @@ pub struct GatewayProcess {
     pub observability_base: String,
 }
 
+#[derive(Clone, Copy)]
+pub enum WorkerBoundary {
+    RequestMetadata,
+    RuntimeOutbox,
+    None,
+}
+
+pub struct WorkerProcess {
+    child_index: usize,
+    start_marker: PathBuf,
+    pub ownership_marker: PathBuf,
+}
+
 pub fn admin_url() -> String {
     std::env::var("OLP_E2E_DATABASE_ADMIN_URL")
         .unwrap_or_else(|_| "postgres://olp_test:olp_test@localhost:5433/postgres".to_owned())
 }
 
-/// The Valkey this run may use exclusively.
+/// The Valkey logical database leased by this test run.
 ///
-/// `docs/operations.md` requires each installation to have "an isolated
-/// database and a fresh isolated Valkey", because the request-metadata stream
-/// key is a fixed global name: any other worker attached to the same keyspace
-/// consumes and acknowledges this installation's envelopes, and its telemetry
-/// simply never arrives. Sharing one Valkey therefore does not degrade the
-/// suite, it silently empties the request log.
+/// Installation resources are durably namespaced, so multiple independently
+/// migrated servers may safely share this exact URL. The lease protects the
+/// run from unrelated parallel tests and owns whole-database cleanup only
+/// after every sharing installation has stopped.
 ///
 /// An explicit `OLP_E2E_VALKEY_URL` is honoured verbatim — CI gives the job a
 /// Valkey service of its own. Otherwise the harness atomically reserves one of
@@ -94,6 +105,31 @@ async fn valkey(admin_url: &str) -> Result<(String, Option<ValkeyReservation>), 
 struct ValkeyReservation {
     database: u16,
     lock: sqlx::postgres::PgConnection,
+}
+
+/// Owns one test Valkey lease independently of any OLP installation. Multiple
+/// independently migrated servers can therefore share the exact URL while the
+/// advisory lease remains held until every server has stopped.
+pub struct SharedValkey {
+    url: String,
+    reservation: Option<ValkeyReservation>,
+}
+
+impl SharedValkey {
+    pub async fn reserve() -> Result<Self, String> {
+        let (url, reservation) = valkey(&admin_url()).await?;
+        Ok(Self { url, reservation })
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub async fn release(mut self) {
+        if let Some(reservation) = self.reservation.take() {
+            reservation.release().await;
+        }
+    }
 }
 
 impl ValkeyReservation {
@@ -274,6 +310,8 @@ impl LaunchGuard {
         binary: &Path,
         database: &str,
         app_database: &str,
+        process: &str,
+        shared_valkey_url: Option<&str>,
     ) -> Result<PreparedServer, String> {
         let console_dir = self.run_dir.join("console");
         let spool_dir = self.run_dir.join("spool");
@@ -289,7 +327,10 @@ impl LaunchGuard {
         write_secret(&auth_hmac_key_file, &random_base64_secret())?;
         write_secret(&bootstrap_token_file, &setup_token)?;
 
-        let (valkey_url, reservation) = valkey(&self.admin_url).await?;
+        let (valkey_url, reservation) = match shared_valkey_url {
+            Some(url) => (url.to_owned(), None),
+            None => valkey(&self.admin_url).await?,
+        };
         self.valkey_reservation = reservation;
 
         for attempt in 1..=3 {
@@ -324,7 +365,7 @@ impl LaunchGuard {
 
             self.stderr = Arc::new(Mutex::new(String::new()));
             let mut child = Command::new(binary)
-                .arg("all")
+                .arg(process)
                 .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -342,7 +383,7 @@ impl LaunchGuard {
                 self.child.as_mut().expect("child was just installed"),
                 &self.stderr,
                 &observability_base,
-                "olp all",
+                &format!("olp {process}"),
             )
             .await;
             match startup {
@@ -408,6 +449,25 @@ impl LaunchGuard {
 
 impl Server {
     pub async fn launch() -> Result<Self, String> {
+        Self::launch_process("all", None).await
+    }
+
+    pub async fn launch_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
+        Self::launch_process("all", Some(valkey_url)).await
+    }
+
+    pub async fn launch_control() -> Result<Self, String> {
+        Self::launch_process("control", None).await
+    }
+
+    pub async fn launch_control_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
+        Self::launch_process("control", Some(valkey_url)).await
+    }
+
+    async fn launch_process(
+        process: &str,
+        shared_valkey_url: Option<&str>,
+    ) -> Result<Self, String> {
         let binary = binary()?;
         let run_token = std::env::var("OLP_E2E_RUN_TOKEN").map_err(|_| {
             "OLP_E2E_RUN_TOKEN is unset; run via scripts/run-e2e-tests.sh".to_owned()
@@ -431,13 +491,26 @@ impl Server {
 
         let run_dir = std::env::temp_dir().join(format!("olp-e2e-{run_token}-{}", random_hex(6)));
         let mut guard = LaunchGuard::new(admin, database_name, run_dir);
-        match guard.prepare(&binary, &database, &app_database).await {
+        match guard
+            .prepare(
+                &binary,
+                &database,
+                &app_database,
+                process,
+                shared_valkey_url,
+            )
+            .await
+        {
             Ok(prepared) => Ok(guard.into_server(prepared)),
             Err(error) => {
                 guard.cleanup().await;
                 Err(error)
             }
         }
+    }
+
+    pub fn valkey_url(&self) -> &str {
+        &self.valkey_url
     }
 
     pub fn stderr_tail(&self) -> String {
@@ -512,6 +585,82 @@ impl Server {
         unreachable!("bounded startup loop either succeeds or returns an error")
     }
 
+    pub async fn launch_worker(
+        &mut self,
+        label: &str,
+        boundary: WorkerBoundary,
+    ) -> Result<WorkerProcess, String> {
+        let binary = binary()?;
+        let start_marker = self.run_dir.join(format!("{label}-start"));
+        let ownership_marker = self.run_dir.join(format!("{label}-owned"));
+        let environment = process_environment(
+            &self.run_dir,
+            &self.app_database_url,
+            &self.valkey_url,
+            "http://127.0.0.1:1".to_owned(),
+            "http://127.0.0.1:2".to_owned(),
+            false,
+        );
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let mut command = Command::new(binary);
+        command
+            .arg("worker")
+            .envs(environment)
+            .env("OLP_TEST_WORKER_START_MARKER", &start_marker)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        match boundary {
+            WorkerBoundary::RequestMetadata => {
+                command.env("OLP_TEST_REQUEST_METADATA_OWNED_MARKER", &ownership_marker);
+            }
+            WorkerBoundary::RuntimeOutbox => {
+                command.env("OLP_TEST_OUTBOX_OWNED_MARKER", &ownership_marker);
+            }
+            WorkerBoundary::None => {}
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("failed to spawn {label}: {error}"))?;
+        if let Some(pipe) = child.stderr.take() {
+            capture_stderr(pipe, Arc::clone(&stderr));
+        }
+        let child_index = self.additional_children.len();
+        self.additional_children.push(child);
+        self.additional_stderr.push(stderr);
+        await_path_or_exit(
+            &mut self.additional_children[child_index],
+            &start_marker,
+            label,
+        )
+        .await?;
+        Ok(WorkerProcess {
+            child_index,
+            start_marker,
+            ownership_marker,
+        })
+    }
+
+    pub fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+        let release = format!("{}.release", worker.start_marker.display());
+        std::fs::write(release, b"release\n")
+            .map_err(|error| format!("failed to release worker: {error}"))
+    }
+
+    pub async fn hard_kill_worker(&mut self, worker: &WorkerProcess) -> Result<(), String> {
+        let child = &mut self.additional_children[worker.child_index];
+        child
+            .kill()
+            .map_err(|error| format!("failed to SIGKILL worker: {error}"))?;
+        child
+            .wait()
+            .map_err(|error| format!("failed to reap killed worker: {error}"))?;
+        Ok(())
+    }
+
+    pub fn worker_ownership_marker(&self, label: &str) -> PathBuf {
+        self.run_dir.join(format!("{label}-owned"))
+    }
+
     /// SIGTERM, bounded wait, then SIGKILL as a last resort.
     pub async fn shutdown(mut self) -> String {
         for child in &mut self.additional_children {
@@ -536,6 +685,29 @@ impl Server {
 
     async fn terminate(&mut self) {
         terminate_child(&mut self.child).await;
+    }
+}
+
+async fn await_path_or_exit(child: &mut Child, path: &Path, process: &str) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if path.exists() {
+            return Ok(());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("failed to inspect {process}: {error}"))?
+        {
+            return Err(format!(
+                "{process} exited before reaching its start barrier: {status}"
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{process} did not reach its start barrier within 30s"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 

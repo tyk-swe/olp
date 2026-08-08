@@ -109,9 +109,18 @@ ingress:
 
 worker:
   enabled: true
-  # Runtime outbox publication uses PostgreSQL leader election. Extra replicas
-  # are safe standby workers and take over when the active worker exits.
+  # One replica keeps the default footprint small. Production installations
+  # should run at least three so stream reclaim and outbox takeover remain
+  # available through a worker failure.
   replicas: 1
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpread:
+    enabled: true
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }

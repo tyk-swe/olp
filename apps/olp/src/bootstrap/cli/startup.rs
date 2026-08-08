@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use olp_storage::{request_metadata::RequestMetadataEmitter, valkey::REQUEST_METADATA_STREAM};
+use olp_storage::request_metadata::RequestMetadataEmitter;
 use tokio::{
     net::TcpListener,
     sync::{oneshot, watch},
@@ -24,7 +24,9 @@ use super::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
         shutdown_signal, stop_background_tasks,
     },
-    runtime_activation::{activate_latest_runtime, runtime_hint_supervisor, spawn_runtime_poller},
+    runtime_activation::{
+        RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor, spawn_runtime_poller,
+    },
     service_supervisors::{
         limiter_supervisor, media_reconciliation_supervisor, request_metadata_loss_reporter,
     },
@@ -152,19 +154,24 @@ pub(super) async fn serve(
         background_shutdown_receiver.clone(),
     ));
     if let Some(url) = &args.valkey_url {
+        let keyspace = store.valkey_keyspace().await?;
         background_tasks.push(tokio::spawn(runtime_hint_supervisor(
             Arc::clone(&state.runtime),
             store.clone(),
             state.transports.clone(),
             state.circuits.clone(),
             state.master_key.clone(),
-            url.clone(),
+            RuntimeHintSource {
+                url: url.clone(),
+                channel: keyspace.runtime_hint_channel(),
+            },
             background_shutdown_receiver.clone(),
         )));
         state.limiter.mark_configured();
         background_tasks.push(tokio::spawn(limiter_supervisor(
             state.limiter.clone(),
             url.clone(),
+            keyspace.limits_namespace(),
             background_shutdown_receiver.clone(),
         )));
 
@@ -186,6 +193,7 @@ pub(super) async fn serve(
                 background_shutdown_receiver.clone(),
             )));
             let request_metadata_writer_url = url.clone();
+            let request_metadata_stream = keyspace.request_metadata_stream();
             let request_metadata_writer_shutdown = background_shutdown_receiver.clone();
             let (status_sender, status_receiver) = oneshot::channel();
             request_metadata_writer_status = Some(status_receiver);
@@ -193,7 +201,7 @@ pub(super) async fn serve(
                 let result: AppResult<()> = receiver
                     .run_connecting(
                         &request_metadata_writer_url,
-                        REQUEST_METADATA_STREAM,
+                        &request_metadata_stream,
                         request_metadata_writer_shutdown,
                     )
                     .await
@@ -208,11 +216,13 @@ pub(super) async fn serve(
             background_tasks.push(tokio::spawn(outbox_supervisor(
                 store.clone(),
                 url.clone(),
+                keyspace.runtime_hint_channel(),
                 background_shutdown_receiver.clone(),
             )));
             background_tasks.push(tokio::spawn(request_metadata_consumer_supervisor(
                 store.clone(),
                 url.clone(),
+                keyspace.request_metadata_stream(),
                 request_metadata_consumer_name(),
                 background_shutdown_receiver.clone(),
             )));

@@ -84,6 +84,7 @@ pub(super) async fn request_metadata_loss_reporter(
 pub(super) async fn limiter_supervisor(
     reloadable_limiter: ReloadableLimiter,
     valkey_url: String,
+    limits_namespace: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut backoff = Duration::from_millis(100);
@@ -113,7 +114,7 @@ pub(super) async fn limiter_supervisor(
 
         match tokio::time::timeout(
             Duration::from_secs(3),
-            DistributedLimiter::connect(&valkey_url, "olp:v2:limits"),
+            DistributedLimiter::connect(&valkey_url, &limits_namespace),
         )
         .await
         {

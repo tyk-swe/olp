@@ -15,9 +15,9 @@
 # Environment:
 #   OLP_E2E_DATABASE_ADMIN_URL  PostgreSQL maintenance database
 #                               (default postgres://olp_test:olp_test@localhost:5433/postgres)
-#   OLP_E2E_VALKEY_URL          Dedicated Valkey URL; when unset, the harness
-#                               leases and clears an exclusive local logical DB
-#   OLP_E2E_TEST_TARGET         contract (default) or ha
+#   OLP_E2E_VALKEY_URL          Valkey URL shared by namespaced installations;
+#                               when unset, the harness leases a local logical DB
+#   OLP_E2E_TEST_TARGET         contract (default), ha, or worker-ha
 #   OLP_E2E_BIN                 Prebuilt olp binary; built here when unset
 #   OLP_E2E_KEEP_DB=1           Keep the per-run database for debugging
 set -euo pipefail
@@ -130,9 +130,23 @@ sweep_leftover_databases
 # process, which would boot a server per assertion.
 cd -- "$repo_root"
 test_target=${OLP_E2E_TEST_TARGET:-contract}
-[[ $test_target == contract || $test_target == ha ]] || {
-  echo "OLP_E2E_TEST_TARGET must be contract or ha" >&2
-  exit 1
-}
-env SQLX_OFFLINE=true cargo test --locked -p olp-e2e --test "$test_target" -- \
-  --ignored --test-threads=1 "$@"
+case "$test_target" in
+  contract)
+    test_binary=contract
+    test_filter=()
+    ;;
+  ha)
+    test_binary=ha
+    test_filter=(two_gateways_converge_and_degrade_safely)
+    ;;
+  worker-ha)
+    test_binary=ha
+    test_filter=(worker_ha_)
+    ;;
+  *)
+    echo "OLP_E2E_TEST_TARGET must be contract, ha, or worker-ha" >&2
+    exit 1
+    ;;
+esac
+env SQLX_OFFLINE=true cargo test --locked -p olp-e2e --test "$test_binary" -- \
+  --ignored --test-threads=1 "${test_filter[@]}" "$@"

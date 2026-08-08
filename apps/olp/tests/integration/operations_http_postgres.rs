@@ -40,6 +40,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         PathBuf::from("missing-console-for-operations-test"),
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [31; 32])));
+    state.limiter.mark_configured();
     configure_bootstrap(&mut state, [32; 32]);
     let dependencies = state.mode_dependencies().unwrap();
     let observability_state = dependencies.observability();

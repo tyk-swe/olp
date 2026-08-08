@@ -40,14 +40,16 @@
     },
     "worker": {
       "type": "object",
-      "required": ["enabled", "replicas", "resources"],
+      "required": ["enabled", "replicas", "podDisruptionBudget", "resources", "topologySpread"],
       "properties": {
         "enabled": { "type": "boolean" },
         "replicas": {
           "type": "integer",
           "minimum": 0,
-          "description": "Worker replicas use PostgreSQL leader election; extra replicas run as standby failover workers."
+          "description": "Replicated workers concurrently process installation-scoped work and take over abandoned ownership."
         },
+        "podDisruptionBudget": { "$ref": "#/definitions/serverComponent/properties/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/definitions/serverComponent/properties/topologySpread" },
         "resources": { "type": "object" }
       }
     },

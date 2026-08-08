@@ -639,6 +639,44 @@ jobs:
             --data '{"name":"olp-valkey","listen":"0.0.0.0:16379","upstream":"valkey:6379"}'
           ./scripts/run-e2e-tests.sh
 
+  worker-ha:
+    name: Replicated worker qualification
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-shared-key: workspace-debug
+          cache-save: "false"
+      - name: Install PostgreSQL 18 client tools
+        run: ./scripts/ci/install-postgres-client.sh 18
+      - name: Build the worker HA binary
+        run: cargo build --locked -p olp --features test-util
+      - name: Run shared-Valkey and three-worker crash-recovery proofs
+        env:
+          OLP_E2E_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
+          OLP_E2E_VALKEY_URL: redis://localhost:6379/0
+          OLP_E2E_BIN: target/debug/olp
+        run: make worker-ha
+
   upgrade-rehearsal:
     name: Backup / restore / upgrade
     if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -801,6 +839,7 @@ jobs:
       - required
       - browser-compatibility
       - ha
+      - worker-ha
       - upgrade-rehearsal
       - fuzz
       - image-arm64

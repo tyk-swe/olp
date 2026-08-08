@@ -289,4 +289,18 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if or .Values.worker.topologySpread.enabled .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- if .Values.worker.topologySpread.enabled }}
+        - maxSkew: {{ .Values.worker.topologySpread.maxSkew }}
+          topologyKey: {{ .Values.worker.topologySpread.topologyKey | quote }}
+          whenUnsatisfiable: {{ .Values.worker.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "olp.selectorLabels" (dict "root" . "component" "worker") | nindent 14 }}
+        {{- end }}
+        {{- with .Values.topologySpreadConstraints }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
 {{- end }}

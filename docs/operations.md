@@ -40,6 +40,13 @@ without a successful checkpoint (four missed five-second heartbeats).
 Maintenance becomes stale after 180 seconds (three missed one-minute passes).
 A clean outbox release remains current during the 20-second handoff window, so
 a replacement can acquire leadership without leaving a permanent incident.
+Run three worker replicas in production and spread them across failure
+domains. A failed metadata consumer's pending entry is eligible for reclaim
+after 30 seconds and is scanned at least every five seconds, so investigate if
+recovery has not begun within 35 seconds. PostgreSQL session loss releases
+outbox leadership; another replica probes every five seconds. The 20-second
+owner heartbeat is the stale-health and failed-takeover bound, not a reason to
+wait before acquiring a released lock.
 
 Use these bounded, content-free signals during diagnosis:
 
@@ -141,6 +148,12 @@ master-key and authentication HMAC key files are excluded — back them up
 separately in the secret manager. Losing any historical master key makes
 records encrypted with that version unrecoverable.
 
+The dump includes `installation_identity`. Restoring it preserves every
+Valkey namespace and is correct for replacement recovery. It does not create
+a second independent installation: stop the source or give the restored copy
+a fresh Valkey logical database. Never connect source and restored databases
+to the same Valkey keyspace concurrently.
+
 At least weekly, restore the newest dump to an isolated database with
 `scripts/restore-rehearsal.sh`. It requires the checksum and a contract-valid
 manifest, refuses the production URL, requires `--replace` for a nonempty
@@ -205,6 +218,12 @@ rollback decision point has passed.
    Pre-upgrade persisted login flows may complete only through their
    existing ten-minute expiry; users whose flow expires restart it after
    the candidate is ready.
+   This stop is mandatory for the legacy global
+   `olp:v2:request-metadata` transition. Candidate `olp migrate` atomically
+   renames that Stream to the durable installation namespace, preserving its
+   consumer group and pending-entry state. It aborts if both legacy and
+   namespaced Streams exist. Do not allow an N-1 gateway or worker to write
+   the legacy key after migration.
 4. With admission and the worker stopped, create the final PostgreSQL
    rollback backup using `OLP_BACKUP_TRAFFIC_QUIESCED=true` and snapshot
    mounted key files in the secret manager. This is the recovery point; a
@@ -243,6 +262,18 @@ replacement cluster with fresh Valkey, then verify migration state,
 workloads, readiness, and runtime generation before redirecting traffic.
 
 ## Incident response
+
+### All workers unavailable
+
+Keep gateway admission open only while the local request-metadata spool has
+capacity and the business accepts delayed accounting. Runtime mutations stay
+durable in the PostgreSQL outbox but will not reach gateways by hints;
+gateways continue their five-second PostgreSQL poll. Restore at least one
+same-version worker, then require metadata pending and lag to reach zero,
+runtime-outbox pending and claimed rows to reach zero, all four worker task
+checkpoints to become healthy, and usage counts to reconcile before declaring
+recovery. If the outage approaches the seven-day receipt window, stop
+admission and preserve Valkey/AOF and PostgreSQL before any repair.
 
 ### Dependency failure
 
