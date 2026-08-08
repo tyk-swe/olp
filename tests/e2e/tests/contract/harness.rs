@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use rand::RngCore as _;
+use redis::{
+    AsyncCommands as _,
+    streams::{StreamReadOptions, StreamReadReply},
+};
 use sqlx::Connection as _;
 
 pub struct Server {
@@ -157,6 +161,56 @@ async fn flush_valkey(database: u16) -> Result<(), String> {
     Ok(())
 }
 
+async fn seed_legacy_request_metadata_stream(valkey_url: &str) -> Result<String, String> {
+    const LEGACY: &str = "olp:v2:request-metadata";
+    const GROUP: &str = "olp:persistence";
+
+    let client = redis::Client::open(valkey_url)
+        .map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| format!("failed to connect shared Valkey: {error}"))?;
+    let _: i64 = redis::cmd("DEL")
+        .arg(LEGACY)
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to clear legacy stream fixture: {error}"))?;
+    let event_id: String = redis::cmd("XADD")
+        .arg(LEGACY)
+        .arg("*")
+        .arg("event")
+        .arg("legacy-pending-event")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to seed legacy stream: {error}"))?;
+    let _: String = redis::cmd("XGROUP")
+        .arg("CREATE")
+        .arg(LEGACY)
+        .arg(GROUP)
+        .arg("0")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to seed legacy consumer group: {error}"))?;
+    let delivered: StreamReadReply = connection
+        .xread_options(
+            &[LEGACY],
+            &[">"],
+            &StreamReadOptions::default().group(GROUP, "legacy-owner"),
+        )
+        .await
+        .map_err(|error| format!("failed to establish legacy ownership: {error}"))?;
+    if !delivered
+        .keys
+        .iter()
+        .flat_map(|stream| &stream.ids)
+        .any(|entry| entry.id == event_id)
+    {
+        return Err("legacy event was not delivered into the pending-entry list".to_owned());
+    }
+    Ok(event_id)
+}
+
 fn binary() -> Result<PathBuf, String> {
     let path = std::env::var("OLP_E2E_BIN")
         .map_err(|_| "OLP_E2E_BIN is unset; run via scripts/run-e2e-tests.sh".to_owned())?;
@@ -225,6 +279,33 @@ fn process_environment(
     environment
 }
 
+fn run_migrate(
+    binary: &Path,
+    environment: &[(&'static str, String)],
+    database: &str,
+    through_version: Option<i64>,
+) -> Result<(), String> {
+    let mut command = Command::new(binary);
+    command
+        .arg("migrate")
+        .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
+        .env("OLP_DATABASE_URL", database);
+    if let Some(target) = through_version {
+        command
+            .arg("--through-version")
+            .arg(target.to_string())
+            .env("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS", "test-only");
+    }
+    let migrate = command
+        .output()
+        .map_err(|error| format!("failed to run olp migrate: {error}"))?;
+    if !migrate.status.success() {
+        let stderr = String::from_utf8_lossy(&migrate.stderr);
+        return Err(format!("olp migrate failed ({}): {stderr}", migrate.status));
+    }
+    Ok(())
+}
+
 fn free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|error| format!("failed to bind an ephemeral port: {error}"))?;
@@ -280,6 +361,13 @@ struct PreparedServer {
     database_url: String,
     app_database_url: String,
     valkey_url: String,
+    legacy_request_metadata_event_id: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum MigrationFixture {
+    Current,
+    LegacyRequestMetadataUpgrade,
 }
 
 /// Owns every resource acquired after `CREATE DATABASE` until startup either
@@ -312,6 +400,7 @@ impl LaunchGuard {
         app_database: &str,
         process: &str,
         shared_valkey_url: Option<&str>,
+        migration_fixture: MigrationFixture,
     ) -> Result<PreparedServer, String> {
         let console_dir = self.run_dir.join("console");
         let spool_dir = self.run_dir.join("spool");
@@ -332,6 +421,7 @@ impl LaunchGuard {
             None => valkey(&self.admin_url).await?,
         };
         self.valkey_reservation = reservation;
+        let mut legacy_request_metadata_event_id = None;
 
         for attempt in 1..=3 {
             let public_port = free_port()?;
@@ -351,15 +441,16 @@ impl LaunchGuard {
             );
 
             if attempt == 1 {
-                let migrate = Command::new(binary)
-                    .arg("migrate")
-                    .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
-                    .env("OLP_DATABASE_URL", database)
-                    .output()
-                    .map_err(|error| format!("failed to run olp migrate: {error}"))?;
-                if !migrate.status.success() {
-                    let stderr = String::from_utf8_lossy(&migrate.stderr);
-                    return Err(format!("olp migrate failed ({}): {stderr}", migrate.status));
+                match migration_fixture {
+                    MigrationFixture::Current => {
+                        run_migrate(binary, &environment, database, None)?;
+                    }
+                    MigrationFixture::LegacyRequestMetadataUpgrade => {
+                        run_migrate(binary, &environment, database, Some(31))?;
+                        legacy_request_metadata_event_id =
+                            Some(seed_legacy_request_metadata_stream(&valkey_url).await?);
+                        run_migrate(binary, &environment, database, None)?;
+                    }
                 }
             }
 
@@ -395,6 +486,7 @@ impl LaunchGuard {
                         database_url: database.to_owned(),
                         app_database_url: app_database.to_owned(),
                         valkey_url,
+                        legacy_request_metadata_event_id,
                     });
                 }
                 Err(error) => {
@@ -464,10 +556,37 @@ impl Server {
         Self::launch_process("control", Some(valkey_url)).await
     }
 
+    pub async fn launch_control_from_legacy_request_metadata_upgrade(
+        valkey_url: &str,
+    ) -> Result<(Self, String), String> {
+        let (server, event_id) = Self::launch_process_with_migration_fixture(
+            "control",
+            Some(valkey_url),
+            MigrationFixture::LegacyRequestMetadataUpgrade,
+        )
+        .await?;
+        let event_id = event_id.expect("legacy request metadata fixture seeds an event");
+        Ok((server, event_id))
+    }
+
     async fn launch_process(
         process: &str,
         shared_valkey_url: Option<&str>,
     ) -> Result<Self, String> {
+        Self::launch_process_with_migration_fixture(
+            process,
+            shared_valkey_url,
+            MigrationFixture::Current,
+        )
+        .await
+        .map(|(server, _)| server)
+    }
+
+    async fn launch_process_with_migration_fixture(
+        process: &str,
+        shared_valkey_url: Option<&str>,
+        migration_fixture: MigrationFixture,
+    ) -> Result<(Self, Option<String>), String> {
         let binary = binary()?;
         let run_token = std::env::var("OLP_E2E_RUN_TOKEN").map_err(|_| {
             "OLP_E2E_RUN_TOKEN is unset; run via scripts/run-e2e-tests.sh".to_owned()
@@ -498,10 +617,18 @@ impl Server {
                 &app_database,
                 process,
                 shared_valkey_url,
+                migration_fixture,
             )
             .await
         {
-            Ok(prepared) => Ok(guard.into_server(prepared)),
+            Ok(prepared) => {
+                let legacy_request_metadata_event_id =
+                    prepared.legacy_request_metadata_event_id.clone();
+                Ok((
+                    guard.into_server(prepared),
+                    legacy_request_metadata_event_id,
+                ))
+            }
             Err(error) => {
                 guard.cleanup().await;
                 Err(error)

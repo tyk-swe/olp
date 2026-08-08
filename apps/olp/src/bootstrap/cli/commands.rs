@@ -47,19 +47,29 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
         olp_storage::MIGRATOR.run_to(target, store.pool()).await?;
         info!(target, "PostgreSQL migrations reached test target");
     } else {
+        let should_claim_legacy_stream =
+            store.should_claim_legacy_request_metadata_stream().await?;
         store.migrate().await?;
         info!("PostgreSQL migrations are current");
         let keyspace = store.valkey_keyspace().await?;
-        let migrated = olp_storage::valkey::migrate_legacy_request_metadata_stream(
-            &args.persistence.valkey_url,
-            &keyspace.request_metadata_stream(),
-        )
-        .await?;
-        info!(
-            migrated,
-            stream = %keyspace.request_metadata_stream(),
-            "legacy request metadata stream transition is complete"
-        );
+        if should_claim_legacy_stream {
+            let migrated = olp_storage::valkey::migrate_legacy_request_metadata_stream(
+                &args.persistence.valkey_url,
+                &keyspace.request_metadata_stream(),
+            )
+            .await?;
+            info!(
+                migrated,
+                stream = %keyspace.request_metadata_stream(),
+                "legacy request metadata stream transition is complete"
+            );
+        } else {
+            olp_storage::valkey::verify_request_metadata_stream_upgrade(
+                &args.persistence.valkey_url,
+            )
+            .await?;
+            info!("legacy request metadata stream claim skipped for non-upgrade database");
+        }
     }
     Ok(())
 }

@@ -20,6 +20,7 @@ pub use request_metadata::{
 };
 
 const KEYSPACE_VERSION: &str = "olp:v3";
+const INSTALLATION_IDENTITY_MIGRATION_VERSION: i64 = 32;
 
 /// Installation-scoped Valkey resource names derived from PostgreSQL's durable
 /// identity. Restoring PostgreSQL therefore restores the same Valkey namespace.
@@ -58,11 +59,33 @@ impl ValkeyKeyspace {
 }
 
 impl PgStore {
+    /// Returns true only when the pre-migration database history proves this is
+    /// an upgrade from a schema that predates installation-scoped Valkey names.
+    pub async fn should_claim_legacy_request_metadata_stream(
+        &self,
+    ) -> Result<bool, PersistenceError> {
+        let migration_history_exists: bool = sqlx::query_scalar!(
+            "SELECT to_regclass('public._sqlx_migrations') IS NOT NULL AS \"exists!\""
+        )
+        .fetch_one(self.pool())
+        .await?;
+        if !migration_history_exists {
+            return Ok(false);
+        }
+
+        let latest_successful_migration: Option<i64> = sqlx::query_scalar!(
+            "SELECT max(version) AS \"version\" FROM public._sqlx_migrations WHERE success"
+        )
+        .fetch_one(self.pool())
+        .await?;
+        Ok(latest_successful_migration
+            .is_some_and(|version| version < INSTALLATION_IDENTITY_MIGRATION_VERSION))
+    }
+
     pub async fn valkey_keyspace(&self) -> Result<ValkeyKeyspace, PersistenceError> {
-        let id =
-            sqlx::query_scalar::<_, Uuid>("SELECT id FROM installation_identity WHERE singleton")
-                .fetch_one(self.pool())
-                .await?;
+        let id = sqlx::query_scalar!("SELECT id FROM installation_identity WHERE singleton")
+            .fetch_one(self.pool())
+            .await?;
         Ok(ValkeyKeyspace::from_installation_id(id))
     }
 }
@@ -163,7 +186,7 @@ pub async fn verify_request_metadata_stream_upgrade(url: &str) -> Result<(), Val
         .await?;
     if legacy_exists {
         return Err(ValkeyAdapterError::InvalidState(
-            "legacy request metadata stream still exists; stop N-1 processes and run olp migrate",
+            "legacy request metadata stream still exists; stop N-1 processes and use only the pre-0032 database that owns that stream to claim it",
         ));
     }
     Ok(())

@@ -13,12 +13,12 @@
 //! the documented flow is asserted on its own in `provider_lifecycle`, so a
 //! defect there fails one named test instead of collapsing the whole suite.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
+use tokio::sync::Mutex;
 
 use crate::harness::{GatewayProcess, Server, WorkerBoundary, WorkerProcess};
 use crate::mock_upstream::{self, MockUpstream};
@@ -292,37 +292,30 @@ impl GatewayResponse {
 }
 
 impl World {
-    pub fn valkey_url(&self) -> Result<String, String> {
+    pub async fn valkey_url(&self) -> Result<String, String> {
         self.server
             .lock()
-            .expect("world lock is not poisoned")
+            .await
             .as_ref()
             .map(|server| server.valkey_url().to_owned())
             .ok_or_else(|| "server has already shut down".to_owned())
     }
 
-    pub fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+    pub async fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
         self.server
             .lock()
-            .expect("world lock is not poisoned")
+            .await
             .as_ref()
             .ok_or_else(|| "server has already shut down".to_owned())?
             .release_worker(worker)
     }
 
     pub async fn hard_kill_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
-        let mut server = self
-            .server
-            .lock()
-            .expect("world lock is not poisoned")
-            .take()
+        let mut guard = self.server.lock().await;
+        let server = guard
+            .as_mut()
             .ok_or_else(|| "server has already shut down".to_owned())?;
-        let result = server.hard_kill_worker(worker).await;
-        self.server
-            .lock()
-            .expect("world lock is not poisoned")
-            .replace(server);
-        result
+        server.hard_kill_worker(worker).await
     }
 
     pub fn origin(&self) -> &str {
@@ -484,11 +477,7 @@ impl World {
     /// Stops the server and releases the per-run database. Returns the tail of
     /// its stderr. Idempotent, so a second call is harmless.
     pub async fn shutdown(&self) -> String {
-        let server = self
-            .server
-            .lock()
-            .expect("world lock is not poisoned")
-            .take();
+        let server = self.server.lock().await.take();
         match server {
             Some(server) => server.shutdown().await,
             None => String::new(),

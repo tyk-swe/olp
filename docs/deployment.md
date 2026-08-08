@@ -50,11 +50,12 @@ the same time. Use a fresh Valkey database for restore rehearsals.
 
 The chart defaults to one worker to keep the evaluation footprint small.
 Production installations should set `worker.replicas: 3`, enable the worker
-PodDisruptionBudget, and spread replicas across failure domains. All replicas
-consume installation-scoped work concurrently; PostgreSQL advisory locking
-serializes runtime-outbox publication, and the Valkey consumer group reclaims
-abandoned metadata ownership. Size `config.databaseMaxConnections` and Valkey
-client capacity for the complete gateway, control, and worker fleet.
+PodDisruptionBudget with `worker.podDisruptionBudget.minAvailable: 1` or
+higher, and spread replicas across failure domains. All replicas consume
+installation-scoped work concurrently; PostgreSQL advisory locking serializes
+runtime-outbox publication, and the Valkey consumer group reclaims abandoned
+metadata ownership. Size `config.databaseMaxConnections` and Valkey client
+capacity for the complete gateway, control, and worker fleet.
 
 The worker Deployment deliberately retains `strategy.type: Recreate`.
 Replicated same-version operation does not prove N-1/N compatibility across

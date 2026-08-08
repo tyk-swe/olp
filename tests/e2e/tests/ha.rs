@@ -16,7 +16,7 @@ use futures::StreamExt as _;
 use olp_storage::limits::{DistributedLimiter, LimitError, LimitRequest};
 use redis::{
     AsyncCommands as _,
-    streams::{StreamInfoGroupsReply, StreamPendingCountReply, StreamReadOptions, StreamReadReply},
+    streams::{StreamInfoGroupsReply, StreamPendingCountReply},
 };
 use serde_json::{Value, json};
 use sqlx::Connection as _;
@@ -81,53 +81,22 @@ async fn worker_ha_migrate_preserves_legacy_stream_ownership() -> Result<(), Str
     const LEGACY: &str = "olp:v2:request-metadata";
     const GROUP: &str = "olp:persistence";
     let valkey = SharedValkey::reserve().await?;
-    let client = redis::Client::open(valkey.url())
-        .map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
-    let mut connection = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|error| format!("failed to connect shared Valkey: {error}"))?;
-    let event_id: String = redis::cmd("XADD")
-        .arg(LEGACY)
-        .arg("*")
-        .arg("event")
-        .arg("legacy-pending-event")
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| format!("failed to seed legacy stream: {error}"))?;
-    let _: String = redis::cmd("XGROUP")
-        .arg("CREATE")
-        .arg(LEGACY)
-        .arg(GROUP)
-        .arg("0")
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| format!("failed to seed legacy consumer group: {error}"))?;
-    let delivered: StreamReadReply = connection
-        .xread_options(
-            &[LEGACY],
-            &[">"],
-            &StreamReadOptions::default().group(GROUP, "legacy-owner"),
-        )
-        .await
-        .map_err(|error| format!("failed to establish legacy ownership: {error}"))?;
-    require!(
-        delivered
-            .keys
-            .iter()
-            .flat_map(|stream| &stream.ids)
-            .any(|entry| entry.id == event_id),
-        "legacy event was not delivered into the pending-entry list"
-    );
 
-    let server = match Server::launch_control_sharing_valkey(valkey.url()).await {
-        Ok(server) => server,
-        Err(error) => {
-            valkey.release().await;
-            return Err(error);
-        }
-    };
+    let (server, event_id) =
+        match Server::launch_control_from_legacy_request_metadata_upgrade(valkey.url()).await {
+            Ok(server) => server,
+            Err(error) => {
+                valkey.release().await;
+                return Err(error);
+            }
+        };
     let result = async {
+        let client = redis::Client::open(valkey.url())
+            .map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
+        let mut connection = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|error| format!("failed to connect shared Valkey: {error}"))?;
         let target = format!(
             "{}:request-metadata",
             installation_prefix(&server.database_url).await?
@@ -207,13 +176,13 @@ async fn prove_three_worker_recovery(
     await_outbox_pending(world, 0, Duration::from_secs(15)).await?;
     world.hard_kill_worker(&workers[0]).await?;
 
-    world.release_worker(&workers[1])?;
+    world.release_worker(&workers[1]).await?;
     await_metadata_recovery(world, &world.api_key_id, Duration::from_secs(45)).await?;
 
     let crash_second = async {
         await_file(&workers[1].ownership_marker, Duration::from_secs(30)).await?;
         world.hard_kill_worker(&workers[1]).await?;
-        world.release_worker(&workers[2])?;
+        world.release_worker(&workers[2]).await?;
         Ok::<(), String>(())
     };
     let (takeover_key, crash_result) = tokio::join!(
@@ -285,12 +254,16 @@ async fn await_outbox_pending(
     timeout: Duration,
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
+    let mut database = sqlx::PgConnection::connect(&world.database_url)
+        .await
+        .map_err(|error| format!("failed to inspect outbox pending state: {error}"))?;
     loop {
-        let pending = database_scalar(
-            &world.database_url,
+        let pending: i64 = sqlx::query_scalar(
             "SELECT count(*)::bigint FROM transactional_outbox WHERE published_at IS NULL",
         )
-        .await?;
+        .fetch_one(&mut database)
+        .await
+        .map_err(|error| format!("failed to read outbox pending state: {error}"))?;
         if pending == expected {
             return Ok(());
         }
@@ -309,10 +282,10 @@ async fn await_metadata_recovery(
     timeout: Duration,
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
+    let mut database = sqlx::PgConnection::connect(&world.database_url)
+        .await
+        .map_err(|error| format!("failed to inspect metadata recovery: {error}"))?;
     loop {
-        let mut database = sqlx::PgConnection::connect(&world.database_url)
-            .await
-            .map_err(|error| format!("failed to inspect metadata recovery: {error}"))?;
         let (usage_facts, recovered, pending, lag): (i64, i64, Option<i64>, Option<i64>) =
             sqlx::query_as(
                 "SELECT \
@@ -340,10 +313,10 @@ async fn await_metadata_recovery(
 
 async fn await_healthy_recovered_workers(world: &World, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
+    let mut database = sqlx::PgConnection::connect(&world.database_url)
+        .await
+        .map_err(|error| format!("failed to inspect worker health: {error}"))?;
     loop {
-        let mut database = sqlx::PgConnection::connect(&world.database_url)
-            .await
-            .map_err(|error| format!("failed to inspect worker health: {error}"))?;
         let state: (i64, i64, i64, i64, i64, bool, i64, Option<i64>, Option<i64>) = sqlx::query_as(
             "SELECT \
                    (SELECT count(*)::bigint FROM transactional_outbox WHERE published_at IS NULL), \
@@ -406,8 +379,10 @@ async fn prove_shared_valkey_isolation(
     installation_a: &World,
     installation_b: &World,
 ) -> Result<Vec<String>, String> {
+    let valkey_url_a = installation_a.valkey_url().await?;
+    let valkey_url_b = installation_b.valkey_url().await?;
     require!(
-        installation_a.valkey_url()? == installation_b.valkey_url()?,
+        valkey_url_a == valkey_url_b,
         "installations did not receive the exact same Valkey URL"
     );
     let prefix_a = installation_prefix(&installation_a.database_url).await?;
@@ -424,7 +399,7 @@ async fn prove_shared_valkey_isolation(
     require!(channel_a != channel_b, "runtime hint channels collide");
     require!(stream_a != stream_b, "request metadata streams collide");
 
-    let client = redis::Client::open(installation_a.valkey_url()?)
+    let client = redis::Client::open(valkey_url_a.clone())
         .map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
     let mut pubsub = client
         .get_async_pubsub()
@@ -439,10 +414,7 @@ async fn prove_shared_valkey_isolation(
         .await
         .map_err(|error| format!("failed to subscribe to installation B hints: {error}"))?;
     let mut hints = pubsub.on_message();
-    while tokio::time::timeout(Duration::from_millis(100), hints.next())
-        .await
-        .is_ok()
-    {}
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(100), hints.next()).await {}
 
     let b_generation_before = latest_runtime_generation(&installation_b.database_url).await?;
     let b_processed_before = metadata_processed(&installation_b.database_url).await?;
@@ -501,14 +473,12 @@ async fn prove_shared_valkey_isolation(
     );
 
     let same_lookup = "identical_lookup_01";
-    let limiter_a =
-        DistributedLimiter::connect(&installation_a.valkey_url()?, format!("{prefix_a}:limits"))
-            .await
-            .map_err(|error| format!("installation A limiter failed to connect: {error}"))?;
-    let limiter_b =
-        DistributedLimiter::connect(&installation_b.valkey_url()?, format!("{prefix_b}:limits"))
-            .await
-            .map_err(|error| format!("installation B limiter failed to connect: {error}"))?;
+    let limiter_a = DistributedLimiter::connect(&valkey_url_a, format!("{prefix_a}:limits"))
+        .await
+        .map_err(|error| format!("installation A limiter failed to connect: {error}"))?;
+    let limiter_b = DistributedLimiter::connect(&valkey_url_b, format!("{prefix_b}:limits"))
+        .await
+        .map_err(|error| format!("installation B limiter failed to connect: {error}"))?;
     let limit_request = || LimitRequest {
         lookup_id: same_lookup,
         requests_per_minute: Some(1),
@@ -540,11 +510,7 @@ async fn prove_shared_valkey_isolation(
         "installation B did not enforce its own exhausted RPM/TPM/concurrency state"
     );
 
-    let keys_b = valkey_keys(
-        installation_b.valkey_url()?.as_str(),
-        &format!("{prefix_b}:*"),
-    )
-    .await?;
+    let keys_b = valkey_keys(&valkey_url_b, &format!("{prefix_b}:*")).await?;
     require!(
         !keys_b.is_empty(),
         "installation B created no namespaced Valkey keys"

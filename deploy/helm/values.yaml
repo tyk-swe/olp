@@ -115,7 +115,9 @@ worker:
   replicas: 1
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
+    # Single-worker defaults must allow voluntary eviction; production
+    # multi-replica installations should raise this to at least 1.
+    minAvailable: 0
   topologySpread:
     enabled: true
     maxSkew: 1
