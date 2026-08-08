@@ -13,8 +13,11 @@ use olp::test_support::{
 use olp_domain::Surface;
 use olp_inference::runtime::RuntimeManager;
 use olp_storage::{
-    request_metadata::RequestAttemptMetadata, request_metadata::RequestMetadataEvent,
-    request_metadata::RequestMetadataGap, security::MasterKey,
+    request_metadata::RequestAttemptMetadata,
+    request_metadata::RequestMetadataEvent,
+    request_metadata::RequestMetadataGap,
+    security::MasterKey,
+    worker_health::{RequestMetadataConsumerActivity, WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
@@ -273,6 +276,31 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .report_request_metadata_consumer_health(2, 3, Some(Utc::now() - Duration::seconds(30)))
         .await
         .unwrap();
+    store
+        .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
+            reclaimed: 1,
+            recovered: 1,
+            duplicates: 1,
+            processed: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .acquire_runtime_outbox_leader()
+        .await
+        .unwrap()
+        .release()
+        .await
+        .unwrap();
+    for task in [
+        WorkerTask::Maintenance,
+        WorkerTask::RequestMetadataGatewayEpochDetection,
+    ] {
+        store
+            .report_worker_task_checkpoint(task, WorkerTaskCheckpointOutcome::Success, true)
+            .await
+            .unwrap();
+    }
 
     let requests = get(&app, "/api/v1/requests?limit=1", &cookie).await;
     assert_eq!(requests.status(), StatusCode::OK);
@@ -351,10 +379,29 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert_eq!(ready.status(), StatusCode::OK);
     let ready_body = response_json(ready).await;
     assert_eq!(ready_body["status"], "degraded");
+    assert_eq!(ready_body["asynchronous_plane"], "backlogged");
+    assert_eq!(ready_body["asynchronous_plane_current"], true);
+    assert_eq!(ready_body["asynchronous_plane_drained"], false);
     assert_eq!(ready_body["request_metadata_complete"], false);
     assert_eq!(ready_body["request_metadata_consumer"], "backlogged");
     assert_eq!(ready_body["request_metadata_consumer_pending_events"], 2);
     assert_eq!(ready_body["request_metadata_consumer_lag_events"], 3);
+    assert!(ready_body["request_metadata_consumer_oldest_pending_at"].is_string());
+    assert!(
+        ready_body["request_metadata_consumer_oldest_pending_age_seconds"]
+            .as_u64()
+            .is_some_and(|age| age >= 30)
+    );
+    assert_eq!(ready_body["request_metadata_reclaimed_events_total"], 1);
+    assert_eq!(ready_body["request_metadata_recovered_events_total"], 1);
+    assert_eq!(
+        ready_body["request_metadata_duplicate_persistence_total"],
+        1
+    );
+    assert_eq!(ready_body["runtime_outbox"], "healthy");
+    assert_eq!(ready_body["runtime_outbox_pending_rows"], 0);
+    assert_eq!(ready_body["runtime_outbox_owner_active"], false);
+    assert_eq!(ready_body["runtime_outbox_claimed_rows"], 0);
 
     let management_ready = get(&app, "/api/v1/health/ready", &cookie).await;
     assert_eq!(management_ready.status(), StatusCode::OK);
@@ -396,8 +443,23 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert!(metrics.contains("olp_ready 1"));
     assert!(metrics.contains("olp_request_metadata_consumer_pending_events 2"));
     assert!(metrics.contains("olp_request_metadata_consumer_lag_events 3"));
+    assert!(metrics.contains("# HELP olp_request_metadata_consumer_pending_events "));
+    assert!(metrics.contains("# TYPE olp_request_metadata_consumer_pending_events gauge"));
+    assert!(metrics.contains("# HELP olp_request_metadata_consumer_lag_events "));
+    assert!(metrics.contains("# TYPE olp_request_metadata_consumer_lag_events gauge"));
+    assert!(metrics.contains("# HELP olp_request_metadata_consumer_heartbeat_age_seconds "));
+    assert!(metrics.contains("# TYPE olp_request_metadata_consumer_heartbeat_age_seconds gauge"));
     assert!(metrics.contains("olp_request_metadata_consumer_healthy 0"));
     assert!(metrics.contains("olp_request_metadata_consumer_stale 1"));
+    assert!(metrics.contains("# HELP olp_request_metadata_events_reclaimed_total "));
+    assert!(metrics.contains("# TYPE olp_request_metadata_events_reclaimed_total counter"));
+    assert!(metrics.contains("olp_request_metadata_events_reclaimed_total 1"));
+    assert!(metrics.contains("olp_request_metadata_persistence_duplicates_total 1"));
+    assert!(metrics.contains("# HELP olp_runtime_outbox_pending_rows "));
+    assert!(metrics.contains("# TYPE olp_runtime_outbox_pending_rows gauge"));
+    assert!(metrics.contains("olp_runtime_outbox_pending_rows 0"));
+    assert!(metrics.contains("olp_async_plane_current 0"));
+    assert!(metrics.contains("olp_async_plane_healthy 0"));
     assert!(metrics.contains("olp_operational_metrics_available 1"));
     assert!(metrics.contains("olp_request_success_ratio_5m"));
     assert!(metrics.contains("olp_request_latency_seconds{quantile=\"0.95\"}"));

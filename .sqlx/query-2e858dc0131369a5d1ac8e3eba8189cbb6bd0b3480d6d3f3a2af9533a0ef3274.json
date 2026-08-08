@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_worker_counters SET runtime_outbox_failed_takeovers_total = runtime_outbox_failed_takeovers_total + 1 WHERE singleton AND EXISTS ( SELECT 1 FROM runtime_outbox_health WHERE singleton AND owner_active AND checked_at < clock_timestamp() - make_interval(secs => $1::double precision) )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e858dc0131369a5d1ac8e3eba8189cbb6bd0b3480d6d3f3a2af9533a0ef3274"
+}

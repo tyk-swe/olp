@@ -8,7 +8,9 @@ use chrono::{TimeDelta, Utc};
 use olp::test_support::{
     OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch,
 };
-use olp_storage::{PgStore, test_support::TestDb, valkey::ValkeyAdapterError};
+use olp_storage::{
+    PgStore, runtime::RuntimeOutboxState, test_support::TestDb, valkey::ValkeyAdapterError,
+};
 use tokio::sync::{Barrier, oneshot, watch};
 use uuid::Uuid;
 
@@ -301,6 +303,10 @@ async fn runtime_outbox_death_after_publish_before_mark_causes_only_an_idempoten
         .await
         .unwrap()
         .remove(0);
+    assert_eq!(
+        old_owner.begin_publication(record.id).await.unwrap(),
+        Some(1)
+    );
     let mut publisher = RecordingPublisher::default();
     publisher
         .publish_runtime_hint(&record.payload)
@@ -349,6 +355,14 @@ async fn runtime_outbox_ambiguous_valkey_error_keeps_the_row_pending_for_retry()
         OutboxBatchOutcome::Retry
     );
     assert_eq!(unpublished_count(&store).await, 1);
+    let pending = store.runtime_outbox_status(Utc::now()).await.unwrap();
+    assert_eq!(pending.state, RuntimeOutboxState::Backlogged);
+    assert_eq!(pending.pending_rows, 1);
+    assert_eq!(pending.claimed_rows, 0);
+    let counters = store.worker_recovery_counters().await.unwrap();
+    assert_eq!(counters.runtime_outbox_attempts, 1);
+    assert_eq!(counters.runtime_outbox_retry_scheduled, 1);
+    assert_eq!(counters.runtime_outbox_repeated_attempts, 0);
 
     assert_eq!(
         publish_outbox_batch(&mut first_owner, &mut publisher, &mut shutdown)
@@ -362,6 +376,73 @@ async fn runtime_outbox_ambiguous_valkey_error_keeps_the_row_pending_for_retry()
         vec![rows[0].payload.clone(), rows[0].payload.clone()]
     );
     assert_eq!(unpublished_count(&store).await, 0);
+    let counters = store.worker_recovery_counters().await.unwrap();
+    assert_eq!(counters.runtime_outbox_attempts, 2);
+    assert_eq!(counters.runtime_outbox_retry_scheduled, 1);
+    assert_eq!(counters.runtime_outbox_repeated_attempts, 1);
+    assert_eq!(counters.runtime_outbox_published, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make db-test"]
+async fn stale_outbox_owner_failed_takeover_and_abandoned_claim_are_durable() {
+    let db = TestDb::create_migrated("outbox_failed_takeover_visibility").await;
+    let store = db.store(6).await;
+    let rows = insert_outbox_rows(&store, 1).await;
+    let mut owner = store.acquire_runtime_outbox_leader().await.unwrap();
+    assert_eq!(owner.begin_publication(rows[0].id).await.unwrap(), Some(1));
+    sqlx::query(
+        "UPDATE runtime_outbox_health SET checked_at = now() - interval '1 minute' \
+         WHERE singleton",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    assert!(
+        store
+            .try_acquire_runtime_outbox_leader()
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let stale = store.runtime_outbox_status(Utc::now()).await.unwrap();
+    assert_eq!(stale.state, RuntimeOutboxState::Stale);
+    assert_eq!(stale.pending_rows, 1);
+    assert_eq!(stale.claimed_rows, 1);
+    assert!(stale.ownership_abandoned());
+    assert_eq!(
+        store
+            .worker_recovery_counters()
+            .await
+            .unwrap()
+            .runtime_outbox_failed_takeovers,
+        1
+    );
+
+    drop(owner);
+    let takeover = store
+        .try_acquire_runtime_outbox_leader()
+        .await
+        .unwrap()
+        .expect("the abandoned PostgreSQL session lock must be recoverable");
+    let counters = store.worker_recovery_counters().await.unwrap();
+    assert_eq!(counters.runtime_outbox_abandoned_ownership, 1);
+    assert_eq!(counters.runtime_outbox_abandoned_claims, 1);
+    takeover.release().await.unwrap();
+
+    let handoff = store.runtime_outbox_status(Utc::now()).await.unwrap();
+    assert!(!handoff.owner_active);
+    assert!(!handoff.ownership_abandoned());
+    let clean_owner = store
+        .try_acquire_runtime_outbox_leader()
+        .await
+        .unwrap()
+        .expect("cleanly released leadership must be immediately available");
+    let after_clean_handoff = store.worker_recovery_counters().await.unwrap();
+    assert_eq!(after_clean_handoff.runtime_outbox_abandoned_ownership, 1);
+    assert_eq!(after_clean_handoff.runtime_outbox_abandoned_claims, 1);
+    clean_owner.release().await.unwrap();
 }
 
 #[tokio::test]

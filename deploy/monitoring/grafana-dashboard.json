@@ -107,6 +107,34 @@
         { "refId": "A", "expr": "min(olp_distributed_limiter_available{namespace=~\"$namespace\"})", "legendFormat": "limiter available" },
         { "refId": "B", "expr": "sum(olp_open_target_circuits{namespace=~\"$namespace\"})", "legendFormat": "open target circuits" }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Asynchronous plane and worker tasks",
+      "id": 13,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "min(olp_async_plane_current{namespace=~\"$namespace\"})", "legendFormat": "plane current" },
+        { "refId": "B", "expr": "min(olp_async_plane_drained{namespace=~\"$namespace\"})", "legendFormat": "plane drained" },
+        { "refId": "C", "expr": "min by (task) (olp_worker_task_healthy{namespace=~\"$namespace\"})", "legendFormat": "{{task}} healthy" },
+        { "refId": "D", "expr": "min(olp_async_worker_observability_available{namespace=~\"$namespace\"})", "legendFormat": "worker observability available" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker recovery and runtime outbox",
+      "id": 14,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "targets": [
+        { "refId": "A", "expr": "max(olp_runtime_outbox_pending_rows{namespace=~\"$namespace\"})", "legendFormat": "outbox pending" },
+        { "refId": "B", "expr": "max(olp_runtime_outbox_claimed_rows{namespace=~\"$namespace\"})", "legendFormat": "outbox claimed" },
+        { "refId": "C", "expr": "max(olp_runtime_outbox_oldest_pending_age_seconds{namespace=~\"$namespace\"})", "legendFormat": "oldest pending age (s)" },
+        { "refId": "D", "expr": "max(rate(olp_request_metadata_events_reclaimed_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata reclaimed/s" },
+        { "refId": "E", "expr": "max(rate(olp_request_metadata_persistence_duplicates_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata duplicates/s" },
+        { "refId": "F", "expr": "max(rate(olp_runtime_outbox_publication_retries_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "outbox retries/s" },
+        { "refId": "G", "expr": "max(rate(olp_runtime_outbox_failed_takeovers_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "failed takeovers/s" }
+      ]
     }
   ],
   "refresh": "15s",
@@ -130,5 +158,5 @@
   "timezone": "utc",
   "title": "OpenLLMProxy Operations",
   "uid": "openllmproxy-v2",
-  "version": 2
+  "version": 3
 }

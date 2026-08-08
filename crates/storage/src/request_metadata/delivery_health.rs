@@ -6,6 +6,7 @@ use crate::{
     PersistenceError, PgStore,
     operations::{OperationsError, OperationsPage, TimestampCursor},
     split_page,
+    worker_health::{WorkerTask, WorkerTaskCheckpointOutcome, checkpoint_worker_task_on},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,31 +115,58 @@ impl PgStore {
         {
             return Err(PersistenceError::InvalidRequestMetadataGap);
         }
+        let mut transaction = self.pool().begin().await?;
         let row = sqlx::query!(
             "INSERT INTO request_metadata_consumer_health \
              (singleton, pending_events, lag_events, oldest_pending_at, checked_at) \
-             VALUES (true, $1, $2, $3, $4) \
+             VALUES (true, $1, $2, $3, clock_timestamp()) \
              ON CONFLICT (singleton) DO UPDATE SET \
                pending_events = EXCLUDED.pending_events, \
                lag_events = EXCLUDED.lag_events, \
                oldest_pending_at = EXCLUDED.oldest_pending_at, \
                checked_at = EXCLUDED.checked_at \
+             WHERE request_metadata_consumer_health.checked_at <= EXCLUDED.checked_at \
              RETURNING pending_events, lag_events, oldest_pending_at, checked_at",
             pending_events,
             lag_events,
             oldest_pending_at,
-            checked_at
         )
-        .fetch_one(self.pool())
+        .fetch_optional(&mut *transaction)
         .await?;
-        Ok(RequestMetadataConsumerHealth {
-            pending_events: u64::try_from(row.pending_events)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-            lag_events: u64::try_from(row.lag_events)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
-            oldest_pending_at: row.oldest_pending_at,
-            checked_at: row.checked_at,
-        })
+        let health = if let Some(row) = row {
+            RequestMetadataConsumerHealth {
+                pending_events: u64::try_from(row.pending_events)
+                    .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                lag_events: u64::try_from(row.lag_events)
+                    .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                oldest_pending_at: row.oldest_pending_at,
+                checked_at: row.checked_at,
+            }
+        } else {
+            let row = sqlx::query!(
+                "SELECT pending_events, lag_events, oldest_pending_at, checked_at \
+                 FROM request_metadata_consumer_health WHERE singleton"
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            RequestMetadataConsumerHealth {
+                pending_events: u64::try_from(row.pending_events)
+                    .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                lag_events: u64::try_from(row.lag_events)
+                    .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                oldest_pending_at: row.oldest_pending_at,
+                checked_at: row.checked_at,
+            }
+        };
+        checkpoint_worker_task_on(
+            &mut transaction,
+            WorkerTask::RequestMetadataConsumer,
+            WorkerTaskCheckpointOutcome::Success,
+            false,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(health)
     }
 
     pub async fn request_metadata_consumer_health(

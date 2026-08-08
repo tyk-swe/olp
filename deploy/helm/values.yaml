@@ -163,3 +163,4 @@ monitoring:
     # Zero implements the default runbook policy: any sustained backlog warns.
     # Raise this only with a documented installation-specific noise budget.
     requestMetadataPendingThreshold: 0
+    runtimeOutboxPendingThreshold: 0

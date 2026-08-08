@@ -1461,6 +1461,11 @@ export interface components {
             new_password: string;
         };
         HealthResponse: {
+            asynchronous_plane: string;
+            asynchronous_plane_current: boolean;
+            asynchronous_plane_drained: boolean;
+            /** Format: date-time */
+            asynchronous_plane_last_progress_at?: string | null;
             database: string;
             /** Format: int64 */
             generation?: number | null;
@@ -1484,10 +1489,14 @@ export interface components {
             request_metadata_consumer_heartbeat_age_seconds?: number | null;
             /** Format: int64 */
             request_metadata_consumer_lag_events: number;
+            /** Format: int64 */
+            request_metadata_consumer_oldest_pending_age_seconds?: number | null;
             /** Format: date-time */
             request_metadata_consumer_oldest_pending_at?: string | null;
             /** Format: int64 */
             request_metadata_consumer_pending_events: number;
+            /** Format: int64 */
+            request_metadata_duplicate_persistence_total?: number | null;
             /** Format: int64 */
             request_metadata_gateway_open_epochs: number;
             /** Format: int64 */
@@ -1496,7 +1505,38 @@ export interface components {
             request_metadata_gateway_unresolved_event_lower_bound: number;
             /** Format: int64 */
             request_metadata_historical_uncertain_gaps: number;
+            /** Format: int64 */
+            request_metadata_reclaimed_events_total?: number | null;
+            /** Format: int64 */
+            request_metadata_recovered_events_total?: number | null;
+            runtime_outbox: string;
+            /** Format: int64 */
+            runtime_outbox_abandoned_ownership_total?: number | null;
+            /** Format: int64 */
+            runtime_outbox_claimed_rows: number;
+            /** Format: int64 */
+            runtime_outbox_failed_takeovers_total?: number | null;
+            /** Format: int64 */
+            runtime_outbox_heartbeat_age_seconds?: number | null;
+            /** Format: int64 */
+            runtime_outbox_oldest_pending_age_seconds?: number | null;
+            /** Format: date-time */
+            runtime_outbox_oldest_pending_at?: string | null;
+            runtime_outbox_owner_abandoned: boolean;
+            runtime_outbox_owner_active: boolean;
+            /** Format: int64 */
+            runtime_outbox_pending_rows: number;
+            /** Format: int64 */
+            runtime_outbox_publication_attempts_total?: number | null;
+            /** Format: int64 */
+            runtime_outbox_publication_retries_total?: number | null;
+            /** Format: int64 */
+            runtime_outbox_repeated_publication_attempts_total?: number | null;
             status: string;
+            /** Format: int64 */
+            worker_tasks_stale: number;
+            /** Format: int64 */
+            worker_tasks_unknown: number;
         };
         InvitationListResponse: {
             data: components["schemas"]["InvitationResponse"][];

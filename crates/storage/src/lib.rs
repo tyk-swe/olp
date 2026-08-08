@@ -22,6 +22,7 @@ mod store;
 pub mod test_support;
 pub mod usage;
 pub mod valkey;
+pub mod worker_health;
 
 pub use error::PersistenceError;
 pub use store::PgStore;

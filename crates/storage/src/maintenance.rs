@@ -23,6 +23,7 @@ pub enum MaintenanceError {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MaintenanceReport {
+    pub lock_acquired: bool,
     pub rollup_rows: u64,
     pub request_metadata_gap_rollup_rows: u64,
     pub request_rows: u64,
@@ -294,6 +295,7 @@ impl PgStore {
 
         transaction.commit().await?;
         Ok(MaintenanceReport {
+            lock_acquired: true,
             rollup_rows: rollups,
             request_metadata_gap_rollup_rows,
             request_rows,

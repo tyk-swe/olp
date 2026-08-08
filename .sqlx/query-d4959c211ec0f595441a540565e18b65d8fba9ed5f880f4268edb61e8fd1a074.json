@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE transactional_outbox SET publication_attempts = publication_attempts + 1 WHERE id = $1 AND published_at IS NULL RETURNING publication_attempts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "publication_attempts",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transactional_outbox",
+            "name": "publication_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d4959c211ec0f595441a540565e18b65d8fba9ed5f880f4268edb61e8fd1a074"
+}

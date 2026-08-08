@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT owner_active, claimed_rows, checked_at, last_progress_at FROM runtime_outbox_health WHERE singleton",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "owner_active"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "claimed_rows",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "claimed_rows"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "checked_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_progress_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "last_progress_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c77ccd984d5c969444b8749fe416e9da657be0abee7fe0d074cdc70d01e515bb"
+}

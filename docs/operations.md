@@ -19,11 +19,59 @@ stale snapshot freshness as well as absent readiness. Page when readiness is
 absent for five minutes, request-metadata events are dropped or abandoned,
 request-metadata persistence is unavailable, or the distributed limiter is
 unavailable while hard limits are configured; warn when a request-metadata
-backlog stays nonzero for ten minutes. The bundled Prometheus rules implement
-these defaults, one ServiceMonitor per HTTP component keeps a healthy gateway
-from hiding control failure, and the Grafana dashboard is a starting point.
+or runtime-outbox backlog stays above its configured threshold for ten
+minutes. Page when every asynchronous-plane reporter is stale or when a live
+replica cannot take over an outbox owner past its heartbeat window. The
+bundled Prometheus rules implement these defaults, one ServiceMonitor per HTTP
+component keeps a healthy gateway from hiding control failure, and the
+Grafana dashboard is a starting point.
 See [deployment.md](deployment.md) for edge routing and observability
 exposure.
+
+### Replicated worker health
+
+`/health/ready` and `/metrics` read PostgreSQL-backed fleet summaries; worker
+pods do not serve HTTP. `asynchronous_plane: healthy` means every fixed worker
+responsibility has a current successful checkpoint and both the
+request-metadata consumer group and runtime outbox are drained. It never
+requires a particular replica or exactly one worker. Metadata consumption,
+outbox publication, and gateway-epoch detection become stale after 20 seconds
+without a successful checkpoint (four missed five-second heartbeats).
+Maintenance becomes stale after 180 seconds (three missed one-minute passes).
+A clean outbox release remains current during the 20-second handoff window, so
+a replacement can acquire leadership without leaving a permanent incident.
+
+Use these bounded, content-free signals during diagnosis:
+
+- `olp_request_metadata_consumer_pending_events`,
+  `olp_request_metadata_consumer_lag_events`, and
+  `olp_request_metadata_consumer_oldest_pending_age_seconds` show group
+  backlog.
+- `olp_request_metadata_events_reclaimed_total`,
+  `olp_request_metadata_events_recovered_total`, and
+  `olp_request_metadata_persistence_duplicates_total` show at-least-once
+  recovery activity. They count outcomes, not unique event identities.
+- `olp_runtime_outbox_pending_rows`, `olp_runtime_outbox_claimed_rows`,
+  `olp_runtime_outbox_owner_stale`, and the publication attempt/retry counters
+  distinguish backlog, an active side effect, abandoned ownership, and a
+  harmless repeated hint.
+- `olp_worker_task_healthy{task=...}` and
+  `olp_worker_task_runs_total{task=...,outcome=...}` use only four fixed task
+  values and three fixed outcomes. No worker, stream, event, route, key,
+  provider, or installation identifier is exported.
+
+The counters are PostgreSQL-side additive totals shared by every replica. If
+one of the durable summaries cannot be read, readiness returns `null` for
+these totals and Prometheus omits their series while setting
+`olp_async_worker_observability_available` to zero; an outage therefore does
+not appear as a counter reset.
+
+When the plane is current but not drained, inspect the oldest-entry ages and
+dependency health before scaling workers. Reclaim and duplicate increments
+alone are evidence that recovery worked, not a paging condition. A rising
+failed-takeover counter is actionable: inspect the PostgreSQL session holding
+the outbox advisory lock before terminating it through the database's normal
+operational procedure.
 
 ## Routine checks
 

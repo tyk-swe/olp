@@ -1,0 +1,158 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT request_metadata_reclaimed_total, request_metadata_recovered_total, request_metadata_duplicates_total, request_metadata_processed_total, runtime_outbox_attempts_total, runtime_outbox_retry_scheduled_total, runtime_outbox_repeated_attempts_total, runtime_outbox_published_total, runtime_outbox_duplicate_publications_total, runtime_outbox_abandoned_ownership_total, runtime_outbox_abandoned_claims_total, runtime_outbox_failed_takeovers_total FROM async_worker_counters WHERE singleton",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_metadata_reclaimed_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "request_metadata_reclaimed_total"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "request_metadata_recovered_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "request_metadata_recovered_total"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "request_metadata_duplicates_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "request_metadata_duplicates_total"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "request_metadata_processed_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "request_metadata_processed_total"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "runtime_outbox_attempts_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_attempts_total"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "runtime_outbox_retry_scheduled_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_retry_scheduled_total"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "runtime_outbox_repeated_attempts_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_repeated_attempts_total"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "runtime_outbox_published_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_published_total"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "runtime_outbox_duplicate_publications_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_duplicate_publications_total"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "runtime_outbox_abandoned_ownership_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_abandoned_ownership_total"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "runtime_outbox_abandoned_claims_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_abandoned_claims_total"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "runtime_outbox_failed_takeovers_total",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "async_worker_counters",
+            "name": "runtime_outbox_failed_takeovers_total"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ebbb6e041bb29aa071535c3c42cd07ce671bc7a9f30433c586a7cd905503e2d5"
+}

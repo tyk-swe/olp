@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE transactional_outbox SET published_at = clock_timestamp() WHERE id = $1 AND published_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab4fd6d23f476a367dde89b7ae1d798daf73a3e5cae17d43b79792659a9512a4"
+}

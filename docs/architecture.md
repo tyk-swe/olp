@@ -124,8 +124,21 @@ and prevents the stale connection from completing work. A crash after Valkey
 accepts `PUBLISH` but before `published_at` commits can produce an additional
 hint on retry, which is harmless because every hint only triggers an
 authoritative PostgreSQL read. The leader connection is always closed rather
-than returned locked to the pool. Each worker replica therefore uses one
-dedicated PostgreSQL session, including while it waits as a standby.
+than returned locked to the pool. Standby replicas use a bounded nonblocking
+advisory-lock probe every five seconds. A probe that cannot acquire an owner
+past its durable heartbeat window increments the shared failed-takeover
+counter; ordinary contention with a current owner is only a skipped task
+checkpoint.
+
+Every worker responsibility has one PostgreSQL task checkpoint shared by all
+replicas: runtime outbox publication, request-metadata consumption,
+maintenance, and stale gateway-epoch detection. Successful timestamps advance
+with `GREATEST`, and outcome/recovery counters add database-side deltas, so a
+late or restarted process cannot regress the fleet view. Outbox ownership and
+the one row inside an active publication attempt are summarized separately;
+the session advisory lock remains authoritative. Maintenance retains its
+transaction advisory lock, epoch detection retains `FOR UPDATE SKIP LOCKED`,
+and Stream recovery retains `XAUTOCLAIM` plus idempotent PostgreSQL receipts.
 Each request holds one `Arc` with its configuration, key indexes, and
 provider transports, so a stream cannot cross a generation or credential
 version.

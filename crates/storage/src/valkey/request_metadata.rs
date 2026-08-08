@@ -14,6 +14,7 @@ use crate::{
     request_metadata::{
         RequestMetadataEvent, RequestMetadataGap, RequestMetadataPersistenceOutcome,
     },
+    worker_health::RequestMetadataConsumerActivity,
 };
 
 use super::{ValkeyAdapterError, valkey_connection};
@@ -80,6 +81,14 @@ struct AutoClaimPage {
 struct ProcessingSummary {
     retry: bool,
     shutdown: bool,
+    completed: u64,
+    duplicates: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EntryProcessingOutcome {
+    Completed { duplicate: bool },
+    Retry,
 }
 
 /// Runs one request-metadata consumer identity until shutdown. Callers must
@@ -162,6 +171,7 @@ async fn run_request_metadata_consumer_with_policy(
             let summary =
                 process_entries(store, &mut connection, stream, consumer, entries, &shutdown)
                     .await?;
+            report_processing_activity(store, summary, true).await?;
             if summary.shutdown {
                 return Ok(());
             }
@@ -186,6 +196,14 @@ async fn run_request_metadata_consumer_with_policy(
                 policy.batch_size,
             )
             .await?;
+            store
+                .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
+                    reclaimed: u64::try_from(page.entries.len()).map_err(|_| {
+                        ValkeyAdapterError::InvalidState("reclaimed entry count overflow")
+                    })?,
+                    ..RequestMetadataConsumerActivity::default()
+                })
+                .await?;
             report_deleted_pending_entries(store, consumer, &page.deleted_ids).await?;
             let next_start = page.next_start;
             let summary = process_entries(
@@ -197,6 +215,7 @@ async fn run_request_metadata_consumer_with_policy(
                 &shutdown,
             )
             .await?;
+            report_processing_activity(store, summary, true).await?;
             if summary.shutdown {
                 return Ok(());
             }
@@ -249,6 +268,7 @@ async fn run_request_metadata_consumer_with_policy(
         };
         let summary =
             process_entries(store, &mut connection, stream, consumer, entries, &shutdown).await?;
+        report_processing_activity(store, summary, false).await?;
         if summary.shutdown {
             return Ok(());
         }
@@ -375,11 +395,31 @@ async fn process_entries(
             summary.shutdown = true;
             break;
         }
-        if process_entry(store, connection, stream, consumer, entry).await? {
-            summary.retry = true;
+        match process_entry(store, connection, stream, consumer, entry).await? {
+            EntryProcessingOutcome::Completed { duplicate } => {
+                summary.completed = summary.completed.saturating_add(1);
+                summary.duplicates = summary.duplicates.saturating_add(u64::from(duplicate));
+            }
+            EntryProcessingOutcome::Retry => summary.retry = true,
         }
     }
     Ok(summary)
+}
+
+async fn report_processing_activity(
+    store: &PgStore,
+    summary: ProcessingSummary,
+    recovered: bool,
+) -> Result<(), ValkeyAdapterError> {
+    store
+        .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
+            recovered: if recovered { summary.completed } else { 0 },
+            duplicates: summary.duplicates,
+            processed: summary.completed,
+            ..RequestMetadataConsumerActivity::default()
+        })
+        .await?;
+    Ok(())
 }
 
 /// Returns `true` when PostgreSQL rejected the attempt transiently and the
@@ -390,7 +430,7 @@ async fn process_entry(
     stream: &str,
     consumer: &str,
     entry: StreamEntry,
-) -> Result<bool, ValkeyAdapterError> {
+) -> Result<EntryProcessingOutcome, ValkeyAdapterError> {
     let Some(payload) = entry.payload else {
         error!(stream_id = %entry.id, "discarding malformed request metadata stream event");
         let now = Utc::now();
@@ -438,7 +478,9 @@ async fn process_entry(
                 warn!(stream_id = %entry.id, "request metadata event outside the replay window was recorded as an uncertain gap");
             }
             acknowledge_and_delete(connection, stream, &entry.id).await?;
-            Ok(false)
+            Ok(EntryProcessingOutcome::Completed {
+                duplicate: outcome == RequestMetadataPersistenceOutcome::Duplicate,
+            })
         }
         Err(PersistenceError::InvalidRequestMetadataEvent) => {
             error!(stream_id = %entry.id, "discarding permanently invalid request metadata event");
@@ -459,7 +501,7 @@ async fn process_entry(
         }
         Err(error) => {
             warn!(%error, stream_id = %entry.id, "request metadata persistence will retry");
-            Ok(true)
+            Ok(EntryProcessingOutcome::Retry)
         }
     }
 }
@@ -469,15 +511,15 @@ async fn finish_gap_or_retry(
     connection: &mut ConnectionManager,
     stream: &str,
     id: &str,
-) -> Result<bool, ValkeyAdapterError> {
+) -> Result<EntryProcessingOutcome, ValkeyAdapterError> {
     match result {
         Ok(_) => {
             acknowledge_and_delete(connection, stream, id).await?;
-            Ok(false)
+            Ok(EntryProcessingOutcome::Completed { duplicate: false })
         }
         Err(error) => {
             warn!(%error, stream_id = %id, "request metadata gap persistence will retry");
-            Ok(true)
+            Ok(EntryProcessingOutcome::Retry)
         }
     }
 }
