@@ -136,10 +136,11 @@
         "scrapeTimeout": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$" },
         "rules": {
           "type": "object",
-          "required": ["enabled", "requestMetadataPendingThreshold"],
+          "required": ["enabled", "requestMetadataPendingThreshold", "runtimeOutboxPendingThreshold"],
           "properties": {
             "enabled": { "type": "boolean" },
-            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 }
+            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 },
+            "runtimeOutboxPendingThreshold": { "type": "integer", "minimum": 0 }
           }
         }
       }

@@ -8,6 +8,213 @@ fn prometheus_labels_escape_control_syntax() {
     );
 }
 
+#[test]
+fn replicated_worker_metrics_declare_types_and_render_durable_values() {
+    use olp_storage::{
+        request_metadata::RequestMetadataConsumerStatus,
+        runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
+        worker_health::{
+            WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary, WorkerTaskState,
+            WorkerTaskStatus,
+        },
+    };
+
+    use crate::observability::append_async_worker_metrics;
+
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-08T12:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let consumer = RequestMetadataConsumerStatus::from_health(
+        Some(
+            olp_storage::request_metadata::RequestMetadataConsumerHealth {
+                pending_events: 2,
+                lag_events: 3,
+                oldest_pending_at: Some(now - chrono::Duration::seconds(30)),
+                checked_at: now - chrono::Duration::seconds(2),
+            },
+        ),
+        now,
+    );
+    let outbox = RuntimeOutboxStatus {
+        state: RuntimeOutboxState::Backlogged,
+        pending_rows: 4,
+        oldest_pending_at: Some(now - chrono::Duration::seconds(45)),
+        owner_active: true,
+        claimed_rows: 1,
+        checked_at: Some(now - chrono::Duration::seconds(2)),
+        heartbeat_age_seconds: Some(2),
+        last_progress_at: Some(now - chrono::Duration::seconds(10)),
+        last_progress_age_seconds: Some(10),
+    };
+    let tasks = WorkerTaskHealthSummary {
+        tasks: WorkerTask::ALL
+            .into_iter()
+            .map(|task| WorkerTaskStatus {
+                task,
+                state: WorkerTaskState::Healthy,
+                checked_at: Some(now - chrono::Duration::seconds(2)),
+                last_success_at: Some(now - chrono::Duration::seconds(2)),
+                last_progress_at: Some(now - chrono::Duration::seconds(10)),
+                heartbeat_age_seconds: Some(2),
+                last_success_age_seconds: Some(2),
+                successes_total: 7,
+                failures_total: 1,
+                skipped_total: 5,
+            })
+            .collect(),
+    };
+    let counters = WorkerRecoveryCounters {
+        request_metadata_reclaimed: 11,
+        request_metadata_recovered: 12,
+        request_metadata_duplicates: 13,
+        request_metadata_processed: 14,
+        runtime_outbox_attempts: 15,
+        runtime_outbox_retry_scheduled: 16,
+        runtime_outbox_repeated_attempts: 17,
+        runtime_outbox_published: 18,
+        runtime_outbox_duplicate_publications: 19,
+        runtime_outbox_abandoned_ownership: 20,
+        runtime_outbox_abandoned_claims: 21,
+        runtime_outbox_failed_takeovers: 22,
+    };
+    let mut metrics = String::new();
+    append_async_worker_metrics(
+        &mut metrics,
+        now,
+        true,
+        consumer,
+        Some(outbox),
+        Some(&tasks),
+        Some(counters),
+    );
+
+    for (name, metric_type) in [
+        ("olp_async_worker_observability_available", "gauge"),
+        ("olp_async_plane_current", "gauge"),
+        ("olp_async_plane_drained", "gauge"),
+        ("olp_async_plane_healthy", "gauge"),
+        ("olp_async_plane_last_progress_timestamp_seconds", "gauge"),
+        (
+            "olp_request_metadata_consumer_oldest_pending_age_seconds",
+            "gauge",
+        ),
+        ("olp_request_metadata_events_reclaimed_total", "counter"),
+        ("olp_request_metadata_events_recovered_total", "counter"),
+        (
+            "olp_request_metadata_persistence_duplicates_total",
+            "counter",
+        ),
+        ("olp_request_metadata_events_processed_total", "counter"),
+        ("olp_runtime_outbox_pending_rows", "gauge"),
+        ("olp_runtime_outbox_oldest_pending_age_seconds", "gauge"),
+        ("olp_runtime_outbox_owner_active", "gauge"),
+        ("olp_runtime_outbox_claimed_rows", "gauge"),
+        ("olp_runtime_outbox_owner_stale", "gauge"),
+        ("olp_runtime_outbox_heartbeat_age_seconds", "gauge"),
+        ("olp_runtime_outbox_publication_attempts_total", "counter"),
+        ("olp_runtime_outbox_publication_retries_total", "counter"),
+        (
+            "olp_runtime_outbox_repeated_publication_attempts_total",
+            "counter",
+        ),
+        ("olp_runtime_outbox_published_total", "counter"),
+        ("olp_runtime_outbox_duplicate_publications_total", "counter"),
+        ("olp_runtime_outbox_abandoned_ownership_total", "counter"),
+        ("olp_runtime_outbox_abandoned_claims_total", "counter"),
+        ("olp_runtime_outbox_failed_takeovers_total", "counter"),
+        ("olp_worker_task_healthy", "gauge"),
+        ("olp_worker_task_heartbeat_age_seconds", "gauge"),
+        ("olp_worker_task_last_success_age_seconds", "gauge"),
+        ("olp_worker_task_runs_total", "counter"),
+    ] {
+        assert!(
+            metrics.contains(&format!("# HELP {name} ")),
+            "missing HELP for {name}"
+        );
+        assert!(
+            metrics.contains(&format!("# TYPE {name} {metric_type}\n")),
+            "missing TYPE for {name}"
+        );
+    }
+    for sample in [
+        "olp_async_worker_observability_available 1",
+        "olp_async_plane_current 1",
+        "olp_async_plane_drained 0",
+        "olp_async_plane_healthy 0",
+        "olp_request_metadata_consumer_oldest_pending_age_seconds 30",
+        "olp_request_metadata_events_reclaimed_total 11",
+        "olp_request_metadata_events_recovered_total 12",
+        "olp_request_metadata_persistence_duplicates_total 13",
+        "olp_request_metadata_events_processed_total 14",
+        "olp_runtime_outbox_pending_rows 4",
+        "olp_runtime_outbox_oldest_pending_age_seconds 45",
+        "olp_runtime_outbox_owner_active 1",
+        "olp_runtime_outbox_claimed_rows 1",
+        "olp_runtime_outbox_owner_stale 0",
+        "olp_runtime_outbox_heartbeat_age_seconds 2",
+        "olp_runtime_outbox_publication_attempts_total 15",
+        "olp_runtime_outbox_publication_retries_total 16",
+        "olp_runtime_outbox_repeated_publication_attempts_total 17",
+        "olp_runtime_outbox_published_total 18",
+        "olp_runtime_outbox_duplicate_publications_total 19",
+        "olp_runtime_outbox_abandoned_ownership_total 20",
+        "olp_runtime_outbox_abandoned_claims_total 21",
+        "olp_runtime_outbox_failed_takeovers_total 22",
+        "olp_worker_task_healthy{task=\"maintenance\"} 1",
+        "olp_worker_task_heartbeat_age_seconds{task=\"maintenance\"} 2",
+        "olp_worker_task_last_success_age_seconds{task=\"maintenance\"} 2",
+        "olp_worker_task_runs_total{task=\"maintenance\",outcome=\"success\"} 7",
+        "olp_worker_task_runs_total{task=\"maintenance\",outcome=\"failure\"} 1",
+        "olp_worker_task_runs_total{task=\"maintenance\",outcome=\"skipped\"} 5",
+    ] {
+        assert!(metrics.contains(sample), "missing sample {sample}");
+    }
+    assert!(metrics.contains(&format!(
+        "olp_async_plane_last_progress_timestamp_seconds {}",
+        (now - chrono::Duration::seconds(10)).timestamp()
+    )));
+    for forbidden_label in [
+        "worker_id=",
+        "stream_id=",
+        "event_id=",
+        "api_key=",
+        "route=",
+        "provider=",
+        "installation=",
+    ] {
+        assert!(!metrics.contains(forbidden_label));
+    }
+
+    let mut unavailable = String::new();
+    append_async_worker_metrics(
+        &mut unavailable,
+        now,
+        false,
+        consumer,
+        Some(outbox),
+        Some(&tasks),
+        Some(counters),
+    );
+    assert!(unavailable.contains("olp_async_worker_observability_available 0"));
+    assert!(unavailable.contains("olp_async_plane_current 0"));
+    assert!(unavailable.contains("olp_runtime_outbox_publication_attempts_total 15"));
+    assert!(unavailable.contains("olp_request_metadata_events_reclaimed_total 11"));
+
+    let mut missing_summaries = String::new();
+    append_async_worker_metrics(
+        &mut missing_summaries,
+        now,
+        false,
+        consumer,
+        None,
+        None,
+        None,
+    );
+    assert!(missing_summaries.contains("olp_async_worker_observability_available 0"));
+    assert!(!missing_summaries.contains("olp_runtime_outbox_publication_attempts_total"));
+    assert!(!missing_summaries.contains("olp_request_metadata_events_reclaimed_total"));
+}
+
 #[tokio::test]
 async fn public_router_serves_console_health_and_hides_observability_paths() {
     let console_dir =

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runtime_outbox_health SET owner_active = true, claimed_rows = 1, checked_at = clock_timestamp() WHERE singleton",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "69cfece18185c2d5a4e88f7e23514f1b0e8583847c48a34925b3c93ecac19565"
+}

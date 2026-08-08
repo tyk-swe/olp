@@ -805,6 +805,22 @@
       },
       "HealthResponse": {
         "properties": {
+          "asynchronous_plane": {
+            "type": "string"
+          },
+          "asynchronous_plane_current": {
+            "type": "boolean"
+          },
+          "asynchronous_plane_drained": {
+            "type": "boolean"
+          },
+          "asynchronous_plane_last_progress_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "database": {
             "type": "string"
           },
@@ -873,6 +889,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "request_metadata_consumer_oldest_pending_age_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "request_metadata_consumer_oldest_pending_at": {
             "format": "date-time",
             "type": [
@@ -884,6 +908,14 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "request_metadata_duplicate_persistence_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "request_metadata_gateway_open_epochs": {
             "format": "int64",
@@ -905,12 +937,125 @@
             "minimum": 0,
             "type": "integer"
           },
+          "request_metadata_reclaimed_events_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "request_metadata_recovered_events_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox": {
+            "type": "string"
+          },
+          "runtime_outbox_abandoned_ownership_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox_claimed_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtime_outbox_failed_takeovers_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox_heartbeat_age_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox_oldest_pending_age_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox_oldest_pending_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime_outbox_owner_abandoned": {
+            "type": "boolean"
+          },
+          "runtime_outbox_owner_active": {
+            "type": "boolean"
+          },
+          "runtime_outbox_pending_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtime_outbox_publication_attempts_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox_publication_retries_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_outbox_repeated_publication_attempts_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "status": {
             "type": "string"
+          },
+          "worker_tasks_stale": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "worker_tasks_unknown": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
           "status",
+          "asynchronous_plane",
+          "asynchronous_plane_current",
+          "asynchronous_plane_drained",
+          "worker_tasks_stale",
+          "worker_tasks_unknown",
           "database",
           "limits",
           "request_metadata_complete",
@@ -921,6 +1066,11 @@
           "request_metadata_gateway_unresolved_epochs",
           "request_metadata_historical_uncertain_gaps",
           "request_metadata_gateway_unresolved_event_lower_bound",
+          "runtime_outbox",
+          "runtime_outbox_pending_rows",
+          "runtime_outbox_owner_active",
+          "runtime_outbox_claimed_rows",
+          "runtime_outbox_owner_abandoned",
           "media_reconciliation",
           "media_reconciliation_pending",
           "media_reconciliation_stale",

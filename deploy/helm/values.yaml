@@ -160,6 +160,8 @@ monitoring:
   scrapeTimeout: 5s
   rules:
     enabled: true
-    # Zero implements the default runbook policy: any sustained backlog warns.
-    # Raise this only with a documented installation-specific noise budget.
+    # Zero implements the default runbook policy for both thresholds below:
+    # any sustained backlog warns. Raise either value only with a documented
+    # installation-specific noise budget.
     requestMetadataPendingThreshold: 0
+    runtimeOutboxPendingThreshold: 0

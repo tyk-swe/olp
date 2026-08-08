@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO worker_task_health (task, checked_at, last_success_at, last_progress_at, successes_total, failures_total, skipped_total) VALUES ($1, clock_timestamp(), CASE WHEN $2 THEN clock_timestamp() ELSE NULL END, CASE WHEN $3 THEN clock_timestamp() ELSE NULL END, $4, $5, $6) ON CONFLICT (task) DO UPDATE SET checked_at = GREATEST(worker_task_health.checked_at, EXCLUDED.checked_at), last_success_at = CASE WHEN $2 THEN GREATEST(worker_task_health.last_success_at, EXCLUDED.last_success_at) ELSE worker_task_health.last_success_at END, last_progress_at = CASE WHEN $3 THEN GREATEST(worker_task_health.last_progress_at, EXCLUDED.last_progress_at) ELSE worker_task_health.last_progress_at END, successes_total = worker_task_health.successes_total + EXCLUDED.successes_total, failures_total = worker_task_health.failures_total + EXCLUDED.failures_total, skipped_total = worker_task_health.skipped_total + EXCLUDED.skipped_total",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "093757327052117c0bcaec7c03ef9b6a383550696e206b95827703dc4e10f1c0"
+}

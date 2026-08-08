@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_worker_counters SET request_metadata_reclaimed_total = request_metadata_reclaimed_total + $1, request_metadata_recovered_total = request_metadata_recovered_total + $2, request_metadata_duplicates_total = request_metadata_duplicates_total + $3, request_metadata_processed_total = request_metadata_processed_total + $4, runtime_outbox_attempts_total = runtime_outbox_attempts_total + $5, runtime_outbox_retry_scheduled_total = runtime_outbox_retry_scheduled_total + $6, runtime_outbox_repeated_attempts_total = runtime_outbox_repeated_attempts_total + $7, runtime_outbox_published_total = runtime_outbox_published_total + $8, runtime_outbox_duplicate_publications_total = runtime_outbox_duplicate_publications_total + $9, runtime_outbox_abandoned_ownership_total = runtime_outbox_abandoned_ownership_total + $10, runtime_outbox_abandoned_claims_total = runtime_outbox_abandoned_claims_total + $11, runtime_outbox_failed_takeovers_total = runtime_outbox_failed_takeovers_total + $12 WHERE singleton",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c99bfe82a3943fa2a2e3b06cf3de07f5d643538f5940d43f860a7fb885c73a53"
+}

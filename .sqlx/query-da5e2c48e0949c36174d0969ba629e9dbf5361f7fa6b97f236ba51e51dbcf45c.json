@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT owner_active, claimed_rows, checked_at, last_progress_at, GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint AS \"heartbeat_age_seconds!\", CASE WHEN last_progress_at IS NULL THEN NULL ELSE GREATEST(0, floor(extract(epoch FROM clock_timestamp() - last_progress_at)))::bigint END AS last_progress_age_seconds FROM runtime_outbox_health WHERE singleton",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "owner_active"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "claimed_rows",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "claimed_rows"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "checked_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_progress_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "last_progress_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "heartbeat_age_seconds!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_progress_age_seconds",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "da5e2c48e0949c36174d0969ba629e9dbf5361f7fa6b97f236ba51e51dbcf45c"
+}

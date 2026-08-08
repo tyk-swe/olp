@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runtime_outbox_health SET owner_active = true, claimed_rows = 0, checked_at = clock_timestamp(), last_progress_at = CASE WHEN $1 THEN GREATEST(last_progress_at, clock_timestamp()) ELSE last_progress_at END WHERE singleton",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ddb0e9360a36c3b4f5e2eff283c379b5f9b7e2831e3acb35d5363e700527c8fd"
+}

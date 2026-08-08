@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
+pub const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
 const REQUEST_METADATA_RECEIPT_DELETE_BATCH: i64 = 250_000;
 
 #[derive(Debug, Error)]
@@ -23,6 +23,7 @@ pub enum MaintenanceError {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MaintenanceReport {
+    pub lock_acquired: bool,
     pub rollup_rows: u64,
     pub request_metadata_gap_rollup_rows: u64,
     pub request_rows: u64,
@@ -294,6 +295,7 @@ impl PgStore {
 
         transaction.commit().await?;
         Ok(MaintenanceReport {
+            lock_acquired: true,
             rollup_rows: rollups,
             request_metadata_gap_rollup_rows,
             request_rows,

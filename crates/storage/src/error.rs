@@ -16,6 +16,8 @@ pub enum PersistenceError {
     Serialize(#[from] serde_json::Error),
     #[error("runtime outbox leadership was lost")]
     RuntimeOutboxLeadershipLost,
+    #[error("worker health checkpoint is invalid")]
+    InvalidWorkerHealth,
     #[error("session lifetime must be positive and representable")]
     InvalidSessionTtl,
     #[error("recent-authentication metadata is invalid")]

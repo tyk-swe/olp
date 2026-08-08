@@ -695,6 +695,20 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
     .unwrap();
     assert_eq!(counts, (1, 1, 1));
     stop_consumers(shutdown, consumers).await;
+    let counters = store.worker_recovery_counters().await.unwrap();
+    // With a zero-idle test policy both contenders may transfer the same PEL
+    // entry before the winner acknowledges it. The counter records recovery
+    // activity, not unique event identity.
+    assert!(counters.request_metadata_reclaimed >= 1);
+    assert!(counters.request_metadata_recovered >= 1);
+    assert_eq!(
+        counters.request_metadata_duplicates,
+        counters.request_metadata_recovered
+    );
+    assert_eq!(
+        counters.request_metadata_processed,
+        counters.request_metadata_recovered
+    );
 }
 
 #[tokio::test]

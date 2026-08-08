@@ -3,10 +3,11 @@ use std::{path::Path, time::Duration};
 use olp_storage::{
     PgStore,
     limits::DistributedLimiter,
-    runtime::RuntimeOutboxLeader,
+    runtime::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
     security::MasterKey,
     security::MasterKeyEncryptionStatus,
     valkey::{RuntimeHintPublisher, ValkeyAdapterError, run_request_metadata_consumer},
+    worker_health::{WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use serde_json::json;
 use tokio::{sync::watch, task::JoinSet};
@@ -145,8 +146,39 @@ pub(super) async fn maintenance_supervisor(store: PgStore, mut shutdown: watch::
         tokio::select! {
             _ = interval.tick() => {
                 match store.run_maintenance(chrono::Utc::now()).await {
-                    Ok(report) => info!(?report, "maintenance pass completed"),
-                    Err(error) => error!(%error, "maintenance pass failed; retrying next interval"),
+                    Ok(report) => {
+                        let outcome = if report.lock_acquired {
+                            WorkerTaskCheckpointOutcome::Success
+                        } else {
+                            WorkerTaskCheckpointOutcome::Skipped
+                        };
+                        if let Err(error) = store
+                            .report_worker_task_checkpoint(
+                                WorkerTask::Maintenance,
+                                outcome,
+                                report.lock_acquired,
+                            )
+                            .await
+                        {
+                            warn!(%error, "maintenance health checkpoint failed");
+                        }
+                        if report.lock_acquired {
+                            info!(?report, "maintenance pass completed");
+                        }
+                    }
+                    Err(error) => {
+                        if let Err(checkpoint_error) = store
+                            .report_worker_task_checkpoint(
+                                WorkerTask::Maintenance,
+                                WorkerTaskCheckpointOutcome::Failure,
+                                false,
+                            )
+                            .await
+                        {
+                            warn!(%checkpoint_error, "maintenance failure checkpoint failed");
+                        }
+                        error!(%error, "maintenance pass failed; retrying next interval");
+                    }
                 }
             }
             changed = shutdown.changed() => {
@@ -168,17 +200,43 @@ pub(super) async fn request_metadata_epoch_supervisor(
         tokio::select! {
             _ = interval.tick() => {
                 match store.detect_stale_request_metadata_gateway_epochs(chrono::Utc::now()).await {
-                    Ok(report) if report.detected_epochs > 0 => warn!(
-                        detected_epochs = report.detected_epochs,
-                        uncertain_event_lower_bound = report.uncertain_event_lower_bound,
-                        "unclean request metadata gateway epochs recorded as completeness gaps"
-                    ),
-                    Ok(report) if report.candidate_epochs > 0 => warn!(
-                        candidate_epochs = report.candidate_epochs,
-                        "request metadata gateway epochs missed the stale threshold; awaiting confirmation"
-                    ),
-                    Ok(_) => {}
-                    Err(error) => warn!(%error, "request metadata gateway epoch detection failed; retrying"),
+                    Ok(report) => {
+                        if let Err(error) = store
+                            .report_worker_task_checkpoint(
+                                WorkerTask::RequestMetadataGatewayEpochDetection,
+                                WorkerTaskCheckpointOutcome::Success,
+                                report.candidate_epochs > 0 || report.detected_epochs > 0,
+                            )
+                            .await
+                        {
+                            warn!(%error, "request metadata gateway epoch health checkpoint failed");
+                        }
+                        if report.detected_epochs > 0 {
+                            warn!(
+                                detected_epochs = report.detected_epochs,
+                                uncertain_event_lower_bound = report.uncertain_event_lower_bound,
+                                "unclean request metadata gateway epochs recorded as completeness gaps"
+                            );
+                        } else if report.candidate_epochs > 0 {
+                            warn!(
+                                candidate_epochs = report.candidate_epochs,
+                                "request metadata gateway epochs missed the stale threshold; awaiting confirmation"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        if let Err(checkpoint_error) = store
+                            .report_worker_task_checkpoint(
+                                WorkerTask::RequestMetadataGatewayEpochDetection,
+                                WorkerTaskCheckpointOutcome::Failure,
+                                false,
+                            )
+                            .await
+                        {
+                            warn!(%checkpoint_error, "request metadata gateway epoch failure checkpoint failed");
+                        }
+                        warn!(%error, "request metadata gateway epoch detection failed; retrying");
+                    }
                 }
             }
             changed = shutdown.changed() => {
@@ -202,7 +260,19 @@ pub(super) async fn outbox_supervisor(
         }
         match outbox_loop(store.clone(), &valkey_url, shutdown.clone()).await {
             Ok(()) => return,
-            Err(error) => error!(%error, "outbox worker failed; restarting"),
+            Err(error) => {
+                if let Err(checkpoint_error) = store
+                    .report_worker_task_checkpoint(
+                        WorkerTask::RuntimeOutbox,
+                        WorkerTaskCheckpointOutcome::Failure,
+                        false,
+                    )
+                    .await
+                {
+                    warn!(%checkpoint_error, "outbox failure checkpoint failed");
+                }
+                error!(%error, "outbox worker failed; restarting");
+            }
         }
         tokio::select! {
             changed = shutdown.changed() => {
@@ -218,6 +288,8 @@ pub(super) async fn outbox_supervisor(
 
 const OUTBOX_BATCH_SIZE: u16 = 100;
 const OUTBOX_IDLE_INTERVAL: Duration = Duration::from_millis(250);
+const OUTBOX_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const OUTBOX_LEADERSHIP_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 #[allow(async_fn_in_trait)]
 pub trait RuntimeHintPublication {
@@ -257,7 +329,19 @@ pub(super) async fn request_metadata_consumer_supervisor(
         .await
         {
             Ok(()) => return,
-            Err(error) => error!(%error, "request metadata persistence worker failed; restarting"),
+            Err(error) => {
+                if let Err(checkpoint_error) = store
+                    .report_worker_task_checkpoint(
+                        WorkerTask::RequestMetadataConsumer,
+                        WorkerTaskCheckpointOutcome::Failure,
+                        false,
+                    )
+                    .await
+                {
+                    warn!(%checkpoint_error, "request metadata consumer failure checkpoint failed");
+                }
+                error!(%error, "request metadata persistence worker failed; restarting");
+            }
         }
         tokio::select! {
             changed = shutdown.changed() => {
@@ -276,9 +360,26 @@ async fn outbox_loop(
     valkey_url: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
+    let mut contender = Some(store.runtime_outbox_leader_contender().await?);
     let mut leader = loop {
         tokio::select! {
-            result = store.acquire_runtime_outbox_leader() => break result?,
+            result = contender
+                .take()
+                .expect("runtime outbox contender must be present before each probe")
+                .try_acquire(&store) => {
+                match result? {
+                    RuntimeOutboxLeadershipProbe::Acquired(leader) => break leader,
+                    RuntimeOutboxLeadershipProbe::Pending(pending) => contender = Some(pending),
+                }
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return Ok(());
+                }
+            }
+        }
+        tokio::select! {
+            () = tokio::time::sleep(OUTBOX_LEADERSHIP_RETRY_INTERVAL) => {}
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return Ok(());
@@ -316,9 +417,14 @@ async fn run_owned_outbox_loop(
     valkey_url: &str,
     shutdown: &mut watch::Receiver<bool>,
 ) -> AppResult<()> {
+    let publisher = RuntimeHintPublisher::connect(valkey_url);
+    tokio::pin!(publisher);
+    let mut connect_heartbeat = tokio::time::interval(OUTBOX_HEARTBEAT_INTERVAL);
+    connect_heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut publisher = loop {
         tokio::select! {
-            result = RuntimeHintPublisher::connect(valkey_url) => break result?,
+            result = &mut publisher => break result?,
+            _ = connect_heartbeat.tick() => leader.heartbeat().await?,
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return Ok(());
@@ -327,6 +433,7 @@ async fn run_owned_outbox_loop(
         }
     };
     let mut wait_for_more = false;
+    let mut heartbeat_due = tokio::time::Instant::now() + OUTBOX_HEARTBEAT_INTERVAL;
     loop {
         if wait_for_more {
             tokio::select! {
@@ -339,6 +446,11 @@ async fn run_owned_outbox_loop(
             }
         } else if *shutdown.borrow() {
             return Ok(());
+        }
+
+        if tokio::time::Instant::now() >= heartbeat_due {
+            leader.heartbeat().await?;
+            heartbeat_due = tokio::time::Instant::now() + OUTBOX_HEARTBEAT_INTERVAL;
         }
 
         match publish_outbox_batch(leader, &mut publisher, shutdown).await? {
@@ -362,46 +474,68 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
 ) -> AppResult<OutboxBatchOutcome> {
     let records = leader.pending(OUTBOX_BATCH_SIZE).await?;
     let mut published = 0_usize;
-    for record in records {
-        info!(
-            event = "runtime_outbox_publication_attempt",
-            outbox_id = %record.id,
-            generation_id = %record.aggregate_id,
-            topic = %record.topic,
-            created_at = %record.created_at,
-            "attempting runtime hint publication"
-        );
-        let result = loop {
-            tokio::select! {
-                result = publisher.publish_runtime_hint(&record.payload) => break result,
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
+    'records: for record in records {
+        let result = 'attempts: loop {
+            let Some(attempt) = leader.begin_publication(record.id).await? else {
+                warn!(
+                    event = "runtime_outbox_claim_disappeared",
+                    outbox_id = %record.id,
+                    generation_id = %record.aggregate_id,
+                    "runtime outbox row was completed before its publication attempt"
+                );
+                continue 'records;
+            };
+            info!(
+                event = "runtime_outbox_publication_attempt",
+                outbox_id = %record.id,
+                generation_id = %record.aggregate_id,
+                topic = %record.topic,
+                created_at = %record.created_at,
+                attempt,
+                repeated_attempt = attempt > 1,
+                "attempting runtime hint publication"
+            );
+            let publication = publisher.publish_runtime_hint(&record.payload);
+            tokio::pin!(publication);
+            let mut heartbeat = tokio::time::interval(OUTBOX_HEARTBEAT_INTERVAL);
+            heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            heartbeat.tick().await;
+            loop {
+                tokio::select! {
+                    result = &mut publication => break 'attempts result,
+                    _ = heartbeat.tick() => leader.heartbeat().await?,
+                    changed = shutdown.changed() => {
+                        leader.record_publication_retry().await?;
+                        if changed.is_err() || *shutdown.borrow() {
+                            warn!(
+                                event = "runtime_outbox_publication_unconfirmed",
+                                outbox_id = %record.id,
+                                generation_id = %record.aggregate_id,
+                                outcome = "shutdown_during_publish",
+                                publish_may_have_succeeded = true,
+                                retry_required = true,
+                                "runtime hint publication was interrupted; leaving the outbox row pending"
+                            );
+                            return Ok(OutboxBatchOutcome::Shutdown);
+                        }
                         warn!(
                             event = "runtime_outbox_publication_unconfirmed",
                             outbox_id = %record.id,
                             generation_id = %record.aggregate_id,
-                            outcome = "shutdown_during_publish",
+                            outcome = "publish_cancelled_by_watch_change",
                             publish_may_have_succeeded = true,
                             retry_required = true,
-                            "runtime hint publication was interrupted; leaving the outbox row pending"
+                            "runtime hint publication was cancelled; retrying the same outbox row"
                         );
-                        return Ok(OutboxBatchOutcome::Shutdown);
+                        break;
                     }
-                    warn!(
-                        event = "runtime_outbox_publication_unconfirmed",
-                        outbox_id = %record.id,
-                        generation_id = %record.aggregate_id,
-                        outcome = "publish_cancelled_by_watch_change",
-                        publish_may_have_succeeded = true,
-                        retry_required = true,
-                        "runtime hint publication was cancelled; retrying the same outbox row"
-                    );
                 }
             }
         };
         let subscribers = match result {
             Ok(subscribers) => subscribers,
             Err(error) => {
+                leader.record_publication_retry().await?;
                 warn!(
                     event = "runtime_outbox_publication_unconfirmed",
                     outbox_id = %record.id,

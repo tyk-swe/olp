@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT owner_active, claimed_rows FROM runtime_outbox_health WHERE singleton FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "owner_active"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "claimed_rows",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runtime_outbox_health",
+            "name": "claimed_rows"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "04d6ac4d71a6ca6390f730a877cb4375bc2f01c25a10b74c8fd563c29d3cf855"
+}
