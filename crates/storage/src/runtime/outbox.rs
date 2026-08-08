@@ -132,13 +132,6 @@ impl PgStore {
 
     async fn report_runtime_outbox_contention(&self) -> Result<(), PersistenceError> {
         let mut transaction = self.pool().begin().await?;
-        checkpoint_worker_task_on(
-            &mut transaction,
-            WorkerTask::RuntimeOutbox,
-            WorkerTaskCheckpointOutcome::Skipped,
-            false,
-        )
-        .await?;
         sqlx::query!(
             "UPDATE async_worker_counters SET \
                runtime_outbox_failed_takeovers_total = \
@@ -151,6 +144,13 @@ impl PgStore {
             RUNTIME_OUTBOX_STALE_AFTER_SECONDS as f64,
         )
         .execute(&mut *transaction)
+        .await?;
+        checkpoint_worker_task_on(
+            &mut transaction,
+            WorkerTask::RuntimeOutbox,
+            WorkerTaskCheckpointOutcome::Skipped,
+            false,
+        )
         .await?;
         transaction.commit().await?;
         Ok(())
