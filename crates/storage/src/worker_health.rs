@@ -125,15 +125,27 @@ impl WorkerTaskHealthSummary {
 
     #[must_use]
     pub fn current(&self) -> bool {
+        self.current_for(&WorkerTask::ALL)
+    }
+
+    #[must_use]
+    pub fn current_for(&self, expected_tasks: &[WorkerTask]) -> bool {
         self.tasks
             .iter()
+            .filter(|task| expected_tasks.contains(&task.task))
             .all(|task| task.state == WorkerTaskState::Healthy)
     }
 
     #[must_use]
     pub fn stale_tasks(&self) -> u64 {
+        self.stale_tasks_for(&WorkerTask::ALL)
+    }
+
+    #[must_use]
+    pub fn stale_tasks_for(&self, expected_tasks: &[WorkerTask]) -> u64 {
         self.tasks
             .iter()
+            .filter(|task| expected_tasks.contains(&task.task))
             .filter(|task| task.state == WorkerTaskState::Stale)
             .count()
             .try_into()
@@ -142,8 +154,14 @@ impl WorkerTaskHealthSummary {
 
     #[must_use]
     pub fn unknown_tasks(&self) -> u64 {
+        self.unknown_tasks_for(&WorkerTask::ALL)
+    }
+
+    #[must_use]
+    pub fn unknown_tasks_for(&self, expected_tasks: &[WorkerTask]) -> u64 {
         self.tasks
             .iter()
+            .filter(|task| expected_tasks.contains(&task.task))
             .filter(|task| task.state == WorkerTaskState::Unknown)
             .count()
             .try_into()
@@ -152,8 +170,14 @@ impl WorkerTaskHealthSummary {
 
     #[must_use]
     pub fn last_progress_at(&self) -> Option<DateTime<Utc>> {
+        self.last_progress_at_for(&WorkerTask::ALL)
+    }
+
+    #[must_use]
+    pub fn last_progress_at_for(&self, expected_tasks: &[WorkerTask]) -> Option<DateTime<Utc>> {
         self.tasks
             .iter()
+            .filter(|task| expected_tasks.contains(&task.task))
             .filter_map(|task| task.last_progress_at)
             .max()
     }
@@ -208,25 +232,22 @@ pub(crate) struct WorkerCounterDeltas {
 
 impl WorkerCounterDeltas {
     fn checked(self) -> Result<[i64; 12], PersistenceError> {
-        [
-            self.request_metadata_reclaimed,
-            self.request_metadata_recovered,
-            self.request_metadata_duplicates,
-            self.request_metadata_processed,
-            self.runtime_outbox_attempts,
-            self.runtime_outbox_retry_scheduled,
-            self.runtime_outbox_repeated_attempts,
-            self.runtime_outbox_published,
-            self.runtime_outbox_duplicate_publications,
-            self.runtime_outbox_abandoned_ownership,
-            self.runtime_outbox_abandoned_claims,
-            self.runtime_outbox_failed_takeovers,
-        ]
-        .map(|value| i64::try_from(value).map_err(|_| PersistenceError::InvalidWorkerHealth))
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .try_into()
-        .map_err(|_| PersistenceError::InvalidWorkerHealth)
+        let checked =
+            |value| i64::try_from(value).map_err(|_| PersistenceError::InvalidWorkerHealth);
+        Ok([
+            checked(self.request_metadata_reclaimed)?,
+            checked(self.request_metadata_recovered)?,
+            checked(self.request_metadata_duplicates)?,
+            checked(self.request_metadata_processed)?,
+            checked(self.runtime_outbox_attempts)?,
+            checked(self.runtime_outbox_retry_scheduled)?,
+            checked(self.runtime_outbox_repeated_attempts)?,
+            checked(self.runtime_outbox_published)?,
+            checked(self.runtime_outbox_duplicate_publications)?,
+            checked(self.runtime_outbox_abandoned_ownership)?,
+            checked(self.runtime_outbox_abandoned_claims)?,
+            checked(self.runtime_outbox_failed_takeovers)?,
+        ])
     }
 }
 
@@ -296,6 +317,8 @@ pub(crate) async fn checkpoint_worker_task_on(
         WorkerTaskCheckpointOutcome::Skipped => (0_i64, 0_i64, 1_i64),
     };
     let success = outcome == WorkerTaskCheckpointOutcome::Success;
+    // Callers that also touch outbox health or counters must keep the order:
+    // runtime_outbox_health, async_worker_counters, then worker_task_health.
     sqlx::query!(
         "INSERT INTO worker_task_health \
            (task, checked_at, last_success_at, last_progress_at, \
@@ -467,4 +490,98 @@ impl PgStore {
 
 fn age_seconds(now: DateTime<Utc>, at: DateTime<Utc>) -> u64 {
     u64::try_from(now.signed_duration_since(at).num_seconds().max(0)).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone as _;
+
+    use super::*;
+
+    fn task_status(
+        task: WorkerTask,
+        state: WorkerTaskState,
+        last_progress_at: Option<DateTime<Utc>>,
+    ) -> WorkerTaskStatus {
+        WorkerTaskStatus {
+            task,
+            state,
+            checked_at: None,
+            last_success_at: None,
+            last_progress_at,
+            heartbeat_age_seconds: None,
+            last_success_age_seconds: None,
+            successes_total: 0,
+            failures_total: 0,
+            skipped_total: 0,
+        }
+    }
+
+    #[test]
+    fn summary_filters_expected_tasks_for_current_counts_and_progress() {
+        let now = Utc.timestamp_opt(1_000, 0).unwrap();
+        let summary = WorkerTaskHealthSummary {
+            tasks: vec![
+                task_status(
+                    WorkerTask::RuntimeOutbox,
+                    WorkerTaskState::Healthy,
+                    Some(now),
+                ),
+                task_status(
+                    WorkerTask::RequestMetadataConsumer,
+                    WorkerTaskState::Unknown,
+                    Some(now - chrono::Duration::seconds(10)),
+                ),
+                task_status(WorkerTask::Maintenance, WorkerTaskState::Stale, None),
+            ],
+        };
+
+        assert!(!summary.current());
+        assert!(summary.current_for(&[WorkerTask::RuntimeOutbox]));
+        assert!(!summary.current_for(&[WorkerTask::RuntimeOutbox, WorkerTask::Maintenance]));
+        assert_eq!(summary.stale_tasks_for(&[WorkerTask::Maintenance]), 1);
+        assert_eq!(
+            summary.unknown_tasks_for(&[WorkerTask::RequestMetadataConsumer]),
+            1
+        );
+        assert_eq!(
+            summary.last_progress_at_for(&[
+                WorkerTask::RuntimeOutbox,
+                WorkerTask::RequestMetadataConsumer
+            ]),
+            Some(now)
+        );
+    }
+
+    #[test]
+    fn unknown_summary_marks_every_fixed_task_unknown() {
+        let summary = WorkerTaskHealthSummary::unknown();
+
+        assert_eq!(summary.tasks.len(), WorkerTask::ALL.len());
+        assert!(!summary.current());
+        assert_eq!(summary.stale_tasks(), 0);
+        assert_eq!(summary.unknown_tasks(), WorkerTask::ALL.len() as u64);
+        assert_eq!(summary.last_progress_at(), None);
+    }
+
+    #[test]
+    fn age_seconds_clamps_future_timestamps() {
+        let now = Utc.timestamp_opt(1_000, 0).unwrap();
+
+        assert_eq!(age_seconds(now, now - chrono::Duration::seconds(7)), 7);
+        assert_eq!(age_seconds(now, now + chrono::Duration::seconds(7)), 0);
+    }
+
+    #[test]
+    fn worker_task_parse_accepts_fixed_values_only() {
+        assert_eq!(
+            WorkerTask::parse("runtime_outbox").unwrap(),
+            WorkerTask::RuntimeOutbox
+        );
+        assert_eq!(
+            WorkerTask::parse("request_metadata_consumer").unwrap(),
+            WorkerTask::RequestMetadataConsumer
+        );
+        assert!(WorkerTask::parse("unexpected").is_err());
+    }
 }

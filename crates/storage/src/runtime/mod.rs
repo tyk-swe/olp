@@ -14,8 +14,8 @@ pub(crate) use compiler::{
     compile_and_publish_runtime_in_transaction, lock_runtime_publication, prepare_runtime_mutation,
 };
 pub use outbox::{
-    RUNTIME_OUTBOX_STALE_AFTER_SECONDS, RuntimeOutboxLeader, RuntimeOutboxState,
-    RuntimeOutboxStatus,
+    RUNTIME_OUTBOX_STALE_AFTER_SECONDS, RuntimeOutboxLeader, RuntimeOutboxLeaderContender,
+    RuntimeOutboxLeadershipProbe, RuntimeOutboxState, RuntimeOutboxStatus,
 };
 
 #[derive(Clone)]

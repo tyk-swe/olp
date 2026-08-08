@@ -196,8 +196,23 @@ fn replicated_worker_metrics_declare_types_and_render_durable_values() {
         Some(counters),
     );
     assert!(unavailable.contains("olp_async_worker_observability_available 0"));
-    assert!(!unavailable.contains("olp_runtime_outbox_publication_attempts_total"));
-    assert!(!unavailable.contains("olp_request_metadata_events_reclaimed_total"));
+    assert!(unavailable.contains("olp_async_plane_current 0"));
+    assert!(unavailable.contains("olp_runtime_outbox_publication_attempts_total 15"));
+    assert!(unavailable.contains("olp_request_metadata_events_reclaimed_total 11"));
+
+    let mut missing_summaries = String::new();
+    append_async_worker_metrics(
+        &mut missing_summaries,
+        now,
+        false,
+        consumer,
+        None,
+        None,
+        None,
+    );
+    assert!(missing_summaries.contains("olp_async_worker_observability_available 0"));
+    assert!(!missing_summaries.contains("olp_runtime_outbox_publication_attempts_total"));
+    assert!(!missing_summaries.contains("olp_request_metadata_events_reclaimed_total"));
 }
 
 #[tokio::test]

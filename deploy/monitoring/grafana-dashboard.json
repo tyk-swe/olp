@@ -126,6 +126,7 @@
       "title": "Worker recovery and runtime outbox",
       "id": 14,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "fieldConfig": { "defaults": {}, "overrides": [{ "matcher": { "id": "byRegexp", "options": "/.* age \\\\(s\\\\)/" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "custom.axisPlacement", "value": "right" }] }] },
       "targets": [
         { "refId": "A", "expr": "max(olp_runtime_outbox_pending_rows{namespace=~\"$namespace\"})", "legendFormat": "outbox pending" },
         { "refId": "B", "expr": "max(olp_runtime_outbox_claimed_rows{namespace=~\"$namespace\"})", "legendFormat": "outbox claimed" },

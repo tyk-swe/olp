@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT clock_timestamp() AS \"database_now!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "database_now!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "468ff87a55c74e6f00dc8952ac8579d2632a63806cb0e38562249c7eaae6e1fa"
+}

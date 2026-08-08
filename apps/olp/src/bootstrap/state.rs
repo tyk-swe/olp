@@ -69,6 +69,7 @@ pub struct ProcessComposition {
     pub console_dir: Arc<PathBuf>,
     pub session_ttl: chrono::Duration,
     pub local_login_enabled: bool,
+    pub(crate) runs_worker_tasks: bool,
     pub(crate) observability: ObservabilityCache,
     /// Enables loopback HTTP only for local mock-IdP tests. Runtime wiring
     /// keeps this production-safe default disabled.
@@ -131,6 +132,7 @@ impl ProcessComposition {
             console_dir: Arc::new(console_dir.into()),
             session_ttl: chrono::Duration::hours(12),
             local_login_enabled: true,
+            runs_worker_tasks: mode == ApiMode::All,
             observability: ObservabilityCache::default(),
             oidc_allow_insecure_test_endpoints: false,
         }

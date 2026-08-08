@@ -145,12 +145,16 @@ impl PgStore {
             .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
         let lag_events =
             i64::try_from(lag_events).map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
+        let mut transaction = self.pool().begin().await?;
+        let database_now = sqlx::query_scalar!("SELECT clock_timestamp() AS \"database_now!\"")
+            .fetch_one(&mut *transaction)
+            .await?;
+        let checked_at = checked_at.min(database_now);
         if oldest_pending_at
             .is_some_and(|oldest| oldest > checked_at + chrono::Duration::minutes(5))
         {
             return Err(PersistenceError::InvalidRequestMetadataGap);
         }
-        let mut transaction = self.pool().begin().await?;
         let row = sqlx::query!(
             "INSERT INTO request_metadata_consumer_health \
              (singleton, pending_events, lag_events, oldest_pending_at, checked_at) \

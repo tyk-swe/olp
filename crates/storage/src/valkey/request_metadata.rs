@@ -196,14 +196,16 @@ async fn run_request_metadata_consumer_with_policy(
                 policy.batch_size,
             )
             .await?;
-            store
-                .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
-                    reclaimed: u64::try_from(page.entries.len()).map_err(|_| {
-                        ValkeyAdapterError::InvalidState("reclaimed entry count overflow")
-                    })?,
-                    ..RequestMetadataConsumerActivity::default()
-                })
-                .await?;
+            if !page.entries.is_empty() {
+                store
+                    .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
+                        reclaimed: u64::try_from(page.entries.len()).map_err(|_| {
+                            ValkeyAdapterError::InvalidState("reclaimed entry count overflow")
+                        })?,
+                        ..RequestMetadataConsumerActivity::default()
+                    })
+                    .await?;
+            }
             report_deleted_pending_entries(store, consumer, &page.deleted_ids).await?;
             let next_start = page.next_start;
             let summary = process_entries(
@@ -411,6 +413,9 @@ async fn report_processing_activity(
     summary: ProcessingSummary,
     recovered: bool,
 ) -> Result<(), ValkeyAdapterError> {
+    if summary.completed == 0 && summary.duplicates == 0 {
+        return Ok(());
+    }
     store
         .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
             recovered: if recovered { summary.completed } else { 0 },

@@ -17,7 +17,7 @@ use olp_storage::{
     request_metadata::RequestMetadataEmitter,
     request_metadata::RequestMetadataEpochHealth,
     runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
-    worker_health::{WorkerRecoveryCounters, WorkerTaskHealthSummary, WorkerTaskState},
+    worker_health::{WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary, WorkerTaskState},
 };
 use serde::Serialize;
 use tower::ServiceBuilder;
@@ -30,6 +30,10 @@ const OBSERVABILITY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const OBSERVABILITY_REFRESH_TIMEOUT: Duration = Duration::from_secs(4);
 const OBSERVABILITY_READINESS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const OBSERVABILITY_METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
+const NON_VALKEY_WORKER_TASKS: [WorkerTask; 2] = [
+    WorkerTask::Maintenance,
+    WorkerTask::RequestMetadataGatewayEpochDetection,
+];
 // Metrics are refreshed every fifteen seconds. Give a successful snapshot
 // enough headroom for normal scheduler jitter and a single refresh timeout;
 // otherwise a healthy metrics endpoint would mark itself stale for the last
@@ -436,6 +440,7 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
         ),
         Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
     };
+    let expected_worker_tasks = expected_worker_tasks(state);
 
     if state.mode.serves_gateway() {
         let snapshot = state.runtime().pin();
@@ -481,16 +486,17 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
         .map_or(!state.mode.serves_gateway(), |request_metadata| {
             request_metadata.snapshot().complete()
         });
+    let expects_request_metadata_consumer =
+        expected_worker_tasks.contains(&WorkerTask::RequestMetadataConsumer);
     let request_metadata_complete = local_request_metadata_complete
-        && request_metadata_consumer.complete()
+        && (!expects_request_metadata_consumer || request_metadata_consumer.complete())
         && request_metadata_epochs.unresolved_epochs == 0;
-    let asynchronous_plane_current = worker_tasks.current()
-        && request_metadata_consumer_is_current(request_metadata_consumer)
-        && runtime_outbox_is_current(runtime_outbox);
-    let asynchronous_plane_drained = request_metadata_consumer.pending_events == 0
-        && request_metadata_consumer.lag_events == 0
-        && runtime_outbox.pending_rows == 0
-        && runtime_outbox.claimed_rows == 0;
+    let (asynchronous_plane_current, asynchronous_plane_drained) = asynchronous_plane_flags(
+        &worker_tasks,
+        expected_worker_tasks,
+        request_metadata_consumer,
+        runtime_outbox,
+    );
     let asynchronous_plane_healthy = asynchronous_plane_current && asynchronous_plane_drained;
     Ok(HealthResponse {
         status: if degraded_limits
@@ -506,14 +512,16 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
             asynchronous_plane_current,
             asynchronous_plane_drained,
             &worker_tasks,
+            expected_worker_tasks,
             request_metadata_consumer,
             runtime_outbox,
         ),
         asynchronous_plane_current,
         asynchronous_plane_drained,
-        asynchronous_plane_last_progress_at: worker_tasks.last_progress_at(),
-        worker_tasks_stale: worker_tasks.stale_tasks(),
-        worker_tasks_unknown: worker_tasks.unknown_tasks(),
+        asynchronous_plane_last_progress_at: worker_tasks
+            .last_progress_at_for(expected_worker_tasks),
+        worker_tasks_stale: worker_tasks.stale_tasks_for(expected_worker_tasks),
+        worker_tasks_unknown: worker_tasks.unknown_tasks_for(expected_worker_tasks),
         generation,
         database,
         limits: if limits_healthy {
@@ -604,10 +612,37 @@ fn runtime_outbox_is_current(status: RuntimeOutboxStatus) -> bool {
     )
 }
 
+fn expected_worker_tasks(state: &ObservabilityState) -> &'static [WorkerTask] {
+    if !state.runs_worker_tasks {
+        &[]
+    } else if state.limiter().is_configured() {
+        &WorkerTask::ALL
+    } else {
+        &NON_VALKEY_WORKER_TASKS
+    }
+}
+
+fn asynchronous_plane_flags(
+    tasks: &WorkerTaskHealthSummary,
+    expected_tasks: &[WorkerTask],
+    consumer: RequestMetadataConsumerStatus,
+    outbox: RuntimeOutboxStatus,
+) -> (bool, bool) {
+    let expects_consumer = expected_tasks.contains(&WorkerTask::RequestMetadataConsumer);
+    let expects_outbox = expected_tasks.contains(&WorkerTask::RuntimeOutbox);
+    let current = tasks.current_for(expected_tasks)
+        && (!expects_consumer || request_metadata_consumer_is_current(consumer))
+        && (!expects_outbox || runtime_outbox_is_current(outbox));
+    let drained = (!expects_consumer || (consumer.pending_events == 0 && consumer.lag_events == 0))
+        && (!expects_outbox || (outbox.pending_rows == 0 && outbox.claimed_rows == 0));
+    (current, drained)
+}
+
 fn asynchronous_plane_state(
     current: bool,
     drained: bool,
     tasks: &WorkerTaskHealthSummary,
+    expected_tasks: &[WorkerTask],
     consumer: RequestMetadataConsumerStatus,
     outbox: RuntimeOutboxStatus,
 ) -> &'static str {
@@ -615,7 +650,7 @@ fn asynchronous_plane_state(
         "healthy"
     } else if current {
         "backlogged"
-    } else if tasks.unknown_tasks() > 0
+    } else if tasks.unknown_tasks_for(expected_tasks) > 0
         || matches!(
             consumer.state,
             olp_storage::request_metadata::RequestMetadataConsumerState::Unknown
@@ -928,22 +963,16 @@ pub(crate) fn append_async_worker_metrics(
         "olp_async_worker_observability_available {}",
         u8::from(available)
     );
-    let (Some(outbox), Some(tasks), Some(counters)) = (outbox, tasks, counters) else {
-        // Omitting durable counter series during a database read failure keeps
-        // a transient dependency outage from looking like a counter reset.
+    let (Some(outbox), Some(tasks)) = (outbox, tasks) else {
         return;
     };
-    if !consumer_available {
-        return;
-    }
 
-    let current = tasks.current()
-        && request_metadata_consumer_is_current(consumer)
-        && runtime_outbox_is_current(outbox);
-    let drained = consumer.pending_events == 0
-        && consumer.lag_events == 0
-        && outbox.pending_rows == 0
-        && outbox.claimed_rows == 0;
+    let consumer = if consumer_available {
+        consumer
+    } else {
+        RequestMetadataConsumerStatus::from_health(None, now)
+    };
+    let (current, drained) = asynchronous_plane_flags(tasks, &WorkerTask::ALL, consumer, outbox);
     body.push_str(
         "# HELP olp_async_plane_current Whether every replicated worker responsibility has a current successful checkpoint.\n\
          # TYPE olp_async_plane_current gauge\n\
@@ -955,14 +984,6 @@ pub(crate) fn append_async_worker_metrics(
          # TYPE olp_async_plane_last_progress_timestamp_seconds gauge\n\
          # HELP olp_request_metadata_consumer_oldest_pending_age_seconds Age of the oldest delivered metadata entry awaiting acknowledgement.\n\
          # TYPE olp_request_metadata_consumer_oldest_pending_age_seconds gauge\n\
-         # HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n\
-         # TYPE olp_request_metadata_events_reclaimed_total counter\n\
-         # HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n\
-         # TYPE olp_request_metadata_events_recovered_total counter\n\
-         # HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n\
-         # TYPE olp_request_metadata_persistence_duplicates_total counter\n\
-         # HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n\
-         # TYPE olp_request_metadata_events_processed_total counter\n\
          # HELP olp_runtime_outbox_pending_rows Unpublished runtime-hint outbox rows.\n\
          # TYPE olp_runtime_outbox_pending_rows gauge\n\
          # HELP olp_runtime_outbox_oldest_pending_age_seconds Age of the oldest unpublished runtime-hint outbox row.\n\
@@ -975,22 +996,14 @@ pub(crate) fn append_async_worker_metrics(
          # TYPE olp_runtime_outbox_owner_stale gauge\n\
          # HELP olp_runtime_outbox_heartbeat_age_seconds Age of the last durable outbox-owner checkpoint.\n\
          # TYPE olp_runtime_outbox_heartbeat_age_seconds gauge\n\
-         # HELP olp_runtime_outbox_publication_attempts_total Runtime-hint publication attempts begun durably.\n\
-         # TYPE olp_runtime_outbox_publication_attempts_total counter\n\
-         # HELP olp_runtime_outbox_publication_retries_total Ambiguous or failed publications left pending for retry.\n\
-         # TYPE olp_runtime_outbox_publication_retries_total counter\n\
-         # HELP olp_runtime_outbox_repeated_publication_attempts_total Publication attempts for rows that had already been attempted.\n\
-         # TYPE olp_runtime_outbox_repeated_publication_attempts_total counter\n\
-         # HELP olp_runtime_outbox_published_total Runtime-hint outbox rows durably completed after publication.\n\
-         # TYPE olp_runtime_outbox_published_total counter\n\
-         # HELP olp_runtime_outbox_duplicate_publications_total Accepted publications whose outbox row was already complete.\n\
-         # TYPE olp_runtime_outbox_duplicate_publications_total counter\n\
-         # HELP olp_runtime_outbox_abandoned_ownership_total Advisory-lock acquisitions that recovered uncleared ownership.\n\
-         # TYPE olp_runtime_outbox_abandoned_ownership_total counter\n\
-         # HELP olp_runtime_outbox_abandoned_claims_total Claimed rows recovered from owners that disappeared.\n\
-         # TYPE olp_runtime_outbox_abandoned_claims_total counter\n\
-         # HELP olp_runtime_outbox_failed_takeovers_total Attempts that could not take over an owner past its heartbeat window.\n\
-         # TYPE olp_runtime_outbox_failed_takeovers_total counter\n",
+         # HELP olp_worker_task_healthy Whether a fixed worker responsibility has a current successful checkpoint.\n\
+         # TYPE olp_worker_task_healthy gauge\n\
+         # HELP olp_worker_task_heartbeat_age_seconds Age of the latest checkpoint for a fixed worker responsibility.\n\
+         # TYPE olp_worker_task_heartbeat_age_seconds gauge\n\
+         # HELP olp_worker_task_last_success_age_seconds Age of the latest successful checkpoint for a fixed worker responsibility.\n\
+         # TYPE olp_worker_task_last_success_age_seconds gauge\n\
+         # HELP olp_worker_task_runs_total Durable checkpoint outcomes across all worker replicas.\n\
+         # TYPE olp_worker_task_runs_total counter\n",
     );
     let last_progress = tasks
         .last_progress_at()
@@ -1010,26 +1023,6 @@ pub(crate) fn append_async_worker_metrics(
         body,
         "olp_request_metadata_consumer_oldest_pending_age_seconds {}",
         datetime_age_seconds(now, consumer.oldest_pending_at).unwrap_or(0)
-    );
-    let _ = writeln!(
-        body,
-        "olp_request_metadata_events_reclaimed_total {}",
-        counters.request_metadata_reclaimed
-    );
-    let _ = writeln!(
-        body,
-        "olp_request_metadata_events_recovered_total {}",
-        counters.request_metadata_recovered
-    );
-    let _ = writeln!(
-        body,
-        "olp_request_metadata_persistence_duplicates_total {}",
-        counters.request_metadata_duplicates
-    );
-    let _ = writeln!(
-        body,
-        "olp_request_metadata_events_processed_total {}",
-        counters.request_metadata_processed
     );
     let _ = writeln!(
         body,
@@ -1060,6 +1053,86 @@ pub(crate) fn append_async_worker_metrics(
         body,
         "olp_runtime_outbox_heartbeat_age_seconds {}",
         outbox.heartbeat_age_seconds.unwrap_or(u64::MAX)
+    );
+    for task in &tasks.tasks {
+        let task_label = task.task.as_str();
+        let _ = writeln!(
+            body,
+            "olp_worker_task_healthy{{task=\"{task_label}\"}} {}",
+            u8::from(task.state == WorkerTaskState::Healthy)
+        );
+        let _ = writeln!(
+            body,
+            "olp_worker_task_heartbeat_age_seconds{{task=\"{task_label}\"}} {}",
+            task.heartbeat_age_seconds.unwrap_or(u64::MAX)
+        );
+        let _ = writeln!(
+            body,
+            "olp_worker_task_last_success_age_seconds{{task=\"{task_label}\"}} {}",
+            task.last_success_age_seconds.unwrap_or(u64::MAX)
+        );
+        for (outcome, value) in [
+            ("success", task.successes_total),
+            ("failure", task.failures_total),
+            ("skipped", task.skipped_total),
+        ] {
+            let _ = writeln!(
+                body,
+                "olp_worker_task_runs_total{{task=\"{task_label}\",outcome=\"{outcome}\"}} {value}"
+            );
+        }
+    }
+
+    let Some(counters) = counters else {
+        // Omitting recovery counter series during a database read failure keeps
+        // a transient dependency outage from looking like a counter reset.
+        return;
+    };
+    body.push_str(
+        "# HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n\
+         # TYPE olp_request_metadata_events_reclaimed_total counter\n\
+         # HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n\
+         # TYPE olp_request_metadata_events_recovered_total counter\n\
+         # HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n\
+         # TYPE olp_request_metadata_persistence_duplicates_total counter\n\
+         # HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n\
+         # TYPE olp_request_metadata_events_processed_total counter\n\
+         # HELP olp_runtime_outbox_publication_attempts_total Runtime-hint publication attempts begun durably.\n\
+         # TYPE olp_runtime_outbox_publication_attempts_total counter\n\
+         # HELP olp_runtime_outbox_publication_retries_total Ambiguous or failed publications left pending for retry.\n\
+         # TYPE olp_runtime_outbox_publication_retries_total counter\n\
+         # HELP olp_runtime_outbox_repeated_publication_attempts_total Publication attempts for rows that had already been attempted.\n\
+         # TYPE olp_runtime_outbox_repeated_publication_attempts_total counter\n\
+         # HELP olp_runtime_outbox_published_total Runtime-hint outbox rows durably completed after publication.\n\
+         # TYPE olp_runtime_outbox_published_total counter\n\
+         # HELP olp_runtime_outbox_duplicate_publications_total Accepted publications whose outbox row was already complete.\n\
+         # TYPE olp_runtime_outbox_duplicate_publications_total counter\n\
+         # HELP olp_runtime_outbox_abandoned_ownership_total Advisory-lock acquisitions that recovered uncleared ownership.\n\
+         # TYPE olp_runtime_outbox_abandoned_ownership_total counter\n\
+         # HELP olp_runtime_outbox_abandoned_claims_total Claimed rows recovered from owners that disappeared.\n\
+         # TYPE olp_runtime_outbox_abandoned_claims_total counter\n\
+         # HELP olp_runtime_outbox_failed_takeovers_total Attempts that could not take over an owner past its heartbeat window.\n\
+         # TYPE olp_runtime_outbox_failed_takeovers_total counter\n",
+    );
+    let _ = writeln!(
+        body,
+        "olp_request_metadata_events_reclaimed_total {}",
+        counters.request_metadata_reclaimed
+    );
+    let _ = writeln!(
+        body,
+        "olp_request_metadata_events_recovered_total {}",
+        counters.request_metadata_recovered
+    );
+    let _ = writeln!(
+        body,
+        "olp_request_metadata_persistence_duplicates_total {}",
+        counters.request_metadata_duplicates
+    );
+    let _ = writeln!(
+        body,
+        "olp_request_metadata_events_processed_total {}",
+        counters.request_metadata_processed
     );
     let _ = writeln!(
         body,
@@ -1101,45 +1174,6 @@ pub(crate) fn append_async_worker_metrics(
         "olp_runtime_outbox_failed_takeovers_total {}",
         counters.runtime_outbox_failed_takeovers
     );
-
-    body.push_str(
-        "# HELP olp_worker_task_healthy Whether a fixed worker responsibility has a current successful checkpoint.\n\
-         # TYPE olp_worker_task_healthy gauge\n\
-         # HELP olp_worker_task_heartbeat_age_seconds Age of the latest checkpoint for a fixed worker responsibility.\n\
-         # TYPE olp_worker_task_heartbeat_age_seconds gauge\n\
-         # HELP olp_worker_task_last_success_age_seconds Age of the latest successful checkpoint for a fixed worker responsibility.\n\
-         # TYPE olp_worker_task_last_success_age_seconds gauge\n\
-         # HELP olp_worker_task_runs_total Durable checkpoint outcomes across all worker replicas.\n\
-         # TYPE olp_worker_task_runs_total counter\n",
-    );
-    for task in &tasks.tasks {
-        let task_label = task.task.as_str();
-        let _ = writeln!(
-            body,
-            "olp_worker_task_healthy{{task=\"{task_label}\"}} {}",
-            u8::from(task.state == WorkerTaskState::Healthy)
-        );
-        let _ = writeln!(
-            body,
-            "olp_worker_task_heartbeat_age_seconds{{task=\"{task_label}\"}} {}",
-            task.heartbeat_age_seconds.unwrap_or(u64::MAX)
-        );
-        let _ = writeln!(
-            body,
-            "olp_worker_task_last_success_age_seconds{{task=\"{task_label}\"}} {}",
-            task.last_success_age_seconds.unwrap_or(u64::MAX)
-        );
-        for (outcome, value) in [
-            ("success", task.successes_total),
-            ("failure", task.failures_total),
-            ("skipped", task.skipped_total),
-        ] {
-            let _ = writeln!(
-                body,
-                "olp_worker_task_runs_total{{task=\"{task_label}\",outcome=\"{outcome}\"}} {value}"
-            );
-        }
-    }
 }
 
 pub(super) fn prometheus_label(value: &str) -> String {

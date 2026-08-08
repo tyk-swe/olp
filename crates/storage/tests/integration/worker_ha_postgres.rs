@@ -2,14 +2,13 @@ use std::{sync::Arc, time::Duration as StdDuration};
 
 use chrono::{Duration, Utc};
 use olp_storage::{
+    maintenance::MAINTENANCE_LOCK_ID,
     request_metadata::RequestMetadataConsumerState,
     test_support::TestDb,
     worker_health::{RequestMetadataConsumerActivity, WorkerTask, WorkerTaskState},
 };
 use tokio::sync::Barrier;
 use uuid::Uuid;
-
-const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54;
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL via make db-test"]
@@ -116,7 +115,7 @@ async fn three_maintenance_replicas_never_overlap_a_destructive_pass() {
                 .await
                 .unwrap();
             assert!(released);
-            tokio::task::yield_now().await;
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
         }
     })
     .await

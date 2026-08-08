@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
+pub const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
 const REQUEST_METADATA_RECEIPT_DELETE_BATCH: i64 = 250_000;
 
 #[derive(Debug, Error)]

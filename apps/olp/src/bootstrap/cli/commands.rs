@@ -3,7 +3,7 @@ use std::{path::Path, time::Duration};
 use olp_storage::{
     PgStore,
     limits::DistributedLimiter,
-    runtime::RuntimeOutboxLeader,
+    runtime::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
     security::MasterKey,
     security::MasterKeyEncryptionStatus,
     valkey::{RuntimeHintPublisher, ValkeyAdapterError, run_request_metadata_consumer},
@@ -360,11 +360,16 @@ async fn outbox_loop(
     valkey_url: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
+    let mut contender = Some(store.runtime_outbox_leader_contender().await?);
     let mut leader = loop {
         tokio::select! {
-            result = store.try_acquire_runtime_outbox_leader() => {
-                if let Some(leader) = result? {
-                    break leader;
+            result = contender
+                .take()
+                .expect("runtime outbox contender must be present before each probe")
+                .try_acquire(&store) => {
+                match result? {
+                    RuntimeOutboxLeadershipProbe::Acquired(leader) => break leader,
+                    RuntimeOutboxLeadershipProbe::Pending(pending) => contender = Some(pending),
                 }
             }
             changed = shutdown.changed() => {

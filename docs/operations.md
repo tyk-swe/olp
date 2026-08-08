@@ -64,7 +64,8 @@ The counters are PostgreSQL-side additive totals shared by every replica. If
 one of the durable summaries cannot be read, readiness returns `null` for
 these totals and Prometheus omits their series while setting
 `olp_async_worker_observability_available` to zero; an outage therefore does
-not appear as a counter reset.
+not appear as a counter reset. The `OLPAsyncWorkerObservabilityUnavailable`
+alert covers that unavailable-summary path.
 
 When the plane is current but not drained, inspect the oldest-entry ages and
 dependency health before scaling workers. Reclaim and duplicate increments

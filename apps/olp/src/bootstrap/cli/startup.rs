@@ -71,6 +71,7 @@ pub(super) async fn serve(
         args.http_max_in_flight_management_requests,
     );
     state.local_login_enabled = args.local_login_enabled;
+    state.runs_worker_tasks = run_worker_in_process;
     // The browser integration fixture uses a loopback mock identity
     // provider. This branch is compiled out of release binaries, so no
     // deployment setting can weaken the production HTTPS/SSRF policy.

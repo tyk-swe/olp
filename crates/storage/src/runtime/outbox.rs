@@ -91,6 +91,15 @@ pub struct RuntimeOutboxLeader {
     connection: PgConnection,
 }
 
+pub struct RuntimeOutboxLeaderContender {
+    connection: PgConnection,
+}
+
+pub enum RuntimeOutboxLeadershipProbe {
+    Acquired(RuntimeOutboxLeader),
+    Pending(RuntimeOutboxLeaderContender),
+}
+
 impl PgStore {
     pub async fn acquire_runtime_outbox_leader(
         &self,
@@ -113,21 +122,22 @@ impl PgStore {
     pub async fn try_acquire_runtime_outbox_leader(
         &self,
     ) -> Result<Option<RuntimeOutboxLeader>, PersistenceError> {
-        let mut connection = self.pool().acquire().await?.detach();
-        let acquired: bool = sqlx::query_scalar!(
-            "SELECT pg_try_advisory_lock($1) AS \"acquired!\"",
-            OUTBOX_LEADER_LOCK_ID
-        )
-        .fetch_one(&mut connection)
-        .await?;
-        if !acquired {
-            connection.close().await?;
-            self.report_runtime_outbox_contention().await?;
-            return Ok(None);
+        let contender = self.runtime_outbox_leader_contender().await?;
+        match contender.try_acquire(self).await? {
+            RuntimeOutboxLeadershipProbe::Acquired(leader) => Ok(Some(leader)),
+            RuntimeOutboxLeadershipProbe::Pending(contender) => {
+                contender.close().await?;
+                Ok(None)
+            }
         }
-        let mut leader = RuntimeOutboxLeader { connection };
-        leader.record_acquired().await?;
-        Ok(Some(leader))
+    }
+
+    pub async fn runtime_outbox_leader_contender(
+        &self,
+    ) -> Result<RuntimeOutboxLeaderContender, PersistenceError> {
+        Ok(RuntimeOutboxLeaderContender {
+            connection: self.pool().acquire().await?.detach(),
+        })
     }
 
     async fn report_runtime_outbox_contention(&self) -> Result<(), PersistenceError> {
@@ -158,7 +168,7 @@ impl PgStore {
 
     pub async fn runtime_outbox_status(
         &self,
-        now: DateTime<Utc>,
+        _now: DateTime<Utc>,
     ) -> Result<RuntimeOutboxStatus, PersistenceError> {
         let backlog = sqlx::query!(
             "SELECT count(*) AS \"pending_rows!\", min(created_at) AS oldest_pending_at \
@@ -169,7 +179,12 @@ impl PgStore {
         let pending_rows = u64::try_from(backlog.pending_rows)
             .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
         let health = sqlx::query!(
-            "SELECT owner_active, claimed_rows, checked_at, last_progress_at \
+            "SELECT owner_active, claimed_rows, checked_at, last_progress_at, \
+                    GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint \
+                      AS \"heartbeat_age_seconds!\", \
+                    CASE WHEN last_progress_at IS NULL THEN NULL ELSE \
+                      GREATEST(0, floor(extract(epoch FROM clock_timestamp() - last_progress_at)))::bigint \
+                    END AS last_progress_age_seconds \
              FROM runtime_outbox_health WHERE singleton"
         )
         .fetch_optional(self.pool())
@@ -187,7 +202,13 @@ impl PgStore {
                 last_progress_age_seconds: None,
             });
         };
-        let heartbeat_age_seconds = age_seconds(now, health.checked_at);
+        let heartbeat_age_seconds = u64::try_from(health.heartbeat_age_seconds)
+            .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
+        let last_progress_age_seconds = health
+            .last_progress_age_seconds
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
         let claimed_rows = u64::try_from(health.claimed_rows)
             .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
         let state = if heartbeat_age_seconds
@@ -208,8 +229,36 @@ impl PgStore {
             checked_at: Some(health.checked_at),
             heartbeat_age_seconds: Some(heartbeat_age_seconds),
             last_progress_at: health.last_progress_at,
-            last_progress_age_seconds: health.last_progress_at.map(|at| age_seconds(now, at)),
+            last_progress_age_seconds,
         })
+    }
+}
+
+impl RuntimeOutboxLeaderContender {
+    pub async fn try_acquire(
+        mut self,
+        store: &PgStore,
+    ) -> Result<RuntimeOutboxLeadershipProbe, PersistenceError> {
+        let acquired: bool = sqlx::query_scalar!(
+            "SELECT pg_try_advisory_lock($1) AS \"acquired!\"",
+            OUTBOX_LEADER_LOCK_ID
+        )
+        .fetch_one(&mut self.connection)
+        .await?;
+        if !acquired {
+            store.report_runtime_outbox_contention().await?;
+            return Ok(RuntimeOutboxLeadershipProbe::Pending(self));
+        }
+        let mut leader = RuntimeOutboxLeader {
+            connection: self.connection,
+        };
+        leader.record_acquired().await?;
+        Ok(RuntimeOutboxLeadershipProbe::Acquired(leader))
+    }
+
+    pub async fn close(self) -> Result<(), PersistenceError> {
+        self.connection.close().await?;
+        Ok(())
     }
 }
 
@@ -396,8 +445,11 @@ impl RuntimeOutboxLeader {
         sqlx::query!(
             "UPDATE runtime_outbox_health SET owner_active = true, claimed_rows = 0, \
                     checked_at = clock_timestamp(), \
-                    last_progress_at = GREATEST(last_progress_at, clock_timestamp()) \
-             WHERE singleton"
+                    last_progress_at = CASE WHEN $1 \
+                      THEN GREATEST(last_progress_at, clock_timestamp()) \
+                      ELSE last_progress_at END \
+             WHERE singleton",
+            published
         )
         .execute(&mut *transaction)
         .await?;
@@ -414,7 +466,7 @@ impl RuntimeOutboxLeader {
             &mut transaction,
             WorkerTask::RuntimeOutbox,
             WorkerTaskCheckpointOutcome::Success,
-            true,
+            published,
         )
         .await?;
         transaction.commit().await?;
@@ -463,8 +515,4 @@ impl RuntimeOutboxLeader {
             .fetch_one(&mut self.connection)
             .await?)
     }
-}
-
-fn age_seconds(now: DateTime<Utc>, at: DateTime<Utc>) -> u64 {
-    u64::try_from(now.signed_duration_since(at).num_seconds().max(0)).unwrap_or(u64::MAX)
 }
