@@ -160,13 +160,15 @@ The longest PostgreSQL contracts likewise keep their single ordered database
 lifecycle while moving provider/route/API-key, OIDC harness, query, and
 retention phases into named sibling modules under each integration test.
 
-The suite needs an isolated PostgreSQL **and an isolated Valkey**: the
-request-metadata stream key is a fixed global name, so a second `olp` worker
-on the same Valkey consumes this installation's telemetry and the request log
-silently stays empty. Without `OLP_E2E_VALKEY_URL` the harness atomically
-leases and clears one local logical database with a PostgreSQL session
-advisory lock; concurrent runs cannot select the same keyspace, and process
-exit releases the reservation automatically.
+The suite needs an isolated PostgreSQL database. Multiple independently
+migrated installations may share one Valkey logical database: migration 0032
+creates each installation's durable identity, and every OLP-owned Valkey key
+and channel is derived from it. Without `OLP_E2E_VALKEY_URL` the harness
+atomically leases and clears one local logical database with a PostgreSQL
+session advisory lock; a shared-Valkey HA fixture owns that lease while both
+installation processes run, so one installation's teardown cannot flush the
+other's keys. `make worker-ha` proves that isolation and three-real-worker
+crash recovery in the full CI tier.
 
 Dev builds use `debug = "line-tables-only"` (workspace `[profile.dev]`):
 backtraces keep file:line information, but debuggers lose variable and type
@@ -198,7 +200,7 @@ PostgreSQL/Valkey integration tests through nextest (profile `db` in
 - `OLP_TEST_DATABASE_URL_PREFIX` — connection prefix **without** a trailing
   database name; each test appends its own database.
 - `OLP_TEST_DATABASE_OWNER` (optional, default `olp`).
-- `OLP_VALKEY_URL` (optional) — an isolated Valkey; without it the
+- `OLP_VALKEY_URL` (optional) — a Valkey test endpoint; without it the
   `distributed_limits_valkey` suite is skipped with a warning.
 
 Per-test timeouts live in the nextest `db` profile. To run a subset, pass a

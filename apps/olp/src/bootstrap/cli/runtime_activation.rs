@@ -9,13 +9,18 @@ use crate::{TransportRegistry, bootstrap::connectors::load_runtime_transports};
 
 use super::AppResult;
 
+pub(super) struct RuntimeHintSource {
+    pub(super) url: String,
+    pub(super) channel: String,
+}
+
 pub(super) async fn runtime_hint_supervisor(
     runtime: Arc<RuntimeManager>,
     store: PgStore,
     transports: TransportRegistry,
     circuits: CircuitBreaker,
     master_key: Option<Arc<MasterKey>>,
-    valkey_url: String,
+    source: RuntimeHintSource,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut backoff = Duration::from_millis(100);
@@ -24,7 +29,8 @@ pub(super) async fn runtime_hint_supervisor(
             return;
         }
         let result: AppResult<()> = async {
-            let mut subscriber = RuntimeHintSubscriber::connect(&valkey_url).await?;
+            let mut subscriber =
+                RuntimeHintSubscriber::connect(&source.url, &source.channel).await?;
             backoff = Duration::from_millis(100);
             loop {
                 tokio::select! {

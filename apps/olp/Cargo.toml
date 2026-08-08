@@ -9,7 +9,7 @@ rust-version.workspace = true
 role = "delivery"
 
 [features]
-test-util = ["olp-providers/test-util"]
+test-util = ["olp-providers/test-util", "olp-storage/test-util"]
 
 [[example]]
 name = "sdk_smoke_fixture"

@@ -1,5 +1,6 @@
 use std::{path::Path, time::Duration};
 
+use base64::Engine as _;
 use olp_storage::{
     PgStore,
     limits::DistributedLimiter,
@@ -10,12 +11,15 @@ use olp_storage::{
     worker_health::{WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tokio::{sync::watch, task::JoinSet};
 use tracing::{error, info, warn};
 
 use crate::{
     TransportRegistry, bootstrap::connectors::register_mounted_connectors, create_media_spool,
 };
+
+const DATABASE_IDENTITY_QUERY_PARAMS: &[&str] = &["dbname", "host", "hostaddr", "port"];
 
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
@@ -47,20 +51,90 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
         olp_storage::MIGRATOR.run_to(target, store.pool()).await?;
         info!(target, "PostgreSQL migrations reached test target");
     } else {
+        let legacy_stream_claim_token =
+            legacy_request_metadata_stream_claim_token(&args.persistence.database.database_url)?;
+        let should_claim_legacy_stream =
+            store.should_claim_legacy_request_metadata_stream().await?;
+        let legacy_stream_claim_prepared = if should_claim_legacy_stream {
+            olp_storage::valkey::mark_legacy_request_metadata_stream_claim(
+                &args.persistence.valkey_url,
+                &legacy_stream_claim_token,
+            )
+            .await?
+        } else {
+            false
+        };
         store.migrate().await?;
         info!("PostgreSQL migrations are current");
+        let keyspace = store.valkey_keyspace().await?;
+        let migrated = olp_storage::valkey::migrate_claimed_legacy_request_metadata_stream(
+            &args.persistence.valkey_url,
+            &keyspace.request_metadata_stream(),
+            &legacy_stream_claim_token,
+        )
+        .await?;
+        if migrated || legacy_stream_claim_prepared {
+            info!(
+                migrated,
+                stream = %keyspace.request_metadata_stream(),
+                "legacy request metadata stream transition is complete"
+            );
+        } else {
+            olp_storage::valkey::verify_request_metadata_stream_upgrade(
+                &args.persistence.valkey_url,
+            )
+            .await?;
+            info!("legacy request metadata stream claim skipped for non-upgrade database");
+        }
     }
     Ok(())
 }
 
+pub(super) fn legacy_request_metadata_stream_claim_token(database_url: &str) -> AppResult<String> {
+    let mut identity_url = url::Url::parse(database_url).map_err(|error| {
+        std::io::Error::other(format!(
+            "invalid database URL for legacy request metadata stream claim: {error}"
+        ))
+    })?;
+    identity_url.set_username("").map_err(|()| {
+        std::io::Error::other("database URL cannot be normalized for legacy stream claim")
+    })?;
+    identity_url.set_password(None).map_err(|()| {
+        std::io::Error::other("database URL cannot be normalized for legacy stream claim")
+    })?;
+    let mut identity_query_params = identity_url
+        .query_pairs()
+        .filter(|(key, _)| DATABASE_IDENTITY_QUERY_PARAMS.contains(&key.as_ref()))
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    identity_query_params.sort_unstable();
+    identity_url.set_query(None);
+    if !identity_query_params.is_empty() {
+        let mut query_pairs = identity_url.query_pairs_mut();
+        for (key, value) in identity_query_params {
+            query_pairs.append_pair(&key, &value);
+        }
+    }
+    identity_url.set_fragment(None);
+    let digest = Sha256::digest(identity_url.as_str().as_bytes());
+    Ok(format!(
+        "database-url-sha256-v1:{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+    ))
+}
+
 pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
     let store = connect_store(&args.database).await?;
+    let keyspace = store.valkey_keyspace().await?;
+    test_worker_start_barrier().await?;
     let (sender, receiver) = watch::channel(false);
     let mut workers = JoinSet::new();
     spawn_worker_supervisors(
         &mut workers,
         store,
         args.valkey_url,
+        keyspace.runtime_hint_channel(),
+        keyspace.request_metadata_stream(),
         request_metadata_consumer_name(),
         receiver,
     );
@@ -77,6 +151,24 @@ pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
             Err(std::io::Error::other("worker supervisor stopped unexpectedly").into())
         }
     }
+}
+
+#[cfg(all(feature = "test-util", debug_assertions))]
+async fn test_worker_start_barrier() -> AppResult<()> {
+    let Ok(marker) = std::env::var("OLP_TEST_WORKER_START_MARKER") else {
+        return Ok(());
+    };
+    let release = format!("{marker}.release");
+    std::fs::write(&marker, b"ready\n")?;
+    while !std::path::Path::new(&release).exists() {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Ok(())
+}
+
+#[cfg(not(all(feature = "test-util", debug_assertions)))]
+async fn test_worker_start_barrier() -> AppResult<()> {
+    Ok(())
 }
 
 pub(super) async fn stop_worker_tasks(
@@ -119,17 +211,21 @@ fn spawn_worker_supervisors(
     workers: &mut JoinSet<()>,
     store: PgStore,
     valkey_url: String,
+    runtime_hint_channel: String,
+    request_metadata_stream: String,
     request_metadata_consumer: String,
     shutdown: watch::Receiver<bool>,
 ) {
     workers.spawn(outbox_supervisor(
         store.clone(),
         valkey_url.clone(),
+        runtime_hint_channel,
         shutdown.clone(),
     ));
     workers.spawn(request_metadata_consumer_supervisor(
         store.clone(),
         valkey_url,
+        request_metadata_stream,
         request_metadata_consumer,
         shutdown.clone(),
     ));
@@ -251,6 +347,7 @@ pub(super) async fn request_metadata_epoch_supervisor(
 pub(super) async fn outbox_supervisor(
     store: PgStore,
     valkey_url: String,
+    runtime_hint_channel: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut backoff = Duration::from_millis(100);
@@ -258,7 +355,14 @@ pub(super) async fn outbox_supervisor(
         if *shutdown.borrow() {
             return;
         }
-        match outbox_loop(store.clone(), &valkey_url, shutdown.clone()).await {
+        match outbox_loop(
+            store.clone(),
+            &valkey_url,
+            &runtime_hint_channel,
+            shutdown.clone(),
+        )
+        .await
+        {
             Ok(()) => return,
             Err(error) => {
                 if let Err(checkpoint_error) = store
@@ -312,6 +416,7 @@ pub enum OutboxBatchOutcome {
 pub(super) async fn request_metadata_consumer_supervisor(
     store: PgStore,
     valkey_url: String,
+    request_metadata_stream: String,
     consumer: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -323,6 +428,7 @@ pub(super) async fn request_metadata_consumer_supervisor(
         match request_metadata_consumer_loop(
             store.clone(),
             &valkey_url,
+            &request_metadata_stream,
             &consumer,
             shutdown.clone(),
         )
@@ -358,6 +464,7 @@ pub(super) async fn request_metadata_consumer_supervisor(
 async fn outbox_loop(
     store: PgStore,
     valkey_url: &str,
+    runtime_hint_channel: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
     let mut contender = Some(store.runtime_outbox_leader_contender().await?);
@@ -392,7 +499,8 @@ async fn outbox_loop(
         "acquired runtime outbox publication leadership"
     );
 
-    let run_result = run_owned_outbox_loop(&mut leader, valkey_url, &mut shutdown).await;
+    let run_result =
+        run_owned_outbox_loop(&mut leader, valkey_url, runtime_hint_channel, &mut shutdown).await;
     match leader.release().await {
         Ok(()) => info!(
             event = "runtime_outbox_leadership_released",
@@ -415,9 +523,10 @@ async fn outbox_loop(
 async fn run_owned_outbox_loop(
     leader: &mut RuntimeOutboxLeader,
     valkey_url: &str,
+    runtime_hint_channel: &str,
     shutdown: &mut watch::Receiver<bool>,
 ) -> AppResult<()> {
-    let publisher = RuntimeHintPublisher::connect(valkey_url);
+    let publisher = RuntimeHintPublisher::connect(valkey_url, runtime_hint_channel);
     tokio::pin!(publisher);
     let mut connect_heartbeat = tokio::time::interval(OUTBOX_HEARTBEAT_INTERVAL);
     connect_heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -485,6 +594,8 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
                 );
                 continue 'records;
             };
+            #[cfg(all(feature = "test-util", debug_assertions))]
+            block_after_test_outbox_claim().await;
             info!(
                 event = "runtime_outbox_publication_attempt",
                 outbox_id = %record.id,
@@ -615,18 +726,36 @@ pub mod test_support {
 async fn request_metadata_consumer_loop(
     store: PgStore,
     valkey_url: &str,
+    request_metadata_stream: &str,
     consumer: &str,
     shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
     run_request_metadata_consumer(
         &store,
         valkey_url,
-        olp_storage::valkey::REQUEST_METADATA_STREAM,
+        request_metadata_stream,
         consumer,
         shutdown,
     )
     .await?;
     Ok(())
+}
+
+#[cfg(all(feature = "test-util", debug_assertions))]
+async fn block_after_test_outbox_claim() {
+    let Ok(marker) = std::env::var("OLP_TEST_OUTBOX_OWNED_MARKER") else {
+        return;
+    };
+    let marker = std::path::Path::new(&marker);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
+    {
+        Ok(_) => std::future::pending::<()>().await,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => panic!("failed to create outbox failpoint marker: {error}"),
+    }
 }
 
 /// Combines a bounded, log-safe host label with the OS process ID and a UUIDv7
@@ -796,10 +925,16 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
     store.ping().await?;
     checks.insert("postgresql".into(), json!({ "ok": true }));
 
-    let limiter =
-        DistributedLimiter::connect(&args.persistence.valkey_url, "olp:v2:doctor").await?;
+    let keyspace = store.valkey_keyspace().await?;
+    let limiter = DistributedLimiter::connect(
+        &args.persistence.valkey_url,
+        &format!("{}:doctor", keyspace.prefix()),
+    )
+    .await?;
     limiter.ping().await?;
     checks.insert("valkey".into(), json!({ "ok": true }));
+    olp_storage::valkey::verify_request_metadata_stream_upgrade(&args.persistence.valkey_url)
+        .await?;
     checks.insert(
         "request_metadata_stream_upgrade".into(),
         json!({ "ok": true }),

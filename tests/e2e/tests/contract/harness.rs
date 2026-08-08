@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use rand::RngCore as _;
+use redis::{
+    AsyncCommands as _,
+    streams::{StreamReadOptions, StreamReadReply},
+};
 use sqlx::Connection as _;
 
 pub struct Server {
@@ -16,6 +20,7 @@ pub struct Server {
     stderr: Arc<Mutex<String>>,
     additional_children: Vec<Child>,
     additional_stderr: Vec<Arc<Mutex<String>>>,
+    additional_pid_files: Vec<PathBuf>,
     /// Public listener origin, e.g. `http://127.0.0.1:41234`.
     pub public_origin: String,
     /// Observability listener base.
@@ -39,19 +44,30 @@ pub struct GatewayProcess {
     pub observability_base: String,
 }
 
+#[derive(Clone, Copy)]
+pub enum WorkerBoundary {
+    RequestMetadata,
+    RuntimeOutbox,
+    None,
+}
+
+pub struct WorkerProcess {
+    child_index: usize,
+    start_marker: PathBuf,
+    pub ownership_marker: PathBuf,
+}
+
 pub fn admin_url() -> String {
     std::env::var("OLP_E2E_DATABASE_ADMIN_URL")
         .unwrap_or_else(|_| "postgres://olp_test:olp_test@localhost:5433/postgres".to_owned())
 }
 
-/// The Valkey this run may use exclusively.
+/// The Valkey logical database leased by this test run.
 ///
-/// `docs/operations.md` requires each installation to have "an isolated
-/// database and a fresh isolated Valkey", because the request-metadata stream
-/// key is a fixed global name: any other worker attached to the same keyspace
-/// consumes and acknowledges this installation's envelopes, and its telemetry
-/// simply never arrives. Sharing one Valkey therefore does not degrade the
-/// suite, it silently empties the request log.
+/// Installation resources are durably namespaced, so multiple independently
+/// migrated servers may safely share this exact URL. The lease protects the
+/// run from unrelated parallel tests and owns whole-database cleanup only
+/// after every sharing installation has stopped.
 ///
 /// An explicit `OLP_E2E_VALKEY_URL` is honoured verbatim — CI gives the job a
 /// Valkey service of its own. Otherwise the harness atomically reserves one of
@@ -96,6 +112,31 @@ struct ValkeyReservation {
     lock: sqlx::postgres::PgConnection,
 }
 
+/// Owns one test Valkey lease independently of any OLP installation. Multiple
+/// independently migrated servers can therefore share the exact URL while the
+/// advisory lease remains held until every server has stopped.
+pub struct SharedValkey {
+    url: String,
+    reservation: Option<ValkeyReservation>,
+}
+
+impl SharedValkey {
+    pub async fn reserve() -> Result<Self, String> {
+        let (url, reservation) = valkey(&admin_url()).await?;
+        Ok(Self { url, reservation })
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub async fn release(mut self) {
+        if let Some(reservation) = self.reservation.take() {
+            reservation.release().await;
+        }
+    }
+}
+
 impl ValkeyReservation {
     fn url(&self) -> String {
         format!("redis://localhost:6379/{}", self.database)
@@ -119,6 +160,56 @@ async fn flush_valkey(database: u16) -> Result<(), String> {
         .await
         .map_err(|error| format!("failed to clear local Valkey database {database}: {error}"))?;
     Ok(())
+}
+
+async fn seed_legacy_request_metadata_stream(valkey_url: &str) -> Result<String, String> {
+    const LEGACY: &str = "olp:v2:request-metadata";
+    const GROUP: &str = "olp:persistence";
+
+    let client = redis::Client::open(valkey_url)
+        .map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| format!("failed to connect shared Valkey: {error}"))?;
+    let _: i64 = redis::cmd("DEL")
+        .arg(LEGACY)
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to clear legacy stream fixture: {error}"))?;
+    let event_id: String = redis::cmd("XADD")
+        .arg(LEGACY)
+        .arg("*")
+        .arg("event")
+        .arg("legacy-pending-event")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to seed legacy stream: {error}"))?;
+    let _: String = redis::cmd("XGROUP")
+        .arg("CREATE")
+        .arg(LEGACY)
+        .arg(GROUP)
+        .arg("0")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to seed legacy consumer group: {error}"))?;
+    let delivered: StreamReadReply = connection
+        .xread_options(
+            &[LEGACY],
+            &[">"],
+            &StreamReadOptions::default().group(GROUP, "legacy-owner"),
+        )
+        .await
+        .map_err(|error| format!("failed to establish legacy ownership: {error}"))?;
+    if !delivered
+        .keys
+        .iter()
+        .flat_map(|stream| &stream.ids)
+        .any(|entry| entry.id == event_id)
+    {
+        return Err("legacy event was not delivered into the pending-entry list".to_owned());
+    }
+    Ok(event_id)
 }
 
 fn binary() -> Result<PathBuf, String> {
@@ -189,6 +280,33 @@ fn process_environment(
     environment
 }
 
+fn run_migrate(
+    binary: &Path,
+    environment: &[(&'static str, String)],
+    database: &str,
+    through_version: Option<i64>,
+) -> Result<(), String> {
+    let mut command = Command::new(binary);
+    command
+        .arg("migrate")
+        .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
+        .env("OLP_DATABASE_URL", database);
+    if let Some(target) = through_version {
+        command
+            .arg("--through-version")
+            .arg(target.to_string())
+            .env("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS", "test-only");
+    }
+    let migrate = command
+        .output()
+        .map_err(|error| format!("failed to run olp migrate: {error}"))?;
+    if !migrate.status.success() {
+        let stderr = String::from_utf8_lossy(&migrate.stderr);
+        return Err(format!("olp migrate failed ({}): {stderr}", migrate.status));
+    }
+    Ok(())
+}
+
 fn free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|error| format!("failed to bind an ephemeral port: {error}"))?;
@@ -244,6 +362,13 @@ struct PreparedServer {
     database_url: String,
     app_database_url: String,
     valkey_url: String,
+    legacy_request_metadata_event_id: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum MigrationFixture {
+    Current,
+    LegacyRequestMetadataUpgrade,
 }
 
 /// Owns every resource acquired after `CREATE DATABASE` until startup either
@@ -274,6 +399,9 @@ impl LaunchGuard {
         binary: &Path,
         database: &str,
         app_database: &str,
+        process: &str,
+        shared_valkey_url: Option<&str>,
+        migration_fixture: MigrationFixture,
     ) -> Result<PreparedServer, String> {
         let console_dir = self.run_dir.join("console");
         let spool_dir = self.run_dir.join("spool");
@@ -289,8 +417,12 @@ impl LaunchGuard {
         write_secret(&auth_hmac_key_file, &random_base64_secret())?;
         write_secret(&bootstrap_token_file, &setup_token)?;
 
-        let (valkey_url, reservation) = valkey(&self.admin_url).await?;
+        let (valkey_url, reservation) = match shared_valkey_url {
+            Some(url) => (url.to_owned(), None),
+            None => valkey(&self.admin_url).await?,
+        };
         self.valkey_reservation = reservation;
+        let mut legacy_request_metadata_event_id = None;
 
         for attempt in 1..=3 {
             let public_port = free_port()?;
@@ -310,21 +442,22 @@ impl LaunchGuard {
             );
 
             if attempt == 1 {
-                let migrate = Command::new(binary)
-                    .arg("migrate")
-                    .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
-                    .env("OLP_DATABASE_URL", database)
-                    .output()
-                    .map_err(|error| format!("failed to run olp migrate: {error}"))?;
-                if !migrate.status.success() {
-                    let stderr = String::from_utf8_lossy(&migrate.stderr);
-                    return Err(format!("olp migrate failed ({}): {stderr}", migrate.status));
+                match migration_fixture {
+                    MigrationFixture::Current => {
+                        run_migrate(binary, &environment, database, None)?;
+                    }
+                    MigrationFixture::LegacyRequestMetadataUpgrade => {
+                        run_migrate(binary, &environment, database, Some(31))?;
+                        legacy_request_metadata_event_id =
+                            Some(seed_legacy_request_metadata_stream(&valkey_url).await?);
+                        run_migrate(binary, &environment, database, None)?;
+                    }
                 }
             }
 
             self.stderr = Arc::new(Mutex::new(String::new()));
             let mut child = Command::new(binary)
-                .arg("all")
+                .arg(process)
                 .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -342,7 +475,7 @@ impl LaunchGuard {
                 self.child.as_mut().expect("child was just installed"),
                 &self.stderr,
                 &observability_base,
-                "olp all",
+                &format!("olp {process}"),
             )
             .await;
             match startup {
@@ -354,6 +487,7 @@ impl LaunchGuard {
                         database_url: database.to_owned(),
                         app_database_url: app_database.to_owned(),
                         valkey_url,
+                        legacy_request_metadata_event_id,
                     });
                 }
                 Err(error) => {
@@ -392,6 +526,7 @@ impl LaunchGuard {
             stderr: Arc::clone(&self.stderr),
             additional_children: Vec::new(),
             additional_stderr: Vec::new(),
+            additional_pid_files: Vec::new(),
             public_origin: prepared.public_origin,
             observability_base: prepared.observability_base,
             setup_token: prepared.setup_token,
@@ -408,6 +543,52 @@ impl LaunchGuard {
 
 impl Server {
     pub async fn launch() -> Result<Self, String> {
+        Self::launch_process("all", None).await
+    }
+
+    pub async fn launch_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
+        Self::launch_process("all", Some(valkey_url)).await
+    }
+
+    pub async fn launch_control() -> Result<Self, String> {
+        Self::launch_process("control", None).await
+    }
+
+    pub async fn launch_control_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
+        Self::launch_process("control", Some(valkey_url)).await
+    }
+
+    pub async fn launch_control_from_legacy_request_metadata_upgrade(
+        valkey_url: &str,
+    ) -> Result<(Self, String), String> {
+        let (server, event_id) = Self::launch_process_with_migration_fixture(
+            "control",
+            Some(valkey_url),
+            MigrationFixture::LegacyRequestMetadataUpgrade,
+        )
+        .await?;
+        let event_id = event_id.expect("legacy request metadata fixture seeds an event");
+        Ok((server, event_id))
+    }
+
+    async fn launch_process(
+        process: &str,
+        shared_valkey_url: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::launch_process_with_migration_fixture(
+            process,
+            shared_valkey_url,
+            MigrationFixture::Current,
+        )
+        .await
+        .map(|(server, _)| server)
+    }
+
+    async fn launch_process_with_migration_fixture(
+        process: &str,
+        shared_valkey_url: Option<&str>,
+        migration_fixture: MigrationFixture,
+    ) -> Result<(Self, Option<String>), String> {
         let binary = binary()?;
         let run_token = std::env::var("OLP_E2E_RUN_TOKEN").map_err(|_| {
             "OLP_E2E_RUN_TOKEN is unset; run via scripts/run-e2e-tests.sh".to_owned()
@@ -431,13 +612,34 @@ impl Server {
 
         let run_dir = std::env::temp_dir().join(format!("olp-e2e-{run_token}-{}", random_hex(6)));
         let mut guard = LaunchGuard::new(admin, database_name, run_dir);
-        match guard.prepare(&binary, &database, &app_database).await {
-            Ok(prepared) => Ok(guard.into_server(prepared)),
+        match guard
+            .prepare(
+                &binary,
+                &database,
+                &app_database,
+                process,
+                shared_valkey_url,
+                migration_fixture,
+            )
+            .await
+        {
+            Ok(prepared) => {
+                let legacy_request_metadata_event_id =
+                    prepared.legacy_request_metadata_event_id.clone();
+                Ok((
+                    guard.into_server(prepared),
+                    legacy_request_metadata_event_id,
+                ))
+            }
             Err(error) => {
                 guard.cleanup().await;
                 Err(error)
             }
         }
+    }
+
+    pub fn valkey_url(&self) -> &str {
+        &self.valkey_url
     }
 
     pub fn stderr_tail(&self) -> String {
@@ -488,10 +690,13 @@ impl Server {
                         self.additional_children.len() + 2
                     ));
                     let pid = child.id();
+                    if let Err(error) = std::fs::write(&pid_file, format!("{pid}\n")) {
+                        terminate_child(&mut child).await;
+                        return Err(format!("failed to write gateway pid file: {error}"));
+                    }
                     self.additional_children.push(child);
                     self.additional_stderr.push(Arc::clone(&stderr));
-                    std::fs::write(pid_file, format!("{pid}\n"))
-                        .map_err(|error| format!("failed to write gateway pid file: {error}"))?;
+                    self.additional_pid_files.push(pid_file);
                     return Ok(GatewayProcess {
                         public_origin,
                         observability_base,
@@ -512,10 +717,99 @@ impl Server {
         unreachable!("bounded startup loop either succeeds or returns an error")
     }
 
+    pub async fn launch_worker(
+        &mut self,
+        label: &str,
+        boundary: WorkerBoundary,
+    ) -> Result<WorkerProcess, String> {
+        let binary = binary()?;
+        let start_marker = self.run_dir.join(format!("{label}-start"));
+        let ownership_marker = self.run_dir.join(format!("{label}-owned"));
+        let environment = process_environment(
+            &self.run_dir,
+            &self.app_database_url,
+            &self.valkey_url,
+            "http://127.0.0.1:1".to_owned(),
+            "http://127.0.0.1:2".to_owned(),
+            false,
+        );
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let mut command = Command::new(binary);
+        command
+            .arg("worker")
+            .envs(environment)
+            .env("OLP_TEST_WORKER_START_MARKER", &start_marker)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        match boundary {
+            WorkerBoundary::RequestMetadata => {
+                command.env("OLP_TEST_REQUEST_METADATA_OWNED_MARKER", &ownership_marker);
+            }
+            WorkerBoundary::RuntimeOutbox => {
+                command.env("OLP_TEST_OUTBOX_OWNED_MARKER", &ownership_marker);
+            }
+            WorkerBoundary::None => {}
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("failed to spawn {label}: {error}"))?;
+        let pid_file = self.run_dir.join(format!("{label}.pid"));
+        let pid = child.id();
+        if let Err(error) = std::fs::write(&pid_file, format!("{pid}\n")) {
+            terminate_child(&mut child).await;
+            return Err(format!("failed to write {label} pid file: {error}"));
+        }
+        if let Some(pipe) = child.stderr.take() {
+            capture_stderr(pipe, Arc::clone(&stderr));
+        }
+        let child_index = self.additional_children.len();
+        self.additional_children.push(child);
+        self.additional_stderr.push(stderr);
+        self.additional_pid_files.push(pid_file);
+        await_path_or_exit(
+            &mut self.additional_children[child_index],
+            &start_marker,
+            label,
+        )
+        .await?;
+        Ok(WorkerProcess {
+            child_index,
+            start_marker,
+            ownership_marker,
+        })
+    }
+
+    pub fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+        let release = format!("{}.release", worker.start_marker.display());
+        std::fs::write(release, b"release\n")
+            .map_err(|error| format!("failed to release worker: {error}"))
+    }
+
+    pub async fn hard_kill_worker(&mut self, worker: &WorkerProcess) -> Result<(), String> {
+        let child = &mut self.additional_children[worker.child_index];
+        child
+            .kill()
+            .map_err(|error| format!("failed to SIGKILL worker: {error}"))?;
+        child
+            .wait()
+            .map_err(|error| format!("failed to reap killed worker: {error}"))?;
+        if let Some(pid_file) = self.additional_pid_files.get(worker.child_index) {
+            std::fs::remove_file(pid_file).ok();
+        }
+        Ok(())
+    }
+
+    pub fn worker_ownership_marker(&self, label: &str) -> PathBuf {
+        self.run_dir.join(format!("{label}-owned"))
+    }
+
     /// SIGTERM, bounded wait, then SIGKILL as a last resort.
     pub async fn shutdown(mut self) -> String {
-        for child in &mut self.additional_children {
+        for (index, child) in self.additional_children.iter_mut().enumerate() {
             terminate_child(child).await;
+            if let Some(pid_file) = self.additional_pid_files.get(index) {
+                std::fs::remove_file(pid_file).ok();
+            }
         }
         self.terminate().await;
         if let Some(reservation) = self.valkey_reservation.take() {
@@ -536,6 +830,29 @@ impl Server {
 
     async fn terminate(&mut self) {
         terminate_child(&mut self.child).await;
+    }
+}
+
+async fn await_path_or_exit(child: &mut Child, path: &Path, process: &str) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if path.exists() {
+            return Ok(());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("failed to inspect {process}: {error}"))?
+        {
+            return Err(format!(
+                "{process} exited before reaching its start barrier: {status}"
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{process} did not reach its start barrier within 30s"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 
@@ -630,10 +947,13 @@ async fn terminate_child(child: &mut Child) {
 /// graceful teardown test, and interruptions.
 impl Drop for Server {
     fn drop(&mut self) {
-        for child in &mut self.additional_children {
+        for (index, child) in self.additional_children.iter_mut().enumerate() {
             if matches!(child.try_wait(), Ok(None)) {
                 child.kill().ok();
                 child.wait().ok();
+            }
+            if let Some(pid_file) = self.additional_pid_files.get(index) {
+                std::fs::remove_file(pid_file).ok();
             }
         }
         if matches!(self.child.try_wait(), Ok(None)) {

@@ -36,7 +36,7 @@ struct Fixture {
 }
 
 fn valkey_url() -> String {
-    std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must point to an isolated test Valkey")
+    std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must point to a Valkey test endpoint")
 }
 
 fn stream(label: &str) -> String {
@@ -385,7 +385,7 @@ async fn kill_consumer_connection(connection: &mut MultiplexedConnection, consum
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL 18 and an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
 async fn three_workers_distribute_new_events_and_checkpoint_group_wide_drain() {
     let db = olp_storage::test_support::TestDb::create_migrated("metadata_ha").await;
     let store = db.store(12).await;
@@ -469,7 +469,7 @@ async fn three_workers_distribute_new_events_and_checkpoint_group_wide_drain() {
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL 18 and an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
 async fn reconnect_resumes_own_pending_before_stale_idle_and_survivor_recovers_dead_owner() {
     let db = olp_storage::test_support::TestDb::create_migrated("metadata_reconnect").await;
     let store = db.store(8).await;
@@ -631,7 +631,7 @@ async fn reconnect_resumes_own_pending_before_stale_idle_and_survivor_recovers_d
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL 18 and an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
 async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants() {
     let db = olp_storage::test_support::TestDb::create_migrated("metadata_commit").await;
     let store = db.store(10).await;
@@ -712,7 +712,7 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL 18 and an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
 async fn slow_active_entry_is_not_stolen_below_idle_threshold() {
     let db = olp_storage::test_support::TestDb::create_migrated("metadata_idle").await;
     let store = db.store(8).await;
@@ -782,7 +782,7 @@ async fn slow_active_entry_is_not_stolen_below_idle_threshold() {
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL 18 and an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
 async fn concurrent_recovery_records_malformed_and_invalid_entries_once_then_drains() {
     let db = olp_storage::test_support::TestDb::create_migrated("metadata_invalid").await;
     let store = db.store(10).await;

@@ -19,7 +19,7 @@ use crate::{
 
 use super::{ValkeyAdapterError, valkey_connection};
 
-pub const REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
+pub const LEGACY_REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
 const REQUEST_METADATA_GROUP: &str = "olp:persistence";
 const REQUEST_METADATA_BATCH_SIZE: usize = 100;
 const REQUEST_METADATA_BLOCK_INTERVAL: Duration = Duration::from_secs(1);
@@ -474,6 +474,11 @@ async fn process_entry(
         }
     };
 
+    #[cfg(all(feature = "test-util", debug_assertions))]
+    if event.usage_complete {
+        block_after_test_delivery().await;
+    }
+
     match store
         .persist_request_metadata_stream_event(&event, &payload)
         .await
@@ -508,6 +513,23 @@ async fn process_entry(
             warn!(%error, stream_id = %entry.id, "request metadata persistence will retry");
             Ok(EntryProcessingOutcome::Retry)
         }
+    }
+}
+
+#[cfg(all(feature = "test-util", debug_assertions))]
+async fn block_after_test_delivery() {
+    let Ok(marker) = std::env::var("OLP_TEST_REQUEST_METADATA_OWNED_MARKER") else {
+        return;
+    };
+    let marker = std::path::Path::new(&marker);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
+    {
+        Ok(_) => std::future::pending::<()>().await,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => panic!("failed to create request-metadata failpoint marker: {error}"),
     }
 }
 

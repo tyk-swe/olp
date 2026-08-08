@@ -13,14 +13,14 @@
 //! the documented flow is asserted on its own in `provider_lifecycle`, so a
 //! defect there fails one named test instead of collapsing the whole suite.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
+use tokio::sync::Mutex;
 
-use crate::harness::{GatewayProcess, Server};
+use crate::harness::{GatewayProcess, Server, WorkerBoundary, WorkerProcess};
 use crate::mock_upstream::{self, MockUpstream};
 
 pub const OPENAI_ROUTE: &str = "e2e-openai";
@@ -263,6 +263,7 @@ pub struct World {
     pub mock: MockUpstream,
     pub management: Management,
     pub http: reqwest::Client,
+    pub api_key_id: String,
     pub api_key: String,
     pub compat_provider: String,
     pub azure_provider: String,
@@ -291,6 +292,32 @@ impl GatewayResponse {
 }
 
 impl World {
+    pub async fn valkey_url(&self) -> Result<String, String> {
+        self.server
+            .lock()
+            .await
+            .as_ref()
+            .map(|server| server.valkey_url().to_owned())
+            .ok_or_else(|| "server has already shut down".to_owned())
+    }
+
+    pub async fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+        self.server
+            .lock()
+            .await
+            .as_ref()
+            .ok_or_else(|| "server has already shut down".to_owned())?
+            .release_worker(worker)
+    }
+
+    pub async fn hard_kill_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+        let mut guard = self.server.lock().await;
+        let server = guard
+            .as_mut()
+            .ok_or_else(|| "server has already shut down".to_owned())?;
+        server.hard_kill_worker(worker).await
+    }
+
     pub fn origin(&self) -> &str {
         &self.public_origin
     }
@@ -450,11 +477,7 @@ impl World {
     /// Stops the server and releases the per-run database. Returns the tail of
     /// its stderr. Idempotent, so a second call is harmless.
     pub async fn shutdown(&self) -> String {
-        let server = self
-            .server
-            .lock()
-            .expect("world lock is not poisoned")
-            .take();
+        let server = self.server.lock().await.take();
         match server {
             Some(server) => server.shutdown().await,
             None => String::new(),
@@ -468,13 +491,41 @@ pub async fn bootstrap() -> Result<World, String> {
     bootstrap_server(Server::launch().await?).await
 }
 
+pub async fn bootstrap_sharing_valkey(valkey_url: &str) -> Result<World, String> {
+    bootstrap_server(Server::launch_sharing_valkey(valkey_url).await?).await
+}
+
 pub async fn bootstrap_ha() -> Result<(World, GatewayProcess), String> {
     let mut server = Server::launch().await?;
     let gateway = server.launch_gateway().await?;
     Ok((bootstrap_server(server).await?, gateway))
 }
 
+pub async fn bootstrap_worker_ha() -> Result<(World, [WorkerProcess; 3]), String> {
+    let mut server = Server::launch_control().await?;
+    let gateway = server.launch_gateway().await?;
+    let first = server
+        .launch_worker("worker-1", WorkerBoundary::RequestMetadata)
+        .await?;
+    let second = server
+        .launch_worker("worker-2", WorkerBoundary::RuntimeOutbox)
+        .await?;
+    let third = server
+        .launch_worker("worker-3", WorkerBoundary::None)
+        .await?;
+    server.release_worker(&first)?;
+    let world = bootstrap_server_at_gateway(server, Some(gateway.public_origin)).await?;
+    Ok((world, [first, second, third]))
+}
+
 async fn bootstrap_server(server: Server) -> Result<World, String> {
+    bootstrap_server_at_gateway(server, None).await
+}
+
+async fn bootstrap_server_at_gateway(
+    server: Server,
+    gateway_origin: Option<String>,
+) -> Result<World, String> {
     let mock = MockUpstream::spawn().await;
     let mut management = Management::new(&server.public_origin);
     management.setup(&server.setup_token).await?;
@@ -548,6 +599,10 @@ async fn bootstrap_server(server: Server) -> Result<World, String> {
             201,
         )
         .await?;
+    let api_key_id = api_key.body["id"]
+        .as_str()
+        .ok_or_else(|| format!("api key response lacks id: {}", api_key.body))?
+        .to_owned();
     let secret = api_key.body["secret"]
         .as_str()
         .ok_or_else(|| format!("api key response lacks secret: {}", api_key.body))?
@@ -560,10 +615,11 @@ async fn bootstrap_server(server: Server) -> Result<World, String> {
 
     // The key exists only inside the activated runtime generation, so wait for
     // the gateway to converge before handing the fixture to any test.
-    await_key(&http, &server.public_origin, &secret).await?;
+    let public_origin = gateway_origin.unwrap_or_else(|| server.public_origin.clone());
+    await_key(&http, &public_origin, &secret).await?;
 
     Ok(World {
-        public_origin: server.public_origin.clone(),
+        public_origin,
         observability_base: server.observability_base.clone(),
         setup_token: server.setup_token.clone(),
         database_url: server.database_url.clone(),
@@ -571,6 +627,7 @@ async fn bootstrap_server(server: Server) -> Result<World, String> {
         mock,
         management,
         http,
+        api_key_id,
         api_key: secret,
         compat_provider,
         azure_provider,

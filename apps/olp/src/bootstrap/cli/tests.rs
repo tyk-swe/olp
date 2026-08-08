@@ -15,7 +15,10 @@ use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
 
 use super::{
-    commands::{request_metadata_consumer_name_from, stop_worker_tasks},
+    commands::{
+        legacy_request_metadata_stream_claim_token, request_metadata_consumer_name_from,
+        stop_worker_tasks,
+    },
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
     lifecycle::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
@@ -38,6 +41,67 @@ fn request_metadata_consumer_names_are_process_unique_and_bounded() {
     assert!(
         request_metadata_consumer_name_from(&"x".repeat(200), u32::MAX, first_epoch).len() <= 92
     );
+}
+
+#[test]
+fn legacy_request_metadata_stream_claim_token_ignores_credentials_and_non_identity_query() {
+    let first = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@db.example:5432/olp?sslmode=require&application_name=one&user=one&password=secret",
+    )
+    .unwrap();
+    let second = legacy_request_metadata_stream_claim_token(
+        "postgres://other:rotated@db.example:5432/olp?sslmode=disable&application_name=two&user=two&password=rotated",
+    )
+    .unwrap();
+    let other_database =
+        legacy_request_metadata_stream_claim_token("postgres://user:secret@db.example:5432/other")
+            .unwrap();
+
+    assert_eq!(first, second);
+    assert_ne!(first, other_database);
+    assert!(first.starts_with("database-url-sha256-v1:"));
+    assert!(!first.contains("secret"));
+}
+
+#[test]
+fn legacy_request_metadata_stream_claim_token_preserves_query_database_identity() {
+    let host_one = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@placeholder.example:5432/olp?host=db-one.example&sslmode=require",
+    )
+    .unwrap();
+    let host_two = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@placeholder.example:5432/olp?host=db-two.example&sslmode=require",
+    )
+    .unwrap();
+    let hostaddr_one = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@placeholder.example:5432/olp?hostaddr=10.0.0.1",
+    )
+    .unwrap();
+    let hostaddr_two = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@placeholder.example:5432/olp?hostaddr=10.0.0.2",
+    )
+    .unwrap();
+    let port_one = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@db.example:5432/olp?port=5432&application_name=one",
+    )
+    .unwrap();
+    let port_two = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@db.example:5432/olp?port=6432&application_name=one",
+    )
+    .unwrap();
+    let database_one = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@db.example:5432/postgres?dbname=tenant_one&sslmode=require",
+    )
+    .unwrap();
+    let database_two = legacy_request_metadata_stream_claim_token(
+        "postgres://user:secret@db.example:5432/postgres?dbname=tenant_two&sslmode=require",
+    )
+    .unwrap();
+
+    assert_ne!(host_one, host_two);
+    assert_ne!(hostaddr_one, hostaddr_two);
+    assert_ne!(port_one, port_two);
+    assert_ne!(database_one, database_two);
 }
 
 struct DropSignal(Arc<AtomicBool>);

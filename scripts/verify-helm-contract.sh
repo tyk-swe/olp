@@ -102,6 +102,10 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set mediaSpool.capacityBytes=9007199254740991 \
   > "$work/max-spool-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set worker.replicas=3 \
+  --set worker.podDisruptionBudget.minAvailable=2 \
+  > "$work/worker-ha-manifests.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set-string config.valkeySecretName=migration-preflight-valkey \
   --set-string config.valkeySecretKey=migration-preflight-url \
   --show-only templates/migration-job.yaml \
@@ -171,6 +175,22 @@ done
 
 grep -Fq 'value: "9007199254740991"' "$work/max-spool-manifests.yaml" || {
   echo "rendered Helm contract did not preserve the maximum exact spool capacity" >&2
+  exit 1
+}
+awk -v RS='---' '
+  /kind: Deployment/ && /name: olp-openllmproxy-worker/ { print }
+' "$work/worker-ha-manifests.yaml" > "$work/worker-deployment.yaml"
+awk -v RS='---' '
+  /kind: PodDisruptionBudget/ && /name: olp-openllmproxy-worker/ { print }
+' "$work/worker-ha-manifests.yaml" > "$work/worker-pdb.yaml"
+for expected in 'replicas: 3' 'type: Recreate' 'topologyKey: "kubernetes.io/hostname"'; do
+  grep -Fq "$expected" "$work/worker-deployment.yaml" || {
+    echo "rendered worker Deployment contract is missing: $expected" >&2
+    exit 1
+  }
+done
+grep -Fq 'minAvailable: 2' "$work/worker-pdb.yaml" || {
+  echo "rendered worker PodDisruptionBudget is missing minAvailable: 2" >&2
   exit 1
 }
 default_proxy_cidrs_matched=

@@ -1,5 +1,5 @@
 {{- $root := . -}}
-{{- range $componentName := list "gateway" "control" -}}
+{{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
 {{- if and $component.enabled $component.podDisruptionBudget.enabled }}
 apiVersion: policy/v1

@@ -20,7 +20,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	coverage console-install console-verify console-e2e console-storybook \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e
+	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e worker-ha
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -93,6 +93,9 @@ db-test: ## PostgreSQL/Valkey integration tests via nextest; needs OLP_TEST_DATA
 
 e2e: ## End-to-end contract suite: real olp binary + PostgreSQL + Valkey + mock upstream; any contract violation fails
 	./scripts/run-e2e-tests.sh $(ARGS)
+
+worker-ha: ## Shared-Valkey isolation and three-worker crash recovery against real services
+	OLP_E2E_TEST_TARGET=worker-ha ./scripts/run-e2e-tests.sh $(ARGS)
 
 release-version: ## Require consistent release metadata
 	scripts/check-release-version.sh

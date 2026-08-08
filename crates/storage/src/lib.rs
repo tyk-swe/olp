@@ -73,7 +73,7 @@ mod tests {
                 "duplicate migration version: {name}"
             );
         }
-        assert!(versions.contains(&29));
+        assert!(versions.contains(&32));
     }
 
     #[test]

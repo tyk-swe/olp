@@ -12,7 +12,7 @@ const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
 const RESERVE_SCRIPT: &str = include_str!("../../scripts/reserve_limits.lua");
 
 fn valkey_url() -> String {
-    std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must point to an isolated test Valkey")
+    std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must point to a Valkey test endpoint")
 }
 
 fn namespace(label: &str) -> String {
@@ -84,7 +84,7 @@ async fn release_twice(limiter: &DistributedLimiter, lease: &LimitLease) {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn server_time_unifies_callers() {
     let namespace = namespace("server_time");
     let lookup_id = "lookup_01";
@@ -153,7 +153,7 @@ async fn server_time_unifies_callers() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn minute_rollover_resets_once_and_retry_matches_server_window() {
     let namespace = namespace("rollover");
     let lookup_id = "lookup_01";
@@ -223,7 +223,7 @@ async fn minute_rollover_resets_once_and_retry_matches_server_window() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL and waits for a UTC-minute boundary"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL and waits for a UTC-minute boundary"]
 async fn request_near_minute_end_gets_positive_server_derived_retry() {
     let namespace = namespace("near_boundary");
     let lookup_id = "lookup_01";
@@ -280,7 +280,7 @@ async fn request_near_minute_end_gets_positive_server_derived_retry() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn rpm_rejection_consumes_neither_tokens_nor_concurrency() {
     let namespace = namespace("rpm_atomic");
     let lookup_id = "lookup_01";
@@ -324,7 +324,7 @@ async fn rpm_rejection_consumes_neither_tokens_nor_concurrency() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
     let namespace = namespace("tpm_atomic");
     let lookup_id = "lookup_01";
@@ -369,7 +369,7 @@ async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn token_reconciliation_refunds_only_unused_reservation() {
     let namespace = namespace("token_refund");
     let lookup_id = "lookup_01";
@@ -413,7 +413,7 @@ async fn token_reconciliation_refunds_only_unused_reservation() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn token_reconciliation_does_not_touch_a_new_window() {
     let namespace = namespace("token_refund_window");
     let lookup_id = "lookup_01";
@@ -451,7 +451,7 @@ async fn token_reconciliation_does_not_touch_a_new_window() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn concurrency_rejection_consumes_neither_requests_nor_tokens() {
     let namespace = namespace("concurrency_atomic");
     let lookup_id = "lookup_01";
@@ -491,7 +491,7 @@ async fn concurrency_rejection_consumes_neither_requests_nor_tokens() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn concurrency_expiry_cleanup_scores_and_release_use_server_state() {
     let namespace = namespace("lease_time");
     let lookup_id = "lookup_01";
@@ -538,7 +538,7 @@ async fn concurrency_expiry_cleanup_scores_and_release_use_server_state() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn unlimited_dimensions_create_no_state() {
     let namespace = namespace("unlimited");
     let lookup_id = "lookup_01";
@@ -569,7 +569,7 @@ async fn unlimited_dimensions_create_no_state() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn malformed_rate_state_fails_closed_before_capacity_mutation() {
     let namespace = namespace("malformed");
     let lookup_id = "lookup_01";
@@ -611,7 +611,7 @@ async fn malformed_rate_state_fails_closed_before_capacity_mutation() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn counters_retain_exact_behavior_at_lua_safe_maximum() {
     let namespace = namespace("exact_integer");
     let lookup_id = "lookup_01";
@@ -663,7 +663,7 @@ async fn counters_retain_exact_behavior_at_lua_safe_maximum() {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated Valkey in OLP_VALKEY_URL"]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn concurrent_replicas_enforce_one_atomic_limit() {
     for attempt in 0..3 {
         let namespace = namespace(&format!("concurrent_{attempt}"));

@@ -36,6 +36,32 @@ Keep secret values out of values files and shell history. Override names and
 keys through `config` when required; `deploy/helm/values.yaml` documents the
 fields and `values.schema.json` validates them.
 
+### Shared Valkey
+
+Independent OLP installations may point at the same Valkey logical database.
+Each migrated PostgreSQL database contains a durable installation UUID, and
+OLP uses it to isolate request metadata, runtime hints, RPM/TPM counters, and
+concurrency leases. Do not manufacture or configure key prefixes. A restored
+PostgreSQL database retains its UUID, so it is a replacement for the source,
+not an independent clone: never run both against the same Valkey database at
+the same time. Use a fresh Valkey database for restore rehearsals.
+
+### Workers
+
+The chart defaults to one worker to keep the evaluation footprint small.
+Production installations should set `worker.replicas: 3`, enable the worker
+PodDisruptionBudget with `worker.podDisruptionBudget.minAvailable: 1` or
+higher, and spread replicas across failure domains. All replicas consume
+installation-scoped work concurrently; PostgreSQL advisory locking serializes
+runtime-outbox publication, and the Valkey consumer group reclaims abandoned
+metadata ownership. Size `config.databaseMaxConnections` and Valkey client
+capacity for the complete gateway, control, and worker fleet.
+
+The worker Deployment deliberately retains `strategy.type: Recreate`.
+Replicated same-version operation does not prove N-1/N compatibility across
+the namespace transition, so a rolling mixed-version worker upgrade is not
+supported. Keep Recreate until that compatibility has its own qualification.
+
 ## Edge routing
 
 The console and management API share an origin; vendor SDK traffic
@@ -174,5 +200,7 @@ those bounds.
 Before issuing a proxy key or routing a client, require a successful
 migration Job, ready pods, runtime-generation convergence, and — when
 monitoring is enabled — healthy gateway and control ServiceMonitor targets.
+For replicated workers also require all four `olp_worker_task_healthy` series,
+zero metadata pending/lag, and zero runtime-outbox pending/claimed rows.
 Once serving, continue with the monitoring, backup, and upgrade procedures
 in the [operations runbook](operations.md).
