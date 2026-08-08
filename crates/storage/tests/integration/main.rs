@@ -17,6 +17,8 @@ mod oidc_flow_postgres;
 mod operations_postgres;
 mod provider_revisions_postgres;
 mod request_metadata_consumer_health_postgres;
+#[cfg(all(feature = "test-util", debug_assertions))]
+mod request_metadata_consumer_valkey;
 mod request_metadata_naming_upgrade_postgres;
 mod route_activation_revalidation_postgres;
 mod route_draft_simulation_postgres;

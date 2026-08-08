@@ -16,8 +16,8 @@ use crate::{bootstrap::connectors::register_mounted_connectors, public_http::lis
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
     commands::{
-        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_supervisor,
-        request_metadata_epoch_supervisor,
+        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_name,
+        request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
     },
     config::ServeArgs,
     lifecycle::{
@@ -213,6 +213,7 @@ pub(super) async fn serve(
             background_tasks.push(tokio::spawn(request_metadata_consumer_supervisor(
                 store.clone(),
                 url.clone(),
+                request_metadata_consumer_name(),
                 background_shutdown_receiver.clone(),
             )));
         }
