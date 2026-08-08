@@ -266,7 +266,6 @@ pub struct ObservabilityState {
     pub(crate) public_admission: PublicAdmission,
     media_reconciliation_gaps: Arc<AtomicU64>,
     pub(crate) mode: ApiMode,
-    pub(crate) runs_worker_tasks: bool,
     pub(crate) observability: ObservabilityCache,
 }
 
@@ -420,7 +419,6 @@ impl ProcessComposition {
             public_admission: request_boundary.public_admission.clone(),
             media_reconciliation_gaps: Arc::clone(&self.media_reconciliation_gaps),
             mode: self.mode,
-            runs_worker_tasks: self.runs_worker_tasks,
             observability: self.observability.clone(),
         };
         match self.mode {
