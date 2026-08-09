@@ -1,6 +1,44 @@
 use super::*;
 
 pub(super) async fn verify(app: &Router, cookie: &str, csrf: &str) {
+    let kind_response = send(
+        app,
+        Method::GET,
+        "/api/v1/provider-kinds",
+        None,
+        Some(cookie),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(kind_response.status(), StatusCode::OK);
+    let kind_body = response_json(kind_response).await;
+    let kinds = kind_body["items"].as_array().unwrap();
+    let compatible = kinds
+        .iter()
+        .find(|kind| kind["kind"] == "openai_compatible")
+        .unwrap();
+    assert_eq!(
+        compatible["presets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|preset| preset["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "groq",
+            "mistral_ai",
+            "together_ai",
+            "xai",
+            "cerebras",
+            "openrouter"
+        ]
+    );
+    assert!(kinds.iter().all(|kind| {
+        kind["kind"] == "openai_compatible" || kind["presets"].as_array().is_some_and(Vec::is_empty)
+    }));
+
     let vertex = send(
         app,
         Method::POST,

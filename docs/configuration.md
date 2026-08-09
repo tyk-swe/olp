@@ -44,6 +44,38 @@ Generation and rotation are documented in `deploy/secrets/README.md`.
 `OLP_UID`, and `OLP_GID` — these configure the Compose stack itself, not the
 binary.
 
+## OpenAI-compatible provider presets
+
+The provider wizard offers a release-owned preset catalog under the existing
+`openai_compatible` connector. Selecting a preset resolves its reviewed API
+base URL and `api_key` authentication mode into the same ordinary provider
+fields used by **Custom endpoint**. The provider record stores those resolved
+values, not a catalog reference, so a later release cannot silently change an
+existing provider.
+
+The initial catalog was reviewed against the official documentation below on
+2026-08-09:
+
+| Preset ID | Provider | Resolved HTTPS endpoint | Official documentation |
+|---|---|---|---|
+| `groq` | Groq | `https://api.groq.com/openai/v1` | [OpenAI Compatibility](https://console.groq.com/docs/openai) |
+| `mistral_ai` | Mistral AI | `https://api.mistral.ai/v1` | [Migration from OpenAI](https://docs.mistral.ai/resources/migration-guides) |
+| `together_ai` | Together AI | `https://api.together.ai/v1` | [OpenAI API Compatibility](https://docs.together.ai/docs/openai-api-compatibility) |
+| `xai` | xAI | `https://api.x.ai/v1` | [API Reference](https://docs.x.ai/docs/api-reference) |
+| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | [Using OpenAI with Cerebras](https://inference-docs.cerebras.ai/resources/openai) |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | [API Reference Overview](https://openrouter.ai/docs/api/reference/overview) |
+
+A preset certifies neither a provider nor any model or operation. Creation and
+later edits still pass production HTTPS, public-egress, and SSRF validation;
+the wizard still probes reachability; and only live server certification makes
+an exact model capability eligible for activation and routing. Choose **Custom
+endpoint** for another compatible service or a private deployment that needs
+only the connector's supported Bearer API-key semantics. Services requiring
+mandatory custom headers, authentication, or wire behavior are not supported
+by this catalog.
+
+![Selecting a reviewed OpenAI-compatible provider preset](assets/screenshots/provider-wizard.png)
+
 ## Test-only escape hatches — never set in production
 
 Both require the exact value `test-only` and exist solely for test harnesses:

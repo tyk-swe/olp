@@ -9,6 +9,7 @@ import {
   mockUsage,
   SCREENSHOT_NOW
 } from './fixtures';
+import { mockProviderKinds } from '../e2e/provider-capabilities';
 
 // Playwright resolves screenshot paths against the process CWD, which is the
 // console directory for `pnpm screenshots`.
@@ -74,6 +75,21 @@ test('providers list', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'openai-production' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'vertex-gemini' })).toBeVisible();
   await capture(page, 'providers');
+});
+
+test('compatible-provider preset wizard', async ({ page }) => {
+  await mockProviderKinds(page);
+
+  await page.goto('/providers/new');
+  await page
+    .getByRole('radio', { name: /OpenAI-compatible/ })
+    .check();
+  await page.getByLabel('Compatible provider').selectOption('groq');
+  await page.getByLabel('Provider name').fill('groq-production');
+  await expect(page.getByLabel('Preset endpoint')).toHaveValue(
+    'https://api.groq.com/openai/v1'
+  );
+  await capture(page, 'provider-wizard');
 });
 
 test('routes list', async ({ page }) => {

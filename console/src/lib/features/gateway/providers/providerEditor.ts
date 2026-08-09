@@ -3,6 +3,7 @@ import type {
   ProviderAuthMode,
   ProviderKind,
   ProviderKindCapability,
+  ProviderPreset,
   UpdateProviderInput
 } from '$lib/api/management/providers';
 
@@ -17,6 +18,8 @@ export type ProviderDraft = {
   authMode: ProviderAuthMode;
   credential: string;
   model: string;
+  /** Console-only selection; creation persists the resolved ordinary fields. */
+  presetId: string;
 };
 
 export type ProviderEditValues = {
@@ -57,8 +60,28 @@ export function createProviderDraft(
     deployment: '',
     authMode: spec.default_auth_mode,
     credential: '',
-    model: ''
+    model: '',
+    presetId: ''
   };
+}
+
+export function selectProviderPreset(
+  draft: ProviderDraft,
+  spec: ProviderKindCapability,
+  presetId: string
+): ProviderPreset | null {
+  if (!presetId) {
+    draft.presetId = '';
+    draft.endpoint = '';
+    draft.authMode = spec.default_auth_mode;
+    return null;
+  }
+  const preset = spec.presets.find((candidate) => candidate.id === presetId);
+  if (!preset) throw new Error('The selected provider preset is unavailable.');
+  draft.presetId = preset.id;
+  draft.endpoint = preset.endpoint;
+  draft.authMode = preset.auth_mode;
+  return preset;
 }
 
 export function authOptionsFor(

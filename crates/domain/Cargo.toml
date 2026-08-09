@@ -23,6 +23,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

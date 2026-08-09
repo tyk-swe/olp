@@ -97,9 +97,11 @@ method/path pairs.
 `crates/domain/src/provider_configuration.rs` is the provider capability
 registry, exhaustively binding each `ProviderKind` to supported/default
 authentication, credential rules, supported and required fields, stable API
-metadata, and complete-candidate validation. Management create and update
-use the same validator; the console obtains the matrix from the management
-capability endpoint and uses generated OpenAPI enums for wire values.
+metadata, immutable compatible-provider presets, and complete-candidate
+validation. Presets resolve to ordinary generic-connector fields and never
+enter routing or capability eligibility. Management create and update use the
+same validator; the console obtains the matrix from the management capability
+endpoint and uses generated OpenAPI enums for wire values.
 
 ## Checked storage access
 

@@ -2545,6 +2545,13 @@
           },
           "label": {
             "type": "string"
+          },
+          "presets": {
+            "description": "Reviewed onboarding presets. Empty for provider kinds without presets.",
+            "items": {
+              "$ref": "#/components/schemas/ProviderPresetResponse"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -2553,7 +2560,8 @@
           "description",
           "default_auth_mode",
           "auth_modes",
-          "fields"
+          "fields",
+          "presets"
         ],
         "type": "object"
       },
@@ -2718,6 +2726,48 @@
         "required": [
           "provider_id",
           "etag"
+        ],
+        "type": "object"
+      },
+      "ProviderPresetResponse": {
+        "properties": {
+          "auth_mode": {
+            "$ref": "#/components/schemas/ProviderAuthMode"
+          },
+          "description": {
+            "type": "string"
+          },
+          "documentation_label": {
+            "type": "string"
+          },
+          "documentation_url": {
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "Reviewed HTTPS base URL resolved into ordinary provider configuration.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable identifier for this immutable catalog entry.",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "maintainer": {
+            "description": "Organization maintaining the official documentation used for review.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "endpoint",
+          "auth_mode",
+          "maintainer",
+          "documentation_label",
+          "documentation_url"
         ],
         "type": "object"
       },

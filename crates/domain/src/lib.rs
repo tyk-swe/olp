@@ -46,8 +46,8 @@ pub use provider::{
 };
 pub use provider_configuration::{
     CredentialRequirement, ProviderAuthModeSpec, ProviderConfiguration, ProviderConfigurationField,
-    ProviderConfigurationViolation, ProviderFieldSpec, ProviderKindSpec, ProviderViolationCode,
-    ProviderViolationField, provider_kind_spec, provider_kind_specs,
+    ProviderConfigurationViolation, ProviderFieldSpec, ProviderKindSpec, ProviderPresetSpec,
+    ProviderViolationCode, ProviderViolationField, provider_kind_spec, provider_kind_specs,
     validate_provider_configuration,
 };
 pub use routing::{

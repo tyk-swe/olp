@@ -44,6 +44,7 @@
     probeReady,
     requiresCredential,
     requiresSeedModel,
+    selectProviderPreset,
     validateProviderDraft,
     type ProviderDraft
   } from './providerEditor';
@@ -99,6 +100,9 @@
   const seedModelRequired = $derived(
     Boolean(selectedSpec && requiresSeedModel(selectedSpec))
   );
+  const selectedPreset = $derived(
+    selectedSpec?.presets.find((preset) => preset.id === draft?.presetId)
+  );
 
   $effect(() => {
     const first = providerKinds.data?.[0];
@@ -120,6 +124,15 @@
     return error instanceof Error
       ? error.message
       : 'The control API could not complete the request.';
+  }
+
+  function chooseCompatibleProvider(event: Event) {
+    if (!draft || !selectedSpec) return;
+    selectProviderPreset(
+      draft,
+      selectedSpec,
+      (event.currentTarget as HTMLSelectElement).value
+    );
   }
 
   async function run(
@@ -408,6 +421,35 @@
             >{/each}</select
         >
       </div>
+      {#if draft.kind === 'openai_compatible'}<div class="form-field full">
+          <label for="compatible-provider">Compatible provider</label><select
+            id="compatible-provider"
+            value={draft.presetId}
+            onchange={chooseCompatibleProvider}
+          >
+            <option value="">Custom endpoint</option>
+            {#each selectedSpec.presets as preset (preset.id)}
+              <option value={preset.id}>{preset.label}</option>
+            {/each}
+          </select><small
+            >Presets fill reviewed connector values. Custom endpoint preserves
+            the fully manual path.</small
+          >
+        </div>
+        {#if selectedPreset}<div class="preset-note full" aria-live="polite">
+            <strong>{selectedPreset.label}</strong>
+            <span>{selectedPreset.description}</span>
+            <code>{selectedPreset.endpoint}</code>
+            <span
+              >Maintained by {selectedPreset.maintainer}. Verified against
+              <a
+                href={selectedPreset.documentation_url}
+                target="_blank"
+                rel="noreferrer noopener"
+                >{selectedPreset.documentation_label}</a
+              >.</span
+            >
+          </div>{/if}{/if}
       <div class="form-field">
         <label for="initial-model"
           >{seedModelRequired
@@ -431,18 +473,23 @@
           <label for="provider-endpoint"
             >{draft.kind === 'azure_openai'
               ? 'Azure resource endpoint'
-              : 'Compatible endpoint'}</label
+              : selectedPreset
+                ? 'Preset endpoint'
+                : 'Compatible endpoint'}</label
           ><input
             id="provider-endpoint"
             type="url"
             autocomplete="off"
             bind:value={draft.endpoint}
+            readonly={Boolean(selectedPreset)}
             placeholder={draft.kind === 'openai_compatible'
               ? 'https://models.example.com/v1'
               : 'https://resource.openai.azure.com'}
             required
           /><small
-            >Custom endpoints must be HTTPS and pass the gateway SSRF policy.</small
+            >{selectedPreset
+              ? 'The resolved endpoint is saved with this provider; the preset is not persisted.'
+              : 'Custom endpoints must be HTTPS and pass the gateway SSRF policy.'}</small
           >
         </div>{/if}
       {#if hasApiVersion(selectedSpec)}<div class="form-field">
@@ -912,6 +959,27 @@
   }
   .identity-note strong {
     color: var(--foreground);
+  }
+  .preset-note {
+    display: grid;
+    gap: 0.3rem;
+    padding: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface-subtle);
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
+  }
+  .preset-note strong {
+    color: var(--foreground);
+    font-size: 0.9rem;
+  }
+  .preset-note code {
+    color: var(--foreground);
+  }
+  .preset-note a {
+    color: var(--accent-strong);
+    font-weight: 700;
   }
   .identity-note.full {
     grid-column: 1 / -1;

@@ -207,6 +207,7 @@ pub fn router() -> Router<ManagementState> {
         providers::models::ProviderCapabilityOptionsResponse,
         providers::models::ProviderAuthCapabilityResponse,
         providers::models::ProviderFieldCapabilityResponse,
+        providers::models::ProviderPresetResponse,
         providers::models::ProviderKindCapabilityResponse,
         providers::models::ProviderKindCapabilityListResponse,
         providers::models::CapabilityResponse,
