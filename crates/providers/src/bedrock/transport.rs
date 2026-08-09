@@ -9,6 +9,8 @@ use aws_sdk_bedrockruntime::{
     operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse,
     types::{ContentBlockDelta, ContentBlockStart, ConverseStreamOutput, CountTokensInput},
 };
+use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
+use aws_smithy_types::event_stream::RawMessage;
 use futures::stream;
 use olp_domain::{
     AttemptFailureClass, CanonicalEvent, CanonicalEventKind, CanonicalResult,
@@ -518,6 +520,20 @@ fn mark_uncommitted(mut error: TransportError) -> TransportError {
     error
 }
 
+trait BedrockSdkRawResponse {
+    fn is_successful_response(&self) -> bool {
+        false
+    }
+}
+
+impl BedrockSdkRawResponse for HttpResponse {
+    fn is_successful_response(&self) -> bool {
+        self.status().is_success()
+    }
+}
+
+impl BedrockSdkRawResponse for RawMessage {}
+
 fn map_sdk_error<E, R>(
     error: &SdkError<E, R>,
     phase: TransportPhase,
@@ -525,6 +541,7 @@ fn map_sdk_error<E, R>(
 ) -> TransportError
 where
     E: ProvideErrorMetadata,
+    R: BedrockSdkRawResponse,
 {
     let class = match error {
         SdkError::TimeoutError(_) => AttemptFailureClass::Timeout,
@@ -533,6 +550,9 @@ where
         SdkError::DispatchFailure(_) => AttemptFailureClass::Connect,
         SdkError::ConstructionFailure(_) => AttemptFailureClass::Protocol,
         SdkError::ResponseError(_) => AttemptFailureClass::Protocol,
+        SdkError::ServiceError(service) if service.raw().is_successful_response() => {
+            AttemptFailureClass::Protocol
+        }
         SdkError::ServiceError(service) => classify_service_code(service.err().code()),
         _ => AttemptFailureClass::UpstreamServer,
     };
@@ -887,6 +907,18 @@ mod tests {
         let request = server.await.unwrap().to_ascii_lowercase();
         assert!(request.starts_with("post /model/anthropic.claude-test-v1%3a0/count-tokens"));
         assert!(request.contains("authorization: aws4-hmac-sha256"));
+    }
+
+    #[tokio::test]
+    async fn official_runtime_sdk_maps_malformed_success_body_as_protocol() {
+        let (endpoint, server) = serve_once(b"{".to_vec(), "application/json").await;
+        let connector = mock_connector(&endpoint).await;
+        let error = connector.execute(provider_request()).await.unwrap_err();
+        assert_eq!(error.class, AttemptFailureClass::Protocol);
+        assert_eq!(error.phase, TransportPhase::Body);
+        assert!(!error.response_committed);
+        let request = server.await.unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("post /model/anthropic.claude-test-v1%3a0/converse"));
     }
 
     #[tokio::test]

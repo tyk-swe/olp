@@ -2432,6 +2432,7 @@ dependencies = [
  "aws-sdk-bedrock",
  "aws-sdk-bedrockruntime",
  "aws-smithy-eventstream",
+ "aws-smithy-runtime-api",
  "aws-smithy-types",
  "base64",
  "bytes",
