@@ -56,6 +56,26 @@ pub struct RequestAttemptMetadata {
     pub committed: bool,
     pub latency_ms: u64,
     pub first_byte_ms: Option<u64>,
+    /// Attempt-local usage and billing evidence. This is optional only for
+    /// events serialized by pre-0033 binaries; new producers always populate
+    /// it so storage never has to attach request-level usage to the last
+    /// provider by convention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<RequestAttemptUsageMetadata>,
+}
+
+/// Content-free usage evidence captured for one provider attempt. Pricing is
+/// deliberately resolved only while persisting the event, against the
+/// immutable pricing revision effective at `observed_at`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestAttemptUsageMetadata {
+    pub observed: bool,
+    pub complete: bool,
+    pub billing_uncertain: bool,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub media_units: Option<Decimal>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,10 +87,49 @@ pub enum RequestMetadataPersistenceOutcome {
 
 struct ValidatedAttempt<'a> {
     event: &'a RequestAttemptMetadata,
+    usage: ValidatedAttemptUsage,
     ordinal: i16,
     status_code: Option<i32>,
     latency_ms: i32,
     first_byte_ms: Option<i32>,
+}
+
+#[derive(Clone)]
+struct ValidatedAttemptUsage {
+    observed: bool,
+    complete: bool,
+    billing_uncertain: bool,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cached_input_tokens: Option<i64>,
+    media_units: Option<Decimal>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AttemptChargeStatus {
+    NotBillable,
+    Billable,
+    BillingUncertain,
+}
+
+impl AttemptChargeStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotBillable => "not_billable",
+            Self::Billable => "billable",
+            Self::BillingUncertain => "billing_uncertain",
+        }
+    }
+}
+
+struct PersistedAttemptFact<'a> {
+    attempt: &'a RequestAttemptMetadata,
+    usage: ValidatedAttemptUsage,
+    charge_status: AttemptChargeStatus,
+    estimated_cost: Option<Decimal>,
+    unpriced: bool,
+    pricing_revision_id: Option<Uuid>,
+    currency: Option<String>,
 }
 
 struct ValidatedRequestMetadata<'a> {
@@ -100,11 +159,15 @@ impl<'a> ValidatedRequestMetadata<'a> {
                 && event.cached_input_tokens.is_none()
                 && event.media_units.is_none()
                 && !event.usage_complete);
+        let has_attempt_usage = event.attempts.iter().any(|attempt| attempt.usage.is_some());
+        let attempt_usage_shape_is_valid =
+            !has_attempt_usage || event.attempts.iter().all(|attempt| attempt.usage.is_some());
         if event.request_completed_at < event.request_started_at
             || event.route_slug.trim().is_empty()
             || !valid_status(event.status_code)
             || !final_target_matches
             || !empty_attempt_metadata_is_valid
+            || !attempt_usage_shape_is_valid
         {
             return Err(PersistenceError::InvalidRequestMetadataEvent);
         }
@@ -120,8 +183,10 @@ impl<'a> ValidatedRequestMetadata<'a> {
                 {
                     return Err(PersistenceError::InvalidRequestMetadataEvent);
                 }
+                let usage = validated_attempt_usage(event, attempt, index)?;
                 Ok(ValidatedAttempt {
                     event: attempt,
+                    usage,
                     ordinal: i16::try_from(attempt.ordinal)
                         .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?,
                     status_code: attempt.status_code.map(i32::from),
@@ -144,6 +209,81 @@ impl<'a> ValidatedRequestMetadata<'a> {
             attempts,
         })
     }
+}
+
+fn validated_attempt_usage(
+    request: &RequestMetadataEvent,
+    attempt: &RequestAttemptMetadata,
+    index: usize,
+) -> Result<ValidatedAttemptUsage, PersistenceError> {
+    let usage = attempt
+        .usage
+        .as_ref()
+        .map(|usage| ValidatedAttemptUsage {
+            observed: usage.observed,
+            complete: usage.complete,
+            billing_uncertain: usage.billing_uncertain,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+            media_units: usage.media_units,
+        })
+        .unwrap_or_else(|| {
+            let is_final = index + 1 == request.attempts.len();
+            if is_final {
+                let observed = request.usage_complete
+                    || request.input_tokens.is_some()
+                    || request.output_tokens.is_some()
+                    || request.cached_input_tokens.is_some()
+                    || request.media_units.is_some();
+                ValidatedAttemptUsage {
+                    observed,
+                    complete: request.usage_complete,
+                    billing_uncertain: !observed && legacy_attempt_may_be_billable(attempt),
+                    input_tokens: request.input_tokens,
+                    output_tokens: request.output_tokens,
+                    cached_input_tokens: request.cached_input_tokens,
+                    media_units: request.media_units,
+                }
+            } else {
+                let billing_uncertain = legacy_attempt_may_be_billable(attempt);
+                ValidatedAttemptUsage {
+                    observed: false,
+                    complete: !billing_uncertain,
+                    billing_uncertain,
+                    input_tokens: None,
+                    output_tokens: None,
+                    cached_input_tokens: None,
+                    media_units: None,
+                }
+            }
+        });
+    let state_is_valid = matches!(
+        (usage.observed, usage.complete, usage.billing_uncertain),
+        (false, true, false) | (false, false, true) | (true, _, false)
+    );
+    if !state_is_valid
+        || !usage.observed
+            && (usage.input_tokens.is_some()
+                || usage.output_tokens.is_some()
+                || usage.cached_input_tokens.is_some()
+                || usage.media_units.is_some())
+        || usage.input_tokens.is_some_and(|value| value < 0)
+        || usage.output_tokens.is_some_and(|value| value < 0)
+        || usage.cached_input_tokens.is_some_and(|value| value < 0)
+        || usage.media_units.is_some_and(|value| value < Decimal::ZERO)
+    {
+        return Err(PersistenceError::InvalidRequestMetadataEvent);
+    }
+    Ok(usage)
+}
+
+fn legacy_attempt_may_be_billable(attempt: &RequestAttemptMetadata) -> bool {
+    attempt.committed
+        || matches!(
+            attempt.error_class.as_deref(),
+            Some("ambiguous" | "timeout" | "upstream_server" | "protocol" | "cancelled")
+        )
 }
 
 const fn valid_status(status: Option<u16>) -> bool {
@@ -199,6 +339,8 @@ impl PgStore {
                AND $4 <= now() + make_interval(mins => $6) \
                AND NOT EXISTS (SELECT 1 FROM usage_facts \
                                WHERE id = $1 OR request_id = $2) \
+               AND NOT EXISTS (SELECT 1 FROM attempt_usage_facts \
+                               WHERE event_id = $1 OR request_id = $2) \
              ON CONFLICT DO NOTHING RETURNING event_id",
             event.event_id,
             event.request_id,
@@ -218,6 +360,8 @@ impl PgStore {
                     WHERE event_id = $1 AND request_id = $2) AS event_sha256, \
                    EXISTS (SELECT 1 FROM usage_facts \
                            WHERE id = $1 AND request_id = $2) AS \"fact_exists!\", \
+                   EXISTS (SELECT 1 FROM attempt_usage_facts \
+                           WHERE event_id = $1 AND request_id = $2) AS \"attempt_fact_exists!\", \
                    ($3 < now() - make_interval(days => $4) \
                     OR $3 > now() + make_interval(mins => $5)) AS \"outside_window!\"",
                 event.event_id,
@@ -233,7 +377,7 @@ impl PgStore {
                 && existing
                     .event_sha256
                     .is_none_or(|stored| stored.as_slice() == event_sha256);
-            let exact_raw_fact: bool = existing.fact_exists;
+            let exact_raw_fact: bool = existing.fact_exists || existing.attempt_fact_exists;
             if exact_receipt || exact_raw_fact {
                 transaction.rollback().await?;
                 return Ok(RequestMetadataPersistenceOutcome::Duplicate);
@@ -245,6 +389,8 @@ impl PgStore {
                      SELECT $1, $2, $3, 'rejected'::request_metadata_event_receipt_status, $4 \
                      WHERE NOT EXISTS (SELECT 1 FROM usage_facts \
                                        WHERE id = $1 OR request_id = $2) \
+                       AND NOT EXISTS (SELECT 1 FROM attempt_usage_facts \
+                                       WHERE event_id = $1 OR request_id = $2) \
                      ON CONFLICT DO NOTHING RETURNING event_id",
                     event.event_id,
                     event.request_id,
@@ -275,6 +421,9 @@ impl PgStore {
                          AND (event_sha256 IS NULL OR event_sha256 = $3) \
                        UNION ALL \
                        SELECT 1 FROM usage_facts WHERE id = $1 AND request_id = $2 \
+                       UNION ALL \
+                       SELECT 1 FROM attempt_usage_facts \
+                        WHERE event_id = $1 AND request_id = $2 \
                      ) AS \"value!\"",
                     event.event_id,
                     event.request_id,
@@ -334,17 +483,16 @@ impl PgStore {
         // operational metadata, but no provider usage exists to price or roll
         // up before the first attempt begins.
         if !validated.has_attempts {
+            mark_request_metadata_receipt_persisted(
+                &mut transaction,
+                event.event_id,
+                event.request_id,
+            )
+            .await?;
             transaction.commit().await?;
             return Ok(RequestMetadataPersistenceOutcome::Persisted);
         }
 
-        let provider_id = event
-            .provider_id
-            .ok_or(PersistenceError::InvalidRequestMetadataEvent)?;
-        let upstream_model = event
-            .upstream_model
-            .as_deref()
-            .ok_or(PersistenceError::InvalidRequestMetadataEvent)?;
         sqlx::query!(
             "INSERT INTO usage_request_anchors (request_id, request_started_at) \
              VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -353,57 +501,325 @@ impl PgStore {
         )
         .execute(&mut *transaction)
         .await?;
-        let pricing = sqlx::query!(
-            "SELECT selected.pricing_revision_id AS \"pricing_revision_id?\", \
-                    selected.currency AS \"currency?\", \
-                    selected.pricing_revision_id IS NOT NULL \
-                      AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
-                      AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
-                      AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
-                      AS \"pricing_complete!\", \
-                    CASE WHEN $8::boolean \
-                               AND selected.pricing_revision_id IS NOT NULL \
-                               AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
-                               AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
-                               AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
-                         THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) \
-                             + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
-                             + COALESCE($7::numeric * selected.unit_price, 0)) \
-                         ELSE NULL END AS \"estimated_cost?\" \
-             FROM providers provider \
-             LEFT JOIN LATERAL ( \
-                 SELECT revision.id AS pricing_revision_id, price.input_per_million, \
-                        price.output_per_million, price.unit_price, price.currency::text AS currency \
-                 FROM pricing_revisions revision \
-                 JOIN prices price ON price.pricing_revision_id = revision.id \
-                 WHERE revision.effective_at <= $4 \
-                   AND price.provider_kind = provider.kind \
-                   AND (price.provider_id IS NULL OR price.provider_id = provider.id) \
-                   AND price.model = $2 AND price.operation = $3 \
-                 ORDER BY (price.provider_id IS NOT NULL) DESC, \
-                          revision.effective_at DESC, revision.revision DESC LIMIT 1 \
-             ) selected ON true \
-             WHERE provider.id = $1",
-        provider_id, upstream_model, event.operation.as_str(), event.observed_at, event.input_tokens, event.output_tokens, event.media_units, event.usage_complete)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let pricing_revision_id: Option<Uuid> = pricing.pricing_revision_id;
-        let pricing_complete: bool = pricing.pricing_complete && event.usage_complete;
-        let estimated_cost: Option<rust_decimal::Decimal> = pricing.estimated_cost;
-        let currency = pricing.currency.map(|value| value.trim().to_owned());
-        let unpriced = !pricing_complete;
+
+        let mut persisted_facts = Vec::with_capacity(validated.attempts.len());
+        for attempt in &validated.attempts {
+            let charge_status = if attempt.usage.billing_uncertain {
+                AttemptChargeStatus::BillingUncertain
+            } else if attempt.usage.observed {
+                AttemptChargeStatus::Billable
+            } else {
+                AttemptChargeStatus::NotBillable
+            };
+            let (pricing_revision_id, currency, pricing_complete, estimated_cost) = if charge_status
+                == AttemptChargeStatus::NotBillable
+            {
+                (None, None, true, None)
+            } else {
+                let pricing = sqlx::query!(
+                        "SELECT selected.pricing_revision_id AS \"pricing_revision_id?\", \
+                                selected.currency AS \"currency?\", \
+                                selected.pricing_revision_id IS NOT NULL \
+                                  AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
+                                  AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
+                                  AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
+                                  AS \"pricing_complete!\", \
+                                CASE WHEN $8::boolean \
+                                           AND selected.pricing_revision_id IS NOT NULL \
+                                           AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
+                                           AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
+                                           AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
+                                     THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) \
+                                         + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
+                                         + COALESCE($7::numeric * selected.unit_price, 0)) \
+                                     ELSE NULL END AS \"estimated_cost?\" \
+                         FROM providers provider \
+                         LEFT JOIN LATERAL ( \
+                             SELECT revision.id AS pricing_revision_id, price.input_per_million, \
+                                    price.output_per_million, price.unit_price, \
+                                    price.currency::text AS currency \
+                             FROM pricing_revisions revision \
+                             JOIN prices price ON price.pricing_revision_id = revision.id \
+                             WHERE revision.effective_at <= $4 \
+                               AND price.provider_kind = provider.kind \
+                               AND (price.provider_id IS NULL OR price.provider_id = provider.id) \
+                               AND price.model = $2 AND price.operation = $3 \
+                             ORDER BY (price.provider_id IS NOT NULL) DESC, \
+                                      revision.effective_at DESC, revision.revision DESC LIMIT 1 \
+                         ) selected ON true \
+                         WHERE provider.id = $1",
+                        attempt.event.provider_id,
+                        &attempt.event.upstream_model,
+                        event.operation.as_str(),
+                        event.observed_at,
+                        attempt.usage.input_tokens,
+                        attempt.usage.output_tokens,
+                        attempt.usage.media_units,
+                        attempt.usage.complete
+                    )
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                (
+                    pricing.pricing_revision_id,
+                    pricing.currency.map(|value| value.trim().to_owned()),
+                    pricing.pricing_complete,
+                    pricing.estimated_cost,
+                )
+            };
+            let usage_complete =
+                charge_status == AttemptChargeStatus::NotBillable || attempt.usage.complete;
+            let unpriced = charge_status != AttemptChargeStatus::NotBillable && !pricing_complete;
+
+            sqlx::query!(
+                "INSERT INTO attempt_usage_facts \
+                 (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, \
+                  api_key_id, provider_id, route_slug, upstream_model, operation, surface, \
+                  attempt_started_at, attempt_completed_at, observed_at, charge_status, \
+                  usage_observed, usage_complete, input_tokens, output_tokens, \
+                  cached_input_tokens, media_units, estimated_cost, unpriced, \
+                  pricing_revision_id, currency, request_counted, provider_request_counted, \
+                  model_request_counted, target_request_counted, request_unpriced_counted, \
+                  provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted, \
+                  request_incomplete_counted, provider_incomplete_counted, \
+                  model_incomplete_counted, target_incomplete_counted) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
+                         $15::text::attempt_charge_status, $16, $17, $18, $19, $20, $21, \
+                         $22::numeric, $23, $24, $25, false, false, false, false, false, \
+                         false, false, false, false, false, false, false) \
+                 ON CONFLICT (request_id, attempt_ordinal) DO NOTHING",
+                attempt.event.id,
+                event.event_id,
+                event.request_id,
+                event.request_started_at,
+                attempt.ordinal,
+                event.api_key_id,
+                attempt.event.provider_id,
+                &event.route_slug,
+                &attempt.event.upstream_model,
+                event.operation.as_str(),
+                event.surface.as_str(),
+                attempt.event.started_at,
+                attempt.event.completed_at,
+                event.observed_at,
+                charge_status.as_str(),
+                attempt.usage.observed,
+                usage_complete,
+                attempt.usage.input_tokens,
+                attempt.usage.output_tokens,
+                attempt.usage.cached_input_tokens,
+                attempt.usage.media_units,
+                estimated_cost,
+                unpriced,
+                pricing_revision_id,
+                currency.as_deref()
+            )
+            .execute(&mut *transaction)
+            .await?;
+            persisted_facts.push(PersistedAttemptFact {
+                attempt: attempt.event,
+                usage: attempt.usage.clone(),
+                charge_status,
+                estimated_cost,
+                unpriced,
+                pricing_revision_id,
+                currency,
+            });
+        }
+
         sqlx::query!(
-            "INSERT INTO usage_facts \
-             (id, request_id, request_started_at, api_key_id, provider_id, route_slug, upstream_model, operation, \
-              surface, observed_at, input_tokens, output_tokens, cached_input_tokens, media_units, \
-              estimated_cost, unpriced, usage_complete, pricing_revision_id, currency) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
-                     $15::numeric, $16, $17, $18, $19) \
-             ON CONFLICT (request_id) DO NOTHING",
-        event.event_id, event.request_id, event.request_started_at, event.api_key_id, provider_id, &event.route_slug, upstream_model, event.operation.as_str(), event.surface.as_str(), event.observed_at, event.input_tokens, event.output_tokens, event.cached_input_tokens, event.media_units, estimated_cost, unpriced, event.usage_complete, pricing_revision_id, currency)
+            "WITH marked AS ( \
+                 SELECT attempt_id, \
+                        row_number() OVER (PARTITION BY request_id ORDER BY attempt_ordinal) = 1 \
+                            AS request_marker, \
+                        row_number() OVER (PARTITION BY request_id, provider_id \
+                                           ORDER BY attempt_ordinal) = 1 AS provider_marker, \
+                        row_number() OVER (PARTITION BY request_id, upstream_model \
+                                           ORDER BY attempt_ordinal) = 1 AS model_marker, \
+                        row_number() OVER (PARTITION BY request_id, provider_id, upstream_model \
+                                           ORDER BY attempt_ordinal) = 1 AS target_marker, \
+                        bool_or(charge_status <> 'not_billable' AND unpriced) \
+                            OVER (PARTITION BY request_id) AS request_unpriced, \
+                        bool_or(charge_status <> 'not_billable' AND unpriced) \
+                            OVER (PARTITION BY request_id, provider_id) AS provider_unpriced, \
+                        bool_or(charge_status <> 'not_billable' AND unpriced) \
+                            OVER (PARTITION BY request_id, upstream_model) AS model_unpriced, \
+                        bool_or(charge_status <> 'not_billable' AND unpriced) \
+                            OVER (PARTITION BY request_id, provider_id, upstream_model) \
+                            AS target_unpriced, \
+                        bool_or(charge_status <> 'not_billable' AND NOT usage_complete) \
+                            OVER (PARTITION BY request_id) AS request_incomplete, \
+                        bool_or(charge_status <> 'not_billable' AND NOT usage_complete) \
+                            OVER (PARTITION BY request_id, provider_id) AS provider_incomplete, \
+                        bool_or(charge_status <> 'not_billable' AND NOT usage_complete) \
+                            OVER (PARTITION BY request_id, upstream_model) AS model_incomplete, \
+                        bool_or(charge_status <> 'not_billable' AND NOT usage_complete) \
+                            OVER (PARTITION BY request_id, provider_id, upstream_model) \
+                            AS target_incomplete \
+                   FROM attempt_usage_facts WHERE request_id = $1 \
+             ) \
+             UPDATE attempt_usage_facts fact SET \
+                    request_counted = marked.request_marker, \
+                    provider_request_counted = marked.provider_marker, \
+                    model_request_counted = marked.model_marker, \
+                    target_request_counted = marked.target_marker, \
+                    request_unpriced_counted = marked.request_marker AND marked.request_unpriced, \
+                    provider_unpriced_counted = marked.provider_marker AND marked.provider_unpriced, \
+                    model_unpriced_counted = marked.model_marker AND marked.model_unpriced, \
+                    target_unpriced_counted = marked.target_marker AND marked.target_unpriced, \
+                    request_incomplete_counted = \
+                        marked.request_marker AND marked.request_incomplete, \
+                    provider_incomplete_counted = \
+                        marked.provider_marker AND marked.provider_incomplete, \
+                    model_incomplete_counted = marked.model_marker AND marked.model_incomplete, \
+                    target_incomplete_counted = marked.target_marker AND marked.target_incomplete \
+               FROM marked WHERE fact.attempt_id = marked.attempt_id",
+            event.request_id
+        )
         .execute(&mut *transaction)
         .await?;
+
+        // Keep a truthful request-level aggregate for older readers only when
+        // every potentially billable attempt has the same provider/model.
+        // Authoritative reads always use attempt_usage_facts.
+        if let Some(first) = persisted_facts
+            .iter()
+            .find(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
+            && persisted_facts
+                .iter()
+                .filter(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
+                .all(|fact| {
+                    fact.attempt.provider_id == first.attempt.provider_id
+                        && fact.attempt.upstream_model == first.attempt.upstream_model
+                })
+        {
+            insert_compatibility_usage_fact(&mut transaction, event, first, &persisted_facts)
+                .await?;
+        }
+        mark_request_metadata_receipt_persisted(&mut transaction, event.event_id, event.request_id)
+            .await?;
         transaction.commit().await?;
         Ok(RequestMetadataPersistenceOutcome::Persisted)
     }
+}
+
+async fn mark_request_metadata_receipt_persisted(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_id: Uuid,
+    request_id: Uuid,
+) -> Result<(), PersistenceError> {
+    sqlx::query!(
+        "UPDATE request_metadata_event_receipts \
+            SET status = 'fact_persisted'::request_metadata_event_receipt_status \
+          WHERE event_id = $1 AND request_id = $2 \
+            AND status = 'pending'::request_metadata_event_receipt_status",
+        event_id,
+        request_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn insert_compatibility_usage_fact(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event: &RequestMetadataEvent,
+    attribution: &PersistedAttemptFact<'_>,
+    facts: &[PersistedAttemptFact<'_>],
+) -> Result<(), PersistenceError> {
+    let billable = facts
+        .iter()
+        .filter(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
+        .collect::<Vec<_>>();
+    let usage_complete = billable.iter().all(|fact| fact.usage.complete);
+    let unpriced = billable.iter().any(|fact| fact.unpriced);
+    let input_tokens = checked_optional_i64_sum(&billable, |fact| fact.usage.input_tokens)?;
+    let output_tokens = checked_optional_i64_sum(&billable, |fact| fact.usage.output_tokens)?;
+    let cached_input_tokens =
+        checked_optional_i64_sum(&billable, |fact| fact.usage.cached_input_tokens)?;
+    let media_units = checked_optional_decimal_sum(&billable, |fact| fact.usage.media_units)?;
+    let estimated_cost = if usage_complete && !unpriced {
+        checked_optional_decimal_sum(&billable, |fact| fact.estimated_cost)?
+    } else {
+        None
+    };
+    let pricing_revision_id = billable
+        .first()
+        .map(|fact| fact.pricing_revision_id)
+        .filter(|revision| {
+            billable
+                .iter()
+                .all(|fact| fact.pricing_revision_id == *revision)
+        })
+        .flatten();
+    let currency = billable
+        .first()
+        .and_then(|fact| fact.currency.as_deref())
+        .filter(|currency| {
+            billable
+                .iter()
+                .all(|fact| fact.currency.as_deref() == Some(*currency))
+        });
+
+    sqlx::query!(
+        "INSERT INTO usage_facts \
+         (id, request_id, request_started_at, api_key_id, provider_id, route_slug, \
+          upstream_model, operation, surface, observed_at, input_tokens, output_tokens, \
+          cached_input_tokens, media_units, estimated_cost, unpriced, usage_complete, \
+          pricing_revision_id, currency) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
+                 $15::numeric, $16, $17, $18, $19) \
+         ON CONFLICT (request_id) DO NOTHING",
+        event.event_id,
+        event.request_id,
+        event.request_started_at,
+        event.api_key_id,
+        attribution.attempt.provider_id,
+        &event.route_slug,
+        &attribution.attempt.upstream_model,
+        event.operation.as_str(),
+        event.surface.as_str(),
+        event.observed_at,
+        input_tokens,
+        output_tokens,
+        cached_input_tokens,
+        media_units,
+        estimated_cost,
+        unpriced,
+        usage_complete,
+        pricing_revision_id,
+        currency
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+fn checked_optional_i64_sum<T>(
+    values: &[&T],
+    select: impl Fn(&T) -> Option<i64>,
+) -> Result<Option<i64>, PersistenceError> {
+    values.iter().try_fold(None, |sum, value| {
+        let Some(value) = select(value) else {
+            return Ok(sum);
+        };
+        sum.unwrap_or(0_i64)
+            .checked_add(value)
+            .map(Some)
+            .ok_or(PersistenceError::InvalidRequestMetadataEvent)
+    })
+}
+
+fn checked_optional_decimal_sum<T>(
+    values: &[&T],
+    select: impl Fn(&T) -> Option<Decimal>,
+) -> Result<Option<Decimal>, PersistenceError> {
+    values.iter().try_fold(None, |sum, value| {
+        let Some(value) = select(value) else {
+            return Ok(sum);
+        };
+        sum.unwrap_or(Decimal::ZERO)
+            .checked_add(value)
+            .map(Some)
+            .ok_or(PersistenceError::InvalidRequestMetadataEvent)
+    })
 }

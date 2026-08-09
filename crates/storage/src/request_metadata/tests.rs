@@ -39,6 +39,7 @@ fn event() -> RequestMetadataEvent {
             committed: true,
             latency_ms: 10,
             first_byte_ms: Some(3),
+            usage: None,
         }],
     }
 }
@@ -254,16 +255,37 @@ fn durable_consumer_status_distinguishes_unknown_backlog_and_staleness() {
 #[test]
 fn serialized_event_has_no_content_fields() {
     let value = serde_json::to_value(event()).unwrap();
+    assert_no_content_fields(&value);
+}
+
+fn assert_no_content_fields(value: &serde_json::Value) {
     for forbidden in [
         "prompt",
+        "response",
         "output",
         "reasoning",
         "headers",
         "credential",
         "tool_arguments",
+        "uploaded_media",
+        "provider_body",
     ] {
         assert!(value.get(forbidden).is_none());
     }
+    match value {
+        serde_json::Value::Array(values) => values.iter().for_each(assert_no_content_fields),
+        serde_json::Value::Object(values) => values.values().for_each(assert_no_content_fields),
+        _ => {}
+    }
+}
+
+#[test]
+fn event_serialized_before_attempt_usage_deserializes_safely() {
+    let value = serde_json::to_value(event()).unwrap();
+    assert!(value["attempts"][0].get("usage").is_none());
+    let decoded: RequestMetadataEvent = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded.attempts.len(), 1);
+    assert!(decoded.attempts[0].usage.is_none());
 }
 
 #[test]

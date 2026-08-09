@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH marked AS ( SELECT attempt_id, row_number() OVER (PARTITION BY request_id ORDER BY attempt_ordinal) = 1 AS request_marker, row_number() OVER (PARTITION BY request_id, provider_id ORDER BY attempt_ordinal) = 1 AS provider_marker, row_number() OVER (PARTITION BY request_id, upstream_model ORDER BY attempt_ordinal) = 1 AS model_marker, row_number() OVER (PARTITION BY request_id, provider_id, upstream_model ORDER BY attempt_ordinal) = 1 AS target_marker, bool_or(charge_status <> 'not_billable' AND unpriced) OVER (PARTITION BY request_id) AS request_unpriced, bool_or(charge_status <> 'not_billable' AND unpriced) OVER (PARTITION BY request_id, provider_id) AS provider_unpriced, bool_or(charge_status <> 'not_billable' AND unpriced) OVER (PARTITION BY request_id, upstream_model) AS model_unpriced, bool_or(charge_status <> 'not_billable' AND unpriced) OVER (PARTITION BY request_id, provider_id, upstream_model) AS target_unpriced, bool_or(charge_status <> 'not_billable' AND NOT usage_complete) OVER (PARTITION BY request_id) AS request_incomplete, bool_or(charge_status <> 'not_billable' AND NOT usage_complete) OVER (PARTITION BY request_id, provider_id) AS provider_incomplete, bool_or(charge_status <> 'not_billable' AND NOT usage_complete) OVER (PARTITION BY request_id, upstream_model) AS model_incomplete, bool_or(charge_status <> 'not_billable' AND NOT usage_complete) OVER (PARTITION BY request_id, provider_id, upstream_model) AS target_incomplete FROM attempt_usage_facts WHERE request_id = $1 ) UPDATE attempt_usage_facts fact SET request_counted = marked.request_marker, provider_request_counted = marked.provider_marker, model_request_counted = marked.model_marker, target_request_counted = marked.target_marker, request_unpriced_counted = marked.request_marker AND marked.request_unpriced, provider_unpriced_counted = marked.provider_marker AND marked.provider_unpriced, model_unpriced_counted = marked.model_marker AND marked.model_unpriced, target_unpriced_counted = marked.target_marker AND marked.target_unpriced, request_incomplete_counted = marked.request_marker AND marked.request_incomplete, provider_incomplete_counted = marked.provider_marker AND marked.provider_incomplete, model_incomplete_counted = marked.model_marker AND marked.model_incomplete, target_incomplete_counted = marked.target_marker AND marked.target_incomplete FROM marked WHERE fact.attempt_id = marked.attempt_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a1c6dd8a845d4e05422db32db201a3c34a4dc747c0c5b971fb8f42a882f22aa"
+}

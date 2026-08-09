@@ -2,7 +2,7 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
     UsageDimension, UsageFilters, UsageRangeCoverage,
-    query::{push_usage_rows_cte, validate_usage_range},
+    query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
     PgStore,
@@ -58,8 +58,18 @@ impl PgStore {
             UsageDimension::ApiKey => "COALESCE(api_key_id::text, 'unknown')",
             UsageDimension::Operation => "operation",
         };
+        let count_scope = match dimension {
+            UsageDimension::Provider if filters.upstream_model.is_none() => {
+                UsageCountScope::Provider
+            }
+            UsageDimension::Model if filters.provider_id.is_none() => UsageCountScope::Model,
+            UsageDimension::Provider | UsageDimension::Model => UsageCountScope::Target,
+            UsageDimension::Route | UsageDimension::ApiKey | UsageDimension::Operation => {
+                UsageCountScope::for_filters(filters)
+            }
+        };
         let mut query = QueryBuilder::<Postgres>::new("");
-        push_usage_rows_cte(&mut query, filters);
+        push_usage_rows_cte(&mut query, filters, count_scope);
         query.push(" SELECT ");
         query.push(expression);
         query.push(

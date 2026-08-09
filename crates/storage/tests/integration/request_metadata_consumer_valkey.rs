@@ -145,6 +145,7 @@ fn event(fixture: &Fixture) -> RequestMetadataEvent {
             committed: true,
             latency_ms: 10,
             first_byte_ms: Some(3),
+            usage: None,
         }],
     }
 }

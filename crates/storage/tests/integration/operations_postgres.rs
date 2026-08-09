@@ -4,7 +4,8 @@ use olp_storage::{
     PgStore, idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse,
     idempotency::ReplayableIdempotency, identity::InstallationSetupInput,
     operations::OperationsError, operations::PriceInput, operations::RequestFilters,
-    request_metadata::RequestAttemptMetadata, request_metadata::RequestMetadataBufferSnapshot,
+    request_metadata::RequestAttemptMetadata, request_metadata::RequestAttemptUsageMetadata,
+    request_metadata::RequestMetadataBufferSnapshot,
     request_metadata::RequestMetadataConsumerState, request_metadata::RequestMetadataEvent,
     request_metadata::RequestMetadataGap, request_metadata::RequestMetadataGatewayEpochState,
     request_metadata::RequestMetadataPersistenceOutcome, security::MasterKey,
@@ -13,6 +14,7 @@ use olp_storage::{
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
+mod attempt_accounting;
 mod query_contracts;
 mod retention;
 
@@ -78,6 +80,14 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
         owner.user_id,
         provider_id,
         &master_key,
+        api_key_id,
+        generation_id,
+    )
+    .await;
+    attempt_accounting::exercise(
+        &store,
+        owner.user_id,
+        provider_id,
         api_key_id,
         generation_id,
     )

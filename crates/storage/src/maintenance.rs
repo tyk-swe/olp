@@ -103,7 +103,102 @@ impl PgStore {
         // late stream event out of the delete set until a later pass and makes
         // repeated rollups additive for hours that already contain retained
         // totals.
-        let usage_rollup = sqlx::query!(
+        let attempt_usage_rollup = sqlx::query!(
+            "WITH expired AS ( \
+               DELETE FROM attempt_usage_facts \
+               WHERE observed_at < date_trunc('hour', $1::timestamptz) \
+               RETURNING route_slug, provider_id, upstream_model, operation, surface, \
+                         api_key_id, observed_at, input_tokens, output_tokens, \
+                         cached_input_tokens, media_units, estimated_cost, currency, \
+                         request_counted, provider_request_counted, model_request_counted, \
+                         target_request_counted, request_unpriced_counted, \
+                         provider_unpriced_counted, model_unpriced_counted, \
+                         target_unpriced_counted, request_incomplete_counted, \
+                         provider_incomplete_counted, model_incomplete_counted, \
+                         target_incomplete_counted \
+             ), rolled AS ( \
+             INSERT INTO attempt_usage_hourly \
+             (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id, \
+              request_count, provider_request_count, model_request_count, target_request_count, \
+              input_tokens, output_tokens, cached_input_tokens, media_units, estimated_cost, \
+              request_unpriced_count, provider_unpriced_count, model_unpriced_count, \
+              target_unpriced_count, request_incomplete_count, provider_incomplete_count, \
+              model_incomplete_count, target_incomplete_count, currency) \
+             SELECT date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
+                    operation, surface, api_key_id, \
+                    COUNT(*) FILTER (WHERE request_counted), \
+                    COUNT(*) FILTER (WHERE provider_request_counted), \
+                    COUNT(*) FILTER (WHERE model_request_counted), \
+                    COUNT(*) FILTER (WHERE target_request_counted), \
+                    COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), \
+                    COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(media_units), 0), \
+                    SUM(estimated_cost), \
+                    COUNT(*) FILTER (WHERE request_unpriced_counted), \
+                    COUNT(*) FILTER (WHERE provider_unpriced_counted), \
+                    COUNT(*) FILTER (WHERE model_unpriced_counted), \
+                    COUNT(*) FILTER (WHERE target_unpriced_counted), \
+                    COUNT(*) FILTER (WHERE request_incomplete_counted), \
+                    COUNT(*) FILTER (WHERE provider_incomplete_counted), \
+                    COUNT(*) FILTER (WHERE model_incomplete_counted), \
+                    COUNT(*) FILTER (WHERE target_incomplete_counted), MAX(currency) \
+             FROM expired \
+             GROUP BY date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
+                      operation, surface, api_key_id \
+             ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET \
+               request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count, \
+               provider_request_count = attempt_usage_hourly.provider_request_count \
+                                        + EXCLUDED.provider_request_count, \
+               model_request_count = attempt_usage_hourly.model_request_count \
+                                     + EXCLUDED.model_request_count, \
+               target_request_count = attempt_usage_hourly.target_request_count \
+                                      + EXCLUDED.target_request_count, \
+               input_tokens = attempt_usage_hourly.input_tokens + EXCLUDED.input_tokens, \
+               output_tokens = attempt_usage_hourly.output_tokens + EXCLUDED.output_tokens, \
+               cached_input_tokens = attempt_usage_hourly.cached_input_tokens \
+                                     + EXCLUDED.cached_input_tokens, \
+               media_units = attempt_usage_hourly.media_units + EXCLUDED.media_units, \
+               estimated_cost = CASE \
+                 WHEN attempt_usage_hourly.estimated_cost IS NULL \
+                      AND EXCLUDED.estimated_cost IS NULL THEN NULL \
+                 ELSE COALESCE(attempt_usage_hourly.estimated_cost, 0) \
+                      + COALESCE(EXCLUDED.estimated_cost, 0) END, \
+               request_unpriced_count = attempt_usage_hourly.request_unpriced_count \
+                                        + EXCLUDED.request_unpriced_count, \
+               provider_unpriced_count = attempt_usage_hourly.provider_unpriced_count \
+                                         + EXCLUDED.provider_unpriced_count, \
+               model_unpriced_count = attempt_usage_hourly.model_unpriced_count \
+                                      + EXCLUDED.model_unpriced_count, \
+               target_unpriced_count = attempt_usage_hourly.target_unpriced_count \
+                                       + EXCLUDED.target_unpriced_count, \
+               request_incomplete_count = attempt_usage_hourly.request_incomplete_count \
+                                          + EXCLUDED.request_incomplete_count, \
+               provider_incomplete_count = attempt_usage_hourly.provider_incomplete_count \
+                                           + EXCLUDED.provider_incomplete_count, \
+               model_incomplete_count = attempt_usage_hourly.model_incomplete_count \
+                                        + EXCLUDED.model_incomplete_count, \
+               target_incomplete_count = attempt_usage_hourly.target_incomplete_count \
+                                         + EXCLUDED.target_incomplete_count, \
+               currency = COALESCE(attempt_usage_hourly.currency, EXCLUDED.currency) \
+             RETURNING 1 \
+             ) \
+             SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", \
+                    (SELECT count(*) FROM expired) AS \"usage_rows!\"",
+            usage_cutoff
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let rollups = checked_count(attempt_usage_rollup.rollup_rows, "usage rollup")?;
+        let usage_rows = checked_count(attempt_usage_rollup.usage_rows, "usage")?;
+
+        // Retain the request-level compatibility aggregate for older readers.
+        // It is never used for provider/model attribution by current code.
+        sqlx::query("SELECT set_config('olp.attempt_usage_hourly_mirror', 'off', true)")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("SELECT set_config('olp.attempt_usage_legacy_archive', 'off', true)")
+            .execute(&mut *transaction)
+            .await?;
+        let _compatibility_usage_rollup = sqlx::query!(
             "WITH expired AS ( \
                DELETE FROM usage_facts \
                WHERE observed_at < date_trunc('hour', $1::timestamptz) \
@@ -148,8 +243,6 @@ impl PgStore {
         )
         .fetch_one(&mut *transaction)
         .await?;
-        let rollups = checked_count(usage_rollup.rollup_rows, "usage rollup")?;
-        let usage_rows = checked_count(usage_rollup.usage_rows, "usage")?;
 
         // Lock candidates before deleting them. A concurrent fact insert holds
         // KEY SHARE on its anchor, so SKIP LOCKED leaves that anchor for the
@@ -160,6 +253,10 @@ impl PgStore {
                FROM usage_request_anchors anchor \
                WHERE anchor.request_started_at < $1 AND NOT EXISTS ( \
                  SELECT 1 FROM usage_facts fact \
+                 WHERE fact.request_id = anchor.request_id \
+                   AND fact.request_started_at = anchor.request_started_at \
+               ) AND NOT EXISTS ( \
+                 SELECT 1 FROM attempt_usage_facts fact \
                  WHERE fact.request_id = anchor.request_id \
                    AND fact.request_started_at = anchor.request_started_at \
                ) \
