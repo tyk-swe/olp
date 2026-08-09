@@ -566,7 +566,7 @@ fn classify_service_code(code: Option<&str>) -> AttemptFailureClass {
         Some("ValidationException" | "ResourceNotFoundException" | "ConflictException") => {
             AttemptFailureClass::UpstreamClient
         }
-        None => AttemptFailureClass::Protocol,
+        None => AttemptFailureClass::UpstreamServer,
         Some(_) => AttemptFailureClass::UpstreamServer,
     }
 }
@@ -678,6 +678,17 @@ mod tests {
         assert_eq!(
             classify_service_code(Some("ServiceUnavailableException")),
             AttemptFailureClass::UpstreamServer
+        );
+        let uncoded = classify_service_code(None);
+        assert_eq!(uncoded, AttemptFailureClass::UpstreamServer);
+        assert!(
+            TransportError {
+                phase: TransportPhase::FirstByte,
+                class: uncoded,
+                response_committed: false,
+                message: String::new(),
+            }
+            .allows_failover()
         );
     }
 
