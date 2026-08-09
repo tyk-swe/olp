@@ -94,10 +94,12 @@ screenshots with `pnpm --dir console screenshots`.
 
 ## Contributing
 
-Use Rust 1.97.1, Node.js 24+, pnpm 11, Clang with LLD, and ripgrep. Install
-the console dependencies once, then run the standard local gate:
+Use Rust 1.97.1, sccache 0.17.0, Node.js 24+, pnpm 11, Clang with LLD, and
+ripgrep. Install the compiler cache and console dependencies once, then run
+the standard local gate:
 
 ```bash
+cargo install --locked sccache@0.17.0 --no-default-features
 make console-install
 make check
 ```

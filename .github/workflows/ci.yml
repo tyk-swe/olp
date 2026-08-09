@@ -102,7 +102,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
-          cache-shared-key: lint
+          cache-shared-key: lint-registry
       - name: Install boundary-check dependencies
         run: |
           sudo apt-get update
@@ -130,7 +130,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7"
-          cache-shared-key: coverage
+          cache-shared-key: coverage-registry
       - name: Run workspace coverage
         # test_support only executes under db-test; see the Makefile note.
         run: |
@@ -158,8 +158,8 @@ jobs:
       - name: Derive the pinned fuzz toolchain
         id: fuzz-toolchain
         # The Makefile's FUZZ_TOOLCHAIN is the source of truth for the pin;
-        # keying the shared cache on it keeps a nightly bump from restoring
-        # stale sanitizer artifacts into an immutable cache entry forever.
+        # include it in the shared registry cache key so nightly bumps start
+        # with a fresh immutable entry.
         run: |
           toolchain="$(sed -n 's/^FUZZ_TOOLCHAIN := //p' Makefile)"
           [[ -n "$toolchain" ]]
@@ -168,7 +168,7 @@ jobs:
         with:
           cache-workspaces: fuzz
           tools: "cargo-fuzz@0.13.2"
-          cache-shared-key: fuzz-${{ steps.fuzz-toolchain.outputs.toolchain }}
+          cache-shared-key: fuzz-registry-${{ steps.fuzz-toolchain.outputs.toolchain }}
       - name: Compile fuzz targets
         run: make fuzz-check
       - name: Replay fuzz regression corpora
@@ -288,7 +288,7 @@ jobs:
           install-dirs: tests/sdk-smoke
       - uses: ./.github/actions/setup-rust
         with:
-          cache-shared-key: workspace-debug
+          cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Smoke official OpenAI, Anthropic, and Google GenAI SDKs
         run: ./tests/sdk-smoke/run.sh
@@ -323,10 +323,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           tools: "sqlx-cli@0.9.0,cargo-nextest@0.9.140"
-          # Sole writer of the workspace-debug cache; the other consumers
+          # Sole writer of the workspace registry/tool cache; the other consumers
           # (sdk-compatibility, console-integration, e2e, ha, upgrade-rehearsal)
-          # restore it read-only. This job builds the --all-features superset.
-          cache-shared-key: workspace-debug
+          # restore it read-only. Compiler outputs are shared through sccache.
+          cache-shared-key: workspace-registry
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
       - name: Verify checked SQLx metadata
@@ -378,7 +378,7 @@ jobs:
           install-dirs: console
       - uses: ./.github/actions/setup-rust
         with:
-          cache-shared-key: workspace-debug
+          cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Download the console build
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
@@ -436,7 +436,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-shared-key: workspace-debug
+          cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
@@ -608,7 +608,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-shared-key: workspace-debug
+          cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
@@ -664,7 +664,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-shared-key: workspace-debug
+          cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
@@ -705,7 +705,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-shared-key: workspace-debug
+          cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
@@ -761,7 +761,7 @@ jobs:
           persist-credentials: false
       - name: Derive the pinned fuzz toolchain
         id: fuzz-toolchain
-        # See the fuzz-replay job: the Makefile pin keys the shared cache.
+        # See the fuzz-replay job: the Makefile pin keys the shared registry cache.
         run: |
           toolchain="$(sed -n 's/^FUZZ_TOOLCHAIN := //p' Makefile)"
           [[ -n "$toolchain" ]]
@@ -770,8 +770,8 @@ jobs:
         with:
           cache-workspaces: fuzz
           tools: "cargo-fuzz@0.13.2"
-          # Restores the sanitizer build the PR-tier fuzz-replay job saves.
-          cache-shared-key: fuzz-${{ steps.fuzz-toolchain.outputs.toolchain }}
+          # Keep registry/tool state read-only; sccache owns sanitizer artifacts.
+          cache-shared-key: fuzz-registry-${{ steps.fuzz-toolchain.outputs.toolchain }}
           cache-save: "false"
       - name: Run every seeded fuzz target for two minutes
         run: make fuzz-campaign
