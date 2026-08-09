@@ -52,8 +52,8 @@ impl ConnectorConfig {
         })
     }
 
-    #[cfg(test)]
-    fn for_local_test(
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn for_local_test(
         project: &str,
         location: &str,
         probe_model: &str,

@@ -135,7 +135,8 @@ impl BedrockConnector {
                     .await
                     .map_err(|_| deadline_error(TransportPhase::Body, false))?
                     .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
-                    let events = decode_converse(response, &request.attempt.upstream_model)?;
+                    let events = decode_converse(response, &request.attempt.upstream_model)
+                        .map_err(mark_uncommitted)?;
                     Ok(ProviderOutput::Events(Box::pin(stream::iter(
                         events.into_iter().map(Ok),
                     ))))
@@ -160,9 +161,11 @@ impl BedrockConnector {
                 .await
                 .map_err(|_| deadline_error(TransportPhase::Body, false))?
                 .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
-                let input_tokens = u64::try_from(response.input_tokens()).map_err(|_| {
-                    protocol_body_error("Bedrock returned a negative input token count")
-                })?;
+                let input_tokens = u64::try_from(response.input_tokens())
+                    .map_err(|_| {
+                        protocol_body_error("Bedrock returned a negative input token count")
+                    })
+                    .map_err(mark_uncommitted)?;
                 Ok(ProviderOutput::Result(Box::new(
                     CanonicalResult::TokenCount(TokenCountResult {
                         input_tokens,
@@ -510,6 +513,11 @@ fn deadline_error(phase: TransportPhase, committed: bool) -> TransportError {
     }
 }
 
+fn mark_uncommitted(mut error: TransportError) -> TransportError {
+    error.response_committed = false;
+    error
+}
+
 fn map_sdk_error<E, R>(
     error: &SdkError<E, R>,
     phase: TransportPhase,
@@ -558,7 +566,8 @@ fn classify_service_code(code: Option<&str>) -> AttemptFailureClass {
         Some("ValidationException" | "ResourceNotFoundException" | "ConflictException") => {
             AttemptFailureClass::UpstreamClient
         }
-        _ => AttemptFailureClass::UpstreamServer,
+        None => AttemptFailureClass::Protocol,
+        Some(_) => AttemptFailureClass::UpstreamServer,
     }
 }
 

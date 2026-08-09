@@ -140,6 +140,22 @@ impl ProviderFacade {
         };
         models.map_err(|error| error.to_string())
     }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn from_local_vertex(connector: VertexConnector) -> Self {
+        Self {
+            kind: olp_domain::ProviderKind::VertexAi,
+            connector: ConcreteConnector::Vertex(Arc::new(connector)),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn from_local_bedrock(connector: BedrockConnector) -> Self {
+        Self {
+            kind: olp_domain::ProviderKind::Bedrock,
+            connector: ConcreteConnector::Bedrock(Arc::new(connector)),
+        }
+    }
 }
 
 pub(super) enum ConcreteConnector {
