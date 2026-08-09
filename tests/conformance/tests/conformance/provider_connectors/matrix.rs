@@ -137,6 +137,241 @@ pub(super) const ROWS: [ProviderContractRow; 7] = [
     },
 ];
 
+pub(super) type CapabilityTuple = (OperationKind, Surface, TransportMode);
+
+const SHARED_NATIVE_CAPABILITIES: [CapabilityTuple; 9] = [
+    (
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Anthropic,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Anthropic,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Gemini,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Gemini,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::Anthropic,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::Gemini,
+        TransportMode::Unary,
+    ),
+];
+
+const OPENAI_NATIVE_EXTRA_CAPABILITIES: [CapabilityTuple; 16] = [
+    (
+        OperationKind::Embeddings,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::ImageGeneration,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::ImageGeneration,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::ImageEdit,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::ImageEdit,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::ImageVariation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (OperationKind::Speech, Surface::OpenAi, TransportMode::Unary),
+    (
+        OperationKind::Speech,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Transcription,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Transcription,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::VideoCreate,
+        Surface::OpenAi,
+        TransportMode::Async,
+    ),
+    (
+        OperationKind::VideoList,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::VideoGet,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::VideoContent,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::VideoDelete,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Moderation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+];
+
+const OPENAI_COMPATIBLE_CAPABILITIES: [CapabilityTuple; 5] = [
+    (
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Embeddings,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Moderation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+];
+
+const AZURE_OPENAI_CAPABILITIES: [CapabilityTuple; 11] = [
+    (
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::OpenAi,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Anthropic,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Anthropic,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Gemini,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Generation,
+        Surface::Gemini,
+        TransportMode::Streaming,
+    ),
+    (
+        OperationKind::Embeddings,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::Anthropic,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::TokenCount,
+        Surface::Gemini,
+        TransportMode::Unary,
+    ),
+    (
+        OperationKind::Moderation,
+        Surface::OpenAi,
+        TransportMode::Unary,
+    ),
+];
+
+pub(super) fn expected_certifiable_capabilities(kind: ProviderKind) -> BTreeSet<CapabilityTuple> {
+    match kind {
+        ProviderKind::OpenAi => capability_set(
+            SHARED_NATIVE_CAPABILITIES
+                .into_iter()
+                .chain(OPENAI_NATIVE_EXTRA_CAPABILITIES),
+        ),
+        ProviderKind::Anthropic
+        | ProviderKind::Gemini
+        | ProviderKind::VertexAi
+        | ProviderKind::Bedrock => capability_set(SHARED_NATIVE_CAPABILITIES),
+        ProviderKind::AzureOpenAi => capability_set(AZURE_OPENAI_CAPABILITIES),
+        ProviderKind::OpenAiCompatible => capability_set(OPENAI_COMPATIBLE_CAPABILITIES),
+    }
+}
+
+fn capability_set(tuples: impl IntoIterator<Item = CapabilityTuple>) -> BTreeSet<CapabilityTuple> {
+    tuples.into_iter().collect()
+}
+
 pub(super) fn row_for(kind: ProviderKind) -> ProviderContractRow {
     *ROWS
         .iter()
@@ -191,13 +426,15 @@ fn conformance_matrix_is_closed_and_has_no_empty_opt_outs() {
 #[test]
 fn every_certifiable_tuple_is_in_the_shared_certification_contract() {
     for kind in ProviderKind::ALL {
+        let expected = expected_certifiable_capabilities(kind);
         let reviewed = certifiable_capabilities(kind).collect::<BTreeSet<_>>();
-        assert!(!reviewed.is_empty(), "{kind:?} has no reviewed tuples");
+        assert!(!expected.is_empty(), "{kind:?} has no reviewed tuples");
+        assert_eq!(reviewed, expected, "{kind:?} certification matrix drift");
         for operation in OperationKind::ALL {
             for surface in Surface::ALL {
                 for mode in TransportMode::ALL {
                     assert_eq!(
-                        reviewed.contains(&(operation, surface, mode)),
+                        expected.contains(&(operation, surface, mode)),
                         supports_capability_certification(kind, operation, surface, mode),
                         "matrix drift for {kind:?} {operation:?} {surface:?} {mode:?}"
                     );

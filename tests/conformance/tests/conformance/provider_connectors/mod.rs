@@ -16,11 +16,12 @@ use olp_domain::{
     TranscriptionRequest, TransportError, TransportMode, TransportPhase, Usage,
     validate_event_sequence,
 };
+use olp_protocols::sse::DEFAULT_MAX_EVENT_BYTES;
 use olp_providers::{
-    CompatibleCapability, certifiable_capabilities,
+    CompatibleCapability,
     test_support::{API_KEY, BEDROCK_ACCESS_KEY, BEDROCK_SECRET_KEY, VERTEX_TOKEN, local_provider},
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::{TcpListener, TcpStream},
@@ -60,6 +61,15 @@ impl CapturedRequest {
 
 fn http_response(status: &str, content_type: &str, body: impl AsRef<[u8]>) -> Vec<u8> {
     http_response_with_headers(status, content_type, &[], body)
+}
+
+fn http_stream_response(content_type: &str, body: impl AsRef<[u8]>) -> Vec<u8> {
+    let mut response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nConnection: keep-alive\r\n\r\n"
+    )
+    .into_bytes();
+    response.extend_from_slice(body.as_ref());
+    response
 }
 
 fn http_response_with_headers(
@@ -145,6 +155,29 @@ async fn spawn_stalling_server() -> (
         stream.read_to_end(&mut remaining).await
     });
     (origin, accepted_rx, handle)
+}
+
+async fn spawn_streaming_handoff_server(
+    response: Vec<u8>,
+) -> (String, JoinHandle<(CapturedRequest, usize)>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let handle = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = read_request(&mut socket).await;
+        socket.write_all(&response).await.unwrap();
+        socket.flush().await.unwrap();
+        let mut remaining = Vec::new();
+        let bytes_after_request = socket.read_to_end(&mut remaining).await.unwrap();
+        (
+            CapturedRequest {
+                head: String::from_utf8(request.head).unwrap(),
+                body: request.body,
+            },
+            bytes_after_request,
+        )
+    });
+    (origin, handle)
 }
 
 struct RawRequest {
@@ -662,30 +695,26 @@ fn assert_response_id(kind: ProviderKind, events: &[CanonicalEvent]) {
 
 fn assert_endpoint_and_auth(kind: ProviderKind, mode: TransportMode, request: &CapturedRequest) {
     let streaming = mode == TransportMode::Streaming;
-    let (path_fragment, auth_name, auth_fragment) = match kind {
+    let (path_fragment, auth_name) = match kind {
         ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => {
-            ("/v1/chat/completions", "authorization", "Bearer ")
+            ("/v1/chat/completions", "authorization")
         }
-        ProviderKind::Anthropic => ("/v1/messages", "x-api-key", API_KEY),
+        ProviderKind::Anthropic => ("/v1/messages", "x-api-key"),
         ProviderKind::Gemini if streaming => (
             "/v1beta/models/conformance-model:streamGenerateContent?alt=sse",
             "x-goog-api-key",
-            API_KEY,
         ),
         ProviderKind::Gemini => (
             "/v1beta/models/conformance-model:generateContent",
             "x-goog-api-key",
-            API_KEY,
         ),
         ProviderKind::VertexAi if streaming => (
             "/v1/projects/conformance-project/locations/us-central1/publishers/google/models/conformance-model:streamGenerateContent?alt=sse",
             "authorization",
-            VERTEX_TOKEN,
         ),
         ProviderKind::VertexAi => (
             "/v1/projects/conformance-project/locations/us-central1/publishers/google/models/conformance-model:generateContent",
             "authorization",
-            VERTEX_TOKEN,
         ),
         ProviderKind::Bedrock => (
             if streaming {
@@ -694,22 +723,34 @@ fn assert_endpoint_and_auth(kind: ProviderKind, mode: TransportMode, request: &C
                 "/model/conformance-model/converse"
             },
             "authorization",
-            BEDROCK_ACCESS_KEY,
         ),
         ProviderKind::AzureOpenAi => (
             "/openai/deployments/conformance-deployment/chat/completions?api-version=2024-10-21",
             "api-key",
-            API_KEY,
         ),
     };
     assert_eq!(request.path(), path_fragment, "{kind:?} endpoint");
-    assert!(
-        request
-            .header(auth_name)
-            .is_some_and(|value| value.contains(auth_fragment)),
-        "{kind:?} authentication placement: {}",
-        request.head
-    );
+    let auth = request
+        .header(auth_name)
+        .unwrap_or_else(|| panic!("{kind:?} missing {auth_name} header: {}", request.head));
+    match kind {
+        ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => {
+            assert_eq!(auth, format!("Bearer {API_KEY}"), "{kind:?}");
+        }
+        ProviderKind::VertexAi => {
+            assert_eq!(auth, format!("Bearer {VERTEX_TOKEN}"), "{kind:?}");
+        }
+        ProviderKind::Bedrock => {
+            assert!(
+                auth.contains(BEDROCK_ACCESS_KEY),
+                "{kind:?} authentication placement: {}",
+                request.head
+            );
+        }
+        ProviderKind::Anthropic | ProviderKind::Gemini | ProviderKind::AzureOpenAi => {
+            assert_eq!(auth, API_KEY, "{kind:?}");
+        }
+    }
     assert!(!request.head.contains(BEDROCK_SECRET_KEY));
     if kind == ProviderKind::Gemini {
         assert!(
@@ -887,6 +928,7 @@ async fn all_connectors_round_trip_advertised_tools() {
 async fn structured_output_is_exercised_or_rejected_exactly_as_reviewed() {
     use matrix::{Disposition, ROWS};
 
+    const SCHEMA_ONLY_PROPERTY: &str = "schema_only_conformance_sentinel";
     for row in ROWS {
         let kind = row.kind;
         let mut request = generation_request(kind, native_surface(kind), TransportMode::Unary);
@@ -894,12 +936,12 @@ async fn structured_output_is_exercised_or_rejected_exactly_as_reviewed() {
             unreachable!()
         };
         generation.response_format = Some(ResponseFormat::JsonSchema {
-            name: "answer".to_owned(),
+            name: "conformance_schema".to_owned(),
             description: Some("A bounded answer".to_owned()),
             schema: json!({
                 "type": "object",
-                "properties": {"answer": {"type": "string"}},
-                "required": ["answer"],
+                "properties": {SCHEMA_ONLY_PROPERTY: {"type": "string"}},
+                "required": [SCHEMA_ONLY_PROPERTY],
                 "additionalProperties": false
             }),
             strict: Some(true),
@@ -913,14 +955,30 @@ async fn structured_output_is_exercised_or_rejected_exactly_as_reviewed() {
                     .unwrap();
                 validate_event_sequence(&events).unwrap();
                 let captured = server.await.unwrap();
-                assert!(captured.body_text().contains("answer"), "{kind:?}");
+                let body: Value = serde_json::from_slice(&captured.body).unwrap();
                 if matches!(kind, ProviderKind::Gemini | ProviderKind::VertexAi) {
-                    assert!(
-                        captured.body_text().contains("application/json"),
+                    assert_eq!(
+                        body["generationConfig"]["responseMimeType"], "application/json",
+                        "{kind:?}"
+                    );
+                    assert_eq!(
+                        body["generationConfig"]["responseSchema"]["properties"]
+                            [SCHEMA_ONLY_PROPERTY]["type"],
+                        "string",
                         "{kind:?}"
                     );
                 } else {
-                    assert!(captured.body_text().contains("json_schema"), "{kind:?}");
+                    assert_eq!(body["response_format"]["type"], "json_schema", "{kind:?}");
+                    assert_eq!(
+                        body["response_format"]["json_schema"]["strict"], true,
+                        "{kind:?}"
+                    );
+                    assert_eq!(
+                        body["response_format"]["json_schema"]["schema"]["properties"]
+                            [SCHEMA_ONLY_PROPERTY]["type"],
+                        "string",
+                        "{kind:?}"
+                    );
                 }
             }
             Disposition::Inapplicable(_) => {
@@ -1022,24 +1080,28 @@ async fn all_connectors_redact_secrets_and_classify_retryability() {
 #[tokio::test]
 async fn all_connectors_propagate_attempt_deadlines() {
     for kind in ProviderKind::ALL {
-        let (origin, _accepted, connection) = spawn_stalling_server().await;
+        let (origin, accepted, connection) = spawn_stalling_server().await;
         let provider = local_provider(kind, &origin).await.unwrap();
         let mut request = generation_request(kind, native_surface(kind), TransportMode::Unary);
         request.attempt.timeout = DurationMs::new(50);
-        let error = provider
-            .into_transport()
-            .execute(request)
+        let transport = provider.into_transport();
+        let execute = tokio::spawn(async move { transport.execute(request).await });
+        accepted.await.expect("connector request was not sent");
+        let error = execute
             .await
+            .unwrap()
             .expect_err("stalled provider must hit the attempt deadline");
         assert_eq!(
             error.class,
             AttemptFailureClass::Timeout,
             "{kind:?}: {error:?}"
         );
-        assert!(matches!(
-            error.phase,
-            TransportPhase::Connect | TransportPhase::FirstByte | TransportPhase::Body
-        ));
+        let expected_phase = if kind == ProviderKind::Bedrock {
+            TransportPhase::Body
+        } else {
+            TransportPhase::FirstByte
+        };
+        assert_eq!(error.phase, expected_phase, "{kind:?}: {error:?}");
         connection.abort();
     }
 }
@@ -1061,6 +1123,68 @@ async fn dropping_execute_cancels_every_in_flight_connector_request() {
             .unwrap()
             .unwrap();
         assert_eq!(closed, 0, "{kind:?}: no bytes after request body");
+    }
+}
+
+#[tokio::test]
+async fn dropping_stream_after_handoff_closes_every_connector_socket() {
+    for kind in ProviderKind::ALL {
+        let (origin, connection) =
+            spawn_streaming_handoff_server(stream_handoff_response(kind)).await;
+        let provider = local_provider(kind, &origin).await.unwrap();
+        let output = provider
+            .into_transport()
+            .execute(generation_request(
+                kind,
+                native_surface(kind),
+                TransportMode::Streaming,
+            ))
+            .await
+            .unwrap();
+        let ProviderOutput::Events(events) = output else {
+            panic!("{kind:?} did not return a stream");
+        };
+        drop(events);
+
+        let (captured, bytes_after_request) =
+            tokio::time::timeout(Duration::from_secs(1), connection)
+                .await
+                .expect("dropping a handed-off stream must close its socket")
+                .unwrap();
+        assert_endpoint_and_auth(kind, TransportMode::Streaming, &captured);
+        assert_eq!(
+            bytes_after_request, 0,
+            "{kind:?}: no bytes after request body"
+        );
+    }
+}
+
+fn stream_handoff_response(kind: ProviderKind) -> Vec<u8> {
+    match kind {
+        ProviderKind::OpenAi | ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi => {
+            http_stream_response(
+                "text/event-stream",
+                format!(
+                    "data: {{\"id\":\"handoff\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"{MODEL}\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"partial\"}},\"finish_reason\":null}}]}}\n\n"
+                ),
+            )
+        }
+        ProviderKind::Anthropic => http_stream_response(
+            "text/event-stream",
+            format!(
+                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"handoff\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"{MODEL}\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":1,\"output_tokens\":0}}}}}}\n\n"
+            ),
+        ),
+        ProviderKind::Gemini | ProviderKind::VertexAi => http_stream_response(
+            "text/event-stream",
+            r#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"index":0}]}
+
+"#,
+        ),
+        ProviderKind::Bedrock => http_stream_response(
+            "application/vnd.amazon.eventstream",
+            event_frame("messageStart", &json!({"role": "assistant"}).to_string()),
+        ),
     }
 }
 
@@ -1097,8 +1221,51 @@ fn truncated_stream_response(kind: ProviderKind) -> Vec<u8> {
     }
 }
 
+fn invalid_ordered_stream_response(kind: ProviderKind) -> Vec<u8> {
+    match kind {
+        ProviderKind::OpenAi | ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi => {
+            let finished = format!(
+                "data: {{\"id\":\"invalid-order\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"{MODEL}\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\n"
+            );
+            let late_data = format!(
+                "data: {{\"id\":\"invalid-order\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"{MODEL}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"late\"}},\"finish_reason\":null}}]}}\n\n"
+            );
+            http_response(
+                "200 OK",
+                "text/event-stream",
+                [finished, late_data].concat(),
+            )
+        }
+        ProviderKind::Anthropic => http_response(
+            "200 OK",
+            "text/event-stream",
+            format!(
+                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"invalid-order\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"{MODEL}\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":1,\"output_tokens\":0}}}}}}\n\n\
+                 event: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}},\"usage\":{{\"output_tokens\":1}}}}\n\n\
+                 event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"late\"}}}}\n\n"
+            ),
+        ),
+        ProviderKind::Gemini | ProviderKind::VertexAi => http_response(
+            "200 OK",
+            "text/event-stream",
+            concat!(
+                "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"STOP\",\"index\":0}]}\n\n",
+                "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"late\"}]},\"index\":0}]}\n\n"
+            ),
+        ),
+        ProviderKind::Bedrock => http_response(
+            "200 OK",
+            "application/vnd.amazon.eventstream",
+            event_frame(
+                "contentBlockDelta",
+                r#"{"delta":{"text":"late"},"contentBlockIndex":0}"#,
+            ),
+        ),
+    }
+}
+
 #[tokio::test]
-async fn all_streaming_connectors_reject_truncated_or_invalid_event_sequences() {
+async fn all_streaming_connectors_reject_truncated_event_sequences() {
     for kind in ProviderKind::ALL {
         let (transport, server) = transport_at(kind, truncated_stream_response(kind)).await;
         let output = transport
@@ -1121,6 +1288,31 @@ async fn all_streaming_connectors_reject_truncated_or_invalid_event_sequences() 
             error.response_committed,
             "{kind:?}: partial output commits response"
         );
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn all_streaming_connectors_reject_misordered_event_sequences() {
+    for kind in ProviderKind::ALL {
+        let (transport, server) = transport_at(kind, invalid_ordered_stream_response(kind)).await;
+        let output = transport
+            .execute(generation_request(
+                kind,
+                native_surface(kind),
+                TransportMode::Streaming,
+            ))
+            .await
+            .unwrap();
+        let error = collect_events(output)
+            .await
+            .expect_err("misordered vendor stream must fail");
+        assert_eq!(
+            error.class,
+            AttemptFailureClass::Protocol,
+            "{kind:?}: {error:?}"
+        );
+        assert_eq!(error.phase, TransportPhase::Body, "{kind:?}: {error:?}");
         server.await.unwrap();
     }
 }
@@ -1282,10 +1474,51 @@ async fn bounded_http_connectors_reject_oversized_unary_responses() {
     }
 }
 
+fn oversized_stream_response() -> Vec<u8> {
+    let event = format!("data: {}\n\n", "x".repeat(DEFAULT_MAX_EVENT_BYTES + 1));
+    http_response("200 OK", "text/event-stream", event)
+}
+
+#[tokio::test]
+async fn bounded_http_connectors_reject_oversized_streaming_events() {
+    use matrix::{Disposition, ROWS};
+
+    for row in ROWS {
+        let kind = row.kind;
+        if let Disposition::Inapplicable(_) = row.oversized_responses {
+            continue;
+        }
+        let (transport, server) = transport_at(kind, oversized_stream_response()).await;
+        let output = transport
+            .execute(generation_request(
+                kind,
+                native_surface(kind),
+                TransportMode::Streaming,
+            ))
+            .await
+            .unwrap();
+        let error = collect_events(output)
+            .await
+            .expect_err("oversized streaming event must fail before decoding");
+        assert_eq!(error.phase, TransportPhase::Body, "{kind:?}: {error:?}");
+        assert_eq!(
+            error.class,
+            AttemptFailureClass::Protocol,
+            "{kind:?}: {error:?}"
+        );
+        assert!(
+            error.message.contains("SSE event exceeds"),
+            "{kind:?}: {error:?}"
+        );
+        assert!(!error.response_committed, "{kind:?}");
+        server.await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn every_reviewed_capability_tuple_executes_its_certification_contract() {
     for kind in ProviderKind::ALL {
-        for (operation, surface, mode) in certifiable_capabilities(kind) {
+        for (operation, surface, mode) in matrix::expected_certifiable_capabilities(kind) {
             let capability = CompatibleCapability {
                 operation,
                 surface,
