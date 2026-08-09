@@ -1,261 +1,185 @@
 # Architecture
 
-Crate boundaries and dependency rules, how configuration reaches running
-gateways, how provider capabilities are certified before activation, and the
-invariants that keep durable records free of request content.
+This document records the boundaries and runtime contracts that are useful to
+operators and contributors. Implementation ownership and command details are
+kept in [`CONTRIBUTING.md`](../CONTRIBUTING.md) and the agent guides.
 
 ## Component boundaries
 
-Production dependencies point toward `olp-domain`, which owns domain types,
-routing, and ports without infrastructure dependencies. `olp-protocols` maps
-vendor wire formats to canonical operations. `olp-providers` implements
-upstream transports, discovery, authentication, and outbound network policy.
-`olp-storage` owns PostgreSQL, the outbox, encryption, request-metadata
-ingestion, usage accounting, and Valkey integration. `olp-inference` owns the
-transport-neutral application workflow: immutable generation pinning,
-selection, circuits, failover, limit lease lifetime, canonical event
-collection, terminal accounting, and shared playground execution. The `olp`
-package in `apps/olp` owns only HTTP delivery, process modes, and dependency
-wiring.
+Production dependencies point toward `olp-domain`, which owns canonical types,
+provider configuration, routing, and ports without infrastructure. The other
+roles are deliberately narrow:
 
 ```text
-olp-domain
-├── olp-protocols ───────────────────────────────> olp-domain
-├── olp-providers ───────────────> {domain, protocols}
-├── olp-storage ────────────────────────────────> domain
-├── olp-inference ───────> {domain, protocols, providers, storage}
-└── apps/olp (olp) ─> {domain, protocols, providers, storage, inference}
+domain
+├── protocols  -> domain
+├── providers  -> domain, protocols
+├── storage    -> domain
+├── inference  -> domain, protocols, providers, storage
+└── delivery   -> all production roles
 ```
 
-`olp-conformance` is a test-only workspace package that exercises
-`olp-domain`, `olp-protocols`, and `olp-providers` against the conformance
-corpus, outside the production dependency graph. `olp-e2e` is likewise a
-test-only harness. Each workspace member declares its semantic role under
-`[package.metadata.olp]`; the boundary checker validates allowed role edges and
-infrastructure ownership rather than freezing this concrete package list.
-Multiple packages may therefore share a role while production packages remain
-unable to depend on test harnesses. The console is a client-only static
-application with no server routes or production Node adapter. Its top-level
-feature slices are discovered by layout rather than enumerated; an ESLint rule
-forbids imports from one feature slice into another while permitting neutral
-`$lib` modules and route-level composition.
+`olp-protocols` translates vendor wire formats; `olp-providers` owns outbound
+provider/OIDC networking and egress policy; `olp-storage` owns PostgreSQL,
+Valkey, migrations, encryption, outbox, request-metadata ingestion, and usage
+facts; `olp-inference` owns transport-neutral execution, pinning, selection,
+failover, limits, event collection, and terminal accounting. `apps/olp` owns
+HTTP delivery, CLI modes, workers, and process wiring. Test harnesses are
+outside the production dependency graph. The console is a client-only static
+application; its feature slices share only neutral `$lib` modules.
 
-The delivery crate exposes six responsibility roots:
-
-```text
-apps/olp/src/
-  bootstrap/      CLI, construction, mode finalization, workers, supervision
-  public_http/    listener/router and shared HTTP boundary policy
-  gateway/        protocol-specific inference adapters and endpoint registry
-  management/     auth, access, configuration, operations, OIDC, playground
-  observability/  private readiness/metrics listener
-  console/        embedded static asset delivery
-```
-
-Storage similarly exposes subsystem namespaces instead of a flat `PgStore`
-method/export soup. Pool lifecycle stays in `store.rs`; session, setup,
-idempotency, runtime release/outbox, security, and request-metadata behavior
-live under their owning `authentication`, `identity`, `idempotency`, `runtime`,
-`security`, and `request_metadata` modules.
+Delivery is grouped under `bootstrap/`, `public_http/`, `gateway/`,
+`management/`, `observability/`, and `console/`. Storage exposes subsystem
+namespaces rather than a flat persistence API. The role checker validates
+semantic role edges and infrastructure ownership, so package names and
+directory lists are not architectural contracts.
 
 ## Typed HTTP composition
 
-Startup finalizes mode-specific dependency bundles before building routers.
-Gateway, management, and observability surfaces have immutable state types
-whose mandatory stores, keys, emitters, and runtime services are
-non-optional; Axum `FromRef` exposes narrower capabilities to handlers, and
-the private `ProcessComposition` bootstrap input is never an endpoint service
-locator. It is exposed only by the explicitly gated `olp::test_support`
-namespace for integration fixtures.
-`GatewayState` composes gateway HTTP dependencies with `InferenceService`;
-`ManagementState` contains control-plane dependencies plus only the explicit
-playground inference capability; `ObservabilityState` contains only readiness
-and metrics inputs. Neither control-plane state dereferences to gateway state.
-A routed handler therefore cannot represent a mode missing one of its required
-dependencies or silently acquire another surface's capabilities.
+Startup completes mode-specific dependencies before it builds routers. Gateway,
+management, and observability states contain their required stores, keys,
+emitters, and runtime services as non-optional fields. Axum `FromRef` exposes
+only narrower capabilities. Management and observability state never
+dereference gateway state; playground access receives only its explicit
+inference capability. The optional `ProcessComposition` assembly input is
+private bootstrap machinery and is exposed to fixtures only through the
+`test-util`-gated `olp::test_support` namespace.
 
 ## Transport-neutral inference service
 
-Both public gateway adapters and the authenticated management playground call
-the same cloneable `olp_inference::InferenceService`. It pins a runtime
-generation before selection, retains the matching transport and credential
-registry for the request lifetime, owns cancellation-safe distributed lease
-release, and finalizes exactly one terminal metadata envelope. Axum extraction,
-HTTP status/problem mapping, protocol response rendering, and multipart/body
-admission remain in `apps/olp`; provider construction remains in
-`olp-providers`; concrete persistence remains in `olp-storage`.
+Gateway adapters and the authenticated playground call the same cloneable
+`olp_inference::InferenceService`. It pins one runtime generation before
+selection, retains its transports and credential revision for the request,
+releases distributed leases on cancellation, and finalizes exactly one
+terminal request/attempt metadata envelope. Axum extraction, admission,
+protocol rendering, and HTTP problem mapping remain in delivery; provider
+construction and persistence remain in their owning roles.
+
+### Request and attempt lifecycle
+
+Admission creates one request identity and a bounded execution context. Every
+provider call receives its own monotonically ordered attempt identity carrying
+the selected generation, provider revision, model, operation, deadline, and
+outcome classification. Failover appends an attempt; it never rewrites the
+previous one. A successful billable attempt with no observed upstream usage is
+therefore retained as incomplete and unpriced. A failed attempt may have no
+usage fact, but the gateway never manufactures zero usage or zero cost. Pricing
+and token/media units are attached to the exact attempt that produced them,
+which keeps retries, provider changes, and partial streams auditable without
+storing request content.
+
+The terminal collector is bounded independently of response size. It records
+status, timing, transport/error class, usage completeness, and pricing
+provenance, then emits one terminal envelope. Cancellation follows the same
+terminal path: it releases distributed leases, closes provider streams, and
+persists the attempt facts that are already known. A late provider callback
+cannot create a second terminal record because request and attempt uniqueness
+is enforced in storage.
 
 ## Canonical endpoint and provider policy
 
-`apps/olp/src/gateway/endpoint_policy.rs` is the inference endpoint
-registry. Each entry binds one identity to its HTTP method and path, Axum
-handler, surface, typed operation, body admission, route extraction, token
-estimation, and metadata behavior. Routing and classification both consume
-the registry, and uniqueness tests reject duplicate identities or
-method/path pairs.
+`apps/olp/src/gateway/endpoint_policy.rs` is the sole inference endpoint
+registry. Each entry binds an identity to method, path, surface, typed
+operation, handler, admission, route extraction, token estimation, and
+metadata behavior. Routing, visibility, and classification consume this same
+registry; uniqueness checks reject duplicate identities or method/path pairs.
 
-`crates/domain/src/provider_configuration.rs` is the provider capability
-registry, exhaustively binding each `ProviderKind` to supported/default
-authentication, credential rules, supported and required fields, stable API
-metadata, immutable compatible-provider presets, and complete-candidate
-validation. Presets resolve to ordinary generic-connector fields and never
-enter routing or capability eligibility. Management create and update use the
-same validator; the console obtains the matrix from the management capability
-endpoint and uses generated OpenAPI enums for wire values.
+`crates/domain/src/provider_configuration.rs` is the provider policy registry:
+it binds each provider kind to authentication modes, credential rules,
+applicable fields, defaults, stable API metadata, compatible-provider presets,
+and complete-candidate validation. Presets resolve to ordinary connector
+fields and never bypass certification. Management create and update share the
+validator.
+
+Gateway capabilities and model visibility are default-deny. A capability is
+advertised only when the endpoint policy exposes it and the caller's key has
+the matching route permission; model listing applies the same policy. A
+provider or model that is configured but not explicitly visible cannot be used
+as an accidental discovery or routing path.
 
 ## Checked storage access
 
-Static PostgreSQL statements use SQLx checked macros and the committed
-`.sqlx` metadata. Large or conditionally assembled reads use `QueryBuilder`
-but decode only through subsystem-owned `FromRow` records; string-key
-`PgRow` decoding is forbidden in production storage, and
-`scripts/check-storage-sqlx.sh` enforces the single execute-only dynamic
-statement exception. CI compiles with `SQLX_OFFLINE=true` and verifies the
-metadata against a freshly migrated PostgreSQL 18 database.
+Static PostgreSQL statements use SQLx checked macros and committed `.sqlx`
+metadata. Dynamic filters use `QueryBuilder` but decode through subsystem-owned
+typed `FromRow` records; string-key `PgRow` decoding is forbidden. CI checks
+offline compilation against a freshly migrated PostgreSQL 18 database.
 
 ## Runtime publication
 
-Migration 0032 creates one immutable installation UUID in PostgreSQL before
-application setup. OLP derives an opaque `olp:v3:<installation>` Valkey
-prefix from that durable identity; the runtime-hint channel,
-request-metadata Stream, distributed RPM/TPM state, and concurrency leases
-are children of the prefix. The UUID is not a deployment setting. This lets
-independent PostgreSQL installations safely share the same Valkey logical
-database even when their API-key lookup identifiers match, while every
-replica of one installation resolves the same names. PostgreSQL backup and
-restore deliberately preserves the identity.
+Migration 0032 creates an immutable installation UUID in PostgreSQL. OLP
+derives the opaque `olp:v3:<installation>` Valkey namespace from it for
+runtime hints, request-metadata streams, RPM/TPM state, and concurrency leases.
+Independent installations may share a Valkey logical database; a restored
+database preserves its UUID and must not run beside its source in the same
+keyspace.
 
-Activation stores a byte-stable compiled release, its SHA-256 digest, and an
-outbox row in one transaction. The worker publishes only a generation hint
-to Valkey; gateways consume hints, poll PostgreSQL every five seconds,
-verify the digest, build indexes, and atomically replace the full snapshot.
-Worker replicas serialize hint delivery with a PostgreSQL session advisory
-leader. The owning session performs both ordered, bounded outbox reads and
-durable completion updates; session loss releases leadership automatically
-and prevents the stale connection from completing work. A crash after Valkey
-accepts `PUBLISH` but before `published_at` commits can produce an additional
-hint on retry, which is harmless because every hint only triggers an
-authoritative PostgreSQL read. The leader connection is always closed rather
-than returned locked to the pool. Non-owning replicas continue their other
-responsibilities and use a bounded nonblocking
-advisory-lock probe every five seconds. A probe that cannot acquire an owner
-past its durable heartbeat window increments the shared failed-takeover
-counter; ordinary contention with a current owner is only a skipped task
-checkpoint.
+An activation transaction stores a byte-stable compiled release, its digest,
+and an outbox row. Workers publish only a generation hint. Gateways consume
+the hint, poll authoritative PostgreSQL every five seconds, verify the digest,
+build indexes, and atomically replace the full snapshot. PostgreSQL session
+advisory locking serializes outbox publication; session loss releases the
+owner. Repeated hints are harmless, and non-owning workers continue their
+other responsibilities.
 
-Every worker responsibility has one PostgreSQL task checkpoint shared by all
-replicas: runtime outbox publication, request-metadata consumption,
-maintenance, and stale gateway-epoch detection. Successful timestamps advance
-with `GREATEST`, and outcome/recovery counters add database-side deltas, so a
-late or restarted process cannot regress the fleet view. Outbox ownership and
-the one row inside an active publication attempt are summarized separately;
-the session advisory lock remains authoritative. Maintenance retains its
-transaction advisory lock, epoch detection retains `FOR UPDATE SKIP LOCKED`,
-and Stream recovery retains `XAUTOCLAIM` plus idempotent PostgreSQL receipts.
-An entry owned by a failed consumer becomes reclaimable after 30 seconds;
-the five-second recovery scan bounds normal takeover detection to about 35
-seconds. PostgreSQL event receipts and usage-fact uniqueness make replay one
-logical request and usage fact. Outbox leadership is released with its
-PostgreSQL session and surviving replicas probe every five seconds; repeated
-Pub/Sub hints are safe because PostgreSQL remains authoritative.
-Each request holds one `Arc` with its configuration, key indexes, and
-provider transports, so a stream cannot cross a generation or credential
-version.
+Every worker responsibility has a shared PostgreSQL checkpoint. Runtime
+publication, request-metadata consumption, maintenance, and gateway-epoch
+detection use additive counters and monotonic timestamps, so a restarted
+replica cannot regress the fleet view. A failed metadata consumer becomes
+reclaimable after 30 seconds and is scanned every five seconds. Idempotent
+receipts and usage-fact uniqueness make replay one logical request and one
+logical attempt/usage fact.
 
-Activating a provider creates an immutable numbered revision containing the
-endpoint or cloud context, credential version, enabled models, and certified
-capabilities. Edits and credential rotation affect only the draft; unrelated
-key or route publications continue using the active revision. A current
-ETag-bound connectivity probe and capability certification are required
-before activation atomically replaces the revision. Runtime and fallback
-credential lookup are validated against the release revision, so newer
-configuration credentials cannot enter an older generation.
-
-![Routes published as immutable runtime revisions](assets/screenshots/routes.png)
-
-Revision diffs are bounded to 2,000 models and 32,000 capability tuples per
-side; the database reads at most each limit plus one row, and the API
-returns an RFC 9457 `422` problem beyond a limit. Full revisions remain
-available through the cursor-paginated model endpoint.
+Each request holds one immutable runtime object, so a stream cannot cross a
+generation or credential version. Provider activation similarly creates a
+numbered revision containing endpoint/cloud context, credential version,
+enabled models, and certified capabilities. Draft edits do not affect the
+active revision; an ETag-bound probe and certification are required before
+atomic activation.
 
 ## Distributed limit semantics
 
-Valkey server time is authoritative for distributed requests-per-minute
-(RPM), tokens-per-minute (TPM), and concurrency decisions. The atomic
-reservation script calls `TIME` and derives the UTC minute identity,
-remaining window time, rate-state expiry, expired-lease cleanup, lease
-scores, and `Retry-After` from that one result; gateway process clocks are
-not an input, and obtaining time adds no round trip.
-
-RPM and TPM are fixed UTC-minute windows, not rolling windows or token
-buckets. The rate hash stores only `window`, `rpm`, and `tpm`; the script
-replaces the three fields once at rollover, and the hash expires at the
-fixed minute boundary regardless of traffic. Fixed windows permit boundary
-bursts: a key can use its full allowance just before a minute boundary and
-its next full allowance immediately after.
-
-The cluster-safe state for lookup ID `id` is:
+Valkey server time, not the gateway process clock, is authoritative for RPM,
+TPM, concurrency, window expiry, and `Retry-After`. The reservation script
+calls `TIME` once and atomically handles rollover, expired-lease cleanup, and
+admission. RPM and TPM are fixed UTC-minute windows, so a boundary burst is
+possible by design.
 
 ```text
 <namespace>:{id}:rate           hash(window, rpm, tpm)
-<namespace>:{id}:concurrency:v2 sorted set(lease ID -> server-time expiry ms)
+<namespace>:{id}:concurrency:v2 sorted set(lease_id -> expiry_ms)
 ```
 
-Both keys share the `{id}` Valkey Cluster hash tag, so the reservation
-script declares every key it accesses and keeps RPM, TPM, and concurrency
-admission atomic in one hash slot. A rejection consumes no dimension.
-Malformed stored state and Valkey failures fail closed for hard-limited
-keys; concurrency release is idempotent, and abandoned leases expire on
-Valkey time.
-
-The layout is a forward-only rollout: new binaries neither read, write,
-migrate, nor delete the legacy `rpm:<client-window>`, `tpm:<client-window>`,
-and unversioned `concurrency` keys, which expire naturally. The versioned
-concurrency key also prevents a clock-skewed old process from deleting or
-rescoring a new lease. During mixed-version deployment, old and new binaries
-therefore enforce separate limit pools — each request stays fail-closed, but
-split traffic can temporarily consume up to each pool's allowance. Complete
-the gateway rollout promptly; an N-1 rollback is not a steady state.
+The `{id}` hash tag keeps all keys in one cluster slot. A rejection consumes
+no dimension. Malformed state and Valkey errors fail closed for hard-limited
+keys; release is idempotent and abandoned leases expire on server time. New
+binaries do not read or migrate legacy rate/concurrency keys, so mixed-version
+deployments temporarily have separate pools and must be completed promptly.
 
 ## Capability certification
 
-Enabled native-provider tuples require server-owned certification for the
-exact provider, model, and operation. Safe operations use bounded live
-probes; each enabled native model needs at least one tuple, and every tuple
-must be certified. OpenAI media and video operations that would require user
-media, billable generation, or job mutation may instead use credentialed
-bounded discovery and the closed native connector matrix — generic
-OpenAI-compatible providers cannot. Probe results are stored only while the
-captured draft ETag is still current.
-
-Browser-reviewed tuples for a generic provider are stored as `declared` and
-remain ineligible. The explicit per-model certification action reuses the
-production connector, SSRF controls, deadlines, encoders, streaming decoder,
-and response codecs, permitting at most 16 reviewed tuples and four
-concurrent requests. Safe probes cover OpenAI generation (unary and
-streaming), embeddings, Responses input-token counting, and unary
-moderation; media upload or generation, asynchronous video, and
-cross-protocol claims fail closed.
-
-Every attempted tuple is downgraded before results apply; only an exact
-successful probe receives `source = certified` and `certified_at`.
-Declared-only tuples cannot activate, enter a runtime, validate a route, or
-pass route simulation. Replacing a model's tuple set removes its previous
-evidence.
-
-![Providers with active certified revisions](assets/screenshots/providers.png)
+Native-provider activation requires server-owned certification for every exact
+provider/model/operation tuple. Probes use production connectors, deadlines,
+encoders, streaming decoders, and response codecs; they are bounded and store
+no prompt or response. Generic OpenAI-compatible providers keep browser review
+as `declared` until an explicit per-model certification succeeds. At most 16
+reviewed tuples and four concurrent probe requests are allowed; unsafe media,
+video, asynchronous, and cross-protocol claims fail closed. Only an exact
+successful probe receives `source = certified` and `certified_at`, and a
+replaced tuple set removes previous evidence.
 
 ## Data-safety invariants
 
-Durable request, attempt, and usage records contain only identifiers,
-timing, token or media units, status, error classification, and pricing
-provenance — never prompts, responses, reasoning, tool arguments or results,
-uploads, raw headers, or credentials. Unknown provider fields remain in
-source-scoped in-memory protocol extensions.
+Durable request, attempt, and usage records contain only identifiers, timing,
+token or media units, status, error classification, and pricing provenance —
+never prompts, responses, reasoning, tool arguments/results, uploads, raw
+headers, or credentials. Unknown provider fields stay in source-scoped
+in-memory protocol extensions.
 
 The gateway emits one bounded terminal metadata envelope containing the full
-attempt list. PostgreSQL enforces composite foreign keys from attempts and
-usage facts to the partitioned request. Missing upstream usage is incomplete
-and unpriced, never zero. Stream entries are removed only after the database
-transaction commits and the consumer acknowledges them; producers do not
-trim unconsumed events.
+attempt list. PostgreSQL enforces request/attempt/usage foreign keys and
+uniqueness. Usage and cost are attributed to the exact attempt and provider
+revision. Missing upstream usage is incomplete and unpriced, never zero:
+successful billable attempts without observed usage remain unpriced, while a
+failed attempt is retained without inventing usage or cost. Stream entries are
+removed only after the database transaction commits and the consumer
+acknowledges them; producers never trim unconsumed events.

@@ -1,53 +1,50 @@
-# Conformance and compatibility tests
+# Compatibility and contract tests
 
-The framework-independent conformance corpus, the official SDK smoke test,
-the high-availability proof, and pointers to the fuzz targets.
+The test tree contains the framework-independent wire corpus, official SDK
+smoke tests, end-to-end contracts, HA proof, and fuzz targets. Repository-wide
+Rust validation is `make test` (locked nextest); use the focused commands below
+when changing one suite.
 
-## Conformance harness and corpus
+## Conformance corpus
 
-`fixtures/` is a framework-independent corpus of bounded JSON and UTF-8 SSE
-examples covering protocol translation, fragmented streams, routing and retry
-decisions, and custom-endpoint security. `conformance/` is the Rust reference
-harness for that corpus; it never makes live DNS or provider requests. Run it
-from the repository root:
-
-```sh
-cargo test -p olp-conformance
-```
-
-Each fixture is limited to 64 KiB. Treat fixture changes as contract changes:
-add a case instead of replacing an existing expectation unless that
-expectation is incorrect.
-
-## Official SDK smoke test
-
-`sdk-smoke/` runs the official OpenAI, Anthropic, and Google GenAI JavaScript
-clients against an ephemeral local OpenLLMProxy server. It generates a local
-proxy key, disables SDK retries, and cannot contact a live provider.
-Requires Node.js 24 or newer and pnpm 11:
+`fixtures/` holds bounded JSON and UTF-8 SSE examples for protocol translation,
+fragmented streams, routing/retry decisions, and custom-endpoint security.
+`conformance/` replays them without live DNS or provider requests. Fixture
+changes are contract changes: add a case rather than replacing an expectation
+unless it is demonstrably wrong.
 
 ```sh
-pnpm --dir tests/sdk-smoke install --frozen-lockfile
-./tests/sdk-smoke/run.sh
+SQLX_OFFLINE=true cargo nextest run --locked -p olp-conformance
 ```
 
-## High-availability proof
+The provider conformance matrix exercises every connector transport,
+deadlines, malformed bodies, error mapping, and failover. It includes the
+Bedrock no-code/malformed-body cases fixed in the current release.
 
-The `ha` target in `tests/e2e` reuses the contract harness to run two gateways
-against one PostgreSQL and one Valkey, with Toxiproxy injecting partitions.
-It runs only in CI's full tier (push/schedule/dispatch), not on pull requests.
+## SDK smoke
 
-## Fuzz targets
+Official OpenAI, Anthropic, and Google GenAI JavaScript clients run against an
+ephemeral local server with retries disabled and no live provider access:
 
-The `fuzz/` workspace provides these `cargo-fuzz` targets:
+```sh
+make sdk-smoke
+```
 
-| Target | Coverage |
-|---|---|
-| `sse_decoder` | Fragmented vendor streams |
-| `protocol_json` | Request and response codecs |
-| `media_metadata` | Bounded media handles |
-| `multipart_parser` | Multipart limits, cleanup, and spooling |
+## End-to-end and HA
 
-Run a target with `cargo fuzz run <target>`. Deterministic HTTP lifecycle
-tests, including cancellation and staged-file cleanup, remain in
-`cargo test -p olp --lib`.
+`make e2e` drives the real `olp` binary against PostgreSQL, Valkey, and a
+loopback mock provider. `make worker-ha` adds two gateways, three workers, and
+Toxiproxy partitions; it runs in the full CI tier. The suites assert public
+paths, routing/capability policy, generation pinning, usage completeness,
+data-safety, recovery, and distributed limits.
+
+## Fuzzing
+
+The separate `fuzz/` workspace covers `sse_decoder`, `protocol_json`,
+`media_metadata`, and `multipart_parser`. Use the pinned nightly replay gate:
+
+```sh
+make fuzz-replay
+```
+
+Deterministic cancellation and staged-file cleanup remain Rust unit tests.

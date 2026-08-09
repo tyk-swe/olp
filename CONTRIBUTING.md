@@ -1,213 +1,96 @@
 # Contributing
 
-Thank you for contributing to OpenLLMProxy. This guide covers the development
-environment, the architectural rules every change must respect, and the
-validation required before review.
+This guide is the contributor-facing index for the repository. The root and
+subtree `AGENTS.md` files carry agent-specific constraints; the docs linked
+below are the behavioral sources of truth.
 
 ## Development environment
 
-Use Rust 1.97, Node.js 24 or newer, pnpm 11, Clang with LLD, and PostgreSQL 18
-for the full local suite. Linux builds select Clang and LLD through
-`.cargo/config.toml`. The Compose stack supplies
-PostgreSQL 18 and Valkey 9.1 for integration work. The stable Rust toolchain
-(1.97.1) installs automatically via `rust-toolchain.toml`.
+Use Rust 1.97.1, Node.js 24 or newer, pnpm 11, Clang with LLD, ripgrep,
+PostgreSQL 18, and Valkey 9.1. Rust is pinned by `rust-toolchain.toml`; the
+Compose stack supplies PostgreSQL and Valkey for local service tests.
 
-The broad local gate (`make check-local`, with `make check` retained as an alias) needs ripgrep (for
-`scripts/check-boundaries.sh`) and cargo-nextest
-(`cargo install --locked cargo-nextest@0.9.140`, the `make test` runner).
-Matching CI's full validation additionally needs, at the versions CI pins:
+The normal local gate needs `cargo-nextest`:
 
-- `cargo install --locked cargo-llvm-cov@0.8.7` — the coverage gate
-  (`make coverage`, also run through nextest).
-- `cargo install --locked sqlx-cli@0.9.0` — regenerating `.sqlx/` metadata
-  (`make sqlx-prepare`).
-- `cargo install --locked cargo-fuzz@0.13.2` plus
-  `rustup toolchain install nightly-2026-05-15 --profile minimal` — fuzz
-  targets only (`make fuzz-replay`).
-- `shellcheck` and `jq` — the CI quality job (`make shellcheck`,
-  `scripts/backup-manifest.sh`).
+```sh
+cargo install --locked cargo-nextest@0.9.140
+make console-install       # first run only
+make check-local            # make check is an alias
+```
+
+Additional targets need the matching tools pinned by CI: `cargo-llvm-cov`
+0.8.7 for `make coverage`, `sqlx-cli` 0.9.0 for `make sqlx-prepare`,
+`cargo-fuzz` 0.13.2 plus nightly `2026-05-15` for fuzz replay, and
+`shellcheck`/`jq` for script checks. `make help` is the complete target list.
 
 ## Architectural rules
 
-Keep changes within the component that owns the behavior: `domain` owns
-canonical policy, `protocols` owns wire translation, `providers` owns
-outbound provider/OIDC networking, `storage` owns PostgreSQL and Valkey, and
-`inference` owns transport-neutral runtime pinning, selection, failover,
-limits, and terminal accounting. `apps/olp` owns HTTP delivery and process
-composition. The console remains a static client-only application.
+Keep behavior in its owning role:
 
-### Dependency rules
+| Role | Owns |
+|---|---|
+| Domain | Canonical types, provider configuration, and routing policy; no infrastructure |
+| Protocols | OpenAI/Anthropic/Gemini DTOs, translation, and bounded streams |
+| Providers | Outbound provider/OIDC networking, authentication, egress, and error mapping |
+| Storage | PostgreSQL, Valkey, encryption, migrations, and persistence queries |
+| Inference | Runtime pinning, selection, failover, limits, event collection, and terminal accounting |
+| Delivery (`apps/olp`) | HTTP surfaces, CLI, process composition, and workers |
 
-Dependencies point toward the domain role, which must not acquire
-infrastructure dependencies. Cargo path dependencies stay in this workspace.
-Do not add console server routes or a production Node adapter. Keep
-dependencies locked and third-party Actions and container images pinned.
+Dependencies point toward the domain. SQLx/Redis stay in storage; Reqwest,
+AWS, and Google authentication stay in providers; Axum, Tower, and Clap stay
+in delivery. The console is a client-only `adapter-static` application: do
+not add server routes, hooks, or a production Node adapter.
 
-Each main-workspace package declares one architecture role under
-`[package.metadata.olp]`. The role policy is:
+Every workspace package declares an architecture role in
+`[package.metadata.olp]`. `scripts/check-boundaries.sh` enforces role edges,
+infrastructure ownership, and console feature isolation. Same-role packages
+are allowed; production packages may never depend on test harnesses.
 
-```text
-domain       -> {domain}
-protocol     -> {domain, protocol}
-provider     -> {domain, protocol, provider}
-storage      -> {domain, storage}
-inference    -> {domain, protocol, provider, storage, inference}
-delivery     -> {domain, protocol, provider, storage, inference, delivery}
-test-harness -> any declared role
-```
+## Sources of truth and change map
 
-Same-role edges allow a responsibility to be split into focused crates without
-changing architecture policy; Cargo still rejects cycles. No production role
-may depend on a test harness. Workspace path dependencies must target a
-classified workspace package and may not escape the repository.
-
-Axum, Tower, and Clap stay in delivery-role packages; SQLx/Redis in storage;
-Reqwest, AWS, and Google authentication in providers. The current delivery app
-groups `bootstrap`, `public_http`, `gateway`, `management`, `observability`, and
-`console` under `apps/olp/src`. Boundary checks reject forbidden role edges,
-infrastructure ownership leaks, and production wildcard re-exports without
-freezing those directory or package names. Console feature directories are
-also open-ended, while ESLint prevents one top-level feature from importing
-another; shared code belongs in a neutral `$lib` module. The optional
-`ProcessComposition`
-assembly input stays private to bootstrap in normal builds; integration
-fixtures use the `test-util`-gated `olp::test_support` namespace.
-
-### Sources of truth
-
-- `Cargo.toml` owns the workspace version.
-- `openapi/management.json` owns the tracked management API contract.
-  Regenerate it and the console schema together with `make openapi`
-  (= `cargo run -p olp --example export_openapi` +
-  `pnpm --dir console api:generate`) after management endpoint changes.
-- SQL migrations in `crates/storage/migrations/` are forward-only.
-- `.sqlx/` owns the checked PostgreSQL query metadata. Static production SQL
-  uses `query!`, `query_as!`, or `query_scalar!`; dynamic filters use
-  `QueryBuilder::build_query_as` with a cohesive `FromRow` model. Manual
-  string-key `Row::get`/`try_get` decoding is not allowed.
-- `release-metadata.env` records the migration included in the last completed
-  release and is the CI upgrade-rehearsal baseline.
-- Helm defaults, schema, and templates in `deploy/helm/` change together.
-
-### Change maps
-
-- `crates/domain/src/provider_configuration.rs` owns provider kinds,
-  authentication choices, field applicability, defaults, and
-  complete-candidate validation. Provider factories own transport
-  construction, not a parallel capability matrix.
-- `apps/olp/src/gateway/endpoint_policy.rs` owns the inference endpoint
-  registry: method, path, surface, operation, handler, admission, routing,
-  and token-estimation association.
-- `crates/domain/src/routing/` owns runtime capability eligibility and weighted
-  rendezvous scoring behind the narrow `routing.rs` facade. Connector
-  certification filters those domain capabilities before activation.
-- `crates/inference/src/` owns runtime generation pinning, selection/failover,
-  circuit state, distributed limit lease lifetime, canonical event collection,
-  and terminal request/attempt/usage accounting. HTTP adapters must call the
-  shared `InferenceService` instead of duplicating this orchestration.
-- `crates/providers/src/http_egress.rs` owns public IP classification.
-  Provider and OIDC modules own URL policy, DNS pinning, bounded bodies, and
-  error mapping.
-- Update `openapi/management.json` and regenerate the console schema whenever
-  a management endpoint changes.
-- Regenerate the published console screenshots after visible UI changes with
-  `pnpm --dir console screenshots` and commit the updated PNGs under
-  `docs/assets/screenshots/`.
+- `Cargo.toml` owns the workspace version; lockfiles are changed only by
+  locked/frozen installs.
+- `openapi/management.json` owns the management contract. Run `make openapi`
+  after endpoint changes; it also regenerates the console schema.
+- `crates/storage/migrations/` is sequential and forward-only; `.sqlx/` is
+  generated by `make sqlx-prepare`.
+- `deploy/helm/values.yaml`, `values.schema.json`, and templates change
+  together; verify with `make helm-verify`.
+- `release-metadata.env` is the N-1 upgrade-rehearsal baseline.
+- Provider kinds, auth fields, presets, and validation live in
+  `crates/domain/src/provider_configuration.rs`.
+- Inference endpoint method/path/admission/routing policy lives in
+  `apps/olp/src/gateway/endpoint_policy.rs`.
+- Runtime capability eligibility and rendezvous scoring live under
+  `crates/domain/src/routing/`; generation pinning, failover, limits, and
+  accounting live in `crates/inference/src/`.
+- Public egress classification lives in `crates/providers/src/http_egress.rs`.
 
 ## Validation
 
-Run the full suite before requesting review (first time:
-`make console-install`):
+Run the broad gate before review:
 
 ```sh
 make check-local
 ```
 
-which expands to:
+It runs boundary and SQLx checks, Rust formatting, locked Clippy, the locked
+nextest workspace suite, console verification, release-version checks, and
+supply-chain pin checks. `make coverage` is the CI Rust gate: llvm-cov nextest
+with a 51% line floor. Plain `cargo test` is not a substitute. The workspace
+has no doctests by policy; if one is added, restore a `cargo test --doc` gate.
 
-```sh
-./scripts/check-boundaries.sh
-./scripts/check-storage-sqlx.sh
-cargo fmt --all --check
-SQLX_OFFLINE=true cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-SQLX_OFFLINE=true cargo nextest run --locked --workspace --all-features
-pnpm --dir console verify
-scripts/check-release-version.sh
-scripts/check-supply-chain-pins.sh
-```
+The pass-gated contract suite (`make e2e`) drives the real `olp all` binary
+against PostgreSQL, Valkey, and a loopback mock provider. Its assertions cite
+`README.md`, `docs/*.md`, or the OpenAPI schema, so a documentation/product
+disagreement is a failure to fix at the source. The full CI tier also runs
+`make worker-ha`, SDK compatibility, image, browser, upgrade-rehearsal, and
+fuzz jobs; pull requests run the required tier.
 
-CI's Rust test gate is stricter than plain `cargo test`: it runs
-`cargo llvm-cov nextest` with a **51% line-coverage floor**. Reproduce it
-locally with `make coverage` before pushing test-sensitive changes. The
-workspace deliberately has zero doctests (nextest and llvm-cov do not run
-them); if you add one, restore a `cargo test --doc` gate in the Makefile and
-CI.
+### Database-backed tests
 
-The end-to-end contract suite (`make e2e`, `tests/e2e`) drives the real
-`olp all` binary against PostgreSQL, Valkey, and a loopback mock upstream.
-Every assertion in it is derived from a document — `README.md`, `docs/*.md`,
-or `openapi/management.json` — and cites the clause it enforces. It is
-**pass-gated**: any failure fails CI, and there is no expected-failure
-manifest. A failure means the product and its documentation disagree; resolve
-it by fixing one of them, never by weakening the assertion.
-The runner requires `psql` so its process-exit trap can sweep only the
-run-scoped databases left by a panic, filter, or interruption.
-Contract assertions are split under `tests/e2e/tests/contract/` by public
-surface, management, provider lifecycle, gateway dialect, data safety,
-telemetry, and distributed limits; `contract.rs` owns only the shared
-installation lifecycle and final teardown.
-The longest PostgreSQL contracts likewise keep their single ordered database
-lifecycle while moving provider/route/API-key, OIDC harness, query, and
-retention phases into named sibling modules under each integration test.
-
-The suite needs an isolated PostgreSQL database. Multiple independently
-migrated installations may share one Valkey logical database: migration 0032
-creates each installation's durable identity, and every OLP-owned Valkey key
-and channel is derived from it. Without `OLP_E2E_VALKEY_URL` the harness
-atomically leases and clears one local logical database with a PostgreSQL
-session advisory lock; a shared-Valkey HA fixture owns that lease while both
-installation processes run, so one installation's teardown cannot flush the
-other's keys. `make worker-ha` proves that isolation and three-real-worker
-crash recovery in the full CI tier.
-
-Dev builds use `debug = "line-tables-only"` (workspace `[profile.dev]`):
-backtraces keep file:line information, but debuggers lose variable and type
-detail. For interactive debugging, override locally in
-`~/.cargo/config.toml`:
-
-```toml
-[profile.dev]
-debug = 2
-```
-
-CI runs in two tiers: pull requests and merge queues run the required tier
-(quality, Rust lint/coverage/fuzz-replay, console, SDK compatibility,
-database integration, end-to-end contract, amd64 image). Cross-browser, HA, arm64,
-upgrade-rehearsal, and bounded fuzz campaigns run only on push, schedule, or
-manual dispatch.
-
-### Database test environment
-
-`./scripts/run-postgres-tests.sh` (or `make db-test`) runs the `#[ignore]`d
-PostgreSQL/Valkey integration tests through nextest (profile `db` in
-`.config/nextest.toml`) against PostgreSQL 18 and requires:
-
-- `OLP_TEST_DATABASE_ADMIN_URL` — maintenance database URL with rights to
-  create and drop per-test databases. Every test creates its own
-  `olp_test_{run}_*` database via `olp_storage::test_support::TestDb`; names
-  carry a per-run token, so the script's leftover sweep only ever touches
-  databases of its own run.
-- `OLP_TEST_DATABASE_URL_PREFIX` — connection prefix **without** a trailing
-  database name; each test appends its own database.
-- `OLP_TEST_DATABASE_OWNER` (optional, default `olp`).
-- `OLP_VALKEY_URL` (optional) — a Valkey test endpoint; without it the
-  `distributed_limits_valkey` suite is skipped with a warning.
-
-Per-test timeouts live in the nextest `db` profile. To run a subset, pass a
-nextest filterset through, e.g. `make db-test ARGS="-E 'test(upgrade_0021)'"`.
-
-With the Compose stack from the README quick start running and the default
-`olp` password:
+`make db-test` runs ignored PostgreSQL/Valkey suites through the `db` nextest
+profile. Set an admin URL and a prefix without a trailing database name:
 
 ```sh
 OLP_TEST_DATABASE_ADMIN_URL=postgres://olp:olp@127.0.0.1:5432/postgres \
@@ -215,8 +98,19 @@ OLP_TEST_DATABASE_URL_PREFIX=postgres://olp:olp@127.0.0.1:5432/ \
 make db-test
 ```
 
-For database changes, follow with
-`cargo sqlx prepare --workspace --check -- --all-targets --all-features`
-(`make sqlx-check`) against a migrated development database, and regenerate
-metadata with `make sqlx-prepare` after an intentional query or schema
-change. For deployment changes, run `make helm-verify`.
+Each test creates a run-scoped database through
+`olp_storage::test_support`; `OLP_TEST_DATABASE_OWNER` is optional and
+`OLP_VALKEY_URL` is optional. Pass a nextest filter with
+`make db-test ARGS="-E 'test(upgrade_0021)'"`. After query or migration work,
+run `make sqlx-check` and intentionally regenerate metadata with
+`make sqlx-prepare`.
+
+## Test and fixture layout
+
+Rust unit tests stay beside their owner. `tests/conformance` replays bounded
+wire fixtures; `tests/sdk-smoke` runs official SDKs against a local server;
+`tests/e2e` covers public, management, data-safety, telemetry, HA, and
+distributed-limit contracts; `fuzz/` is a separate nightly workspace. The
+provider conformance matrix exercises every connector transport, deadlines,
+malformed bodies, error mapping, and failover. Use the focused READMEs for
+their commands, not a second copy of the repository gate.

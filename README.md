@@ -4,77 +4,57 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/tyk-swe/olp)](https://github.com/tyk-swe/olp/releases)
 
-OpenLLMProxy is a self-hosted AI gateway and control plane. It exposes
-OpenAI-, Anthropic-, and Gemini-compatible APIs and routes requests to
-OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, AWS Bedrock, and
-certified OpenAI-compatible providers — behind one stable endpoint, one key
-inventory, and one audit trail.
+OpenLLMProxy is a self-hosted AI gateway and control plane. It presents
+OpenAI-, Anthropic-, and Gemini-compatible APIs and routes stable public route
+slugs to OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, Amazon Bedrock,
+and certified OpenAI-compatible providers.
 
 ![OpenLLMProxy console — overview dashboard](docs/assets/screenshots/overview.png)
 
 ## Features
 
-- **Drop-in compatibility** — Point existing OpenAI, Anthropic, and Google
-  GenAI SDKs at one base URL. Clients address routes by a stable public slug;
-  direct provider/model addressing is intentionally unavailable.
-- **Deterministic routing** — Explicit provider-model targets with priority
-  groups, weighted selection, bounded failover, and pre-activation
-  simulation.
-- **Capability certification** — Models activate only after bounded live
-  probes certify each provider/model/operation tuple against the production
-  connector.
-- **Immutable runtime generations** — Configuration is compiled, digested,
-  and published atomically; in-flight streams never cross a generation
-  boundary.
-- **Usage and cost accounting** — Requests, attempts, and usage facts store
-  operational metadata only — never prompts, outputs, tool data, or uploads.
-- **Scoped access control** — Installation-scoped proxy keys with route
-  allowlists, expiry, and distributed hard rate limits; a full audit stream
-  of every administrative change.
-- **Production operations** — Private health and metrics listener, Prometheus
-  rules, Grafana dashboard, backup/restore and upgrade rehearsal tooling.
+- Stable protocol surfaces with explicit route and provider policy; direct
+  provider/model addressing is intentionally unavailable.
+- Priority groups, weighted selection, bounded failover, and pre-activation
+  simulation over certified provider/model/operation tuples.
+- Immutable, digested runtime generations: a stream keeps one generation and
+  credential revision for its entire lifetime.
+- Attempt-level usage and cost accounting with operational metadata only —
+  never prompts, outputs, tool data, uploads, or raw credentials.
+- Installation-scoped keys, route permissions, expiry, hard distributed
+  limits, and an audit stream for administrative changes.
+- Private health/metrics, backup/restore, upgrade rehearsal, and HA workers.
 
 ## Quick start
 
-**Prerequisites:** Docker with Compose support and OpenSSL.
+Prerequisites: Docker with Compose support and OpenSSL.
 
 ```bash
 cp .env.example .env
 ./scripts/prepare-compose-secrets.sh
-```
-
-The helper generates any missing local secrets, including the one-time
-bootstrap token, without replacing existing keys. Compose runs OpenLLMProxy
-as UID/GID `1000`; if your host user differs (`id -u`, `id -g`), set
-`OLP_UID` and `OLP_GID` in `.env` so the container can read the mode-`0600`
-secret files. If you change `POSTGRES_PASSWORD`, set
-`POSTGRES_PASSWORD_URL_ENCODED` to its RFC 3986 percent-encoded form:
-PostgreSQL receives the raw value, while `OLP_DATABASE_URL` derives from the
-encoded one.
-
-Start a new installation with the bootstrap overlay and the root environment
-file explicitly selected:
-
-```bash
 docker compose --env-file .env \
   -f deploy/compose.yaml -f deploy/compose.bootstrap.yaml up --build -d
 ```
 
-Open the console at `http://localhost:8080` and, on first visit, paste the
-one-time value from `deploy/secrets/olp_bootstrap_token` into the setup form
-before creating the installation owner; the application clears its in-memory
-copy after setup. Once the owner account is verified, recreate the
-application from the base configuration and only then retire the token:
+The helper creates only missing secrets, including the one-time bootstrap
+token. Compose runs as UID/GID `1000`; set `OLP_UID` and `OLP_GID` in `.env`
+when the host user differs. If `POSTGRES_PASSWORD` contains reserved URL
+characters, keep its RFC 3986 encoded form in
+`POSTGRES_PASSWORD_URL_ENCODED`.
+
+Open `http://localhost:8080`, paste the value in
+`deploy/secrets/olp_bootstrap_token` into the first-run setup form, and create
+the installation owner. Then recreate the application without the bootstrap
+overlay and retire the token:
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
 ./scripts/retire-compose-bootstrap-secret.sh
 ```
 
-Use `deploy/compose.yaml` alone for every later restart or upgrade; it has no
-bootstrap-secret reference, so container recreation stays valid after the
-file is removed. Compose applies database migrations before startup and
-stores PostgreSQL and Valkey data in named volumes.
+Use `deploy/compose.yaml` alone for later restarts and upgrades. See
+[`deploy/secrets/README.md`](deploy/secrets/README.md) for rotation and
+file-backed connector details.
 
 ## Interfaces
 
@@ -87,62 +67,49 @@ All public interfaces share one origin — `http://localhost:8080` by default:
 | OpenAI-compatible API | `/openai/v1` |
 | Anthropic-compatible API | `/anthropic/v1` |
 | Gemini-compatible APIs | `/gemini/v1` and `/gemini/v1beta` |
-| Management OpenAPI | `/api/v1/openapi.json` — tracked schema: [openapi/management.json](openapi/management.json) |
+| Management OpenAPI | `/api/v1/openapi.json` — [tracked schema](openapi/management.json) |
 
-Liveness, readiness, and metrics are private observability endpoints on
-`OLP_OBSERVABILITY_LISTEN_ADDR` (default `127.0.0.1:9090`): `/health/live`,
-`/health/ready`, and `/metrics`. Compose starts this listener without
-publishing port 9090 to the host; public requests for these paths return 404.
+Liveness, readiness, and metrics are private endpoints on
+`OLP_OBSERVABILITY_LISTEN_ADDR` (default `127.0.0.1:9090`):
+`/health/live`, `/health/ready`, and `/metrics`. Compose does not publish port
+9090; public requests to these paths return 404.
 
 ## Console
 
-The console is the control-plane interface for providers, routes, keys, and
-operations, served as static assets by the same process — no separate
-frontend deployment.
-
-| Providers | API Keys |
-|---|---|
-| ![Providers](docs/assets/screenshots/providers.png) | ![API keys](docs/assets/screenshots/api-keys.png) |
-| **Routes** | **Playground** |
-| ![Routes](docs/assets/screenshots/routes.png) | ![Playground](docs/assets/screenshots/playground.png) |
-| **Usage** | |
-| ![Usage](docs/assets/screenshots/usage.png) | |
-
-Screenshots are generated from deterministic fixtures; regenerate after UI
-changes with `pnpm --dir console screenshots`.
+The SvelteKit console is compiled to static assets and served by the same Rust
+process. It has no API proxy in `pnpm dev`; use a built console with the Rust
+server for API-backed pages. Visible UI changes can regenerate the fixture
+screenshots with `pnpm --dir console screenshots`.
 
 ## Documentation
 
-| Document | Contents |
+| Document | Purpose |
 |---|---|
-| [Architecture](docs/architecture.md) | Component boundaries, runtime publication, capability certification, data-safety invariants |
-| [Configuration](docs/configuration.md) | Runtime `OLP_*` environment variables, file-based secrets, test-only flags |
-| [Deployment](docs/deployment.md) | Helm-based production deployment, secrets, edge routing, readiness |
-| [Operations](docs/operations.md) | SLOs, monitoring, backup and restore, upgrades, incident response |
-| [Security policy](SECURITY.md) | Supported versions and vulnerability reporting |
+| [Architecture](docs/architecture.md) | Boundaries, runtime publication, endpoint/provider policy, limits, certification, and data safety |
+| [Configuration](docs/configuration.md) | Binary defaults, mounted secrets, Compose values, and provider presets |
+| [Deployment](docs/deployment.md) | Helm install, edge routing, workers, observability, and readiness |
+| [Operations](docs/operations.md) | Monitoring, recovery, upgrades, incidents, and master-key rotation |
+| [Contributing](CONTRIBUTING.md) | Toolchain, sources of truth, and validation |
+| [Security](SECURITY.md) | Supported releases and private vulnerability reporting |
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture boundaries,
-source-of-truth ownership, toolchain prerequisites, and the validation
-matrix. Use Rust 1.97.1, Node.js 24 or newer, pnpm 11, Clang with LLD, and
-ripgrep. The Compose stack supplies
-PostgreSQL 18 and Valkey 9.1. Then run the standard checks:
+Use Rust 1.97.1, Node.js 24+, pnpm 11, Clang with LLD, and ripgrep. Install
+the console dependencies once, then run the standard local gate:
 
 ```bash
 make console-install
 make check
 ```
 
-`make help` lists every task (tests, coverage, database-backed suites,
-contract regeneration); each target is a thin wrapper around the same
-commands CI runs.
+`make help` lists the locked CI-aligned targets, including coverage,
+database-backed tests, contract tests, and generated-file checks. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) before changing architecture or APIs.
 
 ## Security
 
-Report suspected vulnerabilities privately to `support@mail.tyk.sh`. See
-[SECURITY.md](SECURITY.md) for supported release lines and reporting
-guidelines.
+Report vulnerabilities privately to `support@mail.tyk.sh`; see
+[`SECURITY.md`](SECURITY.md). Do not include credentials or customer data.
 
 ## License
 

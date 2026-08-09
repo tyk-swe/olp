@@ -1,18 +1,13 @@
 # Repository validation shell helpers
 
-Repository invariant scripts source `repository-validation.sh` to preflight
-their inputs and to run ripgrep without treating scan failures as valid
-no-match results.
+Invariant scripts source `repository-validation.sh` for input preflight and
+fail-closed ripgrep handling.
 
-`checked_rg_capture OUTPUT MATCHED OPERATION PATH [RG_ARGS...]` stores ripgrep
-output in `OUTPUT`. It stores `1` in `MATCHED` for ripgrep exit 0 and `0` for
-exit 1. An exit greater than 1 is fatal, identifies the script, operation, and
-path, and does not update either caller variable.
+`checked_rg_capture OUTPUT MATCHED OPERATION PATH [RG_ARGS...]` stores output
+and sets `MATCHED` to `1` for a match or `0` for no match. A ripgrep exit code
+greater than 1 is fatal and leaves caller variables unchanged.
 
 `checked_rg_match MATCHED OPERATION PATH [RG_ARGS...]` provides the same
-fail-closed status handling when a caller needs only the match/no-match result.
-
-Paths scanned by the migrated invariant scripts are required. There are
-currently no optional scan paths. A future optional path must be documented at
-its call site before it may be skipped; an unclassified missing, unreadable, or
-wrong-type path is a preflight failure.
+match/no-match status when output is unnecessary. Every scanned path is
+required; future optional paths must be explicitly classified at their call
+site before they may be skipped.
