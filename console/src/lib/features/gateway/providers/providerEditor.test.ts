@@ -20,6 +20,7 @@ import {
   requiresCredential,
   requiresSeedModel,
   selectProviderPreset,
+  setProviderDraftKind,
   validateProviderDraft,
   type ProviderEditValues
 } from './providerEditor';
@@ -168,6 +169,24 @@ describe('provider editor capability policy', () => {
       presetId: '',
       endpoint: '',
       authMode: 'api_key'
+    });
+  });
+
+  it('clears the console-only preset selection when provider kind changes', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    selectProviderPreset(draft, compatibleSpec, 'groq');
+
+    setProviderDraftKind(draft, compatibleSpec.kind);
+    expect(draft.presetId).toBe('groq');
+
+    setProviderDraftKind(draft, azureSpec.kind);
+    draft.endpoint = 'https://resource.openai.azure.com';
+    setProviderDraftKind(draft, compatibleSpec.kind);
+
+    expect(draft).toMatchObject({
+      kind: 'openai_compatible',
+      presetId: '',
+      endpoint: 'https://resource.openai.azure.com'
     });
   });
 });

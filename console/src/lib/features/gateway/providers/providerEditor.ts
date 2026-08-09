@@ -65,6 +65,15 @@ export function createProviderDraft(
   };
 }
 
+export function setProviderDraftKind(
+  draft: ProviderDraft,
+  kind: ProviderKind
+): void {
+  if (draft.kind === kind) return;
+  draft.kind = kind;
+  draft.presetId = '';
+}
+
 export function selectProviderPreset(
   draft: ProviderDraft,
   spec: ProviderKindCapability,

@@ -68,6 +68,18 @@ test('compatible preset resolves to persisted connector fields', async ({
     'OpenAI Compatibility'
   );
 
+  await page.getByRole('radio', { name: /Azure OpenAI/ }).check();
+  await page
+    .getByLabel('Azure resource endpoint')
+    .fill('https://resource.openai.azure.com');
+  await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
+  await expect(page.getByLabel('Compatible provider')).toHaveValue('');
+  await expect(page.getByLabel('Compatible endpoint')).toHaveValue(
+    'https://resource.openai.azure.com'
+  );
+  await expect(page.getByLabel('Compatible endpoint')).toBeEditable();
+  await expect(page.getByText(/Verified against/)).toHaveCount(0);
+
   await page.getByLabel('Compatible provider').selectOption('');
   await expect(page.getByLabel('Compatible endpoint')).toHaveValue('');
   await expect(page.getByLabel('Compatible endpoint')).toBeEditable();

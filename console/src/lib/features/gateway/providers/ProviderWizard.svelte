@@ -45,6 +45,7 @@
     requiresCredential,
     requiresSeedModel,
     selectProviderPreset,
+    setProviderDraftKind,
     validateProviderDraft,
     type ProviderDraft
   } from './providerEditor';
@@ -132,6 +133,14 @@
       draft,
       selectedSpec,
       (event.currentTarget as HTMLSelectElement).value
+    );
+  }
+
+  function chooseProviderKind(event: Event) {
+    if (!draft) return;
+    setProviderDraftKind(
+      draft,
+      (event.currentTarget as HTMLInputElement).value as ProviderDraft['kind']
     );
   }
 
@@ -395,7 +404,8 @@
               type="radio"
               name="kind"
               value={option.kind}
-              bind:group={draft.kind}
+              checked={draft.kind === option.kind}
+              onchange={chooseProviderKind}
             />
             <strong>{option.label}</strong><small>{option.description}</small>
           </label>

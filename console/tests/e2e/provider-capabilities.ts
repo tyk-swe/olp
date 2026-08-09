@@ -55,6 +55,20 @@ const providerKinds = {
             'https://docs.mistral.ai/resources/migration-guides'
         }
       ]
+    },
+    {
+      kind: 'azure_openai',
+      label: 'Azure OpenAI',
+      description: 'Azure-hosted OpenAI deployments',
+      default_auth_mode: 'api_key',
+      auth_modes: apiKeyAuth,
+      fields: [
+        { field: 'endpoint', label: 'Resource endpoint', required: true },
+        { field: 'deployment', label: 'Deployment', required: true },
+        { field: 'api_version', label: 'API version', required: true },
+        seedModel
+      ],
+      presets: []
     }
   ]
 };
