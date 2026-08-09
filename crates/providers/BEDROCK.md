@@ -1,37 +1,37 @@
 # Amazon Bedrock connector
 
-This crate implements Amazon Bedrock through the official AWS SDK for Rust. It
-uses Bedrock Runtime for `Converse`, `ConverseStream`, and `CountTokens`, and
-the Bedrock control-plane client for foundation-model discovery. The SDK owns
-SigV4 signing, credential resolution, and event-stream framing.
+The provider crate uses the official AWS SDK for Rust: Bedrock Runtime for
+`Converse`, `ConverseStream`, and `CountTokens`, and the control-plane client
+for foundation-model discovery. The SDK owns SigV4, credential resolution,
+and event framing; model IDs and supported ARNs pass through unchanged.
 
-Model IDs, cross-Region inference profile IDs, and supported ARNs are passed to
-Bedrock unchanged.
+## Authentication
 
-## Authentication modes
-
-| Mode | Description |
+| Mode | Credentials |
 |---|---|
-| `default_chain` | The standard AWS environment, profile, web identity, ECS, and EC2 credential providers |
-| `static` | A JSON object containing `access_key_id`, `secret_access_key`, and an optional `session_token` |
+| `default_chain` | AWS environment, profile, web identity, ECS, or EC2 providers |
+| `static` | JSON `access_key_id`, `secret_access_key`, optional `session_token` |
 
-The connector disables SDK retries so OpenLLMProxy remains responsible for
-retry and failover policy. Streaming calls enforce response-setup, overall,
-and event-idle deadlines. Buffered unary calls use the overall attempt deadline
-and the SDK's connection and socket-read timeouts.
+SDK retries are disabled so inference owns retry/failover policy. Streaming
+calls enforce setup, overall, and event-idle deadlines; unary calls use the
+attempt deadline and SDK connection/socket-read timeouts. Error mapping treats
+malformed bodies and missing error codes as provider failures rather than
+successful empty responses.
 
 ## Testing
 
-Run the local test suite from the repository root:
+Run the focused locked nextest filter or the full gate from the repository root:
 
 ```sh
-cargo test -p olp-providers bedrock
+SQLX_OFFLINE=true cargo nextest run --locked -p olp-providers -E 'test(/bedrock/)'
+make test
 ```
 
-The ignored live tests use the default AWS credential chain:
+Ignored live tests use the default AWS credential chain:
 
 ```sh
 OLP_BEDROCK_LIVE_REGION=us-east-1 \
 OLP_BEDROCK_LIVE_MODEL=amazon.nova-micro-v1:0 \
-cargo test -p olp-providers live_provider -- --ignored
+SQLX_OFFLINE=true cargo nextest run --locked -p olp-providers \
+  -E 'test(/live_provider/)' --run-ignored all
 ```

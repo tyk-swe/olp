@@ -1,206 +1,125 @@
 # Production deployment
 
-Production deployment with the bundled Helm chart: required infrastructure
-and secrets, edge routing, installation, and the checks that must pass
-before the deployment receives traffic.
+The bundled Helm chart deploys one immutable image in gateway, control,
+worker, and migration modes. This guide covers production topology;
+[`operations.md`](operations.md) covers monitoring, recovery, upgrades, and
+incidents.
 
 ## Prerequisites and secrets
 
-The chart requires Kubernetes 1.27 or newer, PostgreSQL 18, and durable
-Valkey 9.1. It runs one immutable image in `gateway`, `control`, `worker`,
-and migration modes. Pin an approved image by `image.digest`, never a
-mutable development tag. Commands below run from the repository root.
+Use Kubernetes 1.27+, PostgreSQL 18, and durable Valkey 9.1. Pin an approved
+OCI image digest; do not deploy a mutable development tag. Create these
+Secrets before installing (names and keys are configurable through `config`):
 
-Create the four long-lived Kubernetes Secrets selected by
-`config.*SecretName` before installation. The defaults are:
+| Purpose | Default Secret/key |
+|---|---|
+| PostgreSQL URL | `olp-postgresql` / `url` |
+| Valkey URL | `olp-valkey` / `url` |
+| Master keyring | `olp-master-key` / `key` |
+| Authentication HMAC key | `olp-auth-hmac-key` / `key` |
 
-| Purpose | Secret | Key |
-|---|---|---|
-| PostgreSQL URL | `olp-postgresql` | `url` |
-| Valkey URL | `olp-valkey` | `url` |
-| Master key | `olp-master-key` | `key` |
-| Authentication HMAC key | `olp-auth-hmac-key` | `key` |
+Installations using `olp-key-hash-key` must copy the exact bytes to the new
+HMAC Secret before upgrading; follow
+[`operations.md#naming-migration-prerequisites`](operations.md#naming-migration-prerequisites).
+New installations also need a 32-byte base64 bootstrap-token Secret mounted
+only into control pods. Keep all secret values out of values files and shell
+history; the chart schema validates configured names and keys.
 
-Installations still using `olp-key-hash-key` must copy those exact bytes to
-the new Secret and update the chart values before upgrading — never generate
-a replacement. Follow the byte-preserving procedure in the
-[upgrade runbook](operations.md#naming-migration-prerequisites).
+### Shared Valkey and workers
 
-For a new installation, also create a 32-byte base64 bootstrap token Secret
-and set `config.bootstrapTokenSecretName` and
-`config.bootstrapTokenSecretKey`. Helm mounts it only into control pods; it
-is required until the first owner exists and is never exposed to gateway
-pods.
+The PostgreSQL installation UUID supplies the Valkey namespace, so independent
+installations may share a logical database without key collisions. A restored
+database retains its identity and is a replacement, not a clone; use a fresh
+Valkey database for rehearsals and never run source and restore together.
 
-Keep secret values out of values files and shell history. Override names and
-keys through `config` when required; `deploy/helm/values.yaml` documents the
-fields and `values.schema.json` validates them.
-
-### Shared Valkey
-
-Independent OLP installations may point at the same Valkey logical database.
-Each migrated PostgreSQL database contains a durable installation UUID, and
-OLP uses it to isolate request metadata, runtime hints, RPM/TPM counters, and
-concurrency leases. Do not manufacture or configure key prefixes. A restored
-PostgreSQL database retains its UUID, so it is a replacement for the source,
-not an independent clone: never run both against the same Valkey database at
-the same time. Use a fresh Valkey database for restore rehearsals.
-
-### Workers
-
-The chart defaults to one worker to keep the evaluation footprint small.
-Production installations should set `worker.replicas: 3`, enable the worker
-PodDisruptionBudget with `worker.podDisruptionBudget.minAvailable: 1` or
-higher, and spread replicas across failure domains. All replicas consume
-installation-scoped work concurrently; PostgreSQL advisory locking serializes
-runtime-outbox publication, and the Valkey consumer group reclaims abandoned
-metadata ownership. Size `config.databaseMaxConnections` and Valkey client
-capacity for the complete gateway, control, and worker fleet.
-
-The worker Deployment deliberately retains `strategy.type: Recreate`.
-Replicated same-version operation does not prove N-1/N compatibility across
-the namespace transition, so a rolling mixed-version worker upgrade is not
-supported. Keep Recreate until that compatibility has its own qualification.
+The chart defaults to one worker for a small footprint. Production should use
+three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
+consume work concurrently; PostgreSQL advisory locking serializes runtime
+outbox publication and Valkey consumer groups reclaim metadata ownership. The
+worker Deployment uses `Recreate`: mixed-version workers are not supported
+through the namespace transition.
 
 ## Edge routing
 
-The console and management API share an origin; vendor SDK traffic
-terminates at gateway pods. The optional Ingress preserves paths and applies
-this routing:
+Route the shared origin as follows, preserving prefixes, streaming, and client
+disconnects:
 
 | Prefix | Service |
 |---|---|
 | `/openai`, `/anthropic`, `/gemini` | gateway |
-| `/api`, `/` and console deep links | control |
+| `/api`, `/`, and console deep links | control |
 
-Enable it only when the selected controller is trusted to terminate TLS:
+Example values:
 
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
   digest: sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST
-
 config:
   publicOrigin: https://olp.example.com
-  # Set false only after OIDC login is configured and verified.
   localLoginEnabled: true
-  # CIDRs of the ingress/controller peers that append X-Forwarded-For.
   trustedProxyCidrs: 10.0.0.0/8
   bootstrapTokenSecretName: olp-bootstrap-token
   bootstrapTokenSecretKey: token
-
-gateway:
-  # Per-pod TCP admission cap with headroom for long-lived HTTP/1.1 streams
-  # and concurrent unary traffic.
-  httpMaxConnections: 16384
-
 ingress:
   enabled: true
   className: nginx
   host: olp.example.com
-  annotations: {}
   tls:
     enabled: true
     secretName: olp-tls
 ```
 
 `config.publicOrigin` and `ingress.host` must identify the same trusted
-origin. Set `config.localLoginEnabled: false` only after OIDC login is
-configured and verified; the public capability endpoint then removes the
-password form. The chart has no gateway catch-all and refuses to render the
-Ingress unless the gateway and control Services are enabled and
-`config.trustedProxyCidrs` is set: public login, invitation, and OIDC limits
-use the connection peer unless that peer is explicitly trusted to supply
-`X-Forwarded-For`.
+origin. Disable local login only after OIDC is verified. For Gateway API or a
+mesh, leave chart Ingress disabled and reproduce the same routing table.
+Disable buffering for SSE and do not lower request-size or idle-timeout
+bounds.
 
-Compose applies the same fail-safe default through
-`OLP_TRUSTED_PROXY_CIDRS`. Leave it empty for direct deployments; behind a
-reverse proxy, set it to the CIDRs of only the proxy peers that append a
-trustworthy `X-Forwarded-For` chain. Forwarding headers received while the
-setting is empty are ignored with a rate-limited warning, so a missing trust
-boundary is visible without letting clients spoof admission identities.
+## Observability and capacity
 
-For Gateway API, a service mesh, or an external Ingress, leave
-`ingress.enabled: false` and reproduce the table above. Preserve the Host,
-scheme, path, streaming behavior, and client disconnects; do not strip the
-vendor or `/api` prefixes. Disable buffering for SSE, and set request-size
-and idle-timeout limits no lower than the application's bounded limits and
-longest approved route deadline.
+`OLP_OBSERVABILITY_LISTEN_ADDR` exposes only `/health/live`, `/health/ready`,
+and `/metrics` on the pod network. The chart creates internal
+`*-observability` ClusterIP Services on port 9090; the public Ingress has no
+health or metrics route. Add an installation-specific NetworkPolicy for the
+kubelet and Prometheus topology.
 
-### Observability listener
-
-Observability is a separate listener. `OLP_OBSERVABILITY_LISTEN_ADDR`
-defaults to `127.0.0.1:9090` and exposes only `/health/live`,
-`/health/ready`, and `/metrics`; the public listener returns 404 for all
-three. The chart binds it to the pod network and creates internal ClusterIP
-`*-observability` Services on port 9090; kubelet probes use the matching
-container port, optional ServiceMonitors select those Services, and the
-bundled Ingress intentionally has no health or metrics route.
-
-The chart installs no generic NetworkPolicy because the correct policy
-depends on the kubelet, Prometheus, and CNI topology. Restrict access to the
-observability Services with an installation-specific policy.
-
-### Capacity
-
-`gateway.httpMaxConnections` and `control.httpMaxConnections` set the
-per-pod public-listener TCP caps (defaults 16,384 and 1,024). Each proxied
-HTTP/1.1 SSE stream holds one connection permit for its lifetime, so size
-the gateway value above the largest expected per-pod stream count with room
-for unary requests.
-
-`gateway.httpMaxInFlightInferenceRequests` and
-`gateway.httpMaxInFlightManagementRequests` (and the corresponding `control`
-values) bound process-local request work independently of TCP connections —
-defaults 256 and 32. The pools do not borrow from each other, so inference
-saturation cannot consume the management reserve in `all` mode. A permit is
-held until the complete response body reaches EOF, fails, or is dropped, so
-streaming responses count for their full lifetime; full pools reject
-immediately with HTTP 503 and `Retry-After: 1` instead of queueing. Size
-these values from pod CPU, memory, provider connection limits, and expected
-streaming duration — raising the TCP cap alone does not increase admitted
-request work.
+Per-pod TCP caps default to 16,384 gateway and 1,024 control connections.
+In-flight work is separate: gateway/control inference pools default to 256
+and management pools to 32. Each permit lasts through streaming completion or
+cancellation; a full pool returns HTTP 503 with `Retry-After: 1` instead of
+queueing. Size limits from CPU, memory, provider connections, and stream
+duration.
 
 ## Install and verify
 
-Render and review the exact digest before applying:
+Render the exact configuration before applying it:
 
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
   --set-string image.digest=sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST \
-  --set ingress.enabled=true \
-  --set ingress.className=nginx \
+  --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
   --set config.publicOrigin=https://olp.example.com
 ```
 
-Install the OCI chart with the version, image digest, and production values
-approved for the deployment:
+Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy \
-  --version 2.0.0 \
-  --namespace olp \
-  --create-namespace \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.0.0 \
+  --namespace olp --create-namespace \
   --set-string image.digest=sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST \
-  --values production-values.yaml \
-  --timeout 20m \
-  --wait
+  --values production-values.yaml --timeout 20m --wait
 ```
-
-The explicit timeout covers the chart's ten-minute migration deadline plus a
-five-minute graceful pod drain and rollout headroom; do not lower it below
-those bounds.
 
 ## Readiness checks
 
-Before issuing a proxy key or routing a client, require a successful
-migration Job, ready pods, runtime-generation convergence, and — when
-monitoring is enabled — healthy gateway and control ServiceMonitor targets.
-For replicated workers also require all four `olp_worker_task_healthy` series,
-zero metadata pending/lag, and zero runtime-outbox pending/claimed rows.
-Once serving, continue with the monitoring, backup, and upgrade procedures
-in the [operations runbook](operations.md).
+Before issuing a proxy key or sending traffic, require a successful migration
+Job, ready pods, runtime-generation convergence, and healthy observability
+targets. With replicated workers also require all four
+`olp_worker_task_healthy` series, zero request-metadata pending/lag, and zero
+runtime-outbox pending/claimed rows. Continue with the monitoring and recovery
+checks in [`operations.md`](operations.md).

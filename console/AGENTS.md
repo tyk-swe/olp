@@ -1,43 +1,34 @@
-# console/ — SvelteKit SPA guide
+# `console` SvelteKit guide
 
-Client-only SvelteKit app compiled to static assets (`adapter-static`,
-`ssr = false`) and served by the Rust binary at `/`. Never add
-`+page.server.*`, `+server.*`, server hooks, or `lib/server/` — CI's
-boundary check rejects them.
+The console is a client-only SvelteKit SPA (`adapter-static`, `ssr = false`)
+served by the Rust binary at `/`. Never add `+page.server.*`, `+server.*`,
+server hooks, or `lib/server/`; the boundary checker rejects them.
 
-## Commands (`pnpm --dir console …` or from this directory)
+## Commands
+
+Run from the repository root with `pnpm --dir console …`, or from this
+directory:
 
 | Command | Purpose |
 |---|---|
-| `pnpm install --frozen-lockfile` | install (pnpm 11, Node ≥ 24) |
-| `pnpm dev` | Vite dev server — **no API proxy**: there is no `server.proxy` in `vite.config.ts`, so `/api/v1` calls fail. For full-stack work, build (`pnpm build`) and run the Rust binary (`cargo run -p olp -- all …`), which serves the built console. |
-| `pnpm verify` | the CI gate: `api:check` + scoped formatter check + vitest + svelte-check/eslint + build |
-| `pnpm format` / `pnpm format:check` | format or verify the incrementally adopted Svelte-compatible formatter scope |
-| `pnpm test:e2e` / `test:integration` / `test:storybook` | Playwright suites (integration needs `OLP_CONSOLE_E2E_*` env, see README) |
-| `pnpm api:generate` | regenerate `src/lib/api/schema.d.ts` from `../openapi/management.json` — never hand-edit that file |
+| `pnpm install --frozen-lockfile` | Node 24+/pnpm 11 dependencies |
+| `pnpm dev` | UI-only Vite server; no `/api/v1` proxy |
+| `pnpm verify` | API drift, formatter scope, Vitest, type/lint, and build |
+| `pnpm test:e2e`, `test:integration`, `test:storybook` | Browser, full-stack, and a11y suites |
+| `pnpm api:generate` | Regenerate `src/lib/api/schema.d.ts` from OpenAPI |
 
-## Layout
+`pnpm dev` cannot exercise API-backed pages. Build the console and run the
+Rust binary for full-stack work. Never hand-edit the generated schema.
 
-- `src/lib/features/gateway/{providers,routes,models}` — provider lifecycle,
-  stable route drafts/revisions, and global model inventory.
-- `src/lib/features/access/{api-keys,users,invitations,sessions,oidc}` — each
-  access workflow owns its queries, mutations, pagination, and write-only
-  secret state. `AccessPage.svelte` only composes tabs.
-- `src/lib/features/operations/{requests,usage,media-jobs,audit,health}` and
-  `settings/{installation,profile}` — resource-oriented operations/settings
-  slices. Profile security and API-key secret workflows use focused components.
-- Top-level directories below `src/lib/features/` are independent feature
-  slices. Their names are not enumerated, but ESLint rejects relative or
-  `$lib/features/…` imports into a different slice. Put genuinely shared code
-  in a neutral `$lib` module; route files may compose multiple slices.
-- Route files under `src/routes/(console)/` remain thin shims; SvelteKit still
-  requires the `+page.svelte` files.
-- `src/lib/api/` — generated `schema.d.ts` + typed fetch wrappers.
-- `*.stories.ts` colocate with components; Storybook's glob picks up
-  anything under `src/`.
-- Four Playwright configs at the root cover e2e / integration /
-  screenshots / storybook — they are distinct suites, not duplicates.
-- Browser contracts are split by product and workflow under `tests/e2e/`;
-  provider wizard, endpoint, probe, model, activation, and inventory behavior
-  has its own spec. Shared provider record construction lives in
-  `gateway-access-fixtures.ts` only.
+## Layout and boundaries
+
+`src/lib/features/` contains independent slices for gateway, access, and
+operations; ESLint rejects cross-slice imports. Put shared code in a neutral
+`$lib` module and keep `src/routes/(console)/` files thin. API wrappers and
+the generated schema live in `src/lib/api/`. Stories colocate with components.
+
+Playwright configs cover e2e, integration, screenshots, and Storybook as
+separate suites. Browser contracts are split by product/workflow; shared
+provider record construction belongs in `gateway-access-fixtures.ts`.
+Integration requires the `OLP_CONSOLE_E2E_*` files described in
+[`README.md`](README.md).

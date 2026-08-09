@@ -1,10 +1,9 @@
 # Compose secrets
 
-File-backed secrets consumed by the local Compose stack: secret generation,
-the bootstrap-token lifecycle, production key rotation, and file-backed
-connector configuration.
+File-backed secrets for the local Compose stack: generation, bootstrap-token
+retirement, key rotation, and optional connector configuration.
 
-## Generating local secrets
+## Generate and migrate secrets
 
 From the repository root:
 
@@ -12,50 +11,44 @@ From the repository root:
 ./scripts/prepare-compose-secrets.sh
 ```
 
-The helper creates only missing files, preserves operator-supplied material,
-and sets restrictive permissions. The generated files are ignored by Git and
-never copied into the application image. Compose runs OpenLLMProxy as
-`1000:1000` by default; set `OLP_UID` and `OLP_GID` to the host user's IDs
-when necessary.
+The helper creates only missing files, preserves operator material, applies
+restrictive permissions, and never copies secrets into the image. Compose runs
+as `1000:1000`; set `OLP_UID` and `OLP_GID` when the host user differs.
 
-Existing installations must preserve the authentication HMAC key bytes.
-Before running the helper after an upgrade, rename the legacy file without
-changing its contents:
+Existing installations must preserve authentication HMAC bytes. Before an
+upgrade, rename the legacy file without changing it:
 
 ```sh
 mv deploy/secrets/olp_key_hash_key deploy/secrets/olp_auth_hmac_key
 ```
 
-The helper refuses to generate `olp_auth_hmac_key` while the legacy filename
-is present, because replacing this key would invalidate persisted
-authentication digests.
+The helper refuses to generate the new file while the legacy name exists;
+replacing it would invalidate persisted authentication digests. The complete
+2.0 naming migration is in
+[`docs/operations.md`](../../docs/operations.md#naming-migration-prerequisites).
 
 ## Bootstrap token lifecycle
 
-`olp_bootstrap_token` is a one-time first-owner setup token. A new
-installation must include `deploy/compose.bootstrap.yaml` alongside the base
-Compose file. Paste the value into the console's setup form and verify the
-owner account.
-
-Before deleting the token, recreate the initialized application without the
-bootstrap overlay; retire it with the helper only after that succeeds:
+`olp_bootstrap_token` is a one-time first-owner setup token. Start a new
+installation with `deploy/compose.yaml` and
+`deploy/compose.bootstrap.yaml`, paste its value into the setup form, and
+verify the owner. Recreate the initialized application without the bootstrap
+overlay, then retire the token:
 
 ```sh
 docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
 ./scripts/retire-compose-bootstrap-secret.sh
 ```
 
-The retirement helper deletes `olp_bootstrap_token` and records its
-retirement so `prepare-compose-secrets.sh` will not recreate a meaningless
-replacement. Use `deploy/compose.yaml` alone for all later restarts and
-upgrades. To abandon the initialized database and intentionally bootstrap a
-fresh installation, remove `deploy/secrets/.olp_bootstrap_retired`, rerun the
-preparation helper, and add the bootstrap overlay again.
+The helper deletes the token and records retirement so preparation cannot
+recreate it. Use the base Compose file for all later restarts/upgrades. To
+intentionally bootstrap a fresh database, remove
+`deploy/secrets/.olp_bootstrap_retired`, prepare again, and include the overlay.
 
-## Production key rotation
+## Master-key rotation
 
-A single base64 master key is version 1. Rotation uses a versioned keyring;
-this example shows version 2 after activation:
+Use a versioned keyring, retaining the old key until all encrypted rows are
+rewritten and verified:
 
 ```json
 {
@@ -67,38 +60,27 @@ this example shows version 2 after activation:
 }
 ```
 
-Add the new key while the old version is still active, restart every replica,
-then select the new active version and restart again. Retain the old key
-until `olp master-key reencrypt` has rewritten all encrypted rows, and run
-`olp master-key verify-retirement --version 1` to confirm no references
-remain. Follow the complete
-[rotation procedure](../../docs/operations.md#master-key-rotation) before
-removing a key.
+Add the new key and restart every replica, select it as active and restart
+again, then run `olp master-key reencrypt` and
+`olp master-key verify-retirement --version 1`. Follow the
+[operations rotation procedure](../../docs/operations.md#master-key-rotation)
+before removing a key.
 
-## File-backed connector configuration
+## File-backed connectors
 
-The stock Compose stack and Helm chart use console-managed providers and
-encrypted credentials; they do not set `OLP_CONNECTOR_CONFIG_FILE`. A custom
-deployment can point that variable at a mounted JSON configuration file when
-credentials must remain file-backed — see the
-[connector configuration example](../connectors.example.json).
+Console-managed providers use encrypted credentials and do not set
+`OLP_CONNECTOR_CONFIG_FILE`. A custom deployment may point that variable at a
+read-only JSON file; every `provider_id` must match the active runtime.
 
-The JSON object supports these array keys and provider fields; each
-`provider_id` must match the corresponding provider in the active runtime
-configuration.
-
-| Key | Fields |
+| Array key | Required fields |
 |---|---|
-| `openai` | `provider_id`, optional `base_url`, and a required `credential_file` containing the API key |
-| `azure_openai` | `provider_id`, `endpoint`, `deployment`, `api_version`, and a required `credential_file` containing the API key |
-| `vertex` | `provider_id`, `project`, `location`, `model`, and optional `auth_mode`. The default `adc` mode must omit `credential_file`; `service_account` requires a credential file containing service-account JSON |
-| `bedrock` | `provider_id`, `region`, and optional `auth_mode`. The default `default_chain` mode must omit `credential_file`; `static` requires a credential file containing static AWS credentials |
+| `openai` | `provider_id`, optional `base_url`, `credential_file` |
+| `azure_openai` | `provider_id`, `endpoint`, `deployment`, `api_version`, `credential_file` |
+| `vertex` | `provider_id`, `project`, `location`, `model`; `adc` omits `credential_file`, `service_account` requires it |
+| `bedrock` | `provider_id`, `region`; `default_chain` omits `credential_file`, `static` requires it |
 
-Mount the configuration and every referenced credential file read-only, with
-mode `0600` for credential files. Prefer workload identity (`adc` for Vertex
-AI or `default_chain` with an IAM role for Amazon Bedrock); use
-`service_account` or `static` only when workload identity is unavailable. A
-static Bedrock credential file has this shape:
+Mount the configuration and credential files read-only (`0600` for credentials).
+Prefer workload identity. A static Bedrock file is:
 
 ```json
 {
@@ -108,7 +90,7 @@ static Bedrock credential file has this shape:
 }
 ```
 
-Bedrock discovery requires `bedrock:ListFoundationModels`; inference requires
+Bedrock discovery needs `bedrock:ListFoundationModels`; inference needs
 `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, and, when
-used, `bedrock:CountTokens`. Scope runtime permissions to the configured
-resources where AWS supports resource-level permissions.
+used, `bedrock:CountTokens`. Scope permissions to configured resources where
+AWS supports resource-level grants.

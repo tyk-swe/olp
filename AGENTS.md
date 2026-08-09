@@ -1,118 +1,76 @@
-# OpenLLMProxy — agent guide
+# OpenLLMProxy agent guide
 
-OpenLLMProxy is a single-binary Rust AI gateway (OpenAI/Anthropic/Gemini
-surfaces, management API, background worker) that also serves an embedded
-SvelteKit console as static assets. One Cargo workspace plus three deliberate
-islands with their own lockfiles: `console/` (pnpm), `tests/sdk-smoke/` (pnpm),
-`fuzz/` (separate Cargo workspace).
+OpenLLMProxy is a single Rust binary serving OpenAI/Anthropic/Gemini surfaces,
+management, workers, and an embedded static SvelteKit console. The main Cargo
+workspace has two pnpm islands (`console/`, `tests/sdk-smoke/`) and a separate
+nightly Cargo workspace (`fuzz/`).
 
 ## Commands
 
-`make help` lists everything. The Makefile mirrors CI
-(`.github/workflows/ci.yml`); keep both in lockstep when either changes.
+`make help` is the CI-aligned index. Common gates are:
 
-| Task | Command |
+| Concern | Target |
 |---|---|
-| Broad local gate | `make check-local` (`make check` remains an alias) |
-| Rust format / lint | `make fmt` (`fmt-fix`), `make clippy` |
-| Rust unit tests | `make test` |
-| CI's real Rust gate | `make coverage` — llvm-cov nextest with a **51% line floor**. Plain `cargo test` is not what CI enforces. The workspace has zero doctests by policy; if you add one, restore a `cargo test --doc` gate. |
-| Postgres/Valkey integration tests | `make db-test` — requires `OLP_TEST_DATABASE_ADMIN_URL` and `OLP_TEST_DATABASE_URL_PREFIX`, optional `OLP_VALKEY_URL` (see CONTRIBUTING.md) |
+| Broad local gate | `make check-local` (`make check` is an alias) |
+| Format/lint/tests | `make fmt`, `make clippy`, `make test` (locked nextest) |
+| CI Rust gate | `make coverage` (llvm-cov nextest, 51% line floor) |
+| PostgreSQL/Valkey | `make db-test` (see `CONTRIBUTING.md`) |
 | Console | `make console-install`, `make console-verify`, `make console-e2e` |
-| Regenerate contracts | `make openapi`, `make sqlx-prepare`, `make screenshots` |
+| Contracts/generated files | `make openapi`, `make sqlx-prepare`, `make screenshots` |
 
-The CI required tier additionally runs service-, browser-, image-, and
-coverage-dependent jobs that `make check-local` does not reproduce.
-CI tiers: pull requests run the required tier; cross-browser, HA, arm64,
-upgrade-rehearsal, and fuzz campaigns run only on push/schedule/dispatch.
+The workspace has zero doctests by policy; restore a `cargo test --doc` gate if
+one is added. CI also runs service, browser, image, HA, upgrade, supply-chain,
+Helm, SDK, and fuzz jobs beyond the local gate.
 
-## Generated files — never hand-edit
+## Generated files
 
-| Path | Regenerate with | Drift gate in CI |
-|---|---|---|
-| `.sqlx/` (offline query metadata) | `make sqlx-prepare` | `cargo sqlx prepare --check` (postgres-integration job) |
-| `openapi/management.json` | `make openapi` | `apps/olp/tests/openapi_drift.rs` |
-| `console/src/lib/api/schema.d.ts` | `make openapi` | `pnpm api:check` (inside `make console-verify`) |
-| `docs/assets/screenshots/*.png` | `make screenshots` | manual — regenerate after visible UI changes |
-| `Cargo.lock`, `pnpm-lock.yaml` | locked installs only | `--locked` / `--frozen-lockfile` everywhere |
+Never hand-edit `.sqlx/`, `openapi/management.json`,
+`console/src/lib/api/schema.d.ts`, or `docs/assets/screenshots/*.png`; use
+`make sqlx-prepare`, `make openapi`, or `make screenshots`. Lockfiles change
+only through locked/frozen installs.
 
-## Crate map
+## Roles and ownership
 
-```
-apps/olp        delivery: HTTP surfaces, CLI, process composition (axum, clap)
-crates/domain   canonical model, routing policy — no infrastructure deps
-crates/protocols vendor wire translation (OpenAI/Anthropic/Gemini DTOs, SSE)
-crates/providers outbound provider + OIDC networking (reqwest, aws-*, google-cloud-auth)
-crates/storage  PostgreSQL (sqlx) + Valkey; migrations; Lua scripts
-crates/inference transport-neutral runtime pinning, selection, execution, failover, accounting
-tests/conformance cross-protocol conformance harness over tests/fixtures/
-```
-
-Every main-workspace package declares an architecture role in
-`[package.metadata.olp]`. `scripts/check-boundaries.sh` enforces permitted
-role-to-role edges rather than a package-name or directory snapshot: domain is
-the base; protocol and provider code point inward; storage remains separate
-from provider transport; inference may compose the production library roles;
-delivery may compose any production role; test harnesses may consume
-production crates but never enter their dependency graph. Multiple packages
-may share a role, so a responsibility can be split without editing the
-checker. Infrastructure ownership is role-based (`sqlx`/`redis` in storage;
-`reqwest`/`aws-*`/`google-cloud-auth` in providers;
-`axum`/`tower*`/`clap` in delivery). Console feature names are likewise
-open-ended; ESLint rejects imports across top-level feature boundaries instead
-of snapshotting the feature directory list.
-
-The current app source groups delivery into `bootstrap/`, `public_http/`,
-`gateway/`, `management/`, `observability/`, and `console/`. Transport-neutral
-inference behavior belongs in an inference-role crate, never in an Axum
-handler.
-
-## Where does X live
-
-| Change | Owner |
+| Role | Responsibility |
 |---|---|
-| Provider kinds, auth choices, field applicability, validation | `crates/domain/src/provider_configuration.rs` |
-| Inference endpoint registry (method, path, admission, routing) | `apps/olp/src/gateway/endpoint_policy.rs` |
-| Runtime capability eligibility, weighted rendezvous scoring | `crates/domain/src/routing/{selection,route}.rs` via the `routing` facade |
-| Runtime pinning, failover, limits, terminal accounting | `crates/inference/src/` |
-| Public IP classification / egress policy | `crates/providers/src/http_egress.rs` |
-| SQL migrations (forward-only, sequential) | `crates/storage/migrations/` |
-| Management API contract | `openapi/management.json` → `make openapi` after endpoint changes |
-| Helm defaults + schema + templates (change together) | `deploy/helm/` → `make helm-verify` |
-| Runtime configuration reference | `docs/configuration.md` |
+| `domain` | Canonical model, provider configuration, routing; no infrastructure |
+| `protocols` | Vendor DTOs, translation, bounded SSE |
+| `providers` | Outbound/OIDC networking, authentication, egress, error mapping |
+| `storage` | PostgreSQL, Valkey, encryption, migrations, Lua |
+| `inference` | Pinning, selection, failover, limits, event collection, accounting |
+| `delivery` | HTTP, CLI, process composition, workers |
 
-## Testing model
+Every workspace package declares `[package.metadata.olp]`; the boundary checker
+enforces semantic role edges and infrastructure ownership. Domain is the base;
+storage owns SQLx/Redis, providers own Reqwest/AWS/Google auth, and delivery
+owns Axum/Tower/Clap. Test harnesses never enter production dependency graphs.
+Transport-neutral behavior belongs in an inference-role crate. Delivery roots
+are `bootstrap/`, `public_http/`, `gateway/`, `management/`,
+`observability/`, and `console/`.
 
-- Rust unit tests live in `src/**/tests.rs` modules next to the code.
-- The `#[ignore]`d PostgreSQL/Valkey suites live in the consolidated
-  `tests/integration/` binaries of `crates/storage` and `apps/olp` and run
-  via `make db-test` (nextest, one database per test from
-  `olp_storage::test_support`) against PostgreSQL 18 and Valkey.
-- `tests/conformance` replays the fixture corpus in `tests/fixtures/`.
-- Console: Vitest colocated `*.test.ts`, Playwright suites under
-  `console/tests/`, Storybook a11y. `fuzz/` needs nightly (see Makefile).
+### Source map
 
-## Hazards
+- Provider kinds, auth, fields, presets: `crates/domain/src/provider_configuration.rs`.
+- Endpoint method/path/admission/routing: `apps/olp/src/gateway/endpoint_policy.rs`.
+- Routing eligibility/scoring: `crates/domain/src/routing/`.
+- Pinning, failover, limits, terminal accounting: `crates/inference/src/`.
+- Public egress classification: `crates/providers/src/http_egress.rs`.
+- SQL migrations: `crates/storage/migrations/` (forward-only, sequential).
+- Management contract: `openapi/management.json` → `make openapi`.
+- Helm values/schema/templates: `deploy/helm/` → `make helm-verify`.
+- Runtime settings: `docs/configuration.md`.
 
-- When adding or moving a main-workspace package, declare its
-  `[package.metadata.olp]` role and verify the workspace COPY scope in
-  `deploy/Dockerfile`. The boundary checker discovers members from Cargo
-  metadata and should not need a topology update.
-- Two dockerignore files exist; BuildKit uses `deploy/Dockerfile.dockerignore`
-  for the production image. Keep the root `.dockerignore` a synchronized copy.
-- Migrations are forward-only; `release-metadata.env` pins the last released
-  migration for CI's upgrade rehearsal.
-- The console is client-only: no `+page.server.*`, `+server.*`, or server
-  hooks; the adapter must stay `adapter-static` (enforced by
-  `scripts/check-boundaries.sh`).
+## Hazards and tests
 
-Deeper rules: `CONTRIBUTING.md` (architecture rules, sources of truth, change
-maps, validation) and `docs/{architecture,configuration,deployment,operations}.md`.
-Subtree guides: `apps/olp/AGENTS.md`, `crates/AGENTS.md`, `console/AGENTS.md`.
+Adding a package requires its role and verification that `deploy/Dockerfile`
+copies it. BuildKit uses `deploy/Dockerfile.dockerignore`; keep the root
+`.dockerignore` synchronized. `release-metadata.env` pins the upgrade baseline.
+The console remains `adapter-static` with no server routes/hooks.
 
-## Tool preference
+Unit tests stay beside owners; ignored service suites use `make db-test`; the
+conformance, SDK, HA, browser, and fuzz layouts are indexed in `tests/README.md`.
+See `CONTRIBUTING.md` and `docs/{architecture,configuration,deployment,operations}.md`
+for contributor and operational detail.
 
-- Prefer built-in Read, Edit, Write tools for file operations.
-- Avoid shell-based file reading, searching, or editing when a built-in tool can perform the operation.
-- Avoid complex inline shell, heredocs, nested quoting, and multi-stage pipelines.
-- Keep tool output bounded; save full logs to a file and return only relevant diagnostics.
+Prefer built-in file tools and bounded output. Avoid shell-based editing,
+complex quoting, and commands that rewrite generated or unrelated files.
