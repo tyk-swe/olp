@@ -568,7 +568,8 @@ impl PgStore {
             };
             let usage_complete =
                 charge_status == AttemptChargeStatus::NotBillable || attempt.usage.complete;
-            let unpriced = charge_status != AttemptChargeStatus::NotBillable && !pricing_complete;
+            let unpriced = charge_status != AttemptChargeStatus::NotBillable
+                && (!attempt.usage.complete || !pricing_complete);
 
             sqlx::query!(
                 "INSERT INTO attempt_usage_facts \

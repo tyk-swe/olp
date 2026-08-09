@@ -192,12 +192,14 @@ impl PgStore {
 
         // Retain the request-level compatibility aggregate for older readers.
         // It is never used for provider/model attribution by current code.
-        sqlx::query("SELECT set_config('olp.attempt_usage_hourly_mirror', 'off', true)")
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("SELECT set_config('olp.attempt_usage_legacy_archive', 'off', true)")
-            .execute(&mut *transaction)
-            .await?;
+        let _hourly_mirror_setting =
+            sqlx::query!("SELECT set_config('olp.attempt_usage_hourly_mirror', 'off', true)")
+                .fetch_one(&mut *transaction)
+                .await?;
+        let _legacy_archive_setting =
+            sqlx::query!("SELECT set_config('olp.attempt_usage_legacy_archive', 'off', true)")
+                .fetch_one(&mut *transaction)
+                .await?;
         let _compatibility_usage_rollup = sqlx::query!(
             "WITH expired AS ( \
                DELETE FROM usage_facts \

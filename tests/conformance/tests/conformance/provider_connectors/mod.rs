@@ -1083,12 +1083,16 @@ async fn all_connectors_propagate_attempt_deadlines() {
         let (origin, accepted, connection) = spawn_stalling_server().await;
         let provider = local_provider(kind, &origin).await.unwrap();
         let mut request = generation_request(kind, native_surface(kind), TransportMode::Unary);
-        request.attempt.timeout = DurationMs::new(50);
+        request.attempt.timeout = DurationMs::new(250);
         let transport = provider.into_transport();
         let execute = tokio::spawn(async move { transport.execute(request).await });
-        accepted.await.expect("connector request was not sent");
-        let error = execute
+        tokio::time::timeout(Duration::from_secs(1), accepted)
             .await
+            .unwrap_or_else(|_| panic!("{kind:?}: connector request was not sent"))
+            .expect("connector request was not sent");
+        let error = tokio::time::timeout(Duration::from_secs(1), execute)
+            .await
+            .unwrap_or_else(|_| panic!("{kind:?}: connector ignored the attempt deadline"))
             .unwrap()
             .expect_err("stalled provider must hit the attempt deadline");
         assert_eq!(

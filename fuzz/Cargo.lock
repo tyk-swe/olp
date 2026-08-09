@@ -2403,6 +2403,7 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-bedrock",
  "aws-sdk-bedrockruntime",
+ "aws-smithy-runtime-api",
  "aws-smithy-types",
  "base64",
  "bytes",

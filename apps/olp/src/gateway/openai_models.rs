@@ -29,7 +29,7 @@ pub(super) async fn list_models(
         .routes
         .keys()
         .filter(|slug| key.allowed_routes.is_empty() || key.allowed_routes.contains(*slug))
-        .filter(|slug| route_is_visible(&runtime, slug))
+        .filter(|slug| route_is_visible(runtime, slug))
         .map(|slug| ModelObject::new(slug.as_str(), created))
         .collect();
 
@@ -57,7 +57,7 @@ pub(super) async fn get_model(
             .map_err(|_| OpenAiModelError::model_not_found(&model_id))?;
         if !runtime.routes.contains_key(&slug)
             || (!key.allowed_routes.is_empty() && !key.allowed_routes.contains(&slug))
-            || !route_is_visible(&runtime, &slug)
+            || !route_is_visible(runtime, &slug)
         {
             return Err(OpenAiModelError::model_not_found(&model_id));
         }
