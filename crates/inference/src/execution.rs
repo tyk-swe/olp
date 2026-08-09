@@ -9,8 +9,9 @@ use std::{
 
 use chrono::Utc;
 use olp_domain::{
-    ApiKey, CanonicalEvent, CanonicalResult, Operation, OperationKind, RequestId, RequestMetadata,
-    RouteSlug, Surface, TransportMode, authorize_api_key,
+    ApiKey, CanonicalEvent, CanonicalResult, GatewayCapability, Operation, OperationKind,
+    RequestId, RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
+    gateway_capability_for_operation,
 };
 use olp_storage::request_metadata::RequestAttemptMetadata;
 
@@ -252,11 +253,17 @@ impl InferenceService {
     pub fn authorize_principal<'a>(
         &self,
         principal: &'a InferencePrincipal,
-        operation: OperationKind,
+        capability: GatewayCapability,
         route: Option<&RouteSlug>,
     ) -> Result<&'a ApiKey, InferenceError> {
-        authorize_api_key(principal.key(), route, operation, Utc::now())
-            .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+        authorize_api_key(
+            principal.key(),
+            route,
+            principal.gateway_capability(),
+            capability,
+            Utc::now(),
+        )
+        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
         Ok(principal.key())
     }
 
@@ -559,13 +566,12 @@ impl InferenceService {
             surface: principal.surface(),
         };
         admission.claim_metadata();
-        if let Err(error) = authorize_api_key(
-            principal.key(),
+        if let Err(error) = self.authorize_principal(
+            principal,
+            gateway_capability_for_operation(context.operation_kind),
             Some(&context.route_slug),
-            context.operation_kind,
-            Utc::now(),
         ) {
-            let failure = InferenceError::forbidden(error.to_string());
+            let failure = error;
             RequestAccountingGuard::new(
                 self.clone(),
                 context.accounting_input(),
@@ -702,9 +708,8 @@ impl InferenceService {
     pub fn authorize_model_access<'a>(
         &self,
         principal: &'a InferencePrincipal,
-        operation: OperationKind,
     ) -> Result<(&'a RuntimeBundle, &'a ApiKey), InferenceError> {
-        let key = self.authorize_principal(principal, operation, None)?;
+        let key = self.authorize_principal(principal, GatewayCapability::ModelsRead, None)?;
         Ok((principal.runtime(), key))
     }
 

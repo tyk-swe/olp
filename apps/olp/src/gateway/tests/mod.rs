@@ -229,7 +229,12 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
 fn test_principal(state: &GatewayState, surface: Surface) -> crate::InferencePrincipal {
     let runtime = state.runtime().pin();
     let (lookup_id, _) = runtime.api_keys.iter().next().unwrap();
-    crate::InferencePrincipal::new(Arc::clone(&runtime), lookup_id.clone(), surface)
+    crate::InferencePrincipal::new(
+        Arc::clone(&runtime),
+        lookup_id.clone(),
+        surface,
+        Some(olp_domain::GatewayCapability::Inference),
+    )
 }
 
 fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {

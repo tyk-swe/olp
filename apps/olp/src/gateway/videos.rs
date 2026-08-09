@@ -9,7 +9,9 @@ use axum::{
 };
 use chrono::Utc;
 use futures::{StreamExt, stream};
-use olp_domain::{CanonicalResult, Operation, OperationKind, Surface, TransportMode};
+use olp_domain::{
+    CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
+};
 use olp_inference::CleanupMediaStream;
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
@@ -345,7 +347,7 @@ pub(super) async fn video_list(
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
-    let key = authorize_principal(&state, &principal, OperationKind::VideoList, None)?;
+    let key = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
     if !query.extra.is_empty() {
         return Err(InferenceError::invalid_request(
             "Video list contains unsupported query parameters.",

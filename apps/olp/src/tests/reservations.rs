@@ -209,8 +209,12 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     let state = state.gateway_state_for_test();
     let pinned = state.runtime().pin();
     let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
-    let principal =
-        InferencePrincipal::new(Arc::clone(&pinned), lookup_id.clone(), Surface::OpenAi);
+    let principal = InferencePrincipal::new(
+        Arc::clone(&pinned),
+        lookup_id.clone(),
+        Surface::OpenAi,
+        Some(olp_domain::GatewayCapability::Inference),
+    );
     state
         .runtime()
         .install(
@@ -229,34 +233,44 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
         .unwrap();
     let metadata_claimed = Arc::new(AtomicBool::new(false));
     let reservation = InferenceReservation::for_test(async {});
-    let (principal_generation, principal_surface, reserved_tokens, has_reservation_hold) =
-        HTTP_INFERENCE_PRINCIPAL
-            .scope(
-                principal,
-                HTTP_INFERENCE_METADATA_CLAIMED.scope(
-                    Arc::clone(&metadata_claimed),
-                    HTTP_INFERENCE_LIMITS_RESERVED.scope(
-                        2_000,
-                        HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
-                            let task = spawn_http_inference_task(async move {
-                                claim_http_inference_metadata();
-                                let principal = http_inference_principal()
-                                    .expect("the detached task inherits the admitted principal");
-                                (
-                                    principal.runtime().generation.id,
-                                    principal.surface(),
-                                    http_inference_reserved_tokens(),
-                                    HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
-                                )
-                            });
-                            task.await.unwrap()
-                        }),
-                    ),
+    let (
+        principal_generation,
+        principal_surface,
+        principal_capability,
+        reserved_tokens,
+        has_reservation_hold,
+    ) = HTTP_INFERENCE_PRINCIPAL
+        .scope(
+            principal,
+            HTTP_INFERENCE_METADATA_CLAIMED.scope(
+                Arc::clone(&metadata_claimed),
+                HTTP_INFERENCE_LIMITS_RESERVED.scope(
+                    2_000,
+                    HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
+                        let task = spawn_http_inference_task(async move {
+                            claim_http_inference_metadata();
+                            let principal = http_inference_principal()
+                                .expect("the detached task inherits the admitted principal");
+                            (
+                                principal.runtime().generation.id,
+                                principal.surface(),
+                                principal.gateway_capability(),
+                                http_inference_reserved_tokens(),
+                                HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
+                            )
+                        });
+                        task.await.unwrap()
+                    }),
                 ),
-            )
-            .await;
+            ),
+        )
+        .await;
     assert_eq!(principal_generation, pinned.generation.id);
     assert_eq!(principal_surface, Surface::OpenAi);
+    assert_eq!(
+        principal_capability,
+        Some(olp_domain::GatewayCapability::Inference)
+    );
     assert_ne!(state.runtime().pin().generation.id, pinned.generation.id);
     assert_eq!(reserved_tokens, Some(2_000));
     assert!(has_reservation_hold);

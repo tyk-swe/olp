@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_domain::{CanonicalEvent, CanonicalResult, Operation, OperationKind, TransportMode};
+use olp_domain::{CanonicalEvent, CanonicalResult, GatewayCapability, Operation, TransportMode};
 use olp_protocols::openai::{
     OpenAiResponsesStreamEncoder, ResponseCreateRequest, ResponseInputTokensRequest,
     decode_response_create, decode_response_input_tokens, encode_response_input_tokens_result,
@@ -38,7 +38,7 @@ pub(super) async fn responses(
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ResponseCreateRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let _ = authorize_principal(&state, &principal, OperationKind::Generation, None)?;
+    let _ = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
     let Json(mut request) = valid_json(payload)?;
     let streaming = request.stream;
     let admitted = admit_openai_responses(&state, &mut request).await?;
@@ -138,7 +138,7 @@ pub(super) async fn response_input_tokens(
     Extension(principal): Extension<InferencePrincipal>,
     payload: Result<Json<ResponseInputTokensRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let _ = authorize_principal(&state, &principal, OperationKind::TokenCount, None)?;
+    let _ = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
     let Json(mut request) = valid_json(payload)?;
     let admitted = admit_openai_response_input_tokens(&state, &mut request).await?;
     let operation = match decode_response_input_tokens(request) {

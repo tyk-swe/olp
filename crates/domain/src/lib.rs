@@ -14,7 +14,8 @@ pub mod routing;
 
 pub use auth::{
     ApiKey, ApiKeyAuthorizationError, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus,
-    InvalidRole, OwnerInvariantError, Permission, Role, authorize_api_key, validate_owner_change,
+    GatewayCapability, InvalidRole, OwnerInvariantError, Permission, Role, authorize_api_key,
+    gateway_capability_for_operation, validate_owner_change,
 };
 pub use canonical::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, CanonicalResult, ContentPart,

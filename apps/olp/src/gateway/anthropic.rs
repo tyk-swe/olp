@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_domain::{ApiKey, CanonicalResult, OperationKind, RouteSlug, Surface, TransportMode};
+use olp_domain::{ApiKey, CanonicalResult, RouteSlug, Surface, TransportMode};
 use olp_protocols::anthropic::{
     AnthropicMessagesClientStreamEncoder, CountTokensRequest, MessagesRequest,
     decode_count_tokens_request, decode_messages_request, encode_count_tokens_result,
@@ -169,8 +169,8 @@ pub(super) async fn models(
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
-    let (runtime, key) = authorize_model_access(&state, &principal, OperationKind::ModelList)
-        .map_err(ProtocolError::anthropic)?;
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(ProtocolError::anthropic)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::anthropic)?;
@@ -237,8 +237,8 @@ pub(super) async fn model(
     Extension(principal): Extension<InferencePrincipal>,
     Path(id): Path<String>,
 ) -> Result<Response, ProtocolError> {
-    let (runtime, key) = authorize_model_access(&state, &principal, OperationKind::ModelGet)
-        .map_err(ProtocolError::anthropic)?;
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(ProtocolError::anthropic)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::anthropic)?;

@@ -1,30 +1,25 @@
-use std::sync::Arc;
-
 use axum::{
     Json,
     extract::{Extension, Path, State},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
-use olp_domain::{ApiKeyAuthorizationError, OperationKind, RouteSlug, Surface, authorize_api_key};
+use olp_domain::{OperationKind, RouteSlug, Surface};
 use serde::Serialize;
 
 use olp_inference::runtime::RuntimeBundle;
 
 use crate::{
     GatewayState, InferencePrincipal,
-    gateway::{InferenceError, release_model_limits, reserve_model_limits},
+    gateway::{InferenceError, authorize_model_access, release_model_limits, reserve_model_limits},
 };
 
 pub(super) async fn list_models(
     State(state): State<GatewayState>,
     Extension(principal): Extension<InferencePrincipal>,
 ) -> Result<Json<ModelList>, OpenAiModelError> {
-    let runtime = Arc::clone(principal.runtime());
-    let key = principal.key();
-    authorize_api_key(key, None, OperationKind::ModelList, Utc::now())
-        .map_err(map_authorization_error)?;
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(OpenAiModelError::from_inference)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(OpenAiModelError::from_inference)?;
@@ -51,10 +46,8 @@ pub(super) async fn get_model(
     Extension(principal): Extension<InferencePrincipal>,
     Path(model_id): Path<String>,
 ) -> Result<Json<ModelObject>, OpenAiModelError> {
-    let runtime = Arc::clone(principal.runtime());
-    let key = principal.key();
-    authorize_api_key(key, None, OperationKind::ModelGet, Utc::now())
-        .map_err(map_authorization_error)?;
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(OpenAiModelError::from_inference)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(OpenAiModelError::from_inference)?;
@@ -101,16 +94,6 @@ fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug) -> bool {
     })
 }
 
-fn map_authorization_error(error: ApiKeyAuthorizationError) -> OpenAiModelError {
-    match error {
-        ApiKeyAuthorizationError::Revoked | ApiKeyAuthorizationError::Expired => {
-            OpenAiModelError::unauthorized()
-        }
-        ApiKeyAuthorizationError::MissingScope { .. }
-        | ApiKeyAuthorizationError::RouteNotAllowed { .. } => OpenAiModelError::forbidden(),
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub(super) struct ModelList {
     object: &'static str,
@@ -146,26 +129,6 @@ pub(super) struct OpenAiModelError {
 }
 
 impl OpenAiModelError {
-    fn unauthorized() -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            code: "invalid_api_key",
-            kind: "authentication_error",
-            message: "The API key is invalid or unavailable.".to_owned(),
-            retry_after: None,
-        }
-    }
-
-    fn forbidden() -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            code: "permission_denied",
-            kind: "permission_error",
-            message: "The API key does not have the models_read scope.".to_owned(),
-            retry_after: None,
-        }
-    }
-
     fn model_not_found(id: &str) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
@@ -177,16 +140,10 @@ impl OpenAiModelError {
     }
 
     fn from_inference(error: InferenceError) -> Self {
-        let status = error.status();
-        let (code, kind) = if status == StatusCode::TOO_MANY_REQUESTS {
-            ("rate_limit_exceeded", "rate_limit_error")
-        } else {
-            ("service_unavailable", "service_unavailable_error")
-        };
         Self {
-            status,
-            code,
-            kind,
+            status: error.status(),
+            code: error.code(),
+            kind: error.kind(),
             message: error.message().to_owned(),
             retry_after: error.retry_after(),
         }

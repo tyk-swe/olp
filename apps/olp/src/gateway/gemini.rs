@@ -220,8 +220,8 @@ pub(super) async fn models(
     Extension(principal): Extension<InferencePrincipal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
-    let (runtime, key) = authorize_model_access(&state, &principal, OperationKind::ModelList)
-        .map_err(ProtocolError::gemini)?;
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(ProtocolError::gemini)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::gemini)?;
@@ -283,8 +283,8 @@ pub(super) async fn model(
     Extension(principal): Extension<InferencePrincipal>,
     Path(resource): Path<String>,
 ) -> Result<Response, ProtocolError> {
-    let (runtime, key) = authorize_model_access(&state, &principal, OperationKind::ModelGet)
-        .map_err(ProtocolError::gemini)?;
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(ProtocolError::gemini)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::gemini)?;

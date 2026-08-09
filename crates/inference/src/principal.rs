@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use olp_domain::{ApiKey, ApiKeyLookupId, Surface};
+use olp_domain::{ApiKey, ApiKeyLookupId, GatewayCapability, Surface};
 
 use crate::runtime::RuntimeBundle;
 
@@ -11,15 +11,22 @@ pub struct InferencePrincipal {
     runtime: Arc<RuntimeBundle>,
     lookup_id: ApiKeyLookupId,
     surface: Surface,
+    gateway_capability: Option<GatewayCapability>,
 }
 
 impl InferencePrincipal {
     #[must_use]
-    pub fn new(runtime: Arc<RuntimeBundle>, lookup_id: ApiKeyLookupId, surface: Surface) -> Self {
+    pub fn new(
+        runtime: Arc<RuntimeBundle>,
+        lookup_id: ApiKeyLookupId,
+        surface: Surface,
+        gateway_capability: Option<GatewayCapability>,
+    ) -> Self {
         Self {
             runtime,
             lookup_id,
             surface,
+            gateway_capability,
         }
     }
 
@@ -44,5 +51,12 @@ impl InferencePrincipal {
     #[must_use]
     pub const fn surface(&self) -> Surface {
         self.surface
+    }
+
+    /// Capability declared by the classified public endpoint, if the action
+    /// has a supported authorization policy.
+    #[must_use]
+    pub const fn gateway_capability(&self) -> Option<GatewayCapability> {
+        self.gateway_capability
     }
 }

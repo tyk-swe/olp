@@ -274,7 +274,12 @@ async fn enforce_request_limits_inner(
 
     let principal = endpoint
         .map(|endpoint| {
-            authenticate_inference_headers(state, request.headers(), endpoint.surface())
+            authenticate_inference_headers(
+                state,
+                request.headers(),
+                endpoint.surface(),
+                endpoint.capability(),
+            )
         })
         .transpose()?;
     if let Some(principal) = principal.clone() {
@@ -387,11 +392,11 @@ async fn enforce_request_limits_inner(
             return Err(problem.into());
         }
         match (multipart_policy, finalization.principal()) {
-            (Some((operation, reservation_bytes)), Some(principal)) => {
+            (Some((capability, reservation_bytes)), Some(principal)) => {
                 match preauthorize_multipart(
                     request.headers(),
                     principal.key(),
-                    operation,
+                    capability,
                     reservation_bytes,
                 ) {
                     Ok(admission) => Some(admission),

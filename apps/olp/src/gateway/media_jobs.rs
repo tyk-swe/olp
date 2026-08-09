@@ -4,8 +4,9 @@ use axum::http::StatusCode;
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
-    ApiKey, CanonicalResult, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, OperationKind,
-    RouteSlug, Surface, TransportMode, authorize_api_key,
+    ApiKey, CanonicalResult, GatewayCapability, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION,
+    Operation, OperationKind, RouteSlug, Surface, TransportMode, authorize_api_key,
+    gateway_capability_for_operation,
 };
 use olp_inference::selection::select_representable_attempts_filtered;
 use olp_storage::{
@@ -35,7 +36,7 @@ pub(super) fn select_video_create_target(
     let key = authorize_principal(
         state,
         principal,
-        OperationKind::VideoCreate,
+        GatewayCapability::Inference,
         Some(&route_slug),
     )?;
     let snapshot = principal.runtime();
@@ -386,7 +387,8 @@ pub(super) async fn owned_media_job(
     video_id: &str,
     operation: OperationKind,
 ) -> Result<(ApiKey, MediaJobRecord), InferenceError> {
-    let key = authorize_principal(state, principal, operation, None)?;
+    let capability = gateway_capability_for_operation(operation);
+    let key = authorize_principal(state, principal, capability, None)?;
     let id = uuid::Uuid::parse_str(video_id)
         .map_err(|_| InferenceError::resource_not_found("video_not_found"))?;
     let record = state.store().media_job(id).await.map_err(media_job_error)?;
@@ -406,8 +408,14 @@ pub(super) async fn owned_media_job(
     }
     let route = RouteSlug::parse(&record.route_slug)
         .map_err(|_| InferenceError::unavailable("media_job_route_invalid"))?;
-    authorize_api_key(key, Some(&route), operation, Utc::now())
-        .map_err(|error| InferenceError::forbidden(error.to_string()))?;
+    authorize_api_key(
+        key,
+        Some(&route),
+        principal.gateway_capability(),
+        capability,
+        Utc::now(),
+    )
+    .map_err(|error| InferenceError::forbidden(error.to_string()))?;
     Ok((key.clone(), record))
 }
 

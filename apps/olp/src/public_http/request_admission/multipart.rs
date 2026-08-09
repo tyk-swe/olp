@@ -7,7 +7,7 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_domain::{ApiKey, OperationKind, RouteSlug, authorize_api_key};
+use olp_domain::{ApiKey, GatewayCapability, RouteSlug, authorize_api_key};
 
 use crate::{Problem, gateway};
 
@@ -179,10 +179,10 @@ pub(crate) fn validate_multipart_boundary(content_type: &str) -> Result<(), Prob
 pub(super) fn preauthorize_multipart(
     headers: &HeaderMap,
     key: &ApiKey,
-    operation: OperationKind,
+    capability: GatewayCapability,
     reservation_bytes: u64,
 ) -> Result<(MultipartRouteAdmission, u64), gateway::InferenceError> {
-    authorize_api_key(key, None, operation, chrono::Utc::now())
+    authorize_api_key(key, None, Some(capability), capability, chrono::Utc::now())
         .map_err(|error| gateway::InferenceError::forbidden(error.to_string()))?;
 
     let route_header = HeaderName::from_static("x-olp-route");
@@ -207,8 +207,14 @@ pub(super) fn preauthorize_multipart(
     if let Some(supplied) = supplied {
         let route = RouteSlug::parse(supplied)
             .map_err(|_| gateway::InferenceError::invalid_request("X-OLP-Route is invalid."))?;
-        authorize_api_key(key, Some(&route), operation, chrono::Utc::now())
-            .map_err(|error| gateway::InferenceError::forbidden(error.to_string()))?;
+        authorize_api_key(
+            key,
+            Some(&route),
+            Some(capability),
+            capability,
+            chrono::Utc::now(),
+        )
+        .map_err(|error| gateway::InferenceError::forbidden(error.to_string()))?;
         Ok((MultipartRouteAdmission::Expected(route), reservation_bytes))
     } else {
         Ok((

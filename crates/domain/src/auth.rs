@@ -147,7 +147,23 @@ pub enum ApiKeyScope {
     ModelsRead,
 }
 
+/// Closed authorization capabilities for public gateway endpoints.
+///
+/// These capabilities intentionally remain separate from [`OperationKind`],
+/// which continues to describe routing, provider support, and accounting.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum GatewayCapability {
+    Inference,
+    ModelsRead,
+}
+
+impl GatewayCapability {
+    pub const ALL: [Self; 2] = [Self::Inference, Self::ModelsRead];
+}
+
 impl ApiKeyScope {
+    pub const ALL: [Self; 2] = [Self::Inference, Self::ModelsRead];
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -156,18 +172,44 @@ impl ApiKeyScope {
         }
     }
 
+    /// Returns whether this scope positively grants `capability`.
+    ///
+    /// The fully enumerated matrix is deliberate: adding either a scope or a
+    /// capability requires an explicit decision for every combination.
     #[must_use]
-    pub const fn permits(self, operation: OperationKind) -> bool {
-        match self {
-            Self::Inference => !matches!(
-                operation,
-                OperationKind::ModelList | OperationKind::ModelGet
-            ),
-            Self::ModelsRead => matches!(
-                operation,
-                OperationKind::ModelList | OperationKind::ModelGet
-            ),
+    pub const fn permits(self, capability: GatewayCapability) -> bool {
+        match (self, capability) {
+            (Self::Inference, GatewayCapability::Inference) => true,
+            (Self::Inference, GatewayCapability::ModelsRead) => false,
+            (Self::ModelsRead, GatewayCapability::Inference) => false,
+            (Self::ModelsRead, GatewayCapability::ModelsRead) => true,
         }
+    }
+}
+
+/// Maps the canonical operation dimension to its required gateway
+/// authorization capability.
+///
+/// This exhaustive positive mapping prevents a new operation from inheriting
+/// authorization merely because it is not a model-read operation.
+#[must_use]
+pub const fn gateway_capability_for_operation(operation: OperationKind) -> GatewayCapability {
+    match operation {
+        OperationKind::Generation
+        | OperationKind::Embeddings
+        | OperationKind::Moderation
+        | OperationKind::ImageGeneration
+        | OperationKind::ImageEdit
+        | OperationKind::ImageVariation
+        | OperationKind::Speech
+        | OperationKind::Transcription
+        | OperationKind::TokenCount
+        | OperationKind::VideoCreate
+        | OperationKind::VideoList
+        | OperationKind::VideoGet
+        | OperationKind::VideoContent
+        | OperationKind::VideoDelete => GatewayCapability::Inference,
+        OperationKind::ModelList | OperationKind::ModelGet => GatewayCapability::ModelsRead,
     }
 }
 
@@ -234,7 +276,8 @@ pub struct ApiKey {
 pub fn authorize_api_key(
     key: &ApiKey,
     route: Option<&RouteSlug>,
-    operation: OperationKind,
+    endpoint_capability: Option<GatewayCapability>,
+    required_capability: GatewayCapability,
     now: DateTime<Utc>,
 ) -> Result<(), ApiKeyAuthorizationError> {
     if key.status == ApiKeyStatus::Revoked {
@@ -243,8 +286,19 @@ pub fn authorize_api_key(
     if key.expires_at.is_some_and(|expiration| expiration <= now) {
         return Err(ApiKeyAuthorizationError::Expired);
     }
-    if !key.scopes.iter().any(|scope| scope.permits(operation)) {
-        return Err(ApiKeyAuthorizationError::MissingScope { operation });
+    if endpoint_capability != Some(required_capability) {
+        return Err(ApiKeyAuthorizationError::CapabilityNotDeclared {
+            required: required_capability,
+        });
+    }
+    if !key
+        .scopes
+        .iter()
+        .any(|scope| scope.permits(required_capability))
+    {
+        return Err(ApiKeyAuthorizationError::MissingScope {
+            capability: required_capability,
+        });
     }
     if let Some(route) = route
         && !key.allowed_routes.is_empty()
@@ -259,12 +313,14 @@ pub fn authorize_api_key(
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ApiKeyAuthorizationError {
+    #[error("endpoint does not declare required gateway capability {required:?}")]
+    CapabilityNotDeclared { required: GatewayCapability },
     #[error("API key is revoked")]
     Revoked,
     #[error("API key is expired")]
     Expired,
-    #[error("API key scope does not permit operation {operation:?}")]
-    MissingScope { operation: OperationKind },
+    #[error("API key scope does not permit gateway capability {capability:?}")]
+    MissingScope { capability: GatewayCapability },
     #[error("API key does not allow route {route}")]
     RouteNotAllowed { route: RouteSlug },
 }
@@ -272,6 +328,58 @@ pub enum ApiKeyAuthorizationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const fn expected_scope_capability(scope: ApiKeyScope, capability: GatewayCapability) -> bool {
+        match (scope, capability) {
+            (ApiKeyScope::Inference, GatewayCapability::Inference) => true,
+            (ApiKeyScope::Inference, GatewayCapability::ModelsRead) => false,
+            (ApiKeyScope::ModelsRead, GatewayCapability::Inference) => false,
+            (ApiKeyScope::ModelsRead, GatewayCapability::ModelsRead) => true,
+        }
+    }
+
+    #[test]
+    fn api_key_scope_capability_matrix_is_exhaustive() {
+        for scope in ApiKeyScope::ALL {
+            for capability in GatewayCapability::ALL {
+                assert_eq!(
+                    scope.permits(capability),
+                    expected_scope_capability(scope, capability),
+                    "unexpected API-key decision for {scope:?}/{capability:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inference_scope_does_not_grant_a_non_inference_capability() {
+        let hypothetical_non_inference_action = GatewayCapability::ModelsRead;
+        assert!(!ApiKeyScope::Inference.permits(hypothetical_non_inference_action));
+    }
+
+    #[test]
+    fn every_operation_has_an_explicit_gateway_capability() {
+        for operation in OperationKind::ALL {
+            let expected = match operation {
+                OperationKind::Generation
+                | OperationKind::Embeddings
+                | OperationKind::TokenCount
+                | OperationKind::ImageGeneration
+                | OperationKind::ImageEdit
+                | OperationKind::ImageVariation
+                | OperationKind::Speech
+                | OperationKind::Transcription
+                | OperationKind::VideoCreate
+                | OperationKind::VideoList
+                | OperationKind::VideoGet
+                | OperationKind::VideoContent
+                | OperationKind::VideoDelete
+                | OperationKind::Moderation => GatewayCapability::Inference,
+                OperationKind::ModelList | OperationKind::ModelGet => GatewayCapability::ModelsRead,
+            };
+            assert_eq!(gateway_capability_for_operation(operation), expected);
+        }
+    }
 
     const fn expected(role: Role, permission: Permission) -> bool {
         match role {

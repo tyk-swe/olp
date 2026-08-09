@@ -433,16 +433,42 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
         authorize_api_key(
             &api_key(ApiKeyStatus::Active, Some(now + Duration::minutes(1))),
             Some(&allowed),
-            OperationKind::Generation,
+            Some(GatewayCapability::Inference),
+            GatewayCapability::Inference,
             now,
         ),
         Ok(())
     );
     assert_eq!(
         authorize_api_key(
+            &api_key(ApiKeyStatus::Active, None),
+            Some(&allowed),
+            None,
+            GatewayCapability::Inference,
+            now,
+        ),
+        Err(ApiKeyAuthorizationError::CapabilityNotDeclared {
+            required: GatewayCapability::Inference,
+        })
+    );
+    assert_eq!(
+        authorize_api_key(
+            &api_key(ApiKeyStatus::Active, None),
+            Some(&allowed),
+            Some(GatewayCapability::ModelsRead),
+            GatewayCapability::Inference,
+            now,
+        ),
+        Err(ApiKeyAuthorizationError::CapabilityNotDeclared {
+            required: GatewayCapability::Inference,
+        })
+    );
+    assert_eq!(
+        authorize_api_key(
             &api_key(ApiKeyStatus::Revoked, None),
             Some(&allowed),
-            OperationKind::Generation,
+            Some(GatewayCapability::Inference),
+            GatewayCapability::Inference,
             now,
         ),
         Err(ApiKeyAuthorizationError::Revoked)
@@ -451,7 +477,8 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
         authorize_api_key(
             &api_key(ApiKeyStatus::Active, Some(now)),
             Some(&allowed),
-            OperationKind::Generation,
+            Some(GatewayCapability::Inference),
+            GatewayCapability::Inference,
             now,
         ),
         Err(ApiKeyAuthorizationError::Expired)
@@ -460,7 +487,8 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
         authorize_api_key(
             &api_key(ApiKeyStatus::Active, None),
             Some(&allowed),
-            OperationKind::ModelList,
+            Some(GatewayCapability::ModelsRead),
+            GatewayCapability::ModelsRead,
             now,
         ),
         Err(ApiKeyAuthorizationError::MissingScope { .. })
@@ -469,7 +497,8 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
         authorize_api_key(
             &api_key(ApiKeyStatus::Active, None),
             Some(&RouteSlug::parse("blocked").unwrap()),
-            OperationKind::Generation,
+            Some(GatewayCapability::Inference),
+            GatewayCapability::Inference,
             now,
         ),
         Err(ApiKeyAuthorizationError::RouteNotAllowed { .. })
