@@ -5,6 +5,8 @@
 //! admission, token estimation, and route extraction behavior.  Axum routing
 //! and request-boundary classification both consume this registry.
 
+use std::borrow::Cow;
+
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -886,7 +888,7 @@ impl InferenceEndpoint {
         if spec.route_extraction != RouteExtraction::JsonModelOrPath {
             return None;
         }
-        let resource = path.split("/models/").nth(1)?;
+        let resource = path_model_resource(path).and_then(percent_decode_path_resource)?;
         let model = resource.split(':').next()?;
         RouteSlug::parse(model).is_ok().then(|| model.to_owned())
     }
@@ -956,12 +958,54 @@ fn single_segment(path: &str, prefix: &str, suffix: Option<&str>) -> bool {
     !resource.is_empty() && !resource.contains('/')
 }
 
+fn path_model_resource(path: &str) -> Option<&str> {
+    path.split_once("/models/")
+        .map(|(_, resource)| resource)
+        .filter(|resource| !resource.is_empty())
+}
+
+fn percent_decode_path_resource(resource: &str) -> Option<Cow<'_, str>> {
+    let bytes = resource.as_bytes();
+    let Some(first_percent) = bytes.iter().position(|byte| *byte == b'%') else {
+        return Some(Cow::Borrowed(resource));
+    };
+
+    let mut decoded = Vec::with_capacity(bytes.len());
+    decoded.extend_from_slice(&bytes[..first_percent]);
+    let mut index = first_percent;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hex_value(*bytes.get(index + 1)?)?;
+            let low = hex_value(*bytes.get(index + 2)?)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok().map(Cow::Owned)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn gemini_action(path: &str) -> GeminiAction {
-    if path.ends_with(":generateContent") {
+    let Some(resource) = path_model_resource(path).and_then(percent_decode_path_resource) else {
+        return GeminiAction::Unsupported;
+    };
+    if resource.ends_with(":generateContent") {
         GeminiAction::Generate
-    } else if path.ends_with(":streamGenerateContent") {
+    } else if resource.ends_with(":streamGenerateContent") {
         GeminiAction::StreamGenerate
-    } else if path.ends_with(":countTokens") {
+    } else if resource.ends_with(":countTokens") {
         GeminiAction::CountTokens
     } else {
         GeminiAction::Unsupported
@@ -1080,15 +1124,21 @@ mod tests {
     fn every_supported_gemini_action_resolves_authorization_policy() {
         for version in ["v1", "v1beta"] {
             for action in ["generateContent", "streamGenerateContent", "countTokens"] {
-                let path = format!("/gemini/{version}/models/route-1:{action}");
-                let endpoint = InferenceEndpoint::classify(&Method::POST, &path).unwrap();
-                let metadata = endpoint.metadata().expect("supported action has metadata");
-                assert_eq!(
-                    endpoint.capability(),
-                    Some(olp_domain::gateway_capability_for_operation(
-                        metadata.operation
-                    ))
-                );
+                for delimiter in [":", "%3A", "%3a"] {
+                    let path = format!("/gemini/{version}/models/route-1{delimiter}{action}");
+                    let endpoint = InferenceEndpoint::classify(&Method::POST, &path).unwrap();
+                    let metadata = endpoint.metadata().expect("supported action has metadata");
+                    assert_eq!(
+                        endpoint.capability(),
+                        Some(olp_domain::gateway_capability_for_operation(
+                            metadata.operation
+                        ))
+                    );
+                    assert_eq!(
+                        endpoint.route_from_json(&path, b"{}"),
+                        Some("route-1".to_owned())
+                    );
+                }
             }
         }
     }

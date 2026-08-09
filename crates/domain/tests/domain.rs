@@ -453,6 +453,18 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
     );
     assert_eq!(
         authorize_api_key(
+            &api_key(ApiKeyStatus::Active, None),
+            Some(&allowed),
+            Some(GatewayCapability::ModelsRead),
+            GatewayCapability::Inference,
+            now,
+        ),
+        Err(ApiKeyAuthorizationError::CapabilityNotDeclared {
+            required: GatewayCapability::Inference,
+        })
+    );
+    assert_eq!(
+        authorize_api_key(
             &api_key(ApiKeyStatus::Revoked, None),
             Some(&allowed),
             Some(GatewayCapability::Inference),
