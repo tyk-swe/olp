@@ -8,7 +8,7 @@ use axum::{
     body::{Body, HttpBody},
     http::HeaderMap,
 };
-use olp_domain::{ApiKeyLookupId, ApiKeyStatus, Surface};
+use olp_domain::{ApiKeyLookupId, ApiKeyStatus, GatewayCapability, Surface};
 use olp_inference::{InferencePrincipal, InferenceReservation};
 use olp_protocols::openai::EmbeddingWireInput;
 use olp_storage::{limits::LimitError, limits::LimitRequest};
@@ -56,6 +56,7 @@ pub(super) fn authenticate_inference_headers(
     state: &RequestBoundaryState,
     headers: &HeaderMap,
     surface: Surface,
+    gateway_capability: Option<GatewayCapability>,
 ) -> Result<InferencePrincipal, crate::Problem> {
     let token = match surface {
         Surface::OpenAi => headers
@@ -96,7 +97,12 @@ pub(super) fn authenticate_inference_headers(
             "The API key is invalid or unavailable.",
         ));
     }
-    Ok(InferencePrincipal::new(snapshot, lookup_id, surface))
+    Ok(InferencePrincipal::new(
+        snapshot,
+        lookup_id,
+        surface,
+        gateway_capability,
+    ))
 }
 
 pub(super) async fn reserve_http_inference_limits(

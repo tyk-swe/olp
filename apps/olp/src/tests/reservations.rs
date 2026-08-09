@@ -209,8 +209,12 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     let state = state.gateway_state_for_test();
     let pinned = state.runtime().pin();
     let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
-    let principal =
-        InferencePrincipal::new(Arc::clone(&pinned), lookup_id.clone(), Surface::OpenAi);
+    let principal = InferencePrincipal::new(
+        Arc::clone(&pinned),
+        lookup_id.clone(),
+        Surface::OpenAi,
+        Some(olp_domain::GatewayCapability::Inference),
+    );
     state
         .runtime()
         .install(

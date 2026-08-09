@@ -7,7 +7,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use olp_domain::{ApiKeyAuthorizationError, OperationKind, RouteSlug, Surface, authorize_api_key};
+use olp_domain::{
+    ApiKeyAuthorizationError, GatewayCapability, OperationKind, RouteSlug, Surface,
+    authorize_api_key,
+};
 use serde::Serialize;
 
 use olp_inference::runtime::RuntimeBundle;
@@ -23,8 +26,14 @@ pub(super) async fn list_models(
 ) -> Result<Json<ModelList>, OpenAiModelError> {
     let runtime = Arc::clone(principal.runtime());
     let key = principal.key();
-    authorize_api_key(key, None, OperationKind::ModelList, Utc::now())
-        .map_err(map_authorization_error)?;
+    authorize_api_key(
+        key,
+        None,
+        principal.gateway_capability(),
+        GatewayCapability::ModelsRead,
+        Utc::now(),
+    )
+    .map_err(map_authorization_error)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(OpenAiModelError::from_inference)?;
@@ -53,8 +62,14 @@ pub(super) async fn get_model(
 ) -> Result<Json<ModelObject>, OpenAiModelError> {
     let runtime = Arc::clone(principal.runtime());
     let key = principal.key();
-    authorize_api_key(key, None, OperationKind::ModelGet, Utc::now())
-        .map_err(map_authorization_error)?;
+    authorize_api_key(
+        key,
+        None,
+        principal.gateway_capability(),
+        GatewayCapability::ModelsRead,
+        Utc::now(),
+    )
+    .map_err(map_authorization_error)?;
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(OpenAiModelError::from_inference)?;
@@ -106,7 +121,8 @@ fn map_authorization_error(error: ApiKeyAuthorizationError) -> OpenAiModelError 
         ApiKeyAuthorizationError::Revoked | ApiKeyAuthorizationError::Expired => {
             OpenAiModelError::unauthorized()
         }
-        ApiKeyAuthorizationError::MissingScope { .. }
+        ApiKeyAuthorizationError::CapabilityNotDeclared { .. }
+        | ApiKeyAuthorizationError::MissingScope { .. }
         | ApiKeyAuthorizationError::RouteNotAllowed { .. } => OpenAiModelError::forbidden(),
     }
 }

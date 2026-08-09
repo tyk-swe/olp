@@ -10,7 +10,7 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
-use olp_domain::{ApiKey, Operation, OperationKind, TransportMode};
+use olp_domain::{ApiKey, GatewayCapability, Operation, TransportMode};
 use olp_inference::{
     RequestAdmission, RoutedUnaryFinalizer, limits::DistributedLimitReservation,
     runtime::RuntimeBundle,
@@ -33,12 +33,12 @@ fn admitted_request() -> RequestAdmission {
 pub(super) fn authorize_principal<'a>(
     state: &GatewayState,
     principal: &'a InferencePrincipal,
-    operation: OperationKind,
+    capability: GatewayCapability,
     route: Option<&olp_domain::RouteSlug>,
 ) -> Result<&'a ApiKey, InferenceError> {
     state
         .inference()
-        .authorize_principal(principal, operation, route)
+        .authorize_principal(principal, capability, route)
         .map_err(Into::into)
 }
 
@@ -147,11 +147,10 @@ pub(super) async fn execute_routed_result_for_surface_inner(
 pub(crate) fn authorize_model_access<'a>(
     state: &GatewayState,
     principal: &'a InferencePrincipal,
-    operation: OperationKind,
 ) -> Result<(&'a RuntimeBundle, &'a ApiKey), InferenceError> {
     state
         .inference()
-        .authorize_model_access(principal, operation)
+        .authorize_model_access(principal)
         .map_err(Into::into)
 }
 
