@@ -109,8 +109,18 @@ impl PgStore {
                     r.total_latency_ms, r.first_byte_ms, r.attempt_count, u.input_tokens, \
                     u.output_tokens, u.cached_input_tokens, u.estimated_cost::text AS estimated_cost, \
                     u.currency::text AS currency, u.unpriced, u.usage_complete \
-             FROM requests r LEFT JOIN usage_facts u \
-               ON u.request_id = r.id AND u.request_started_at = r.started_at WHERE true",
+             FROM requests r LEFT JOIN LATERAL ( \
+               SELECT SUM(f.input_tokens)::bigint AS input_tokens, \
+                      SUM(f.output_tokens)::bigint AS output_tokens, \
+                      SUM(f.cached_input_tokens)::bigint AS cached_input_tokens, \
+                      SUM(f.estimated_cost) AS estimated_cost, \
+                      MAX(f.currency)::text AS currency, BOOL_OR(f.unpriced) AS unpriced, \
+                      BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) \
+                          AS usage_complete \
+                 FROM attempt_usage_facts f \
+                WHERE f.request_id = r.id AND f.request_started_at = r.started_at \
+               HAVING count(*) > 0 \
+             ) u ON true WHERE true",
         );
         push_request_filters(&mut query, filters);
         if let Some(cursor) = cursor {
@@ -152,8 +162,18 @@ impl PgStore {
                     u.estimated_cost::text AS \"estimated_cost?\", \
                     u.currency::text AS \"currency?\", u.unpriced AS \"unpriced?\", \
                     u.usage_complete AS \"usage_complete?\" \
-             FROM requests r LEFT JOIN usage_facts u \
-               ON u.request_id = r.id AND u.request_started_at = r.started_at \
+             FROM requests r LEFT JOIN LATERAL ( \
+               SELECT SUM(f.input_tokens)::bigint AS input_tokens, \
+                      SUM(f.output_tokens)::bigint AS output_tokens, \
+                      SUM(f.cached_input_tokens)::bigint AS cached_input_tokens, \
+                      SUM(f.estimated_cost) AS estimated_cost, \
+                      MAX(f.currency)::text AS currency, BOOL_OR(f.unpriced) AS unpriced, \
+                      BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) \
+                          AS usage_complete \
+                 FROM attempt_usage_facts f \
+                WHERE f.request_id = r.id AND f.request_started_at = r.started_at \
+               HAVING count(*) > 0 \
+             ) u ON true \
              WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1",
             id
         )
@@ -199,11 +219,23 @@ fn push_request_filters(query: &mut QueryBuilder<Postgres>, filters: &RequestFil
     if let Some(value) = &filters.route_slug {
         query.push(" AND r.route_slug = ").push_bind(value);
     }
-    if let Some(value) = filters.provider_id {
-        query.push(" AND u.provider_id = ").push_bind(value);
-    }
-    if let Some(value) = &filters.upstream_model {
-        query.push(" AND u.upstream_model = ").push_bind(value);
+    if filters.provider_id.is_some() || filters.upstream_model.is_some() {
+        query.push(
+            " AND EXISTS (SELECT 1 FROM attempt_usage_facts filter_fact \
+             WHERE filter_fact.request_id = r.id \
+               AND filter_fact.request_started_at = r.started_at",
+        );
+        if let Some(value) = filters.provider_id {
+            query
+                .push(" AND filter_fact.provider_id = ")
+                .push_bind(value);
+        }
+        if let Some(value) = &filters.upstream_model {
+            query
+                .push(" AND filter_fact.upstream_model = ")
+                .push_bind(value);
+        }
+        query.push(")");
     }
     if let Some(value) = filters.api_key_id {
         query.push(" AND r.api_key_id = ").push_bind(value);

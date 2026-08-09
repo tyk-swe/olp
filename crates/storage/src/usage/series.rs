@@ -3,7 +3,7 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
     UsageFilters, UsageGranularity, UsageRangeCoverage,
-    query::{push_usage_rows_cte, validate_usage_range},
+    query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
     PgStore,
@@ -56,7 +56,7 @@ impl PgStore {
             UsageGranularity::Day => "date_trunc('day', observed_at)",
         };
         let mut query = QueryBuilder::<Postgres>::new("");
-        push_usage_rows_cte(&mut query, filters);
+        push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
         query.push(" SELECT ");
         query.push(bucket);
         query.push(

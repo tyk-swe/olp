@@ -3,7 +3,8 @@ use olp_domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
 };
 use olp_storage::{
-    request_metadata::RequestAttemptMetadata, request_metadata::RequestMetadataEvent,
+    request_metadata::RequestAttemptMetadata, request_metadata::RequestAttemptUsageMetadata,
+    request_metadata::RequestMetadataEvent,
 };
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
 use serde_json::Value;
@@ -277,6 +278,15 @@ impl RequestAccountingGuard {
                 committed: false,
                 latency_ms: elapsed_ms(active.started.elapsed()),
                 first_byte_ms: None,
+                usage: Some(RequestAttemptUsageMetadata {
+                    observed: false,
+                    complete: false,
+                    billing_uncertain: true,
+                    input_tokens: None,
+                    output_tokens: None,
+                    cached_input_tokens: None,
+                    media_units: None,
+                }),
             });
         }
         emit_request_metadata_event(
@@ -503,6 +513,36 @@ struct RequestMetadataInput<'a> {
     operation: OperationKind,
 }
 
+struct FinalAttemptUpdate<'a> {
+    completed_at: chrono::DateTime<Utc>,
+    started: tokio::time::Instant,
+    first_byte_ms: Option<u64>,
+    status_code: Option<u16>,
+    error_class: &'a Option<String>,
+    committed: bool,
+    usage: &'a UsageCapture,
+}
+
+fn update_final_attempt(attempt: &mut RequestAttemptMetadata, update: FinalAttemptUpdate<'_>) {
+    attempt.completed_at = update.completed_at.max(attempt.started_at);
+    attempt.status_code = update.status_code;
+    attempt.error_class.clone_from(update.error_class);
+    attempt.committed = update.committed;
+    attempt.latency_ms = elapsed_ms(update.started.elapsed());
+    attempt.first_byte_ms = update.first_byte_ms;
+    if update.usage.observed {
+        attempt.usage = Some(RequestAttemptUsageMetadata {
+            observed: true,
+            complete: update.usage.complete,
+            billing_uncertain: false,
+            input_tokens: update.usage.input_tokens,
+            output_tokens: update.usage.output_tokens,
+            cached_input_tokens: update.usage.cached_input_tokens,
+            media_units: update.usage.media_units,
+        });
+    }
+}
+
 fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadataInput<'_>) {
     let Some(emitter) = service.request_metadata() else {
         return;
@@ -511,12 +551,18 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
     let mut attempts = input.attempts.to_vec();
     if let (Some(final_attempt), Some(started)) = (attempts.last_mut(), input.final_attempt_started)
     {
-        final_attempt.completed_at = request_completed_at.max(final_attempt.started_at);
-        final_attempt.status_code = input.status_code;
-        final_attempt.error_class.clone_from(&input.error_class);
-        final_attempt.committed = input.committed;
-        final_attempt.latency_ms = elapsed_ms(started.elapsed());
-        final_attempt.first_byte_ms = input.first_byte_ms;
+        update_final_attempt(
+            final_attempt,
+            FinalAttemptUpdate {
+                completed_at: request_completed_at,
+                started,
+                first_byte_ms: input.first_byte_ms,
+                status_code: input.status_code,
+                error_class: &input.error_class,
+                committed: input.committed,
+                usage: input.usage,
+            },
+        );
     }
     let provider_id = attempts.last().map(|attempt| attempt.provider_id);
     let upstream_model = attempts
@@ -555,7 +601,12 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
 
 #[cfg(test)]
 mod tests {
-    use super::{RequestOutcome, split_actual_tokens};
+    use super::{
+        FinalAttemptUpdate, RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestOutcome,
+        UsageCapture, split_actual_tokens, update_final_attempt,
+    };
+    use chrono::Utc;
+    use uuid::Uuid;
 
     #[test]
     fn successful_outcome_preserves_the_http_status() {
@@ -576,5 +627,86 @@ mod tests {
         );
         assert_eq!(split_actual_tokens(Some(40), None), (None, Some(40)));
         assert_eq!(split_actual_tokens(None, Some(100)), (None, None));
+    }
+
+    #[test]
+    fn final_streaming_usage_is_attached_to_the_final_attempt() {
+        let mut attempt = uncertain_attempt();
+        let usage = UsageCapture {
+            observed: true,
+            complete: true,
+            input_tokens: Some(12),
+            output_tokens: Some(7),
+            cached_input_tokens: Some(2),
+            media_units: None,
+        };
+        let no_error = None;
+        update_final_attempt(
+            &mut attempt,
+            FinalAttemptUpdate {
+                completed_at: Utc::now(),
+                started: tokio::time::Instant::now(),
+                first_byte_ms: Some(3),
+                status_code: Some(200),
+                error_class: &no_error,
+                committed: true,
+                usage: &usage,
+            },
+        );
+        let attempt_usage = attempt.usage.unwrap();
+        assert!(attempt_usage.observed);
+        assert!(attempt_usage.complete);
+        assert!(!attempt_usage.billing_uncertain);
+        assert_eq!(attempt_usage.input_tokens, Some(12));
+        assert_eq!(attempt_usage.output_tokens, Some(7));
+    }
+
+    #[test]
+    fn cancellation_after_commitment_preserves_billing_uncertainty() {
+        let mut attempt = uncertain_attempt();
+        let error = Some("client_cancelled".to_owned());
+        update_final_attempt(
+            &mut attempt,
+            FinalAttemptUpdate {
+                completed_at: Utc::now(),
+                started: tokio::time::Instant::now(),
+                first_byte_ms: Some(3),
+                status_code: None,
+                error_class: &error,
+                committed: true,
+                usage: &UsageCapture::default(),
+            },
+        );
+        let attempt_usage = attempt.usage.unwrap();
+        assert!(!attempt_usage.observed);
+        assert!(!attempt_usage.complete);
+        assert!(attempt_usage.billing_uncertain);
+        assert!(attempt.committed);
+    }
+
+    fn uncertain_attempt() -> RequestAttemptMetadata {
+        let now = Utc::now();
+        RequestAttemptMetadata {
+            id: Uuid::now_v7(),
+            ordinal: 1,
+            provider_id: Uuid::now_v7(),
+            upstream_model: "mock-model".to_owned(),
+            started_at: now,
+            completed_at: now,
+            status_code: Some(200),
+            error_class: None,
+            committed: true,
+            latency_ms: 0,
+            first_byte_ms: None,
+            usage: Some(RequestAttemptUsageMetadata {
+                observed: false,
+                complete: false,
+                billing_uncertain: true,
+                input_tokens: None,
+                output_tokens: None,
+                cached_input_tokens: None,
+                media_units: None,
+            }),
+        }
     }
 }

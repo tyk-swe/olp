@@ -492,6 +492,29 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
             .await
             .unwrap();
     assert_eq!(eager_receipts, 0, "migration must not bulk-copy raw facts");
+    let attempt_fact: (Uuid, Uuid, i16, Uuid, String, String, bool, bool) = sqlx::query_as(
+        "SELECT attempt_id, event_id, attempt_ordinal, provider_id, upstream_model,
+                charge_status::text, usage_complete, unpriced
+           FROM attempt_usage_facts WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(attempt_fact.0, fact_id);
+    assert_eq!(attempt_fact.1, fact_id);
+    assert_eq!(attempt_fact.2, 1);
+    assert_eq!(attempt_fact.3, provider_id);
+    assert_eq!(attempt_fact.4, "model");
+    assert_eq!(attempt_fact.5, "billable");
+    assert!(attempt_fact.6);
+    assert!(attempt_fact.7);
+    let retained_attempt_rollups: i64 =
+        sqlx::query_scalar("SELECT sum(request_count)::bigint FROM attempt_usage_hourly")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(retained_attempt_rollups, 5);
 
     sqlx::query("DELETE FROM usage_facts WHERE id = $1")
         .bind(fact_id)

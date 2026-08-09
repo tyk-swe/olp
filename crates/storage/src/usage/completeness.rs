@@ -2,7 +2,7 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
     UsageFilters, UsageRangeCoverage,
-    query::{push_usage_rows_cte, validate_usage_range},
+    query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
     PgStore,
@@ -53,7 +53,7 @@ impl PgStore {
     ) -> Result<UsageCompleteness, OperationsError> {
         validate_usage_range(filters)?;
         let mut query = QueryBuilder::<Postgres>::new("");
-        push_usage_rows_cte(&mut query, filters);
+        push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
         query.push(
             " SELECT COALESCE(SUM(request_count), 0)::bigint AS request_count, \
                     COALESCE(SUM(request_count - unpriced_count), 0)::bigint AS priced_count, \

@@ -130,6 +130,7 @@ pub(super) async fn exercise(
                 committed: true,
                 latency_ms: 20,
                 first_byte_ms: Some(5),
+                usage: None,
             }],
         })
         .await
@@ -541,6 +542,7 @@ pub(super) async fn exercise(
                 committed: true,
                 latency_ms: 5,
                 first_byte_ms: Some(2),
+                usage: None,
             }],
         })
         .await

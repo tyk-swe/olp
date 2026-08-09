@@ -12,7 +12,8 @@ pub use delivery_health::{
     RequestMetadataConsumerState, RequestMetadataConsumerStatus,
 };
 pub use ingestion::{
-    RequestAttemptMetadata, RequestMetadataEvent, RequestMetadataPersistenceOutcome,
+    RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestMetadataEvent,
+    RequestMetadataPersistenceOutcome,
 };
 pub use reconciliation::{
     REQUEST_METADATA_GATEWAY_EPOCH_STALE_AFTER_SECONDS, RequestMetadataEpochAcknowledgement,

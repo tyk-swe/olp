@@ -256,6 +256,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
                 committed: true,
                 latency_ms: 25,
                 first_byte_ms: Some(5),
+                usage: None,
             }],
         })
         .await

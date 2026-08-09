@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE request_metadata_event_receipts SET status = 'fact_persisted'::request_metadata_event_receipt_status WHERE event_id = $1 AND request_id = $2 AND status = 'pending'::request_metadata_event_receipt_status",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d03198ca90d57860ca08869f5e83bde35415df952ab95b36ca50f61edc53396"
+}

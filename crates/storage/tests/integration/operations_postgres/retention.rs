@@ -55,6 +55,7 @@ pub(super) async fn exercise(
                 committed: true,
                 latency_ms: 10,
                 first_byte_ms: Some(2),
+                usage: None,
             }],
         })
         .await
@@ -389,6 +390,7 @@ pub(super) async fn exercise(
             committed: true,
             latency_ms: 1_000,
             first_byte_ms: Some(10),
+            usage: None,
         }],
     };
     store
@@ -528,6 +530,7 @@ pub(super) async fn exercise(
                 committed: true,
                 latency_ms: 50,
                 first_byte_ms: Some(20),
+                usage: None,
             }],
         })
         .await

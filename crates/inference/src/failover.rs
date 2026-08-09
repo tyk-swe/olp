@@ -7,7 +7,7 @@ use olp_domain::{
     ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation, OperationKind,
     ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
 };
-use olp_storage::request_metadata::RequestAttemptMetadata;
+use olp_storage::request_metadata::{RequestAttemptMetadata, RequestAttemptUsageMetadata};
 
 use crate::{
     InferenceError,
@@ -529,6 +529,15 @@ fn successful_attempt(
         committed: true,
         latency_ms: elapsed_ms(started.elapsed()),
         first_byte_ms: Some(elapsed_ms(started.elapsed())),
+        usage: Some(RequestAttemptUsageMetadata {
+            observed: false,
+            complete: false,
+            billing_uncertain: true,
+            input_tokens: None,
+            output_tokens: None,
+            cached_input_tokens: None,
+            media_units: None,
+        }),
     }
 }
 
@@ -552,7 +561,28 @@ fn failed_attempt(
         committed: error.response_committed,
         latency_ms: elapsed_ms(started.elapsed()),
         first_byte_ms: None,
+        usage: Some(RequestAttemptUsageMetadata {
+            observed: false,
+            complete: !attempt_billing_is_uncertain(error),
+            billing_uncertain: attempt_billing_is_uncertain(error),
+            input_tokens: None,
+            output_tokens: None,
+            cached_input_tokens: None,
+            media_units: None,
+        }),
     }
+}
+
+const fn attempt_billing_is_uncertain(error: &TransportError) -> bool {
+    error.response_committed
+        || matches!(error.class, AttemptFailureClass::Ambiguous)
+        || (matches!(
+            error.class,
+            AttemptFailureClass::Timeout
+                | AttemptFailureClass::UpstreamServer
+                | AttemptFailureClass::Protocol
+                | AttemptFailureClass::Cancelled
+        ) && !matches!(error.phase, olp_domain::TransportPhase::Connect))
 }
 
 const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
@@ -565,5 +595,45 @@ const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
         AttemptFailureClass::Protocol => "protocol",
         AttemptFailureClass::Cancelled => "cancelled",
         AttemptFailureClass::Ambiguous => "ambiguous",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use olp_domain::{AttemptFailureClass, TransportError, TransportPhase};
+
+    use super::attempt_billing_is_uncertain;
+
+    #[test]
+    fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
+        assert!(!attempt_billing_is_uncertain(&failure(
+            TransportPhase::Connect,
+            AttemptFailureClass::Connect,
+        )));
+        assert!(!attempt_billing_is_uncertain(&failure(
+            TransportPhase::FirstByte,
+            AttemptFailureClass::RateLimit,
+        )));
+        assert!(attempt_billing_is_uncertain(&failure(
+            TransportPhase::FirstByte,
+            AttemptFailureClass::UpstreamServer,
+        )));
+        assert!(attempt_billing_is_uncertain(&failure(
+            TransportPhase::Body,
+            AttemptFailureClass::Protocol,
+        )));
+        assert!(attempt_billing_is_uncertain(&failure(
+            TransportPhase::FirstByte,
+            AttemptFailureClass::Timeout,
+        )));
+    }
+
+    fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError {
+        TransportError {
+            phase,
+            class,
+            response_committed: false,
+            message: "metadata-free fixture".to_owned(),
+        }
     }
 }
