@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, stream};
 use olp_domain::{
     CredentialRequirement, ProviderAuthMode, ProviderConfigurationField, ProviderKind,
-    provider_kind_specs,
+    ProviderKindSpec, ProviderPresetSpec, provider_kind_specs,
 };
 use olp_providers::{
     CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
@@ -97,6 +97,36 @@ pub(crate) struct ProviderFieldCapabilityResponse {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderPresetResponse {
+    /// Stable identifier for this immutable catalog entry.
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    /// Reviewed HTTPS base URL resolved into ordinary provider configuration.
+    pub endpoint: String,
+    pub auth_mode: ProviderAuthMode,
+    /// Organization maintaining the official documentation used for review.
+    pub maintainer: String,
+    pub documentation_label: String,
+    pub documentation_url: String,
+}
+
+impl From<&ProviderPresetSpec> for ProviderPresetResponse {
+    fn from(spec: &ProviderPresetSpec) -> Self {
+        Self {
+            id: spec.id.to_owned(),
+            label: spec.label.to_owned(),
+            description: spec.description.to_owned(),
+            endpoint: spec.endpoint.to_owned(),
+            auth_mode: spec.auth_mode,
+            maintainer: spec.maintainer.to_owned(),
+            documentation_label: spec.documentation_label.to_owned(),
+            documentation_url: spec.documentation_url.to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderKindCapabilityResponse {
     pub kind: ProviderKind,
     pub label: String,
@@ -104,6 +134,8 @@ pub(crate) struct ProviderKindCapabilityResponse {
     pub default_auth_mode: ProviderAuthMode,
     pub auth_modes: Vec<ProviderAuthCapabilityResponse>,
     pub fields: Vec<ProviderFieldCapabilityResponse>,
+    /// Reviewed onboarding presets. Empty for provider kinds without presets.
+    pub presets: Vec<ProviderPresetResponse>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -129,32 +161,84 @@ pub(crate) async fn list_provider_kinds(
     require_permission(&principal, Permission::ReadConfiguration)?;
     let items = provider_kind_specs()
         .iter()
-        .map(|spec| ProviderKindCapabilityResponse {
-            kind: spec.kind,
-            label: spec.label.to_owned(),
-            description: spec.description.to_owned(),
-            default_auth_mode: spec.default_auth_mode,
-            auth_modes: spec
-                .auth_modes
-                .iter()
-                .map(|auth| ProviderAuthCapabilityResponse {
-                    mode: auth.mode,
-                    label: auth.label.to_owned(),
-                    credential: auth.credential,
-                })
-                .collect(),
-            fields: spec
-                .fields
-                .iter()
-                .map(|field| ProviderFieldCapabilityResponse {
-                    field: field.field,
-                    label: field.label.to_owned(),
-                    required: field.required,
-                })
-                .collect(),
-        })
+        .map(provider_kind_capability_response)
         .collect();
     Ok(Json(ProviderKindCapabilityListResponse { items }))
+}
+
+fn provider_kind_capability_response(spec: &ProviderKindSpec) -> ProviderKindCapabilityResponse {
+    ProviderKindCapabilityResponse {
+        kind: spec.kind,
+        label: spec.label.to_owned(),
+        description: spec.description.to_owned(),
+        default_auth_mode: spec.default_auth_mode,
+        auth_modes: spec
+            .auth_modes
+            .iter()
+            .map(|auth| ProviderAuthCapabilityResponse {
+                mode: auth.mode,
+                label: auth.label.to_owned(),
+                credential: auth.credential,
+            })
+            .collect(),
+        fields: spec
+            .fields
+            .iter()
+            .map(|field| ProviderFieldCapabilityResponse {
+                field: field.field,
+                label: field.label.to_owned(),
+                required: field.required,
+            })
+            .collect(),
+        presets: spec
+            .presets
+            .iter()
+            .map(ProviderPresetResponse::from)
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+mod provider_kind_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn management_metadata_exposes_presets_only_on_the_compatible_kind() {
+        let responses: Vec<_> = provider_kind_specs()
+            .iter()
+            .map(provider_kind_capability_response)
+            .collect();
+        let compatible = responses
+            .iter()
+            .find(|response| response.kind == ProviderKind::OpenAiCompatible)
+            .expect("compatible provider kind must be present");
+        assert_eq!(
+            compatible
+                .presets
+                .iter()
+                .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "groq",
+                "mistral_ai",
+                "together_ai",
+                "xai",
+                "cerebras",
+                "openrouter"
+            ]
+        );
+        assert!(compatible.presets.iter().all(|preset| {
+            preset.endpoint.starts_with("https://")
+                && preset.documentation_url.starts_with("https://")
+                && preset.auth_mode == ProviderAuthMode::ApiKey
+        }));
+        assert!(
+            responses
+                .iter()
+                .filter(|response| response.kind != ProviderKind::OpenAiCompatible)
+                .all(|response| response.presets.is_empty())
+        );
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

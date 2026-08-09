@@ -1923,6 +1923,8 @@ export interface components {
             fields: components["schemas"]["ProviderFieldCapabilityResponse"][];
             kind: components["schemas"]["ProviderKind"];
             label: string;
+            /** @description Reviewed onboarding presets. Empty for provider kinds without presets. */
+            presets: components["schemas"]["ProviderPresetResponse"][];
         };
         ProviderListResponse: {
             items: components["schemas"]["ProviderSummaryResponse"][];
@@ -1963,6 +1965,19 @@ export interface components {
             /** Format: uuid */
             provider_id: string;
             runtime_generation?: null | components["schemas"]["RuntimeGenerationResponse"];
+        };
+        ProviderPresetResponse: {
+            auth_mode: components["schemas"]["ProviderAuthMode"];
+            description: string;
+            documentation_label: string;
+            documentation_url: string;
+            /** @description Reviewed HTTPS base URL resolved into ordinary provider configuration. */
+            endpoint: string;
+            /** @description Stable identifier for this immutable catalog entry. */
+            id: string;
+            label: string;
+            /** @description Organization maintaining the official documentation used for review. */
+            maintainer: string;
         };
         ProviderResponse: {
             /** Format: uuid */

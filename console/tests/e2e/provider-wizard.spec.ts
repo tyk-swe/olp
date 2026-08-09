@@ -17,6 +17,90 @@ import {
 
 test.beforeEach(async ({ page }) => mockProviderKinds(page));
 
+test('compatible preset resolves to persisted connector fields', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  let createBody: Record<string, unknown> | undefined;
+  const currentProvider = providerRecord('draft', [], {
+    name: 'groq-production',
+    kind: 'openai_compatible',
+    endpoint: 'https://api.groq.com/openai/v1'
+  });
+
+  await page.route(
+    '**/api/v1/provider-kinds/openai_compatible/capabilities',
+    async (route) => {
+      await route.fulfill({
+        json: { provider_kind: 'openai_compatible', capabilities: [] }
+      });
+    }
+  );
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/v1/providers' && request.method() === 'POST') {
+      createBody = request.postDataJSON();
+      await route.fulfill({ status: 201, json: { id: ids.provider } });
+      return;
+    }
+    if (
+      pathname === `/api/v1/providers/${ids.provider}` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto('/providers/new');
+  await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
+  const endpoint = page.getByLabel('Compatible endpoint');
+  await expect(page.getByLabel('Compatible provider')).toHaveValue('');
+  await expect(endpoint).toBeEditable();
+
+  await page.getByLabel('Compatible provider').selectOption('groq');
+  const presetEndpoint = page.getByLabel('Preset endpoint');
+  await expect(presetEndpoint).toHaveValue('https://api.groq.com/openai/v1');
+  await expect(presetEndpoint).not.toBeEditable();
+  await expect(page.getByText(/Verified against/)).toContainText(
+    'OpenAI Compatibility'
+  );
+
+  await page.getByRole('radio', { name: /Azure OpenAI/ }).check();
+  await page
+    .getByLabel('Azure resource endpoint')
+    .fill('https://resource.openai.azure.com');
+  await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
+  await expect(page.getByLabel('Compatible provider')).toHaveValue('');
+  await expect(page.getByLabel('Compatible endpoint')).toHaveValue(
+    'https://resource.openai.azure.com'
+  );
+  await expect(page.getByLabel('Compatible endpoint')).toBeEditable();
+  await expect(page.getByText(/Verified against/)).toHaveCount(0);
+
+  await page.getByLabel('Compatible provider').selectOption('');
+  await expect(page.getByLabel('Compatible endpoint')).toHaveValue('');
+  await expect(page.getByLabel('Compatible endpoint')).toBeEditable();
+  await page.getByLabel('Compatible provider').selectOption('groq');
+  await page.getByLabel('Provider name').fill('groq-production');
+  await page.getByLabel('Credential', { exact: true }).fill('gsk-secret');
+  await page.getByRole('button', { name: /Save and test connection/ }).click();
+
+  await expect(
+    page.getByRole('heading', { name: 'Verify upstream reachability' })
+  ).toBeVisible();
+  expect(createBody).toMatchObject({
+    name: 'groq-production',
+    kind: 'openai_compatible',
+    endpoint: 'https://api.groq.com/openai/v1',
+    auth_mode: 'api_key',
+    credential: 'gsk-secret'
+  });
+  expect(createBody).not.toHaveProperty('preset_id');
+});
+
 test('provider wizard keeps the write-only secret out of subsequent steps', async ({
   page
 }) => {

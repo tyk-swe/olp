@@ -29,6 +29,7 @@ export type CapabilityDeclaration = Schemas['CapabilityInput'];
 export type ProviderCapabilityOptions =
   Schemas['ProviderCapabilityOptionsResponse'];
 export type ProviderKindCapability = Schemas['ProviderKindCapabilityResponse'];
+export type ProviderPreset = Schemas['ProviderPresetResponse'];
 export type CapabilityCertification =
   Schemas['CapabilityCertificationResponse'];
 export type ProviderRevision = Schemas['ProviderRevisionSummaryResponse'];

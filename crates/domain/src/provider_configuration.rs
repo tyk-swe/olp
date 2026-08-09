@@ -60,6 +60,21 @@ pub struct ProviderFieldSpec {
     pub required: bool,
 }
 
+/// Immutable, reviewed onboarding values for the generic OpenAI-compatible
+/// connector. A preset resolves to ordinary provider configuration and carries
+/// no model or operation eligibility.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderPresetSpec {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+    pub endpoint: &'static str,
+    pub auth_mode: ProviderAuthMode,
+    pub maintainer: &'static str,
+    pub documentation_label: &'static str,
+    pub documentation_url: &'static str,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderKindSpec {
     pub kind: ProviderKind,
@@ -69,6 +84,7 @@ pub struct ProviderKindSpec {
     pub default_auth_mode: ProviderAuthMode,
     pub auth_modes: &'static [ProviderAuthModeSpec],
     pub fields: &'static [ProviderFieldSpec],
+    pub presets: &'static [ProviderPresetSpec],
 }
 
 impl ProviderKindSpec {
@@ -84,6 +100,11 @@ impl ProviderKindSpec {
         self.fields
             .iter()
             .find(|candidate| candidate.field == field)
+    }
+
+    #[must_use]
+    pub fn preset(self, id: &str) -> Option<&'static ProviderPresetSpec> {
+        self.presets.iter().find(|candidate| candidate.id == id)
     }
 }
 
@@ -175,6 +196,70 @@ const AZURE_FIELDS: [ProviderFieldSpec; 4] = [
     MODEL_FIELD,
 ];
 
+const NO_PRESETS: [ProviderPresetSpec; 0] = [];
+const OPENAI_COMPATIBLE_PRESETS: [ProviderPresetSpec; 6] = [
+    ProviderPresetSpec {
+        id: "groq",
+        label: "Groq",
+        description: "Low-latency inference through Groq's OpenAI-compatible API.",
+        endpoint: "https://api.groq.com/openai/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Groq",
+        documentation_label: "OpenAI Compatibility",
+        documentation_url: "https://console.groq.com/docs/openai",
+    },
+    ProviderPresetSpec {
+        id: "mistral_ai",
+        label: "Mistral AI",
+        description: "Mistral models through the official OpenAI-compatible API surface.",
+        endpoint: "https://api.mistral.ai/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Mistral AI",
+        documentation_label: "Migration from OpenAI",
+        documentation_url: "https://docs.mistral.ai/resources/migration-guides",
+    },
+    ProviderPresetSpec {
+        id: "together_ai",
+        label: "Together AI",
+        description: "Hosted open models through Together AI's OpenAI-compatible API.",
+        endpoint: "https://api.together.ai/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Together AI",
+        documentation_label: "OpenAI API Compatibility",
+        documentation_url: "https://docs.together.ai/docs/openai-api-compatibility",
+    },
+    ProviderPresetSpec {
+        id: "xai",
+        label: "xAI",
+        description: "Grok models through xAI's OpenAI-compatible API.",
+        endpoint: "https://api.x.ai/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "xAI",
+        documentation_label: "API Reference",
+        documentation_url: "https://docs.x.ai/docs/api-reference",
+    },
+    ProviderPresetSpec {
+        id: "cerebras",
+        label: "Cerebras",
+        description: "Cerebras inference through its OpenAI-compatible API.",
+        endpoint: "https://api.cerebras.ai/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Cerebras",
+        documentation_label: "Using OpenAI with Cerebras",
+        documentation_url: "https://inference-docs.cerebras.ai/resources/openai",
+    },
+    ProviderPresetSpec {
+        id: "openrouter",
+        label: "OpenRouter",
+        description: "Multi-provider model access through OpenRouter's OpenAI-compatible API.",
+        endpoint: "https://openrouter.ai/api/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "OpenRouter",
+        documentation_label: "API Reference Overview",
+        documentation_url: "https://openrouter.ai/docs/api/reference/overview",
+    },
+];
+
 const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
     ProviderKindSpec {
         kind: ProviderKind::OpenAi,
@@ -184,6 +269,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::ApiKey,
         auth_modes: &API_KEY_AUTH,
         fields: &COMMON_FIELDS,
+        presets: &NO_PRESETS,
     },
     ProviderKindSpec {
         kind: ProviderKind::Anthropic,
@@ -193,6 +279,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::ApiKey,
         auth_modes: &API_KEY_AUTH,
         fields: &COMMON_FIELDS,
+        presets: &NO_PRESETS,
     },
     ProviderKindSpec {
         kind: ProviderKind::Gemini,
@@ -202,6 +289,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::ApiKey,
         auth_modes: &API_KEY_AUTH,
         fields: &COMMON_FIELDS,
+        presets: &NO_PRESETS,
     },
     ProviderKindSpec {
         kind: ProviderKind::VertexAi,
@@ -211,6 +299,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::ApplicationDefault,
         auth_modes: &VERTEX_AUTH,
         fields: &VERTEX_FIELDS,
+        presets: &NO_PRESETS,
     },
     ProviderKindSpec {
         kind: ProviderKind::Bedrock,
@@ -220,6 +309,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::DefaultChain,
         auth_modes: &BEDROCK_AUTH,
         fields: &BEDROCK_FIELDS,
+        presets: &NO_PRESETS,
     },
     ProviderKindSpec {
         kind: ProviderKind::AzureOpenAi,
@@ -229,6 +319,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::ApiKey,
         auth_modes: &API_KEY_AUTH,
         fields: &AZURE_FIELDS,
+        presets: &NO_PRESETS,
     },
     ProviderKindSpec {
         kind: ProviderKind::OpenAiCompatible,
@@ -238,6 +329,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         default_auth_mode: ProviderAuthMode::ApiKey,
         auth_modes: &API_KEY_AUTH,
         fields: &COMPATIBLE_FIELDS,
+        presets: &OPENAI_COMPATIBLE_PRESETS,
     },
 ];
 
@@ -512,6 +604,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+    use url::Url;
 
     fn valid(kind: ProviderKind, auth_mode: ProviderAuthMode) -> ProviderConfiguration<'static> {
         ProviderConfiguration {
@@ -543,6 +636,65 @@ mod tests {
             .collect::<HashSet<_>>();
         assert_eq!(registered.len(), provider_kind_specs().len());
         assert_eq!(registered, ProviderKind::ALL.into_iter().collect());
+    }
+
+    #[test]
+    fn compatible_preset_catalog_is_normalized_safe_and_supported() {
+        let compatible = provider_kind_spec(ProviderKind::OpenAiCompatible);
+        assert!(!compatible.presets.is_empty());
+        assert!(
+            provider_kind_specs()
+                .iter()
+                .filter(|spec| spec.kind != ProviderKind::OpenAiCompatible)
+                .all(|spec| spec.presets.is_empty())
+        );
+
+        let mut ids = HashSet::new();
+        let mut labels = HashSet::new();
+        let mut endpoints = HashSet::new();
+        for preset in compatible.presets {
+            assert!((1..=64).contains(&preset.id.chars().count()));
+            assert!(preset.id.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+            }));
+            assert_ne!(preset.id, "custom");
+            assert!(ids.insert(preset.id));
+
+            assert_eq!(preset.label, preset.label.trim());
+            assert!((1..=40).contains(&preset.label.chars().count()));
+            assert!(labels.insert(preset.label.to_lowercase()));
+            assert_eq!(preset.description, preset.description.trim());
+            assert!((1..=160).contains(&preset.description.chars().count()));
+            assert_eq!(preset.maintainer, preset.maintainer.trim());
+            assert!((1..=80).contains(&preset.maintainer.chars().count()));
+            assert_eq!(
+                preset.documentation_label,
+                preset.documentation_label.trim()
+            );
+            assert!((1..=80).contains(&preset.documentation_label.chars().count()));
+
+            let endpoint = Url::parse(preset.endpoint).expect("preset endpoint must be a URL");
+            assert_eq!(endpoint.scheme(), "https");
+            assert!(endpoint.host_str().is_some());
+            assert!(endpoint.username().is_empty());
+            assert!(endpoint.password().is_none());
+            assert!(endpoint.query().is_none());
+            assert!(endpoint.fragment().is_none());
+            assert!(endpoints.insert(endpoint.as_str().trim_end_matches('/').to_owned()));
+
+            let documentation =
+                Url::parse(preset.documentation_url).expect("preset documentation must be a URL");
+            assert_eq!(documentation.scheme(), "https");
+            assert!(documentation.host_str().is_some());
+            assert!(documentation.username().is_empty());
+            assert!(documentation.password().is_none());
+
+            let auth = compatible
+                .auth_mode(preset.auth_mode)
+                .expect("preset authentication must be supported by its provider kind");
+            assert_eq!(auth.credential, CredentialRequirement::Required);
+            assert_eq!(compatible.preset(preset.id), Some(preset));
+        }
     }
 
     #[test]

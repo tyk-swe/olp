@@ -19,6 +19,8 @@ import {
   providerStatus,
   requiresCredential,
   requiresSeedModel,
+  selectProviderPreset,
+  setProviderDraftKind,
   validateProviderDraft,
   type ProviderEditValues
 } from './providerEditor';
@@ -31,7 +33,8 @@ const openAiSpec: ProviderKindCapability = {
   auth_modes: [
     { mode: 'api_key', label: 'Stored API key', credential: 'required' }
   ],
-  fields: [{ field: 'model', label: 'Seed model', required: false }]
+  fields: [{ field: 'model', label: 'Seed model', required: false }],
+  presets: []
 };
 const vertexSpec: ProviderKindCapability = {
   ...openAiSpec,
@@ -74,6 +77,19 @@ const compatibleSpec: ProviderKindCapability = {
   fields: [
     { field: 'endpoint', label: 'HTTPS endpoint', required: true },
     { field: 'model', label: 'Seed model', required: false }
+  ],
+  presets: [
+    {
+      id: 'groq',
+      label: 'Groq',
+      description:
+        "Low-latency inference through Groq's OpenAI-compatible API.",
+      endpoint: 'https://api.groq.com/openai/v1',
+      auth_mode: 'api_key',
+      maintainer: 'Groq',
+      documentation_label: 'OpenAI Compatibility',
+      documentation_url: 'https://console.groq.com/docs/openai'
+    }
   ]
 };
 const apiKeyDraft = {
@@ -124,6 +140,54 @@ describe('provider editor capability policy', () => {
     ).toBe(
       'Name, Vertex probe model, and the selected identity fields are required.'
     );
+  });
+
+  it('resolves a preset to ordinary compatible-provider fields', () => {
+    const draft = {
+      ...createProviderDraft(compatibleSpec),
+      name: 'groq-production',
+      credential: 'write-only-secret'
+    };
+    expect(selectProviderPreset(draft, compatibleSpec, 'groq')).toEqual(
+      compatibleSpec.presets[0]
+    );
+    expect(draft).toMatchObject({
+      presetId: 'groq',
+      endpoint: 'https://api.groq.com/openai/v1',
+      authMode: 'api_key'
+    });
+    const input = buildCreateProviderInput(draft, compatibleSpec);
+    expect(input).toMatchObject({
+      kind: 'openai_compatible',
+      endpoint: 'https://api.groq.com/openai/v1',
+      auth_mode: 'api_key'
+    });
+    expect(input).not.toHaveProperty('preset_id');
+
+    expect(selectProviderPreset(draft, compatibleSpec, '')).toBeNull();
+    expect(draft).toMatchObject({
+      presetId: '',
+      endpoint: '',
+      authMode: 'api_key'
+    });
+  });
+
+  it('clears the console-only preset selection when provider kind changes', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    selectProviderPreset(draft, compatibleSpec, 'groq');
+
+    setProviderDraftKind(draft, compatibleSpec.kind);
+    expect(draft.presetId).toBe('groq');
+
+    setProviderDraftKind(draft, azureSpec.kind);
+    draft.endpoint = 'https://resource.openai.azure.com';
+    setProviderDraftKind(draft, compatibleSpec.kind);
+
+    expect(draft).toMatchObject({
+      kind: 'openai_compatible',
+      presetId: '',
+      endpoint: 'https://resource.openai.azure.com'
+    });
   });
 });
 
