@@ -416,7 +416,7 @@ pub(super) fn connector_configuration_with_policy(
         ProviderKind::Anthropic => {
             let mut configuration = spec
                 .endpoint
-                .map(AnthropicConnectorConfig::with_base_url)
+                .map(|endpoint| anthropic_configuration(endpoint, allow_unsafe_test_targets))
                 .transpose()
                 .map_err(ProviderError::configuration)?
                 .unwrap_or_default();
@@ -429,7 +429,7 @@ pub(super) fn connector_configuration_with_policy(
         }
         ProviderKind::Gemini => spec
             .endpoint
-            .map(GeminiConnectorConfig::with_base_url)
+            .map(|endpoint| gemini_configuration(endpoint, allow_unsafe_test_targets))
             .transpose()
             .map(|configuration| ConnectorConfiguration::Gemini(configuration.unwrap_or_default()))
             .map_err(ProviderError::configuration),
@@ -514,6 +514,38 @@ fn open_ai_configuration(
     #[cfg(not(any(test, feature = "test-util")))]
     let _ = allow_unsafe_test_targets;
     OpenAiConnectorConfig::with_base_url(endpoint)
+}
+
+fn anthropic_configuration(
+    endpoint: &str,
+    allow_unsafe_test_targets: bool,
+) -> Result<AnthropicConnectorConfig, crate::anthropic::ConnectorBuildError> {
+    #[cfg(any(test, feature = "test-util"))]
+    if allow_unsafe_test_targets {
+        return Ok(AnthropicConnectorConfig::for_local_test(
+            endpoint,
+            crate::anthropic::ConnectorTimeouts::default(),
+        ));
+    }
+    #[cfg(not(any(test, feature = "test-util")))]
+    let _ = allow_unsafe_test_targets;
+    AnthropicConnectorConfig::with_base_url(endpoint)
+}
+
+fn gemini_configuration(
+    endpoint: &str,
+    allow_unsafe_test_targets: bool,
+) -> Result<GeminiConnectorConfig, crate::gemini::ConnectorBuildError> {
+    #[cfg(any(test, feature = "test-util"))]
+    if allow_unsafe_test_targets {
+        return Ok(GeminiConnectorConfig::for_local_test(
+            endpoint,
+            crate::gemini::ConnectorTimeouts::default(),
+        ));
+    }
+    #[cfg(not(any(test, feature = "test-util")))]
+    let _ = allow_unsafe_test_targets;
+    GeminiConnectorConfig::with_base_url(endpoint)
 }
 
 fn azure_open_ai_configuration(

@@ -17,6 +17,9 @@ mod transport_io;
 #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod vertex;
 
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_support;
+
 pub use anthropic::validate_operation as validate_anthropic_operation;
 pub use bedrock::validate_operation as validate_bedrock_operation;
 pub use factory::{

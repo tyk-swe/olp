@@ -119,8 +119,8 @@ impl ConnectorConfig {
         Ok(self)
     }
 
-    #[cfg(test)]
-    fn for_local_test(base_url: &str, timeouts: ConnectorTimeouts) -> Self {
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn for_local_test(base_url: &str, timeouts: ConnectorTimeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
         endpoint.set_connect_timeout(timeouts.connect);
         Self {

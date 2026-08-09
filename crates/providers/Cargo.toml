@@ -33,6 +33,7 @@ aws-sdk-bedrockruntime = { version = "1.137.0", default-features = false, featur
     "default-https-client",
     "rt-tokio",
 ] }
+aws-smithy-runtime-api = "1.14.0"
 aws-smithy-types = "1.6.1"
 base64.workspace = true
 bytes.workspace = true

@@ -35,7 +35,7 @@ impl Endpoint {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn for_local_test(value: &str) -> Self {
         Self::parse_with_policy(value, true).expect("local test endpoint must be valid")
     }

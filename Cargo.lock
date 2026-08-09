@@ -2344,11 +2344,16 @@ dependencies = [
 name = "olp-conformance"
 version = "2.0.0"
 dependencies = [
+ "aws-smithy-eventstream",
+ "aws-smithy-types",
+ "bytes",
+ "futures",
  "olp-domain",
  "olp-protocols",
  "olp-providers",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2428,6 +2433,7 @@ dependencies = [
  "aws-sdk-bedrock",
  "aws-sdk-bedrockruntime",
  "aws-smithy-eventstream",
+ "aws-smithy-runtime-api",
  "aws-smithy-types",
  "base64",
  "bytes",
