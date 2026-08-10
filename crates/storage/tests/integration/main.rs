@@ -7,6 +7,7 @@
 mod support;
 
 mod configuration_postgres;
+mod distributed_circuits_valkey;
 mod distributed_limits_valkey;
 mod idempotency_replay_postgres;
 mod identity_postgres;

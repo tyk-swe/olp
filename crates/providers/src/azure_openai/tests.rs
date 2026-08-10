@@ -137,6 +137,7 @@ fn envelope(operation: Operation, mode: TransportMode) -> ProviderRequest {
         attempt: AttemptPlan {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
+            target_routing_id: TargetId::new(),
             target_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::AzureOpenAi,

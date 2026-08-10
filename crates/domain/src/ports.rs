@@ -1,4 +1,4 @@
-use std::{fmt, future::Future, pin::Pin, sync::Arc};
+use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use futures::Stream;
@@ -149,6 +149,8 @@ pub struct TransportError {
     pub phase: TransportPhase,
     pub class: AttemptFailureClass,
     pub response_committed: bool,
+    /// Trusted provider retry guidance captured by the owning transport.
+    pub retry_after: Option<Duration>,
     pub message: String,
 }
 
@@ -159,12 +161,19 @@ impl fmt::Debug for TransportError {
             .field("phase", &self.phase)
             .field("class", &self.class)
             .field("response_committed", &self.response_committed)
+            .field("retry_after", &self.retry_after)
             .field("message", &"[REDACTED]")
             .finish()
     }
 }
 
 impl TransportError {
+    #[must_use]
+    pub const fn with_retry_after(mut self, retry_after: Option<Duration>) -> Self {
+        self.retry_after = retry_after;
+        self
+    }
+
     #[must_use]
     pub const fn allows_failover(&self) -> bool {
         !self.response_committed

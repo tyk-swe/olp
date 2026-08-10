@@ -14,6 +14,8 @@ use super::{Provider, ProviderKind, RuntimeSnapshot, Target};
 pub struct AttemptPlan {
     pub generation_id: RuntimeGenerationId,
     pub route_id: RouteId,
+    /// Stable identity used for health overlays across runtime revisions.
+    pub target_routing_id: TargetId,
     pub target_id: TargetId,
     pub provider_id: ProviderId,
     pub provider_kind: ProviderKind,
@@ -116,6 +118,7 @@ pub fn select_attempts_filtered(
             attempts.push(AttemptPlan {
                 generation_id: snapshot.generation.id,
                 route_id: route.id,
+                target_routing_id: ranked.target.routing_id.unwrap_or(ranked.target.id),
                 target_id: ranked.target.id,
                 provider_id: ranked.provider.id,
                 provider_kind: ranked.provider.kind,

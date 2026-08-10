@@ -28,7 +28,8 @@ use super::{
         RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor, spawn_runtime_poller,
     },
     service_supervisors::{
-        limiter_supervisor, media_reconciliation_supervisor, request_metadata_loss_reporter,
+        circuit_supervisor, limiter_supervisor, media_reconciliation_supervisor,
+        request_metadata_loss_reporter,
     },
     validation::{
         check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
@@ -174,8 +175,14 @@ pub(super) async fn serve(
             keyspace.limits_namespace(),
             background_shutdown_receiver.clone(),
         )));
-
         if mode.serves_gateway() {
+            state.circuits.mark_distributed_unavailable();
+            background_tasks.push(tokio::spawn(circuit_supervisor(
+                state.circuits.clone(),
+                url.clone(),
+                keyspace.circuits_namespace(),
+                background_shutdown_receiver.clone(),
+            )));
             // Install the bounded local emitter even when Valkey is not up yet.
             // Its connection loop exposes retry/pending state and preserves events
             // until the configured bound is reached.

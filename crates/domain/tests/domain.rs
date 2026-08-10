@@ -522,6 +522,7 @@ fn failover_is_never_allowed_after_commit() {
         phase: TransportPhase::FirstByte,
         class: AttemptFailureClass::Timeout,
         response_committed: false,
+        retry_after: None,
         message: "upstream timeout".into(),
     };
     assert!(retryable.allows_failover());
@@ -540,6 +541,7 @@ fn transport_error_diagnostics_never_include_upstream_text() {
         phase: TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed: true,
+        retry_after: None,
         message: "sensitive upstream response".into(),
     };
 

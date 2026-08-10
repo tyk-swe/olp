@@ -511,6 +511,7 @@ fn deadline_error(phase: TransportPhase, committed: bool) -> TransportError {
         phase,
         class: AttemptFailureClass::Timeout,
         response_committed: committed,
+        retry_after: None,
         message: "Bedrock request deadline exceeded".to_owned(),
     }
 }
@@ -560,6 +561,7 @@ where
         phase,
         class,
         response_committed: committed,
+        retry_after: None,
         message: "Bedrock SDK request failed".to_owned(),
     }
 }
@@ -622,6 +624,7 @@ mod tests {
             attempt: AttemptPlan {
                 generation_id: RuntimeGenerationId::new(),
                 route_id: RouteId::new(),
+                target_routing_id: TargetId::new(),
                 target_id: TargetId::new(),
                 provider_id: ProviderId::new(),
                 provider_kind: ProviderKind::Bedrock,
@@ -706,6 +709,7 @@ mod tests {
                 phase: TransportPhase::FirstByte,
                 class: uncoded,
                 response_committed: false,
+                retry_after: None,
                 message: String::new(),
             }
             .allows_failover()

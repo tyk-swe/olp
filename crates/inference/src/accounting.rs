@@ -1,6 +1,7 @@
 use chrono::Utc;
 use olp_domain::{
-    CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
+    AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug,
+    Surface,
 };
 use olp_storage::{
     request_metadata::RequestAttemptMetadata, request_metadata::RequestAttemptUsageMetadata,
@@ -12,6 +13,7 @@ use tracing::error;
 
 use crate::{
     InferenceError, InferenceService,
+    failover::AttemptLifecycleObserver,
     limits::{DistributedLimitReservation, InferenceReservation, release_limits},
     telemetry::{elapsed_ms, metadata_status_code},
 };
@@ -204,6 +206,11 @@ impl RequestAccountingGuard {
         self.committed = committed;
     }
 
+    fn record_attempt_completed(&mut self, attempt: &RequestAttemptMetadata) {
+        self.attempts.push(attempt.clone());
+        self.active_attempt = None;
+    }
+
     #[must_use]
     pub fn usage_mut(&mut self) -> &mut UsageCapture {
         &mut self.usage
@@ -309,6 +316,30 @@ impl RequestAccountingGuard {
                 operation: self.operation,
             },
         );
+    }
+}
+
+impl AttemptLifecycleObserver for RequestAccountingGuard {
+    fn on_attempt_started(
+        &mut self,
+        completed: &[RequestAttemptMetadata],
+        attempt: &AttemptPlan,
+        ordinal: u16,
+        started_at: chrono::DateTime<Utc>,
+        started: tokio::time::Instant,
+    ) {
+        self.record_attempt_started(
+            completed,
+            ordinal,
+            attempt.provider_id.as_uuid(),
+            &attempt.upstream_model,
+            started_at,
+            started,
+        );
+    }
+
+    fn on_attempt_completed(&mut self, attempt: &RequestAttemptMetadata) {
+        self.record_attempt_completed(attempt);
     }
 }
 

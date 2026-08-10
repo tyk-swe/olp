@@ -57,6 +57,11 @@ impl ValkeyKeyspace {
     pub fn limits_namespace(&self) -> String {
         format!("{}:limits", self.prefix)
     }
+
+    #[must_use]
+    pub fn circuits_namespace(&self) -> String {
+        format!("{}:circuits", self.prefix)
+    }
 }
 
 impl PgStore {
@@ -257,5 +262,6 @@ mod tests {
         );
         assert_ne!(first.runtime_hint_channel(), second.runtime_hint_channel());
         assert_ne!(first.limits_namespace(), second.limits_namespace());
+        assert_ne!(first.circuits_namespace(), second.circuits_namespace());
     }
 }

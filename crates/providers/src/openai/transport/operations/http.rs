@@ -4,6 +4,7 @@ use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
 use super::super::{OpenAiConnector, errors::*, streams::*};
+use crate::transport_common::retry_after;
 
 impl OpenAiConnector {
     pub(super) async fn post_raw_json(
@@ -268,6 +269,7 @@ impl OpenAiConnector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let retry_after = retry_after(response.headers());
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match read_bounded_body(
             response,
@@ -291,5 +293,6 @@ impl OpenAiConnector {
             AttemptFailureClass::UpstreamClient
         };
         transport_error(TransportPhase::FirstByte, class, false, message)
+            .with_retry_after(retry_after)
     }
 }

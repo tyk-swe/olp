@@ -5,6 +5,7 @@
 
 pub mod access;
 pub mod authentication;
+pub mod circuits;
 pub mod configuration;
 mod error;
 pub mod idempotency;

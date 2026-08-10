@@ -173,7 +173,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
             overall_timeout: Duration::from_millis(200),
             media_spool: media_state.media_spool().clone(),
             circuits: &CircuitBreaker::default(),
-            on_attempt_started: None,
+            attempt_observer: None,
         },
         attempts,
         streaming_request_metadata(OperationKind::ImageGeneration),
@@ -209,7 +209,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
             overall_timeout: Duration::from_millis(200),
             media_spool: generation_state.media_spool().clone(),
             circuits: &CircuitBreaker::default(),
-            on_attempt_started: None,
+            attempt_observer: None,
         },
         attempts,
         streaming_request_metadata(OperationKind::Generation),
@@ -232,6 +232,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
         phase: olp_domain::TransportPhase::FirstByte,
         class: AttemptFailureClass::Connect,
         response_committed: false,
+        retry_after: None,
         message: "connection closed before response headers".to_owned(),
     };
 
@@ -251,6 +252,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
             phase: olp_domain::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
+            retry_after: None,
             message: "connection failed".to_owned(),
         },
         OperationKind::ImageGeneration,
@@ -295,7 +297,7 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
             overall_timeout: Duration::from_millis(200),
             media_spool: state.media_spool().clone(),
             circuits: &CircuitBreaker::default(),
-            on_attempt_started: None,
+            attempt_observer: None,
         },
         attempts,
         streaming_request_metadata(OperationKind::Generation),
@@ -313,6 +315,54 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
     );
     assert!(!success.attempts[0].committed);
     assert_eq!(second_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn denied_circuit_acquisition_creates_no_provider_attempt() {
+    let (state, _) = test_state(true);
+    let first_calls = Arc::new(AtomicUsize::new(0));
+    let second_calls = Arc::new(AtomicUsize::new(0));
+    let (runtime, attempts) = install_two_target_streams(
+        &state,
+        OperationKind::Generation,
+        Arc::new(CountingFiniteTransport {
+            calls: first_calls.clone(),
+            events: generation_stream_events("first"),
+        }),
+        Arc::new(CountingFiniteTransport {
+            calls: second_calls.clone(),
+            events: generation_stream_events("second"),
+        }),
+    );
+    let circuits = CircuitBreaker::default();
+    for target in attempts.iter().map(|attempt| attempt.target_routing_id) {
+        for _ in 0..5 {
+            let permit = circuits.acquire(target).await.unwrap();
+            circuits
+                .record_failure(&permit, AttemptFailureClass::Connect, None)
+                .await;
+        }
+    }
+    let failure = match execute_with_failover(
+        FailoverContext {
+            runtime: &runtime,
+            overall_timeout: Duration::from_millis(200),
+            media_spool: state.media_spool().clone(),
+            circuits: &circuits,
+            attempt_observer: None,
+        },
+        attempts,
+        streaming_request_metadata(OperationKind::Generation),
+        streaming_generation_operation(),
+    )
+    .await
+    {
+        Err(failure) => failure,
+        Ok(_) => panic!("open circuits must suppress both transports"),
+    };
+    assert!(failure.attempts.is_empty());
+    assert_eq!(first_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(second_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

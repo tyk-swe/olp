@@ -69,7 +69,7 @@ pub(super) async fn video_create(
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     let local_job_id = uuid::Uuid::now_v7();
     let (key, route_slug, required_target) =
-        select_video_create_target(&state, &principal, &operation, local_job_id)?;
+        select_video_create_target(&state, &principal, &operation, local_job_id).await?;
     let reserved = state
         .store()
         .reserve_media_job(NewMediaJobReservation {

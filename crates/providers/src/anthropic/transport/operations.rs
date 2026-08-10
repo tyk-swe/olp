@@ -18,7 +18,10 @@ use tokio::time::{Instant, timeout};
 use super::errors::*;
 use super::media::hydrate_anthropic_messages;
 use crate::anthropic::{AnthropicApiKey, ConnectorConfig};
-use crate::transport_io::{ProviderResponseIo, bounded_duration};
+use crate::{
+    transport_common::retry_after,
+    transport_io::{ProviderResponseIo, bounded_duration},
+};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
 
@@ -364,6 +367,7 @@ impl AnthropicConnector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let retry_after = retry_after(response.headers());
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(
@@ -388,6 +392,7 @@ impl AnthropicConnector {
             AttemptFailureClass::UpstreamClient
         };
         transport_error(TransportPhase::FirstByte, class, false, message)
+            .with_retry_after(retry_after)
     }
 }
 

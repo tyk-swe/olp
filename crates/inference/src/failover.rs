@@ -5,13 +5,13 @@ use futures::{StreamExt, stream};
 use olp_domain::{
     AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
     ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation, OperationKind,
-    ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
+    ProviderOutput, ProviderRequest, RequestMetadata, TransportError,
 };
 use olp_storage::request_metadata::{RequestAttemptMetadata, RequestAttemptUsageMetadata};
 
 use crate::{
     InferenceError,
-    circuit::CircuitBreaker,
+    circuit::{CircuitBreaker, CircuitPermit},
     runtime::RuntimeBundle,
     selection::operation_for_provider,
     telemetry::{elapsed_ms, metadata_status_code},
@@ -27,6 +27,7 @@ fn canonical_event_protocol_error(
         phase: olp_domain::TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed,
+        retry_after: None,
         message: format!("invalid canonical event stream: {error}"),
     }
 }
@@ -64,23 +65,25 @@ pub fn validated_event_stream(
 pub fn circuit_accounted_event_stream(
     events: EventStream,
     circuits: CircuitBreaker,
-    target: TargetId,
+    permit: CircuitPermit,
     initial_failure: bool,
 ) -> EventStream {
     Box::pin(stream::unfold(
-        (events, circuits, initial_failure),
-        move |(mut events, circuits, mut failed)| async move {
+        (events, circuits, permit, initial_failure),
+        move |(mut events, circuits, permit, mut failed)| async move {
             let item = events.next().await?;
             let item = match item {
                 Ok(event) => {
                     match &event.kind {
                         CanonicalEventKind::Error { error } => {
                             if let Some(class) = canonical_error_circuit_class(error.class) {
-                                circuits.record_failure(target, class);
+                                circuits.record_failure(&permit, class, None).await;
                             }
                             failed = true;
                         }
-                        CanonicalEventKind::Done if !failed => circuits.record_success(target),
+                        CanonicalEventKind::Done if !failed => {
+                            circuits.record_success(&permit).await;
+                        }
                         _ => {}
                     }
                     Ok(event)
@@ -90,12 +93,14 @@ pub fn circuit_accounted_event_stream(
                     // owns it. Terminal transport failures still affect target
                     // health, but must never trigger request failover.
                     error.response_committed = true;
-                    circuits.record_failure(target, error.class);
+                    circuits
+                        .record_failure(&permit, error.class, error.retry_after)
+                        .await;
                     failed = true;
                     Err(error)
                 }
             };
-            Some((item, (events, circuits, failed)))
+            Some((item, (events, circuits, permit, failed)))
         },
     ))
 }
@@ -154,10 +159,12 @@ struct AttemptRecord<'a> {
 }
 
 impl AttemptRecord<'_> {
-    fn record_failure(
+    async fn record_failure(
         &self,
         traces: &mut Vec<RequestAttemptMetadata>,
         circuits: &CircuitBreaker,
+        permit: &CircuitPermit,
+        observer: &mut Option<&mut dyn AttemptLifecycleObserver>,
         failure: ProviderAttemptFailure,
     ) -> ProviderAttemptOutcome {
         let (transport, terminal) = match failure {
@@ -171,7 +178,10 @@ impl AttemptRecord<'_> {
             self.started,
             &transport,
         ));
-        circuits.record_failure(self.plan.target_id, transport.class);
+        notify_attempt_completed(observer, traces);
+        circuits
+            .record_failure(permit, transport.class, transport.retry_after)
+            .await;
         if terminal.is_none() && transport.allows_failover() {
             ProviderAttemptOutcome::Retryable(transport)
         } else {
@@ -182,27 +192,52 @@ impl AttemptRecord<'_> {
         }
     }
 
-    fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &CircuitBreaker) {
-        circuits.record_success(self.plan.target_id);
+    async fn record_success(
+        &self,
+        traces: &mut Vec<RequestAttemptMetadata>,
+        circuits: &CircuitBreaker,
+        permit: &CircuitPermit,
+        observer: &mut Option<&mut dyn AttemptLifecycleObserver>,
+    ) {
         traces.push(successful_attempt(
             self.plan,
             self.ordinal,
             self.started_at,
             self.started,
         ));
+        notify_attempt_completed(observer, traces);
+        circuits.record_success(permit).await;
     }
 }
 
-pub type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &AttemptPlan, u16, chrono::DateTime<Utc>, tokio::time::Instant)
-    + Send
-    + 'a;
+pub trait AttemptLifecycleObserver: Send {
+    fn on_attempt_started(
+        &mut self,
+        completed: &[RequestAttemptMetadata],
+        attempt: &AttemptPlan,
+        ordinal: u16,
+        started_at: chrono::DateTime<Utc>,
+        started: tokio::time::Instant,
+    );
+
+    fn on_attempt_completed(&mut self, attempt: &RequestAttemptMetadata);
+}
+
+fn notify_attempt_completed(
+    observer: &mut Option<&mut dyn AttemptLifecycleObserver>,
+    traces: &[RequestAttemptMetadata],
+) {
+    if let (Some(observer), Some(attempt)) = (observer.as_deref_mut(), traces.last()) {
+        observer.on_attempt_completed(attempt);
+    }
+}
 
 pub struct FailoverContext<'a> {
     pub runtime: &'a RuntimeBundle,
     pub overall_timeout: Duration,
     pub media_spool: Arc<dyn MediaSpool>,
     pub circuits: &'a CircuitBreaker,
-    pub on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
+    pub attempt_observer: Option<&'a mut dyn AttemptLifecycleObserver>,
 }
 
 pub async fn execute_with_failover(
@@ -216,7 +251,7 @@ pub async fn execute_with_failover(
         overall_timeout,
         media_spool,
         circuits,
-        mut on_attempt_started,
+        mut attempt_observer,
     } = context;
     let deadline = tokio::time::Instant::now() + overall_timeout;
     let mut last_error = None;
@@ -227,14 +262,14 @@ pub async fn execute_with_failover(
     let mut traces = Vec::with_capacity(attempts.len());
     let attempt_count = attempts.len();
     for (attempt_index, attempt) in attempts.into_iter().enumerate() {
-        if !circuits.try_acquire(attempt.target_id) {
+        let Some(permit) = circuits.acquire(attempt.target_routing_id).await else {
             continue;
-        }
+        };
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
-        if let Some(observer) = on_attempt_started.as_mut() {
-            observer(
+        if let Some(observer) = attempt_observer.as_deref_mut() {
+            observer.on_attempt_started(
                 &traces,
                 &attempt,
                 ordinal,
@@ -254,13 +289,19 @@ pub async fn execute_with_failover(
                 phase: olp_domain::TransportPhase::Connect,
                 class: AttemptFailureClass::Connect,
                 response_committed: false,
+                retry_after: None,
                 message: "provider transport is not loaded".to_owned(),
             };
-            match record.record_failure(
-                &mut traces,
-                circuits,
-                ProviderAttemptFailure::Classify(error),
-            ) {
+            match record
+                .record_failure(
+                    &mut traces,
+                    circuits,
+                    &permit,
+                    &mut attempt_observer,
+                    ProviderAttemptFailure::Classify(error),
+                )
+                .await
+            {
                 ProviderAttemptOutcome::Retryable(error) => last_error = Some(error),
                 ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
             }
@@ -284,11 +325,16 @@ pub async fn execute_with_failover(
                 Ok(Ok(events)) => events,
                 Ok(Err(error)) => {
                     let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-                    match record.record_failure(
-                        &mut traces,
-                        circuits,
-                        ProviderAttemptFailure::Classify(error),
-                    ) {
+                    match record
+                        .record_failure(
+                            &mut traces,
+                            circuits,
+                            &permit,
+                            &mut attempt_observer,
+                            ProviderAttemptFailure::Classify(error),
+                        )
+                        .await
+                    {
                         ProviderAttemptOutcome::Retryable(error) => {
                             last_error = Some(error);
                             continue;
@@ -302,15 +348,21 @@ pub async fn execute_with_failover(
                             phase: olp_domain::TransportPhase::FirstByte,
                             class: AttemptFailureClass::Timeout,
                             response_committed: false,
+                            retry_after: None,
                             message: "route deadline elapsed before provider response".to_owned(),
                         },
                         operation.kind(),
                     );
-                    match record.record_failure(
-                        &mut traces,
-                        circuits,
-                        ProviderAttemptFailure::Classify(error),
-                    ) {
+                    match record
+                        .record_failure(
+                            &mut traces,
+                            circuits,
+                            &permit,
+                            &mut attempt_observer,
+                            ProviderAttemptFailure::Classify(error),
+                        )
+                        .await
+                    {
                         ProviderAttemptOutcome::Retryable(error) => {
                             last_error = Some(error);
                             continue;
@@ -322,7 +374,9 @@ pub async fn execute_with_failover(
         let mut events = match output {
             ProviderOutput::Events(events) => events,
             ProviderOutput::Result(result) => {
-                record.record_success(&mut traces, circuits);
+                record
+                    .record_success(&mut traces, circuits, &permit, &mut attempt_observer)
+                    .await;
                 return Ok(ExecutionSuccess {
                     output: ExecutionOutput::Result(result),
                     deadline: attempt_deadline,
@@ -336,11 +390,16 @@ pub async fn execute_with_failover(
             Ok(Some(Ok(event))) => event,
             Ok(Some(Err(error))) => {
                 let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Classify(error),
-                ) {
+                match record
+                    .record_failure(
+                        &mut traces,
+                        circuits,
+                        &permit,
+                        &mut attempt_observer,
+                        ProviderAttemptFailure::Classify(error),
+                    )
+                    .await
+                {
                     ProviderAttemptOutcome::Retryable(error) => {
                         last_error = Some(error);
                         continue;
@@ -353,20 +412,26 @@ pub async fn execute_with_failover(
                     phase: olp_domain::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,
+                    retry_after: None,
                     message: "the provider returned an empty response".to_owned(),
                 };
                 let gateway = InferenceError::bad_gateway(
                     "provider_protocol_error",
                     "The provider returned an empty response.",
                 );
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Terminal {
-                        transport: error,
-                        gateway,
-                    },
-                ) {
+                match record
+                    .record_failure(
+                        &mut traces,
+                        circuits,
+                        &permit,
+                        &mut attempt_observer,
+                        ProviderAttemptFailure::Terminal {
+                            transport: error,
+                            gateway,
+                        },
+                    )
+                    .await
+                {
                     ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
                     ProviderAttemptOutcome::Retryable(_) => unreachable!("terminal failure"),
                 }
@@ -377,15 +442,21 @@ pub async fn execute_with_failover(
                         phase: olp_domain::TransportPhase::FirstByte,
                         class: AttemptFailureClass::Timeout,
                         response_committed: false,
+                        retry_after: None,
                         message: "route deadline elapsed before a canonical event".to_owned(),
                     },
                     operation.kind(),
                 );
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Classify(error),
-                ) {
+                match record
+                    .record_failure(
+                        &mut traces,
+                        circuits,
+                        &permit,
+                        &mut attempt_observer,
+                        ProviderAttemptFailure::Classify(error),
+                    )
+                    .await
+                {
                     ProviderAttemptOutcome::Retryable(error) => {
                         last_error = Some(error);
                         continue;
@@ -398,64 +469,76 @@ pub async fn execute_with_failover(
         if let Err(sequence_error) = event_sequence.push(&first) {
             let error = canonical_event_protocol_error(sequence_error, false);
             let gateway = InferenceError::from_transport(error.clone());
-            match record.record_failure(
-                &mut traces,
-                circuits,
-                ProviderAttemptFailure::Terminal {
-                    transport: error,
-                    gateway,
-                },
-            ) {
+            match record
+                .record_failure(
+                    &mut traces,
+                    circuits,
+                    &permit,
+                    &mut attempt_observer,
+                    ProviderAttemptFailure::Terminal {
+                        transport: error,
+                        gateway,
+                    },
+                )
+                .await
+            {
                 ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
                 ProviderAttemptOutcome::Retryable(_) => unreachable!("terminal failure"),
             }
         }
-        let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
-            if error.retryable
-                && attempt_index + 1 < attempt_count
-                && let Some(class) = canonical_error_circuit_class(error.class)
-            {
-                let transport_error = TransportError {
-                    phase: olp_domain::TransportPhase::FirstByte,
-                    class,
-                    response_committed: false,
-                    message: error.message.clone(),
-                };
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Classify(transport_error),
-                ) {
-                    ProviderAttemptOutcome::Retryable(error) => last_error = Some(error),
-                    ProviderAttemptOutcome::Terminal(_) => {
-                        unreachable!("canonical retryable error permits failover")
+        let (initial_failure, initial_failure_class) =
+            if let CanonicalEventKind::Error { error } = &first.kind {
+                if error.retryable
+                    && attempt_index + 1 < attempt_count
+                    && let Some(class) = canonical_error_circuit_class(error.class)
+                {
+                    let transport_error = TransportError {
+                        phase: olp_domain::TransportPhase::FirstByte,
+                        class,
+                        response_committed: false,
+                        retry_after: None,
+                        message: error.message.clone(),
+                    };
+                    match record
+                        .record_failure(
+                            &mut traces,
+                            circuits,
+                            &permit,
+                            &mut attempt_observer,
+                            ProviderAttemptFailure::Classify(transport_error),
+                        )
+                        .await
+                    {
+                        ProviderAttemptOutcome::Retryable(error) => last_error = Some(error),
+                        ProviderAttemptOutcome::Terminal(_) => {
+                            unreachable!("canonical retryable error permits failover")
+                        }
                     }
+                    last_canonical_error = Some((traces.len(), error.clone()));
+                    continue;
                 }
-                last_canonical_error = Some((traces.len(), error.clone()));
-                continue;
-            }
-            if let Some(class) = canonical_error_circuit_class(error.class) {
-                circuits.record_failure(attempt.target_id, class);
-            }
-            true
-        } else {
-            false
-        };
-        if matches!(first.kind, CanonicalEventKind::Done) && !initial_failure {
-            circuits.record_success(attempt.target_id);
-        }
-        let events = circuit_accounted_event_stream(
-            validated_event_stream(events, event_sequence),
-            circuits.clone(),
-            attempt.target_id,
-            initial_failure,
-        );
+                (true, canonical_error_circuit_class(error.class))
+            } else {
+                (false, None)
+            };
         traces.push(successful_attempt(
             &attempt,
             ordinal,
             attempt_started_at,
             attempt_started,
         ));
+        notify_attempt_completed(&mut attempt_observer, &traces);
+        if let Some(class) = initial_failure_class {
+            circuits.record_failure(&permit, class, None).await;
+        } else if matches!(first.kind, CanonicalEventKind::Done) {
+            circuits.record_success(&permit).await;
+        }
+        let events = circuit_accounted_event_stream(
+            validated_event_stream(events, event_sequence),
+            circuits.clone(),
+            permit,
+            initial_failure,
+        );
         return Ok(ExecutionSuccess {
             output: ExecutionOutput::Events { first, events },
             deadline: attempt_deadline,
@@ -633,6 +716,7 @@ mod tests {
             phase,
             class,
             response_committed: false,
+            retry_after: None,
             message: "metadata-free fixture".to_owned(),
         }
     }

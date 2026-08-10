@@ -1,7 +1,10 @@
 use std::time::Duration;
 
-use olp_inference::limits::ReloadableLimiter;
-use olp_storage::{PgStore, limits::DistributedLimiter, request_metadata::RequestMetadataEmitter};
+use olp_inference::{circuit::CircuitBreaker, limits::ReloadableLimiter};
+use olp_storage::{
+    PgStore, circuits::DistributedCircuitBreaker, limits::DistributedLimiter,
+    request_metadata::RequestMetadataEmitter,
+};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
@@ -125,6 +128,57 @@ pub(super) async fn limiter_supervisor(
             }
             Ok(Err(error)) => warn!(%error, "Valkey limiter connection failed"),
             Err(_) => warn!("Valkey limiter connection timed out"),
+        }
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            () = tokio::time::sleep(backoff) => {}
+        }
+        backoff = (backoff * 2).min(Duration::from_secs(5));
+    }
+}
+
+pub(super) async fn circuit_supervisor(
+    circuits: CircuitBreaker,
+    valkey_url: String,
+    circuits_namespace: String,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let mut backoff = Duration::from_millis(100);
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        if matches!(
+            tokio::time::timeout(Duration::from_secs(1), circuits.ping_distributed()).await,
+            Ok(Some(true))
+        ) {
+            tokio::select! {
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        return;
+                    }
+                }
+                () = tokio::time::sleep(Duration::from_secs(5)) => {}
+            }
+            continue;
+        }
+        circuits.mark_distributed_unavailable();
+
+        if let Ok(Ok(distributed)) = tokio::time::timeout(
+            Duration::from_secs(3),
+            DistributedCircuitBreaker::connect(&valkey_url, &circuits_namespace),
+        )
+        .await
+            && let Ok(Ok(())) =
+                tokio::time::timeout(Duration::from_secs(1), distributed.ping()).await
+        {
+            circuits.install_distributed(distributed);
+            backoff = Duration::from_millis(100);
+            info!("Valkey circuit coordination is available");
         }
         tokio::select! {
             changed = shutdown.changed() => {

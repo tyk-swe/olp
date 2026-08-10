@@ -100,6 +100,7 @@ impl ProviderTransport for VideoLifecycleTransport {
                             phase: olp_domain::TransportPhase::FirstByte,
                             class: olp_domain::AttemptFailureClass::Ambiguous,
                             response_committed: true,
+                            retry_after: None,
                             message: "injected cleanup ambiguity".to_owned(),
                         });
                     }

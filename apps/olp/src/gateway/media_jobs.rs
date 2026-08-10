@@ -23,7 +23,7 @@ use super::{
     execution::{RequiredTarget, authorize_principal, execute_routed_result},
 };
 
-pub(super) fn select_video_create_target(
+pub(super) async fn select_video_create_target(
     state: &GatewayState,
     principal: &InferencePrincipal,
     operation: &Operation,
@@ -40,6 +40,17 @@ pub(super) fn select_video_create_target(
         Some(&route_slug),
     )?;
     let snapshot = principal.runtime();
+    let selectable = state
+        .circuits()
+        .selectable_targets(
+            snapshot
+                .routes
+                .get(&route_slug)
+                .into_iter()
+                .flat_map(|route| &route.targets)
+                .map(|target| target.routing_id.unwrap_or(target.id)),
+        )
+        .await;
     let attempt = select_representable_attempts_filtered(
         snapshot,
         &route_slug,
@@ -47,7 +58,7 @@ pub(super) fn select_video_create_target(
         Surface::OpenAi,
         TransportMode::Async,
         local_job_id.as_bytes(),
-        |_, target| state.circuits().is_selectable(target.id),
+        |_, target| selectable.contains(&target.routing_id.unwrap_or(target.id)),
     )?
     .into_iter()
     .next()

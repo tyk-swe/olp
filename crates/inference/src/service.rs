@@ -127,6 +127,17 @@ impl InferenceService {
             .cloned()
             .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
         let request_id = RequestId::new();
+        let selectable = self
+            .circuits
+            .selectable_targets(
+                snapshot
+                    .routes
+                    .get(&route_slug)
+                    .into_iter()
+                    .flat_map(|route| &route.targets)
+                    .map(|target| target.routing_id.unwrap_or(target.id)),
+            )
+            .await;
         let attempts = select_representable_attempts_filtered(
             &snapshot,
             &route_slug,
@@ -134,7 +145,7 @@ impl InferenceService {
             surface,
             TransportMode::Unary,
             request_id.as_uuid().as_bytes(),
-            |_, target| self.circuits.is_selectable(target.id),
+            |_, target| selectable.contains(&target.routing_id.unwrap_or(target.id)),
         )?;
         let route = snapshot
             .routes
@@ -147,7 +158,7 @@ impl InferenceService {
                 overall_timeout: route.overall_timeout.as_duration(),
                 media_spool: Arc::clone(&self.media_spool),
                 circuits: &self.circuits,
-                on_attempt_started: None,
+                attempt_observer: None,
             },
             attempts,
             RequestMetadata {

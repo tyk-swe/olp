@@ -280,6 +280,7 @@ mod tests {
         AttemptPlan {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
+            target_routing_id: TargetId::new(),
             target_id: TargetId::new(),
             provider_id: olp_domain::ProviderId::new(),
             provider_kind: kind,

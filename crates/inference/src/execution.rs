@@ -13,7 +13,6 @@ use olp_domain::{
     RequestId, RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
     gateway_capability_for_operation,
 };
-use olp_storage::request_metadata::RequestAttemptMetadata;
 
 use crate::{
     InferenceError, InferenceService,
@@ -392,6 +391,17 @@ impl InferenceService {
         };
         let mut accounting =
             RequestAccountingGuard::new(self.clone(), context.accounting_input(), None, None, None);
+        let selectable = self
+            .circuits()
+            .selectable_targets(
+                runtime
+                    .routes
+                    .get(&context.route_slug)
+                    .into_iter()
+                    .flat_map(|route| &route.targets)
+                    .map(|target| target.routing_id.unwrap_or(target.id)),
+            )
+            .await;
         let attempts = match select_representable_attempts_filtered(
             &runtime,
             &context.route_slug,
@@ -400,7 +410,7 @@ impl InferenceService {
             TransportMode::Unary,
             context.request_id.as_uuid().as_bytes(),
             |_, target| {
-                self.circuits().is_selectable(target.id)
+                selectable.contains(&target.routing_id.unwrap_or(target.id))
                     && target.provider_id.as_uuid() == required_target.provider_id
                     && target.upstream_model == required_target.upstream_model
             },
@@ -423,28 +433,13 @@ impl InferenceService {
             .get(&context.route_slug)
             .expect("attempt selection returned a known route");
         let execution = {
-            let mut record_attempt_started =
-                |completed: &[RequestAttemptMetadata],
-                 attempt: &olp_domain::AttemptPlan,
-                 ordinal: u16,
-                 started_at: chrono::DateTime<Utc>,
-                 started: tokio::time::Instant| {
-                    accounting.record_attempt_started(
-                        completed,
-                        ordinal,
-                        attempt.provider_id.as_uuid(),
-                        &attempt.upstream_model,
-                        started_at,
-                        started,
-                    );
-                };
             execute_with_failover(
                 FailoverContext {
                     runtime: &runtime,
                     overall_timeout: route.overall_timeout.as_duration(),
                     media_spool: self.media_spool().clone(),
                     circuits: self.circuits(),
-                    on_attempt_started: Some(&mut record_attempt_started),
+                    attempt_observer: Some(&mut accounting),
                 },
                 attempts,
                 RequestMetadata {
@@ -621,6 +616,18 @@ impl InferenceService {
             admission.reservation.take(),
             admission.reserved_tokens,
         );
+        let selectable = self
+            .circuits()
+            .selectable_targets(
+                principal
+                    .runtime()
+                    .routes
+                    .get(&context.route_slug)
+                    .into_iter()
+                    .flat_map(|route| &route.targets)
+                    .map(|target| target.routing_id.unwrap_or(target.id)),
+            )
+            .await;
         let attempts = match select_representable_attempts_filtered(
             principal.runtime(),
             &context.route_slug,
@@ -629,7 +636,7 @@ impl InferenceService {
             mode,
             context.request_id.as_uuid().as_bytes(),
             |_, target| {
-                self.circuits().is_selectable(target.id)
+                selectable.contains(&target.routing_id.unwrap_or(target.id))
                     && required_target.as_ref().is_none_or(|required| {
                         target.provider_id.as_uuid() == required.provider_id
                             && target.upstream_model == required.upstream_model
@@ -656,28 +663,13 @@ impl InferenceService {
             .get(&context.route_slug)
             .expect("attempt selection returned a known route");
         let execution = {
-            let mut record_attempt_started =
-                |completed: &[RequestAttemptMetadata],
-                 attempt: &olp_domain::AttemptPlan,
-                 ordinal: u16,
-                 started_at: chrono::DateTime<Utc>,
-                 started: tokio::time::Instant| {
-                    accounting.record_attempt_started(
-                        completed,
-                        ordinal,
-                        attempt.provider_id.as_uuid(),
-                        &attempt.upstream_model,
-                        started_at,
-                        started,
-                    );
-                };
             execute_with_failover(
                 FailoverContext {
                     runtime: principal.runtime(),
                     overall_timeout: route.overall_timeout.as_duration(),
                     media_spool: self.media_spool().clone(),
                     circuits: self.circuits(),
-                    on_attempt_started: Some(&mut record_attempt_started),
+                    attempt_observer: Some(&mut accounting),
                 },
                 attempts,
                 RequestMetadata {

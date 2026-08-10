@@ -1,8 +1,8 @@
 //! Shared request metadata and error construction for native HTTP transports.
 
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
-use http::{HeaderValue, StatusCode};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 use olp_domain::{AttemptFailureClass, SourceExtensions, Surface, TransportError, TransportPhase};
 use zeroize::Zeroizing;
 
@@ -124,8 +124,22 @@ pub(crate) fn transport_error(
         phase,
         class,
         response_committed,
+        retry_after: None,
         message: message.into(),
     }
+}
+
+/// Accept only the unambiguous delta-seconds form. The circuit layer applies
+/// the same upper bound independently before changing shared state.
+pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
+    const MAX: u64 = 5 * 60;
+    let seconds = headers
+        .get(header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .parse::<u64>()
+        .ok()?;
+    Some(Duration::from_secs(seconds.min(MAX)))
 }
 
 pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
@@ -166,4 +180,18 @@ pub(crate) async fn read_inline_media(
         bytes.extend_from_slice(&chunk);
     }
     Ok(STANDARD.encode(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounds_trusted_retry_after_delta_seconds() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("999999"));
+        assert_eq!(retry_after(&headers), Some(Duration::from_secs(300)));
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("not-seconds"));
+        assert_eq!(retry_after(&headers), None);
+    }
 }

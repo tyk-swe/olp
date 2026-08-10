@@ -752,6 +752,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         provider_health = page.items;
     }
     let media_reconciliation = media.ok();
+    let local_open_circuits = state.circuits().local_open_count();
     let mut body = format!(
         "# HELP olp_runtime_generation Current immutable runtime generation.\n\
          # TYPE olp_runtime_generation gauge\n\
@@ -801,9 +802,21 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
          # HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n\
          # TYPE olp_distributed_limiter_available gauge\n\
          olp_distributed_limiter_available {}\n\
-         # HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n\
+         # HELP olp_local_open_target_circuits Process-local fallback circuits currently open or half-open.\n\
+         # TYPE olp_local_open_target_circuits gauge\n\
+         olp_local_open_target_circuits {}\n\
+         # HELP olp_open_target_circuits Compatibility alias for process-local open or half-open circuits.\n\
          # TYPE olp_open_target_circuits gauge\n\
          olp_open_target_circuits {}\n\
+         # HELP olp_distributed_circuit_configured Whether distributed circuit coordination is configured.\n\
+         # TYPE olp_distributed_circuit_configured gauge\n\
+         olp_distributed_circuit_configured {}\n\
+         # HELP olp_distributed_circuit_available Whether distributed circuit coordination is currently available.\n\
+         # TYPE olp_distributed_circuit_available gauge\n\
+         olp_distributed_circuit_available {}\n\
+         # HELP olp_distributed_circuit_degradation_events_total Distributed failures or unavailable periods that required process-local protection.\n\
+         # TYPE olp_distributed_circuit_degradation_events_total counter\n\
+         olp_distributed_circuit_degradation_events_total {}\n\
          # HELP olp_media_reconciliation_pending Metadata-only media jobs awaiting reconciliation.\n\
          # TYPE olp_media_reconciliation_pending gauge\n\
          olp_media_reconciliation_pending {}\n\
@@ -840,7 +853,11 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         request_metadata_epochs.historical_uncertain_gap_count,
         request_metadata_epochs.unresolved_event_lower_bound,
         u8::from(limiter_available),
-        state.circuits().open_count(),
+        local_open_circuits,
+        local_open_circuits,
+        u8::from(state.circuits().distributed_configured()),
+        u8::from(state.circuits().distributed_available()),
+        state.circuits().degraded_operations(),
         media_reconciliation
             .as_ref()
             .map_or(0, |value| value.pending),
