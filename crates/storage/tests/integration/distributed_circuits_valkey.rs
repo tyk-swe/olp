@@ -89,6 +89,40 @@ async fn replicas_share_open_state_and_one_recovering_probe() {
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn shorter_later_failure_does_not_shorten_open_deadline() {
+    let namespace = namespace("retry-after");
+    let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let second = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let target = TargetId::new();
+    let long_open = Duration::from_millis(180);
+    let short_open = Duration::from_millis(40);
+    let retention = Duration::from_secs(2);
+
+    let long = first.acquire(target, short_open, retention).await.unwrap();
+    let shorter = second.acquire(target, short_open, retention).await.unwrap();
+    assert!(
+        first
+            .record_failure(target, token(&long), 1, long_open, retention)
+            .await
+            .unwrap()
+    );
+    assert!(
+        second
+            .record_failure(target, token(&shorter), 1, short_open, retention)
+            .await
+            .unwrap()
+    );
+
+    tokio::time::sleep(short_open + Duration::from_millis(40)).await;
+    assert!(!first.observe(target).await.unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn failed_probe_reopens_and_expired_lease_recovers_after_crash() {
     let namespace = namespace("leases");
     let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)

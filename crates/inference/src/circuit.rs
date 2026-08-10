@@ -203,10 +203,10 @@ impl CircuitBreaker {
                 }
                 Ok(Ok(DistributedCircuitPermit::Acquired { probe_token })) => {
                     self.mark_healthy();
-                    let local_probe_started = if probe_token.is_some() {
-                        Some(self.local_start_distributed_probe(target))
-                    } else {
-                        None
+                    let Some(local_probe_started) =
+                        self.local_accept_distributed_permit(target, probe_token.is_some())
+                    else {
+                        return None;
                     };
                     return Some(CircuitPermit {
                         target,
@@ -382,6 +382,18 @@ impl CircuitBreaker {
     }
 
     fn local_try_acquire(&self, target: TargetId) -> Option<Option<Instant>> {
+        self.local_acquire_state(target, false)
+    }
+
+    fn local_accept_distributed_permit(
+        &self,
+        target: TargetId,
+        distributed_probe: bool,
+    ) -> Option<Option<Instant>> {
+        self.local_acquire_state(target, distributed_probe)
+    }
+
+    fn local_acquire_state(&self, target: TargetId, force_probe: bool) -> Option<Option<Instant>> {
         let now = Instant::now();
         let mut states = self
             .inner
@@ -389,6 +401,10 @@ impl CircuitBreaker {
             .lock()
             .expect("circuit state lock poisoned");
         match states.get(&target).copied() {
+            None | Some(CircuitState::Closed { .. }) if force_probe => {
+                states.insert(target, CircuitState::HalfOpen { probe_started: now });
+                Some(Some(now))
+            }
             None | Some(CircuitState::Closed { .. }) => Some(None),
             Some(CircuitState::Open { until }) if now >= until => {
                 states.insert(target, CircuitState::HalfOpen { probe_started: now });
@@ -402,16 +418,6 @@ impl CircuitBreaker {
             }
             Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => None,
         }
-    }
-
-    fn local_start_distributed_probe(&self, target: TargetId) -> Instant {
-        let probe_started = Instant::now();
-        self.inner
-            .local
-            .lock()
-            .expect("circuit state lock poisoned")
-            .insert(target, CircuitState::HalfOpen { probe_started });
-        probe_started
     }
 
     fn local_record_success(&self, permit: &CircuitPermit) {
@@ -435,27 +441,25 @@ impl CircuitBreaker {
         if !local_permit_owns_state(&states, permit) {
             return;
         }
+        let open_until = now + open_duration;
         let next = match states.get(&permit.target).copied() {
-            Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. }) => CircuitState::Open {
-                until: now + open_duration,
+            Some(CircuitState::Open { until }) => CircuitState::Open {
+                until: until.max(open_until),
             },
+            Some(CircuitState::HalfOpen { .. }) => CircuitState::Open { until: open_until },
             Some(CircuitState::Closed {
                 consecutive_failures,
             }) => {
                 let failures = consecutive_failures.saturating_add(1);
                 if failures >= self.inner.failure_threshold {
-                    CircuitState::Open {
-                        until: now + open_duration,
-                    }
+                    CircuitState::Open { until: open_until }
                 } else {
                     CircuitState::Closed {
                         consecutive_failures: failures,
                     }
                 }
             }
-            None if self.inner.failure_threshold == 1 => CircuitState::Open {
-                until: now + open_duration,
-            },
+            None if self.inner.failure_threshold == 1 => CircuitState::Open { until: open_until },
             None => CircuitState::Closed {
                 consecutive_failures: 1,
             },
@@ -611,6 +615,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn later_failure_does_not_shorten_existing_open_deadline() {
+        let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
+        let target = TargetId::new();
+        let long = breaker.acquire(target).await.unwrap();
+        let shorter = breaker.acquire(target).await.unwrap();
+
+        breaker
+            .record_failure(
+                &long,
+                AttemptFailureClass::RateLimit,
+                Some(Duration::from_millis(80)),
+            )
+            .await;
+        let CircuitState::Open { until: first_until } =
+            breaker.inner.local.lock().unwrap()[&target]
+        else {
+            panic!("expected open circuit");
+        };
+
+        breaker
+            .record_failure(&shorter, AttemptFailureClass::UpstreamServer, None)
+            .await;
+        let CircuitState::Open {
+            until: second_until,
+        } = breaker.inner.local.lock().unwrap()[&target]
+        else {
+            panic!("expected open circuit");
+        };
+        assert!(second_until >= first_until);
+    }
+
+    #[tokio::test]
     async fn expired_local_probe_cannot_overwrite_replacement_probe() {
         let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
         let target = TargetId::new();
@@ -659,6 +695,29 @@ mod tests {
         assert!(!breaker.distributed_available());
         assert!(breaker.degraded_operations() > 0);
         assert!(breaker.acquire(target).await.is_none());
+    }
+
+    #[test]
+    fn distributed_closed_permit_respects_local_fallback_open() {
+        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let target = TargetId::new();
+        let open_until = Instant::now() + Duration::from_secs(30);
+        breaker
+            .inner
+            .local
+            .lock()
+            .unwrap()
+            .insert(target, CircuitState::Open { until: open_until });
+
+        assert!(
+            breaker
+                .local_accept_distributed_permit(target, false)
+                .is_none()
+        );
+        let CircuitState::Open { until } = breaker.inner.local.lock().unwrap()[&target] else {
+            panic!("expected open circuit");
+        };
+        assert_eq!(until, open_until);
     }
 
     #[test]
