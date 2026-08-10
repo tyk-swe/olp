@@ -65,6 +65,34 @@ enum CircuitState {
     HalfOpen { probe_started: Instant },
 }
 
+struct PendingLocalFailure<'a> {
+    breaker: &'a CircuitBreaker,
+    permit: &'a CircuitPermit,
+    open_duration: Duration,
+    record_on_drop: bool,
+}
+
+impl PendingLocalFailure<'_> {
+    fn record(mut self) {
+        self.record_on_drop = false;
+        self.breaker
+            .local_record_failure(self.permit, self.open_duration);
+    }
+
+    fn disarm(mut self) {
+        self.record_on_drop = false;
+    }
+}
+
+impl Drop for PendingLocalFailure<'_> {
+    fn drop(&mut self) {
+        if self.record_on_drop {
+            self.breaker
+                .local_record_failure(self.permit, self.open_duration);
+        }
+    }
+}
+
 impl Default for CircuitBreaker {
     fn default() -> Self {
         Self::new(DEFAULT_FAILURE_THRESHOLD, DEFAULT_OPEN_DURATION)
@@ -239,12 +267,19 @@ impl CircuitBreaker {
         let open_duration = retry_after
             .map(|duration| duration.max(Duration::from_millis(1)).min(MAX_RETRY_AFTER))
             .unwrap_or(self.inner.open_duration);
-        let mut update_local = true;
         if let PermitSource::Distributed {
             adapter,
             probe_token,
         } = &permit.source
         {
+            // Preserve local circuit accuracy even if the request task is
+            // cancelled while awaiting the shared Valkey update below.
+            let pending_local = PendingLocalFailure {
+                breaker: self,
+                permit,
+                open_duration,
+                record_on_drop: true,
+            };
             match tokio::time::timeout(
                 DISTRIBUTED_OPERATION_TIMEOUT,
                 adapter.record_failure(
@@ -261,13 +296,22 @@ impl CircuitBreaker {
             {
                 Ok(Ok(applied)) => {
                     self.mark_healthy();
-                    update_local = applied;
+                    if applied {
+                        pending_local.record();
+                    } else {
+                        pending_local.disarm();
+                    }
                 }
-                Ok(Err(error)) => self.note_degraded_error("record_failure", &error),
-                Err(_) => self.note_degraded("record_failure timed out"),
+                Ok(Err(error)) => {
+                    self.note_degraded_error("record_failure", &error);
+                    pending_local.record();
+                }
+                Err(_) => {
+                    self.note_degraded("record_failure timed out");
+                    pending_local.record();
+                }
             }
-        }
-        if update_local {
+        } else {
             self.local_record_failure(permit, open_duration);
         }
     }
@@ -615,6 +659,24 @@ mod tests {
         assert!(!breaker.distributed_available());
         assert!(breaker.degraded_operations() > 0);
         assert!(breaker.acquire(target).await.is_none());
+    }
+
+    #[test]
+    fn pending_local_failure_records_when_dropped() {
+        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let target = TargetId::new();
+        let permit = CircuitPermit {
+            target,
+            source: PermitSource::Local,
+            local_probe_started: None,
+        };
+        drop(PendingLocalFailure {
+            breaker: &breaker,
+            permit: &permit,
+            open_duration: Duration::from_secs(1),
+            record_on_drop: true,
+        });
+        assert!(!breaker.local_is_selectable(target));
     }
 
     #[tokio::test]
