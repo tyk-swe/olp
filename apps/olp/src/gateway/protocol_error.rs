@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::rejection::JsonRejection,
-    http::{HeaderValue, StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use olp_domain::Surface;
@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::Problem;
 
-use super::InferenceError;
+use super::{InferenceError, error::insert_retry_after_header};
 
 #[derive(Debug)]
 pub(super) struct ProtocolError {
@@ -71,13 +71,9 @@ impl IntoResponse for ProtocolError {
             )
                 .into_response(),
             Surface::Gemini => (status, Json(gemini_error_body(&self.error))).into_response(),
-            Surface::OpenAi => self.error.into_response(),
+            Surface::OpenAi => return self.error.into_response(),
         };
-        if let Some(retry_after) = retry_after
-            && let Ok(value) = HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
-        {
-            response.headers_mut().insert(header::RETRY_AFTER, value);
-        }
+        insert_retry_after_header(&mut response, retry_after);
         response
     }
 }
@@ -184,5 +180,35 @@ fn gemini_error_status(status: StatusCode) -> &'static str {
         StatusCode::GATEWAY_TIMEOUT => "DEADLINE_EXCEEDED",
         StatusCode::SERVICE_UNAVAILABLE => "UNAVAILABLE",
         _ => "INTERNAL",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::http::header;
+    use olp_storage::limits::LimitDimension;
+
+    use super::*;
+
+    #[test]
+    fn fractional_retry_after_rounds_up_for_every_protocol_surface() {
+        for surface in [Surface::OpenAi, Surface::Anthropic, Surface::Gemini] {
+            let response = inference_error_response(
+                surface,
+                InferenceError::rate_limited(
+                    LimitDimension::Requests,
+                    Duration::from_millis(1_001),
+                ),
+            );
+
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(
+                response.headers().get(header::RETRY_AFTER).unwrap(),
+                "2",
+                "surface: {surface:?}"
+            );
+        }
     }
 }

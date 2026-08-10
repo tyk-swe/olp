@@ -3,7 +3,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
 use olp_domain::{AttemptFailureClass, CanonicalEvent, CanonicalEventKind, TransportPhase};
-use tokio::time::{Instant, timeout};
+use tokio::time::{Instant, advance, sleep, timeout};
 
 use super::{
     CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream, ProviderResponseIo,
@@ -145,6 +145,150 @@ async fn deadline_stream_enforces_idle_and_attempt_deadlines() {
         "Test attempt deadline elapsed while reading the response"
     );
     assert!(attempt.next().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn deadline_stream_prefers_phase_timeout_over_simultaneously_ready_bytes() {
+    let io = ProviderResponseIo::new("Test");
+    let phase_timeout = Duration::from_secs(1);
+    let attempt_deadline = Instant::now() + Duration::from_secs(10);
+    let late_first_byte = Box::pin(stream::once(async move {
+        sleep(phase_timeout).await;
+        Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"late"))
+    })) as ReqwestByteStream;
+    let mut first = DeadlineByteStream::new(
+        io,
+        late_first_byte,
+        Some(Instant::now() + phase_timeout),
+        Duration::from_secs(10),
+        attempt_deadline,
+    );
+
+    let first_error = first.next().await.unwrap().unwrap_err();
+    assert_eq!(first_error.phase, TransportPhase::FirstByte);
+    assert_eq!(first_error.class, AttemptFailureClass::Timeout);
+    assert_eq!(first_error.message, "Test first-byte deadline elapsed");
+    assert!(first.next().await.is_none());
+
+    let late_body = Box::pin(
+        stream::iter([Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"first"))]).chain(
+            stream::once(async move {
+                sleep(phase_timeout).await;
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"late"))
+            }),
+        ),
+    ) as ReqwestByteStream;
+    let mut body = io.after_first_byte_stream(
+        late_body,
+        phase_timeout,
+        Instant::now() + Duration::from_secs(10),
+    );
+
+    assert_eq!(
+        body.next().await.unwrap().unwrap(),
+        Bytes::from_static(b"first")
+    );
+    let body_error = body.next().await.unwrap().unwrap_err();
+    assert_eq!(body_error.phase, TransportPhase::Body);
+    assert_eq!(body_error.class, AttemptFailureClass::Timeout);
+    assert_eq!(body_error.message, "Test response idle deadline elapsed");
+    assert!(body.next().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn deadline_stream_reports_attempt_deadline_before_the_first_byte() {
+    let io = ProviderResponseIo::new("Test");
+    let now = Instant::now();
+    let mut stream = DeadlineByteStream::new(
+        io,
+        Box::pin(stream::pending()),
+        Some(now + Duration::from_secs(10)),
+        Duration::from_secs(30),
+        now + Duration::from_secs(1),
+    );
+
+    let error = stream.next().await.unwrap().unwrap_err();
+    assert_eq!(error.phase, TransportPhase::FirstByte);
+    assert_eq!(error.class, AttemptFailureClass::Timeout);
+    assert_eq!(
+        error.message,
+        "Test attempt deadline elapsed before the first response byte"
+    );
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn deadline_stream_preserves_earlier_idle_cause_after_delayed_poll() {
+    let io = ProviderResponseIo::new("Test");
+    let mut body = io.after_first_byte_stream(
+        Box::pin(
+            stream::iter([Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"first"))])
+                .chain(stream::pending()),
+        ),
+        Duration::from_secs(1),
+        Instant::now() + Duration::from_secs(10),
+    );
+
+    assert_eq!(
+        body.next().await.unwrap().unwrap(),
+        Bytes::from_static(b"first")
+    );
+    advance(Duration::from_secs(11)).await;
+
+    let body_error = body.next().await.unwrap().unwrap_err();
+    assert_eq!(body_error.phase, TransportPhase::Body);
+    assert_eq!(body_error.class, AttemptFailureClass::Timeout);
+    assert_eq!(body_error.message, "Test response idle deadline elapsed");
+    assert!(body.next().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn bounded_body_reports_the_tighter_attempt_deadline() {
+    let io = ProviderResponseIo::new("Test");
+    let now = Instant::now();
+    let error = io
+        .read_bounded_stream(
+            Box::pin(
+                stream::iter([Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"first"))])
+                    .chain(stream::pending()),
+            ),
+            now + Duration::from_secs(1),
+            now + Duration::from_secs(5),
+            Duration::from_secs(30),
+            16,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.phase, TransportPhase::Body);
+    assert_eq!(error.class, AttemptFailureClass::Timeout);
+    assert_eq!(
+        error.message,
+        "Test attempt deadline elapsed while reading the response"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn bounded_body_reports_attempt_deadline_before_the_first_byte() {
+    let io = ProviderResponseIo::new("Test");
+    let now = Instant::now();
+    let error = io
+        .read_bounded_stream(
+            Box::pin(stream::pending()),
+            now + Duration::from_secs(10),
+            now + Duration::from_secs(1),
+            Duration::from_secs(30),
+            16,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.phase, TransportPhase::FirstByte);
+    assert_eq!(error.class, AttemptFailureClass::Timeout);
+    assert_eq!(
+        error.message,
+        "Test attempt deadline elapsed before the first response byte"
+    );
 }
 
 #[test]

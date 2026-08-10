@@ -191,13 +191,23 @@ pub(super) fn openai_error_response(
             .headers_mut()
             .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
     }
+    insert_retry_after_header(&mut response, retry_after);
+    response
+}
+
+pub(super) fn insert_retry_after_header(response: &mut Response, retry_after: Option<Duration>) {
     if let Some(retry_after) = retry_after {
-        let seconds = retry_after.as_secs().max(1).to_string();
+        // Retry-After only accepts whole delta-seconds. Rounding down could
+        // tell a client to retry before the limiter's actual reset time.
+        let seconds = retry_after
+            .as_secs()
+            .saturating_add(u64::from(retry_after.subsec_nanos() != 0))
+            .max(1)
+            .to_string();
         if let Ok(value) = HeaderValue::from_str(&seconds) {
             response.headers_mut().insert(header::RETRY_AFTER, value);
         }
     }
-    response
 }
 
 #[derive(Serialize)]
@@ -356,6 +366,29 @@ mod tests {
             let error = InferenceError::from(core);
             assert_eq!(error.status(), status);
             assert_eq!(error.kind(), kind);
+        }
+    }
+
+    #[test]
+    fn retry_after_delta_seconds_round_up() {
+        for (retry_after, expected) in [
+            (Duration::ZERO, "1"),
+            (Duration::from_nanos(1), "1"),
+            (Duration::from_secs(1), "1"),
+            (Duration::from_millis(1_001), "2"),
+        ] {
+            let response = openai_error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_exceeded",
+                "rate_limit_error",
+                "retry later",
+                Some(retry_after),
+                false,
+            );
+            assert_eq!(
+                response.headers().get(header::RETRY_AFTER).unwrap(),
+                expected
+            );
         }
     }
 }

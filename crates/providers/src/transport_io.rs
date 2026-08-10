@@ -22,6 +22,20 @@ pub(crate) use event_stream::{CanonicalEventDecoder, DeadlineByteStream, Decoded
 pub(crate) type ReqwestByteStream =
     Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>>;
 
+#[derive(Clone, Copy)]
+enum DeadlineKind {
+    Phase,
+    Attempt,
+}
+
+fn select_deadline(phase_deadline: Instant, attempt_deadline: Instant) -> (Instant, DeadlineKind) {
+    if attempt_deadline <= phase_deadline {
+        (attempt_deadline, DeadlineKind::Attempt)
+    } else {
+        (phase_deadline, DeadlineKind::Phase)
+    }
+}
+
 /// Provider-labelled response I/O policy.
 ///
 /// Keeping the label here preserves the connector-specific diagnostic text
@@ -93,12 +107,14 @@ impl ProviderResponseIo {
     {
         self.require_content_type(&response, "text/event-stream")?;
         let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let first_wait = self
-            .remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(|| self.first_byte_timeout())?;
+        let (first_deadline, deadline_kind) =
+            select_deadline(first_byte_deadline, attempt_deadline);
+        let first_wait = first_deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| self.first_byte_wait_timeout(deadline_kind))?;
         let first = timeout(first_wait, source.next())
             .await
-            .map_err(|_| self.first_byte_timeout())?
+            .map_err(|_| self.first_byte_wait_timeout(deadline_kind))?
             .ok_or_else(|| {
                 self.protocol_error(
                     TransportPhase::FirstByte,
@@ -149,6 +165,25 @@ impl ProviderResponseIo {
             false,
             format!("{} first-byte deadline elapsed", self.provider),
         )
+    }
+
+    fn attempt_first_byte_timeout(self) -> TransportError {
+        self.transport_error(
+            TransportPhase::FirstByte,
+            AttemptFailureClass::Timeout,
+            false,
+            format!(
+                "{} attempt deadline elapsed before the first response byte",
+                self.provider
+            ),
+        )
+    }
+
+    fn first_byte_wait_timeout(self, deadline_kind: DeadlineKind) -> TransportError {
+        match deadline_kind {
+            DeadlineKind::Phase => self.first_byte_timeout(),
+            DeadlineKind::Attempt => self.attempt_first_byte_timeout(),
+        }
     }
 
     pub(crate) fn map_first_body_error(self, error: reqwest::Error) -> TransportError {
@@ -206,18 +241,27 @@ impl ProviderResponseIo {
         let mut output = Vec::new();
         let mut first = true;
         loop {
-            let wait = if first {
-                self.remaining_until(first_byte_deadline, attempt_deadline)
-                    .ok_or_else(|| self.first_byte_timeout())?
+            let (wait, attempt_deadline_is_tighter) = if first {
+                let (deadline, deadline_kind) =
+                    select_deadline(first_byte_deadline, attempt_deadline);
+                let wait = deadline
+                    .checked_duration_since(Instant::now())
+                    .ok_or_else(|| self.first_byte_wait_timeout(deadline_kind))?;
+                (wait, matches!(deadline_kind, DeadlineKind::Attempt))
             } else {
-                bounded_duration(
-                    idle_timeout,
-                    self.remaining(attempt_deadline, TransportPhase::Body)?,
+                let attempt_remaining = self.remaining(attempt_deadline, TransportPhase::Body)?;
+                (
+                    bounded_duration(idle_timeout, attempt_remaining),
+                    attempt_remaining <= idle_timeout,
                 )
             };
             let next = timeout(wait, source.next()).await.map_err(|_| {
-                if first {
+                if first && attempt_deadline_is_tighter {
+                    self.attempt_first_byte_timeout()
+                } else if first {
                     self.first_byte_timeout()
+                } else if attempt_deadline_is_tighter {
+                    self.attempt_body_timeout()
                 } else {
                     self.body_idle_timeout()
                 }

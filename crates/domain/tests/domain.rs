@@ -349,6 +349,38 @@ fn route_attempt_budget_cannot_exceed_target_count() {
 }
 
 #[test]
+fn route_rejects_duplicate_explicit_target_routing_ids() {
+    let routing_id = TargetId::from_uuid(id(700));
+    let mut targets = vec![provider(1, 11, 0, 1), provider(2, 12, 0, 1)];
+    for (_, target) in &mut targets {
+        target.routing_id = Some(routing_id);
+    }
+    let runtime = snapshot(targets, 2);
+    let route = runtime.routes.values().next().unwrap();
+
+    assert_eq!(
+        route.validate(),
+        Err(RouteValidationError::DuplicateTargetRoutingId { routing_id })
+    );
+}
+
+#[test]
+fn route_rejects_legacy_and_explicit_target_routing_id_collisions() {
+    let legacy_routing_id = TargetId::from_uuid(id(11));
+    let mut targets = vec![provider(1, 11, 0, 1), provider(2, 12, 0, 1)];
+    targets[1].1.routing_id = Some(legacy_routing_id);
+    let runtime = snapshot(targets, 2);
+    let route = runtime.routes.values().next().unwrap();
+
+    assert_eq!(
+        route.validate(),
+        Err(RouteValidationError::DuplicateTargetRoutingId {
+            routing_id: legacy_routing_id,
+        })
+    );
+}
+
+#[test]
 fn source_extensions_are_forwardable_only_on_the_same_surface() {
     let extensions = SourceExtensions::new(
         Surface::OpenAi,

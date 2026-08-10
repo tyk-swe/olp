@@ -272,13 +272,14 @@ async fn enforce_request_limits_inner(
         ..
     } = body_admission;
 
+    let endpoint_capability = endpoint.and_then(gateway::InferenceEndpoint::capability);
     let principal = endpoint
         .map(|endpoint| {
             authenticate_inference_headers(
                 state,
                 request.headers(),
                 endpoint.surface(),
-                endpoint.capability(),
+                endpoint_capability,
             )
         })
         .transpose()?;
@@ -339,7 +340,9 @@ async fn enforce_request_limits_inner(
                 .unwrap_or(gateway::TokenEstimate::Default),
             &bytes,
         );
-        let reservation = if let Some(principal) = &principal {
+        // Protocol-shaped misses remain authenticated, but capability-free
+        // requests must reach the router fallback without requiring a limiter.
+        let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
             match reserve_http_inference_limits(state, principal, requested_tokens).await {
                 Ok(reservation) => reservation,
                 Err(error) => {
@@ -369,7 +372,7 @@ async fn enforce_request_limits_inner(
             .map(gateway::InferenceEndpoint::token_estimate)
             .unwrap_or(gateway::TokenEstimate::Default),
     );
-    let reservation = if let Some(principal) = &principal {
+    let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
         match reserve_http_inference_limits(state, principal, requested_tokens).await {
             Ok(reservation) => reservation,
             Err(error) => {

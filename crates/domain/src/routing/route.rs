@@ -47,6 +47,7 @@ impl Route {
         }
 
         let mut target_ids = HashSet::with_capacity(self.targets.len());
+        let mut target_routing_ids = HashSet::with_capacity(self.targets.len());
         for target in &self.targets {
             if target.timeout.is_zero() {
                 return Err(RouteValidationError::ZeroTargetTimeout {
@@ -62,6 +63,10 @@ impl Route {
                 return Err(RouteValidationError::DuplicateTarget {
                     target_id: target.id,
                 });
+            }
+            let routing_id = target.routing_id.unwrap_or(target.id);
+            if !target_routing_ids.insert(routing_id) {
+                return Err(RouteValidationError::DuplicateTargetRoutingId { routing_id });
             }
         }
 
@@ -83,4 +88,6 @@ pub enum RouteValidationError {
     TargetTimeoutExceedsRoute { target_id: TargetId },
     #[error("target ID {target_id} appears more than once")]
     DuplicateTarget { target_id: TargetId },
+    #[error("effective target routing ID {routing_id} appears more than once")]
+    DuplicateTargetRoutingId { routing_id: TargetId },
 }

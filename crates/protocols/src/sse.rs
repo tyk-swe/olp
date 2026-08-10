@@ -19,6 +19,13 @@ pub struct SseFrame {
 
 pub(crate) const RAW_SSE_FRAME_EXTENSION: &str = "/__olp/raw_sse_frame";
 
+#[derive(Clone, Copy)]
+enum TrailingCr {
+    None,
+    Processed { provisional_lf_byte: bool },
+    DeferredLine,
+}
+
 pub(crate) fn raw_sse_frame_event(
     sequence: u64,
     surface: Surface,
@@ -81,6 +88,7 @@ fn optional_u64(value: Option<&Value>) -> Option<Option<u64>> {
 
 pub struct SseDecoder {
     buffer: BytesMut,
+    trailing_cr: TrailingCr,
     event: Option<String>,
     data_lines: Vec<String>,
     has_data: bool,
@@ -115,6 +123,7 @@ impl SseDecoder {
     pub fn new(max_event_bytes: usize) -> Self {
         Self {
             buffer: BytesMut::new(),
+            trailing_cr: TrailingCr::None,
             event: None,
             data_lines: Vec::new(),
             has_data: false,
@@ -127,19 +136,48 @@ impl SseDecoder {
 
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<SseFrame>, SseDecodeError> {
         let mut frames = Vec::new();
-        let mut remaining = chunk;
+        let mut remaining = self.resolve_trailing_cr(chunk, &mut frames)?;
 
-        while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
-            let line_size = self.buffer.len().saturating_add(newline);
-            self.check_additional(line_size.saturating_add(1))?;
-            self.buffer.extend_from_slice(&remaining[..newline]);
-            let mut line = self.buffer.split();
-            if line.last() == Some(&b'\r') {
-                line.truncate(line.len() - 1);
+        while let Some(line_end) = remaining
+            .iter()
+            .position(|byte| matches!(*byte, b'\r' | b'\n'))
+        {
+            let terminator = remaining[line_end];
+            let line_size = self.buffer.len().saturating_add(line_end);
+            let next_is_lf =
+                terminator == b'\r' && remaining.get(line_end.saturating_add(1)) == Some(&b'\n');
+            let trailing_cr = terminator == b'\r' && line_end.saturating_add(1) == remaining.len();
+
+            if trailing_cr {
+                let cr_size = line_size.saturating_add(1);
+                self.check_additional(cr_size)?;
+                let crlf_size = line_size.saturating_add(2);
+                if self.check_additional(crlf_size).is_err() {
+                    // The CR fits but a CRLF would not. Delay only this
+                    // boundary case until the next byte (or EOF) resolves it.
+                    self.buffer.extend_from_slice(&remaining[..line_end]);
+                    self.trailing_cr = TrailingCr::DeferredLine;
+                    remaining = &[];
+                    break;
+                }
+
+                self.buffer.extend_from_slice(&remaining[..line_end]);
+                let provisional_lf_byte = line_size != 0;
+                self.process_buffered_line(2, &mut frames)?;
+                // Processing an empty line resets the event accounting, so
+                // only a non-empty line can still carry the provisional byte.
+                self.trailing_cr = TrailingCr::Processed {
+                    provisional_lf_byte,
+                };
+                remaining = &[];
+                break;
             }
-            self.pending_bytes = self.pending_bytes.saturating_add(line_size + 1);
-            self.process_line(&line, &mut frames)?;
-            remaining = &remaining[newline + 1..];
+
+            let terminator_size = if next_is_lf { 2 } else { 1 };
+            self.check_additional(line_size.saturating_add(terminator_size))?;
+            self.buffer.extend_from_slice(&remaining[..line_end]);
+            self.process_buffered_line(terminator_size, &mut frames)?;
+            remaining = &remaining[line_end + terminator_size..];
         }
 
         self.check_additional(self.buffer.len().saturating_add(remaining.len()))?;
@@ -149,6 +187,16 @@ impl SseDecoder {
 
     pub fn finish(&mut self) -> Result<Vec<SseFrame>, SseDecodeError> {
         let mut frames = Vec::new();
+        match std::mem::replace(&mut self.trailing_cr, TrailingCr::None) {
+            TrailingCr::Processed {
+                provisional_lf_byte: true,
+            } => self.pending_bytes = self.pending_bytes.saturating_sub(1),
+            TrailingCr::DeferredLine => self.process_buffered_line(1, &mut frames)?,
+            TrailingCr::None
+            | TrailingCr::Processed {
+                provisional_lf_byte: false,
+            } => {}
+        }
         if !self.buffer.is_empty() {
             self.check_additional(self.buffer.len())?;
             self.pending_bytes = self.pending_bytes.saturating_add(self.buffer.len());
@@ -159,6 +207,50 @@ impl SseDecoder {
             frames.push(frame);
         }
         Ok(frames)
+    }
+
+    fn resolve_trailing_cr<'a>(
+        &mut self,
+        chunk: &'a [u8],
+        frames: &mut Vec<SseFrame>,
+    ) -> Result<&'a [u8], SseDecodeError> {
+        if chunk.is_empty() {
+            return Ok(chunk);
+        }
+
+        let next_is_lf = chunk[0] == b'\n';
+        match std::mem::replace(&mut self.trailing_cr, TrailingCr::None) {
+            TrailingCr::None => {}
+            TrailingCr::Processed {
+                provisional_lf_byte,
+            } => {
+                if next_is_lf {
+                    return Ok(&chunk[1..]);
+                }
+                if provisional_lf_byte {
+                    self.pending_bytes = self.pending_bytes.saturating_sub(1);
+                }
+            }
+            TrailingCr::DeferredLine => {
+                self.process_buffered_line(if next_is_lf { 2 } else { 1 }, frames)?;
+                if next_is_lf {
+                    return Ok(&chunk[1..]);
+                }
+            }
+        }
+        Ok(chunk)
+    }
+
+    fn process_buffered_line(
+        &mut self,
+        terminator_size: usize,
+        frames: &mut Vec<SseFrame>,
+    ) -> Result<(), SseDecodeError> {
+        let accounted_size = self.buffer.len().saturating_add(terminator_size);
+        self.check_additional(accounted_size)?;
+        self.pending_bytes = self.pending_bytes.saturating_add(accounted_size);
+        let line = self.buffer.split();
+        self.process_line(&line, frames)
     }
 
     fn process_line(

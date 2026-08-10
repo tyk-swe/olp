@@ -54,6 +54,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 aws-smithy-eventstream = "0.61.1"
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

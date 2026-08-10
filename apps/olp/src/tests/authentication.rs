@@ -471,8 +471,10 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
 }
 
 #[tokio::test]
-async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior() {
-    let (state, key) = inference_state(false);
+async fn authenticated_hard_limited_unknown_paths_keep_the_not_found_fallback() {
+    // No distributed limiter is installed, so any reservation attempt would
+    // replace the expected fallback with a service-unavailable response.
+    let (state, key) = inference_state(true);
     let app = public_router(state.gateway_state_for_test());
     for (path, header_name, header_value) in [
         (
@@ -523,6 +525,29 @@ async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior(
         );
     }
 
+    let response = app
+        .oneshot(
+            Request::post("/openai/v1/not-enabled")
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.headers()[axum::http::header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+}
+
+#[tokio::test]
+async fn authenticated_hard_limited_wrong_method_keeps_the_method_not_allowed_fallback() {
+    // No distributed limiter is installed, so any reservation attempt would
+    // replace the expected fallback with a service-unavailable response.
+    let (state, key) = inference_state(true);
+    let app = public_router(state.gateway_state_for_test());
     let response = app
         .oneshot(
             Request::get("/openai/v1/chat/completions")

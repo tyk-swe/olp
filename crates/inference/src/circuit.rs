@@ -2,7 +2,10 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -17,15 +20,29 @@ const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub struct CircuitBreaker {
     inner: Arc<Mutex<BTreeMap<TargetId, CircuitState>>>,
+    next_probe_generation: Arc<AtomicU64>,
     failure_threshold: u32,
     open_duration: Duration,
 }
 
+/// Permission to execute a target, including the identity of a half-open probe.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CircuitPermit {
+    probe_generation: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CircuitState {
-    Closed { consecutive_failures: u32 },
-    Open { until: Instant },
-    HalfOpen { probe_started: Instant },
+    Closed {
+        consecutive_failures: u32,
+    },
+    Open {
+        until: Instant,
+    },
+    HalfOpen {
+        probe_started: Instant,
+        generation: u64,
+    },
 }
 
 impl Default for CircuitBreaker {
@@ -38,6 +55,7 @@ impl CircuitBreaker {
     fn new(failure_threshold: u32, open_duration: Duration) -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
+            next_probe_generation: Arc::new(AtomicU64::new(1)),
             failure_threshold: failure_threshold.max(1),
             open_duration: open_duration.max(Duration::from_millis(1)),
         }
@@ -51,7 +69,7 @@ impl CircuitBreaker {
         match states.get(&target) {
             None | Some(CircuitState::Closed { .. }) => true,
             Some(CircuitState::Open { until }) => now >= *until,
-            Some(CircuitState::HalfOpen { probe_started }) => {
+            Some(CircuitState::HalfOpen { probe_started, .. }) => {
                 now.duration_since(*probe_started) >= self.open_duration
             }
         }
@@ -60,23 +78,47 @@ impl CircuitBreaker {
     /// Claims permission to execute this target. An expired open circuit moves
     /// to half-open and admits one caller; concurrent callers skip it.
     pub fn try_acquire(&self, target: TargetId) -> bool {
+        self.try_acquire_permit(target).is_some()
+    }
+
+    pub(crate) fn try_acquire_permit(&self, target: TargetId) -> Option<CircuitPermit> {
         let now = Instant::now();
         let mut states = self.inner.lock().expect("circuit state lock poisoned");
         match states.get(&target).copied() {
-            None | Some(CircuitState::Closed { .. }) => true,
+            None | Some(CircuitState::Closed { .. }) => Some(CircuitPermit {
+                probe_generation: None,
+            }),
             Some(CircuitState::Open { until }) if now >= until => {
-                states.insert(target, CircuitState::HalfOpen { probe_started: now });
-                true
+                let generation = self.next_probe_generation.fetch_add(1, Ordering::Relaxed);
+                states.insert(
+                    target,
+                    CircuitState::HalfOpen {
+                        probe_started: now,
+                        generation,
+                    },
+                );
+                Some(CircuitPermit {
+                    probe_generation: Some(generation),
+                })
             }
-            Some(CircuitState::HalfOpen { probe_started })
+            Some(CircuitState::HalfOpen { probe_started, .. })
                 if now.duration_since(probe_started) >= self.open_duration =>
             {
                 // Recover if a probing request was cancelled before reporting
                 // an outcome; otherwise a circuit could remain stuck forever.
-                states.insert(target, CircuitState::HalfOpen { probe_started: now });
-                true
+                let generation = self.next_probe_generation.fetch_add(1, Ordering::Relaxed);
+                states.insert(
+                    target,
+                    CircuitState::HalfOpen {
+                        probe_started: now,
+                        generation,
+                    },
+                );
+                Some(CircuitPermit {
+                    probe_generation: Some(generation),
+                })
             }
-            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => false,
+            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => None,
         }
     }
 
@@ -85,6 +127,27 @@ impl CircuitBreaker {
             .lock()
             .expect("circuit state lock poisoned")
             .remove(&target);
+    }
+
+    /// Releases a half-open probe that ended before the provider was called.
+    /// The expired open state keeps the next probe single-flight without
+    /// penalizing the target with a fresh recovery interval.
+    pub(crate) fn abandon_probe(&self, target: TargetId, permit: CircuitPermit) {
+        let Some(probe_generation) = permit.probe_generation else {
+            return;
+        };
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        if matches!(
+            states.get(&target),
+            Some(CircuitState::HalfOpen { generation, .. }) if *generation == probe_generation
+        ) {
+            states.insert(
+                target,
+                CircuitState::Open {
+                    until: Instant::now(),
+                },
+            );
+        }
     }
 
     pub fn retain_targets(&self, live: &BTreeSet<TargetId>) {
@@ -193,6 +256,67 @@ mod tests {
             breaker.record_failure(target, class);
             assert!(breaker.try_acquire(target));
         }
+    }
+
+    #[test]
+    fn abandoned_half_open_probe_is_immediately_reclaimable() {
+        let breaker = CircuitBreaker::default();
+        let target = TargetId::new();
+        breaker
+            .inner
+            .lock()
+            .expect("circuit state lock poisoned")
+            .insert(
+                target,
+                CircuitState::Open {
+                    until: Instant::now(),
+                },
+            );
+        let permit = breaker
+            .try_acquire_permit(target)
+            .expect("expired open circuit admits a probe");
+
+        breaker.abandon_probe(target, permit);
+
+        assert!(breaker.is_selectable(target));
+        assert!(breaker.try_acquire(target));
+        assert!(!breaker.try_acquire(target));
+    }
+
+    #[test]
+    fn stale_probe_cannot_abandon_a_newer_lease() {
+        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let target = TargetId::new();
+        breaker
+            .inner
+            .lock()
+            .expect("circuit state lock poisoned")
+            .insert(
+                target,
+                CircuitState::Open {
+                    until: Instant::now(),
+                },
+            );
+        let stale_permit = breaker
+            .try_acquire_permit(target)
+            .expect("expired open circuit admits a probe");
+        if let Some(CircuitState::HalfOpen { probe_started, .. }) = breaker
+            .inner
+            .lock()
+            .expect("circuit state lock poisoned")
+            .get_mut(&target)
+        {
+            *probe_started = Instant::now() - breaker.open_duration;
+        }
+        let current_permit = breaker
+            .try_acquire_permit(target)
+            .expect("stale probe lease can be replaced");
+
+        breaker.abandon_probe(target, stale_permit);
+
+        assert!(!breaker.try_acquire(target));
+        breaker.abandon_probe(target, current_permit);
+        assert!(breaker.try_acquire(target));
     }
 
     #[test]

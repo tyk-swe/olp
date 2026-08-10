@@ -11,7 +11,7 @@ use olp_storage::request_metadata::{RequestAttemptMetadata, RequestAttemptUsageM
 
 use crate::{
     InferenceError,
-    circuit::CircuitBreaker,
+    circuit::{CircuitBreaker, CircuitPermit},
     runtime::RuntimeBundle,
     selection::operation_for_provider,
     telemetry::{elapsed_ms, metadata_status_code},
@@ -148,6 +148,7 @@ enum ProviderAttemptOutcome {
 
 struct AttemptRecord<'a> {
     plan: &'a AttemptPlan,
+    circuit_permit: CircuitPermit,
     ordinal: u16,
     started_at: chrono::DateTime<Utc>,
     started: tokio::time::Instant,
@@ -191,6 +192,31 @@ impl AttemptRecord<'_> {
             self.started,
         ));
     }
+
+    fn record_deadline_elapsed(
+        &self,
+        traces: &mut Vec<RequestAttemptMetadata>,
+        circuits: &CircuitBreaker,
+    ) -> ExecutionFailure {
+        let timeout = TransportError {
+            phase: olp_domain::TransportPhase::Connect,
+            class: AttemptFailureClass::Timeout,
+            response_committed: false,
+            message: "route deadline elapsed before provider execution".to_owned(),
+        };
+        traces.push(failed_attempt(
+            self.plan,
+            self.ordinal,
+            self.started_at,
+            self.started,
+            &timeout,
+        ));
+        circuits.abandon_probe(self.plan.target_id, self.circuit_permit);
+        ExecutionFailure {
+            error: InferenceError::timeout(),
+            attempts: std::mem::take(traces),
+        }
+    }
 }
 
 pub type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &AttemptPlan, u16, chrono::DateTime<Utc>, tokio::time::Instant)
@@ -227,9 +253,9 @@ pub async fn execute_with_failover(
     let mut traces = Vec::with_capacity(attempts.len());
     let attempt_count = attempts.len();
     for (attempt_index, attempt) in attempts.into_iter().enumerate() {
-        if !circuits.try_acquire(attempt.target_id) {
+        let Some(circuit_permit) = circuits.try_acquire_permit(attempt.target_id) else {
             continue;
-        }
+        };
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
@@ -244,6 +270,7 @@ pub async fn execute_with_failover(
         }
         let record = AttemptRecord {
             plan: &attempt,
+            circuit_permit,
             ordinal,
             started_at: attempt_started_at,
             started: attempt_started,
@@ -268,10 +295,7 @@ pub async fn execute_with_failover(
         };
         let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
-            return Err(ExecutionFailure {
-                error: InferenceError::timeout(),
-                attempts: traces,
-            });
+            return Err(record.record_deadline_elapsed(&mut traces, circuits));
         }
         let provider_request = ProviderRequest {
             metadata: metadata.clone(),
@@ -600,9 +624,14 @@ const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use olp_domain::{AttemptFailureClass, TransportError, TransportPhase};
+    use chrono::Utc;
+    use olp_domain::{
+        AttemptFailureClass, AttemptPlan, DurationMs, ProviderId, ProviderKind, RouteId,
+        RuntimeGenerationId, TargetId, TransportError, TransportPhase,
+    };
 
-    use super::attempt_billing_is_uncertain;
+    use super::{AttemptRecord, attempt_billing_is_uncertain};
+    use crate::circuit::CircuitBreaker;
 
     #[test]
     fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
@@ -626,6 +655,56 @@ mod tests {
             TransportPhase::FirstByte,
             AttemptFailureClass::Timeout,
         )));
+    }
+
+    #[test]
+    fn elapsed_deadline_records_attempt_without_penalizing_closed_circuit() {
+        let target_id = TargetId::new();
+        let attempt = AttemptPlan {
+            generation_id: RuntimeGenerationId::new(),
+            route_id: RouteId::new(),
+            target_id,
+            provider_id: ProviderId::new(),
+            provider_kind: ProviderKind::OpenAi,
+            upstream_model: "deadline-test".to_owned(),
+            timeout: DurationMs::new(1_000),
+            priority: 0,
+        };
+        let circuits = CircuitBreaker::default();
+        let record = AttemptRecord {
+            plan: &attempt,
+            circuit_permit: circuits
+                .try_acquire_permit(target_id)
+                .expect("closed circuit admits an attempt"),
+            ordinal: 1,
+            started_at: Utc::now(),
+            started: tokio::time::Instant::now(),
+        };
+
+        let mut traces = Vec::new();
+        let failure = record.record_deadline_elapsed(&mut traces, &circuits);
+
+        assert_eq!(failure.error.code(), "gateway_timeout");
+        assert_eq!(failure.attempts.len(), 1);
+        let failed_attempt = &failure.attempts[0];
+        assert_eq!(failed_attempt.ordinal, 1);
+        assert_eq!(failed_attempt.error_class.as_deref(), Some("timeout"));
+        assert_eq!(failed_attempt.status_code, Some(504));
+        assert!(!failed_attempt.committed);
+        let usage = failed_attempt
+            .usage
+            .as_ref()
+            .expect("timeout attempt records billing certainty");
+        assert!(usage.complete);
+        assert!(!usage.billing_uncertain);
+        assert_eq!(circuits.open_count(), 0);
+        for _ in 0..4 {
+            circuits.record_failure(target_id, AttemptFailureClass::Connect);
+        }
+        assert_eq!(circuits.open_count(), 0);
+        assert!(circuits.is_selectable(target_id));
+        circuits.record_failure(target_id, AttemptFailureClass::Connect);
+        assert_eq!(circuits.open_count(), 1);
     }
 
     fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError {

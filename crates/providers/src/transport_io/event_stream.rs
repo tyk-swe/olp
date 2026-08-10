@@ -11,7 +11,7 @@ use futures::Stream;
 use olp_domain::{CanonicalEvent, TransportError, TransportPhase};
 use tokio::time::{Instant, Sleep};
 
-use super::{ProviderResponseIo, ReqwestByteStream};
+use super::{DeadlineKind, ProviderResponseIo, ReqwestByteStream, select_deadline};
 
 pub(crate) trait CanonicalEventDecoder: Send + Unpin + 'static {
     type Error: fmt::Display;
@@ -25,7 +25,8 @@ pub(crate) struct DeadlineByteStream {
     io: ProviderResponseIo,
     first: bool,
     idle_timeout: Duration,
-    idle_sleep: Pin<Box<Sleep>>,
+    deadline_sleep: Pin<Box<Sleep>>,
+    deadline_kind: DeadlineKind,
     attempt_deadline: Instant,
     terminal: bool,
 }
@@ -38,17 +39,26 @@ impl DeadlineByteStream {
         idle_timeout: Duration,
         attempt_deadline: Instant,
     ) -> Self {
-        let wake = first_byte_deadline
-            .unwrap_or_else(|| Instant::now() + idle_timeout)
-            .min(attempt_deadline);
+        let phase_deadline = first_byte_deadline.unwrap_or_else(|| Instant::now() + idle_timeout);
+        let (wake, deadline_kind) = select_deadline(phase_deadline, attempt_deadline);
         Self {
             source,
             io,
             first: first_byte_deadline.is_some(),
             idle_timeout,
-            idle_sleep: Box::pin(tokio::time::sleep_until(wake)),
+            deadline_sleep: Box::pin(tokio::time::sleep_until(wake)),
+            deadline_kind,
             attempt_deadline,
             terminal: false,
+        }
+    }
+
+    fn timeout_error(&self) -> TransportError {
+        match (self.first, self.deadline_kind) {
+            (true, DeadlineKind::Attempt) => self.io.attempt_first_byte_timeout(),
+            (true, DeadlineKind::Phase) => self.io.first_byte_timeout(),
+            (false, DeadlineKind::Attempt) => self.io.attempt_body_timeout(),
+            (false, DeadlineKind::Phase) => self.io.body_idle_timeout(),
         }
     }
 }
@@ -62,18 +72,19 @@ impl Stream for DeadlineByteStream {
         }
         if Instant::now() >= self.attempt_deadline {
             self.terminal = true;
-            let error = if self.first {
-                self.io.first_byte_timeout()
-            } else {
-                self.io.attempt_body_timeout()
-            };
-            return Poll::Ready(Some(Err(error)));
+            return Poll::Ready(Some(Err(self.timeout_error())));
+        }
+        if self.deadline_sleep.as_mut().poll(context).is_ready() {
+            self.terminal = true;
+            return Poll::Ready(Some(Err(self.timeout_error())));
         }
         match self.source.as_mut().poll_next(context) {
             Poll::Ready(Some(Ok(chunk))) => {
                 self.first = false;
-                let wake = (Instant::now() + self.idle_timeout).min(self.attempt_deadline);
-                self.idle_sleep.as_mut().reset(wake);
+                let idle_deadline = Instant::now() + self.idle_timeout;
+                let (wake, deadline_kind) = select_deadline(idle_deadline, self.attempt_deadline);
+                self.deadline_kind = deadline_kind;
+                self.deadline_sleep.as_mut().reset(wake);
                 return Poll::Ready(Some(Ok(chunk)));
             }
             Poll::Ready(Some(Err(error))) => {
@@ -97,16 +108,6 @@ impl Stream for DeadlineByteStream {
                 return Poll::Ready(None);
             }
             Poll::Pending => {}
-        }
-        if self.idle_sleep.as_mut().poll(context).is_ready() {
-            self.terminal = true;
-            return Poll::Ready(Some(Err(if self.first {
-                self.io.first_byte_timeout()
-            } else if Instant::now() >= self.attempt_deadline {
-                self.io.attempt_body_timeout()
-            } else {
-                self.io.body_idle_timeout()
-            })));
         }
         Poll::Pending
     }
