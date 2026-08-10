@@ -1,5 +1,23 @@
 use super::*;
 
+struct CountingTransport {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ProviderTransport for CountingTransport {
+    fn execute<'a>(
+        &'a self,
+        _request: ProviderRequest,
+    ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(ProviderOutput::Events(
+                Box::pin(stream::empty()) as ProviderEventStream
+            ))
+        })
+    }
+}
+
 #[test]
 fn inference_error_debug_redacts_client_message() {
     let error =
@@ -41,6 +59,84 @@ async fn unary_openai_route_authenticates_routes_and_encodes() {
     assert_eq!(event.attempts.len(), 1);
     assert!(event.committed);
     assert!(!event.usage_complete, "missing provider usage is explicit");
+}
+
+#[tokio::test]
+async fn openai_v1_aliases_route_static_and_dynamic_handlers() {
+    let (state, key) = test_state(false);
+    let pinned = state.runtime().pin();
+    let mut api_keys = pinned.api_keys.clone();
+    api_keys
+        .values_mut()
+        .next()
+        .unwrap()
+        .scopes
+        .insert(ApiKeyScope::ModelsRead);
+    reinstall_api_keys(&state, api_keys);
+    let response = post_json(
+        &state,
+        &key,
+        "/v1/chat/completions",
+        r#"{"model":"default","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    for path in ["/openai/v1/models/default", "/v1/models/default"] {
+        let response = crate::public_http::router::gateway_router_for_test(state.clone())
+            .oneshot(
+                Request::get(path)
+                    .header(header::AUTHORIZATION, format!("Bearer {key}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["id"], "default", "{path}");
+    }
+}
+
+#[tokio::test]
+async fn unknown_openai_v1_paths_never_call_a_provider_and_alias_methods_keep_405() {
+    let (state, key) = test_state(false);
+    let calls = Arc::new(AtomicUsize::new(0));
+    install_transport(
+        &state,
+        Arc::new(CountingTransport {
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let app = crate::public_http::router::gateway_router_for_test(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/chat/completions")
+                .header(header::AUTHORIZATION, format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let response = app
+        .oneshot(
+            Request::post("/v1/not-enabled")
+                .header(header::AUTHORIZATION, format!("Bearer {key}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
