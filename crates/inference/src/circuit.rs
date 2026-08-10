@@ -12,7 +12,9 @@ use std::{
 use arc_swap::ArcSwapOption;
 use futures::{StreamExt, stream};
 use olp_domain::{AttemptFailureClass, TargetId};
-use olp_storage::circuits::{DistributedCircuitBreaker, DistributedCircuitPermit};
+use olp_storage::circuits::{
+    CircuitStoreError, DistributedCircuitBreaker, DistributedCircuitPermit,
+};
 
 const DEFAULT_FAILURE_THRESHOLD: u32 = 5;
 const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
@@ -69,6 +71,7 @@ struct PendingLocalFailure<'a> {
     breaker: &'a CircuitBreaker,
     permit: &'a CircuitPermit,
     open_duration: Duration,
+    force_open: bool,
     record_on_drop: bool,
 }
 
@@ -76,7 +79,7 @@ impl PendingLocalFailure<'_> {
     fn record(mut self) {
         self.record_on_drop = false;
         self.breaker
-            .local_record_failure(self.permit, self.open_duration);
+            .local_record_failure(self.permit, self.open_duration, self.force_open);
     }
 
     fn disarm(mut self) {
@@ -88,7 +91,7 @@ impl Drop for PendingLocalFailure<'_> {
     fn drop(&mut self) {
         if self.record_on_drop {
             self.breaker
-                .local_record_failure(self.permit, self.open_duration);
+                .local_record_failure(self.permit, self.open_duration, self.force_open);
         }
     }
 }
@@ -164,7 +167,8 @@ impl CircuitBreaker {
 
     /// Observes a route's targets before deterministic ordering. Results are
     /// hints: acquisition remains authoritative because state can change after
-    /// this method returns. Valkey lookups are bounded and do not spawn tasks.
+    /// this method returns. Valkey lookups share one route-level timeout and do
+    /// not spawn tasks.
     pub async fn selectable_targets(
         &self,
         targets: impl IntoIterator<Item = TargetId>,
@@ -172,18 +176,48 @@ impl CircuitBreaker {
         // Own the identifiers across the bounded concurrent observations so
         // handler futures remain `Send` regardless of the source iterator.
         let targets = targets.into_iter().collect::<Vec<_>>();
-        if self.inner.distributed.load().is_none() {
-            return targets
-                .into_iter()
-                .filter(|target| self.local_is_selectable(*target))
-                .collect();
+        let Some(distributed) = self.inner.distributed.load_full() else {
+            return self.local_selectable_targets(&targets);
+        };
+        if self.inner.distributed_degraded.load(Ordering::Acquire) {
+            return self.local_selectable_targets(&targets);
         }
-        stream::iter(targets)
-            .map(|target| async move { self.is_selectable(target).await.then_some(target) })
-            .buffer_unordered(16)
-            .filter_map(std::future::ready)
-            .collect()
-            .await
+
+        match tokio::time::timeout(DISTRIBUTED_OPERATION_TIMEOUT, async {
+            let mut selectable = BTreeSet::new();
+            let mut observations = stream::iter(targets.iter().copied())
+                .map(|target| {
+                    let distributed = Arc::clone(&distributed);
+                    async move { (target, distributed.observe(target).await) }
+                })
+                .buffer_unordered(16);
+
+            while let Some((target, result)) = observations.next().await {
+                match result {
+                    Ok(true) => {
+                        selectable.insert(target);
+                    }
+                    Ok(false) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok::<_, CircuitStoreError>(selectable)
+        })
+        .await
+        {
+            Ok(Ok(selectable)) => {
+                self.mark_healthy();
+                selectable
+            }
+            Ok(Err(error)) => {
+                self.note_degraded_error("observe", &error);
+                self.local_selectable_targets(&targets)
+            }
+            Err(_) => {
+                self.note_degraded("observe route timed out");
+                self.local_selectable_targets(&targets)
+            }
+        }
     }
 
     /// Performs the authoritative attempt acquisition. Valkey errors degrade
@@ -203,11 +237,8 @@ impl CircuitBreaker {
                 }
                 Ok(Ok(DistributedCircuitPermit::Acquired { probe_token })) => {
                     self.mark_healthy();
-                    let Some(local_probe_started) =
-                        self.local_accept_distributed_permit(target, probe_token.is_some())
-                    else {
-                        return None;
-                    };
+                    let local_probe_started =
+                        self.local_accept_distributed_permit(target, probe_token.is_some())?;
                     return Some(CircuitPermit {
                         target,
                         source: PermitSource::Distributed {
@@ -267,6 +298,7 @@ impl CircuitBreaker {
         let open_duration = retry_after
             .map(|duration| duration.max(Duration::from_millis(1)).min(MAX_RETRY_AFTER))
             .unwrap_or(self.inner.open_duration);
+        let force_open = retry_after.is_some();
         if let PermitSource::Distributed {
             adapter,
             probe_token,
@@ -278,14 +310,20 @@ impl CircuitBreaker {
                 breaker: self,
                 permit,
                 open_duration,
+                force_open,
                 record_on_drop: true,
+            };
+            let failure_threshold = if force_open {
+                1
+            } else {
+                self.inner.failure_threshold
             };
             match tokio::time::timeout(
                 DISTRIBUTED_OPERATION_TIMEOUT,
                 adapter.record_failure(
                     permit.target,
                     probe_token.as_deref(),
-                    self.inner.failure_threshold,
+                    failure_threshold,
                     open_duration,
                     self.inner
                         .state_retention
@@ -312,7 +350,7 @@ impl CircuitBreaker {
                 }
             }
         } else {
-            self.local_record_failure(permit, open_duration);
+            self.local_record_failure(permit, open_duration, force_open);
         }
     }
 
@@ -381,6 +419,14 @@ impl CircuitBreaker {
         }
     }
 
+    fn local_selectable_targets(&self, targets: &[TargetId]) -> BTreeSet<TargetId> {
+        targets
+            .iter()
+            .copied()
+            .filter(|target| self.local_is_selectable(*target))
+            .collect()
+    }
+
     fn local_try_acquire(&self, target: TargetId) -> Option<Option<Instant>> {
         self.local_acquire_state(target, false)
     }
@@ -431,7 +477,12 @@ impl CircuitBreaker {
         }
     }
 
-    fn local_record_failure(&self, permit: &CircuitPermit, open_duration: Duration) {
+    fn local_record_failure(
+        &self,
+        permit: &CircuitPermit,
+        open_duration: Duration,
+        force_open: bool,
+    ) {
         let now = Instant::now();
         let mut states = self
             .inner
@@ -451,7 +502,7 @@ impl CircuitBreaker {
                 consecutive_failures,
             }) => {
                 let failures = consecutive_failures.saturating_add(1);
-                if failures >= self.inner.failure_threshold {
+                if force_open || failures >= self.inner.failure_threshold {
                     CircuitState::Open { until: open_until }
                 } else {
                     CircuitState::Closed {
@@ -459,7 +510,9 @@ impl CircuitBreaker {
                     }
                 }
             }
-            None if self.inner.failure_threshold == 1 => CircuitState::Open { until: open_until },
+            None if force_open || self.inner.failure_threshold == 1 => {
+                CircuitState::Open { until: open_until }
+            }
             None => CircuitState::Closed {
                 consecutive_failures: 1,
             },
@@ -478,7 +531,7 @@ impl CircuitBreaker {
     }
 
     fn note_degraded(&self, operation: &'static str) {
-        self.note_degraded_with::<olp_storage::circuits::CircuitStoreError>(operation, None);
+        self.note_degraded_with::<CircuitStoreError>(operation, None);
     }
 
     fn note_degraded_with<E: std::fmt::Display>(&self, operation: &'static str, error: Option<&E>) {
@@ -615,6 +668,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_after_opens_before_failure_threshold() {
+        let breaker = CircuitBreaker::new(5, Duration::from_secs(1));
+        let target = TargetId::new();
+        let permit = breaker.acquire(target).await.unwrap();
+
+        breaker
+            .record_failure(
+                &permit,
+                AttemptFailureClass::RateLimit,
+                Some(Duration::from_millis(50)),
+            )
+            .await;
+
+        assert!(!breaker.is_selectable(target).await);
+        assert!(breaker.acquire(target).await.is_none());
+    }
+
+    #[tokio::test]
     async fn later_failure_does_not_shorten_existing_open_deadline() {
         let breaker = CircuitBreaker::new(1, Duration::from_millis(5));
         let target = TargetId::new();
@@ -733,6 +804,7 @@ mod tests {
             breaker: &breaker,
             permit: &permit,
             open_duration: Duration::from_secs(1),
+            force_open: false,
             record_on_drop: true,
         });
         assert!(!breaker.local_is_selectable(target));
@@ -756,7 +828,7 @@ mod tests {
         let stale_success = distributed_probe_after_open(&breaker, TargetId::new()).await;
         tokio::time::sleep(Duration::from_millis(55)).await;
         let replacement = local_replacement_probe(&breaker, stale_success.target);
-        breaker.local_record_failure(&replacement, Duration::from_secs(1));
+        breaker.local_record_failure(&replacement, Duration::from_secs(1), false);
         breaker.local_record_success(&stale_success);
         assert!(breaker.local_try_acquire(stale_success.target).is_none());
 
@@ -764,7 +836,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(55)).await;
         let replacement = local_replacement_probe(&breaker, stale_failure.target);
         breaker.local_record_success(&replacement);
-        breaker.local_record_failure(&stale_failure, Duration::from_secs(1));
+        breaker.local_record_failure(&stale_failure, Duration::from_secs(1), false);
         assert_eq!(breaker.local_try_acquire(stale_failure.target), Some(None));
     }
 
