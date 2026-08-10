@@ -137,6 +137,75 @@ async fn failed_probe_reopens_and_expired_lease_recovers_after_crash() {
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn expired_probe_success_closes_when_token_has_not_been_replaced() {
+    let namespace = namespace("slow-success");
+    let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let second = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let target = TargetId::new();
+    let lease = Duration::from_millis(80);
+    let retention = Duration::from_secs(2);
+
+    let permit = first.acquire(target, lease, retention).await.unwrap();
+    first
+        .record_failure(target, token(&permit), 1, lease, retention)
+        .await
+        .unwrap();
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let probe = first.acquire(target, lease, retention).await.unwrap();
+    assert!(token(&probe).is_some());
+
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    assert!(first.record_success(target, token(&probe)).await.unwrap());
+    assert!(second.observe(target).await.unwrap());
+    assert_eq!(
+        token(&second.acquire(target, lease, retention).await.unwrap()),
+        None
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn expired_probe_failure_reopens_when_token_has_not_been_replaced() {
+    let namespace = namespace("slow-failure");
+    let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let second = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let target = TargetId::new();
+    let lease = Duration::from_millis(80);
+    let retention = Duration::from_secs(2);
+
+    let permit = first.acquire(target, lease, retention).await.unwrap();
+    first
+        .record_failure(target, token(&permit), 1, lease, retention)
+        .await
+        .unwrap();
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let probe = first.acquire(target, lease, retention).await.unwrap();
+    assert!(token(&probe).is_some());
+
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    assert!(
+        first
+            .record_failure(target, token(&probe), 1, lease, retention)
+            .await
+            .unwrap()
+    );
+    assert!(!second.observe(target).await.unwrap());
+    assert_eq!(
+        second.acquire(target, lease, retention).await.unwrap(),
+        DistributedCircuitPermit::Denied
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn stale_probe_success_is_rejected_after_replacement_failure() {
     let namespace = namespace("stale-success");
     let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
