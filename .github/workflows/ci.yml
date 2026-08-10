@@ -84,6 +84,9 @@ jobs:
         run: scripts/verify-helm-contract.sh deploy/helm
       - name: Enforce dependency bans, licenses, and sources
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        env:
+          # This container does not include the repository's compiler wrapper.
+          RUSTC_WRAPPER: ""
         with:
           manifest-path: Cargo.toml
           command: check
