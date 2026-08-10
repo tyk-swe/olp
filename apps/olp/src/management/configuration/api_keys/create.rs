@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_domain::{ApiKeyOwner, ApiKeyOwnerKind, ServiceAccountId, UserId};
+use olp_domain::{ApiKeyOwner, ApiKeyOwnerKind, UserId};
 use olp_storage::{
     access::NewApiKeyRecord, idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
     idempotency::idempotency_fingerprint,
@@ -123,22 +123,9 @@ pub(crate) async fn create_api_key(
     let auth_hmac_key = state.auth_hmac_key();
     let material = auth_hmac_key.generate_api_key();
     let secret = WriteOnlySecret(material.expose_once().to_owned());
-    let (owner, owner_kind, owner_id) = match (request.owner_kind, request.owner_id) {
-        (Some(ApiKeyOwnerKind::User), Some(id)) => (
-            ApiKeyOwner::User(UserId::from_uuid(id)),
-            ApiKeyOwnerKind::User,
-            id,
-        ),
-        (Some(ApiKeyOwnerKind::ServiceAccount), Some(id)) => (
-            ApiKeyOwner::ServiceAccount(ServiceAccountId::from_uuid(id)),
-            ApiKeyOwnerKind::ServiceAccount,
-            id,
-        ),
-        (None, None) => (
-            ApiKeyOwner::User(UserId::from_uuid(principal.user_id)),
-            ApiKeyOwnerKind::User,
-            principal.user_id,
-        ),
+    let owner = match (request.owner_kind, request.owner_id) {
+        (Some(kind), Some(id)) => kind.with_id(id),
+        (None, None) => ApiKeyOwner::User(UserId::from_uuid(principal.user_id)),
         _ => {
             let mut errors = FieldErrors::new();
             errors.insert(
@@ -148,6 +135,8 @@ pub(crate) async fn create_api_key(
             return Err(Problem::validation(errors));
         }
     };
+    let owner_kind = owner.kind();
+    let owner_id = owner.id();
     let record = NewApiKeyRecord {
         name: policy.name,
         material,
@@ -226,8 +215,8 @@ pub(crate) async fn revoke_api_key(
         .map_err(map_access)?;
     with_etag(
         Json(RevokeApiKeyResponse {
-            owner_kind: revoked.owner_kind,
-            owner_id: revoked.owner_id,
+            owner_kind: revoked.owner.kind(),
+            owner_id: revoked.owner.id(),
             team_id: revoked.team_id,
             project_id: revoked.project_id,
             runtime_generation: RuntimeGenerationResponse {

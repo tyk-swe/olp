@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use olp_domain::{OperationKind, Surface};
+use olp_domain::{ApiKeyOwner, OperationKind, Surface};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
@@ -34,8 +34,7 @@ pub struct RequestRecord {
     pub id: Uuid,
     pub runtime_generation_id: Uuid,
     pub api_key_id: Uuid,
-    pub owner_user_id: Option<Uuid>,
-    pub service_account_id: Option<Uuid>,
+    pub owner: ApiKeyOwner,
     pub team_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
     pub route_slug: String,
@@ -290,8 +289,8 @@ fn request_from_row(row: RequestRow) -> Result<RequestRecord, OperationsError> {
         id: row.id,
         runtime_generation_id: row.runtime_generation_id,
         api_key_id: row.api_key_id,
-        owner_user_id: row.owner_user_id,
-        service_account_id: row.service_account_id,
+        owner: ApiKeyOwner::from_ids(row.owner_user_id, row.service_account_id)
+            .ok_or(PersistenceError::InvalidStoredValue("request owner"))?,
         team_id: row.team_id,
         project_id: row.project_id,
         route_slug: row.route_slug,

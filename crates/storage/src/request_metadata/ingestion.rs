@@ -18,14 +18,6 @@ pub struct RequestMetadataEvent {
     pub request_id: Uuid,
     pub runtime_generation_id: Uuid,
     pub api_key_id: Uuid,
-    #[serde(default)]
-    pub owner_user_id: Option<Uuid>,
-    #[serde(default)]
-    pub service_account_id: Option<Uuid>,
-    #[serde(default)]
-    pub team_id: Option<Uuid>,
-    #[serde(default)]
-    pub project_id: Option<Uuid>,
     /// Absent when an authenticated request fails before a provider attempt can
     /// be selected. Such events still produce request metadata, but never a
     /// usage fact.
@@ -449,21 +441,18 @@ impl PgStore {
             transaction.rollback().await?;
             return Err(PersistenceError::InvalidRequestMetadataEvent);
         }
+        // Migration 0034 derives immutable owner/scope attribution from the API key (and from
+        // the parent request for attempts), so the event only needs the authoritative key ID.
         sqlx::query!(
             "INSERT INTO requests \
-              (id, runtime_generation_id, api_key_id, owner_user_id, service_account_id, \
-               team_id, project_id, route_slug, operation, surface, \
+              (id, runtime_generation_id, api_key_id, route_slug, operation, surface, \
               started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms, \
               attempt_count, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $12) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8) \
              ON CONFLICT (id, started_at) DO NOTHING",
             event.request_id,
             event.runtime_generation_id,
             event.api_key_id,
-            event.owner_user_id,
-            event.service_account_id,
-            event.team_id,
-            event.project_id,
             &event.route_slug,
             event.operation.as_str(),
             event.surface.as_str(),
@@ -480,13 +469,11 @@ impl PgStore {
         for attempt in &validated.attempts {
             sqlx::query!(
                 "INSERT INTO attempts \
-                 (id, request_id, request_started_at, api_key_id, owner_user_id, \
-                  service_account_id, team_id, project_id, ordinal, provider_id, upstream_model, \
+                 (id, request_id, request_started_at, ordinal, provider_id, upstream_model, \
                   started_at, completed_at, status_code, error_class, committed, latency_ms, first_byte_ms) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
                  ON CONFLICT (request_id, ordinal) DO NOTHING",
-            attempt.event.id, event.request_id, event.request_started_at, event.api_key_id,
-            event.owner_user_id, event.service_account_id, event.team_id, event.project_id, attempt.ordinal,
+            attempt.event.id, event.request_id, event.request_started_at, attempt.ordinal,
             attempt.event.provider_id, &attempt.event.upstream_model, attempt.event.started_at,
             attempt.event.completed_at, attempt.status_code, attempt.event.error_class.as_deref(),
             attempt.event.committed, attempt.latency_ms, attempt.first_byte_ms)
@@ -592,8 +579,7 @@ impl PgStore {
             sqlx::query!(
                 "INSERT INTO attempt_usage_facts \
                  (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, \
-                  api_key_id, owner_user_id, service_account_id, team_id, project_id, \
-                  provider_id, route_slug, upstream_model, operation, surface, \
+                  api_key_id, provider_id, route_slug, upstream_model, operation, surface, \
                   attempt_started_at, attempt_completed_at, observed_at, charge_status, \
                   usage_observed, usage_complete, input_tokens, output_tokens, \
                   cached_input_tokens, media_units, estimated_cost, unpriced, \
@@ -602,9 +588,9 @@ impl PgStore {
                   provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted, \
                   request_incomplete_counted, provider_incomplete_counted, \
                   model_incomplete_counted, target_incomplete_counted) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                         $16, $17, $18, $19::text::attempt_charge_status, $20, $21, $22, $23, $24, $25, \
-                         $26::numeric, $27, $28, $29, false, false, false, false, false, \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
+                         $15::text::attempt_charge_status, $16, $17, $18, $19, $20, $21, \
+                         $22::numeric, $23, $24, $25, false, false, false, false, false, \
                          false, false, false, false, false, false, false) \
                  ON CONFLICT (request_id, attempt_ordinal) DO NOTHING",
                 attempt.event.id,
@@ -613,10 +599,6 @@ impl PgStore {
                 event.request_started_at,
                 attempt.ordinal,
                 event.api_key_id,
-                event.owner_user_id,
-                event.service_account_id,
-                event.team_id,
-                event.project_id,
                 attempt.event.provider_id,
                 &event.route_slug,
                 &attempt.event.upstream_model,

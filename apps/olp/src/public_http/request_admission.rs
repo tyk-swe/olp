@@ -197,10 +197,6 @@ pub(crate) struct LocalRequestMetadata {
     pub(crate) request_started_at: chrono::DateTime<chrono::Utc>,
     pub(crate) runtime_generation_id: uuid::Uuid,
     pub(crate) api_key_id: uuid::Uuid,
-    pub(crate) owner_user_id: Option<uuid::Uuid>,
-    pub(crate) service_account_id: Option<uuid::Uuid>,
-    pub(crate) team_id: Option<uuid::Uuid>,
-    pub(crate) project_id: Option<uuid::Uuid>,
     pub(crate) route_slug: String,
     pub(crate) operation: OperationKind,
     pub(crate) surface: Surface,
@@ -225,10 +221,6 @@ impl LocalRequestMetadata {
             request_id: uuid::Uuid::now_v7(),
             runtime_generation_id: self.runtime_generation_id,
             api_key_id: self.api_key_id,
-            owner_user_id: self.owner_user_id,
-            service_account_id: self.service_account_id,
-            team_id: self.team_id,
-            project_id: self.project_id,
             provider_id: None,
             route_slug: self.route_slug,
             upstream_model: None,
@@ -294,20 +286,11 @@ async fn enforce_request_limits_inner(
         request.extensions_mut().insert(principal);
     }
     let local_metadata = principal.as_ref().and_then(|principal| {
-        let key = principal.key();
-        let (owner_user_id, service_account_id) = match key.owner {
-            olp_domain::ApiKeyOwner::User(id) => (Some(id.as_uuid()), None),
-            olp_domain::ApiKeyOwner::ServiceAccount(id) => (None, Some(id.as_uuid())),
-        };
         metadata_policy.map(|metadata| LocalRequestMetadata {
             request_metadata: state.inference.request_metadata().cloned(),
             request_started_at,
             runtime_generation_id: principal.runtime().generation.id.as_uuid(),
-            api_key_id: key.id.as_uuid(),
-            owner_user_id,
-            service_account_id,
-            team_id: key.team_id.map(|id| id.as_uuid()),
-            project_id: key.project_id.map(|id| id.as_uuid()),
+            api_key_id: principal.key().id.as_uuid(),
             route_slug: metadata.fallback_route.to_owned(),
             operation: metadata.operation,
             surface: principal.surface(),

@@ -75,7 +75,6 @@ pub struct RequiredTarget {
 struct ExecutionContext {
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
-    attribution: crate::accounting::RequestAttribution,
     request_id: RequestId,
     route_slug: RouteSlug,
     operation_kind: OperationKind,
@@ -89,7 +88,6 @@ impl ExecutionContext {
         RequestAccountingInput {
             generation_id: self.generation_id,
             api_key_id: self.api_key_id,
-            attribution: self.attribution,
             request_id: self.request_id.as_uuid(),
             route_slug: self.route_slug.clone(),
             request_started_at: self.request_started_at,
@@ -385,7 +383,6 @@ impl InferenceService {
         let context = ExecutionContext {
             generation_id: runtime.generation.id.as_uuid(),
             api_key_id,
-            attribution: crate::accounting::RequestAttribution::default(),
             request_id: RequestId::new(),
             route_slug,
             operation_kind: operation.kind(),
@@ -561,7 +558,6 @@ impl InferenceService {
         let context = ExecutionContext {
             generation_id: principal.runtime().generation.id.as_uuid(),
             api_key_id: principal.key().id.as_uuid(),
-            attribution: crate::accounting::RequestAttribution::from_api_key(principal.key()),
             request_id: RequestId::new(),
             route_slug,
             operation_kind: operation.kind(),

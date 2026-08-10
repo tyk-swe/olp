@@ -20,6 +20,14 @@ impl ApiKeyOwnerKind {
             Self::ServiceAccount => "service_account",
         }
     }
+
+    #[must_use]
+    pub const fn with_id(self, id: uuid::Uuid) -> ApiKeyOwner {
+        match self {
+            Self::User => ApiKeyOwner::User(UserId::from_uuid(id)),
+            Self::ServiceAccount => ApiKeyOwner::ServiceAccount(ServiceAccountId::from_uuid(id)),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -37,6 +45,18 @@ impl Default for ApiKeyOwner {
 
 impl ApiKeyOwner {
     #[must_use]
+    pub const fn from_ids(
+        user_id: Option<uuid::Uuid>,
+        service_account_id: Option<uuid::Uuid>,
+    ) -> Option<Self> {
+        match (user_id, service_account_id) {
+            (Some(id), None) => Some(Self::User(UserId::from_uuid(id))),
+            (None, Some(id)) => Some(Self::ServiceAccount(ServiceAccountId::from_uuid(id))),
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub const fn kind(self) -> ApiKeyOwnerKind {
         match self {
             Self::User(_) => ApiKeyOwnerKind::User,
@@ -49,6 +69,14 @@ impl ApiKeyOwner {
         match self {
             Self::User(id) => id.as_uuid(),
             Self::ServiceAccount(id) => id.as_uuid(),
+        }
+    }
+
+    #[must_use]
+    pub const fn split_ids(self) -> (Option<uuid::Uuid>, Option<uuid::Uuid>) {
+        match self {
+            Self::User(id) => (Some(id.as_uuid()), None),
+            Self::ServiceAccount(id) => (None, Some(id.as_uuid())),
         }
     }
 }

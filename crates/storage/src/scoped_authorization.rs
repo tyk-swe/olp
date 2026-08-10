@@ -1,16 +1,17 @@
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-pub(crate) async fn can_manage_existing_api_key(
+async fn can_access_existing_api_key(
     transaction: &mut Transaction<'_, Postgres>,
     actor: Uuid,
     key_id: Uuid,
+    allow_viewer: bool,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
         "SELECT EXISTS ( \
            SELECT 1 FROM api_keys key JOIN users actor ON actor.id = $1 \
             WHERE key.id = $2 AND actor.active AND ( \
-              actor.role IN ('owner', 'operator') OR \
+              actor.role IN ('owner', 'operator') OR ($3 AND actor.role = 'viewer') OR \
               (actor.role = 'developer' AND ( \
                 (key.owner_user_id = actor.id \
                   AND (key.team_id IS NULL OR EXISTS ( \
@@ -33,10 +34,19 @@ pub(crate) async fn can_manage_existing_api_key(
             ) \
          ) AS \"value!\"",
         actor,
-        key_id
+        key_id,
+        allow_viewer
     )
     .fetch_one(&mut **transaction)
     .await
+}
+
+pub(crate) async fn can_manage_existing_api_key(
+    transaction: &mut Transaction<'_, Postgres>,
+    actor: Uuid,
+    key_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    can_access_existing_api_key(transaction, actor, key_id, false).await
 }
 
 pub(crate) async fn can_manage_api_key_scope(
@@ -79,31 +89,7 @@ pub(crate) async fn can_read_existing_api_key(
     actor: Uuid,
     key_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar!(
-        "SELECT EXISTS ( \
-           SELECT 1 FROM api_keys key JOIN users actor ON actor.id = $1 \
-            WHERE key.id = $2 AND actor.active AND ( \
-              actor.role IN ('owner', 'operator', 'viewer') OR \
-              (actor.role = 'developer' AND ( \
-                (key.owner_user_id = actor.id \
-                  AND (key.team_id IS NULL OR EXISTS (SELECT 1 FROM team_memberships membership \
-                    WHERE membership.team_id = key.team_id AND membership.user_id = actor.id)) \
-                  AND (key.project_id IS NULL OR EXISTS (SELECT 1 FROM project_memberships membership \
-                    WHERE membership.project_id = key.project_id AND membership.user_id = actor.id))) OR \
-                (key.team_id IS NOT NULL AND EXISTS (SELECT 1 FROM team_memberships membership \
-                   WHERE membership.team_id = key.team_id AND membership.user_id = actor.id \
-                     AND membership.role = 'admin')) OR \
-                (key.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_memberships membership \
-                   WHERE membership.project_id = key.project_id AND membership.user_id = actor.id \
-                     AND membership.role = 'admin')) \
-              )) \
-            ) \
-         ) AS \"value!\"",
-        actor,
-        key_id
-    )
-    .fetch_one(&mut **transaction)
-    .await
+    can_access_existing_api_key(transaction, actor, key_id, true).await
 }
 
 pub(crate) async fn is_installation_admin(

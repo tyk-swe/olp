@@ -78,10 +78,7 @@ impl PgStore {
     {
         let name = valid_name(&input.name)?;
         let mut transaction = self.pool().begin().await?;
-        if !is_installation_admin(&mut transaction, input.actor).await? {
-            return Err(IdentityError::Forbidden);
-        }
-        let replayed = claim_replay(
+        let claim = claim_replay(
             &mut transaction,
             input.actor,
             "team.create",
@@ -89,12 +86,13 @@ impl PgStore {
             replay,
         )
         .await?;
+        if !is_installation_admin(&mut transaction, input.actor).await? {
+            return Err(IdentityError::Forbidden);
+        }
+        let replayed = replay_response(claim)?;
         if let Some(response) = replayed {
             transaction.rollback().await?;
             return Ok(IdempotencyOutcome::Replayed(response));
-        }
-        if !is_installation_admin(&mut transaction, input.actor).await? {
-            return Err(IdentityError::Forbidden);
         }
         let now = Utc::now();
         let id = Uuid::now_v7();
@@ -124,19 +122,12 @@ impl PgStore {
         )
         .execute(&mut *transaction)
         .await?;
-        insert_audit(
+        let response = build_response(&record)?;
+        finish_creation(
             &mut transaction,
             input.actor,
-            "team.create",
             "team",
             &id.to_string(),
-        )
-        .await?;
-        let response = build_response(&record)?;
-        finish_replay(
-            &mut transaction,
-            input.actor,
-            "team.create",
             &input.idempotency_key,
             replay,
             &response,
@@ -209,10 +200,7 @@ impl PgStore {
     {
         let name = valid_name(&input.name)?;
         let mut transaction = self.pool().begin().await?;
-        if !can_manage_team(&mut transaction, input.actor, input.team_id).await? {
-            return Err(IdentityError::Forbidden);
-        }
-        let replayed = claim_replay(
+        let claim = claim_replay(
             &mut transaction,
             input.actor,
             "project.create",
@@ -220,12 +208,13 @@ impl PgStore {
             replay,
         )
         .await?;
+        if !can_manage_team(&mut transaction, input.actor, input.team_id).await? {
+            return Err(IdentityError::Forbidden);
+        }
+        let replayed = replay_response(claim)?;
         if let Some(response) = replayed {
             transaction.rollback().await?;
             return Ok(IdempotencyOutcome::Replayed(response));
-        }
-        if !can_manage_team(&mut transaction, input.actor, input.team_id).await? {
-            return Err(IdentityError::Forbidden);
         }
         let now = Utc::now();
         let id = Uuid::now_v7();
@@ -261,19 +250,12 @@ impl PgStore {
         )
         .execute(&mut *transaction)
         .await?;
-        insert_audit(
+        let response = build_response(&record)?;
+        finish_creation(
             &mut transaction,
             input.actor,
-            "project.create",
             "project",
             &id.to_string(),
-        )
-        .await?;
-        let response = build_response(&record)?;
-        finish_replay(
-            &mut transaction,
-            input.actor,
-            "project.create",
             &input.idempotency_key,
             replay,
             &response,
@@ -350,10 +332,7 @@ impl PgStore {
     {
         let name = valid_name(&input.name)?;
         let mut transaction = self.pool().begin().await?;
-        if !can_manage_project(&mut transaction, input.actor, input.project_id).await? {
-            return Err(IdentityError::Forbidden);
-        }
-        let replayed = claim_replay(
+        let claim = claim_replay(
             &mut transaction,
             input.actor,
             "service_account.create",
@@ -361,12 +340,13 @@ impl PgStore {
             replay,
         )
         .await?;
+        if !can_manage_project(&mut transaction, input.actor, input.project_id).await? {
+            return Err(IdentityError::Forbidden);
+        }
+        let replayed = replay_response(claim)?;
         if let Some(response) = replayed {
             transaction.rollback().await?;
             return Ok(IdempotencyOutcome::Replayed(response));
-        }
-        if !can_manage_project(&mut transaction, input.actor, input.project_id).await? {
-            return Err(IdentityError::Forbidden);
         }
         let now = Utc::now();
         let id = Uuid::now_v7();
@@ -390,19 +370,12 @@ impl PgStore {
         .await
         .map_err(map_scoped_name_error)?
         .ok_or_else(|| IdentityError::Invalid("project and team must be active".to_owned()))?;
-        insert_audit(
+        let response = build_response(&record)?;
+        finish_creation(
             &mut transaction,
             input.actor,
-            "service_account.create",
             "service_account",
             &id.to_string(),
-        )
-        .await?;
-        let response = build_response(&record)?;
-        finish_replay(
-            &mut transaction,
-            input.actor,
-            "service_account.create",
             &input.idempotency_key,
             replay,
             &response,
@@ -424,12 +397,7 @@ impl PgStore {
         actor: Uuid,
         idempotency_key: &str,
     ) -> Result<ScopedResourceUpdate<TeamRecord>, IdentityError> {
-        if name.is_none() && active.is_none() {
-            return Err(IdentityError::Invalid(
-                "name or active status is required".to_owned(),
-            ));
-        }
-        let name = name.map(valid_name).transpose()?;
+        let name = valid_update(name, active)?;
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -474,20 +442,13 @@ impl PgStore {
         } else {
             None
         };
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "team.update",
             "team",
             &id.to_string(),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "team.update",
             idempotency_key,
-            &id.to_string(),
         )
         .await?;
         transaction.commit().await?;
@@ -506,12 +467,7 @@ impl PgStore {
         actor: Uuid,
         idempotency_key: &str,
     ) -> Result<ScopedResourceUpdate<ProjectRecord>, IdentityError> {
-        if name.is_none() && active.is_none() {
-            return Err(IdentityError::Invalid(
-                "name or active status is required".to_owned(),
-            ));
-        }
-        let name = name.map(valid_name).transpose()?;
+        let name = valid_update(name, active)?;
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -552,20 +508,13 @@ impl PgStore {
         } else {
             None
         };
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "project.update",
             "project",
             &id.to_string(),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "project.update",
             idempotency_key,
-            &id.to_string(),
         )
         .await?;
         transaction.commit().await?;
@@ -584,12 +533,7 @@ impl PgStore {
         actor: Uuid,
         idempotency_key: &str,
     ) -> Result<ScopedResourceUpdate<ServiceAccountRecord>, IdentityError> {
-        if name.is_none() && active.is_none() {
-            return Err(IdentityError::Invalid(
-                "name or active status is required".to_owned(),
-            ));
-        }
-        let name = name.map(valid_name).transpose()?;
+        let name = valid_update(name, active)?;
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -635,20 +579,13 @@ impl PgStore {
         } else {
             None
         };
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "service_account.update",
             "service_account",
             &id.to_string(),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "service_account.update",
             idempotency_key,
-            &id.to_string(),
         )
         .await?;
         transaction.commit().await?;
@@ -727,20 +664,13 @@ impl PgStore {
             created_at: row.created_at,
             updated_at: row.updated_at,
         })?;
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "team_membership.put",
             "team_membership",
             &format!("{team_id}:{user_id}"),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "team_membership.put",
             idempotency_key,
-            &format!("{team_id}:{user_id}"),
         )
         .await?;
         transaction.commit().await?;
@@ -821,20 +751,13 @@ impl PgStore {
             created_at: row.created_at,
             updated_at: row.updated_at,
         })?;
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "project_membership.put",
             "project_membership",
             &format!("{project_id}:{user_id}"),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "project_membership.put",
             idempotency_key,
-            &format!("{project_id}:{user_id}"),
         )
         .await?;
         transaction.commit().await?;
@@ -959,20 +882,13 @@ impl PgStore {
         .await?
         .rows_affected();
         let generation = publish_if_revoked(&mut transaction, actor, revoked).await?;
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "team_membership.remove",
             "team_membership",
             &format!("{team_id}:{user_id}"),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "team_membership.remove",
             idempotency_key,
-            &format!("{team_id}:{user_id}"),
         )
         .await?;
         transaction.commit().await?;
@@ -1024,20 +940,13 @@ impl PgStore {
         .await?
         .rows_affected();
         let generation = publish_if_revoked(&mut transaction, actor, revoked).await?;
-        insert_audit(
+        finish_mutation(
             &mut transaction,
             actor,
             "project_membership.remove",
             "project_membership",
             &format!("{project_id}:{user_id}"),
-        )
-        .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "project_membership.remove",
             idempotency_key,
-            &format!("{project_id}:{user_id}"),
         )
         .await?;
         transaction.commit().await?;
@@ -1053,6 +962,15 @@ fn valid_name(value: &str) -> Result<&str, IdentityError> {
         ));
     }
     Ok(value)
+}
+
+fn valid_update(name: Option<&str>, active: Option<bool>) -> Result<Option<&str>, IdentityError> {
+    if name.is_none() && active.is_none() {
+        return Err(IdentityError::Invalid(
+            "name or active status is required".to_owned(),
+        ));
+    }
+    name.map(valid_name).transpose()
 }
 
 fn map_scoped_name_error(error: sqlx::Error) -> IdentityError {
@@ -1079,8 +997,8 @@ async fn claim_replay(
     operation: &str,
     key: &str,
     replay: ReplayableIdempotency<'_>,
-) -> Result<Option<IdempotencyResponse>, IdentityError> {
-    match claim_replayable_idempotency(
+) -> Result<ReplayableIdempotencyClaim, IdentityError> {
+    Ok(claim_replayable_idempotency(
         transaction,
         actor,
         operation,
@@ -1088,8 +1006,13 @@ async fn claim_replay(
         replay.request_fingerprint(),
         replay.master_key(),
     )
-    .await?
-    {
+    .await?)
+}
+
+fn replay_response(
+    claim: ReplayableIdempotencyClaim,
+) -> Result<Option<IdempotencyResponse>, IdentityError> {
+    match claim {
         ReplayableIdempotencyClaim::Execute => Ok(None),
         ReplayableIdempotencyClaim::Replay(response) => Ok(Some(response)),
         ReplayableIdempotencyClaim::Conflict => Err(IdentityError::IdempotencyConflict),
@@ -1097,24 +1020,40 @@ async fn claim_replay(
     }
 }
 
-async fn finish_replay(
+async fn finish_creation(
     transaction: &mut Transaction<'_, Postgres>,
     actor: Uuid,
-    operation: &str,
+    resource_kind: &str,
+    target: &str,
     key: &str,
     replay: ReplayableIdempotency<'_>,
     response: &IdempotencyResponse,
 ) -> Result<(), IdentityError> {
+    let operation = format!("{resource_kind}.create");
+    insert_audit(transaction, actor, &operation, resource_kind, target).await?;
     complete_replayable_idempotency(
         transaction,
         actor,
-        operation,
+        &operation,
         key,
         replay.request_fingerprint(),
         replay.master_key(),
         response,
     )
     .await?;
+    Ok(())
+}
+
+async fn finish_mutation(
+    transaction: &mut Transaction<'_, Postgres>,
+    actor: Uuid,
+    operation: &str,
+    resource_kind: &str,
+    target: &str,
+    idempotency_key: &str,
+) -> Result<(), IdentityError> {
+    insert_audit(transaction, actor, operation, resource_kind, target).await?;
+    complete_idempotency(transaction, actor, operation, idempotency_key, target).await?;
     Ok(())
 }
 

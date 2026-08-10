@@ -1,7 +1,6 @@
 use chrono::Utc;
 use olp_domain::{
-    ApiKeyOwner, CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug,
-    Surface,
+    CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
 };
 use olp_storage::{
     request_metadata::RequestAttemptMetadata, request_metadata::RequestAttemptUsageMetadata,
@@ -69,36 +68,12 @@ impl RequestOutcome {
 pub(crate) struct RequestAccountingInput {
     pub generation_id: uuid::Uuid,
     pub api_key_id: uuid::Uuid,
-    pub attribution: RequestAttribution,
     pub request_id: uuid::Uuid,
     pub route_slug: RouteSlug,
     pub request_started_at: chrono::DateTime<Utc>,
     pub request_started: tokio::time::Instant,
     pub surface: Surface,
     pub operation: OperationKind,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct RequestAttribution {
-    pub owner_user_id: Option<uuid::Uuid>,
-    pub service_account_id: Option<uuid::Uuid>,
-    pub team_id: Option<uuid::Uuid>,
-    pub project_id: Option<uuid::Uuid>,
-}
-
-impl RequestAttribution {
-    pub(crate) fn from_api_key(key: &olp_domain::ApiKey) -> Self {
-        let (owner_user_id, service_account_id) = match key.owner {
-            ApiKeyOwner::User(id) => (Some(id.as_uuid()), None),
-            ApiKeyOwner::ServiceAccount(id) => (None, Some(id.as_uuid())),
-        };
-        Self {
-            owner_user_id,
-            service_account_id,
-            team_id: key.team_id.map(|id| id.as_uuid()),
-            project_id: key.project_id.map(|id| id.as_uuid()),
-        }
-    }
 }
 
 struct ActiveRequestAttempt {
@@ -147,7 +122,6 @@ pub struct RequestAccountingGuard {
     service: InferenceService,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
-    attribution: RequestAttribution,
     request_id: uuid::Uuid,
     route_slug: RouteSlug,
     attempts: Vec<RequestAttemptMetadata>,
@@ -178,7 +152,6 @@ impl RequestAccountingGuard {
             service,
             generation_id: input.generation_id,
             api_key_id: input.api_key_id,
-            attribution: input.attribution,
             request_id: input.request_id,
             route_slug: input.route_slug,
             attempts: Vec::new(),
@@ -262,7 +235,6 @@ impl RequestAccountingGuard {
             service: self.service.clone(),
             generation_id: self.generation_id,
             api_key_id: self.api_key_id,
-            attribution: self.attribution,
             request_id: self.request_id,
             route_slug: self.route_slug.clone(),
             attempts: self.attempts.clone(),
@@ -322,7 +294,6 @@ impl RequestAccountingGuard {
             RequestMetadataInput {
                 generation_id: self.generation_id,
                 api_key_id: self.api_key_id,
-                attribution: self.attribution,
                 request_id: self.request_id,
                 route_slug: &self.route_slug,
                 attempts: &attempts,
@@ -362,7 +333,6 @@ pub(crate) struct RequestMetadataFinalizer {
     service: InferenceService,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
-    attribution: RequestAttribution,
     request_id: uuid::Uuid,
     route_slug: RouteSlug,
     attempts: Vec<RequestAttemptMetadata>,
@@ -383,7 +353,6 @@ impl RequestMetadataFinalizer {
             RequestMetadataInput {
                 generation_id: self.generation_id,
                 api_key_id: self.api_key_id,
-                attribution: self.attribution,
                 request_id: self.request_id,
                 route_slug: &self.route_slug,
                 attempts: &self.attempts,
@@ -529,7 +498,6 @@ pub(crate) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
 struct RequestMetadataInput<'a> {
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
-    attribution: RequestAttribution,
     request_id: uuid::Uuid,
     route_slug: &'a RouteSlug,
     attempts: &'a [RequestAttemptMetadata],
@@ -605,10 +573,6 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
         request_id: input.request_id,
         runtime_generation_id: input.generation_id,
         api_key_id: input.api_key_id,
-        owner_user_id: input.attribution.owner_user_id,
-        service_account_id: input.attribution.service_account_id,
-        team_id: input.attribution.team_id,
-        project_id: input.attribution.project_id,
         provider_id,
         route_slug: input.route_slug.to_string(),
         upstream_model,

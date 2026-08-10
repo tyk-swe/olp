@@ -1,9 +1,7 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use olp_domain::{
-    ApiKeyLimits, ApiKeyOwner, ApiKeyOwnerKind, ApiKeyScope, ProjectId, RouteSlug, TeamId,
-};
+use olp_domain::{ApiKeyLimits, ApiKeyOwner, ApiKeyScope, ProjectId, RouteSlug, TeamId};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -74,8 +72,7 @@ pub struct ApiKeyCreated {
 #[derive(Debug, Clone)]
 pub struct ApiKeyRevoked {
     pub etag: Uuid,
-    pub owner_kind: ApiKeyOwnerKind,
-    pub owner_id: Uuid,
+    pub owner: ApiKeyOwner,
     pub team_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
     pub release: PublishedRuntimeRelease,
@@ -136,10 +133,16 @@ impl PgStore {
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
-        let (owner_user_id, owner_service_account_id) = match key.owner {
-            ApiKeyOwner::User(id) => (Some(id.as_uuid()), None),
-            ApiKeyOwner::ServiceAccount(id) => (None, Some(id.as_uuid())),
-        };
+        let (owner_user_id, owner_service_account_id) = key.owner.split_ids();
+        let claim = claim_replayable_idempotency(
+            &mut transaction,
+            key.actor,
+            "api_key.create",
+            &key.idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
+        )
+        .await?;
         if !can_manage_api_key_scope(
             &mut transaction,
             key.actor,
@@ -151,16 +154,7 @@ impl PgStore {
         {
             return Err(AccessError::Forbidden);
         }
-        match claim_replayable_idempotency(
-            &mut transaction,
-            key.actor,
-            "api_key.create",
-            &key.idempotency_key,
-            replay.request_fingerprint(),
-            replay.master_key(),
-        )
-        .await?
-        {
+        match claim {
             ReplayableIdempotencyClaim::Execute => {
                 prepare_runtime_mutation(&mut transaction).await?;
             }
@@ -176,17 +170,6 @@ impl PgStore {
                 transaction.rollback().await?;
                 return Err(AccessError::IdempotencyInProgress);
             }
-        }
-        if !can_manage_api_key_scope(
-            &mut transaction,
-            key.actor,
-            owner_user_id,
-            key.team_id.map(TeamId::as_uuid),
-            key.project_id.map(ProjectId::as_uuid),
-        )
-        .await?
-        {
-            return Err(AccessError::Forbidden);
         }
         if key
             .expires_at
@@ -364,17 +347,11 @@ impl PgStore {
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
         transaction.commit().await?;
+        let owner = ApiKeyOwner::from_ids(result.owner_user_id, result.owner_service_account_id)
+            .expect("API-key owner constraint guarantees one owner");
         Ok(ApiKeyRevoked {
             etag: result.etag,
-            owner_kind: if result.owner_user_id.is_some() {
-                ApiKeyOwnerKind::User
-            } else {
-                ApiKeyOwnerKind::ServiceAccount
-            },
-            owner_id: result
-                .owner_user_id
-                .or(result.owner_service_account_id)
-                .expect("API-key owner constraint guarantees one owner"),
+            owner,
             team_id: result.team_id,
             project_id: result.project_id,
             release,

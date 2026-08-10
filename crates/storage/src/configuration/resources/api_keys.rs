@@ -84,23 +84,19 @@ impl PgStore {
         .fetch_optional(self.pool())
         .await?
         .ok_or(ConfigurationError::NotFound)?;
-        let (owner_kind, owner_id) = match (row.owner_user_id, row.owner_service_account_id) {
-            (Some(id), None) => (ApiKeyOwnerKind::User, id),
-            (None, Some(id)) => (ApiKeyOwnerKind::ServiceAccount, id),
-            _ => {
-                return Err(ConfigurationError::Invalid(
+        let owner = ApiKeyOwner::from_ids(row.owner_user_id, row.owner_service_account_id)
+            .ok_or_else(|| {
+                ConfigurationError::Invalid(
                     "stored API key does not have exactly one owner".to_owned(),
-                ));
-            }
-        };
+                )
+            })?;
         Ok(ApiKeyRecord {
             id: row.id,
             lookup_id: row.lookup_id,
             name: row.name,
             created_by: row.created_by,
             created_by_email: row.created_by_email,
-            owner_kind,
-            owner_id,
+            owner,
             team_id: row.team_id,
             project_id: row.project_id,
             scopes: sqlx::query_scalar!("SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope", id).fetch_all(self.pool()).await?,
@@ -323,10 +319,7 @@ impl PgStore {
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
-        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
-            return Err(ConfigurationError::NotFound);
-        }
-        match claim_replayable_idempotency(
+        let claim = claim_replayable_idempotency(
             &mut transaction,
             actor,
             "api_key.rotate",
@@ -334,8 +327,11 @@ impl PgStore {
             replay.request_fingerprint(),
             replay.master_key(),
         )
-        .await?
-        {
+        .await?;
+        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
+            return Err(ConfigurationError::NotFound);
+        }
+        match claim {
             ReplayableIdempotencyClaim::Execute => {
                 prepare_runtime_mutation(&mut transaction).await?;
             }
@@ -351,9 +347,6 @@ impl PgStore {
                 transaction.rollback().await?;
                 return Err(ConfigurationError::IdempotencyInProgress);
             }
-        }
-        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
-            return Err(ConfigurationError::NotFound);
         }
         let etag = Uuid::now_v7();
         let result = sqlx::query!(

@@ -5,7 +5,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use olp_domain::{
-    ApiKeyOwnerKind, CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind,
+    ApiKeyOwner, ApiKeyOwnerKind, CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind,
     ProviderState, RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
     weighted_rendezvous_score,
 };
@@ -337,8 +337,7 @@ pub struct ApiKeyRecord {
     /// Immutable audit metadata; this is independent from credential ownership.
     pub created_by: Uuid,
     pub created_by_email: String,
-    pub owner_kind: ApiKeyOwnerKind,
-    pub owner_id: Uuid,
+    pub owner: ApiKeyOwner,
     pub team_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
     pub scopes: Vec<String>,

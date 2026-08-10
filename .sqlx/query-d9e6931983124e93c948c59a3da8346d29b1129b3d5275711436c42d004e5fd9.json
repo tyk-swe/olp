@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO requests (id, runtime_generation_id, api_key_id, route_slug, operation, surface, started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms, attempt_count, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8) ON CONFLICT (id, started_at) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4",
+        "Text",
+        "Int4",
+        "Int4",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d9e6931983124e93c948c59a3da8346d29b1129b3d5275711436c42d004e5fd9"
+}

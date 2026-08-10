@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit, validate_time_range};
+use super::helpers::{map_operations, owner_filter, page_limit, validate_time_range};
 use crate::{
     ManagementState, Problem,
     management::{Permission, require_permission, require_read_session},
@@ -80,17 +80,13 @@ pub(super) struct RequestSummary {
 
 impl From<RequestRecord> for RequestSummary {
     fn from(record: RequestRecord) -> Self {
-        let (owner_kind, owner_id) = match (record.owner_user_id, record.service_account_id) {
-            (Some(id), None) => (ApiKeyOwnerKind::User, id),
-            (None, Some(id)) => (ApiKeyOwnerKind::ServiceAccount, id),
-            _ => unreachable!("stored request attribution has exactly one owner"),
-        };
+        let owner = record.owner;
         Self {
             id: record.id,
             runtime_generation_id: record.runtime_generation_id,
             api_key_id: record.api_key_id,
-            owner_kind,
-            owner_id,
+            owner_kind: owner.kind(),
+            owner_id: owner.id(),
             team_id: record.team_id,
             project_id: record.project_id,
             route: record.route_slug,
@@ -193,17 +189,7 @@ pub(super) async fn list_requests(
         validate_time_range("started_after", after, "started_before", before)?;
     }
     let limit = page_limit(query.limit)?;
-    if query.owner_kind.is_some() != query.owner_id.is_some() {
-        return Err(Problem::bad_request(
-            "invalid_owner_filter",
-            "owner_kind and owner_id must be supplied together.",
-        ));
-    }
-    let (owner_user_id, service_account_id) = match query.owner_kind {
-        Some(ApiKeyOwnerKind::User) => (query.owner_id, None),
-        Some(ApiKeyOwnerKind::ServiceAccount) => (None, query.owner_id),
-        None => (None, None),
-    };
+    let (owner_user_id, service_account_id) = owner_filter(query.owner_kind, query.owner_id)?;
     let page = state
         .store()
         .requests(

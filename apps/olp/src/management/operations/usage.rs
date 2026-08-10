@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::validate_time_range;
+use super::helpers::{owner_filter, validate_time_range};
 use crate::Problem;
 
 pub(super) mod breakdown;
@@ -36,17 +36,7 @@ pub(super) struct UsageQuery {
 
 impl UsageQuery {
     pub(super) fn filters(&self) -> Result<UsageFilters, Problem> {
-        if self.owner_kind.is_some() != self.owner_id.is_some() {
-            return Err(Problem::bad_request(
-                "invalid_owner_filter",
-                "owner_kind and owner_id must be supplied together.",
-            ));
-        }
-        let (owner_user_id, service_account_id) = match self.owner_kind {
-            Some(ApiKeyOwnerKind::User) => (self.owner_id, None),
-            Some(ApiKeyOwnerKind::ServiceAccount) => (None, self.owner_id),
-            None => (None, None),
-        };
+        let (owner_user_id, service_account_id) = owner_filter(self.owner_kind, self.owner_id)?;
         Ok(UsageFilters {
             observed_after: self.start,
             observed_before: self.end,

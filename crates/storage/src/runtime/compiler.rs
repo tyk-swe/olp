@@ -8,7 +8,7 @@ use olp_domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyOwner, ApiKeyScope,
     ApiKeyStatus, Capability, CredentialVersionId, DurationMs, OperationKind, ProjectId, Provider,
     ProviderId, ProviderKind, Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId,
-    RuntimeSnapshot, ServiceAccountId, Surface, Target, TargetId, TeamId, TransportMode, UserId,
+    RuntimeSnapshot, Surface, Target, TargetId, TeamId, TransportMode,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -388,17 +388,12 @@ async fn compile_api_keys(
         let rpm: Option<i32> = row.requests_per_minute;
         let tpm: Option<i64> = row.tokens_per_minute;
         let concurrency: Option<i32> = row.max_concurrency;
-        let owner = match (row.owner_user_id, row.owner_service_account_id) {
-            (Some(user_id), None) => ApiKeyOwner::User(UserId::from_uuid(user_id)),
-            (None, Some(account_id)) => {
-                ApiKeyOwner::ServiceAccount(ServiceAccountId::from_uuid(account_id))
-            }
-            _ => {
-                return Err(RuntimeCompileError::InvalidConfiguration(
+        let owner = ApiKeyOwner::from_ids(row.owner_user_id, row.owner_service_account_id)
+            .ok_or_else(|| {
+                RuntimeCompileError::InvalidConfiguration(
                     "API key must have exactly one owner".into(),
-                ));
-            }
-        };
+                )
+            })?;
         api_keys.insert(
             lookup_id.clone(),
             ApiKey {

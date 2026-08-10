@@ -223,12 +223,6 @@ pub(crate) struct MembershipRemovalResponse {
     pub runtime_generation: Option<RuntimeGenerationResponse>,
 }
 
-fn require_scope_manager(
-    principal: &olp_storage::authentication::SessionPrincipal,
-) -> Result<(), Problem> {
-    require_permission(principal, Permission::ManageApiKeys)
-}
-
 fn runtime_generation(
     generation: Option<RuntimeGenerationRecord>,
 ) -> Option<RuntimeGenerationResponse> {
@@ -296,7 +290,7 @@ pub(crate) async fn create_team(
     payload: Result<Json<CreateTeamRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
@@ -330,7 +324,7 @@ pub(crate) async fn update_team(
     payload: Result<Json<UpdateScopedResourceRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let request = json_payload(payload)?;
@@ -406,7 +400,7 @@ pub(crate) async fn create_project(
     payload: Result<Json<CreateProjectRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
@@ -441,7 +435,7 @@ pub(crate) async fn update_project(
     payload: Result<Json<UpdateScopedResourceRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let request = json_payload(payload)?;
@@ -517,7 +511,7 @@ pub(crate) async fn create_service_account(
     payload: Result<Json<CreateServiceAccountRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
@@ -553,7 +547,7 @@ pub(crate) async fn update_service_account(
     payload: Result<Json<UpdateScopedResourceRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let request = json_payload(payload)?;
@@ -605,7 +599,7 @@ pub(crate) async fn put_team_membership(
     payload: Result<Json<PutMembershipRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = optional_if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let request = json_payload(payload)?;
@@ -632,7 +626,7 @@ pub(crate) async fn remove_team_membership(
     Path((team_id, user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<MembershipRemovalResponse>, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let generation = state
@@ -677,7 +671,7 @@ pub(crate) async fn put_project_membership(
     payload: Result<Json<PutMembershipRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = optional_if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let request = json_payload(payload)?;
@@ -704,7 +698,7 @@ pub(crate) async fn remove_project_membership(
     Path((project_id, user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<MembershipRemovalResponse>, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_scope_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let generation = state

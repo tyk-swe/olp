@@ -1,9 +1,11 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
+use olp_domain::ApiKeyOwnerKind;
 use olp_storage::operations::OperationsError;
 use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;
+use uuid::Uuid;
 
 use crate::{FieldErrors, Problem, management::map_persistence};
 
@@ -42,6 +44,20 @@ pub(super) fn validate_time_range(
         vec![format!("{end_name} must be later than {start_name}.")],
     );
     Err(Problem::validation(errors))
+}
+
+pub(super) fn owner_filter(
+    kind: Option<ApiKeyOwnerKind>,
+    id: Option<Uuid>,
+) -> Result<(Option<Uuid>, Option<Uuid>), Problem> {
+    match (kind, id) {
+        (Some(kind), Some(id)) => Ok(kind.with_id(id).split_ids()),
+        (None, None) => Ok((None, None)),
+        _ => Err(Problem::bad_request(
+            "invalid_owner_filter",
+            "owner_kind and owner_id must be supplied together.",
+        )),
+    }
 }
 
 pub(super) fn not_found() -> Problem {
