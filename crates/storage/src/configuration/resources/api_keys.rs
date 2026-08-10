@@ -1,6 +1,55 @@
 use super::{helpers::audit_in_transaction, *};
 
 impl PgStore {
+    pub async fn list_api_keys_for_actor(
+        &self,
+        actor: Uuid,
+        filter: ApiKeyListFilter,
+        cursor: Option<Uuid>,
+        limit: i64,
+    ) -> Result<ConfigurationPage<ApiKeyRecord>, ConfigurationError> {
+        let limit = checked_limit(limit)?;
+        let owner_kind = filter.owner_kind.map(ApiKeyOwnerKind::as_str);
+        let rows = sqlx::query!(
+            "SELECT key.id FROM api_keys key JOIN users actor ON actor.id = $1 \
+             WHERE actor.active AND ($2::uuid IS NULL OR key.id > $2) \
+               AND ($3::text IS NULL OR ($3 = 'user' AND key.owner_user_id IS NOT NULL) \
+                    OR ($3 = 'service_account' AND key.owner_service_account_id IS NOT NULL)) \
+               AND ($4::uuid IS NULL OR key.owner_user_id = $4 OR key.owner_service_account_id = $4) \
+               AND ($5::uuid IS NULL OR key.team_id = $5) \
+               AND ($6::uuid IS NULL OR key.project_id = $6) \
+               AND (actor.role IN ('owner', 'operator', 'viewer') OR \
+                    (actor.role = 'developer' AND ( \
+                      (key.owner_user_id = actor.id \
+                        AND (key.team_id IS NULL OR EXISTS (SELECT 1 FROM team_memberships membership \
+                          WHERE membership.team_id = key.team_id AND membership.user_id = actor.id)) \
+                        AND (key.project_id IS NULL OR EXISTS (SELECT 1 FROM project_memberships membership \
+                          WHERE membership.project_id = key.project_id AND membership.user_id = actor.id))) OR \
+                      (key.team_id IS NOT NULL AND EXISTS (SELECT 1 FROM team_memberships membership \
+                        WHERE membership.team_id = key.team_id AND membership.user_id = actor.id \
+                          AND membership.role = 'admin')) OR \
+                      (key.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_memberships membership \
+                        WHERE membership.project_id = key.project_id AND membership.user_id = actor.id \
+                          AND membership.role = 'admin'))))) \
+             ORDER BY key.id LIMIT $7",
+            actor,
+            cursor,
+            owner_kind,
+            filter.owner_id,
+            filter.team_id,
+            filter.project_id,
+            limit + 1
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(self.get_api_key(row.id).await?);
+        }
+        Ok(ConfigurationPage { items, next_cursor })
+    }
+
     pub async fn list_api_keys(
         &self,
         cursor: Option<Uuid>,
@@ -27,6 +76,7 @@ impl PgStore {
         let row = sqlx::query!(
             "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
+                    k.owner_user_id, k.owner_service_account_id, k.team_id, k.project_id, \
                     k.revoked_at, k.rotated_at, k.etag, k.created_at \
              FROM api_keys k JOIN users u ON u.id = k.created_by WHERE k.id = $1",
             id
@@ -34,12 +84,25 @@ impl PgStore {
         .fetch_optional(self.pool())
         .await?
         .ok_or(ConfigurationError::NotFound)?;
+        let (owner_kind, owner_id) = match (row.owner_user_id, row.owner_service_account_id) {
+            (Some(id), None) => (ApiKeyOwnerKind::User, id),
+            (None, Some(id)) => (ApiKeyOwnerKind::ServiceAccount, id),
+            _ => {
+                return Err(ConfigurationError::Invalid(
+                    "stored API key does not have exactly one owner".to_owned(),
+                ));
+            }
+        };
         Ok(ApiKeyRecord {
             id: row.id,
             lookup_id: row.lookup_id,
             name: row.name,
             created_by: row.created_by,
             created_by_email: row.created_by_email,
+            owner_kind,
+            owner_id,
+            team_id: row.team_id,
+            project_id: row.project_id,
             scopes: sqlx::query_scalar!("SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope", id).fetch_all(self.pool()).await?,
             allowed_routes: sqlx::query_scalar!("SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug", id).fetch_all(self.pool()).await?,
             requests_per_minute: row.requests_per_minute,
@@ -51,6 +114,19 @@ impl PgStore {
             etag: row.etag,
             created_at: row.created_at,
         })
+    }
+
+    pub async fn get_api_key_for_actor(
+        &self,
+        actor: Uuid,
+        id: Uuid,
+    ) -> Result<ApiKeyRecord, ConfigurationError> {
+        let mut transaction = self.pool().begin().await?;
+        if !can_read_existing_api_key(&mut transaction, actor, id).await? {
+            return Err(ConfigurationError::NotFound);
+        }
+        transaction.commit().await?;
+        self.get_api_key(id).await
     }
 
     pub async fn update_api_key(
@@ -138,6 +214,9 @@ impl PgStore {
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
+        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
+            return Err(ConfigurationError::NotFound);
+        }
         for route in &allowed_routes {
             let exists: bool = sqlx::query_scalar!(
                 "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
@@ -244,6 +323,9 @@ impl PgStore {
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
+        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
+            return Err(ConfigurationError::NotFound);
+        }
         match claim_replayable_idempotency(
             &mut transaction,
             actor,
@@ -269,6 +351,9 @@ impl PgStore {
                 transaction.rollback().await?;
                 return Err(ConfigurationError::IdempotencyInProgress);
             }
+        }
+        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
+            return Err(ConfigurationError::NotFound);
         }
         let etag = Uuid::now_v7();
         let result = sqlx::query!(

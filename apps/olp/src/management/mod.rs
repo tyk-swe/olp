@@ -105,6 +105,48 @@ pub fn router() -> Router<ManagementState> {
             "/api/v1/invitations/{invitation_id}",
             axum::routing::delete(revoke_invitation),
         )
+        .route(
+            "/api/v1/teams",
+            get(access::scoped::list_teams).post(access::scoped::create_team),
+        )
+        .route(
+            "/api/v1/teams/{team_id}",
+            get(access::scoped::get_team).patch(access::scoped::update_team),
+        )
+        .route(
+            "/api/v1/teams/{team_id}/members",
+            get(access::scoped::list_team_memberships),
+        )
+        .route(
+            "/api/v1/teams/{team_id}/members/{user_id}",
+            axum::routing::put(access::scoped::put_team_membership)
+                .delete(access::scoped::remove_team_membership),
+        )
+        .route(
+            "/api/v1/projects",
+            get(access::scoped::list_projects).post(access::scoped::create_project),
+        )
+        .route(
+            "/api/v1/projects/{project_id}",
+            get(access::scoped::get_project).patch(access::scoped::update_project),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/members",
+            get(access::scoped::list_project_memberships),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/members/{user_id}",
+            axum::routing::put(access::scoped::put_project_membership)
+                .delete(access::scoped::remove_project_membership),
+        )
+        .route(
+            "/api/v1/service-accounts",
+            get(access::scoped::list_service_accounts).post(access::scoped::create_service_account),
+        )
+        .route(
+            "/api/v1/service-accounts/{service_account_id}",
+            get(access::scoped::get_service_account).patch(access::scoped::update_service_account),
+        )
         .merge(configuration::router())
         .merge(crate::management::oidc::router())
         .merge(crate::management::operations::router())
@@ -140,6 +182,24 @@ pub fn router() -> Router<ManagementState> {
         access::invitations::create_invitation,
         access::invitations::revoke_invitation,
         access::invitations::accept_invitation,
+        access::scoped::list_teams,
+        access::scoped::get_team,
+        access::scoped::create_team,
+        access::scoped::update_team,
+        access::scoped::list_projects,
+        access::scoped::get_project,
+        access::scoped::create_project,
+        access::scoped::update_project,
+        access::scoped::list_service_accounts,
+        access::scoped::get_service_account,
+        access::scoped::create_service_account,
+        access::scoped::update_service_account,
+        access::scoped::list_team_memberships,
+        access::scoped::put_team_membership,
+        access::scoped::remove_team_membership,
+        access::scoped::list_project_memberships,
+        access::scoped::put_project_membership,
+        access::scoped::remove_project_membership,
     ),
     components(schemas(
         AuthenticationCapabilities,
@@ -162,6 +222,23 @@ pub fn router() -> Router<ManagementState> {
         AcceptInvitationRequest,
         SessionDetailResponse,
         SessionListResponse,
+        access::scoped::TeamResponse,
+        access::scoped::TeamListResponse,
+        access::scoped::ProjectResponse,
+        access::scoped::ProjectListResponse,
+        access::scoped::ServiceAccountResponse,
+        access::scoped::ServiceAccountListResponse,
+        access::scoped::MembershipResponse,
+        access::scoped::MembershipListResponse,
+        access::scoped::MembershipRemovalResponse,
+        access::scoped::CreateTeamRequest,
+        access::scoped::CreateProjectRequest,
+        access::scoped::CreateServiceAccountRequest,
+        access::scoped::UpdateScopedResourceRequest,
+        access::scoped::PutMembershipRequest,
+        access::scoped::TeamMutationResponse,
+        access::scoped::ProjectMutationResponse,
+        access::scoped::ServiceAccountMutationResponse,
         Problem
     )),
     tags(
@@ -169,6 +246,10 @@ pub fn router() -> Router<ManagementState> {
         (name = "sessions"),
         (name = "users"),
         (name = "invitations"),
+        (name = "teams"),
+        (name = "projects"),
+        (name = "service-accounts"),
+        (name = "memberships"),
     )
 )]
 pub struct ManagementApiDoc;

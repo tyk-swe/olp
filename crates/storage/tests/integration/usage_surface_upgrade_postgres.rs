@@ -249,6 +249,10 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
         provider_id: None,
         upstream_model: None,
         api_key_id: None,
+        owner_user_id: None,
+        service_account_id: None,
+        team_id: None,
+        project_id: None,
         operation: None,
     };
     let completeness = store.usage_completeness(&filters).await.unwrap();

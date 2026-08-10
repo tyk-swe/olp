@@ -18,6 +18,10 @@ pub struct RequestFilters {
     pub provider_id: Option<Uuid>,
     pub upstream_model: Option<String>,
     pub api_key_id: Option<Uuid>,
+    pub owner_user_id: Option<Uuid>,
+    pub service_account_id: Option<Uuid>,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub operation: Option<OperationKind>,
     pub status_code: Option<u16>,
     pub error_class: Option<String>,
@@ -30,6 +34,10 @@ pub struct RequestRecord {
     pub id: Uuid,
     pub runtime_generation_id: Uuid,
     pub api_key_id: Uuid,
+    pub owner_user_id: Option<Uuid>,
+    pub service_account_id: Option<Uuid>,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub route_slug: String,
     pub operation: OperationKind,
     pub surface: Surface,
@@ -76,6 +84,10 @@ struct RequestRow {
     id: Uuid,
     runtime_generation_id: Uuid,
     api_key_id: Uuid,
+    owner_user_id: Option<Uuid>,
+    service_account_id: Option<Uuid>,
+    team_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     route_slug: String,
     operation: String,
     surface: String,
@@ -104,7 +116,8 @@ impl PgStore {
     ) -> Result<OperationsPage<RequestRecord>, OperationsError> {
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(
-            "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
+            "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.owner_user_id, \
+                    r.service_account_id, r.team_id, r.project_id, r.route_slug, r.operation, \
                     r.surface, r.started_at, r.completed_at, r.status_code, r.error_class, \
                     r.total_latency_ms, r.first_byte_ms, r.attempt_count, u.input_tokens, \
                     u.output_tokens, u.cached_input_tokens, u.estimated_cost::text AS estimated_cost, \
@@ -153,7 +166,8 @@ impl PgStore {
     pub async fn request_detail(&self, id: Uuid) -> Result<RequestDetail, OperationsError> {
         let row = sqlx::query_as!(
             RequestRow,
-            "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
+            "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.owner_user_id, \
+                    r.service_account_id, r.team_id, r.project_id, r.route_slug, r.operation, \
                     r.surface, r.started_at, r.completed_at, r.status_code, r.error_class, \
                     r.total_latency_ms, r.first_byte_ms, r.attempt_count, \
                     u.input_tokens AS \"input_tokens?\", \
@@ -240,6 +254,18 @@ fn push_request_filters(query: &mut QueryBuilder<Postgres>, filters: &RequestFil
     if let Some(value) = filters.api_key_id {
         query.push(" AND r.api_key_id = ").push_bind(value);
     }
+    if let Some(value) = filters.owner_user_id {
+        query.push(" AND r.owner_user_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.service_account_id {
+        query.push(" AND r.service_account_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.team_id {
+        query.push(" AND r.team_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.project_id {
+        query.push(" AND r.project_id = ").push_bind(value);
+    }
     if let Some(value) = filters.operation {
         query.push(" AND r.operation = ").push_bind(value.as_str());
     }
@@ -264,6 +290,10 @@ fn request_from_row(row: RequestRow) -> Result<RequestRecord, OperationsError> {
         id: row.id,
         runtime_generation_id: row.runtime_generation_id,
         api_key_id: row.api_key_id,
+        owner_user_id: row.owner_user_id,
+        service_account_id: row.service_account_id,
+        team_id: row.team_id,
+        project_id: row.project_id,
         route_slug: row.route_slug,
         operation: row
             .operation

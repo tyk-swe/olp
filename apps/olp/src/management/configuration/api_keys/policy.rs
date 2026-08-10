@@ -242,6 +242,10 @@ mod tests {
     fn create_request() -> CreateApiKeyRequest {
         CreateApiKeyRequest {
             name: "  SDK key  ".to_owned(),
+            owner_kind: Some(olp_domain::ApiKeyOwnerKind::User),
+            owner_id: Some(uuid::Uuid::now_v7()),
+            team_id: None,
+            project_id: None,
             scopes: vec!["inference".to_owned(), "models_read".to_owned()],
             allowed_routes: vec!["primary-route".to_owned()],
             requests_per_minute: Some(60),
@@ -315,6 +319,10 @@ mod tests {
         let now = Utc::now();
         let create = CreateApiKeyRequest {
             name: "   ".to_owned(),
+            owner_kind: Some(olp_domain::ApiKeyOwnerKind::User),
+            owner_id: Some(uuid::Uuid::now_v7()),
+            team_id: None,
+            project_id: None,
             scopes: vec!["admin".to_owned()],
             allowed_routes: vec!["same-route".to_owned(), "same-route".to_owned()],
             requests_per_minute: Some(0),

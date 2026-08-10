@@ -388,6 +388,11 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
                         id: ApiKeyId::from_uuid(api_key_id),
                         lookup_id,
                         digest: ApiKeyDigest::new(material.digest),
+                        owner: olp_domain::ApiKeyOwner::User(olp_domain::UserId::from_uuid(
+                            owner_id,
+                        )),
+                        team_id: None,
+                        project_id: None,
                         status: ApiKeyStatus::Active,
                         expires_at: None,
                         scopes: BTreeSet::from([ApiKeyScope::Inference]),

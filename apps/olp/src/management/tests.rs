@@ -506,6 +506,10 @@ fn management_dto_debug_output_redacts_plaintext_secrets() {
     let response = CreateApiKeyResponse {
         id: Uuid::now_v7(),
         lookup_id: "olp_lookup".into(),
+        owner_kind: olp_domain::ApiKeyOwnerKind::User,
+        owner_id: Uuid::now_v7(),
+        team_id: None,
+        project_id: None,
         secret: WriteOnlySecret("olp_secret_once".into()),
         runtime_generation: RuntimeGenerationResponse {
             id: Uuid::now_v7(),

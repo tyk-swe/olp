@@ -38,6 +38,10 @@ pub struct UsageFilters {
     pub provider_id: Option<Uuid>,
     pub upstream_model: Option<String>,
     pub api_key_id: Option<Uuid>,
+    pub owner_user_id: Option<Uuid>,
+    pub service_account_id: Option<Uuid>,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub operation: Option<OperationKind>,
 }
 

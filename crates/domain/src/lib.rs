@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod canonical;
+pub mod identity;
 pub mod ids;
 pub mod ports;
 pub mod provider;
@@ -33,9 +34,14 @@ pub use canonical::{
     VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
     media_handle_from_inline_marker, validate_event_sequence,
 };
+pub use identity::{
+    ApiKeyOwner, ApiKeyOwnerKind, Project, ProjectMembership, ScopedRole, ServiceAccount, Team,
+    TeamMembership,
+};
 pub use ids::{
     ApiKeyId, ApiKeyLookupId, ApiKeyLookupIdError, AttemptId, CredentialVersionId, DurationMs,
-    ProviderId, RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId, TargetId,
+    ProjectId, ProviderId, RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId,
+    ServiceAccountId, TargetId, TeamId, UserId,
 };
 pub use ports::{
     AttemptFailureClass, BoxFuture, DiscoveredProviderModel, MediaByteStream, MediaSpool,

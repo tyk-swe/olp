@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() WHERE owner_user_id = $1 AND project_id = $2 AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43f27d9b677797e7db4e76d288e08b0988ce6e2c30599de37ad800a17521ad91"
+}

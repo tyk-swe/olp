@@ -1,10 +1,10 @@
 use serde::Deserialize;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::Problem;
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
 pub(crate) struct PageQuery {
     pub cursor: Option<String>,
     pub limit: Option<u16>,

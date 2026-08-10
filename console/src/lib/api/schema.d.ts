@@ -425,6 +425,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_projects"];
+        put?: never;
+        post: operations["create_project"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_project"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update_project"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_project_memberships"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["put_project_membership"];
+        post?: never;
+        delete: operations["remove_project_membership"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/provider-health": {
         parameters: {
             query?: never;
@@ -1018,6 +1082,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/service-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_service_accounts"];
+        put?: never;
+        post: operations["create_service_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/service-accounts/{service_account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_service_account"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update_service_account"];
+        trace?: never;
+    };
     "/api/v1/sessions": {
         parameters: {
             query?: never;
@@ -1125,6 +1221,70 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_teams"];
+        put?: never;
+        post: operations["create_team"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{team_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_team"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update_team"];
+        trace?: never;
+    };
+    "/api/v1/teams/{team_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_team_memberships"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{team_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["put_team_membership"];
+        post?: never;
+        delete: operations["remove_team_membership"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1241,7 +1401,7 @@ export interface components {
             created_at: string;
             /**
              * Format: uuid
-             * @description The operator who issued this installation-scoped key.
+             * @description Immutable audit metadata for the operator who issued this key.
              */
             created_by: string;
             created_by_email: string;
@@ -1255,6 +1415,11 @@ export interface components {
             /** Format: int32 */
             max_concurrency?: number | null;
             name: string;
+            /** Format: uuid */
+            owner_id: string;
+            owner_kind: components["schemas"]["ApiKeyOwnerKind"];
+            /** Format: uuid */
+            project_id?: string | null;
             /** Format: int32 */
             requests_per_minute?: number | null;
             /** Format: date-time */
@@ -1262,6 +1427,8 @@ export interface components {
             /** Format: date-time */
             rotated_at?: string | null;
             scopes: string[];
+            /** Format: uuid */
+            team_id?: string | null;
             /** Format: int64 */
             tokens_per_minute?: number | null;
         };
@@ -1274,6 +1441,8 @@ export interface components {
             etag: string;
             runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
         };
+        /** @enum {string} */
+        ApiKeyOwnerKind: "user" | "service_account";
         AttemptResponse: {
             committed: boolean;
             /** Format: date-time */
@@ -1364,9 +1533,16 @@ export interface components {
             /** Format: int32 */
             max_concurrency?: number | null;
             name: string;
+            /** Format: uuid */
+            owner_id?: string | null;
+            owner_kind?: null | components["schemas"]["ApiKeyOwnerKind"];
+            /** Format: uuid */
+            project_id?: string | null;
             /** Format: int32 */
             requests_per_minute?: number | null;
             scopes?: string[];
+            /** Format: uuid */
+            team_id?: string | null;
             /** Format: int64 */
             tokens_per_minute?: number | null;
         };
@@ -1374,9 +1550,16 @@ export interface components {
             /** Format: uuid */
             id: string;
             lookup_id: string;
+            /** Format: uuid */
+            owner_id: string;
+            owner_kind: components["schemas"]["ApiKeyOwnerKind"];
+            /** Format: uuid */
+            project_id?: string | null;
             runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
             /** @description Returned only by this creation response. */
             secret: string;
+            /** Format: uuid */
+            team_id?: string | null;
         };
         CreateInvitationRequest: {
             email: string;
@@ -1392,6 +1575,11 @@ export interface components {
             invitation: components["schemas"]["InvitationResponse"];
             /** @description Returned only by the invitation-creation response. */
             readonly token: string;
+        };
+        CreateProjectRequest: {
+            name: string;
+            /** Format: uuid */
+            team_id: string;
         };
         CreateProviderRequest: {
             api_version?: string | null;
@@ -1423,6 +1611,16 @@ export interface components {
             overall_timeout_ms: number;
             slug: string;
             targets: components["schemas"]["RouteTargetRequest"][];
+        };
+        CreateServiceAccountRequest: {
+            name: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            team_id: string;
+        };
+        CreateTeamRequest: {
+            name: string;
         };
         CredentialListResponse: {
             items: components["schemas"]["CredentialResponse"][];
@@ -1600,6 +1798,29 @@ export interface components {
         MediaJobListResponse: {
             data: components["schemas"]["MediaJobItem"][];
             next_cursor?: string | null;
+        };
+        MembershipListResponse: {
+            items: components["schemas"]["MembershipResponse"][];
+        };
+        MembershipRemovalResponse: {
+            runtime_generation?: null | components["schemas"]["RuntimeGenerationResponse"];
+        };
+        MembershipResponse: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by: string;
+            /** Format: uuid */
+            etag: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            role: components["schemas"]["ScopedRole"];
+            /** Format: uuid */
+            team_id: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            user_id: string;
         };
         OidcAuthorizationResponse: {
             authorization_url: string;
@@ -1805,6 +2026,30 @@ export interface components {
             status: number;
             title: string;
             type: string;
+        };
+        ProjectListResponse: {
+            items: components["schemas"]["ProjectResponse"][];
+            next_cursor?: string | null;
+        };
+        ProjectMutationResponse: {
+            project: components["schemas"]["ProjectResponse"];
+            runtime_generation?: null | components["schemas"]["RuntimeGenerationResponse"];
+        };
+        ProjectResponse: {
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by: string;
+            /** Format: uuid */
+            etag: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uuid */
+            team_id: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         ProviderActivationResponse: {
             /** Format: uuid */
@@ -2108,6 +2353,9 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        PutMembershipRequest: {
+            role: components["schemas"]["ScopedRole"];
+        };
         RecentAuthenticationRequest: {
             current_password: string;
             /** @description Exact security operation authorized by this one-time grant. */
@@ -2218,6 +2466,11 @@ export interface components {
             operation: string;
             /** Format: int64 */
             output_tokens?: number | null;
+            /** Format: uuid */
+            owner_id: string;
+            owner_kind: components["schemas"]["ApiKeyOwnerKind"];
+            /** Format: uuid */
+            project_id?: string | null;
             route: string;
             /** Format: uuid */
             runtime_generation_id: string;
@@ -2226,10 +2479,22 @@ export interface components {
             /** Format: int32 */
             status_code?: number | null;
             surface: string;
+            /** Format: uuid */
+            team_id?: string | null;
             /** Format: int64 */
             total_latency_ms?: number | null;
             unpriced?: boolean | null;
             usage_complete?: boolean | null;
+        };
+        RevokeApiKeyResponse: {
+            /** Format: uuid */
+            owner_id: string;
+            owner_kind: components["schemas"]["ApiKeyOwnerKind"];
+            /** Format: uuid */
+            project_id?: string | null;
+            runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
+            /** Format: uuid */
+            team_id?: string | null;
         };
         RotateApiKeyResponse: {
             /** Format: uuid */
@@ -2408,6 +2673,34 @@ export interface components {
             /** Format: int64 */
             sequence: number;
         };
+        /** @enum {string} */
+        ScopedRole: "admin" | "member";
+        ServiceAccountListResponse: {
+            items: components["schemas"]["ServiceAccountResponse"][];
+            next_cursor?: string | null;
+        };
+        ServiceAccountMutationResponse: {
+            runtime_generation?: null | components["schemas"]["RuntimeGenerationResponse"];
+            service_account: components["schemas"]["ServiceAccountResponse"];
+        };
+        ServiceAccountResponse: {
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by: string;
+            /** Format: uuid */
+            etag: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            team_id: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         SessionDetailResponse: {
             /** Format: date-time */
             created_at: string;
@@ -2466,6 +2759,28 @@ export interface components {
             seed: string;
             surface: string;
         };
+        TeamListResponse: {
+            items: components["schemas"]["TeamResponse"][];
+            next_cursor?: string | null;
+        };
+        TeamMutationResponse: {
+            runtime_generation?: null | components["schemas"]["RuntimeGenerationResponse"];
+            team: components["schemas"]["TeamResponse"];
+        };
+        TeamResponse: {
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by: string;
+            /** Format: uuid */
+            etag: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         UpdateApiKeyRequest: {
             allowed_routes?: string[];
             /** Format: date-time */
@@ -2490,6 +2805,10 @@ export interface components {
             deployment?: string | null;
             endpoint?: string | null;
             name: string;
+        };
+        UpdateScopedResourceRequest: {
+            active?: boolean | null;
+            name?: string | null;
         };
         UpdateSettingRequest: {
             value: string;
@@ -2629,6 +2948,10 @@ export interface operations {
             query?: {
                 cursor?: string;
                 limit?: number;
+                owner_kind?: components["schemas"]["ApiKeyOwnerKind"];
+                owner_id?: string;
+                team_id?: string;
+                project_id?: string;
             };
             header?: never;
             path?: never;
@@ -2917,7 +3240,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RuntimeGenerationResponse"];
+                    "application/json": components["schemas"]["RevokeApiKeyResponse"];
                 };
             };
             /** @description Authentication required. */
@@ -4781,6 +5104,427 @@ export interface operations {
             };
         };
     };
+    list_projects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string | null;
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectListResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProjectRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScopedResourceRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMutationResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_project_memberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipListResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_project_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutMembershipRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    remove_project_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipRemovalResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     provider_health: {
         parameters: {
             query?: {
@@ -6487,6 +7231,10 @@ export interface operations {
                 provider_id?: string;
                 model?: string;
                 api_key_id?: string;
+                owner_kind?: components["schemas"]["ApiKeyOwnerKind"];
+                owner_id?: string;
+                team_id?: string;
+                project_id?: string;
                 operation?: string;
                 status_code?: number;
                 error_class?: string;
@@ -7533,6 +8281,237 @@ export interface operations {
             };
         };
     };
+    list_service_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string | null;
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceAccountListResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_service_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateServiceAccountRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceAccountResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_service_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceAccountResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_service_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScopedResourceRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceAccountMutationResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_sessions: {
         parameters: {
             query?: {
@@ -8089,6 +9068,426 @@ export interface operations {
             };
         };
     };
+    list_teams: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamListResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_team: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTeamRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_team: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_team: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScopedResourceRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamMutationResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_team_memberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipListResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_team_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutMembershipRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    remove_team_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipRemovalResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request could not be completed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     usage_breakdown: {
         parameters: {
             query: {
@@ -8098,6 +9497,10 @@ export interface operations {
                 provider_id?: string;
                 model?: string;
                 api_key_id?: string;
+                owner_kind?: components["schemas"]["ApiKeyOwnerKind"];
+                owner_id?: string;
+                team_id?: string;
+                project_id?: string;
                 operation?: string;
                 /** @description Break down by route, provider, model, api_key, or operation */
                 dimension: string;
@@ -8157,6 +9560,10 @@ export interface operations {
                 provider_id?: string;
                 model?: string;
                 api_key_id?: string;
+                owner_kind?: components["schemas"]["ApiKeyOwnerKind"];
+                owner_id?: string;
+                team_id?: string;
+                project_id?: string;
                 operation?: string;
             };
             header?: never;
@@ -8212,6 +9619,10 @@ export interface operations {
                 provider_id?: string;
                 model?: string;
                 api_key_id?: string;
+                owner_kind?: components["schemas"]["ApiKeyOwnerKind"];
+                owner_id?: string;
+                team_id?: string;
+                project_id?: string;
                 operation?: string;
             };
             header?: never;
@@ -8267,6 +9678,10 @@ export interface operations {
                 provider_id?: string;
                 model?: string;
                 api_key_id?: string;
+                owner_kind?: components["schemas"]["ApiKeyOwnerKind"];
+                owner_id?: string;
+                team_id?: string;
+                project_id?: string;
                 operation?: string;
                 /** @description Bucket size: hour or day */
                 granularity?: string;

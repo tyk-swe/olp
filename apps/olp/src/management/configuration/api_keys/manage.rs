@@ -7,8 +7,9 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
+use olp_domain::ApiKeyOwnerKind;
 use olp_storage::{
-    configuration::ApiKeyRecord, configuration::RotateApiKeyInput,
+    configuration::ApiKeyListFilter, configuration::ApiKeyRecord, configuration::RotateApiKeyInput,
     idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
 };
 use serde::{Deserialize, Serialize};
@@ -35,9 +36,13 @@ pub(crate) struct ApiKeyDetailResponse {
     pub id: Uuid,
     pub lookup_id: String,
     pub name: String,
-    /// The operator who issued this installation-scoped key.
+    /// Immutable audit metadata for the operator who issued this key.
     pub created_by: Uuid,
     pub created_by_email: String,
+    pub owner_kind: ApiKeyOwnerKind,
+    pub owner_id: Uuid,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub scopes: Vec<String>,
     pub allowed_routes: Vec<String>,
     pub requests_per_minute: Option<i32>,
@@ -58,6 +63,10 @@ impl From<ApiKeyRecord> for ApiKeyDetailResponse {
             name: value.name,
             created_by: value.created_by,
             created_by_email: value.created_by_email,
+            owner_kind: value.owner_kind,
+            owner_id: value.owner_id,
+            team_id: value.team_id,
+            project_id: value.project_id,
             scopes: value.scopes,
             allowed_routes: value.allowed_routes,
             requests_per_minute: value.requests_per_minute,
@@ -78,24 +87,56 @@ pub(crate) struct ApiKeyListResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ApiKeyListQuery {
+    pub cursor: Option<String>,
+    pub limit: Option<u16>,
+    pub owner_kind: Option<ApiKeyOwnerKind>,
+    pub owner_id: Option<Uuid>,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/api-keys",
     tag = "api-keys",
-    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)),
+    params(
+        ("cursor" = Option<String>, Query),
+        ("limit" = Option<u16>, Query),
+        ("owner_kind" = Option<ApiKeyOwnerKind>, Query),
+        ("owner_id" = Option<Uuid>, Query),
+        ("team_id" = Option<Uuid>, Query),
+        ("project_id" = Option<Uuid>, Query)
+    ),
     responses((status = 200, body = ApiKeyListResponse))
 )]
 pub(crate) async fn list_api_keys(
     State(state): State<ManagementState>,
     headers: HeaderMap,
-    Query(query): Query<PageQuery>,
+    Query(query): Query<ApiKeyListQuery>,
 ) -> Result<Json<ApiKeyListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let (cursor, limit) = page(query)?;
+    if query.owner_id.is_some() && query.owner_kind.is_none() {
+        return Err(Problem::bad_request(
+            "invalid_owner_filter",
+            "owner_kind is required when owner_id is supplied.",
+        ));
+    }
+    let filter = ApiKeyListFilter {
+        owner_kind: query.owner_kind,
+        owner_id: query.owner_id,
+        team_id: query.team_id,
+        project_id: query.project_id,
+    };
+    let (cursor, limit) = page(PageQuery {
+        cursor: query.cursor,
+        limit: query.limit,
+    })?;
     let page = state
         .store()
-        .list_api_keys(cursor, limit)
+        .list_api_keys_for_actor(principal.user_id, filter, cursor, limit)
         .await
         .map_err(map_configuration_resource)?;
     Ok(Json(ApiKeyListResponse {
@@ -120,7 +161,7 @@ pub(crate) async fn get_api_key(
     require_permission(&principal, Permission::ReadConfiguration)?;
     let key: ApiKeyDetailResponse = state
         .store()
-        .get_api_key(api_key_id)
+        .get_api_key_for_actor(principal.user_id, api_key_id)
         .await
         .map_err(map_configuration_resource)?
         .into();

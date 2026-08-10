@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use olp_domain::ApiKeyOwnerKind;
 use olp_storage::{usage::UsageFilters, usage::UsageRangeCoverage};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -23,11 +24,29 @@ pub(super) struct UsageQuery {
     pub(super) model: Option<String>,
     #[param(value_type = Option<String>, format = Uuid)]
     pub(super) api_key_id: Option<Uuid>,
+    pub(super) owner_kind: Option<ApiKeyOwnerKind>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    pub(super) owner_id: Option<Uuid>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    pub(super) team_id: Option<Uuid>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    pub(super) project_id: Option<Uuid>,
     pub(super) operation: Option<String>,
 }
 
 impl UsageQuery {
     pub(super) fn filters(&self) -> Result<UsageFilters, Problem> {
+        if self.owner_kind.is_some() != self.owner_id.is_some() {
+            return Err(Problem::bad_request(
+                "invalid_owner_filter",
+                "owner_kind and owner_id must be supplied together.",
+            ));
+        }
+        let (owner_user_id, service_account_id) = match self.owner_kind {
+            Some(ApiKeyOwnerKind::User) => (self.owner_id, None),
+            Some(ApiKeyOwnerKind::ServiceAccount) => (None, self.owner_id),
+            None => (None, None),
+        };
         Ok(UsageFilters {
             observed_after: self.start,
             observed_before: self.end,
@@ -35,6 +54,10 @@ impl UsageQuery {
             provider_id: self.provider_id,
             upstream_model: self.model.clone(),
             api_key_id: self.api_key_id,
+            owner_user_id,
+            service_account_id,
+            team_id: self.team_id,
+            project_id: self.project_id,
             operation: self
                 .operation
                 .as_deref()

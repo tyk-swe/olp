@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM users actor WHERE actor.id = $1 AND actor.active AND ( actor.role IN ('owner', 'operator') OR (actor.role = 'developer' AND EXISTS (SELECT 1 FROM team_memberships membership WHERE membership.team_id = $2 AND membership.user_id = actor.id AND membership.role = 'admin')))) AS \"value!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f692ed5140f7d65248dc9bcfb2e3c38a3ba14a28c6a0f7e9234e10823a71caaf"
+}

@@ -4,6 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
+use olp_domain::ApiKeyOwnerKind;
 use olp_storage::{
     operations::AttemptRecord, operations::RequestFilters, operations::RequestRecord,
     operations::TimestampCursor,
@@ -29,6 +30,13 @@ pub(super) struct RequestQuery {
     model: Option<String>,
     #[param(value_type = Option<String>, format = Uuid)]
     api_key_id: Option<Uuid>,
+    owner_kind: Option<ApiKeyOwnerKind>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    owner_id: Option<Uuid>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    team_id: Option<Uuid>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    project_id: Option<Uuid>,
     operation: Option<String>,
     status_code: Option<u16>,
     error_class: Option<String>,
@@ -44,6 +52,13 @@ pub(super) struct RequestSummary {
     runtime_generation_id: Uuid,
     #[schema(value_type = String, format = Uuid)]
     api_key_id: Uuid,
+    owner_kind: ApiKeyOwnerKind,
+    #[schema(value_type = String, format = Uuid)]
+    owner_id: Uuid,
+    #[schema(value_type = Option<String>, format = Uuid)]
+    team_id: Option<Uuid>,
+    #[schema(value_type = Option<String>, format = Uuid)]
+    project_id: Option<Uuid>,
     route: String,
     operation: String,
     surface: String,
@@ -65,10 +80,19 @@ pub(super) struct RequestSummary {
 
 impl From<RequestRecord> for RequestSummary {
     fn from(record: RequestRecord) -> Self {
+        let (owner_kind, owner_id) = match (record.owner_user_id, record.service_account_id) {
+            (Some(id), None) => (ApiKeyOwnerKind::User, id),
+            (None, Some(id)) => (ApiKeyOwnerKind::ServiceAccount, id),
+            _ => unreachable!("stored request attribution has exactly one owner"),
+        };
         Self {
             id: record.id,
             runtime_generation_id: record.runtime_generation_id,
             api_key_id: record.api_key_id,
+            owner_kind,
+            owner_id,
+            team_id: record.team_id,
+            project_id: record.project_id,
             route: record.route_slug,
             operation: record.operation.to_string(),
             surface: record.surface.to_string(),
@@ -169,6 +193,17 @@ pub(super) async fn list_requests(
         validate_time_range("started_after", after, "started_before", before)?;
     }
     let limit = page_limit(query.limit)?;
+    if query.owner_kind.is_some() != query.owner_id.is_some() {
+        return Err(Problem::bad_request(
+            "invalid_owner_filter",
+            "owner_kind and owner_id must be supplied together.",
+        ));
+    }
+    let (owner_user_id, service_account_id) = match query.owner_kind {
+        Some(ApiKeyOwnerKind::User) => (query.owner_id, None),
+        Some(ApiKeyOwnerKind::ServiceAccount) => (None, query.owner_id),
+        None => (None, None),
+    };
     let page = state
         .store()
         .requests(
@@ -177,6 +212,10 @@ pub(super) async fn list_requests(
                 provider_id: query.provider_id,
                 upstream_model: query.model,
                 api_key_id: query.api_key_id,
+                owner_user_id,
+                service_account_id,
+                team_id: query.team_id,
+                project_id: query.project_id,
                 operation: query
                     .operation
                     .as_deref()

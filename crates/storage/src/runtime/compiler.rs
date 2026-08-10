@@ -5,10 +5,10 @@ use std::{
 
 use chrono::Utc;
 use olp_domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    Capability, CredentialVersionId, DurationMs, OperationKind, Provider, ProviderId, ProviderKind,
-    Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface,
-    Target, TargetId, TransportMode,
+    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyOwner, ApiKeyScope,
+    ApiKeyStatus, Capability, CredentialVersionId, DurationMs, OperationKind, ProjectId, Provider,
+    ProviderId, ProviderKind, Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId,
+    RuntimeSnapshot, ServiceAccountId, Surface, Target, TargetId, TeamId, TransportMode, UserId,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -325,10 +325,28 @@ async fn compile_api_keys(
 ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
     let mut api_keys = BTreeMap::new();
     for row in sqlx::query!(
-        "SELECT id, lookup_id, secret_digest, expires_at, requests_per_minute, \
-                tokens_per_minute, max_concurrency \
-         FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) \
-         ORDER BY lookup_id",
+        "SELECT key.id, key.lookup_id, key.secret_digest, key.expires_at, \
+                key.requests_per_minute, key.tokens_per_minute, key.max_concurrency, \
+                key.owner_user_id, key.owner_service_account_id, key.team_id, key.project_id \
+         FROM api_keys key \
+         LEFT JOIN users owner_user ON owner_user.id = key.owner_user_id \
+         LEFT JOIN service_accounts owner_account ON owner_account.id = key.owner_service_account_id \
+         LEFT JOIN teams team ON team.id = key.team_id \
+         LEFT JOIN projects project ON project.id = key.project_id \
+         WHERE key.revoked_at IS NULL AND (key.expires_at IS NULL OR key.expires_at > now()) \
+           AND ((key.owner_user_id IS NOT NULL AND owner_user.active) OR \
+                (key.owner_service_account_id IS NOT NULL AND owner_account.active)) \
+           AND (key.team_id IS NULL OR team.active) \
+           AND (key.project_id IS NULL OR project.active) \
+           AND (key.owner_user_id IS NULL OR key.team_id IS NULL OR EXISTS ( \
+                SELECT 1 FROM team_memberships membership \
+                 WHERE membership.team_id = key.team_id \
+                   AND membership.user_id = key.owner_user_id)) \
+           AND (key.owner_user_id IS NULL OR key.project_id IS NULL OR EXISTS ( \
+                SELECT 1 FROM project_memberships membership \
+                 WHERE membership.project_id = key.project_id \
+                   AND membership.user_id = key.owner_user_id)) \
+         ORDER BY key.lookup_id",
     )
     .fetch_all(&mut **transaction)
     .await?
@@ -370,12 +388,26 @@ async fn compile_api_keys(
         let rpm: Option<i32> = row.requests_per_minute;
         let tpm: Option<i64> = row.tokens_per_minute;
         let concurrency: Option<i32> = row.max_concurrency;
+        let owner = match (row.owner_user_id, row.owner_service_account_id) {
+            (Some(user_id), None) => ApiKeyOwner::User(UserId::from_uuid(user_id)),
+            (None, Some(account_id)) => {
+                ApiKeyOwner::ServiceAccount(ServiceAccountId::from_uuid(account_id))
+            }
+            _ => {
+                return Err(RuntimeCompileError::InvalidConfiguration(
+                    "API key must have exactly one owner".into(),
+                ));
+            }
+        };
         api_keys.insert(
             lookup_id.clone(),
             ApiKey {
                 id: ApiKeyId::from_uuid(id),
                 lookup_id,
                 digest: ApiKeyDigest::new(digest),
+                owner,
+                team_id: row.team_id.map(TeamId::from_uuid),
+                project_id: row.project_id.map(ProjectId::from_uuid),
                 status: ApiKeyStatus::Active,
                 expires_at: row.expires_at,
                 scopes,

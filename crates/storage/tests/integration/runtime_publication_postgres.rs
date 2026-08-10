@@ -48,6 +48,9 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
             allowed_routes: Vec::new(),
             limits: ApiKeyLimits::default(),
             expires_at: None,
+            owner: olp_domain::ApiKeyOwner::User(olp_domain::UserId::from_uuid(actor)),
+            team_id: None,
+            project_id: None,
             actor,
             idempotency_key: "runtime-lock-order-0001".to_owned(),
         };

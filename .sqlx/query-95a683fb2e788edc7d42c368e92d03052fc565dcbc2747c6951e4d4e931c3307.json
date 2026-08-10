@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE service_accounts SET active = false, etag = uuidv7(), updated_at = now() WHERE project_id = $1 AND active",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "95a683fb2e788edc7d42c368e92d03052fc565dcbc2747c6951e4d4e931c3307"
+}

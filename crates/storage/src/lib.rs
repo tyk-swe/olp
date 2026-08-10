@@ -16,6 +16,7 @@ pub mod oidc;
 pub mod operations;
 pub mod request_metadata;
 pub mod runtime;
+mod scoped_authorization;
 pub mod security;
 mod store;
 #[cfg(feature = "test-util")]

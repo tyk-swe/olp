@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH valid_scope AS ( SELECT project.id AS project_id, project.team_id, account.id AS user_id FROM projects project JOIN users account ON account.id = $2 JOIN team_memberships team_member ON team_member.team_id = project.team_id AND team_member.user_id = account.id WHERE project.id = $1 AND project.active AND account.active ), updated AS ( UPDATE project_memberships membership SET role = $3::text::scoped_membership_role, etag = $4, updated_at = now() FROM valid_scope WHERE membership.project_id = valid_scope.project_id AND membership.user_id = valid_scope.user_id AND $6::uuid IS NOT NULL AND membership.etag = $6 RETURNING membership.project_id, membership.team_id, membership.user_id, membership.role, membership.etag, membership.created_by, membership.created_at, membership.updated_at ), inserted AS ( INSERT INTO project_memberships (project_id, team_id, user_id, role, etag, created_by, created_at, updated_at) SELECT project_id, team_id, user_id, $3::text::scoped_membership_role, $4, $5, now(), now() FROM valid_scope WHERE $6::uuid IS NULL ON CONFLICT (project_id, user_id) DO NOTHING RETURNING project_id, team_id, user_id, role, etag, created_by, created_at, updated_at ) SELECT project_id AS \"project_id!\", team_id AS \"team_id!\", user_id AS \"user_id!\", role::text AS \"role!\", etag AS \"etag!\", created_by AS \"created_by!\", created_at AS \"created_at!\", updated_at AS \"updated_at!\" FROM updated UNION ALL SELECT project_id, team_id, user_id, role::text AS \"role!\", etag, created_by, created_at, updated_at FROM inserted",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "team_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "role!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "etag!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_by!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "6b525847c3f9ef686f53a02721ff913d3ca524fd44a88ce0938761ef38e01410"
+}

@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH valid_scope AS ( SELECT team.id AS team_id, account.id AS user_id FROM teams team JOIN users account ON account.id = $2 WHERE team.id = $1 AND team.active AND account.active ), updated AS ( UPDATE team_memberships membership SET role = $3::text::scoped_membership_role, etag = $4, updated_at = now() FROM valid_scope WHERE membership.team_id = valid_scope.team_id AND membership.user_id = valid_scope.user_id AND $6::uuid IS NOT NULL AND membership.etag = $6 RETURNING membership.team_id, membership.user_id, membership.role, membership.etag, membership.created_by, membership.created_at, membership.updated_at ), inserted AS ( INSERT INTO team_memberships (team_id, user_id, role, etag, created_by, created_at, updated_at) SELECT team_id, user_id, $3::text::scoped_membership_role, $4, $5, now(), now() FROM valid_scope WHERE $6::uuid IS NULL ON CONFLICT (team_id, user_id) DO NOTHING RETURNING team_id, user_id, role, etag, created_by, created_at, updated_at ) SELECT team_id AS \"team_id!\", user_id AS \"user_id!\", role::text AS \"role!\", etag AS \"etag!\", created_by AS \"created_by!\", created_at AS \"created_at!\", updated_at AS \"updated_at!\" FROM updated UNION ALL SELECT team_id, user_id, role::text AS \"role!\", etag, created_by, created_at, updated_at FROM inserted",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "team_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "role!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "etag!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "37ca89b0a12c12a1e62f0843118909d066d8fc43d1ebf5109b31d1375ed726a0"
+}

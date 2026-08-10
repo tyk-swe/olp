@@ -9,6 +9,7 @@ use crate::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, revoke_user_sessions,
     },
+    runtime::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
     security::SessionMaterial,
     split_page,
 };
@@ -123,7 +124,13 @@ impl PgStore {
                 "role or active status is required".to_owned(),
             ));
         }
-        let mut transaction = self.pool().begin().await?;
+        let mut transaction = self
+            .pool()
+            .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+            .await?;
+        if active == Some(false) {
+            prepare_runtime_mutation(&mut transaction).await?;
+        }
         let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
             .fetch_optional(&mut *transaction)
             .await?
@@ -152,6 +159,18 @@ impl PgStore {
             .execute(&mut *transaction)
             .await?
             .rows_affected();
+        let revoked_keys = if active == Some(false) {
+            sqlx::query!(
+                "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() \
+                 WHERE owner_user_id = $1 AND revoked_at IS NULL",
+                id
+            )
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+        } else {
+            0
+        };
         insert_audit(
             &mut transaction,
             actor,
@@ -169,6 +188,17 @@ impl PgStore {
                 &id.to_string(),
             )
             .await?;
+        }
+        if revoked_keys > 0 {
+            insert_audit(
+                &mut transaction,
+                actor,
+                "api_key.revoke_for_user_disable",
+                "user",
+                &id.to_string(),
+            )
+            .await?;
+            compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
         }
         transaction.commit().await?;
         user_from_row(row)

@@ -54,11 +54,15 @@ macro_rules! uuid_id {
 uuid_id!(ApiKeyId);
 uuid_id!(AttemptId);
 uuid_id!(CredentialVersionId);
+uuid_id!(ProjectId);
 uuid_id!(ProviderId);
 uuid_id!(RequestId);
 uuid_id!(RouteId);
 uuid_id!(RuntimeGenerationId);
+uuid_id!(ServiceAccountId);
+uuid_id!(TeamId);
 uuid_id!(TargetId);
+uuid_id!(UserId);
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(try_from = "String", into = "String")]

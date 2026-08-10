@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use olp_domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
+use olp_domain::{
+    ApiKeyLimits, ApiKeyOwner, ApiKeyOwnerKind, ApiKeyScope, ProjectId, RouteSlug, TeamId,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -16,6 +18,7 @@ use crate::{
         PublishedRuntimeRelease, RuntimeCompileError, compile_and_publish_runtime_in_transaction,
         prepare_runtime_mutation,
     },
+    scoped_authorization::{can_manage_api_key_scope, can_manage_existing_api_key},
     security::ApiKeyMaterial,
 };
 
@@ -35,6 +38,8 @@ pub enum AccessError {
     IdempotencyConflict,
     #[error("an operation with this idempotency key is still in progress")]
     IdempotencyInProgress,
+    #[error("the current user cannot manage API keys in this scope")]
+    Forbidden,
 }
 
 impl From<sqlx::Error> for AccessError {
@@ -51,6 +56,9 @@ pub struct NewApiKeyRecord {
     pub allowed_routes: Vec<RouteSlug>,
     pub limits: ApiKeyLimits,
     pub expires_at: Option<DateTime<Utc>>,
+    pub owner: ApiKeyOwner,
+    pub team_id: Option<TeamId>,
+    pub project_id: Option<ProjectId>,
     pub actor: Uuid,
     pub idempotency_key: String,
 }
@@ -66,6 +74,10 @@ pub struct ApiKeyCreated {
 #[derive(Debug, Clone)]
 pub struct ApiKeyRevoked {
     pub etag: Uuid,
+    pub owner_kind: ApiKeyOwnerKind,
+    pub owner_id: Uuid,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub release: PublishedRuntimeRelease,
 }
 
@@ -106,12 +118,39 @@ impl PgStore {
                 "route allowlist entries must be unique".to_owned(),
             ));
         }
+        if key.project_id.is_some() && key.team_id.is_none() {
+            return Err(AccessError::Invalid(
+                "project-scoped keys must identify their team".to_owned(),
+            ));
+        }
+        if matches!(key.owner, ApiKeyOwner::ServiceAccount(_))
+            && (key.team_id.is_none() || key.project_id.is_none())
+        {
+            return Err(AccessError::Invalid(
+                "service-account-owned keys must identify their team and project".to_owned(),
+            ));
+        }
         let id = Uuid::now_v7();
         let etag = Uuid::now_v7();
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
+        let (owner_user_id, owner_service_account_id) = match key.owner {
+            ApiKeyOwner::User(id) => (Some(id.as_uuid()), None),
+            ApiKeyOwner::ServiceAccount(id) => (None, Some(id.as_uuid())),
+        };
+        if !can_manage_api_key_scope(
+            &mut transaction,
+            key.actor,
+            owner_user_id,
+            key.team_id.map(TeamId::as_uuid),
+            key.project_id.map(ProjectId::as_uuid),
+        )
+        .await?
+        {
+            return Err(AccessError::Forbidden);
+        }
         match claim_replayable_idempotency(
             &mut transaction,
             key.actor,
@@ -138,6 +177,17 @@ impl PgStore {
                 return Err(AccessError::IdempotencyInProgress);
             }
         }
+        if !can_manage_api_key_scope(
+            &mut transaction,
+            key.actor,
+            owner_user_id,
+            key.team_id.map(TeamId::as_uuid),
+            key.project_id.map(ProjectId::as_uuid),
+        )
+        .await?
+        {
+            return Err(AccessError::Forbidden);
+        }
         if key
             .expires_at
             .is_some_and(|expiration| expiration <= Utc::now())
@@ -146,16 +196,21 @@ impl PgStore {
                 "expiration must be in the future".to_owned(),
             ));
         }
-        sqlx::query!(
+        let inserted = sqlx::query!(
             "INSERT INTO api_keys \
-             (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, \
+             (id, lookup_id, secret_digest, name, created_by, owner_user_id, \
+              owner_service_account_id, team_id, project_id, expires_at, requests_per_minute, \
               tokens_per_minute, max_concurrency, etag) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
             id,
             &key.material.lookup_id,
             key.material.digest.to_vec(),
             key.name.trim(),
             key.actor,
+            owner_user_id,
+            owner_service_account_id,
+            key.team_id.map(TeamId::as_uuid),
+            key.project_id.map(ProjectId::as_uuid),
             key.expires_at,
             key.limits
                 .requests_per_minute
@@ -175,7 +230,18 @@ impl PgStore {
             etag
         )
         .execute(&mut *transaction)
-        .await?;
+        .await;
+        match inserted {
+            Ok(_) => {}
+            Err(sqlx::Error::Database(error))
+                if matches!(error.code().as_deref(), Some("23503" | "23514")) =>
+            {
+                return Err(AccessError::Invalid(
+                    "owner and scope must identify an active valid principal".to_owned(),
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        }
         for scope in &key.scopes {
             sqlx::query!(
                 "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
@@ -256,9 +322,13 @@ impl PgStore {
         if !claim_idempotency(&mut transaction, actor, "api_key.revoke", idempotency_key).await? {
             return Err(AccessError::IdempotencyConflict);
         }
+        if !can_manage_existing_api_key(&mut transaction, actor, id).await? {
+            return Err(AccessError::NotFound);
+        }
         let result = sqlx::query!(
             "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() \
-             WHERE id = $1 AND etag = $2 AND revoked_at IS NULL RETURNING etag",
+             WHERE id = $1 AND etag = $2 AND revoked_at IS NULL \
+             RETURNING etag, owner_user_id, owner_service_account_id, team_id, project_id",
             id,
             expected_etag
         )
@@ -296,6 +366,17 @@ impl PgStore {
         transaction.commit().await?;
         Ok(ApiKeyRevoked {
             etag: result.etag,
+            owner_kind: if result.owner_user_id.is_some() {
+                ApiKeyOwnerKind::User
+            } else {
+                ApiKeyOwnerKind::ServiceAccount
+            },
+            owner_id: result
+                .owner_user_id
+                .or(result.owner_service_account_id)
+                .expect("API-key owner constraint guarantees one owner"),
+            team_id: result.team_id,
+            project_id: result.project_id,
             release,
         })
     }

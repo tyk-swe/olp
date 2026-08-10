@@ -285,6 +285,10 @@ pub(super) async fn exercise(
         provider_id: None,
         upstream_model: None,
         api_key_id: None,
+        owner_user_id: None,
+        service_account_id: None,
+        team_id: None,
+        project_id: None,
         operation: None,
     };
     let summary = store.usage_summary(&filters).await.unwrap();
@@ -513,6 +517,10 @@ fn event(
         request_id,
         runtime_generation_id,
         api_key_id,
+        owner_user_id: None,
+        service_account_id: None,
+        team_id: None,
+        project_id: None,
         provider_id: Some(final_provider_id),
         route_slug: route_slug.to_owned(),
         upstream_model: Some(final_model.to_owned()),

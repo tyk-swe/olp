@@ -259,6 +259,7 @@ pub fn router() -> Router<ManagementState> {
         api_keys::manage::RotateApiKeyResponse,
         api_keys::create::CreateApiKeyRequest,
         api_keys::create::CreateApiKeyResponse,
+        api_keys::create::RevokeApiKeyResponse,
         crate::management::response_policy::RuntimeGenerationResponse,
         Problem
     )),

@@ -5,8 +5,8 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use olp_domain::{
-    CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind, ProviderState,
-    RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
+    ApiKeyOwnerKind, CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind,
+    ProviderState, RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
     weighted_rendezvous_score,
 };
 use sqlx::{Postgres, Transaction};
@@ -23,6 +23,7 @@ use crate::{
         PublishedRuntimeRelease, compile_and_publish_runtime_in_transaction,
         prepare_runtime_mutation,
     },
+    scoped_authorization::{can_manage_existing_api_key, can_read_existing_api_key},
     security::{ApiKeyMaterial, EncryptedSecret},
     split_page,
 };
@@ -333,10 +334,13 @@ pub struct ApiKeyRecord {
     pub id: Uuid,
     pub lookup_id: String,
     pub name: String,
-    /// The operator who originally issued the key. API keys intentionally
-    /// remain installation-scoped when that user is later deactivated.
+    /// Immutable audit metadata; this is independent from credential ownership.
     pub created_by: Uuid,
     pub created_by_email: String,
+    pub owner_kind: ApiKeyOwnerKind,
+    pub owner_id: Uuid,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub scopes: Vec<String>,
     pub allowed_routes: Vec<String>,
     pub requests_per_minute: Option<i32>,
@@ -347,6 +351,14 @@ pub struct ApiKeyRecord {
     pub rotated_at: Option<DateTime<Utc>>,
     pub etag: Uuid,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ApiKeyListFilter {
+    pub owner_kind: Option<ApiKeyOwnerKind>,
+    pub owner_id: Option<Uuid>,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug)]

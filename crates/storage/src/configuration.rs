@@ -15,13 +15,14 @@ mod route_lifecycle;
 mod validation;
 
 pub use resources::{
-    ApiKeyMutationResult, ApiKeyRecord, ApiKeyRotationResult, CapabilityCertificationApplied,
-    CapabilityCertificationOutcome, CapabilityRecord, ConfigurationPage, CredentialVersionRecord,
-    DiscoveredModelInput, ProviderModelInventoryRecord, ProviderModelRecord,
-    ProviderMutationResult, ProviderRecord, ProviderRevisionDiff, ProviderRevisionRecord,
-    ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput, RouteDraftRecord,
-    RouteRecord, RouteRevisionDiff, RouteRevisionRecord, RouteSimulation, RouteSimulationTarget,
-    RouteTargetRecord, StoredCredentialSecret, UpdateApiKeyInput, UpdateProvider,
+    ApiKeyListFilter, ApiKeyMutationResult, ApiKeyRecord, ApiKeyRotationResult,
+    CapabilityCertificationApplied, CapabilityCertificationOutcome, CapabilityRecord,
+    ConfigurationPage, CredentialVersionRecord, DiscoveredModelInput, ProviderModelInventoryRecord,
+    ProviderModelRecord, ProviderMutationResult, ProviderRecord, ProviderRevisionDiff,
+    ProviderRevisionRecord, ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput,
+    RouteDraftRecord, RouteRecord, RouteRevisionDiff, RouteRevisionRecord, RouteSimulation,
+    RouteSimulationTarget, RouteTargetRecord, StoredCredentialSecret, UpdateApiKeyInput,
+    UpdateProvider,
 };
 
 #[derive(Debug, Error)]

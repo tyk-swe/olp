@@ -30,6 +30,7 @@ mod api_keys;
 mod provider_kinds;
 mod providers;
 mod routes;
+mod scoped_identity;
 mod support;
 
 use support::*;
@@ -74,10 +75,12 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     let cookie = cookie_header(&setup);
     let setup_body = response_json(setup).await;
     let csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
+    let owner_id = setup_body["user"]["id"].as_str().unwrap().to_owned();
 
     provider_kinds::verify(&app, &cookie, &csrf).await;
     let (provider_id, model_id) =
         providers::exercise(&app, &configuration_state, &mock_provider, &cookie, &csrf).await;
     let draft_id = routes::exercise(&app, &cookie, &csrf, &provider_id, &model_id).await;
     api_keys::exercise(&app, &cookie, &csrf, &draft_id, &model_id).await;
+    scoped_identity::exercise(&app, &cookie, &csrf, &owner_id).await;
 }

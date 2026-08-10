@@ -1,0 +1,146 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT key.id, key.lookup_id, key.secret_digest, key.expires_at, key.requests_per_minute, key.tokens_per_minute, key.max_concurrency, key.owner_user_id, key.owner_service_account_id, key.team_id, key.project_id FROM api_keys key LEFT JOIN users owner_user ON owner_user.id = key.owner_user_id LEFT JOIN service_accounts owner_account ON owner_account.id = key.owner_service_account_id LEFT JOIN teams team ON team.id = key.team_id LEFT JOIN projects project ON project.id = key.project_id WHERE key.revoked_at IS NULL AND (key.expires_at IS NULL OR key.expires_at > now()) AND ((key.owner_user_id IS NOT NULL AND owner_user.active) OR (key.owner_service_account_id IS NOT NULL AND owner_account.active)) AND (key.team_id IS NULL OR team.active) AND (key.project_id IS NULL OR project.active) AND (key.owner_user_id IS NULL OR key.team_id IS NULL OR EXISTS ( SELECT 1 FROM team_memberships membership WHERE membership.team_id = key.team_id AND membership.user_id = key.owner_user_id)) AND (key.owner_user_id IS NULL OR key.project_id IS NULL OR EXISTS ( SELECT 1 FROM project_memberships membership WHERE membership.project_id = key.project_id AND membership.user_id = key.owner_user_id)) ORDER BY key.lookup_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lookup_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "lookup_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "secret_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "secret_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "requests_per_minute",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "requests_per_minute"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "tokens_per_minute",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "tokens_per_minute"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "max_concurrency",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "max_concurrency"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "owner_user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "owner_service_account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "owner_service_account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "team_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "team_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "project_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "project_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e5e9467f7ac2e5d5e48cf0400da02911d7fd53d668db872243fc21a7525a847f"
+}

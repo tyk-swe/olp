@@ -7,6 +7,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
+use olp_domain::{ApiKeyOwner, ApiKeyOwnerKind, ServiceAccountId, UserId};
 use olp_storage::{
     access::NewApiKeyRecord, idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
     idempotency::idempotency_fingerprint,
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::FieldErrors;
 use crate::management::{
     error_mapping::{map_access, map_persistence},
     idempotency::{idempotency_http_response, require_idempotency_key},
@@ -32,6 +34,10 @@ use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_pol
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct CreateApiKeyRequest {
     pub name: String,
+    pub owner_kind: Option<ApiKeyOwnerKind>,
+    pub owner_id: Option<Uuid>,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     #[serde(default = "default_key_scopes")]
     pub scopes: Vec<String>,
     #[serde(default)]
@@ -51,9 +57,22 @@ pub(crate) struct CreateApiKeyResponse {
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
     pub lookup_id: String,
+    pub owner_kind: ApiKeyOwnerKind,
+    pub owner_id: Uuid,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     /// Returned only by this creation response.
     #[schema(value_type = String)]
     pub(crate) secret: WriteOnlySecret,
+    pub runtime_generation: RuntimeGenerationResponse,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct RevokeApiKeyResponse {
+    pub owner_kind: ApiKeyOwnerKind,
+    pub owner_id: Uuid,
+    pub team_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub runtime_generation: RuntimeGenerationResponse,
 }
 
@@ -104,6 +123,31 @@ pub(crate) async fn create_api_key(
     let auth_hmac_key = state.auth_hmac_key();
     let material = auth_hmac_key.generate_api_key();
     let secret = WriteOnlySecret(material.expose_once().to_owned());
+    let (owner, owner_kind, owner_id) = match (request.owner_kind, request.owner_id) {
+        (Some(ApiKeyOwnerKind::User), Some(id)) => (
+            ApiKeyOwner::User(UserId::from_uuid(id)),
+            ApiKeyOwnerKind::User,
+            id,
+        ),
+        (Some(ApiKeyOwnerKind::ServiceAccount), Some(id)) => (
+            ApiKeyOwner::ServiceAccount(ServiceAccountId::from_uuid(id)),
+            ApiKeyOwnerKind::ServiceAccount,
+            id,
+        ),
+        (None, None) => (
+            ApiKeyOwner::User(UserId::from_uuid(principal.user_id)),
+            ApiKeyOwnerKind::User,
+            principal.user_id,
+        ),
+        _ => {
+            let mut errors = FieldErrors::new();
+            errors.insert(
+                "owner".to_owned(),
+                vec!["owner_kind and owner_id must be supplied together.".to_owned()],
+            );
+            return Err(Problem::validation(errors));
+        }
+    };
     let record = NewApiKeyRecord {
         name: policy.name,
         material,
@@ -111,6 +155,9 @@ pub(crate) async fn create_api_key(
         allowed_routes: policy.allowed_routes,
         limits: policy.limits,
         expires_at: policy.expires_at,
+        owner,
+        team_id: request.team_id.map(olp_domain::TeamId::from_uuid),
+        project_id: request.project_id.map(olp_domain::ProjectId::from_uuid),
         actor: principal.user_id,
         idempotency_key,
     };
@@ -125,6 +172,10 @@ pub(crate) async fn create_api_key(
                     &CreateApiKeyResponse {
                         id: created.id,
                         lookup_id: created.lookup_id.clone(),
+                        owner_kind,
+                        owner_id,
+                        team_id: request.team_id,
+                        project_id: request.project_id,
                         secret,
                         runtime_generation: RuntimeGenerationResponse {
                             id: created.release.generation_id,
@@ -150,7 +201,7 @@ pub(crate) async fn create_api_key(
         ("Idempotency-Key" = String, Header, description = "Unique revocation key")
     ),
     responses(
-        (status = 200, description = "API key revoked and new runtime published", body = RuntimeGenerationResponse),
+        (status = 200, description = "API key revoked and new runtime published", body = RevokeApiKeyResponse),
         (status = 404, description = "API key not found", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem)
     )
@@ -174,9 +225,15 @@ pub(crate) async fn revoke_api_key(
         .await
         .map_err(map_access)?;
     with_etag(
-        Json(RuntimeGenerationResponse {
-            id: revoked.release.generation_id,
-            sequence: revoked.release.sequence,
+        Json(RevokeApiKeyResponse {
+            owner_kind: revoked.owner_kind,
+            owner_id: revoked.owner_id,
+            team_id: revoked.team_id,
+            project_id: revoked.project_id,
+            runtime_generation: RuntimeGenerationResponse {
+                id: revoked.release.generation_id,
+                sequence: revoked.release.sequence,
+            },
         }),
         revoked.etag,
     )

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE projects SET active = false, etag = uuidv7(), updated_at = now() WHERE team_id = $1 AND active",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "541d8fbc53a87bd3c60ab9545329b87202068d281b0db70f3f6a0e8420b00e7a"
+}

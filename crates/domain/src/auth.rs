@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{ApiKeyId, ApiKeyLookupId, OperationKind, RouteSlug};
+use crate::{ApiKeyId, ApiKeyLookupId, ApiKeyOwner, OperationKind, ProjectId, RouteSlug, TeamId};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -263,6 +263,10 @@ pub struct ApiKey {
     pub id: ApiKeyId,
     pub lookup_id: ApiKeyLookupId,
     pub digest: ApiKeyDigest,
+    #[serde(default)]
+    pub owner: ApiKeyOwner,
+    pub team_id: Option<TeamId>,
+    pub project_id: Option<ProjectId>,
     pub status: ApiKeyStatus,
     pub expires_at: Option<DateTime<Utc>>,
     #[serde(default)]

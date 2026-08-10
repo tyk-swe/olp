@@ -10,6 +10,8 @@ use crate::{PersistenceError, security::InvitationMaterial};
 mod accounts;
 mod auth_admission;
 mod invitations;
+mod scoped;
+pub use scoped::ScopedResourceUpdate;
 mod setup;
 
 pub struct InstallationSetupInput {
@@ -43,6 +45,8 @@ pub struct InstallationSetupResult {
 pub enum IdentityError {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    #[error("runtime compilation failed: {0}")]
+    RuntimeCompile(#[from] crate::runtime::RuntimeCompileError),
     #[error("identity input is invalid: {0}")]
     Invalid(String),
     #[error("identity resource was not found")]
@@ -73,6 +77,86 @@ pub enum IdentityError {
     RecentAuthenticationRequired,
     #[error("the initiating session is no longer current")]
     SessionUnavailable,
+    #[error("the current user cannot manage that identity scope")]
+    Forbidden,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TeamRecord {
+    pub id: Uuid,
+    pub name: String,
+    pub active: bool,
+    pub etag: Uuid,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ProjectRecord {
+    pub id: Uuid,
+    pub team_id: Uuid,
+    pub name: String,
+    pub active: bool,
+    pub etag: Uuid,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ServiceAccountRecord {
+    pub id: Uuid,
+    pub team_id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    pub active: bool,
+    pub etag: Uuid,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScopedMembershipRecord {
+    pub team_id: Uuid,
+    pub project_id: Option<Uuid>,
+    pub user_id: Uuid,
+    pub role: olp_domain::ScopedRole,
+    pub etag: Uuid,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeGenerationRecord {
+    pub id: Uuid,
+    pub sequence: i64,
+}
+
+#[derive(Debug)]
+pub struct NewTeam {
+    pub name: String,
+    pub actor: Uuid,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug)]
+pub struct NewProject {
+    pub team_id: Uuid,
+    pub name: String,
+    pub actor: Uuid,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug)]
+pub struct NewServiceAccount {
+    pub team_id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    pub actor: Uuid,
+    pub idempotency_key: String,
 }
 
 impl From<sqlx::Error> for IdentityError {

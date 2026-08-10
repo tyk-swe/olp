@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE service_accounts SET active = false, etag = uuidv7(), updated_at = now() WHERE team_id = $1 AND active",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0708fdf264d8b6c69461adc84ea7c75578a72b2b35fc7add0e0f69d822b4d78"
+}

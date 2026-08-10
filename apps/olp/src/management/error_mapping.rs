@@ -103,6 +103,10 @@ pub(crate) fn map_access(error: AccessError) -> Problem {
             errors.insert("api_key".to_owned(), vec![detail]);
             Problem::validation(errors)
         }
+        AccessError::Forbidden => Problem::forbidden(
+            "permission_denied",
+            "The current principal cannot manage credentials in that scope.",
+        ),
         AccessError::NotFound => Problem::new(
             StatusCode::NOT_FOUND,
             "api_key_not_found",
@@ -138,6 +142,10 @@ pub(crate) fn user_not_found() -> Problem {
 pub(crate) fn map_identity(error: IdentityError) -> Problem {
     match error {
         IdentityError::Persistence(error) => map_persistence(error),
+        IdentityError::RuntimeCompile(error) => {
+            error!(%error, "runtime compilation failed after identity change");
+            Problem::internal()
+        }
         IdentityError::Invalid(detail) => {
             let mut errors = FieldErrors::new();
             errors.insert("identity".to_owned(), vec![detail]);
@@ -200,6 +208,10 @@ pub(crate) fn map_identity(error: IdentityError) -> Problem {
         IdentityError::RecentAuthenticationRequired => reauthentication_required(),
         IdentityError::SessionUnavailable => Problem::unauthorized(
             "The session changed while the security operation was in progress.",
+        ),
+        IdentityError::Forbidden => Problem::forbidden(
+            "permission_denied",
+            "The current user cannot manage that identity scope.",
         ),
     }
 }

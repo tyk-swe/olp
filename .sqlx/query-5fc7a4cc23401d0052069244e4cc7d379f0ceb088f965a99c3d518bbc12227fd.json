@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO project_memberships (project_id, team_id, user_id, role, etag, created_by, created_at, updated_at) SELECT $1, $2, $3, 'admin', $4, $3, $5, $5 WHERE EXISTS (SELECT 1 FROM team_memberships WHERE team_id = $2 AND user_id = $3) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5fc7a4cc23401d0052069244e4cc7d379f0ceb088f965a99c3d518bbc12227fd"
+}

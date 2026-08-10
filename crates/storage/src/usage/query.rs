@@ -230,6 +230,18 @@ fn push_usage_dimension_filters(query: &mut QueryBuilder<Postgres>, filters: &Us
     if let Some(value) = filters.api_key_id {
         query.push(" AND api_key_id = ").push_bind(value);
     }
+    if let Some(value) = filters.owner_user_id {
+        query.push(" AND owner_user_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.service_account_id {
+        query.push(" AND service_account_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.team_id {
+        query.push(" AND team_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.project_id {
+        query.push(" AND project_id = ").push_bind(value);
+    }
     if let Some(value) = filters.operation {
         query.push(" AND operation = ").push_bind(value.as_str());
     }
