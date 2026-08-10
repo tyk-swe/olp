@@ -481,6 +481,11 @@ async fn authenticated_unknown_protocol_paths_keep_the_router_fallback_behavior(
             format!("Bearer {key}"),
         ),
         (
+            "/v1/not-enabled",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {key}"),
+        ),
+        (
             "/anthropic/v2/not-enabled",
             HeaderName::from_static("x-api-key"),
             key.clone(),

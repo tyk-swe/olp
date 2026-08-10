@@ -2,8 +2,8 @@
 //!
 //! Each routed `(method, path)` pair is declared exactly once in [`ENDPOINTS`].
 //! The declaration owns its handler, surface, operation/metadata policy, body
-//! admission, token estimation, and route extraction behavior.  Axum routing
-//! and request-boundary classification both consume this registry.
+//! admission, token estimation, and route extraction behavior. Axum routing and
+//! request-boundary classification both consume this registry.
 
 use std::borrow::Cow;
 
@@ -121,6 +121,12 @@ enum PathMatcher {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EndpointAlias {
+    route_path: &'static str,
+    matcher: PathMatcher,
+}
+
 impl PathMatcher {
     fn matches(self, route_path: &str, request_path: &str) -> bool {
         match self {
@@ -184,6 +190,7 @@ pub(crate) struct EndpointSpec {
     method: EndpointMethod,
     pub(crate) route_path: &'static str,
     matcher: PathMatcher,
+    aliases: &'static [EndpointAlias],
     surface: Surface,
     authorization: AuthorizationPolicy,
     policy: Policy,
@@ -199,6 +206,7 @@ macro_rules! fixed_endpoint {
         method: $method:expr,
         route_path: $route_path:expr,
         matcher: $matcher:expr,
+        aliases: $aliases:expr,
         surface: $surface:expr,
         capability: $capability:expr,
         operation: $operation:expr,
@@ -215,6 +223,7 @@ macro_rules! fixed_endpoint {
             method: $method,
             route_path: $route_path,
             matcher: $matcher,
+            aliases: $aliases,
             surface: $surface,
             authorization: AuthorizationPolicy::Fixed($capability),
             policy: Policy::Fixed {
@@ -281,6 +290,7 @@ const fn gemini_endpoint(
         method,
         route_path,
         matcher,
+        aliases: &[],
         surface: Surface::Gemini,
         authorization,
         policy,
@@ -304,6 +314,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/chat/completions",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/chat/completions",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Generation,
@@ -320,6 +334,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/responses",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/responses",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Generation,
@@ -336,6 +354,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/responses/input_tokens",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/responses/input_tokens",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::TokenCount,
@@ -352,6 +374,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/embeddings",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/embeddings",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Embeddings,
@@ -368,6 +394,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/moderations",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/moderations",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Moderation,
@@ -384,6 +414,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/images/generations",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/images/generations",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::ImageGeneration,
@@ -400,6 +434,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/images/edits",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/images/edits",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::ImageEdit,
@@ -418,6 +456,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/images/variations",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/images/variations",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::ImageVariation,
@@ -436,6 +478,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/audio/speech",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/audio/speech",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Speech,
@@ -452,6 +498,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/audio/transcriptions",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/audio/transcriptions",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Transcription,
@@ -470,6 +520,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/openai/v1/videos",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/videos",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::VideoCreate,
@@ -488,6 +542,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Get,
         route_path: "/openai/v1/videos",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/videos",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::VideoList,
@@ -507,6 +565,13 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         prefix: "/openai/v1/videos/",
         suffix: None,
         },
+        aliases: &[EndpointAlias {
+            route_path: "/v1/videos/{video_id}",
+            matcher: PathMatcher::SingleSegment {
+                prefix: "/v1/videos/",
+                suffix: None,
+            },
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::VideoGet,
@@ -526,6 +591,13 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         prefix: "/openai/v1/videos/",
         suffix: None,
         },
+        aliases: &[EndpointAlias {
+            route_path: "/v1/videos/{video_id}",
+            matcher: PathMatcher::SingleSegment {
+                prefix: "/v1/videos/",
+                suffix: None,
+            },
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::VideoDelete,
@@ -545,6 +617,13 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         prefix: "/openai/v1/videos/",
         suffix: Some("/content"),
         },
+        aliases: &[EndpointAlias {
+            route_path: "/v1/videos/{video_id}/content",
+            matcher: PathMatcher::SingleSegment {
+                prefix: "/v1/videos/",
+                suffix: Some("/content"),
+            },
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::Inference,
         operation: OperationKind::VideoContent,
@@ -561,6 +640,10 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Get,
         route_path: "/openai/v1/models",
         matcher: EXACT,
+        aliases: &[EndpointAlias {
+            route_path: "/v1/models",
+            matcher: EXACT,
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelList,
@@ -580,6 +663,13 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         prefix: "/openai/v1/models/",
         suffix: None,
         },
+        aliases: &[EndpointAlias {
+            route_path: "/v1/models/{model_id}",
+            matcher: PathMatcher::SingleSegment {
+                prefix: "/v1/models/",
+                suffix: None,
+            },
+        }],
         surface: Surface::OpenAi,
         capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelGet,
@@ -596,6 +686,7 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/anthropic/v1/messages",
         matcher: EXACT,
+        aliases: &[],
         surface: Surface::Anthropic,
         capability: GatewayCapability::Inference,
         operation: OperationKind::Generation,
@@ -612,6 +703,7 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Post,
         route_path: "/anthropic/v1/messages/count_tokens",
         matcher: EXACT,
+        aliases: &[],
         surface: Surface::Anthropic,
         capability: GatewayCapability::Inference,
         operation: OperationKind::TokenCount,
@@ -628,6 +720,7 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         method: EndpointMethod::Get,
         route_path: "/anthropic/v1/models",
         matcher: EXACT,
+        aliases: &[],
         surface: Surface::Anthropic,
         capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelList,
@@ -647,6 +740,7 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         prefix: "/anthropic/v1/models/",
         suffix: None,
         },
+        aliases: &[],
         surface: Surface::Anthropic,
         capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelGet,
@@ -749,10 +843,14 @@ pub(crate) enum InferenceEndpoint {
 
 impl InferenceEndpoint {
     pub(crate) fn classify(method: &Method, path: &str) -> Option<Self> {
-        if let Some(spec) = ENDPOINTS
-            .iter()
-            .find(|spec| spec.method.matches(method) && spec.matcher.matches(spec.route_path, path))
-        {
+        if let Some(spec) = ENDPOINTS.iter().find(|spec| {
+            spec.method.matches(method)
+                && (spec.matcher.matches(spec.route_path, path)
+                    || spec
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.matcher.matches(alias.route_path, path)))
+        }) {
             let action = matches!(spec.policy, Policy::GeminiAction).then(|| gemini_action(path));
             return Some(Self::Registered { spec, action });
         }
@@ -761,7 +859,10 @@ impl InferenceEndpoint {
             surface,
             media_body: path.starts_with("/openai/v1/images/")
                 || path.starts_with("/openai/v1/audio/")
-                || path == "/openai/v1/videos",
+                || path == "/openai/v1/videos"
+                || path.starts_with("/v1/images/")
+                || path.starts_with("/v1/audio/")
+                || path == "/v1/videos",
             token_estimate: token_estimate_from_path(path),
         })
     }
@@ -929,11 +1030,14 @@ fn register(router: Router<GatewayState>, spec: &'static EndpointSpec) -> Router
     let method_router = spec.axum_body_limit.map_or(method_router.clone(), |limit| {
         method_router.layer(DefaultBodyLimit::max(limit))
     });
-    router.route(spec.route_path, method_router)
+    let router = router.route(spec.route_path, method_router.clone());
+    spec.aliases.iter().fold(router, |router, alias| {
+        router.route(alias.route_path, method_router.clone())
+    })
 }
 
 fn surface_from_path(path: &str) -> Option<Surface> {
-    if path.starts_with("/openai/") {
+    if path.starts_with("/openai/") || path.starts_with("/v1/") {
         Some(Surface::OpenAi)
     } else if path.starts_with("/anthropic/") {
         Some(Surface::Anthropic)
@@ -1049,8 +1153,16 @@ mod tests {
     use super::*;
 
     fn representative_path(spec: &EndpointSpec) -> String {
-        match spec.matcher {
-            PathMatcher::Exact => spec.route_path.to_owned(),
+        representative_path_for(spec, spec.route_path, spec.matcher)
+    }
+
+    fn representative_path_for(
+        spec: &EndpointSpec,
+        route_path: &str,
+        matcher: PathMatcher,
+    ) -> String {
+        match matcher {
+            PathMatcher::Exact => route_path.to_owned(),
             PathMatcher::SingleSegment { prefix, suffix } => {
                 format!("{prefix}route-1{}", suffix.unwrap_or_default())
             }
@@ -1072,6 +1184,14 @@ mod tests {
         }
     }
 
+    fn method_name(method: EndpointMethod) -> &'static str {
+        match method {
+            EndpointMethod::Get => "GET",
+            EndpointMethod::Post => "POST",
+            EndpointMethod::Delete => "DELETE",
+        }
+    }
+
     #[test]
     fn registry_identities_and_routes_are_unique() {
         let mut identities = BTreeSet::new();
@@ -1088,7 +1208,124 @@ mod tests {
                 spec.method,
                 spec.route_path
             );
+            for alias in spec.aliases {
+                assert!(
+                    routes.insert((spec.method as u8, alias.route_path)),
+                    "duplicate route: {:?} {}",
+                    spec.method,
+                    alias.route_path
+                );
+            }
         }
+    }
+
+    #[test]
+    fn openai_aliases_reuse_the_canonical_endpoint_spec() {
+        for spec in ENDPOINTS {
+            for alias in spec.aliases {
+                let canonical_path = representative_path_for(spec, spec.route_path, spec.matcher);
+                let alias_path = representative_path_for(spec, alias.route_path, alias.matcher);
+                let canonical = InferenceEndpoint::classify(&method(spec), &canonical_path)
+                    .expect("canonical route is classified");
+                let aliased = InferenceEndpoint::classify(&method(spec), &alias_path)
+                    .expect("alias route is classified");
+                assert_eq!(canonical, aliased, "alias differs for {:?}", spec.id);
+                assert_eq!(
+                    canonical.route_from_json(&canonical_path, b"{}"),
+                    aliased.route_from_json(&alias_path, b"{}"),
+                    "route extraction differs for {:?}",
+                    spec.id
+                );
+                let InferenceEndpoint::Registered {
+                    spec: canonical_spec,
+                    ..
+                } = canonical
+                else {
+                    panic!("canonical route classified as unknown: {:?}", spec.id);
+                };
+                let InferenceEndpoint::Registered {
+                    spec: aliased_spec, ..
+                } = aliased
+                else {
+                    panic!("alias classified as unknown: {:?}", spec.id);
+                };
+                assert!(std::ptr::eq(canonical_spec, aliased_spec));
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_openai_v1_alias_catalog_is_complete() {
+        let aliases = ENDPOINTS
+            .iter()
+            .flat_map(|spec| {
+                spec.aliases
+                    .iter()
+                    .map(move |alias| (method_name(spec.method), alias.route_path))
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            aliases,
+            BTreeSet::from([
+                ("POST", "/v1/chat/completions"),
+                ("POST", "/v1/responses"),
+                ("POST", "/v1/responses/input_tokens"),
+                ("POST", "/v1/embeddings"),
+                ("POST", "/v1/moderations"),
+                ("POST", "/v1/images/generations"),
+                ("POST", "/v1/images/edits"),
+                ("POST", "/v1/images/variations"),
+                ("POST", "/v1/audio/speech"),
+                ("POST", "/v1/audio/transcriptions"),
+                ("POST", "/v1/videos"),
+                ("GET", "/v1/videos"),
+                ("GET", "/v1/videos/{video_id}"),
+                ("DELETE", "/v1/videos/{video_id}"),
+                ("GET", "/v1/videos/{video_id}/content"),
+                ("GET", "/v1/models"),
+                ("GET", "/v1/models/{model_id}"),
+            ])
+        );
+    }
+
+    #[test]
+    fn canonical_openai_routes_remain_unchanged() {
+        let canonical = ENDPOINTS
+            .iter()
+            .filter(|spec| spec.surface == Surface::OpenAi)
+            .map(|spec| (method_name(spec.method), spec.route_path))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            canonical,
+            BTreeSet::from([
+                ("POST", "/openai/v1/chat/completions"),
+                ("POST", "/openai/v1/responses"),
+                ("POST", "/openai/v1/responses/input_tokens"),
+                ("POST", "/openai/v1/embeddings"),
+                ("POST", "/openai/v1/moderations"),
+                ("POST", "/openai/v1/images/generations"),
+                ("POST", "/openai/v1/images/edits"),
+                ("POST", "/openai/v1/images/variations"),
+                ("POST", "/openai/v1/audio/speech"),
+                ("POST", "/openai/v1/audio/transcriptions"),
+                ("POST", "/openai/v1/videos"),
+                ("GET", "/openai/v1/videos"),
+                ("GET", "/openai/v1/videos/{video_id}"),
+                ("DELETE", "/openai/v1/videos/{video_id}"),
+                ("GET", "/openai/v1/videos/{video_id}/content"),
+                ("GET", "/openai/v1/models"),
+                ("GET", "/openai/v1/models/{id}"),
+            ])
+        );
+    }
+
+    #[test]
+    fn unknown_openai_v1_paths_are_capability_free() {
+        let endpoint = InferenceEndpoint::classify(&Method::POST, "/v1/not-implemented")
+            .expect("OpenAI v1 paths are classified for protocol errors");
+        assert_eq!(endpoint.surface(), Surface::OpenAi);
+        assert_eq!(endpoint.capability(), None);
+        assert_eq!(endpoint.metadata(), None);
     }
 
     #[test]

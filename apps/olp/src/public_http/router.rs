@@ -147,6 +147,7 @@ fn compose_public_router(
         router = router
             .merge(gateway::router().with_state(state))
             .route("/openai/{*path}", any(protocol_not_found))
+            .route("/v1/{*path}", any(protocol_not_found))
             .route("/anthropic/{*path}", any(protocol_not_found))
             .route("/gemini/{*path}", any(protocol_not_found));
     }
