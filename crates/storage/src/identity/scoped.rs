@@ -111,7 +111,8 @@ impl PgStore {
             now
         )
         .fetch_one(&mut *transaction)
-        .await?;
+        .await
+        .map_err(map_scoped_name_error)?;
         sqlx::query!(
             "INSERT INTO team_memberships \
              (team_id, user_id, role, etag, created_by, created_at, updated_at) \
@@ -243,7 +244,8 @@ impl PgStore {
             now
         )
         .fetch_optional(&mut *transaction)
-        .await?
+        .await
+        .map_err(map_scoped_name_error)?
         .ok_or_else(|| IdentityError::Invalid("team must be active".to_owned()))?;
         sqlx::query!(
             "INSERT INTO project_memberships \
@@ -385,7 +387,8 @@ impl PgStore {
             now
         )
         .fetch_optional(&mut *transaction)
-        .await?
+        .await
+        .map_err(map_scoped_name_error)?
         .ok_or_else(|| IdentityError::Invalid("project and team must be active".to_owned()))?;
         insert_audit(
             &mut transaction,
@@ -448,8 +451,9 @@ impl PgStore {
             expected_etag
         )
         .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or_else(|| IdentityError::PreconditionFailed)?;
+        .await
+        .map_err(map_scoped_name_error)?
+        .ok_or(IdentityError::PreconditionFailed)?;
         let generation = if active == Some(false) {
             sqlx::query!(
                 "UPDATE projects SET active = false, etag = uuidv7(), updated_at = now() \
@@ -532,7 +536,8 @@ impl PgStore {
             expected_etag
         )
         .fetch_optional(&mut *transaction)
-        .await?
+        .await
+        .map_err(map_scoped_name_error)?
         .ok_or(IdentityError::PreconditionFailed)?;
         let generation = if active == Some(false) {
             sqlx::query!(
@@ -621,7 +626,8 @@ impl PgStore {
             expected_etag
         )
         .fetch_optional(&mut *transaction)
-        .await?
+        .await
+        .map_err(map_scoped_name_error)?
         .ok_or(IdentityError::PreconditionFailed)?;
         let generation = if active == Some(false) {
             revoke_scoped_keys(&mut transaction, None, None, Some(id)).await?;
@@ -1047,6 +1053,24 @@ fn valid_name(value: &str) -> Result<&str, IdentityError> {
         ));
     }
     Ok(value)
+}
+
+fn map_scoped_name_error(error: sqlx::Error) -> IdentityError {
+    let is_duplicate_name = match &error {
+        sqlx::Error::Database(database) => matches!(
+            database.constraint(),
+            Some(
+                "teams_name_key"
+                    | "projects_team_id_name_key"
+                    | "service_accounts_project_id_name_key"
+            )
+        ),
+        _ => false,
+    };
+    if is_duplicate_name {
+        return IdentityError::ScopedNameAlreadyExists;
+    }
+    error.into()
 }
 
 async fn claim_replay(

@@ -175,6 +175,10 @@ pub(crate) fn map_identity(error: IdentityError) -> Problem {
             "pending_invitation_exists",
             "A pending invitation already exists for this email.",
         ),
+        IdentityError::ScopedNameAlreadyExists => Problem::conflict(
+            "scoped_name_already_exists",
+            "A resource with this name already exists in this scope.",
+        ),
         IdentityError::InvitationUnavailable => Problem::new(
             StatusCode::GONE,
             "invitation_unavailable",

@@ -12,7 +12,8 @@ use olp_domain::{
 use olp_inference::runtime::RuntimeManager;
 use olp_storage::{
     authentication::SessionPrincipal, configuration::ConfigurationError,
-    idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse, security::SessionMaterial,
+    idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse, identity::IdentityError,
+    security::SessionMaterial,
 };
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -31,7 +32,7 @@ use super::{
         api_keys::create::CreateApiKeyResponse, providers::create::CreateProviderRequest,
     },
     cookies::append_session_cookies,
-    error_mapping::map_configuration,
+    error_mapping::{map_configuration, map_identity},
     idempotency::{idempotency_http_response, require_idempotency_key},
     management_openapi,
     permissions::require_permission,
@@ -410,6 +411,16 @@ fn openapi_document_includes_its_public_serving_endpoint() {
 #[test]
 fn idempotency_reuse_is_an_rfc9457_conflict() {
     let response = map_configuration(ConfigurationError::IdempotencyConflict).into_response();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/problem+json"
+    );
+}
+
+#[test]
+fn duplicate_scoped_names_are_rfc9457_conflicts() {
+    let response = map_identity(IdentityError::ScopedNameAlreadyExists).into_response();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE).unwrap(),

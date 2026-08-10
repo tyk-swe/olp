@@ -59,6 +59,8 @@ pub enum IdentityError {
     EmailAlreadyMember,
     #[error("a pending invitation for this email already exists")]
     PendingInvitationExists,
+    #[error("a scoped identity resource with this name already exists")]
+    ScopedNameAlreadyExists,
     #[error("the invitation is invalid, expired, or no longer pending")]
     InvitationUnavailable,
     #[error("the current user cannot revoke this session")]

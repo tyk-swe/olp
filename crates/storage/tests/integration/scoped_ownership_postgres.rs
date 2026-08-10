@@ -705,6 +705,156 @@ async fn scoped_ownership_lifecycle_authorization_and_attribution_are_consistent
     assert!(outbox_events > 0);
 }
 
+#[tokio::test]
+#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+async fn duplicate_scoped_resource_names_are_identity_conflicts() {
+    let db = olp_storage::test_support::TestDb::create_migrated("scoped_owner_duplicates").await;
+    let store = db.store(5).await;
+    let session = SessionMaterial::generate();
+    let (owner, _) = store
+        .setup_installation_with_session(
+            InstallationSetupInput {
+                installation_name: "Scoped duplicates".to_owned(),
+                email: "owner-duplicates@scoped.test".to_owned(),
+                display_name: "Owner".to_owned(),
+                password_hash: hash_password("correct horse battery staple").unwrap(),
+            },
+            &session,
+            Duration::hours(12),
+        )
+        .await
+        .unwrap();
+    let owner_id = owner.user_id;
+    let master_key = MasterKey::new(1, [17; 32]);
+
+    let team = create_team(&store, owner_id, &master_key, "Team A", "team-create-a").await;
+    assert!(matches!(
+        store
+            .create_team(
+                NewTeam {
+                    name: "Team A".to_owned(),
+                    actor: owner_id,
+                    idempotency_key: "team-create-a-duplicate".to_owned(),
+                },
+                replay(&master_key, "Team A duplicate"),
+                empty_created_response,
+            )
+            .await,
+        Err(IdentityError::ScopedNameAlreadyExists)
+    ));
+    let second_team = create_team(&store, owner_id, &master_key, "Team B", "team-create-b").await;
+    assert!(matches!(
+        store
+            .update_team(
+                second_team.id,
+                Some("Team A"),
+                None,
+                second_team.etag,
+                owner_id,
+                "team-update-duplicate",
+            )
+            .await,
+        Err(IdentityError::ScopedNameAlreadyExists)
+    ));
+
+    let project = create_project(
+        &store,
+        owner_id,
+        &master_key,
+        team.id,
+        "Project A",
+        "project-create-a",
+    )
+    .await;
+    assert!(matches!(
+        store
+            .create_project(
+                NewProject {
+                    team_id: team.id,
+                    name: "Project A".to_owned(),
+                    actor: owner_id,
+                    idempotency_key: "project-create-a-duplicate".to_owned(),
+                },
+                replay(&master_key, "Project A duplicate"),
+                empty_created_response,
+            )
+            .await,
+        Err(IdentityError::ScopedNameAlreadyExists)
+    ));
+    let second_project = create_project(
+        &store,
+        owner_id,
+        &master_key,
+        team.id,
+        "Project B",
+        "project-create-b",
+    )
+    .await;
+    assert!(matches!(
+        store
+            .update_project(
+                second_project.id,
+                Some("Project A"),
+                None,
+                second_project.etag,
+                owner_id,
+                "project-update-duplicate",
+            )
+            .await,
+        Err(IdentityError::ScopedNameAlreadyExists)
+    ));
+
+    let service_account = create_service_account(
+        &store,
+        owner_id,
+        &master_key,
+        team.id,
+        project.id,
+        "Worker A",
+        "service-create-a",
+    )
+    .await;
+    assert!(matches!(
+        store
+            .create_service_account(
+                NewServiceAccount {
+                    team_id: team.id,
+                    project_id: project.id,
+                    name: "Worker A".to_owned(),
+                    actor: owner_id,
+                    idempotency_key: "service-create-a-duplicate".to_owned(),
+                },
+                replay(&master_key, "Worker A duplicate"),
+                empty_created_response,
+            )
+            .await,
+        Err(IdentityError::ScopedNameAlreadyExists)
+    ));
+    let second_service_account = create_service_account(
+        &store,
+        owner_id,
+        &master_key,
+        team.id,
+        project.id,
+        "Worker B",
+        "service-create-b",
+    )
+    .await;
+    assert!(matches!(
+        store
+            .update_service_account(
+                second_service_account.id,
+                Some(&service_account.name),
+                None,
+                second_service_account.etag,
+                owner_id,
+                "service-update-duplicate",
+            )
+            .await,
+        Err(IdentityError::ScopedNameAlreadyExists)
+    ));
+}
+
 async fn insert_user(store: &PgStore, id: Uuid, email: &str, role: &str, active: bool) {
     sqlx::query(
         "INSERT INTO users (id, email, display_name, role, active) \
