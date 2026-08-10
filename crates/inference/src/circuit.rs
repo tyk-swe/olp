@@ -21,18 +21,17 @@ const DEGRADED_WARNING_INTERVAL: Duration = Duration::from_secs(30);
 const DISTRIBUTED_OPERATION_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Permission returned by the authoritative check immediately before provider
-/// transport. It also identifies an owned distributed half-open probe.
+/// transport. It also identifies an owned local half-open probe.
 #[derive(Debug)]
 pub struct CircuitPermit {
     target: TargetId,
     source: PermitSource,
+    local_probe_started: Option<Instant>,
 }
 
 #[derive(Debug)]
 enum PermitSource {
-    Local {
-        probe_started: Option<Instant>,
-    },
+    Local,
     Distributed {
         adapter: Arc<DistributedCircuitBreaker>,
         probe_token: Option<String>,
@@ -176,12 +175,18 @@ impl CircuitBreaker {
                 }
                 Ok(Ok(DistributedCircuitPermit::Acquired { probe_token })) => {
                     self.mark_healthy();
+                    let local_probe_started = if probe_token.is_some() {
+                        Some(self.local_start_distributed_probe(target))
+                    } else {
+                        None
+                    };
                     return Some(CircuitPermit {
                         target,
                         source: PermitSource::Distributed {
                             adapter: distributed,
                             probe_token,
                         },
+                        local_probe_started,
                     });
                 }
                 Ok(Err(error)) => self.note_degraded_error("acquire", &error),
@@ -189,9 +194,10 @@ impl CircuitBreaker {
             }
         }
         self.local_try_acquire(target)
-            .map(|probe_started| CircuitPermit {
+            .map(|local_probe_started| CircuitPermit {
                 target,
-                source: PermitSource::Local { probe_started },
+                source: PermitSource::Local,
+                local_probe_started,
             })
     }
 
@@ -354,6 +360,16 @@ impl CircuitBreaker {
         }
     }
 
+    fn local_start_distributed_probe(&self, target: TargetId) -> Instant {
+        let probe_started = Instant::now();
+        self.inner
+            .local
+            .lock()
+            .expect("circuit state lock poisoned")
+            .insert(target, CircuitState::HalfOpen { probe_started });
+        probe_started
+    }
+
     fn local_record_success(&self, permit: &CircuitPermit) {
         let mut states = self
             .inner
@@ -453,17 +469,12 @@ fn local_permit_owns_state(
     states: &BTreeMap<TargetId, CircuitState>,
     permit: &CircuitPermit,
 ) -> bool {
-    match permit.source {
-        PermitSource::Local {
-            probe_started: Some(owned),
-        } => matches!(
+    match permit.local_probe_started {
+        Some(owned) => matches!(
             states.get(&permit.target),
             Some(CircuitState::HalfOpen { probe_started }) if *probe_started == owned
         ),
-        PermitSource::Local {
-            probe_started: None,
-        }
-        | PermitSource::Distributed { .. } => true,
+        None => true,
     }
 }
 
@@ -608,6 +619,36 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires Valkey in OLP_VALKEY_URL"]
+    async fn stale_distributed_probe_cannot_mutate_replacement_local_probe_on_fallback() {
+        let url = std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must be set");
+        let namespace = format!(
+            "olp:test:inference-circuit-fallback:{}",
+            TargetId::new().as_uuid()
+        );
+        let breaker = CircuitBreaker::new(1, Duration::from_millis(40));
+        breaker.install_distributed(
+            DistributedCircuitBreaker::connect(&url, &namespace)
+                .await
+                .unwrap(),
+        );
+
+        let stale_success = distributed_probe_after_open(&breaker, TargetId::new()).await;
+        tokio::time::sleep(Duration::from_millis(55)).await;
+        let replacement = local_replacement_probe(&breaker, stale_success.target);
+        breaker.local_record_failure(&replacement, Duration::from_secs(1));
+        breaker.local_record_success(&stale_success);
+        assert!(breaker.local_try_acquire(stale_success.target).is_none());
+
+        let stale_failure = distributed_probe_after_open(&breaker, TargetId::new()).await;
+        tokio::time::sleep(Duration::from_millis(55)).await;
+        let replacement = local_replacement_probe(&breaker, stale_failure.target);
+        breaker.local_record_success(&replacement);
+        breaker.local_record_failure(&stale_failure, Duration::from_secs(1));
+        assert_eq!(breaker.local_try_acquire(stale_failure.target), Some(None));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Valkey in OLP_VALKEY_URL"]
     async fn independent_breakers_coordinate_through_valkey() {
         let url = std::env::var("OLP_VALKEY_URL").expect("OLP_VALKEY_URL must be set");
         let namespace = format!("olp:test:inference-circuit:{}", TargetId::new().as_uuid());
@@ -636,5 +677,41 @@ mod tests {
         let probe = left.or(right).unwrap();
         first.record_success(&probe).await;
         assert!(second.acquire(target).await.is_some());
+    }
+
+    async fn distributed_probe_after_open(
+        breaker: &CircuitBreaker,
+        target: TargetId,
+    ) -> CircuitPermit {
+        let permit = breaker.acquire(target).await.unwrap();
+        breaker
+            .record_failure(&permit, AttemptFailureClass::Connect, None)
+            .await;
+        tokio::time::sleep(Duration::from_millis(55)).await;
+        let probe = breaker.acquire(target).await.unwrap();
+        assert!(
+            matches!(
+                &probe.source,
+                PermitSource::Distributed {
+                    probe_token: Some(_),
+                    ..
+                }
+            ),
+            "expected distributed half-open probe permit"
+        );
+        assert!(probe.local_probe_started.is_some());
+        probe
+    }
+
+    fn local_replacement_probe(breaker: &CircuitBreaker, target: TargetId) -> CircuitPermit {
+        let local_probe_started = breaker
+            .local_try_acquire(target)
+            .expect("local fallback should allow replacement probe");
+        assert!(local_probe_started.is_some());
+        CircuitPermit {
+            target,
+            source: PermitSource::Local,
+            local_probe_started,
+        }
     }
 }

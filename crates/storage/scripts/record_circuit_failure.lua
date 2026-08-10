@@ -1,8 +1,9 @@
 local version = 1
 local values = redis.call('HMGET', KEYS[1], 'failures', 'probe_token', 'probe_until_ms')
 local active_probe = values[2]
-if active_probe then
-  if active_probe ~= ARGV[1] then
+local supplied_probe = ARGV[1] ~= ''
+if supplied_probe or active_probe then
+  if not active_probe or active_probe ~= ARGV[1] then
     return {version, 0}
   end
   local time = redis.call('TIME')

@@ -134,3 +134,91 @@ async fn failed_probe_reopens_and_expired_lease_recovers_after_crash() {
         DistributedCircuitPermit::Denied
     );
 }
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn stale_probe_success_is_rejected_after_replacement_failure() {
+    let namespace = namespace("stale-success");
+    let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let second = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let target = TargetId::new();
+    let lease = Duration::from_millis(80);
+    let retention = Duration::from_secs(2);
+
+    let permit = first.acquire(target, lease, retention).await.unwrap();
+    first
+        .record_failure(target, token(&permit), 1, lease, retention)
+        .await
+        .unwrap();
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let abandoned = first.acquire(target, lease, retention).await.unwrap();
+    assert!(token(&abandoned).is_some());
+
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let replacement = second.acquire(target, lease, retention).await.unwrap();
+    assert!(token(&replacement).is_some());
+    second
+        .record_failure(target, token(&replacement), 1, lease, retention)
+        .await
+        .unwrap();
+
+    assert!(
+        !first
+            .record_success(target, token(&abandoned))
+            .await
+            .unwrap()
+    );
+    assert!(!first.observe(target).await.unwrap());
+    assert_eq!(
+        first.acquire(target, lease, retention).await.unwrap(),
+        DistributedCircuitPermit::Denied
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn stale_probe_failure_is_rejected_after_replacement_success() {
+    let namespace = namespace("stale-failure");
+    let first = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let second = DistributedCircuitBreaker::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let target = TargetId::new();
+    let lease = Duration::from_millis(80);
+    let retention = Duration::from_secs(2);
+
+    let permit = first.acquire(target, lease, retention).await.unwrap();
+    first
+        .record_failure(target, token(&permit), 1, lease, retention)
+        .await
+        .unwrap();
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let abandoned = first.acquire(target, lease, retention).await.unwrap();
+    assert!(token(&abandoned).is_some());
+
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let replacement = second.acquire(target, lease, retention).await.unwrap();
+    assert!(token(&replacement).is_some());
+    second
+        .record_success(target, token(&replacement))
+        .await
+        .unwrap();
+
+    assert!(
+        !first
+            .record_failure(target, token(&abandoned), 1, lease, retention)
+            .await
+            .unwrap()
+    );
+    assert!(first.observe(target).await.unwrap());
+    assert_eq!(
+        token(&first.acquire(target, lease, retention).await.unwrap()),
+        None
+    );
+}
