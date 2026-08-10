@@ -7,10 +7,17 @@ import OpenAI from 'openai';
 const metadataPath = process.env.OLP_SDK_SMOKE_METADATA;
 assert.ok(metadataPath, 'OLP_SDK_SMOKE_METADATA is required');
 const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
-const { origin, api_key: apiKey, route_slug: routeSlug } = metadata;
+const {
+  origin,
+  api_key: apiKey,
+  conflict_api_key: conflictApiKey,
+  route_slug: routeSlug
+} = metadata;
 assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/);
 assert.equal(routeSlug, 'sdk-smoke-route');
 assert.ok(apiKey.startsWith('olp_'), 'fixture returned an OLP proxy key');
+assert.ok(conflictApiKey.startsWith('olp_'), 'fixture returned a second OLP proxy key');
+assert.notEqual(conflictApiKey, apiKey, 'fixture keys must be distinct for conflict coverage');
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const localOnlyFetch = async (input, init) => {
@@ -20,14 +27,26 @@ const localOnlyFetch = async (input, init) => {
 };
 globalThis.fetch = localOnlyFetch;
 
-async function smokeOpenAI() {
-  const client = new OpenAI({
+function openAIClient(baseURL, options = {}) {
+  return new OpenAI({
     apiKey,
-    baseURL: `${origin}/openai/v1`,
+    baseURL,
     fetch: localOnlyFetch,
     maxRetries: 0,
-    timeout: 5_000
+    timeout: 5_000,
+    ...options
   });
+}
+
+const openAIBaseURLs = [
+  ['canonical OpenAI base', `${origin}/openai/v1`],
+  ['canonical OpenAI base with trailing slash', `${origin}/openai/v1/`],
+  ['OpenAI compatibility base', `${origin}/v1`],
+  ['OpenAI compatibility base with trailing slash', `${origin}/v1/`]
+];
+
+async function smokeOpenAI(baseURL, label) {
+  const client = openAIClient(baseURL);
   const completion = await client.chat.completions.create({
     model: routeSlug,
     max_tokens: 32,
@@ -58,7 +77,33 @@ async function smokeOpenAI() {
   assert.equal(streamedText, `official openai sdk reached ${routeSlug}`);
 
   const page = await client.models.list();
+  assert.ok(page.data.some((model) => model.id === routeSlug), label);
+
+  const model = await client.models.retrieve(routeSlug);
+  assert.equal(model.id, routeSlug, label);
+}
+
+async function smokeOpenAILitellm() {
+  const observedHeaders = [];
+  const captureFetch = async (input, init) => {
+    const request = new Request(input, init);
+    observedHeaders.push({
+      authorization: request.headers.get('authorization'),
+      litellmApiKey: request.headers.get('x-litellm-api-key')
+    });
+    return localOnlyFetch(request);
+  };
+  const client = openAIClient(`${origin}/v1/`, {
+    apiKey: 'external-upstream-authorization',
+    fetch: captureFetch,
+    defaultHeaders: { 'x-litellm-api-key': apiKey }
+  });
+  const page = await client.models.list();
   assert.ok(page.data.some((model) => model.id === routeSlug));
+  assert.deepEqual(observedHeaders.at(-1), {
+    authorization: 'Bearer external-upstream-authorization',
+    litellmApiKey: apiKey
+  });
 }
 
 async function smokeAnthropic() {
@@ -141,15 +186,9 @@ async function rejection(what, attempt) {
 // whose failures do not land in the SDK's own typed hierarchy, with the status
 // each vendor documents for that condition, is not compatible however well its
 // successes are shaped.
-async function errorContractOpenAI() {
-  const wrongKey = new OpenAI({
-    apiKey: 'olp_not-a-real-key',
-    baseURL: `${origin}/openai/v1`,
-    fetch: localOnlyFetch,
-    maxRetries: 0,
-    timeout: 5_000
-  });
-  const unauthorized = await rejection('an OpenAI call with an invalid key', () =>
+async function errorContractOpenAI(baseURL, label) {
+  const wrongKey = openAIClient(baseURL, { apiKey: 'olp_not-a-real-key' });
+  const unauthorized = await rejection(`${label} with an invalid key`, () =>
     wrongKey.chat.completions.create({
       model: routeSlug,
       max_tokens: 32,
@@ -158,18 +197,12 @@ async function errorContractOpenAI() {
   );
   assert.ok(
     unauthorized instanceof OpenAI.AuthenticationError,
-    `an invalid key must raise OpenAI.AuthenticationError, got ${unauthorized?.constructor?.name}: ${unauthorized}`
+    `${label} invalid key must raise OpenAI.AuthenticationError, got ${unauthorized?.constructor?.name}: ${unauthorized}`
   );
-  assert.equal(unauthorized.status, 401, 'an invalid credential is 401, not another 4xx');
+  assert.equal(unauthorized.status, 401, `${label} invalid key is 401`);
 
-  const client = new OpenAI({
-    apiKey,
-    baseURL: `${origin}/openai/v1`,
-    fetch: localOnlyFetch,
-    maxRetries: 0,
-    timeout: 5_000
-  });
-  const missing = await rejection('an OpenAI call naming an unknown model', () =>
+  const client = openAIClient(baseURL);
+  const missing = await rejection(`${label} with an unknown model`, () =>
     client.chat.completions.create({
       model: 'sdk-smoke-no-such-route',
       max_tokens: 32,
@@ -178,9 +211,37 @@ async function errorContractOpenAI() {
   );
   assert.ok(
     missing instanceof OpenAI.NotFoundError,
-    `an unknown model must raise OpenAI.NotFoundError, got ${missing?.constructor?.name}: ${missing}`
+    `${label} unknown model must raise OpenAI.NotFoundError, got ${missing?.constructor?.name}: ${missing}`
   );
-  assert.equal(missing.status, 404, 'an unknown model is 404, not another 4xx');
+  assert.equal(missing.status, 404, `${label} unknown model is 404`);
+}
+
+async function directNegativeContracts() {
+  for (const [description, litellmApiKey, authorization] of [
+    ['an invalid x-litellm-api-key', 'olp_not-a-real-key', undefined],
+    [
+      'an invalid x-litellm-api-key must not fall back to a valid native key',
+      'olp_not-a-real-key',
+      `Bearer ${apiKey}`
+    ],
+    [
+      'conflicting valid OLP gateway credentials',
+      apiKey,
+      `Bearer ${conflictApiKey}`
+    ]
+  ]) {
+    const headers = { 'x-litellm-api-key': litellmApiKey };
+    if (authorization) headers.Authorization = authorization;
+    const response = await localOnlyFetch(`${origin}/v1/models`, { headers });
+    assert.equal(response.status, 401, description);
+    await response.text();
+  }
+
+  const unknownRoute = await localOnlyFetch(`${origin}/v1/not-enabled`, {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  assert.equal(unknownRoute.status, 404, 'an unknown /v1 route must remain unsupported');
+  await unknownRoute.text();
 }
 
 async function errorContractAnthropic() {
@@ -236,10 +297,12 @@ async function errorContractGoogle() {
   );
 }
 
-await smokeOpenAI();
+for (const [label, baseURL] of openAIBaseURLs) await smokeOpenAI(baseURL, label);
+await smokeOpenAILitellm();
 await smokeAnthropic();
 await smokeGoogle();
-await errorContractOpenAI();
+for (const [label, baseURL] of openAIBaseURLs) await errorContractOpenAI(baseURL, label);
+await directNegativeContracts();
 await errorContractAnthropic();
 await errorContractGoogle();
 process.stdout.write(

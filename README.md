@@ -64,7 +64,7 @@ All public interfaces share one origin — `http://localhost:8080` by default:
 |---|---|
 | Console | `/` |
 | Management API | `/api/v1` |
-| OpenAI-compatible API | `/openai/v1` |
+| OpenAI-compatible API | `/v1` (SDK compatibility alias) and `/openai/v1` (explicit protocol prefix) |
 | Anthropic-compatible API | `/anthropic/v1` |
 | Gemini-compatible APIs | `/gemini/v1` and `/gemini/v1beta` |
 | Management OpenAPI | `/api/v1/openapi.json` — [tracked schema](openapi/management.json) |
@@ -73,6 +73,29 @@ Liveness, readiness, and metrics are private endpoints on
 `OLP_OBSERVABILITY_LISTEN_ADDR` (default `127.0.0.1:9090`):
 `/health/live`, `/health/ready`, and `/metrics`. Compose does not publish port
 9090; public requests to these paths return 404.
+
+### OpenAI compatibility
+
+Use either registered OpenAI base with the official OpenAI JavaScript SDK;
+both also accept a trailing slash:
+
+| Base URL | Meaning | Gateway credentials |
+|---|---|---|
+| `/v1` | OpenAI SDK-compatible alias | `Authorization: Bearer <OLP key>` or `x-litellm-api-key: <OLP key>` |
+| `/openai/v1` | Explicit protocol-prefixed OpenAI surface | `Authorization: Bearer <OLP key>` or `x-litellm-api-key: <OLP key>` |
+
+`x-litellm-api-key` accepts the raw key or `Bearer <OLP key>`. When it is
+present, it is authoritative: an invalid value does not fall back to a valid
+native credential, and two different valid OLP credentials are rejected. A
+valid gateway key may coexist with a separate, non-OLP `Authorization` value.
+
+These are explicit aliases, not wildcard forwarding. Bare root paths such as
+`/chat/completions` or `/models`, the base paths without a registered
+operation, and unknown `/v1/*` or `/openai/*` paths are unsupported and return
+404; they are never passed through to a provider. The compatibility suite
+covers the implemented chat-completions, Responses, streaming, and model
+list/retrieve operations, but this does not imply support for other OpenAI
+endpoints.
 
 ## Console
 

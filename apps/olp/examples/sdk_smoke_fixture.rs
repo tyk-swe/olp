@@ -110,10 +110,24 @@ fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
     ]
 }
 
+fn fixture_api_key(lookup_id: ApiKeyLookupId, digest: ApiKeyDigest) -> ApiKey {
+    ApiKey {
+        id: ApiKeyId::new(),
+        lookup_id,
+        digest,
+        status: ApiKeyStatus::Active,
+        expires_at: None,
+        scopes: BTreeSet::from([ApiKeyScope::Inference, ApiKeyScope::ModelsRead]),
+        allowed_routes: BTreeSet::new(),
+        limits: ApiKeyLimits::default(),
+    }
+}
+
 #[derive(Serialize)]
 struct FixtureMetadata<'a> {
     origin: &'a str,
     api_key: &'a str,
+    conflict_api_key: &'a str,
     route_slug: &'a str,
 }
 
@@ -127,6 +141,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key_material = auth_hmac_key.generate_api_key();
     let plaintext_key = key_material.expose_once().to_owned();
     let lookup_id = ApiKeyLookupId::parse(key_material.lookup_id.clone())?;
+    let conflict_key_material = auth_hmac_key.generate_api_key();
+    let conflict_plaintext_key = conflict_key_material.expose_once().to_owned();
+    let conflict_lookup_id = ApiKeyLookupId::parse(conflict_key_material.lookup_id.clone())?;
     let provider_id = ProviderId::new();
     let route_slug = RouteSlug::parse(ROUTE_SLUG)?;
 
@@ -177,19 +194,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )]),
         routes: BTreeMap::from([(route_slug, route)]),
-        api_keys: BTreeMap::from([(
-            lookup_id.clone(),
-            ApiKey {
-                id: ApiKeyId::new(),
-                lookup_id,
-                digest: ApiKeyDigest::new(key_material.digest),
-                status: ApiKeyStatus::Active,
-                expires_at: None,
-                scopes: BTreeSet::from([ApiKeyScope::Inference, ApiKeyScope::ModelsRead]),
-                allowed_routes: BTreeSet::new(),
-                limits: ApiKeyLimits::default(),
-            },
-        )]),
+        api_keys: BTreeMap::from([
+            (
+                lookup_id.clone(),
+                fixture_api_key(lookup_id, ApiKeyDigest::new(key_material.digest)),
+            ),
+            (
+                conflict_lookup_id.clone(),
+                fixture_api_key(
+                    conflict_lookup_id,
+                    ApiKeyDigest::new(conflict_key_material.digest),
+                ),
+            ),
+        ]),
     };
     let runtime = Arc::new(RuntimeManager::empty());
     runtime.install(
@@ -222,6 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_vec(&FixtureMetadata {
             origin: &origin,
             api_key: &plaintext_key,
+            conflict_api_key: &conflict_plaintext_key,
             route_slug: ROUTE_SLUG,
         })?,
     )
