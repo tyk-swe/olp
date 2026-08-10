@@ -38,28 +38,32 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
     state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([3; 32])));
     let app = public_router(state.gateway_state_for_test());
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
-    for (path, header_name, expected_pointer) in [
+    for (path, header_name, value, expected_pointer) in [
         (
             "/openai/v1/chat/completions",
             axum::http::header::AUTHORIZATION,
+            "Bearer invalid-key",
             "/error/code",
         ),
         (
             "/anthropic/v1/messages",
             HeaderName::from_static("x-api-key"),
+            "invalid-key",
             "/error/type",
         ),
         (
             "/gemini/v1beta/models/test:generateContent",
             HeaderName::from_static("x-goog-api-key"),
+            "invalid-key",
             "/error/status",
         ),
+        (
+            "/openai/v1/chat/completions",
+            HeaderName::from_static("x-litellm-api-key"),
+            "Bearer invalid-key",
+            "/error/code",
+        ),
     ] {
-        let value = if header_name == axum::http::header::AUTHORIZATION {
-            "Bearer invalid-key"
-        } else {
-            "invalid-key"
-        };
         let response = app
             .clone()
             .oneshot(
@@ -231,6 +235,183 @@ async fn every_inference_surface_and_models_endpoint_requires_its_own_well_forme
 }
 
 #[tokio::test]
+async fn litellm_gateway_credentials_authenticate_each_surface_in_both_forms() {
+    let (state, key) = inference_state(false);
+    let app = public_router(state.gateway_state_for_test());
+    for (path, value) in [
+        ("/openai/v1/models", format!("Bearer {key}")),
+        ("/anthropic/v1/models", key.clone()),
+        ("/gemini/v1/models", format!("Bearer {key}")),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("x-litellm-api-key", value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK, "{path}");
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/openai/v1/models")
+                .header("x-litellm-api-key", format!("Bearer {key}"))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    "Bearer upstream-oauth-token",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    for (path, native_header, native_value) in [
+        (
+            "/openai/v1/models",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {key}"),
+        ),
+        (
+            "/anthropic/v1/models",
+            HeaderName::from_static("x-api-key"),
+            key.clone(),
+        ),
+        (
+            "/gemini/v1/models",
+            HeaderName::from_static("x-goog-api-key"),
+            key.clone(),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("x-litellm-api-key", format!("Bearer {key}"))
+                    .header(native_header, native_value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn litellm_gateway_credentials_are_authoritative_and_conflicts_fail_closed() {
+    let (state, key) = inference_state(false);
+    let other_key = AuthHmacKey::new([19; 32])
+        .generate_api_key()
+        .expose_once()
+        .to_owned();
+    let app = public_router(state.gateway_state_for_test());
+
+    for (path, native_header, native_value, pointer, expected) in [
+        (
+            "/openai/v1/models",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {other_key}"),
+            "/error/code",
+            "invalid_api_key",
+        ),
+        (
+            "/anthropic/v1/models",
+            HeaderName::from_static("x-api-key"),
+            other_key.clone(),
+            "/error/type",
+            "authentication_error",
+        ),
+        (
+            "/gemini/v1/models",
+            HeaderName::from_static("x-goog-api-key"),
+            other_key.clone(),
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("x-litellm-api-key", format!("Bearer {key}"))
+                    .header(native_header, native_value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body_text = String::from_utf8(body.to_vec()).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&body_text).unwrap();
+        assert_eq!(
+            body.pointer(pointer).and_then(serde_json::Value::as_str),
+            Some(expected)
+        );
+        assert!(!body_text.contains(&key));
+        assert!(!body_text.contains(&other_key));
+    }
+
+    for (path, native_header, native_value, pointer, expected) in [
+        (
+            "/openai/v1/models",
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {key}"),
+            "/error/code",
+            "invalid_api_key",
+        ),
+        (
+            "/anthropic/v1/models",
+            HeaderName::from_static("x-api-key"),
+            key.clone(),
+            "/error/type",
+            "authentication_error",
+        ),
+        (
+            "/gemini/v1/models",
+            HeaderName::from_static("x-goog-api-key"),
+            key.clone(),
+            "/error/status",
+            "UNAUTHENTICATED",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("x-litellm-api-key", "Bearer invalid-key")
+                    .header(native_header, native_value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body.pointer(pointer).and_then(serde_json::Value::as_str),
+            Some(expected)
+        );
+    }
+}
+
+#[tokio::test]
 async fn revoked_and_expired_keys_are_rejected_by_admission() {
     for (status, expires_at) in [
         (ApiKeyStatus::Revoked, None),
@@ -261,7 +442,22 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
                 BTreeMap::new(),
             )
             .unwrap();
-        let response = public_router(state.gateway_state_for_test())
+        let app = public_router(state.gateway_state_for_test());
+        let litellm_response = app
+            .clone()
+            .oneshot(
+                Request::get("/openai/v1/models")
+                    .header("x-litellm-api-key", format!("Bearer {key}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            litellm_response.status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+        let response = app
             .oneshot(
                 Request::get("/openai/v1/models")
                     .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))

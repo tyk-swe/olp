@@ -16,6 +16,8 @@ use serde::Deserialize;
 
 use crate::{RequestBoundaryState, gateway};
 
+const LITELLM_API_KEY_HEADER: &str = "x-litellm-api-key";
+
 pub(crate) struct ReleaseReservationBody {
     pub(crate) inner: Body,
     pub(crate) reservation: InferenceReservation,
@@ -58,21 +60,24 @@ pub(super) fn authenticate_inference_headers(
     surface: Surface,
     gateway_capability: Option<GatewayCapability>,
 ) -> Result<InferencePrincipal, crate::Problem> {
-    let token = match surface {
-        Surface::OpenAi => headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split_once(' '))
-            .filter(|(scheme, token)| {
-                scheme.eq_ignore_ascii_case("bearer")
-                    && !token.is_empty()
-                    && !token.contains(char::is_whitespace)
-            })
-            .map(|(_, token)| token),
-        Surface::Anthropic => inference_header_token(headers, "x-api-key"),
-        Surface::Gemini => inference_header_token(headers, "x-goog-api-key"),
-    }
-    .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
+    let litellm_header_present = headers.contains_key(LITELLM_API_KEY_HEADER);
+    let native_token = native_inference_token(headers, surface);
+    let litellm_token = if litellm_header_present {
+        let mut values = headers.get_all(LITELLM_API_KEY_HEADER).iter();
+        match (values.next(), values.next()) {
+            (Some(value), None) => litellm_header_token(value),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let token = if litellm_header_present {
+        litellm_token
+            .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
+    } else {
+        native_token
+            .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
+    };
     let auth_hmac_key = &state.auth_hmac_key;
     let lookup = auth_hmac_key
         .lookup_id(token)
@@ -92,6 +97,15 @@ pub(super) fn authenticate_inference_headers(
         || key
             .expires_at
             .is_some_and(|expires_at| expires_at <= chrono::Utc::now())
+    {
+        return Err(crate::Problem::unauthorized(
+            "The API key is invalid or unavailable.",
+        ));
+    }
+    if litellm_header_present
+        && native_token.is_some_and(|native_token| {
+            native_token != token && auth_hmac_key.lookup_id(native_token).is_ok()
+        })
     {
         return Err(crate::Problem::unauthorized(
             "The API key is invalid or unavailable.",
@@ -252,9 +266,35 @@ pub(super) const fn estimate_http_non_json_request_tokens(category: gateway::Tok
     }
 }
 
+fn native_inference_token(headers: &HeaderMap, surface: Surface) -> Option<&str> {
+    match surface {
+        Surface::OpenAi => headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(bearer_token),
+        Surface::Anthropic => inference_header_token(headers, "x-api-key"),
+        Surface::Gemini => inference_header_token(headers, "x-goog-api-key"),
+    }
+}
+
+fn litellm_header_token(value: &axum::http::HeaderValue) -> Option<&str> {
+    let value = value.to_str().ok()?;
+    bearer_token(value).or_else(|| non_whitespace_token(value))
+}
+
+fn bearer_token(value: &str) -> Option<&str> {
+    let (scheme, token) = value.split_once(' ')?;
+    (scheme.eq_ignore_ascii_case("bearer") && non_whitespace_token(token).is_some())
+        .then_some(token)
+}
+
+fn non_whitespace_token(value: &str) -> Option<&str> {
+    (!value.is_empty() && !value.contains(char::is_whitespace)).then_some(value)
+}
+
 fn inference_header_token<'a>(headers: &'a HeaderMap, name: &'static str) -> Option<&'a str> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
-        .filter(|token| !token.is_empty() && !token.contains(char::is_whitespace))
+        .and_then(non_whitespace_token)
 }

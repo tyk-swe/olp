@@ -301,7 +301,7 @@ fn problem_panic_response(_panic: Box<dyn std::any::Any + Send + 'static>) -> Re
     Problem::internal().into_response()
 }
 
-pub(crate) fn sensitive_request_headers() -> [HeaderName; 6] {
+pub(crate) fn sensitive_request_headers() -> [HeaderName; 7] {
     [
         axum::http::header::AUTHORIZATION,
         axum::http::header::COOKIE,
@@ -309,6 +309,7 @@ pub(crate) fn sensitive_request_headers() -> [HeaderName; 6] {
         HeaderName::from_static(management::SETUP_TOKEN_HEADER),
         HeaderName::from_static("x-api-key"),
         HeaderName::from_static("x-goog-api-key"),
+        HeaderName::from_static("x-litellm-api-key"),
     ]
 }
 
