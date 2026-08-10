@@ -2,9 +2,8 @@ use std::collections::BTreeMap;
 
 use axum::{
     Json,
-    body::Body,
     extract::{Extension, Multipart, Path, Query, State},
-    http::{HeaderValue, StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
@@ -12,7 +11,6 @@ use futures::{StreamExt, stream};
 use olp_domain::{
     CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
 };
-use olp_inference::CleanupMediaStream;
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
@@ -33,7 +31,7 @@ use super::{
         RequiredTarget, authorize_principal, defer_unary_outcome_to_body, execute_routed_result,
         incompatible_result, mark_unary_outcome, mark_unary_outcome_with_status,
     },
-    media::open_response_media,
+    media::{open_response_media, response_from_opened_media},
     media_jobs::{
         attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
         media_job_error, media_job_result, media_job_state, owned_media_job,
@@ -127,7 +125,7 @@ async fn complete_video_create(
     {
         Ok(executed) => executed,
         Err(error) => {
-            if error.code == "ambiguous_upstream_result" {
+            if error.code() == "ambiguous_upstream_result" {
                 if let Err(persistence_error) = state
                     .store()
                     .mark_media_job_create_ambiguous(
@@ -527,45 +525,13 @@ pub(super) async fn video_content(
             return Err(failure);
         }
     };
-    let cleanup = CleanupMediaStream::new(
-        opened.bytes,
+    let response = response_from_opened_media(
+        opened,
         state.media_spool().clone(),
-        opened.artifact.handle.clone(),
+        "The provider returned an invalid video content type.",
+        "The provider returned an invalid video length.",
     );
-    let mut response = Response::new(Body::from_stream(cleanup));
-    if let Some(content_type) = opened.artifact.content_type {
-        let content_type = match HeaderValue::from_str(&content_type) {
-            Ok(content_type) => content_type,
-            Err(_) => {
-                let failure = InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "The provider returned an invalid video content type.",
-                );
-                executed.mark_failure(failure.accounting_outcome());
-                return Err(failure);
-            }
-        };
-        response
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, content_type);
-    }
-    if let Some(length) = opened.artifact.content_length {
-        let content_length = match HeaderValue::from_str(&length.to_string()) {
-            Ok(content_length) => content_length,
-            Err(_) => {
-                let failure = InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "The provider returned an invalid video length.",
-                );
-                executed.mark_failure(failure.accounting_outcome());
-                return Err(failure);
-            }
-        };
-        response
-            .headers_mut()
-            .insert(header::CONTENT_LENGTH, content_length);
-    }
-    defer_unary_outcome_to_body(&mut executed, Ok(response))
+    defer_unary_outcome_to_body(&mut executed, response)
 }
 
 pub(super) async fn video_delete(

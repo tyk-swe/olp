@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Extension, Path, State},
-    http::{HeaderValue, StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use olp_domain::{OperationKind, RouteSlug, Surface};
@@ -13,6 +13,8 @@ use crate::{
     GatewayState, InferencePrincipal,
     gateway::{InferenceError, authorize_model_access, release_model_limits, reserve_model_limits},
 };
+
+use super::error::openai_error_response;
 
 pub(super) async fn list_models(
     State(state): State<GatewayState>,
@@ -150,46 +152,16 @@ impl OpenAiModelError {
     }
 }
 
-#[derive(Serialize)]
-struct OpenAiErrorEnvelope<'a> {
-    error: OpenAiErrorBody<'a>,
-}
-
-#[derive(Serialize)]
-struct OpenAiErrorBody<'a> {
-    message: &'a str,
-    #[serde(rename = "type")]
-    kind: &'a str,
-    param: Option<&'a str>,
-    code: &'a str,
-}
-
 impl IntoResponse for OpenAiModelError {
     fn into_response(self) -> Response {
-        let is_unauthorized = self.status == StatusCode::UNAUTHORIZED;
-        let mut response = (
+        openai_error_response(
             self.status,
-            Json(OpenAiErrorEnvelope {
-                error: OpenAiErrorBody {
-                    message: &self.message,
-                    kind: self.kind,
-                    param: None,
-                    code: self.code,
-                },
-            }),
+            self.code,
+            self.kind,
+            &self.message,
+            self.retry_after,
+            self.status == StatusCode::UNAUTHORIZED,
         )
-            .into_response();
-        if is_unauthorized {
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-        }
-        if let Some(retry_after) = self.retry_after {
-            let value = HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
-                .expect("retry-after seconds are a valid header value");
-            response.headers_mut().insert(header::RETRY_AFTER, value);
-        }
-        response
     }
 }
 
@@ -201,7 +173,10 @@ mod tests {
         sync::Arc,
     };
 
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{Request, header},
+    };
     use chrono::{TimeZone, Utc};
     use futures::stream;
     use http_body_util::BodyExt;

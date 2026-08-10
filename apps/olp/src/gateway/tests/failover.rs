@@ -337,8 +337,8 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
         Ok(_) => panic!("missing limiter must fail closed before route selection"),
         Err(error) => error,
     };
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(error.code, "distributed_limits_unavailable");
+    assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error.code(), "distributed_limits_unavailable");
 }
 
 #[tokio::test]
@@ -376,8 +376,8 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
         Err(error) => error,
     };
 
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(error.code, "media_job_target_unavailable");
+    assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error.code(), "media_job_target_unavailable");
 }
 
 #[tokio::test]
@@ -452,6 +452,6 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
         .await
         .map_err(InferenceError::from)
         .expect_err("missing delta limiter must fail closed above the HTTP baseline");
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(error.code, "distributed_limits_unavailable");
+    assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error.code(), "distributed_limits_unavailable");
 }

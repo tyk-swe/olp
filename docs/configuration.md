@@ -80,11 +80,14 @@ endpoint** for another Bearer-key-compatible service.
 
 ## Test and harness variables
 
-Never set the test escape hatches in production; both require the exact value
+Never set the test escape hatches in production; these require the exact value
 `test-only`:
 
 - `OLP_ALLOW_INSECURE_OIDC_FOR_TESTS` permits HTTP OIDC issuers.
 - `OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS` builds N-1 migration fixtures.
+- `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS` permits loopback mock
+  provider endpoints. It is available only in debug binaries built with the
+  `test-util` feature and is compiled out of release binaries.
 
 Script and harness families are intentionally not runtime settings:
 `OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`

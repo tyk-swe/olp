@@ -12,7 +12,7 @@ pub(super) async fn connect_store(args: &DatabaseArgs) -> AppResult<PgStore> {
 }
 
 pub(super) async fn load_auth_hmac_key(path: &Path) -> AppResult<AuthHmacKey> {
-    let encoded = Zeroizing::new(tokio::fs::read_to_string(path).await?);
+    let encoded = read_secret_file(path).await?;
     Ok(AuthHmacKey::from_base64(&encoded)?)
 }
 
@@ -20,13 +20,17 @@ pub(super) async fn load_bootstrap_token_digest(
     path: &Path,
     auth_hmac_key: &AuthHmacKey,
 ) -> AppResult<[u8; 32]> {
-    let encoded = Zeroizing::new(tokio::fs::read_to_string(path).await?);
+    let encoded = read_secret_file(path).await?;
     Ok(auth_hmac_key.bootstrap_token_digest_from_base64(&encoded)?)
 }
 
 pub(super) async fn load_master_key(path: &Path) -> AppResult<MasterKey> {
-    let encoded = Zeroizing::new(tokio::fs::read_to_string(path).await?);
+    let encoded = read_secret_file(path).await?;
     Ok(MasterKey::from_file_contents(&encoded)?)
+}
+
+async fn read_secret_file(path: &Path) -> AppResult<Zeroizing<String>> {
+    Ok(Zeroizing::new(tokio::fs::read_to_string(path).await?))
 }
 
 pub(super) fn ensure_keyring_covers_references(

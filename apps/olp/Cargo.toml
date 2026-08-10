@@ -1,9 +1,11 @@
 [package]
 name = "olp"
+description = "OpenLLMProxy delivery binary serving public inference and management APIs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
 
 [package.metadata.olp]
 role = "delivery"

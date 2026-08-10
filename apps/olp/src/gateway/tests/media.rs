@@ -4,8 +4,8 @@ use super::*;
 fn unknown_upstream_video_status_fails_closed() {
     let error = media_job_state(&olp_domain::VideoStatus::Other("mystery".to_owned()))
         .expect_err("unknown upstream status must not become a local terminal state");
-    assert_eq!(error.status, StatusCode::BAD_GATEWAY);
-    assert_eq!(error.code, "provider_protocol_error");
+    assert_eq!(error.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(error.code(), "provider_protocol_error");
 }
 
 #[test]

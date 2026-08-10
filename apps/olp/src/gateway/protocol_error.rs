@@ -94,25 +94,21 @@ pub(crate) fn problem_response(surface: Surface, problem: Problem) -> Response {
             .unwrap_or("request_failed")
             .to_owned()
     };
-    let mut response = match surface {
-        Surface::OpenAi => (
+    match surface {
+        Surface::OpenAi => super::error::openai_error_response(
             status,
-            Json(json!({
-                "error": {
-                    "message": problem.detail,
-                    "type": match status {
-                        StatusCode::UNAUTHORIZED => "authentication_error",
-                        StatusCode::FORBIDDEN => "permission_error",
-                        StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
-                        status if status.is_client_error() => "invalid_request_error",
-                        _ => "server_error"
-                    },
-                    "param": null,
-                    "code": code
-                }
-            })),
-        )
-            .into_response(),
+            &code,
+            match status {
+                StatusCode::UNAUTHORIZED => "authentication_error",
+                StatusCode::FORBIDDEN => "permission_error",
+                StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+                status if status.is_client_error() => "invalid_request_error",
+                _ => "server_error",
+            },
+            &problem.detail,
+            None,
+            status == StatusCode::UNAUTHORIZED,
+        ),
         Surface::Anthropic => (
             status,
             Json(json!({
@@ -142,13 +138,7 @@ pub(crate) fn problem_response(surface: Surface, problem: Problem) -> Response {
             })),
         )
             .into_response(),
-    };
-    if matches!(surface, Surface::OpenAi) && status == StatusCode::UNAUTHORIZED {
-        response
-            .headers_mut()
-            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
     }
-    response
 }
 
 pub(crate) fn inference_error_response(surface: Surface, error: InferenceError) -> Response {

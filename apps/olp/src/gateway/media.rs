@@ -220,36 +220,12 @@ pub(super) async fn speech(
         let body = encode_speech_body(result).map_err(|error| {
             InferenceError::bad_gateway("provider_protocol_error", error.to_string())
         })?;
-        let opened = open_response_media(&state, &body.media.handle).await?;
-        let cleanup = CleanupMediaStream::new(
-            opened.bytes,
+        response_from_opened_media(
+            open_response_media(&state, &body.media.handle).await?,
             state.media_spool().clone(),
-            opened.artifact.handle.clone(),
-        );
-        let mut response = Response::new(Body::from_stream(cleanup));
-        if let Some(content_type) = opened.artifact.content_type {
-            let content_type = HeaderValue::from_str(&content_type).map_err(|_| {
-                InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "The provider returned an invalid media content type.",
-                )
-            })?;
-            response
-                .headers_mut()
-                .insert(header::CONTENT_TYPE, content_type);
-        }
-        if let Some(length) = opened.artifact.content_length {
-            response.headers_mut().insert(
-                header::CONTENT_LENGTH,
-                HeaderValue::from_str(&length.to_string()).map_err(|_| {
-                    InferenceError::bad_gateway(
-                        "provider_protocol_error",
-                        "The provider returned an invalid media length.",
-                    )
-                })?,
-            );
-        }
-        Ok(response)
+            "The provider returned an invalid media content type.",
+            "The provider returned an invalid media length.",
+        )
     }
     .await;
     defer_unary_outcome_to_body(&mut executed, outcome)
@@ -483,4 +459,33 @@ pub(super) async fn open_response_media(
             Err(mapped)
         }
     }
+}
+
+/// Converts bounded spooled media into an HTTP response that removes the
+/// artifact when the body is exhausted or dropped.
+pub(super) fn response_from_opened_media(
+    opened: olp_domain::OpenedMedia,
+    spool: Arc<dyn olp_domain::MediaSpool>,
+    invalid_content_type_message: &'static str,
+    invalid_content_length_message: &'static str,
+) -> Result<Response, InferenceError> {
+    let cleanup = CleanupMediaStream::new(opened.bytes, spool, opened.artifact.handle.clone());
+    let mut response = Response::new(Body::from_stream(cleanup));
+    if let Some(content_type) = opened.artifact.content_type {
+        let content_type = HeaderValue::from_str(&content_type).map_err(|_| {
+            InferenceError::bad_gateway("provider_protocol_error", invalid_content_type_message)
+        })?;
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
+    }
+    if let Some(length) = opened.artifact.content_length {
+        let content_length = HeaderValue::from_str(&length.to_string()).map_err(|_| {
+            InferenceError::bad_gateway("provider_protocol_error", invalid_content_length_message)
+        })?;
+        response
+            .headers_mut()
+            .insert(header::CONTENT_LENGTH, content_length);
+    }
+    Ok(response)
 }

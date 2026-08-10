@@ -123,8 +123,8 @@ fn responses_error_sse(error: &InferenceError) -> Bytes {
         event: Some("error".to_owned()),
         data: json!({
             "type": "error",
-            "code": error.code,
-            "message": error.message,
+            "code": error.code(),
+            "message": error.message(),
             "param": null
         })
         .to_string(),

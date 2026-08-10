@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, time::Duration};
 
-use axum::http::StatusCode;
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
@@ -247,12 +246,12 @@ async fn reconcile_media_job_operation(
         .ok_or("media_job_upstream_id_unavailable")?;
     if record.lifecycle == MediaJobLifecycle::Active {
         let mut operation = olp_protocols::openai::decode_video_get(upstream_id);
-        set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code)?;
+        set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
         let result = execute_media_reconciliation_result(state, record, operation).await?;
         let CanonicalResult::VideoJob(result) = result.as_ref() else {
             return Err("provider_protocol_error");
         };
-        let state_update = media_job_state(&result.status).map_err(|error| error.code)?;
+        let state_update = media_job_state(&result.status).map_err(|error| error.code())?;
         *record = store
             .refresh_media_job(
                 record.id,
@@ -276,8 +275,8 @@ async fn reconcile_media_job_operation(
     }
 
     let mut operation = olp_protocols::openai::decode_video_delete(upstream_id);
-    set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code)?;
-    mark_missing_delete_as_success(&mut operation).map_err(|error| error.code)?;
+    set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
+    mark_missing_delete_as_success(&mut operation).map_err(|error| error.code())?;
     let result = execute_media_reconciliation_result(state, record, operation).await?;
     if !matches!(
         result.as_ref(),
@@ -440,13 +439,9 @@ pub(super) fn set_video_route(
 pub(super) fn media_job_error(error: MediaJobError) -> InferenceError {
     match error {
         MediaJobError::NotFound => InferenceError::resource_not_found("video_not_found"),
-        MediaJobError::PreconditionFailed => InferenceError {
-            status: StatusCode::CONFLICT,
-            code: "video_changed",
-            kind: "conflict_error",
-            message: "The video job changed; retry the request.".into(),
-            retry_after: None,
-        },
+        MediaJobError::PreconditionFailed => {
+            InferenceError::conflict("video_changed", "The video job changed; retry the request.")
+        }
         MediaJobError::UpstreamIdentityConflict => {
             InferenceError::unavailable("media_job_upstream_identity_conflict")
         }

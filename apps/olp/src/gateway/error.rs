@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::time::Duration;
 
 use axum::{
     Json,
@@ -6,19 +6,20 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use olp_domain::{AttemptFailureClass, CanonicalError, ErrorClass, TransportError};
+use olp_domain::{CanonicalError, ErrorClass, TransportError};
+use olp_inference::{InferenceError as CoreInferenceError, InferenceErrorKind};
 use olp_storage::limits::LimitDimension;
 use serde::Serialize;
 
 use crate::Problem;
 
-pub(crate) struct InferenceError {
-    pub(super) status: StatusCode,
-    pub(super) code: &'static str,
-    pub(super) kind: &'static str,
-    pub(super) message: String,
-    pub(super) retry_after: Option<Duration>,
-}
+/// Delivery adapter for transport-neutral inference failures.
+///
+/// `olp_inference` owns the error's classification, code, message, and retry
+/// policy. The gateway only maps that stable contract to HTTP status codes and
+/// OpenAI-compatible error envelopes.
+#[derive(Debug)]
+pub(crate) struct InferenceError(CoreInferenceError);
 
 pub(super) fn valid_json<T>(
     payload: Result<Json<T>, JsonRejection>,
@@ -28,181 +29,88 @@ pub(super) fn valid_json<T>(
     })
 }
 
-impl fmt::Debug for InferenceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("InferenceError")
-            .field("status", &self.status)
-            .field("code", &self.code)
-            .field("kind", &self.kind)
-            .field("message", &"[REDACTED]")
-            .field("retry_after", &self.retry_after)
-            .finish()
-    }
-}
-
 impl InferenceError {
     pub(crate) fn accounting_outcome(&self) -> olp_inference::RequestOutcome {
         olp_inference::RequestOutcome::failure(
-            (self.code != "client_cancelled").then_some(self.status.as_u16()),
-            self.code,
+            (self.code() != "client_cancelled").then_some(self.status().as_u16()),
+            self.code(),
         )
     }
 
     pub(crate) fn unauthorized() -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            code: "invalid_api_key",
-            kind: "authentication_error",
-            message: "The API key is invalid or unavailable.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::unauthorized().into()
     }
 
-    pub(crate) fn forbidden(message: String) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            code: "permission_denied",
-            kind: "permission_error",
-            message,
-            retry_after: None,
-        }
+    pub(crate) fn forbidden(message: impl Into<String>) -> Self {
+        CoreInferenceError::forbidden(message).into()
     }
 
     pub(crate) fn invalid_request(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            code: "invalid_request",
-            kind: "invalid_request_error",
-            message: message.into(),
-            retry_after: None,
-        }
+        CoreInferenceError::invalid_request(message).into()
     }
 
     pub(super) fn payload_too_large(code: &'static str) -> Self {
-        Self {
-            status: StatusCode::PAYLOAD_TOO_LARGE,
-            code,
-            kind: "invalid_request_error",
-            message: "The uploaded media exceeds the configured limit.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::payload_too_large(code).into()
     }
 
-    pub(crate) fn not_found(message: String) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            code: "route_not_found",
-            kind: "invalid_request_error",
-            message,
-            retry_after: None,
-        }
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
+        CoreInferenceError::not_found(message).into()
     }
 
     pub(super) fn resource_not_found(code: &'static str) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            code,
-            kind: "invalid_request_error",
-            message: "The requested resource was not found.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::resource_not_found(code).into()
+    }
+
+    pub(crate) fn conflict(code: &'static str, message: impl Into<String>) -> Self {
+        CoreInferenceError::conflict(code, message).into()
     }
 
     pub(crate) fn rate_limited(dimension: LimitDimension, retry_after: Duration) -> Self {
-        let name = match dimension {
-            LimitDimension::Requests => "requests per minute",
-            LimitDimension::Tokens => "tokens per minute",
-            LimitDimension::Concurrency => "concurrency",
-            LimitDimension::Unknown => "configured",
-        };
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            code: "rate_limit_exceeded",
-            kind: "rate_limit_error",
-            message: format!("The API key {name} limit was exceeded."),
-            retry_after: Some(retry_after),
-        }
+        CoreInferenceError::rate_limited(dimension, retry_after).into()
     }
 
     pub(crate) fn unavailable(code: &'static str) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            code,
-            kind: "service_unavailable_error",
-            message: "The gateway is temporarily unavailable.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::unavailable(code).into()
     }
 
     pub(crate) fn overloaded() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            code: "request_admission_overloaded",
-            kind: "service_unavailable_error",
-            message: "The gateway is temporarily overloaded.".to_owned(),
-            retry_after: Some(Duration::from_secs(1)),
-        }
+        CoreInferenceError::overloaded().into()
     }
 
     pub(super) fn multipart_parser_timeout() -> Self {
-        Self {
-            status: StatusCode::REQUEST_TIMEOUT,
-            code: "multipart_parser_timeout",
-            kind: "timeout_error",
-            message: "The multipart upload exceeded its parser deadline.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::multipart_parser_timeout().into()
     }
 
     pub(crate) fn timeout() -> Self {
-        Self {
-            status: StatusCode::GATEWAY_TIMEOUT,
-            code: "gateway_timeout",
-            kind: "timeout_error",
-            message: "The route deadline elapsed.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::timeout().into()
     }
 
     pub(crate) fn bad_gateway(code: &'static str, message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_GATEWAY,
-            code,
-            kind: "upstream_error",
-            message: message.into(),
-            retry_after: None,
-        }
+        CoreInferenceError::bad_gateway(code, message).into()
     }
 
     pub(crate) fn client_cancelled() -> Self {
-        Self {
-            status: StatusCode::BAD_GATEWAY,
-            code: "client_cancelled",
-            kind: "cancelled_error",
-            message: "The client disconnected.".to_owned(),
-            retry_after: None,
-        }
+        CoreInferenceError::client_cancelled().into()
     }
 
-    pub(crate) const fn status(&self) -> StatusCode {
-        self.status
+    pub(crate) fn status(&self) -> StatusCode {
+        presentation(self.0.kind()).0
     }
 
     pub(crate) const fn code(&self) -> &'static str {
-        self.code
+        self.0.code()
     }
 
-    pub(crate) const fn kind(&self) -> &'static str {
-        self.kind
+    pub(crate) fn kind(&self) -> &'static str {
+        presentation(self.0.kind()).1
     }
 
     pub(crate) fn message(&self) -> &str {
-        &self.message
+        self.0.message()
     }
 
     pub(crate) const fn retry_after(&self) -> Option<Duration> {
-        self.retry_after
+        self.0.retry_after()
     }
 
     pub(crate) fn into_problem(self) -> Problem {
@@ -210,101 +118,86 @@ impl InferenceError {
     }
 
     pub(crate) fn from_transport(error: TransportError) -> Self {
-        match error.class {
-            AttemptFailureClass::RateLimit => Self {
-                status: StatusCode::TOO_MANY_REQUESTS,
-                code: "upstream_rate_limit",
-                kind: "rate_limit_error",
-                message: error.message,
-                retry_after: None,
-            },
-            AttemptFailureClass::Timeout => Self::timeout(),
-            AttemptFailureClass::UpstreamClient => {
-                Self::bad_gateway("upstream_rejected", error.message)
-            }
-            AttemptFailureClass::Connect | AttemptFailureClass::UpstreamServer => {
-                Self::bad_gateway("upstream_unavailable", error.message)
-            }
-            AttemptFailureClass::Protocol => {
-                Self::bad_gateway("provider_protocol_error", error.message)
-            }
-            AttemptFailureClass::Cancelled => {
-                Self::bad_gateway("provider_cancelled", error.message)
-            }
-            AttemptFailureClass::Ambiguous => {
-                Self::bad_gateway("ambiguous_upstream_result", error.message)
-            }
-        }
+        CoreInferenceError::from_transport(error).into()
     }
 
     pub(crate) fn from_canonical(error: &CanonicalError) -> Self {
-        let status = match error.class {
-            ErrorClass::Authentication => StatusCode::BAD_GATEWAY,
-            ErrorClass::Authorization => StatusCode::BAD_GATEWAY,
-            ErrorClass::InvalidRequest => StatusCode::BAD_GATEWAY,
-            ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
-            ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
-            ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => {
-                StatusCode::BAD_GATEWAY
-            }
-        };
-        Self {
-            status,
-            code: "upstream_error",
-            kind: super::openai_http::error_type(error.class),
-            message: error.message.clone(),
-            retry_after: None,
+        CoreInferenceError::from_canonical(error).into()
+    }
+}
+
+impl From<CoreInferenceError> for InferenceError {
+    fn from(error: CoreInferenceError) -> Self {
+        Self(error)
+    }
+}
+
+fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
+    match kind {
+        InferenceErrorKind::Authentication => (StatusCode::UNAUTHORIZED, "authentication_error"),
+        InferenceErrorKind::Permission => (StatusCode::FORBIDDEN, "permission_error"),
+        InferenceErrorKind::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid_request_error"),
+        InferenceErrorKind::PayloadTooLarge => {
+            (StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error")
+        }
+        InferenceErrorKind::NotFound => (StatusCode::NOT_FOUND, "invalid_request_error"),
+        InferenceErrorKind::Conflict => (StatusCode::CONFLICT, "conflict_error"),
+        InferenceErrorKind::RateLimit => (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
+        InferenceErrorKind::Unavailable => {
+            (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable_error")
+        }
+        InferenceErrorKind::RequestTimeout => (StatusCode::REQUEST_TIMEOUT, "timeout_error"),
+        InferenceErrorKind::GatewayTimeout => (StatusCode::GATEWAY_TIMEOUT, "timeout_error"),
+        InferenceErrorKind::Upstream => (StatusCode::BAD_GATEWAY, "upstream_error"),
+        InferenceErrorKind::Cancelled => (StatusCode::BAD_GATEWAY, "cancelled_error"),
+        InferenceErrorKind::Canonical(class) => {
+            let status = match class {
+                ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
+                ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
+                ErrorClass::Authentication
+                | ErrorClass::Authorization
+                | ErrorClass::InvalidRequest
+                | ErrorClass::Transport
+                | ErrorClass::Upstream
+                | ErrorClass::Internal => StatusCode::BAD_GATEWAY,
+            };
+            (status, super::openai_http::error_type(class))
         }
     }
 }
 
-impl From<olp_inference::InferenceError> for InferenceError {
-    fn from(error: olp_inference::InferenceError) -> Self {
-        use olp_inference::InferenceErrorKind;
-
-        let (status, kind) = match error.kind() {
-            InferenceErrorKind::Authentication => {
-                (StatusCode::UNAUTHORIZED, "authentication_error")
-            }
-            InferenceErrorKind::Permission => (StatusCode::FORBIDDEN, "permission_error"),
-            InferenceErrorKind::InvalidRequest => {
-                (StatusCode::BAD_REQUEST, "invalid_request_error")
-            }
-            InferenceErrorKind::PayloadTooLarge => {
-                (StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error")
-            }
-            InferenceErrorKind::NotFound => (StatusCode::NOT_FOUND, "invalid_request_error"),
-            InferenceErrorKind::Conflict => (StatusCode::CONFLICT, "conflict_error"),
-            InferenceErrorKind::RateLimit => (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
-            InferenceErrorKind::Unavailable => {
-                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable_error")
-            }
-            InferenceErrorKind::RequestTimeout => (StatusCode::REQUEST_TIMEOUT, "timeout_error"),
-            InferenceErrorKind::GatewayTimeout => (StatusCode::GATEWAY_TIMEOUT, "timeout_error"),
-            InferenceErrorKind::Upstream => (StatusCode::BAD_GATEWAY, "upstream_error"),
-            InferenceErrorKind::Cancelled => (StatusCode::BAD_GATEWAY, "cancelled_error"),
-            InferenceErrorKind::Canonical(class) => {
-                let status = match class {
-                    ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
-                    ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
-                    ErrorClass::Authentication
-                    | ErrorClass::Authorization
-                    | ErrorClass::InvalidRequest
-                    | ErrorClass::Transport
-                    | ErrorClass::Upstream
-                    | ErrorClass::Internal => StatusCode::BAD_GATEWAY,
-                };
-                (status, super::openai_http::error_type(class))
-            }
-        };
-        Self {
-            status,
-            code: error.code(),
-            kind,
-            message: error.message().to_owned(),
-            retry_after: error.retry_after(),
+pub(super) fn openai_error_response(
+    status: StatusCode,
+    code: &str,
+    kind: &str,
+    message: &str,
+    retry_after: Option<Duration>,
+    authenticate: bool,
+) -> Response {
+    let mut response = (
+        status,
+        Json(OpenAiErrorEnvelope {
+            error: OpenAiErrorBody {
+                message,
+                kind,
+                param: None,
+                code,
+            },
+        }),
+    )
+        .into_response();
+    if authenticate {
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    }
+    if let Some(retry_after) = retry_after {
+        let seconds = retry_after.as_secs().max(1).to_string();
+        if let Ok(value) = HeaderValue::from_str(&seconds) {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
         }
     }
+    response
 }
 
 #[derive(Serialize)]
@@ -323,30 +216,146 @@ struct OpenAiErrorBody<'a> {
 
 impl IntoResponse for InferenceError {
     fn into_response(self) -> Response {
-        let mut response = (
-            self.status,
-            Json(OpenAiErrorEnvelope {
-                error: OpenAiErrorBody {
-                    message: &self.message,
-                    kind: self.kind,
-                    param: None,
-                    code: self.code,
-                },
-            }),
+        openai_error_response(
+            self.status(),
+            self.code(),
+            self.kind(),
+            self.message(),
+            self.retry_after(),
+            false,
         )
-            .into_response();
-        if let Some(retry_after) = self.retry_after {
-            let seconds = retry_after.as_secs().max(1).to_string();
-            if let Ok(value) = HeaderValue::from_str(&seconds) {
-                response.headers_mut().insert(header::RETRY_AFTER, value);
-            }
-        }
-        response
     }
 }
 
 impl From<InferenceError> for Problem {
     fn from(error: InferenceError) -> Self {
-        Problem::new(error.status, error.code, error.kind, error.message)
+        Problem::new(
+            error.status(),
+            error.code(),
+            error.kind(),
+            error.message().to_owned(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presentation_covers_the_transport_neutral_error_contract() {
+        let cases = [
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::Authentication,
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::UNAUTHORIZED,
+                "authentication_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::Permission, "code", "message", None),
+                StatusCode::FORBIDDEN,
+                "permission_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::InvalidRequest,
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::PayloadTooLarge,
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "invalid_request_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::NotFound, "code", "message", None),
+                StatusCode::NOT_FOUND,
+                "invalid_request_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::Conflict, "code", "message", None),
+                StatusCode::CONFLICT,
+                "conflict_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::RateLimit, "code", "message", None),
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::Unavailable, "code", "message", None),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::RequestTimeout,
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::REQUEST_TIMEOUT,
+                "timeout_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::GatewayTimeout,
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::Upstream, "code", "message", None),
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+            ),
+            (
+                CoreInferenceError::new(InferenceErrorKind::Cancelled, "code", "message", None),
+                StatusCode::BAD_GATEWAY,
+                "cancelled_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::Canonical(ErrorClass::RateLimit),
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::Canonical(ErrorClass::Internal),
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::BAD_GATEWAY,
+                "internal_error",
+            ),
+        ];
+
+        for (core, status, kind) in cases {
+            let error = InferenceError::from(core);
+            assert_eq!(error.status(), status);
+            assert_eq!(error.kind(), kind);
+        }
     }
 }

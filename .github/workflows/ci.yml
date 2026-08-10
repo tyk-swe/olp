@@ -70,12 +70,7 @@ jobs:
       - name: Verify repository validation helper contract
         run: scripts/test-repository-validation.sh
       - name: Verify request metadata loss recorder contract
-        run: |
-          scripts/record-request-metadata-stream-loss.sh --help 2>&1 \
-            | grep -F 'OLP_CONFIRM_REQUEST_METADATA_STREAM_LOSS=record-explicit-gap'
-          grep -Fq "'request_metadata.stream_loss_recorded'" \
-            scripts/record-request-metadata-stream-loss.sh
-          test ! -e scripts/checkpoint-lost-usage-stream.sh
+        run: scripts/test-record-request-metadata-stream-loss.sh
       - name: Require consistent release metadata
         run: scripts/check-release-version.sh
       - name: Require immutable supply-chain references

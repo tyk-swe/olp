@@ -1,9 +1,11 @@
 [package]
 name = "olp-storage"
+description = "PostgreSQL, Valkey, encryption, and migration infrastructure for OpenLLMProxy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
 
 [package.metadata.olp]
 role = "storage"
