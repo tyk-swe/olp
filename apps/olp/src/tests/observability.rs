@@ -412,6 +412,10 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
         HeaderName::from_static("x-goog-api-key"),
         HeaderValue::from_static("gemini-secret"),
     );
+    request.headers_mut().insert(
+        HeaderName::from_static("x-litellm-api-key"),
+        HeaderValue::from_static("litellm-secret"),
+    );
     let response = service.oneshot(request).await.unwrap();
     assert!(
         response.headers()[axum::http::header::SET_COOKIE].is_sensitive(),
