@@ -89,13 +89,14 @@ present, it is authoritative: an invalid value does not fall back to a valid
 native credential, and two different valid OLP credentials are rejected. A
 valid gateway key may coexist with a separate, non-OLP `Authorization` value.
 
-These are explicit aliases, not wildcard forwarding. Bare root paths such as
-`/chat/completions` or `/models`, the base paths without a registered
-operation, and unknown `/v1/*` or `/openai/*` paths are unsupported and return
-404; they are never passed through to a provider. The compatibility suite
-covers the implemented chat-completions, Responses, streaming, and model
-list/retrieve operations, but this does not imply support for other OpenAI
-endpoints.
+These are explicit aliases, not wildcard forwarding. Gateway-only deployments
+return 404 for bare root paths such as `/chat/completions` or `/models`; when
+the management console is enabled, unmatched bare paths can instead serve the
+console SPA fallback for deep links. Base paths without a registered operation
+and unknown `/v1/*` or `/openai/*` paths are unsupported and return 404; they
+are never passed through to a provider. The compatibility suite covers the
+implemented chat-completions, Responses, streaming, and model list/retrieve
+operations, but this does not imply support for other OpenAI endpoints.
 
 ## Console
 
