@@ -4,7 +4,43 @@ use olp_domain::{
 };
 use olp_protocols::openai;
 
-use crate::InferenceError;
+use crate::{InferenceError, circuit::CircuitBreaker};
+
+/// Applies shared circuit availability and any caller-specific constraint
+/// before representability checks and deterministic route truncation.
+// Mirrors the routing selector's inputs and adds circuit availability.
+#[allow(clippy::too_many_arguments)]
+pub async fn select_available_attempts_filtered(
+    circuits: &CircuitBreaker,
+    snapshot: &RuntimeSnapshot,
+    route_slug: &RouteSlug,
+    operation: &Operation,
+    surface: Surface,
+    mode: TransportMode,
+    affinity_key: &[u8],
+    mut eligible: impl FnMut(&Provider, &Target) -> bool,
+) -> Result<Vec<AttemptPlan>, InferenceError> {
+    let selectable = circuits
+        .selectable_targets(
+            snapshot
+                .routes
+                .get(route_slug)
+                .into_iter()
+                .flat_map(|route| &route.targets)
+                .map(Target::stable_id),
+        )
+        .await;
+
+    select_representable_attempts_filtered(
+        snapshot,
+        route_slug,
+        operation,
+        surface,
+        mode,
+        affinity_key,
+        |provider, target| selectable.contains(&target.stable_id()) && eligible(provider, target),
+    )
+}
 
 /// Removes targets that cannot encode this concrete request without semantic
 /// loss. Capability tuples are the coarse model boundary; this request-level

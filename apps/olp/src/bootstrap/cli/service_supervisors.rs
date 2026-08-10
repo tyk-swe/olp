@@ -10,6 +10,13 @@ use tracing::{error, info, warn};
 
 use crate::reconcile_media_jobs_once;
 
+async fn wait_or_shutdown(shutdown: &mut watch::Receiver<bool>, delay: Duration) -> bool {
+    tokio::select! {
+        changed = shutdown.changed() => changed.is_err() || *shutdown.borrow(),
+        () = tokio::time::sleep(delay) => false,
+    }
+}
+
 pub(super) async fn media_reconciliation_supervisor(
     state: crate::GatewayState,
     mut shutdown: watch::Receiver<bool>,
@@ -101,13 +108,8 @@ pub(super) async fn limiter_supervisor(
                 Ok(Ok(()))
             );
             if healthy {
-                tokio::select! {
-                    changed = shutdown.changed() => {
-                        if changed.is_err() || *shutdown.borrow() {
-                            return;
-                        }
-                    }
-                    () = tokio::time::sleep(Duration::from_secs(5)) => {}
+                if wait_or_shutdown(&mut shutdown, Duration::from_secs(5)).await {
+                    return;
                 }
                 continue;
             }
@@ -125,17 +127,13 @@ pub(super) async fn limiter_supervisor(
                 reloadable_limiter.install(limiter);
                 backoff = Duration::from_millis(100);
                 info!("Valkey limiter connection is available");
+                continue;
             }
             Ok(Err(error)) => warn!(%error, "Valkey limiter connection failed"),
             Err(_) => warn!("Valkey limiter connection timed out"),
         }
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-            }
-            () = tokio::time::sleep(backoff) => {}
+        if wait_or_shutdown(&mut shutdown, backoff).await {
+            return;
         }
         backoff = (backoff * 2).min(Duration::from_secs(5));
     }
@@ -156,13 +154,8 @@ pub(super) async fn circuit_supervisor(
             tokio::time::timeout(Duration::from_secs(1), circuits.ping_distributed()).await,
             Ok(Some(true))
         ) {
-            tokio::select! {
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
-                        return;
-                    }
-                }
-                () = tokio::time::sleep(Duration::from_secs(5)) => {}
+            if wait_or_shutdown(&mut shutdown, Duration::from_secs(5)).await {
+                return;
             }
             continue;
         }
@@ -173,20 +166,14 @@ pub(super) async fn circuit_supervisor(
             DistributedCircuitBreaker::connect(&valkey_url, &circuits_namespace),
         )
         .await
-            && let Ok(Ok(())) =
-                tokio::time::timeout(Duration::from_secs(1), distributed.ping()).await
         {
             circuits.install_distributed(distributed);
             backoff = Duration::from_millis(100);
             info!("Valkey circuit coordination is available");
+            continue;
         }
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-            }
-            () = tokio::time::sleep(backoff) => {}
+        if wait_or_shutdown(&mut shutdown, backoff).await {
+            return;
         }
         backoff = (backoff * 2).min(Duration::from_secs(5));
     }

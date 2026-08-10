@@ -8,7 +8,7 @@ use olp_domain::{
     Operation, OperationKind, RouteSlug, Surface, TransportMode, authorize_api_key,
     gateway_capability_for_operation,
 };
-use olp_inference::selection::select_representable_attempts_filtered;
+use olp_inference::selection::select_available_attempts_filtered;
 use olp_storage::{
     media_jobs::MediaJobError, media_jobs::MediaJobLifecycle, media_jobs::MediaJobRecord,
     media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::MediaReconciliationPass,
@@ -40,26 +40,17 @@ pub(super) async fn select_video_create_target(
         Some(&route_slug),
     )?;
     let snapshot = principal.runtime();
-    let selectable = state
-        .circuits()
-        .selectable_targets(
-            snapshot
-                .routes
-                .get(&route_slug)
-                .into_iter()
-                .flat_map(|route| &route.targets)
-                .map(|target| target.routing_id.unwrap_or(target.id)),
-        )
-        .await;
-    let attempt = select_representable_attempts_filtered(
+    let attempt = select_available_attempts_filtered(
+        state.circuits(),
         snapshot,
         &route_slug,
         operation,
         Surface::OpenAi,
         TransportMode::Async,
         local_job_id.as_bytes(),
-        |_, target| selectable.contains(&target.routing_id.unwrap_or(target.id)),
-    )?
+        |_, _| true,
+    )
+    .await?
     .into_iter()
     .next()
     .ok_or_else(|| InferenceError::unavailable("no_eligible_provider"))?;

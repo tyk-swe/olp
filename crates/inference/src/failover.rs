@@ -156,57 +156,48 @@ struct AttemptRecord<'a> {
     ordinal: u16,
     started_at: chrono::DateTime<Utc>,
     started: tokio::time::Instant,
+    circuits: &'a CircuitBreaker,
+    permit: &'a CircuitPermit,
 }
 
 impl AttemptRecord<'_> {
     async fn record_failure(
         &self,
-        traces: &mut Vec<RequestAttemptMetadata>,
-        circuits: &CircuitBreaker,
-        permit: &CircuitPermit,
-        observer: &mut Option<&mut dyn AttemptLifecycleObserver>,
+        attempts: &mut AttemptLog<'_>,
         failure: ProviderAttemptFailure,
     ) -> ProviderAttemptOutcome {
         let (transport, terminal) = match failure {
             ProviderAttemptFailure::Classify(transport) => (transport, None),
             ProviderAttemptFailure::Terminal { transport, gateway } => (transport, Some(gateway)),
         };
-        traces.push(failed_attempt(
+        attempts.complete(failed_attempt(
             self.plan,
             self.ordinal,
             self.started_at,
             self.started,
             &transport,
         ));
-        notify_attempt_completed(observer, traces);
-        circuits
-            .record_failure(permit, transport.class, transport.retry_after)
+        self.circuits
+            .record_failure(self.permit, transport.class, transport.retry_after)
             .await;
         if terminal.is_none() && transport.allows_failover() {
             ProviderAttemptOutcome::Retryable(transport)
         } else {
             ProviderAttemptOutcome::Terminal(ExecutionFailure {
                 error: terminal.unwrap_or_else(|| InferenceError::from_transport(transport)),
-                attempts: std::mem::take(traces),
+                attempts: attempts.take(),
             })
         }
     }
 
-    async fn record_success(
-        &self,
-        traces: &mut Vec<RequestAttemptMetadata>,
-        circuits: &CircuitBreaker,
-        permit: &CircuitPermit,
-        observer: &mut Option<&mut dyn AttemptLifecycleObserver>,
-    ) {
-        traces.push(successful_attempt(
+    async fn record_success(&self, attempts: &mut AttemptLog<'_>) {
+        attempts.complete(successful_attempt(
             self.plan,
             self.ordinal,
             self.started_at,
             self.started,
         ));
-        notify_attempt_completed(observer, traces);
-        circuits.record_success(permit).await;
+        self.circuits.record_success(self.permit).await;
     }
 }
 
@@ -223,12 +214,33 @@ pub trait AttemptLifecycleObserver: Send {
     fn on_attempt_completed(&mut self, attempt: &RequestAttemptMetadata);
 }
 
-fn notify_attempt_completed(
-    observer: &mut Option<&mut dyn AttemptLifecycleObserver>,
-    traces: &[RequestAttemptMetadata],
-) {
-    if let (Some(observer), Some(attempt)) = (observer.as_deref_mut(), traces.last()) {
-        observer.on_attempt_completed(attempt);
+struct AttemptLog<'a> {
+    traces: Vec<RequestAttemptMetadata>,
+    observer: Option<&'a mut dyn AttemptLifecycleObserver>,
+}
+
+impl AttemptLog<'_> {
+    fn start(
+        &mut self,
+        attempt: &AttemptPlan,
+        ordinal: u16,
+        started_at: chrono::DateTime<Utc>,
+        started: tokio::time::Instant,
+    ) {
+        if let Some(observer) = self.observer.as_deref_mut() {
+            observer.on_attempt_started(&self.traces, attempt, ordinal, started_at, started);
+        }
+    }
+
+    fn complete(&mut self, attempt: RequestAttemptMetadata) {
+        self.traces.push(attempt);
+        if let Some(observer) = self.observer.as_deref_mut() {
+            observer.on_attempt_completed(self.traces.last().expect("attempt was just added"));
+        }
+    }
+
+    fn take(&mut self) -> Vec<RequestAttemptMetadata> {
+        std::mem::take(&mut self.traces)
     }
 }
 
@@ -251,7 +263,7 @@ pub async fn execute_with_failover(
         overall_timeout,
         media_spool,
         circuits,
-        mut attempt_observer,
+        attempt_observer,
     } = context;
     let deadline = tokio::time::Instant::now() + overall_timeout;
     let mut last_error = None;
@@ -259,29 +271,26 @@ pub async fn execute_with_failover(
     // it was recorded. When no later attempt runs, the client receives the
     // provider's own error instead of a synthesized transport failure.
     let mut last_canonical_error: Option<(usize, olp_domain::CanonicalError)> = None;
-    let mut traces = Vec::with_capacity(attempts.len());
     let attempt_count = attempts.len();
+    let mut attempt_log = AttemptLog {
+        traces: Vec::with_capacity(attempt_count),
+        observer: attempt_observer,
+    };
     for (attempt_index, attempt) in attempts.into_iter().enumerate() {
         let Some(permit) = circuits.acquire(attempt.target_routing_id).await else {
             continue;
         };
-        let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
+        let ordinal = u16::try_from(attempt_log.traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
-        if let Some(observer) = attempt_observer.as_deref_mut() {
-            observer.on_attempt_started(
-                &traces,
-                &attempt,
-                ordinal,
-                attempt_started_at,
-                attempt_started,
-            );
-        }
+        attempt_log.start(&attempt, ordinal, attempt_started_at, attempt_started);
         let record = AttemptRecord {
             plan: &attempt,
             ordinal,
             started_at: attempt_started_at,
             started: attempt_started,
+            circuits,
+            permit: &permit,
         };
         let attempt_deadline = deadline.min(attempt_started + attempt.timeout.as_duration());
         let Some(transport) = runtime.transport(attempt.provider_id) else {
@@ -293,13 +302,7 @@ pub async fn execute_with_failover(
                 message: "provider transport is not loaded".to_owned(),
             };
             match record
-                .record_failure(
-                    &mut traces,
-                    circuits,
-                    &permit,
-                    &mut attempt_observer,
-                    ProviderAttemptFailure::Classify(error),
-                )
+                .record_failure(&mut attempt_log, ProviderAttemptFailure::Classify(error))
                 .await
             {
                 ProviderAttemptOutcome::Retryable(error) => last_error = Some(error),
@@ -311,7 +314,7 @@ pub async fn execute_with_failover(
         if remaining.is_zero() {
             return Err(ExecutionFailure {
                 error: InferenceError::timeout(),
-                attempts: traces,
+                attempts: attempt_log.take(),
             });
         }
         let provider_request = ProviderRequest {
@@ -326,13 +329,7 @@ pub async fn execute_with_failover(
                 Ok(Err(error)) => {
                     let error = reclassify_ambiguous_transport_failure(error, operation.kind());
                     match record
-                        .record_failure(
-                            &mut traces,
-                            circuits,
-                            &permit,
-                            &mut attempt_observer,
-                            ProviderAttemptFailure::Classify(error),
-                        )
+                        .record_failure(&mut attempt_log, ProviderAttemptFailure::Classify(error))
                         .await
                     {
                         ProviderAttemptOutcome::Retryable(error) => {
@@ -354,13 +351,7 @@ pub async fn execute_with_failover(
                         operation.kind(),
                     );
                     match record
-                        .record_failure(
-                            &mut traces,
-                            circuits,
-                            &permit,
-                            &mut attempt_observer,
-                            ProviderAttemptFailure::Classify(error),
-                        )
+                        .record_failure(&mut attempt_log, ProviderAttemptFailure::Classify(error))
                         .await
                     {
                         ProviderAttemptOutcome::Retryable(error) => {
@@ -374,13 +365,11 @@ pub async fn execute_with_failover(
         let mut events = match output {
             ProviderOutput::Events(events) => events,
             ProviderOutput::Result(result) => {
-                record
-                    .record_success(&mut traces, circuits, &permit, &mut attempt_observer)
-                    .await;
+                record.record_success(&mut attempt_log).await;
                 return Ok(ExecutionSuccess {
                     output: ExecutionOutput::Result(result),
                     deadline: attempt_deadline,
-                    attempts: traces,
+                    attempts: attempt_log.take(),
                     attempt_started,
                 });
             }
@@ -391,13 +380,7 @@ pub async fn execute_with_failover(
             Ok(Some(Err(error))) => {
                 let error = reclassify_ambiguous_transport_failure(error, operation.kind());
                 match record
-                    .record_failure(
-                        &mut traces,
-                        circuits,
-                        &permit,
-                        &mut attempt_observer,
-                        ProviderAttemptFailure::Classify(error),
-                    )
+                    .record_failure(&mut attempt_log, ProviderAttemptFailure::Classify(error))
                     .await
                 {
                     ProviderAttemptOutcome::Retryable(error) => {
@@ -421,10 +404,7 @@ pub async fn execute_with_failover(
                 );
                 match record
                     .record_failure(
-                        &mut traces,
-                        circuits,
-                        &permit,
-                        &mut attempt_observer,
+                        &mut attempt_log,
                         ProviderAttemptFailure::Terminal {
                             transport: error,
                             gateway,
@@ -448,13 +428,7 @@ pub async fn execute_with_failover(
                     operation.kind(),
                 );
                 match record
-                    .record_failure(
-                        &mut traces,
-                        circuits,
-                        &permit,
-                        &mut attempt_observer,
-                        ProviderAttemptFailure::Classify(error),
-                    )
+                    .record_failure(&mut attempt_log, ProviderAttemptFailure::Classify(error))
                     .await
                 {
                     ProviderAttemptOutcome::Retryable(error) => {
@@ -471,10 +445,7 @@ pub async fn execute_with_failover(
             let gateway = InferenceError::from_transport(error.clone());
             match record
                 .record_failure(
-                    &mut traces,
-                    circuits,
-                    &permit,
-                    &mut attempt_observer,
+                    &mut attempt_log,
                     ProviderAttemptFailure::Terminal {
                         transport: error,
                         gateway,
@@ -501,10 +472,7 @@ pub async fn execute_with_failover(
                     };
                     match record
                         .record_failure(
-                            &mut traces,
-                            circuits,
-                            &permit,
-                            &mut attempt_observer,
+                            &mut attempt_log,
                             ProviderAttemptFailure::Classify(transport_error),
                         )
                         .await
@@ -514,20 +482,19 @@ pub async fn execute_with_failover(
                             unreachable!("canonical retryable error permits failover")
                         }
                     }
-                    last_canonical_error = Some((traces.len(), error.clone()));
+                    last_canonical_error = Some((attempt_log.traces.len(), error.clone()));
                     continue;
                 }
                 (true, canonical_error_circuit_class(error.class))
             } else {
                 (false, None)
             };
-        traces.push(successful_attempt(
+        attempt_log.complete(successful_attempt(
             &attempt,
             ordinal,
             attempt_started_at,
             attempt_started,
         ));
-        notify_attempt_completed(&mut attempt_observer, &traces);
         if let Some(class) = initial_failure_class {
             circuits.record_failure(&permit, class, None).await;
         } else if matches!(first.kind, CanonicalEventKind::Done) {
@@ -542,13 +509,13 @@ pub async fn execute_with_failover(
         return Ok(ExecutionSuccess {
             output: ExecutionOutput::Events { first, events },
             deadline: attempt_deadline,
-            attempts: traces,
+            attempts: attempt_log.take(),
             attempt_started,
         });
     }
     Err(ExecutionFailure {
         error: match last_canonical_error {
-            Some((failed_at, canonical)) if failed_at == traces.len() => {
+            Some((failed_at, canonical)) if failed_at == attempt_log.traces.len() => {
                 InferenceError::from_canonical(&canonical)
             }
             _ => last_error.map_or_else(
@@ -556,7 +523,7 @@ pub async fn execute_with_failover(
                 InferenceError::from_transport,
             ),
         },
-        attempts: traces,
+        attempts: attempt_log.take(),
     })
 }
 

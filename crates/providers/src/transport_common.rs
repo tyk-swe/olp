@@ -129,17 +129,15 @@ pub(crate) fn transport_error(
     }
 }
 
-/// Accept only the unambiguous delta-seconds form. The circuit layer applies
-/// the same upper bound independently before changing shared state.
+/// Accept only the unambiguous delta-seconds form.
 pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
-    const MAX: u64 = 5 * 60;
     let seconds = headers
         .get(header::RETRY_AFTER)?
         .to_str()
         .ok()?
         .parse::<u64>()
         .ok()?;
-    Some(Duration::from_secs(seconds.min(MAX)))
+    Some(Duration::from_secs(seconds))
 }
 
 pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
@@ -187,10 +185,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bounds_trusted_retry_after_delta_seconds() {
+    fn parses_retry_after_delta_seconds() {
         let mut headers = HeaderMap::new();
         headers.insert(header::RETRY_AFTER, HeaderValue::from_static("999999"));
-        assert_eq!(retry_after(&headers), Some(Duration::from_secs(300)));
+        assert_eq!(retry_after(&headers), Some(Duration::from_secs(999_999)));
         headers.insert(header::RETRY_AFTER, HeaderValue::from_static("not-seconds"));
         assert_eq!(retry_after(&headers), None);
     }

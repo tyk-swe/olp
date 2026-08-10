@@ -68,6 +68,7 @@ pub fn select_attempts_filtered(
         });
     }
 
+    let route_id = route.routing_id.unwrap_or(route.id);
     let mut groups: BTreeMap<u16, Vec<RankedTarget<'_>>> = BTreeMap::new();
     for target in &route.targets {
         let Some(provider) = snapshot.providers.get(&target.provider_id) else {
@@ -87,8 +88,8 @@ pub fn select_attempts_filtered(
                 target,
                 provider,
                 score: weighted_rendezvous_score(
-                    route.routing_id.unwrap_or(route.id),
-                    target.routing_id.unwrap_or(target.id),
+                    route_id,
+                    target.stable_id(),
                     target.weight,
                     operation,
                     surface,
@@ -106,19 +107,14 @@ pub fn select_attempts_filtered(
                 .score
                 .partial_cmp(&left.score)
                 .unwrap_or(Ordering::Equal)
-                .then_with(|| {
-                    left.target
-                        .routing_id
-                        .unwrap_or(left.target.id)
-                        .cmp(&right.target.routing_id.unwrap_or(right.target.id))
-                })
+                .then_with(|| left.target.stable_id().cmp(&right.target.stable_id()))
         });
 
         for ranked in group {
             attempts.push(AttemptPlan {
                 generation_id: snapshot.generation.id,
                 route_id: route.id,
-                target_routing_id: ranked.target.routing_id.unwrap_or(ranked.target.id),
+                target_routing_id: ranked.target.stable_id(),
                 target_id: ranked.target.id,
                 provider_id: ranked.provider.id,
                 provider_kind: ranked.provider.kind,

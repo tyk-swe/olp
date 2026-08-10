@@ -11,7 +11,6 @@ const OBSERVE_SCRIPT: &str = include_str!("../scripts/observe_circuit.lua");
 const ACQUIRE_SCRIPT: &str = include_str!("../scripts/acquire_circuit.lua");
 const SUCCESS_SCRIPT: &str = include_str!("../scripts/record_circuit_success.lua");
 const FAILURE_SCRIPT: &str = include_str!("../scripts/record_circuit_failure.lua");
-const RESPONSE_VERSION: i64 = 1;
 const MAX_LUA_INTEGER: u64 = (1_u64 << 53) - 1;
 
 #[derive(Clone)]
@@ -26,9 +25,7 @@ impl DistributedCircuitBreaker {
         namespace: impl Into<String>,
     ) -> Result<Self, CircuitStoreError> {
         let namespace = namespace.into();
-        validate_namespace(&namespace)?;
-        let client = redis::Client::open(url)?;
-        let connection = ConnectionManager::new(client).await?;
+        let connection = crate::valkey::valkey_connection(url).await?;
         Ok(Self {
             connection,
             namespace,
@@ -37,11 +34,11 @@ impl DistributedCircuitBreaker {
 
     pub async fn observe(&self, target: TargetId) -> Result<bool, CircuitStoreError> {
         let mut connection = self.connection.clone();
-        let response: Vec<i64> = Script::new(OBSERVE_SCRIPT)
+        let response: i64 = Script::new(OBSERVE_SCRIPT)
             .key(self.key(target))
             .invoke_async(&mut connection)
             .await?;
-        parse_boolean_response(&response)
+        parse_boolean_response(response)
     }
 
     pub async fn acquire(
@@ -52,24 +49,25 @@ impl DistributedCircuitBreaker {
     ) -> Result<DistributedCircuitPermit, CircuitStoreError> {
         let token = Uuid::now_v7().to_string();
         let mut connection = self.connection.clone();
-        let response: Vec<String> = Script::new(ACQUIRE_SCRIPT)
+        let response: (String, String) = Script::new(ACQUIRE_SCRIPT)
             .key(self.key(target))
             .arg(duration_ms(probe_lease)?)
             .arg(duration_ms(retention)?)
             .arg(&token)
             .invoke_async(&mut connection)
             .await?;
-        if response.len() != 3 || response[0] != RESPONSE_VERSION.to_string() {
-            return Err(CircuitStoreError::UnexpectedResponse);
-        }
-        match response[1].as_str() {
-            "denied" if response[2].is_empty() => Ok(DistributedCircuitPermit::Denied),
-            "closed" if response[2].is_empty() => {
+        match response {
+            (status, response_token) if status == "denied" && response_token.is_empty() => {
+                Ok(DistributedCircuitPermit::Denied)
+            }
+            (status, response_token) if status == "closed" && response_token.is_empty() => {
                 Ok(DistributedCircuitPermit::Acquired { probe_token: None })
             }
-            "probe" if response[2] == token => Ok(DistributedCircuitPermit::Acquired {
-                probe_token: Some(token),
-            }),
+            (status, response_token) if status == "probe" && response_token == token => {
+                Ok(DistributedCircuitPermit::Acquired {
+                    probe_token: Some(token),
+                })
+            }
             _ => Err(CircuitStoreError::UnexpectedResponse),
         }
     }
@@ -80,12 +78,12 @@ impl DistributedCircuitBreaker {
         probe_token: Option<&str>,
     ) -> Result<bool, CircuitStoreError> {
         let mut connection = self.connection.clone();
-        let response: Vec<i64> = Script::new(SUCCESS_SCRIPT)
+        let response: i64 = Script::new(SUCCESS_SCRIPT)
             .key(self.key(target))
             .arg(probe_token.unwrap_or(""))
             .invoke_async(&mut connection)
             .await?;
-        parse_ack_response(&response)
+        parse_boolean_response(response)
     }
 
     pub async fn record_failure(
@@ -97,7 +95,7 @@ impl DistributedCircuitBreaker {
         retention: Duration,
     ) -> Result<bool, CircuitStoreError> {
         let mut connection = self.connection.clone();
-        let response: Vec<i64> = Script::new(FAILURE_SCRIPT)
+        let response: i64 = Script::new(FAILURE_SCRIPT)
             .key(self.key(target))
             .arg(probe_token.unwrap_or(""))
             .arg(failure_threshold.max(1))
@@ -105,7 +103,7 @@ impl DistributedCircuitBreaker {
             .arg(duration_ms(retention)?)
             .invoke_async(&mut connection)
             .await?;
-        parse_ack_response(&response)
+        parse_boolean_response(response)
     }
 
     pub async fn ping(&self) -> Result<(), CircuitStoreError> {
@@ -148,15 +146,6 @@ pub enum CircuitStoreError {
     UnexpectedResponse,
 }
 
-fn validate_namespace(namespace: &str) -> Result<(), CircuitStoreError> {
-    if namespace.is_empty() || namespace.len() > 512 || namespace.chars().any(char::is_whitespace) {
-        return Err(CircuitStoreError::InvalidConfiguration(
-            "namespace must be 1..=512 non-whitespace bytes",
-        ));
-    }
-    Ok(())
-}
-
 fn duration_ms(duration: Duration) -> Result<u64, CircuitStoreError> {
     let milliseconds = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
     if milliseconds == 0 || milliseconds > MAX_LUA_INTEGER {
@@ -167,17 +156,10 @@ fn duration_ms(duration: Duration) -> Result<u64, CircuitStoreError> {
     Ok(milliseconds)
 }
 
-fn parse_boolean_response(response: &[i64]) -> Result<bool, CircuitStoreError> {
+fn parse_boolean_response(response: i64) -> Result<bool, CircuitStoreError> {
     match response {
-        [RESPONSE_VERSION, 0] => Ok(false),
-        [RESPONSE_VERSION, 1] => Ok(true),
-        _ => Err(CircuitStoreError::UnexpectedResponse),
-    }
-}
-
-fn parse_ack_response(response: &[i64]) -> Result<bool, CircuitStoreError> {
-    match response {
-        [RESPONSE_VERSION, applied @ (0 | 1)] => Ok(*applied == 1),
+        0 => Ok(false),
+        1 => Ok(true),
         _ => Err(CircuitStoreError::UnexpectedResponse),
     }
 }
@@ -187,9 +169,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_unsafe_namespaces_and_durations() {
-        assert!(validate_namespace("").is_err());
-        assert!(validate_namespace("has whitespace").is_err());
+    fn rejects_unsafe_durations() {
         assert!(duration_ms(Duration::ZERO).is_err());
     }
 }

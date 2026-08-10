@@ -14,7 +14,7 @@ use crate::{
     limits::ReloadableLimiter,
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
     runtime::RuntimeManager,
-    selection::select_representable_attempts_filtered,
+    selection::select_available_attempts_filtered,
     telemetry::elapsed_ms,
 };
 
@@ -127,26 +127,17 @@ impl InferenceService {
             .cloned()
             .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
         let request_id = RequestId::new();
-        let selectable = self
-            .circuits
-            .selectable_targets(
-                snapshot
-                    .routes
-                    .get(&route_slug)
-                    .into_iter()
-                    .flat_map(|route| &route.targets)
-                    .map(|target| target.routing_id.unwrap_or(target.id)),
-            )
-            .await;
-        let attempts = select_representable_attempts_filtered(
+        let attempts = select_available_attempts_filtered(
+            &self.circuits,
             &snapshot,
             &route_slug,
             &operation,
             surface,
             TransportMode::Unary,
             request_id.as_uuid().as_bytes(),
-            |_, target| selectable.contains(&target.routing_id.unwrap_or(target.id)),
-        )?;
+            |_, _| true,
+        )
+        .await?;
         let route = snapshot
             .routes
             .get(&route_slug)

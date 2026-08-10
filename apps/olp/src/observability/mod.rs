@@ -802,10 +802,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
          # HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n\
          # TYPE olp_distributed_limiter_available gauge\n\
          olp_distributed_limiter_available {}\n\
-         # HELP olp_local_open_target_circuits Process-local fallback circuits currently open or half-open.\n\
-         # TYPE olp_local_open_target_circuits gauge\n\
-         olp_local_open_target_circuits {}\n\
-         # HELP olp_open_target_circuits Compatibility alias for process-local open or half-open circuits.\n\
+         # HELP olp_open_target_circuits Process-local fallback circuits currently open or half-open.\n\
          # TYPE olp_open_target_circuits gauge\n\
          olp_open_target_circuits {}\n\
          # HELP olp_distributed_circuit_configured Whether distributed circuit coordination is configured.\n\
@@ -854,10 +851,9 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         request_metadata_epochs.unresolved_event_lower_bound,
         u8::from(limiter_available),
         local_open_circuits,
-        local_open_circuits,
         u8::from(state.circuits().distributed_configured()),
         u8::from(state.circuits().distributed_available()),
-        state.circuits().degraded_operations(),
+        state.circuits().degradation_events(),
         media_reconciliation
             .as_ref()
             .map_or(0, |value| value.pending),

@@ -21,6 +21,15 @@ pub struct Target {
     pub timeout: DurationMs,
 }
 
+impl Target {
+    /// Identity that remains stable when a runtime revision replaces this
+    /// target's configuration record.
+    #[must_use]
+    pub fn stable_id(&self) -> TargetId {
+        self.routing_id.unwrap_or(self.id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Route {
     pub id: RouteId,

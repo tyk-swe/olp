@@ -173,25 +173,6 @@ impl RequestAccountingGuard {
         }
     }
 
-    pub(crate) fn record_attempt_started(
-        &mut self,
-        completed: &[RequestAttemptMetadata],
-        ordinal: u16,
-        provider_id: uuid::Uuid,
-        upstream_model: &str,
-        started_at: chrono::DateTime<Utc>,
-        started: tokio::time::Instant,
-    ) {
-        self.attempts = completed.to_vec();
-        self.active_attempt = Some(ActiveRequestAttempt {
-            ordinal,
-            provider_id,
-            upstream_model: upstream_model.to_owned(),
-            started_at,
-            started,
-        });
-    }
-
     pub(crate) fn record_attempts(
         &mut self,
         attempts: Vec<RequestAttemptMetadata>,
@@ -204,11 +185,6 @@ impl RequestAccountingGuard {
         self.attempt_started = attempt_started;
         self.first_byte_ms = first_byte_ms;
         self.committed = committed;
-    }
-
-    fn record_attempt_completed(&mut self, attempt: &RequestAttemptMetadata) {
-        self.attempts.push(attempt.clone());
-        self.active_attempt = None;
     }
 
     #[must_use]
@@ -328,18 +304,19 @@ impl AttemptLifecycleObserver for RequestAccountingGuard {
         started_at: chrono::DateTime<Utc>,
         started: tokio::time::Instant,
     ) {
-        self.record_attempt_started(
-            completed,
+        self.attempts = completed.to_vec();
+        self.active_attempt = Some(ActiveRequestAttempt {
             ordinal,
-            attempt.provider_id.as_uuid(),
-            &attempt.upstream_model,
+            provider_id: attempt.provider_id.as_uuid(),
+            upstream_model: attempt.upstream_model.clone(),
             started_at,
             started,
-        );
+        });
     }
 
     fn on_attempt_completed(&mut self, attempt: &RequestAttemptMetadata) {
-        self.record_attempt_completed(attempt);
+        self.attempts.push(attempt.clone());
+        self.active_attempt = None;
     }
 }
 

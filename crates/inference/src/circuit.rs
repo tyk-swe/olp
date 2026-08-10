@@ -6,7 +6,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use arc_swap::ArcSwapOption;
@@ -19,7 +19,6 @@ use olp_storage::circuits::{
 const DEFAULT_FAILURE_THRESHOLD: u32 = 5;
 const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5 * 60);
-const DEGRADED_WARNING_INTERVAL: Duration = Duration::from_secs(30);
 const DISTRIBUTED_OPERATION_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Permission returned by the authoritative check immediately before provider
@@ -27,17 +26,14 @@ const DISTRIBUTED_OPERATION_TIMEOUT: Duration = Duration::from_millis(250);
 #[derive(Debug)]
 pub struct CircuitPermit {
     target: TargetId,
-    source: PermitSource,
+    distributed: Option<DistributedPermit>,
     local_probe_started: Option<Instant>,
 }
 
 #[derive(Debug)]
-enum PermitSource {
-    Local,
-    Distributed {
-        adapter: Arc<DistributedCircuitBreaker>,
-        probe_token: Option<String>,
-    },
+struct DistributedPermit {
+    adapter: Arc<DistributedCircuitBreaker>,
+    probe_token: Option<String>,
 }
 
 /// Target circuit facade. The process-local implementation remains active as
@@ -53,8 +49,7 @@ struct Inner {
     distributed: ArcSwapOption<DistributedCircuitBreaker>,
     distributed_configured: AtomicBool,
     distributed_degraded: AtomicBool,
-    degraded_operations: AtomicU64,
-    last_warning_ms: AtomicU64,
+    degradation_events: AtomicU64,
     failure_threshold: u32,
     open_duration: Duration,
     state_retention: Duration,
@@ -111,8 +106,7 @@ impl CircuitBreaker {
                 distributed: ArcSwapOption::empty(),
                 distributed_configured: AtomicBool::new(false),
                 distributed_degraded: AtomicBool::new(false),
-                degraded_operations: AtomicU64::new(0),
-                last_warning_ms: AtomicU64::new(0),
+                degradation_events: AtomicU64::new(0),
                 failure_threshold: failure_threshold.max(1),
                 open_duration,
                 state_retention: open_duration
@@ -139,30 +133,13 @@ impl CircuitBreaker {
         self.inner
             .distributed_configured
             .store(true, Ordering::Release);
-        self.note_degraded("distributed circuit store is unavailable");
+        self.note_degraded("distributed circuit store is unavailable", None);
     }
 
     /// Selection-time observation is a hint only. The final acquisition must
     /// still be performed immediately before transport.
     pub async fn is_selectable(&self, target: TargetId) -> bool {
-        let Some(distributed) = self.inner.distributed.load_full() else {
-            return self.local_is_selectable(target);
-        };
-        match tokio::time::timeout(DISTRIBUTED_OPERATION_TIMEOUT, distributed.observe(target)).await
-        {
-            Ok(Ok(selectable)) => {
-                self.mark_healthy();
-                selectable
-            }
-            Ok(Err(error)) => {
-                self.note_degraded_error("observe", &error);
-                self.local_is_selectable(target)
-            }
-            Err(_) => {
-                self.note_degraded("observe timed out");
-                self.local_is_selectable(target)
-            }
-        }
+        self.selectable_targets([target]).await.contains(&target)
     }
 
     /// Observes a route's targets before deterministic ordering. Results are
@@ -210,11 +187,11 @@ impl CircuitBreaker {
                 selectable
             }
             Ok(Err(error)) => {
-                self.note_degraded_error("observe", &error);
+                self.note_degraded("observe", Some(&error));
                 self.local_selectable_targets(&targets)
             }
             Err(_) => {
-                self.note_degraded("observe route timed out");
+                self.note_degraded("observe route timed out", None);
                 self.local_selectable_targets(&targets)
             }
         }
@@ -237,39 +214,36 @@ impl CircuitBreaker {
                 }
                 Ok(Ok(DistributedCircuitPermit::Acquired { probe_token })) => {
                     self.mark_healthy();
-                    let local_probe_started =
-                        self.local_accept_distributed_permit(target, probe_token.is_some())?;
+                    let local_probe_started = self.local_acquire(target, probe_token.is_some())?;
                     return Some(CircuitPermit {
                         target,
-                        source: PermitSource::Distributed {
+                        distributed: Some(DistributedPermit {
                             adapter: distributed,
                             probe_token,
-                        },
+                        }),
                         local_probe_started,
                     });
                 }
-                Ok(Err(error)) => self.note_degraded_error("acquire", &error),
-                Err(_) => self.note_degraded("acquire timed out"),
+                Ok(Err(error)) => self.note_degraded("acquire", Some(&error)),
+                Err(_) => self.note_degraded("acquire timed out", None),
             }
         }
-        self.local_try_acquire(target)
+        self.local_acquire(target, false)
             .map(|local_probe_started| CircuitPermit {
                 target,
-                source: PermitSource::Local,
+                distributed: None,
                 local_probe_started,
             })
     }
 
     pub async fn record_success(&self, permit: &CircuitPermit) {
         let mut update_local = true;
-        if let PermitSource::Distributed {
-            adapter,
-            probe_token,
-        } = &permit.source
-        {
+        if let Some(distributed) = &permit.distributed {
             match tokio::time::timeout(
                 DISTRIBUTED_OPERATION_TIMEOUT,
-                adapter.record_success(permit.target, probe_token.as_deref()),
+                distributed
+                    .adapter
+                    .record_success(permit.target, distributed.probe_token.as_deref()),
             )
             .await
             {
@@ -277,8 +251,8 @@ impl CircuitBreaker {
                     self.mark_healthy();
                     update_local = applied;
                 }
-                Ok(Err(error)) => self.note_degraded_error("record_success", &error),
-                Err(_) => self.note_degraded("record_success timed out"),
+                Ok(Err(error)) => self.note_degraded("record_success", Some(&error)),
+                Err(_) => self.note_degraded("record_success timed out", None),
             }
         }
         if update_local {
@@ -299,11 +273,7 @@ impl CircuitBreaker {
             .map(|duration| duration.max(Duration::from_millis(1)).min(MAX_RETRY_AFTER))
             .unwrap_or(self.inner.open_duration);
         let force_open = retry_after.is_some();
-        if let PermitSource::Distributed {
-            adapter,
-            probe_token,
-        } = &permit.source
-        {
+        if let Some(distributed) = &permit.distributed {
             // Preserve local circuit accuracy even if the request task is
             // cancelled while awaiting the shared Valkey update below.
             let pending_local = PendingLocalFailure {
@@ -320,9 +290,9 @@ impl CircuitBreaker {
             };
             match tokio::time::timeout(
                 DISTRIBUTED_OPERATION_TIMEOUT,
-                adapter.record_failure(
+                distributed.adapter.record_failure(
                     permit.target,
-                    probe_token.as_deref(),
+                    distributed.probe_token.as_deref(),
                     failure_threshold,
                     open_duration,
                     self.inner
@@ -341,11 +311,11 @@ impl CircuitBreaker {
                     }
                 }
                 Ok(Err(error)) => {
-                    self.note_degraded_error("record_failure", &error);
+                    self.note_degraded("record_failure", Some(&error));
                     pending_local.record();
                 }
                 Err(_) => {
-                    self.note_degraded("record_failure timed out");
+                    self.note_degraded("record_failure timed out", None);
                     pending_local.record();
                 }
             }
@@ -399,47 +369,31 @@ impl CircuitBreaker {
         Some(healthy)
     }
 
-    pub fn degraded_operations(&self) -> u64 {
-        self.inner.degraded_operations.load(Ordering::Relaxed)
+    pub fn degradation_events(&self) -> u64 {
+        self.inner.degradation_events.load(Ordering::Relaxed)
     }
 
-    fn local_is_selectable(&self, target: TargetId) -> bool {
+    fn local_selectable_targets(&self, targets: &[TargetId]) -> BTreeSet<TargetId> {
         let now = Instant::now();
         let states = self
             .inner
             .local
             .lock()
             .expect("circuit state lock poisoned");
-        match states.get(&target) {
-            None | Some(CircuitState::Closed { .. }) => true,
-            Some(CircuitState::Open { until }) => now >= *until,
-            Some(CircuitState::HalfOpen { probe_started }) => {
-                now.duration_since(*probe_started) >= self.inner.open_duration
-            }
-        }
-    }
-
-    fn local_selectable_targets(&self, targets: &[TargetId]) -> BTreeSet<TargetId> {
         targets
             .iter()
             .copied()
-            .filter(|target| self.local_is_selectable(*target))
+            .filter(|target| {
+                local_state_is_selectable(
+                    states.get(target).copied(),
+                    now,
+                    self.inner.open_duration,
+                )
+            })
             .collect()
     }
 
-    fn local_try_acquire(&self, target: TargetId) -> Option<Option<Instant>> {
-        self.local_acquire_state(target, false)
-    }
-
-    fn local_accept_distributed_permit(
-        &self,
-        target: TargetId,
-        distributed_probe: bool,
-    ) -> Option<Option<Instant>> {
-        self.local_acquire_state(target, distributed_probe)
-    }
-
-    fn local_acquire_state(&self, target: TargetId, force_probe: bool) -> Option<Option<Instant>> {
+    fn local_acquire(&self, target: TargetId, force_probe: bool) -> Option<Option<Instant>> {
         let now = Instant::now();
         let mut states = self
             .inner
@@ -526,42 +480,32 @@ impl CircuitBreaker {
             .store(false, Ordering::Release);
     }
 
-    fn note_degraded_error(&self, operation: &'static str, error: &impl std::fmt::Display) {
-        self.note_degraded_with(operation, Some(error));
-    }
-
-    fn note_degraded(&self, operation: &'static str) {
-        self.note_degraded_with::<CircuitStoreError>(operation, None);
-    }
-
-    fn note_degraded_with<E: std::fmt::Display>(&self, operation: &'static str, error: Option<&E>) {
+    fn note_degraded(&self, operation: &'static str, error: Option<&dyn std::fmt::Display>) {
+        if self.inner.distributed_degraded.swap(true, Ordering::AcqRel) {
+            return;
+        }
         self.inner
-            .distributed_degraded
-            .store(true, Ordering::Release);
-        self.inner
-            .degraded_operations
+            .degradation_events
             .fetch_add(1, Ordering::Relaxed);
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(u64::MAX);
-        let interval_ms = u64::try_from(DEGRADED_WARNING_INTERVAL.as_millis()).unwrap_or(u64::MAX);
-        let previous = self.inner.last_warning_ms.load(Ordering::Relaxed);
-        if now_ms.saturating_sub(previous) >= interval_ms
-            && self
-                .inner
-                .last_warning_ms
-                .compare_exchange(previous, now_ms, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-        {
-            tracing::warn!(
-                circuit_state = "local_fallback",
-                operation,
-                error = error.map(ToString::to_string),
-                "distributed circuit coordination degraded; using process-local protection"
-            );
+        tracing::warn!(
+            circuit_state = "local_fallback",
+            operation,
+            error = error.map(ToString::to_string),
+            "distributed circuit coordination degraded; using process-local protection"
+        );
+    }
+}
+
+fn local_state_is_selectable(
+    state: Option<CircuitState>,
+    now: Instant,
+    probe_timeout: Duration,
+) -> bool {
+    match state {
+        None | Some(CircuitState::Closed { .. }) => true,
+        Some(CircuitState::Open { until }) => now >= until,
+        Some(CircuitState::HalfOpen { probe_started }) => {
+            now.duration_since(probe_started) >= probe_timeout
         }
     }
 }
@@ -764,7 +708,7 @@ mod tests {
             .await;
         assert!(breaker.distributed_configured());
         assert!(!breaker.distributed_available());
-        assert!(breaker.degraded_operations() > 0);
+        assert!(breaker.degradation_events() > 0);
         assert!(breaker.acquire(target).await.is_none());
     }
 
@@ -780,11 +724,7 @@ mod tests {
             .unwrap()
             .insert(target, CircuitState::Open { until: open_until });
 
-        assert!(
-            breaker
-                .local_accept_distributed_permit(target, false)
-                .is_none()
-        );
+        assert!(breaker.local_acquire(target, false).is_none());
         let CircuitState::Open { until } = breaker.inner.local.lock().unwrap()[&target] else {
             panic!("expected open circuit");
         };
@@ -797,7 +737,7 @@ mod tests {
         let target = TargetId::new();
         let permit = CircuitPermit {
             target,
-            source: PermitSource::Local,
+            distributed: None,
             local_probe_started: None,
         };
         drop(PendingLocalFailure {
@@ -807,7 +747,11 @@ mod tests {
             force_open: false,
             record_on_drop: true,
         });
-        assert!(!breaker.local_is_selectable(target));
+        assert!(
+            !breaker
+                .local_selectable_targets(&[target])
+                .contains(&target)
+        );
     }
 
     #[tokio::test]
@@ -830,14 +774,17 @@ mod tests {
         let replacement = local_replacement_probe(&breaker, stale_success.target);
         breaker.local_record_failure(&replacement, Duration::from_secs(1), false);
         breaker.local_record_success(&stale_success);
-        assert!(breaker.local_try_acquire(stale_success.target).is_none());
+        assert!(breaker.local_acquire(stale_success.target, false).is_none());
 
         let stale_failure = distributed_probe_after_open(&breaker, TargetId::new()).await;
         tokio::time::sleep(Duration::from_millis(55)).await;
         let replacement = local_replacement_probe(&breaker, stale_failure.target);
         breaker.local_record_success(&replacement);
         breaker.local_record_failure(&stale_failure, Duration::from_secs(1), false);
-        assert_eq!(breaker.local_try_acquire(stale_failure.target), Some(None));
+        assert_eq!(
+            breaker.local_acquire(stale_failure.target, false),
+            Some(None)
+        );
     }
 
     #[tokio::test]
@@ -884,11 +831,11 @@ mod tests {
         let probe = breaker.acquire(target).await.unwrap();
         assert!(
             matches!(
-                &probe.source,
-                PermitSource::Distributed {
+                &probe.distributed,
+                Some(DistributedPermit {
                     probe_token: Some(_),
                     ..
-                }
+                })
             ),
             "expected distributed half-open probe permit"
         );
@@ -898,12 +845,12 @@ mod tests {
 
     fn local_replacement_probe(breaker: &CircuitBreaker, target: TargetId) -> CircuitPermit {
         let local_probe_started = breaker
-            .local_try_acquire(target)
+            .local_acquire(target, false)
             .expect("local fallback should allow replacement probe");
         assert!(local_probe_started.is_some());
         CircuitPermit {
             target,
-            source: PermitSource::Local,
+            distributed: None,
             local_probe_started,
         }
     }

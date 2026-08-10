@@ -26,7 +26,7 @@ use crate::{
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
     principal::InferencePrincipal,
     runtime::RuntimeBundle,
-    selection::select_representable_attempts_filtered,
+    selection::select_available_attempts_filtered,
     telemetry::elapsed_ms,
 };
 
@@ -391,18 +391,8 @@ impl InferenceService {
         };
         let mut accounting =
             RequestAccountingGuard::new(self.clone(), context.accounting_input(), None, None, None);
-        let selectable = self
-            .circuits()
-            .selectable_targets(
-                runtime
-                    .routes
-                    .get(&context.route_slug)
-                    .into_iter()
-                    .flat_map(|route| &route.targets)
-                    .map(|target| target.routing_id.unwrap_or(target.id)),
-            )
-            .await;
-        let attempts = match select_representable_attempts_filtered(
+        let attempts = match select_available_attempts_filtered(
+            self.circuits(),
             &runtime,
             &context.route_slug,
             &operation,
@@ -410,11 +400,12 @@ impl InferenceService {
             TransportMode::Unary,
             context.request_id.as_uuid().as_bytes(),
             |_, target| {
-                selectable.contains(&target.routing_id.unwrap_or(target.id))
-                    && target.provider_id.as_uuid() == required_target.provider_id
+                target.provider_id.as_uuid() == required_target.provider_id
                     && target.upstream_model == required_target.upstream_model
             },
-        ) {
+        )
+        .await
+        {
             Ok(attempts) => attempts,
             Err(error) => {
                 let failure = if error.code() == "no_eligible_provider" {
@@ -616,19 +607,8 @@ impl InferenceService {
             admission.reservation.take(),
             admission.reserved_tokens,
         );
-        let selectable = self
-            .circuits()
-            .selectable_targets(
-                principal
-                    .runtime()
-                    .routes
-                    .get(&context.route_slug)
-                    .into_iter()
-                    .flat_map(|route| &route.targets)
-                    .map(|target| target.routing_id.unwrap_or(target.id)),
-            )
-            .await;
-        let attempts = match select_representable_attempts_filtered(
+        let attempts = match select_available_attempts_filtered(
+            self.circuits(),
             principal.runtime(),
             &context.route_slug,
             &operation,
@@ -636,13 +616,14 @@ impl InferenceService {
             mode,
             context.request_id.as_uuid().as_bytes(),
             |_, target| {
-                selectable.contains(&target.routing_id.unwrap_or(target.id))
-                    && required_target.as_ref().is_none_or(|required| {
-                        target.provider_id.as_uuid() == required.provider_id
-                            && target.upstream_model == required.upstream_model
-                    })
+                required_target.as_ref().is_none_or(|required| {
+                    target.provider_id.as_uuid() == required.provider_id
+                        && target.upstream_model == required.upstream_model
+                })
             },
-        ) {
+        )
+        .await
+        {
             Ok(attempts) => attempts,
             Err(error) => {
                 let failure = if required_target.is_some() && error.code() == "no_eligible_provider"
