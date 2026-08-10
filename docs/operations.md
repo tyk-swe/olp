@@ -22,6 +22,11 @@ its threshold for ten minutes. The bundled Prometheus rules and per-component
 ServiceMonitors provide starting alerts; keep control and gateway alerts
 separate.
 
+The target-circuit gauge is named `olp_local_open_target_circuits` because it
+reports only this process's fallback state; distributed circuit state is not
+scanned on the metrics path. Migrate dashboards and alerts from the former
+`olp_open_target_circuits` name when upgrading.
+
 ### Replicated worker health
 
 `/health/ready` and `/metrics` read PostgreSQL-backed fleet summaries; worker

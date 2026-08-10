@@ -525,11 +525,21 @@ trait BedrockSdkRawResponse {
     fn is_successful_response(&self) -> bool {
         false
     }
+
+    fn retry_after(&self) -> Option<Duration> {
+        None
+    }
 }
 
 impl BedrockSdkRawResponse for HttpResponse {
     fn is_successful_response(&self) -> bool {
         self.status().is_success()
+    }
+
+    fn retry_after(&self) -> Option<Duration> {
+        self.headers()
+            .get("retry-after")
+            .and_then(crate::transport_common::retry_after_value)
     }
 }
 
@@ -557,11 +567,15 @@ where
         SdkError::ServiceError(service) => classify_service_code(service.err().code()),
         _ => AttemptFailureClass::UpstreamServer,
     };
+    let retry_after = match error {
+        SdkError::ServiceError(service) => service.raw().retry_after(),
+        _ => None,
+    };
     TransportError {
         phase,
         class,
         response_committed: committed,
-        retry_after: None,
+        retry_after,
         message: "Bedrock SDK request failed".to_owned(),
     }
 }
@@ -598,7 +612,9 @@ mod tests {
     use std::time::Duration;
 
     use aws_smithy_eventstream::frame::write_message_to;
+    use aws_smithy_runtime_api::http::StatusCode;
     use aws_smithy_types::event_stream::{Header, HeaderValue, Message as EventMessage};
+    use aws_smithy_types::{body::SdkBody, error::metadata::ErrorMetadata};
     use futures::StreamExt;
     use olp_domain::{
         AttemptPlan, DurationMs, GenerationParameters, GenerationRequest, Message, OperationKind,
@@ -714,6 +730,20 @@ mod tests {
             }
             .allows_failover()
         );
+    }
+
+    #[test]
+    fn service_error_preserves_retry_after() {
+        let mut raw = HttpResponse::new(StatusCode::try_from(429).unwrap(), SdkBody::empty());
+        raw.headers_mut().insert("retry-after", "17");
+        let error = SdkError::service_error(
+            ErrorMetadata::builder().code("ThrottlingException").build(),
+            raw,
+        );
+
+        let mapped = map_sdk_error(&error, TransportPhase::FirstByte, false);
+        assert_eq!(mapped.class, AttemptFailureClass::RateLimit);
+        assert_eq!(mapped.retry_after, Some(Duration::from_secs(17)));
     }
 
     fn event_frame(event_type: &str, payload: &str) -> Vec<u8> {

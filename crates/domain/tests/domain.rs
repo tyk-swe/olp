@@ -183,8 +183,8 @@ fn persisted_routing_ids_drive_rendezvous_and_legacy_payloads_default_to_row_ids
         .map(|target| {
             (
                 weighted_rendezvous_score(
-                    route.id,
-                    target.id,
+                    route.routing_id.unwrap_or(route.id),
+                    target.stable_id(),
                     target.weight,
                     OperationKind::Generation,
                     Surface::OpenAi,
@@ -238,15 +238,15 @@ fn persisted_routing_ids_drive_rendezvous_and_legacy_payloads_default_to_row_ids
         .map(|target| {
             (
                 weighted_rendezvous_score(
-                    route.routing_id.unwrap(),
-                    target.routing_id.unwrap(),
+                    route.routing_id.unwrap_or(route.id),
+                    target.stable_id(),
                     target.weight,
                     OperationKind::Generation,
                     Surface::OpenAi,
                     TransportMode::Streaming,
                     affinity,
                 ),
-                target.routing_id.unwrap(),
+                target.stable_id(),
                 target.id,
             )
         })

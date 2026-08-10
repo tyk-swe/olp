@@ -21,7 +21,14 @@ async fn replicas(label: &str) -> (DistributedCircuitBreaker, DistributedCircuit
 
 fn token(permit: &DistributedCircuitPermit) -> Option<&str> {
     match permit {
-        DistributedCircuitPermit::Acquired { probe_token } => probe_token.as_deref(),
+        DistributedCircuitPermit::Acquired { probe_token, .. } => probe_token.as_deref(),
+        DistributedCircuitPermit::Denied => panic!("expected acquired circuit permit"),
+    }
+}
+
+fn revision(permit: &DistributedCircuitPermit) -> &str {
+    match permit {
+        DistributedCircuitPermit::Acquired { state_revision, .. } => state_revision,
         DistributedCircuitPermit::Denied => panic!("expected acquired circuit permit"),
     }
 }
@@ -79,7 +86,10 @@ async fn replicas_share_open_state_and_one_recovering_probe() {
         .find(|permit| matches!(permit, DistributedCircuitPermit::Acquired { .. }))
         .unwrap();
     assert!(token(probe).is_some());
-    first.record_success(target, token(probe)).await.unwrap();
+    first
+        .record_success(target, token(probe), revision(probe))
+        .await
+        .unwrap();
     assert!(second.observe(target).await.unwrap());
     assert_eq!(
         token(&second.acquire(target, lease, RETENTION).await.unwrap()),
@@ -138,10 +148,11 @@ async fn failed_probe_reopens_and_expired_lease_recovers_after_crash() {
     tokio::time::sleep(lease + Duration::from_millis(25)).await;
     let recovered = second.acquire(target, lease, RETENTION).await.unwrap();
     assert!(token(&recovered).is_some());
-    first
-        .record_success(target, token(&abandoned))
+    let applied = first
+        .record_success(target, token(&abandoned), revision(&abandoned))
         .await
         .unwrap();
+    assert!(!applied);
     assert!(!first.observe(target).await.unwrap());
 
     second
@@ -172,7 +183,12 @@ async fn expired_probe_success_closes_when_token_has_not_been_replaced() {
     assert!(token(&probe).is_some());
 
     tokio::time::sleep(lease + Duration::from_millis(25)).await;
-    assert!(first.record_success(target, token(&probe)).await.unwrap());
+    assert!(
+        first
+            .record_success(target, token(&probe), revision(&probe))
+            .await
+            .unwrap()
+    );
     assert!(second.observe(target).await.unwrap());
     assert_eq!(
         token(&second.acquire(target, lease, RETENTION).await.unwrap()),
@@ -236,7 +252,7 @@ async fn stale_probe_success_is_rejected_after_replacement_failure() {
 
     assert!(
         !first
-            .record_success(target, token(&abandoned))
+            .record_success(target, token(&abandoned), revision(&abandoned))
             .await
             .unwrap()
     );
@@ -267,7 +283,7 @@ async fn stale_probe_failure_is_rejected_after_replacement_success() {
     let replacement = second.acquire(target, lease, RETENTION).await.unwrap();
     assert!(token(&replacement).is_some());
     second
-        .record_success(target, token(&replacement))
+        .record_success(target, token(&replacement), revision(&replacement))
         .await
         .unwrap();
 
@@ -282,4 +298,50 @@ async fn stale_probe_failure_is_rejected_after_replacement_success() {
         token(&first.acquire(target, lease, RETENTION).await.unwrap()),
         None
     );
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn stale_ordinary_success_does_not_clear_newer_failure_state() {
+    let (first, second) = replicas("stale-ordinary-success").await;
+    let target = TargetId::new();
+    let lease = Duration::from_millis(100);
+
+    let stale = first.acquire(target, lease, RETENTION).await.unwrap();
+    let newer = second.acquire(target, lease, RETENTION).await.unwrap();
+    assert!(
+        second
+            .record_failure(target, token(&newer), 1, lease, RETENTION)
+            .await
+            .unwrap()
+    );
+
+    assert!(
+        !first
+            .record_success(target, token(&stale), revision(&stale))
+            .await
+            .unwrap()
+    );
+    assert!(!first.observe(target).await.unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn owned_probe_can_be_released_without_changing_failure_state() {
+    let (first, second) = replicas("release-probe").await;
+    let target = TargetId::new();
+    let lease = Duration::from_millis(80);
+
+    let ordinary = first.acquire(target, lease, RETENTION).await.unwrap();
+    first
+        .record_failure(target, token(&ordinary), 1, lease, RETENTION)
+        .await
+        .unwrap();
+    tokio::time::sleep(lease + Duration::from_millis(25)).await;
+    let probe = first.acquire(target, lease, RETENTION).await.unwrap();
+    let probe_token = token(&probe).expect("expected half-open probe");
+
+    assert!(first.release_probe(target, probe_token).await.unwrap());
+    let replacement = second.acquire(target, lease, RETENTION).await.unwrap();
+    assert!(token(&replacement).is_some());
 }

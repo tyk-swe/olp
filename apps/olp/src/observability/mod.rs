@@ -802,9 +802,9 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
          # HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n\
          # TYPE olp_distributed_limiter_available gauge\n\
          olp_distributed_limiter_available {}\n\
-         # HELP olp_open_target_circuits Process-local fallback circuits currently open or half-open.\n\
-         # TYPE olp_open_target_circuits gauge\n\
-         olp_open_target_circuits {}\n\
+         # HELP olp_local_open_target_circuits Process-local fallback circuits currently open or half-open.\n\
+         # TYPE olp_local_open_target_circuits gauge\n\
+         olp_local_open_target_circuits {}\n\
          # HELP olp_distributed_circuit_configured Whether distributed circuit coordination is configured.\n\
          # TYPE olp_distributed_circuit_configured gauge\n\
          olp_distributed_circuit_configured {}\n\

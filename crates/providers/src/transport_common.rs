@@ -129,15 +129,19 @@ pub(crate) fn transport_error(
     }
 }
 
-/// Accept only the unambiguous delta-seconds form.
 pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
-    let seconds = headers
-        .get(header::RETRY_AFTER)?
-        .to_str()
+    let value = headers.get(header::RETRY_AFTER)?.to_str().ok()?;
+    retry_after_value(value)
+}
+
+pub(crate) fn retry_after_value(value: &str) -> Option<Duration> {
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    httpdate::parse_http_date(value)
         .ok()?
-        .parse::<u64>()
-        .ok()?;
-    Some(Duration::from_secs(seconds))
+        .duration_since(std::time::SystemTime::now())
+        .ok()
 }
 
 pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
@@ -191,5 +195,14 @@ mod tests {
         assert_eq!(retry_after(&headers), Some(Duration::from_secs(999_999)));
         headers.insert(header::RETRY_AFTER, HeaderValue::from_static("not-seconds"));
         assert_eq!(retry_after(&headers), None);
+    }
+
+    #[test]
+    fn parses_retry_after_http_date() {
+        let deadline = std::time::SystemTime::now() + Duration::from_secs(60);
+        let value = httpdate::fmt_http_date(deadline);
+        let parsed = retry_after_value(&value).unwrap();
+        assert!(parsed <= Duration::from_secs(60));
+        assert!(parsed >= Duration::from_secs(58));
     }
 }

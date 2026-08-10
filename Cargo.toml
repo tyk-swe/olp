@@ -31,6 +31,7 @@ encoding_rs = "0.8"
 futures = "0.3"
 hmac = "0.13"
 http = "1"
+httpdate = "1"
 http-body = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "http2", "server"] }

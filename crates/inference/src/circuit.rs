@@ -34,6 +34,39 @@ pub struct CircuitPermit {
 struct DistributedPermit {
     adapter: Arc<DistributedCircuitBreaker>,
     probe_token: Option<String>,
+    state_revision: String,
+    resolved: AtomicBool,
+}
+
+impl Drop for CircuitPermit {
+    fn drop(&mut self) {
+        let Some(distributed) = &self.distributed else {
+            return;
+        };
+        let Some(probe_token) = distributed.probe_token.clone() else {
+            return;
+        };
+        if distributed.resolved.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let adapter = Arc::clone(&distributed.adapter);
+        let target = self.target;
+        runtime.spawn(async move {
+            match tokio::time::timeout(
+                DISTRIBUTED_OPERATION_TIMEOUT,
+                adapter.release_probe(target, &probe_token),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => tracing::warn!(%error, %target, "failed to release abandoned distributed circuit probe"),
+                Err(_) => tracing::warn!(%target, "timed out releasing abandoned distributed circuit probe"),
+            }
+        });
+    }
 }
 
 /// Target circuit facade. The process-local implementation remains active as
@@ -136,6 +169,14 @@ impl CircuitBreaker {
         self.note_degraded("distributed circuit store is unavailable", None);
     }
 
+    /// Records that distributed coordination is configured without reporting
+    /// a runtime degradation during initial startup.
+    pub fn mark_distributed_configured(&self) {
+        self.inner
+            .distributed_configured
+            .store(true, Ordering::Release);
+    }
+
     /// Selection-time observation is a hint only. The final acquisition must
     /// still be performed immediately before transport.
     pub async fn is_selectable(&self, target: TargetId) -> bool {
@@ -202,6 +243,12 @@ impl CircuitBreaker {
     /// inference request.
     pub async fn acquire(&self, target: TargetId) -> Option<CircuitPermit> {
         if let Some(distributed) = self.inner.distributed.load_full() {
+            if self.inner.distributed_degraded.load(Ordering::Acquire) {
+                return self.local_permit(target);
+            }
+            if !self.local_state_allows_attempt(target) {
+                return None;
+            }
             match tokio::time::timeout(
                 DISTRIBUTED_OPERATION_TIMEOUT,
                 distributed.acquire(target, self.inner.open_duration, self.inner.state_retention),
@@ -212,14 +259,37 @@ impl CircuitBreaker {
                     self.mark_healthy();
                     return None;
                 }
-                Ok(Ok(DistributedCircuitPermit::Acquired { probe_token })) => {
+                Ok(Ok(DistributedCircuitPermit::Acquired {
+                    probe_token,
+                    state_revision,
+                })) => {
                     self.mark_healthy();
-                    let local_probe_started = self.local_acquire(target, probe_token.is_some())?;
+                    let Some(local_probe_started) =
+                        self.local_acquire(target, probe_token.is_some())
+                    else {
+                        if let Some(probe_token) = probe_token.as_deref() {
+                            match tokio::time::timeout(
+                                DISTRIBUTED_OPERATION_TIMEOUT,
+                                distributed.release_probe(target, probe_token),
+                            )
+                            .await
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(error)) => {
+                                    self.note_degraded("release_probe", Some(&error));
+                                }
+                                Err(_) => self.note_degraded("release_probe timed out", None),
+                            }
+                        }
+                        return None;
+                    };
                     return Some(CircuitPermit {
                         target,
                         distributed: Some(DistributedPermit {
                             adapter: distributed,
                             probe_token,
+                            state_revision,
+                            resolved: AtomicBool::new(false),
                         }),
                         local_probe_started,
                     });
@@ -228,12 +298,7 @@ impl CircuitBreaker {
                 Err(_) => self.note_degraded("acquire timed out", None),
             }
         }
-        self.local_acquire(target, false)
-            .map(|local_probe_started| CircuitPermit {
-                target,
-                distributed: None,
-                local_probe_started,
-            })
+        self.local_permit(target)
     }
 
     pub async fn record_success(&self, permit: &CircuitPermit) {
@@ -241,14 +306,17 @@ impl CircuitBreaker {
         if let Some(distributed) = &permit.distributed {
             match tokio::time::timeout(
                 DISTRIBUTED_OPERATION_TIMEOUT,
-                distributed
-                    .adapter
-                    .record_success(permit.target, distributed.probe_token.as_deref()),
+                distributed.adapter.record_success(
+                    permit.target,
+                    distributed.probe_token.as_deref(),
+                    &distributed.state_revision,
+                ),
             )
             .await
             {
                 Ok(Ok(applied)) => {
                     self.mark_healthy();
+                    distributed.resolved.store(true, Ordering::Release);
                     update_local = applied;
                 }
                 Ok(Err(error)) => self.note_degraded("record_success", Some(&error)),
@@ -304,6 +372,7 @@ impl CircuitBreaker {
             {
                 Ok(Ok(applied)) => {
                     self.mark_healthy();
+                    distributed.resolved.store(true, Ordering::Release);
                     if applied {
                         pending_local.record();
                     } else {
@@ -391,6 +460,25 @@ impl CircuitBreaker {
                 )
             })
             .collect()
+    }
+
+    fn local_state_allows_attempt(&self, target: TargetId) -> bool {
+        let now = Instant::now();
+        let states = self
+            .inner
+            .local
+            .lock()
+            .expect("circuit state lock poisoned");
+        local_state_is_selectable(states.get(&target).copied(), now, self.inner.open_duration)
+    }
+
+    fn local_permit(&self, target: TargetId) -> Option<CircuitPermit> {
+        self.local_acquire(target, false)
+            .map(|local_probe_started| CircuitPermit {
+                target,
+                distributed: None,
+                local_probe_started,
+            })
     }
 
     fn local_acquire(&self, target: TargetId, force_probe: bool) -> Option<Option<Instant>> {
@@ -608,7 +696,9 @@ mod tests {
         let CircuitState::Open { until } = state else {
             panic!("expected open circuit");
         };
-        assert!(until.saturating_duration_since(Instant::now()) <= Duration::from_millis(20));
+        let remaining = until.saturating_duration_since(Instant::now());
+        assert!(remaining <= Duration::from_millis(20));
+        assert!(remaining > Duration::from_millis(10));
     }
 
     #[tokio::test]

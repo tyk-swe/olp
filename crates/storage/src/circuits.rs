@@ -1,6 +1,6 @@
 //! Atomic Valkey state transitions for distributed target circuits.
 
-use std::{fmt, time::Duration};
+use std::{fmt, sync::LazyLock, time::Duration};
 
 use olp_domain::TargetId;
 use redis::{Script, aio::ConnectionManager};
@@ -11,7 +11,14 @@ const OBSERVE_SCRIPT: &str = include_str!("../scripts/observe_circuit.lua");
 const ACQUIRE_SCRIPT: &str = include_str!("../scripts/acquire_circuit.lua");
 const SUCCESS_SCRIPT: &str = include_str!("../scripts/record_circuit_success.lua");
 const FAILURE_SCRIPT: &str = include_str!("../scripts/record_circuit_failure.lua");
+const RELEASE_PROBE_SCRIPT: &str = include_str!("../scripts/release_circuit_probe.lua");
 const MAX_LUA_INTEGER: u64 = (1_u64 << 53) - 1;
+
+static OBSERVE: LazyLock<Script> = LazyLock::new(|| Script::new(OBSERVE_SCRIPT));
+static ACQUIRE: LazyLock<Script> = LazyLock::new(|| Script::new(ACQUIRE_SCRIPT));
+static SUCCESS: LazyLock<Script> = LazyLock::new(|| Script::new(SUCCESS_SCRIPT));
+static FAILURE: LazyLock<Script> = LazyLock::new(|| Script::new(FAILURE_SCRIPT));
+static RELEASE_PROBE: LazyLock<Script> = LazyLock::new(|| Script::new(RELEASE_PROBE_SCRIPT));
 
 #[derive(Clone)]
 pub struct DistributedCircuitBreaker {
@@ -34,7 +41,8 @@ impl DistributedCircuitBreaker {
 
     pub async fn observe(&self, target: TargetId) -> Result<bool, CircuitStoreError> {
         let mut connection = self.connection.clone();
-        let response: i64 = Script::new(OBSERVE_SCRIPT)
+        let response: i64 = OBSERVE
+            .prepare_invoke()
             .key(self.key(target))
             .invoke_async(&mut connection)
             .await?;
@@ -49,7 +57,8 @@ impl DistributedCircuitBreaker {
     ) -> Result<DistributedCircuitPermit, CircuitStoreError> {
         let token = Uuid::now_v7().to_string();
         let mut connection = self.connection.clone();
-        let response: (String, String) = Script::new(ACQUIRE_SCRIPT)
+        let response: (String, String, String) = ACQUIRE
+            .prepare_invoke()
             .key(self.key(target))
             .arg(duration_ms(probe_lease)?)
             .arg(duration_ms(retention)?)
@@ -57,15 +66,23 @@ impl DistributedCircuitBreaker {
             .invoke_async(&mut connection)
             .await?;
         match response {
-            (status, response_token) if status == "denied" && response_token.is_empty() => {
+            (status, response_token, _) if status == "denied" && response_token.is_empty() => {
                 Ok(DistributedCircuitPermit::Denied)
             }
-            (status, response_token) if status == "closed" && response_token.is_empty() => {
-                Ok(DistributedCircuitPermit::Acquired { probe_token: None })
+            (status, response_token, state_revision)
+                if status == "closed" && response_token.is_empty() =>
+            {
+                Ok(DistributedCircuitPermit::Acquired {
+                    probe_token: None,
+                    state_revision,
+                })
             }
-            (status, response_token) if status == "probe" && response_token == token => {
+            (status, response_token, state_revision)
+                if status == "probe" && response_token == token =>
+            {
                 Ok(DistributedCircuitPermit::Acquired {
                     probe_token: Some(token),
+                    state_revision,
                 })
             }
             _ => Err(CircuitStoreError::UnexpectedResponse),
@@ -76,11 +93,14 @@ impl DistributedCircuitBreaker {
         &self,
         target: TargetId,
         probe_token: Option<&str>,
+        state_revision: &str,
     ) -> Result<bool, CircuitStoreError> {
         let mut connection = self.connection.clone();
-        let response: i64 = Script::new(SUCCESS_SCRIPT)
+        let response: i64 = SUCCESS
+            .prepare_invoke()
             .key(self.key(target))
             .arg(probe_token.unwrap_or(""))
+            .arg(state_revision)
             .invoke_async(&mut connection)
             .await?;
         parse_boolean_response(response)
@@ -95,12 +115,30 @@ impl DistributedCircuitBreaker {
         retention: Duration,
     ) -> Result<bool, CircuitStoreError> {
         let mut connection = self.connection.clone();
-        let response: i64 = Script::new(FAILURE_SCRIPT)
+        let response: i64 = FAILURE
+            .prepare_invoke()
             .key(self.key(target))
             .arg(probe_token.unwrap_or(""))
             .arg(failure_threshold.max(1))
             .arg(duration_ms(open_duration)?)
             .arg(duration_ms(retention)?)
+            .arg(Uuid::now_v7().to_string())
+            .invoke_async(&mut connection)
+            .await?;
+        parse_boolean_response(response)
+    }
+
+    /// Releases an owned half-open probe without changing the failure state.
+    pub async fn release_probe(
+        &self,
+        target: TargetId,
+        probe_token: &str,
+    ) -> Result<bool, CircuitStoreError> {
+        let mut connection = self.connection.clone();
+        let response: i64 = RELEASE_PROBE
+            .prepare_invoke()
+            .key(self.key(target))
+            .arg(probe_token)
             .invoke_async(&mut connection)
             .await?;
         parse_boolean_response(response)
@@ -133,7 +171,10 @@ impl fmt::Debug for DistributedCircuitBreaker {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DistributedCircuitPermit {
     Denied,
-    Acquired { probe_token: Option<String> },
+    Acquired {
+        probe_token: Option<String>,
+        state_revision: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -171,5 +212,14 @@ mod tests {
     #[test]
     fn rejects_unsafe_durations() {
         assert!(duration_ms(Duration::ZERO).is_err());
+        assert!(duration_ms(Duration::from_millis(MAX_LUA_INTEGER + 1)).is_err());
+        assert_eq!(duration_ms(Duration::from_millis(1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn rejects_unexpected_boolean_responses() {
+        assert!(!parse_boolean_response(0).unwrap());
+        assert!(parse_boolean_response(1).unwrap());
+        assert!(parse_boolean_response(2).is_err());
     }
 }

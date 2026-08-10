@@ -105,7 +105,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
       "targets": [
         { "refId": "A", "expr": "min(olp_distributed_limiter_available{namespace=~\"$namespace\"})", "legendFormat": "limiter available" },
-        { "refId": "B", "expr": "sum(olp_open_target_circuits{namespace=~\"$namespace\"})", "legendFormat": "open target circuits" }
+        { "refId": "B", "expr": "sum(olp_local_open_target_circuits{namespace=~\"$namespace\"})", "legendFormat": "local open target circuits" }
       ]
     },
     {

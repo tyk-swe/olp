@@ -146,6 +146,7 @@ pub(super) async fn circuit_supervisor(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut backoff = Duration::from_millis(100);
+    let mut was_available = circuits.distributed_available();
     loop {
         if *shutdown.borrow() {
             return;
@@ -154,23 +155,32 @@ pub(super) async fn circuit_supervisor(
             tokio::time::timeout(Duration::from_secs(1), circuits.ping_distributed()).await,
             Ok(Some(true))
         ) {
+            was_available = true;
             if wait_or_shutdown(&mut shutdown, Duration::from_secs(5)).await {
                 return;
             }
             continue;
         }
-        circuits.mark_distributed_unavailable();
+        if was_available {
+            circuits.mark_distributed_unavailable();
+            was_available = false;
+        }
 
-        if let Ok(Ok(distributed)) = tokio::time::timeout(
+        match tokio::time::timeout(
             Duration::from_secs(3),
             DistributedCircuitBreaker::connect(&valkey_url, &circuits_namespace),
         )
         .await
         {
-            circuits.install_distributed(distributed);
-            backoff = Duration::from_millis(100);
-            info!("Valkey circuit coordination is available");
-            continue;
+            Ok(Ok(distributed)) => {
+                circuits.install_distributed(distributed);
+                was_available = true;
+                backoff = Duration::from_millis(100);
+                info!("Valkey circuit coordination is available");
+                continue;
+            }
+            Ok(Err(error)) => warn!(%error, "Valkey circuit coordination connection failed"),
+            Err(_) => warn!("Valkey circuit coordination connection timed out"),
         }
         if wait_or_shutdown(&mut shutdown, backoff).await {
             return;

@@ -176,7 +176,7 @@ pub(super) async fn serve(
             background_shutdown_receiver.clone(),
         )));
         if mode.serves_gateway() {
-            state.circuits.mark_distributed_unavailable();
+            state.circuits.mark_distributed_configured();
             background_tasks.push(tokio::spawn(circuit_supervisor(
                 state.circuits.clone(),
                 url.clone(),
