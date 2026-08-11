@@ -6,9 +6,9 @@
     getMediaJob,
     listMediaJobs
   } from '$lib/api/operations';
-  import { popCursor, pushCursor } from '$lib/api/pagination';
+  import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
   import { formatDate } from '$lib/format';
-  import type { MediaJobListState } from './mediaJobListState';
+  import { emptyMediaJobListState, type MediaJobListState } from './mediaJobListState';
 
   let {
     jobId = '',
@@ -31,8 +31,7 @@
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    listState.cursor = undefined;
-    listState.history = [];
+    resetCursor(listState);
     listState.applied = {
       limit: 25,
       route: listState.route.trim() || undefined,
@@ -42,14 +41,7 @@
   }
 
   function clear() {
-    Object.assign(listState, {
-      route: '',
-      jobState: '',
-      lifecycle: '',
-      cursor: undefined,
-      history: [],
-      applied: { limit: 25 }
-    });
+    Object.assign(listState, emptyMediaJobListState());
   }
 
   function tone(value: string) {
@@ -84,7 +76,7 @@
   {#if jobs.isPending}<div class="loading-state" role="status">Loading media jobs…</div>
   {:else if jobs.isError}<div class="inline-problem" role="alert">Media jobs are unavailable. <button class="text-button" type="button" onclick={() => jobs.refetch()}>Retry</button></div>
   {:else if jobs.data?.data.length === 0 && listState.history.length === 0}<section class="card empty-state"><p>No media jobs match these filters.</p></section>
-  {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.data ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/media-jobs/${job.id}`)}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination page={listState.history.length + 1} hasPrevious={listState.history.length > 0} hasNext={Boolean(jobs.data?.next_cursor)} onPrevious={() => popCursor(listState)} onNext={() => pushCursor(listState, jobs.data?.next_cursor)} label="Media job pages" />{/if}
+  {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.data ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/media-jobs/${job.id}`)}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination {...cursorPaginationProps(listState, jobs.data?.next_cursor)} label="Media job pages" />{/if}
 {/if}
 
 <style>

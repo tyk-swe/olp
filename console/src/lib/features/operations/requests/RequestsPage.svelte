@@ -5,8 +5,9 @@
     getRequest,
     listRequests
   } from '$lib/api/operations';
+  import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
   import { formatCompact, formatCost, formatDate, statusLabel, statusTone } from '$lib/format';
-  import type { RequestListState } from './requestListState';
+  import { emptyRequestListState, type RequestListState } from './requestListState';
 
   let {
     requestId = '',
@@ -17,8 +18,8 @@
   } = $props();
 
   const requests = createQuery(() => ({
-    queryKey: ['requests', listState.applied],
-    queryFn: () => listRequests(listState.applied),
+    queryKey: ['requests', listState.applied, listState.cursor ?? 'first'],
+    queryFn: () => listRequests({ ...listState.applied, cursor: listState.cursor }),
     enabled: !requestId
   }));
 
@@ -36,7 +37,7 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    listState.cursors = [];
+    resetCursor(listState);
     listState.applied = {
       limit: 25,
       route: listState.route || undefined,
@@ -52,34 +53,7 @@
   }
 
   function resetFilters() {
-    Object.assign(listState, {
-      route: '',
-      providerId: '',
-      model: '',
-      apiKeyId: '',
-      operation: '',
-      statusCode: '',
-      errorClass: '',
-      startedAfter: '',
-      startedBefore: '',
-      applied: { limit: 25 },
-      cursors: []
-    });
-  }
-
-  function nextPage() {
-    const cursor = requests.data?.next_cursor;
-    if (!cursor) return;
-    listState.cursors = [...listState.cursors, cursor];
-    listState.applied = { ...listState.applied, cursor };
-  }
-
-  function previousPage() {
-    const history = [...listState.cursors];
-    history.pop();
-    const cursor = history.at(-1);
-    listState.cursors = history;
-    listState.applied = { ...listState.applied, cursor };
+    Object.assign(listState, emptyRequestListState());
   }
 </script>
 
@@ -217,10 +191,11 @@
         </li>
       {/each}
     </ul>
+    {@const pagination = cursorPaginationProps(listState, requests.data?.next_cursor)}
     <nav class="pagination" aria-label="Request pages">
-      <button class="button button-secondary" type="button" onclick={previousPage} disabled={listState.cursors.length === 0}>Previous</button>
-      <span>Page {listState.cursors.length + 1}</span>
-      <button class="button button-secondary" type="button" onclick={nextPage} disabled={!requests.data?.next_cursor}>Next</button>
+      <button class="button button-secondary" type="button" onclick={pagination.onPrevious} disabled={!pagination.hasPrevious}>Previous</button>
+      <span>Page {pagination.page}</span>
+      <button class="button button-secondary" type="button" onclick={pagination.onNext} disabled={!pagination.hasNext}>Next</button>
     </nav>
   {/if}
 {/if}

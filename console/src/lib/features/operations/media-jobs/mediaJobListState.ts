@@ -1,11 +1,23 @@
+import { createContext } from 'svelte';
 import type { MediaJobFilters } from '$lib/api/operations';
-import type { CursorHistory } from '$lib/api/pagination';
-
-export const mediaJobListStateContext = Symbol('media-job-list-state');
+import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 
 export type MediaJobListState = CursorHistory & {
   route: string;
   jobState: string;
   lifecycle: string;
-  applied: MediaJobFilters;
+  applied: Omit<MediaJobFilters, 'cursor'>;
 };
+
+export const [getMediaJobListState, setMediaJobListState] =
+  createContext<MediaJobListState>();
+
+export function emptyMediaJobListState(): MediaJobListState {
+  return {
+    ...emptyCursorHistory(),
+    route: '',
+    jobState: '',
+    lifecycle: '',
+    applied: { limit: 25 }
+  };
+}

@@ -14,15 +14,13 @@ use uuid::Uuid;
 use crate::{
     ManagementState, Problem,
     management::{
-        Permission, if_match, require_idempotency_key, require_mutation_session,
-        require_permission, require_read_session,
+        DiffQuery, PageQuery, Permission, if_match, map_configuration, page,
+        require_idempotency_key, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
 };
 
 use super::{manage::ProviderDetailResponse, models::ProviderModelListResponse};
-use crate::management::configuration::common::{
-    DiffQuery, PageQuery, map_configuration_resource, page, with_etag,
-};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderRevisionResponse {
@@ -198,7 +196,7 @@ pub(crate) async fn list_provider_revisions(
         .store()
         .list_provider_revisions(provider_id, cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(ProviderRevisionListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -227,7 +225,7 @@ pub(crate) async fn get_provider_revision(
             .store()
             .get_provider_revision(provider_id, revision_id)
             .await
-            .map_err(map_configuration_resource)?
+            .map_err(map_configuration)?
             .into(),
     ))
 }
@@ -260,7 +258,7 @@ pub(crate) async fn list_provider_revision_models(
         .store()
         .list_provider_revision_models(provider_id, revision_id, cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(ProviderModelListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -292,7 +290,7 @@ pub(crate) async fn diff_provider_revisions(
             .store()
             .diff_provider_revisions(provider_id, query.from, query.to)
             .await
-            .map_err(map_configuration_resource)?
+            .map_err(map_configuration)?
             .into(),
     ))
 }
@@ -331,7 +329,7 @@ pub(crate) async fn restore_provider_revision(
             require_idempotency_key(&headers)?,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let etag = restored.etag;
     with_etag(
         Json(ProviderRevisionRestoreResponse {

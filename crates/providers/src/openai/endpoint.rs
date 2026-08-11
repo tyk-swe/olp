@@ -1,11 +1,22 @@
-use std::{fmt, net::IpAddr, time::Duration};
+use std::{fmt, time::Duration};
 
 use reqwest::{Client, Url};
 use thiserror::Error;
 
-use crate::endpoint::EndpointCore;
+use crate::{CommonEndpointError, endpoint::EndpointCore};
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1/";
+const PROVIDER: &str = "OpenAI";
+
+#[derive(Debug, Error)]
+pub enum EndpointError {
+    #[error(transparent)]
+    Common(#[from] CommonEndpointError),
+    #[error("OpenAI resource path is invalid")]
+    InvalidResourcePath,
+    #[error("OpenAI API version is invalid")]
+    InvalidApiVersion,
+}
 
 #[derive(Clone)]
 pub(crate) struct Endpoint {
@@ -32,7 +43,7 @@ impl Endpoint {
 
     fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
         Ok(Self {
-            core: EndpointCore::parse(value, allow_unsafe_target)?,
+            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
             fixed_query: None,
         })
     }
@@ -87,49 +98,13 @@ impl Endpoint {
         self.core
             .pinned_client(connect_timeout)
             .await
-            .map_err(EndpointError::from)
+            .map_err(Into::into)
     }
-}
-
-crate::endpoint::impl_endpoint_core_error!(EndpointError);
-
-#[derive(Debug, Error)]
-pub enum EndpointError {
-    #[error("custom OpenAI endpoints must use HTTPS")]
-    HttpsRequired,
-    #[error("custom OpenAI endpoint scheme must be HTTP or HTTPS")]
-    UnsupportedScheme,
-    #[error("custom OpenAI endpoints cannot contain user information")]
-    UserInfoForbidden,
-    #[error("custom OpenAI endpoint must include a host")]
-    MissingHost,
-    #[error("custom OpenAI endpoint must have a known or explicit port")]
-    MissingPort,
-    #[error("custom OpenAI endpoint port must be greater than zero")]
-    InvalidPort,
-    #[error("custom OpenAI endpoints cannot contain a query or fragment")]
-    QueryOrFragmentForbidden,
-    #[error("custom OpenAI endpoint URL is invalid: {0}")]
-    InvalidUrl(String),
-    #[error("OpenAI resource path is invalid")]
-    InvalidResourcePath,
-    #[error("OpenAI API version is invalid")]
-    InvalidApiVersion,
-    #[error("custom OpenAI endpoint resolves to forbidden address {0}")]
-    ForbiddenAddress(IpAddr),
-    #[error("custom OpenAI endpoint DNS resolution timed out")]
-    DnsTimeout,
-    #[error("custom OpenAI endpoint DNS resolution failed")]
-    DnsResolution(#[source] std::io::Error),
-    #[error("custom OpenAI endpoint did not resolve to an address")]
-    NoAddresses,
-    #[error("failed to build the pinned OpenAI HTTP client")]
-    ClientBuild(#[source] reqwest::Error),
 }
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::*;
 
@@ -137,15 +112,21 @@ mod tests {
     fn endpoint_requires_https_and_forbids_ambient_authority() {
         assert!(matches!(
             Endpoint::parse("http://api.openai.com/v1"),
-            Err(EndpointError::HttpsRequired)
+            Err(EndpointError::Common(
+                CommonEndpointError::HttpsRequired { .. }
+            ))
         ));
         assert!(matches!(
             Endpoint::parse("https://user:secret@api.openai.com/v1"),
-            Err(EndpointError::UserInfoForbidden)
+            Err(EndpointError::Common(
+                CommonEndpointError::UserInfoForbidden { .. }
+            ))
         ));
         assert!(matches!(
             Endpoint::parse("https://api.openai.com/v1?redirect=1"),
-            Err(EndpointError::QueryOrFragmentForbidden)
+            Err(EndpointError::Common(
+                CommonEndpointError::QueryOrFragmentForbidden { .. }
+            ))
         ));
     }
 
@@ -189,12 +170,13 @@ mod tests {
     fn literal_private_targets_are_rejected_before_dns() {
         assert!(matches!(
             Endpoint::parse("https://169.254.169.254/latest/meta-data"),
-            Err(EndpointError::ForbiddenAddress(address))
+            Err(EndpointError::Common(CommonEndpointError::ForbiddenAddress { address, .. }))
                 if address == IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))
         ));
         assert!(matches!(
             Endpoint::parse("https://[::1]/v1"),
-            Err(EndpointError::ForbiddenAddress(address)) if address == IpAddr::V6(Ipv6Addr::LOCALHOST)
+            Err(EndpointError::Common(CommonEndpointError::ForbiddenAddress { address, .. }))
+                if address == IpAddr::V6(Ipv6Addr::LOCALHOST)
         ));
     }
 }

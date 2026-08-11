@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use olp_domain::{CanonicalEvent, FinishReason, Surface};
+use olp_domain::{CanonicalEvent, Surface};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -9,7 +9,7 @@ use crate::extensions::{PointerExtensionError, apply_response_extensions};
 
 use super::{
     Candidate, Content, FunctionCall, FunctionCallPart, GenerateContentResponse, Part, TextPart,
-    UsageMetadata,
+    UsageMetadata, finish_reason,
 };
 
 #[derive(Debug, Error)]
@@ -62,7 +62,7 @@ pub fn encode_generate_content_response(
         let finish_reason = output
             .finish
             .as_ref()
-            .map(gemini_finish_reason)
+            .map(finish_reason)
             .ok_or(ClientEncodeError::MissingFinish)?;
         candidates.push(Candidate {
             content: Some(Content {
@@ -70,7 +70,7 @@ pub fn encode_generate_content_response(
                 parts,
                 extra: BTreeMap::new(),
             }),
-            finish_reason: Some(finish_reason),
+            finish_reason: Some(finish_reason.to_owned()),
             index: Some(index),
             extra: BTreeMap::new(),
         });
@@ -97,16 +97,6 @@ pub fn encode_generate_content_response(
     apply_extensions(response, &aggregate.extensions)
 }
 
-fn gemini_finish_reason(reason: &FinishReason) -> String {
-    match reason {
-        FinishReason::Stop | FinishReason::ToolCalls => "STOP".to_owned(),
-        FinishReason::Length => "MAX_TOKENS".to_owned(),
-        FinishReason::ContentFilter => "SAFETY".to_owned(),
-        FinishReason::Error => "OTHER".to_owned(),
-        FinishReason::Other(value) => value.clone(),
-    }
-}
-
 fn apply_extensions(
     response: GenerateContentResponse,
     extensions: &BTreeMap<String, Value>,
@@ -119,7 +109,9 @@ fn apply_extensions(
 
 #[cfg(test)]
 mod tests {
-    use olp_domain::{CanonicalEventKind, MessageRole, SourceExtensions, Usage as CanonicalUsage};
+    use olp_domain::{
+        CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Usage as CanonicalUsage,
+    };
 
     use super::*;
 

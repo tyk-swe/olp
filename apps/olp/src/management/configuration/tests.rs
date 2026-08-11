@@ -3,11 +3,9 @@ use olp_providers::{CapabilityCertificationEvidence, CompatibleCapabilityCertifi
 use olp_storage::{configuration::CapabilityRecord, configuration::ConfigurationError};
 use utoipa::OpenApi;
 
-use crate::management::{PageQuery, WriteOnlySecret, page};
+use crate::management::{PageQuery, WriteOnlySecret, map_configuration, page};
 
-use super::{
-    ConfigurationApiDoc, common::map_configuration_resource, providers::models::certification_item,
-};
+use super::{ConfigurationApiDoc, providers::models::certification_item};
 
 #[test]
 fn write_only_secret_debug_is_redacted() {
@@ -199,7 +197,7 @@ fn provider_revision_diff_contract_documents_hard_response_ceilings() {
         assert_eq!(properties[field]["maxItems"], 32_000);
     }
 
-    let problem = map_configuration_resource(ConfigurationError::ProviderRevisionDiffTooLarge {
+    let problem = map_configuration(ConfigurationError::ProviderRevisionDiffTooLarge {
         dimension: "models",
         maximum: 2_000,
     });

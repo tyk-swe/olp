@@ -126,10 +126,7 @@ pub(crate) async fn create_api_key(
                         id: created.id,
                         lookup_id: created.lookup_id.clone(),
                         secret,
-                        runtime_generation: RuntimeGenerationResponse {
-                            id: created.release.generation_id,
-                            sequence: created.release.sequence,
-                        },
+                        runtime_generation: (&created.release).into(),
                     },
                     Some(format!("\"{}\"", created.etag)),
                 )
@@ -174,10 +171,7 @@ pub(crate) async fn revoke_api_key(
         .await
         .map_err(map_access)?;
     with_etag(
-        Json(RuntimeGenerationResponse {
-            id: revoked.release.generation_id,
-            sequence: revoked.release.sequence,
-        }),
+        Json(RuntimeGenerationResponse::from(&revoked.release)),
         revoked.etag,
     )
 }

@@ -1,13 +1,9 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { getContext } from 'svelte';
   import RequestsPage from '$lib/features/operations/requests/RequestsPage.svelte';
-  import {
-    requestListStateContext,
-    type RequestListState
-  } from '$lib/features/operations/requests/requestListState';
+  import { getRequestListState } from '$lib/features/operations/requests/requestListState';
 
-  let listState = getContext<RequestListState>(requestListStateContext);
+  let listState = getRequestListState();
 </script>
 
 <RequestsPage requestId={page.params.requestId} bind:listState />

@@ -2,7 +2,7 @@
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
-  import { popCursor, pushCursor } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/api/pagination';
   import {
     listApiKeyPage,
     revokeApiKey,
@@ -196,11 +196,7 @@
     </table>
   </div>
   <CursorPagination
-    page={listState.history.length + 1}
-    hasPrevious={listState.history.length > 0}
-    hasNext={Boolean(keys.data?.nextCursor)}
-    onPrevious={() => popCursor(listState)}
-    onNext={() => pushCursor(listState, keys.data?.nextCursor)}
+    {...cursorPaginationProps(listState, keys.data?.nextCursor)}
     label="API key pages"
   />
 {/if}

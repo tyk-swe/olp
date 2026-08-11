@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use olp_domain::{CanonicalEvent, FinishReason, Surface};
+use olp_domain::{CanonicalEvent, Surface};
 use serde_json::Value;
 use thiserror::Error;
 
 use crate::client::{AggregateError, aggregate_generation};
 use crate::extensions::{PointerExtensionError, apply_response_extensions};
 
-use super::{ContentBlock, MessagesResponse, Role, TextBlock, ToolUseBlock, Usage};
+use super::{ContentBlock, MessagesResponse, Role, TextBlock, ToolUseBlock, Usage, finish_reason};
 
 #[derive(Debug, Error)]
 pub enum ClientEncodeError {
@@ -66,14 +66,7 @@ pub fn encode_messages_response(
         .finish
         .as_ref()
         .ok_or(ClientEncodeError::MissingFinish)?;
-    let stop_reason = match finish {
-        FinishReason::Stop => "end_turn".to_owned(),
-        FinishReason::Length => "max_tokens".to_owned(),
-        FinishReason::ToolCalls => "tool_use".to_owned(),
-        FinishReason::ContentFilter => "refusal".to_owned(),
-        FinishReason::Error => "error".to_owned(),
-        FinishReason::Other(value) => value.clone(),
-    };
+    let stop_reason = finish_reason(finish).to_owned();
     let usage = aggregate.usage.unwrap_or_default();
     if usage.reasoning_tokens.is_some() {
         return Err(ClientEncodeError::ReasoningUsage);
@@ -114,7 +107,9 @@ fn apply_extensions(
 
 #[cfg(test)]
 mod tests {
-    use olp_domain::{CanonicalEventKind, MessageRole, SourceExtensions, Usage as CanonicalUsage};
+    use olp_domain::{
+        CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Usage as CanonicalUsage,
+    };
 
     use super::*;
 

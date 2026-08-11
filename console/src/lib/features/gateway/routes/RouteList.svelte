@@ -5,7 +5,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { listRouteDraftPage, listRoutePage } from '$lib/api/management/routes';
-  import { popCursor, pushCursor } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/api/pagination';
   import type { RouteListState } from './routeListState';
 
   let { listState = $bindable() }: { listState: RouteListState } = $props();
@@ -41,7 +41,7 @@
     {:else}
       <div class="table-shell"><table class="data-table"><thead><tr><th>Public slug</th><th>Latest revision</th><th>Operations</th><th>Targets</th><th>Activated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each activeRoutes.data.items as item (item.id)}<tr><td><strong><code>{item.slug}</code></strong></td><td>Revision {item.latest_revision.revision}<br /><small>{item.revision_count} total</small></td><td>{item.latest_revision.operations.join(', ')}</td><td>{item.latest_revision.targets.length}</td><td>{new Date(item.latest_revision.activated_at).toLocaleString()}</td><td><a class="button button-secondary" href={resolve(`/routes/${item.id}/revisions`)}>History & restore</a></td></tr>{/each}</tbody></table></div>
     {/if}
-    <CursorPagination page={listState.route.history.length + 1} hasPrevious={listState.route.history.length > 0} hasNext={Boolean(activeRoutes.data?.nextCursor)} onPrevious={() => popCursor(listState.route)} onNext={() => pushCursor(listState.route, activeRoutes.data?.nextCursor)} label="Active route pages" />
+    <CursorPagination {...cursorPaginationProps(listState.route, activeRoutes.data?.nextCursor)} label="Active route pages" />
   </section>
   <section class="route-section" aria-labelledby="draft-routes-heading">
     <div class="list-heading"><div><p class="eyebrow">Working copies</p><h2 id="draft-routes-heading">Route drafts</h2></div></div>
@@ -50,7 +50,7 @@
     {:else}
       <div class="table-shell"><table class="data-table"><thead><tr><th>Slug</th><th>State</th><th>Operations</th><th>Targets</th><th>Deadline / attempts</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each drafts.data.items as item (item.id)}<tr><td><a class="route-link" href={resolve(`/routes/${item.id}`)}>{item.slug}</a></td><td><span class:success={item.state === 'validated'} class:warning={item.state !== 'validated'} class="badge">{item.state}</span></td><td>{item.operations.join(', ')}</td><td>{item.targets.length}</td><td>{item.overall_timeout_ms.toLocaleString()} ms / {item.max_attempts}</td><td>{new Date(item.updated_at).toLocaleString()}</td><td><a class="button button-secondary" href={resolve(`/routes/${item.id}`)}>Open Studio</a></td></tr>{/each}</tbody></table></div>
     {/if}
-    <CursorPagination page={listState.draft.history.length + 1} hasPrevious={listState.draft.history.length > 0} hasNext={Boolean(drafts.data?.nextCursor)} onPrevious={() => popCursor(listState.draft)} onNext={() => pushCursor(listState.draft, drafts.data?.nextCursor)} label="Route draft pages" />
+    <CursorPagination {...cursorPaginationProps(listState.draft, drafts.data?.nextCursor)} label="Route draft pages" />
   </section>
 {/if}
 

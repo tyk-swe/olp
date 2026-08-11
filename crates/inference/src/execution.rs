@@ -510,12 +510,12 @@ impl InferenceService {
             ..
         } = success;
         let first_byte_ms = elapsed_ms(context.request_started.elapsed());
-        accounting.record_attempts(
-            attempts.clone(),
-            Some(attempt_started),
-            Some(first_byte_ms),
-            true,
-        );
+        let final_attempt = attempts
+            .last()
+            .expect("a successful execution has one provider attempt");
+        let provider_id = final_attempt.provider_id;
+        let upstream_model = final_attempt.upstream_model.clone();
+        accounting.record_attempts(attempts, Some(attempt_started), Some(first_byte_ms), true);
         let ExecutionOutput::Result(result) = output else {
             let failure = InferenceError::bad_gateway(
                 "provider_protocol_error",
@@ -529,16 +529,13 @@ impl InferenceService {
         accounting.replace_usage(usage_from_result(&result));
         accounting.release_limits().await;
         let finalizer = accounting.into_finalizer();
-        let final_attempt = attempts
-            .last()
-            .expect("a successful execution has one provider attempt");
         Ok(RoutedUnaryResult {
             result,
             request_id: context.request_id,
             api_key_id: context.api_key_id,
             route_slug: context.route_slug,
-            provider_id: final_attempt.provider_id,
-            upstream_model: final_attempt.upstream_model.clone(),
+            provider_id,
+            upstream_model,
             request_metadata_finalizer: Some(finalizer),
         })
     }

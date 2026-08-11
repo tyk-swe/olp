@@ -125,7 +125,10 @@ pub(super) fn remaining_until(
 }
 
 pub(super) fn map_endpoint_error(error: EndpointError) -> TransportError {
-    let dns_timeout = matches!(error, EndpointError::DnsTimeout);
+    let dns_timeout = matches!(
+        error,
+        EndpointError::Common(crate::CommonEndpointError::DnsTimeout { .. })
+    );
     transport_common::map_endpoint_error(error, dns_timeout)
 }
 

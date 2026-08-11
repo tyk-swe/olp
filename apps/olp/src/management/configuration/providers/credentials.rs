@@ -21,14 +21,11 @@ use crate::{
     ManagementState, Problem,
     bootstrap::provider_adapter::{provider_config, provider_credential},
     management::{
-        Permission, RuntimeGenerationResponse, WriteOnlySecret, idempotency_http_response,
-        if_match, require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session,
+        PageQuery, Permission, RuntimeGenerationResponse, WriteOnlySecret,
+        idempotency_http_response, if_match, json_payload, map_configuration, page,
+        require_idempotency_key, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
-};
-
-use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -86,7 +83,7 @@ pub(crate) async fn list_provider_credentials(
         .store()
         .list_provider_credentials(provider_id, cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let items = page.items.into_iter().map(Into::into).collect();
     Ok(Json(CredentialListResponse {
         items,
@@ -143,7 +140,7 @@ pub(crate) async fn rotate_provider_credential(
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let request_fingerprint = idempotency_fingerprint(&RotateProviderCredentialFingerprint {
         provider_id,
         expected_etag,
@@ -160,13 +157,13 @@ pub(crate) async fn rotate_provider_credential(
     let provider = store
         .get_provider(provider_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     validate_rotated_credential(&provider, request.credential.expose())
         .map_err(|detail| Problem::field_validation("credential", detail))?;
     let version = store
         .next_credential_version_candidate(provider_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let credential_id = Uuid::now_v7();
     let master_key = state
         .master_key
@@ -201,19 +198,14 @@ pub(crate) async fn rotate_provider_credential(
                         etag: result.etag,
                         credential_id: Some(credential_id),
                         credential_version: Some(version),
-                        runtime_generation: result.release.as_ref().map(|release| {
-                            RuntimeGenerationResponse {
-                                id: release.generation_id,
-                                sequence: release.sequence,
-                            }
-                        }),
+                        runtime_generation: result.release.as_ref().map(Into::into),
                     },
                     Some(format!("\"{}\"", result.etag)),
                 )
             },
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     idempotency_http_response(result)
 }
 
@@ -253,7 +245,7 @@ pub(crate) async fn revoke_provider_credential(
             require_idempotency_key(&headers)?,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     with_etag(
         Json(ProviderMutationResponse {
             provider_id,

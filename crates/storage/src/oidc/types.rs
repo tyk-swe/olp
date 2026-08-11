@@ -6,11 +6,11 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use super::helpers::{random_token, role_rank, token_digest};
+use super::helpers::role_rank;
 use crate::{
     PersistenceError,
     authentication::RecentAuthPurpose,
-    security::{EncryptedSecret, RecentAuthMaterial, SessionMaterial},
+    security::{EncryptedSecret, RecentAuthMaterial, SessionMaterial, random_token, token_digest},
 };
 
 #[derive(Debug, Error)]

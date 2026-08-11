@@ -133,19 +133,6 @@ pub struct ExecutionFailure {
     pub attempts: Vec<RequestAttemptMetadata>,
 }
 
-enum ProviderAttemptFailure {
-    Classify(TransportError),
-    Terminal {
-        transport: TransportError,
-        gateway: InferenceError,
-    },
-}
-
-enum ProviderAttemptOutcome {
-    Retryable(TransportError),
-    Terminal(ExecutionFailure),
-}
-
 struct AttemptRecord<'a> {
     plan: &'a AttemptPlan,
     circuit_permit: CircuitPermit,
@@ -155,16 +142,13 @@ struct AttemptRecord<'a> {
 }
 
 impl AttemptRecord<'_> {
-    fn record_failure(
+    fn finish_failure(
         &self,
         traces: &mut Vec<RequestAttemptMetadata>,
         circuits: &CircuitBreaker,
-        failure: ProviderAttemptFailure,
-    ) -> ProviderAttemptOutcome {
-        let (transport, terminal) = match failure {
-            ProviderAttemptFailure::Classify(transport) => (transport, None),
-            ProviderAttemptFailure::Terminal { transport, gateway } => (transport, Some(gateway)),
-        };
+        transport: TransportError,
+        terminal: Option<InferenceError>,
+    ) -> Result<TransportError, ExecutionFailure> {
         traces.push(failed_attempt(
             self.plan,
             self.ordinal,
@@ -174,13 +158,33 @@ impl AttemptRecord<'_> {
         ));
         circuits.record_failure(self.plan.target_id, transport.class);
         if terminal.is_none() && transport.allows_failover() {
-            ProviderAttemptOutcome::Retryable(transport)
+            Ok(transport)
         } else {
-            ProviderAttemptOutcome::Terminal(ExecutionFailure {
+            Err(ExecutionFailure {
                 error: terminal.unwrap_or_else(|| InferenceError::from_transport(transport)),
                 attempts: std::mem::take(traces),
             })
         }
+    }
+
+    fn record_failure(
+        &self,
+        traces: &mut Vec<RequestAttemptMetadata>,
+        circuits: &CircuitBreaker,
+        transport: TransportError,
+    ) -> Result<TransportError, ExecutionFailure> {
+        self.finish_failure(traces, circuits, transport, None)
+    }
+
+    fn record_terminal_failure(
+        &self,
+        traces: &mut Vec<RequestAttemptMetadata>,
+        circuits: &CircuitBreaker,
+        transport: TransportError,
+        gateway: InferenceError,
+    ) -> ExecutionFailure {
+        self.finish_failure(traces, circuits, transport, Some(gateway))
+            .expect_err("an explicit gateway failure is terminal")
     }
 
     fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &CircuitBreaker) {
@@ -283,14 +287,7 @@ pub async fn execute_with_failover(
                 response_committed: false,
                 message: "provider transport is not loaded".to_owned(),
             };
-            match record.record_failure(
-                &mut traces,
-                circuits,
-                ProviderAttemptFailure::Classify(error),
-            ) {
-                ProviderAttemptOutcome::Retryable(error) => last_error = Some(error),
-                ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-            }
+            last_error = Some(record.record_failure(&mut traces, circuits, error)?);
             continue;
         };
         let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -308,17 +305,8 @@ pub async fn execute_with_failover(
                 Ok(Ok(events)) => events,
                 Ok(Err(error)) => {
                     let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-                    match record.record_failure(
-                        &mut traces,
-                        circuits,
-                        ProviderAttemptFailure::Classify(error),
-                    ) {
-                        ProviderAttemptOutcome::Retryable(error) => {
-                            last_error = Some(error);
-                            continue;
-                        }
-                        ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-                    }
+                    last_error = Some(record.record_failure(&mut traces, circuits, error)?);
+                    continue;
                 }
                 Err(_) => {
                     let error = reclassify_ambiguous_transport_failure(
@@ -330,17 +318,8 @@ pub async fn execute_with_failover(
                         },
                         operation.kind(),
                     );
-                    match record.record_failure(
-                        &mut traces,
-                        circuits,
-                        ProviderAttemptFailure::Classify(error),
-                    ) {
-                        ProviderAttemptOutcome::Retryable(error) => {
-                            last_error = Some(error);
-                            continue;
-                        }
-                        ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-                    }
+                    last_error = Some(record.record_failure(&mut traces, circuits, error)?);
+                    continue;
                 }
             };
         let mut events = match output {
@@ -360,17 +339,8 @@ pub async fn execute_with_failover(
             Ok(Some(Ok(event))) => event,
             Ok(Some(Err(error))) => {
                 let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Classify(error),
-                ) {
-                    ProviderAttemptOutcome::Retryable(error) => {
-                        last_error = Some(error);
-                        continue;
-                    }
-                    ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-                }
+                last_error = Some(record.record_failure(&mut traces, circuits, error)?);
+                continue;
             }
             Ok(None) => {
                 let error = TransportError {
@@ -383,17 +353,7 @@ pub async fn execute_with_failover(
                     "provider_protocol_error",
                     "The provider returned an empty response.",
                 );
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Terminal {
-                        transport: error,
-                        gateway,
-                    },
-                ) {
-                    ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-                    ProviderAttemptOutcome::Retryable(_) => unreachable!("terminal failure"),
-                }
+                return Err(record.record_terminal_failure(&mut traces, circuits, error, gateway));
             }
             Err(_) => {
                 let error = reclassify_ambiguous_transport_failure(
@@ -405,34 +365,15 @@ pub async fn execute_with_failover(
                     },
                     operation.kind(),
                 );
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Classify(error),
-                ) {
-                    ProviderAttemptOutcome::Retryable(error) => {
-                        last_error = Some(error);
-                        continue;
-                    }
-                    ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-                }
+                last_error = Some(record.record_failure(&mut traces, circuits, error)?);
+                continue;
             }
         };
         let mut event_sequence = EventSequenceValidator::new();
         if let Err(sequence_error) = event_sequence.push(&first) {
             let error = canonical_event_protocol_error(sequence_error, false);
             let gateway = InferenceError::from_transport(error.clone());
-            match record.record_failure(
-                &mut traces,
-                circuits,
-                ProviderAttemptFailure::Terminal {
-                    transport: error,
-                    gateway,
-                },
-            ) {
-                ProviderAttemptOutcome::Terminal(failure) => return Err(failure),
-                ProviderAttemptOutcome::Retryable(_) => unreachable!("terminal failure"),
-            }
+            return Err(record.record_terminal_failure(&mut traces, circuits, error, gateway));
         }
         let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
             if error.retryable
@@ -445,16 +386,7 @@ pub async fn execute_with_failover(
                     response_committed: false,
                     message: error.message.clone(),
                 };
-                match record.record_failure(
-                    &mut traces,
-                    circuits,
-                    ProviderAttemptFailure::Classify(transport_error),
-                ) {
-                    ProviderAttemptOutcome::Retryable(error) => last_error = Some(error),
-                    ProviderAttemptOutcome::Terminal(_) => {
-                        unreachable!("canonical retryable error permits failover")
-                    }
-                }
+                last_error = Some(record.record_failure(&mut traces, circuits, transport_error)?);
                 last_canonical_error = Some((traces.len(), error.clone()));
                 continue;
             }

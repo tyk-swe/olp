@@ -6,8 +6,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { listProviderPage } from '$lib/api/management/providers';
   import {
-    popCursor,
-    pushCursor,
+    cursorPaginationProps,
     type CursorHistory
   } from '$lib/api/pagination';
   import { providerStatus } from './providerEditor';
@@ -92,11 +91,7 @@
     </table>
   </div>
   <CursorPagination
-    page={listState.history.length + 1}
-    hasPrevious={listState.history.length > 0}
-    hasNext={Boolean(providers.data?.nextCursor)}
-    onPrevious={() => popCursor(listState)}
-    onNext={() => pushCursor(listState, providers.data?.nextCursor)}
+    {...cursorPaginationProps(listState, providers.data?.nextCursor)}
     label="Provider pages"
   />
 {/if}

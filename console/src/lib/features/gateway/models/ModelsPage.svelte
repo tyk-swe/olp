@@ -3,9 +3,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
-    emptyCursorHistory,
-    popCursor,
-    pushCursor
+    cursorPaginationProps,
+    emptyCursorHistory
   } from '$lib/api/pagination';
   import { invalidateProviderSummaries } from '../providers/providerCache';
   import {
@@ -108,7 +107,7 @@
   </tbody></table></div>
 {/if}
 
-{#if !models.isPending && !models.isError}<CursorPagination page={pagination.history.length + 1} hasPrevious={pagination.history.length > 0} hasNext={Boolean(models.data?.nextCursor)} onPrevious={() => popCursor(pagination)} onNext={() => pushCursor(pagination, models.data?.nextCursor)} label="Model inventory pages" />{/if}
+{#if !models.isPending && !models.isError}<CursorPagination {...cursorPaginationProps(pagination, models.data?.nextCursor)} label="Model inventory pages" />{/if}
 
 <aside class="policy-note" aria-label="Capability policy"><strong>No silent semantic loss.</strong> Cross-protocol routes reject operations a target cannot faithfully represent; unknown source fields are not treated as certified support.</aside>
 

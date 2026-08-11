@@ -17,15 +17,13 @@ use crate::{
     FieldErrors, ManagementState, Problem,
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
     management::{
-        Permission, RuntimeGenerationResponse, if_match, require_idempotency_key,
-        require_mutation_session, require_permission, require_read_session,
+        PageQuery, Permission, if_match, json_payload, map_configuration, page,
+        require_idempotency_key, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
 };
 
 use super::credentials::ProviderMutationResponse;
-use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, with_etag,
-};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderSummaryResponse {
@@ -143,7 +141,7 @@ pub(super) async fn load_provider_detail(
         .get_provider(provider_id)
         .await
         .map(Into::into)
-        .map_err(map_configuration_resource)
+        .map_err(map_configuration)
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -178,7 +176,7 @@ pub(crate) async fn list_providers(
         .store()
         .list_providers(cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(ProviderListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -231,12 +229,12 @@ pub(crate) async fn update_provider(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let store = state.store();
     let current = store
         .get_provider(provider_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     validate_provider_update(&current, &request)?;
     let etag = store
         .update_provider(
@@ -254,7 +252,7 @@ pub(crate) async fn update_provider(
             principal.user_id,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
@@ -290,17 +288,14 @@ pub(crate) async fn disable_provider(
             require_idempotency_key(&headers)?,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     with_etag(
         Json(ProviderMutationResponse {
             provider_id,
             etag: result.etag,
             credential_id: None,
             credential_version: None,
-            runtime_generation: result.release.map(|release| RuntimeGenerationResponse {
-                id: release.generation_id,
-                sequence: release.sequence,
-            }),
+            runtime_generation: result.release.as_ref().map(Into::into),
         }),
         result.etag,
     )
@@ -333,7 +328,7 @@ pub(crate) async fn restore_provider_as_draft(
             require_idempotency_key(&headers)?,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
@@ -421,9 +416,9 @@ pub(crate) async fn probe_provider(
     let provider = store
         .get_provider(provider_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     if provider.etag != expected_etag {
-        return Err(map_configuration_resource(
+        return Err(map_configuration(
             olp_storage::configuration::ConfigurationError::PreconditionFailed,
         ));
     }
@@ -449,7 +444,7 @@ pub(crate) async fn probe_provider(
             principal.user_id,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     if !succeeded {
         return Err(Problem::field_validation("provider", detail));
     }

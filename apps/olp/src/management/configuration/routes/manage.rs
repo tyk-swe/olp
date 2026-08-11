@@ -18,13 +18,10 @@ use uuid::Uuid;
 use crate::{
     ManagementState, Problem,
     management::{
-        Permission, if_match, require_idempotency_key, require_mutation_session,
-        require_permission, require_read_session,
+        DiffQuery, PageQuery, Permission, if_match, json_payload, map_configuration, page,
+        require_idempotency_key, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
-};
-
-use crate::management::configuration::common::{
-    DiffQuery, PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -118,7 +115,7 @@ pub(crate) async fn list_route_drafts(
         .store()
         .list_route_drafts(cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(RouteDraftListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -143,7 +140,7 @@ pub(crate) async fn get_route_draft(
         .store()
         .get_route_draft(draft_id)
         .await
-        .map_err(map_configuration_resource)?
+        .map_err(map_configuration)?
         .into();
     let etag = draft.etag;
     with_etag(Json(draft), etag)
@@ -182,7 +179,7 @@ pub(crate) async fn replace_route_draft(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let targets: Vec<_> = request
         .targets
         .into_iter()
@@ -218,11 +215,11 @@ pub(crate) async fn replace_route_draft(
             principal.user_id,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let draft: RouteDraftDetailResponse = store
         .get_route_draft(draft_id)
         .await
-        .map_err(map_configuration_resource)?
+        .map_err(map_configuration)?
         .into();
     with_etag(Json(draft), etag)
 }
@@ -246,7 +243,7 @@ pub(crate) async fn delete_route_draft(
         .store()
         .delete_route_draft(draft_id, expected_etag, principal.user_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     with_etag(StatusCode::NO_CONTENT, expected_etag)
 }
 
@@ -322,7 +319,7 @@ pub(crate) async fn simulate_route_draft(
 ) -> Result<Json<RouteSimulationResponse>, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let simulation =
         state
             .store()
@@ -341,7 +338,7 @@ pub(crate) async fn simulate_route_draft(
                 &request.seed,
             )
             .await
-            .map_err(map_configuration_resource)?;
+            .map_err(map_configuration)?;
     Ok(Json(simulation.into()))
 }
 
@@ -431,7 +428,7 @@ pub(crate) async fn list_routes(
         .store()
         .list_routes(cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(RouteListResponse {
         items: routes.items.into_iter().map(Into::into).collect(),
         next_cursor: routes.next_cursor.map(|value| value.to_string()),
@@ -456,7 +453,7 @@ pub(crate) async fn get_route(
         .store()
         .get_route(route_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(route.into()))
 }
 
@@ -490,7 +487,7 @@ pub(crate) async fn list_route_revisions(
         .store()
         .list_route_revisions(route_id, cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let items = page.items.into_iter().map(Into::into).collect();
     Ok(Json(RouteRevisionListResponse {
         items,
@@ -517,7 +514,7 @@ pub(crate) async fn get_route_revision(
             .store()
             .get_route_revision(route_id, revision_id)
             .await
-            .map_err(map_configuration_resource)?
+            .map_err(map_configuration)?
             .into(),
     ))
 }
@@ -581,7 +578,7 @@ pub(crate) async fn diff_route_revisions(
             .store()
             .diff_route_revisions(route_id, query.from, query.to)
             .await
-            .map_err(map_configuration_resource)?
+            .map_err(map_configuration)?
             .into(),
     ))
 }
@@ -609,7 +606,7 @@ pub(crate) async fn restore_route_revision(
             require_idempotency_key(&headers)?,
         )
         .await
-        .map_err(map_configuration_resource)?
+        .map_err(map_configuration)?
         .into();
     with_etag((StatusCode::CREATED, Json(draft.clone())), draft.etag)
 }

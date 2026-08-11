@@ -1,11 +1,22 @@
-use std::{fmt, net::IpAddr, time::Duration};
+use std::{fmt, time::Duration};
 
 use reqwest::{Client, Url};
 use thiserror::Error;
 
-use crate::endpoint::EndpointCore;
+use crate::{CommonEndpointError, endpoint::EndpointCore};
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";
+const PROVIDER: &str = "Gemini";
+
+#[derive(Debug, Error)]
+pub enum EndpointError {
+    #[error(transparent)]
+    Common(#[from] CommonEndpointError),
+    #[error("Gemini provider model name is invalid")]
+    InvalidModelName,
+    #[error("custom Gemini endpoint cannot be used as a URL base")]
+    CannotBeBase,
+}
 
 #[derive(Clone)]
 pub(crate) struct Endpoint {
@@ -31,7 +42,7 @@ impl Endpoint {
 
     fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
         Ok(Self {
-            core: EndpointCore::parse(value, allow_unsafe_target)?,
+            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
         })
     }
 
@@ -62,7 +73,7 @@ impl Endpoint {
     }
 
     pub(crate) fn models_url(&self) -> Result<Url, EndpointError> {
-        self.core.join("models").map_err(EndpointError::from)
+        self.core.join("models").map_err(Into::into)
     }
 
     pub(crate) fn set_connect_timeout(&mut self, value: Duration) {
@@ -106,63 +117,35 @@ impl Endpoint {
         self.core
             .pinned_client(connect_timeout)
             .await
-            .map_err(EndpointError::from)
+            .map_err(Into::into)
     }
-}
-
-crate::endpoint::impl_endpoint_core_error!(EndpointError);
-
-#[derive(Debug, Error)]
-pub enum EndpointError {
-    #[error("custom Gemini endpoints must use HTTPS")]
-    HttpsRequired,
-    #[error("custom Gemini endpoint scheme must be HTTP or HTTPS")]
-    UnsupportedScheme,
-    #[error("custom Gemini endpoints cannot contain user information")]
-    UserInfoForbidden,
-    #[error("custom Gemini endpoint must include a host")]
-    MissingHost,
-    #[error("custom Gemini endpoint must have a known or explicit port")]
-    MissingPort,
-    #[error("custom Gemini endpoint port must be greater than zero")]
-    InvalidPort,
-    #[error("custom Gemini endpoints cannot contain a query or fragment")]
-    QueryOrFragmentForbidden,
-    #[error("custom Gemini endpoint URL is invalid: {0}")]
-    InvalidUrl(String),
-    #[error("Gemini provider model name is invalid")]
-    InvalidModelName,
-    #[error("custom Gemini endpoint cannot be used as a URL base")]
-    CannotBeBase,
-    #[error("custom Gemini endpoint resolves to forbidden address {0}")]
-    ForbiddenAddress(IpAddr),
-    #[error("custom Gemini endpoint DNS resolution timed out")]
-    DnsTimeout,
-    #[error("custom Gemini endpoint DNS resolution failed")]
-    DnsResolution(#[source] std::io::Error),
-    #[error("custom Gemini endpoint did not resolve to an address")]
-    NoAddresses,
-    #[error("failed to build the pinned Gemini HTTP client")]
-    ClientBuild(#[source] reqwest::Error),
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
+
     use super::*;
 
     #[test]
     fn endpoint_policy_and_action_paths_are_safe() {
         assert!(matches!(
             Endpoint::parse("http://generativelanguage.googleapis.com/v1beta"),
-            Err(EndpointError::HttpsRequired)
+            Err(EndpointError::Common(
+                CommonEndpointError::HttpsRequired { .. }
+            ))
         ));
         assert!(matches!(
             Endpoint::parse("https://key@googleapis.com/v1beta"),
-            Err(EndpointError::UserInfoForbidden)
+            Err(EndpointError::Common(
+                CommonEndpointError::UserInfoForbidden { .. }
+            ))
         ));
         assert!(matches!(
             Endpoint::parse("https://googleapis.com/v1beta?key=ambient"),
-            Err(EndpointError::QueryOrFragmentForbidden)
+            Err(EndpointError::Common(
+                CommonEndpointError::QueryOrFragmentForbidden { .. }
+            ))
         ));
         let endpoint = Endpoint::parse("https://example.com/proxy/v1beta").unwrap();
         assert_eq!(
@@ -194,7 +177,10 @@ mod tests {
         let address: IpAddr = "127.0.0.1".parse().unwrap();
         assert!(matches!(
             Endpoint::parse("https://127.0.0.1/v1beta"),
-            Err(EndpointError::ForbiddenAddress(blocked)) if blocked == address
+            Err(EndpointError::Common(CommonEndpointError::ForbiddenAddress {
+                address: blocked,
+                ..
+            })) if blocked == address
         ));
     }
 }

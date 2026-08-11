@@ -9,9 +9,8 @@
   import type { CursorPage } from '$lib/api/management/shared';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import {
-    emptyCursorHistory,
-    popCursor,
-    pushCursor
+    cursorPaginationProps,
+    emptyCursorHistory
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { FIXED_ROLES } from '../shared';
@@ -167,11 +166,7 @@
     </table>
   </div>
   <CursorPagination
-    page={pagination.history.length + 1}
-    hasPrevious={pagination.history.length > 0}
-    hasNext={Boolean(users.data?.nextCursor)}
-    onPrevious={() => popCursor(pagination)}
-    onNext={() => pushCursor(pagination, users.data?.nextCursor)}
+    {...cursorPaginationProps(pagination, users.data?.nextCursor)}
     label="Member pages"
   />
 {/if}

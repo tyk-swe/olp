@@ -2,9 +2,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import {
-    emptyCursorHistory,
-    popCursor,
-    pushCursor
+    cursorPaginationProps,
+    emptyCursorHistory
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
@@ -88,14 +87,7 @@
     });
   }
 
-  function nextPage() {
-    pushCursor(pagination, revisions.data?.nextCursor);
-    revisionFrom = revisionTo = '';
-    revisionDiff = null;
-  }
-
-  function previousPage() {
-    popCursor(pagination);
+  function resetComparison() {
     revisionFrom = revisionTo = '';
     revisionDiff = null;
   }
@@ -253,11 +245,11 @@
         </article>{/each}
     </div>
     <CursorPagination
-      page={pagination.history.length + 1}
-      hasPrevious={pagination.history.length > 0}
-      hasNext={Boolean(revisions.data?.nextCursor)}
-      onPrevious={previousPage}
-      onNext={nextPage}
+      {...cursorPaginationProps(
+        pagination,
+        revisions.data?.nextCursor,
+        resetComparison
+      )}
       label="Provider revision pages"
     />
   {/if}

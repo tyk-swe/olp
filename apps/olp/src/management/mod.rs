@@ -38,16 +38,15 @@ use auth::{
     UserResponse, authentication_capabilities, current_session, login, logout, setup, setup_status,
 };
 use axum::{Json, Router, routing::get, routing::post};
-pub(crate) use configuration::common::map_configuration_resource;
 pub(crate) use cookies::{
     RECENT_AUTH_COOKIE, append_recent_auth_cookie, append_security_transition_cookies,
     clear_recent_auth_cookie, validate_session_cookie_ttl,
 };
-pub(crate) use error_mapping::map_persistence;
+pub(crate) use error_mapping::{map_configuration, map_persistence};
 pub(crate) use idempotency::{idempotency_http_response, require_idempotency_key};
 pub(crate) use json_payload::json_payload;
 pub(crate) use olp_domain::Permission;
-pub(crate) use pagination::{PageQuery, page};
+pub(crate) use pagination::{DiffQuery, PageQuery, page};
 pub(crate) use permissions::require_permission;
 pub(crate) use preconditions::{if_match, optional_if_match, with_etag};
 pub(crate) use response_policy::{RuntimeGenerationResponse, prevent_sensitive_response_caching};

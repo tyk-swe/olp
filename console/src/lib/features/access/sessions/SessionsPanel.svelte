@@ -9,9 +9,8 @@
   import { authLifecycle } from '$lib/auth/lifecycle';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import {
+    cursorPaginationProps,
     emptyCursorHistory,
-    popCursor,
-    pushCursor,
     resetCursor
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -131,11 +130,7 @@
     </table>
   </div>
   <CursorPagination
-    page={pagination.history.length + 1}
-    hasPrevious={pagination.history.length > 0}
-    hasNext={Boolean(sessions.data?.nextCursor)}
-    onPrevious={() => popCursor(pagination)}
-    onNext={() => pushCursor(pagination, sessions.data?.nextCursor)}
+    {...cursorPaginationProps(pagination, sessions.data?.nextCursor)}
     label="Session pages"
   />
 {/if}

@@ -3,9 +3,8 @@
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
+    cursorPaginationProps,
     emptyCursorHistory,
-    popCursor,
-    pushCursor,
     resetCursor
   } from '$lib/api/pagination';
   import {
@@ -175,7 +174,7 @@
         </details>
       {/each}
     </div>
-    <CursorPagination page={pricingPagination.history.length + 1} hasPrevious={pricingPagination.history.length > 0} hasNext={Boolean(pricing.data?.next_cursor)} onPrevious={() => popCursor(pricingPagination)} onNext={() => pushCursor(pricingPagination, pricing.data?.next_cursor)} label="Pricing revision pages" />
+    <CursorPagination {...cursorPaginationProps(pricingPagination, pricing.data?.next_cursor)} label="Pricing revision pages" />
   {/if}
 </section>
 

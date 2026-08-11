@@ -1,21 +1,14 @@
 <script lang="ts">
-  import { setContext } from 'svelte';
   import {
-    mediaJobListStateContext,
+    emptyMediaJobListState,
+    setMediaJobListState,
     type MediaJobListState
   } from '$lib/features/operations/media-jobs/mediaJobListState';
 
   let { children } = $props();
-  const listState = $state<MediaJobListState>({
-    route: '',
-    jobState: '',
-    lifecycle: '',
-    cursor: undefined,
-    history: [],
-    applied: { limit: 25 }
-  });
+  const listState = $state<MediaJobListState>(emptyMediaJobListState());
 
-  setContext(mediaJobListStateContext, listState);
+  setMediaJobListState(listState);
 </script>
 
 {@render children()}

@@ -2,9 +2,8 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { listAudit } from '$lib/api/operations';
   import {
-    emptyCursorHistory,
-    popCursor,
-    pushCursor
+    cursorPaginationProps,
+    emptyCursorHistory
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
@@ -29,7 +28,7 @@
 {:else}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="table-shell audit-table" tabindex="0" role="region" aria-label="Audit event results"><table class="data-table"><caption class="sr-only">Audit events, newest first</caption><thead><tr><th scope="col">Occurred</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Resource</th><th scope="col">Outcome</th></tr></thead><tbody>{#each audit.data?.data ?? [] as event (event.id)}<tr><td>{formatDate(event.occurred_at)}</td><td>{event.actor_email ?? 'System'}</td><td><code>{event.action}</code></td><td><strong>{event.resource_type}</strong>{#if event.resource_id}<small class="mono">{event.resource_id}</small>{/if}</td><td><span class="badge" class:success={event.outcome === 'success'} class:danger={event.outcome !== 'success'}>{event.outcome}</span></td></tr>{/each}</tbody></table></div>
-  <CursorPagination page={pagination.history.length + 1} hasPrevious={pagination.history.length > 0} hasNext={Boolean(audit.data?.next_cursor)} onPrevious={() => popCursor(pagination)} onNext={() => pushCursor(pagination, audit.data?.next_cursor)} label="Audit pages" />
+  <CursorPagination {...cursorPaginationProps(pagination, audit.data?.next_cursor)} label="Audit pages" />
 {/if}
 
 <style>

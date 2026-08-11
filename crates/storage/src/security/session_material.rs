@@ -5,152 +5,122 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+struct TokenMaterial(Zeroizing<String>);
+
 pub struct SessionMaterial {
-    token: Zeroizing<String>,
-    csrf_token: Zeroizing<String>,
+    token: TokenMaterial,
+    csrf_token: TokenMaterial,
 }
 
 /// One-time, purpose-bound proof of recent authentication. Only its SHA-256
 /// digest is stored on the exact session that requested the proof.
 pub struct RecentAuthMaterial {
-    token: Zeroizing<String>,
+    token: TokenMaterial,
 }
 
 /// Replacement CSRF bearer used when an otherwise valid session has lost or
 /// corrupted its readable CSRF cookie.
 pub struct CsrfMaterial {
-    token: Zeroizing<String>,
+    token: TokenMaterial,
 }
 
 /// One-time invitation bearer material. Only its SHA-256 digest is persisted;
 /// the plaintext is returned by the create-invitation API exactly once.
 pub struct InvitationMaterial {
-    token: Zeroizing<String>,
+    token: TokenMaterial,
 }
 
-impl InvitationMaterial {
-    #[must_use]
-    pub fn generate() -> Self {
-        Self {
-            token: Zeroizing::new(random_token(32)),
+impl TokenMaterial {
+    fn generate() -> Self {
+        Self(random_token())
+    }
+
+    fn token(&self) -> &str {
+        &self.0
+    }
+
+    fn digest(&self) -> [u8; 32] {
+        token_digest(self.token())
+    }
+}
+
+macro_rules! impl_token_material {
+    ($name:ident $(, $digest_token:ident)?) => {
+        impl $name {
+            #[must_use]
+            pub fn generate() -> Self {
+                Self {
+                    token: TokenMaterial::generate(),
+                }
+            }
+
+            #[must_use]
+            pub fn token(&self) -> &str {
+                self.token.token()
+            }
+
+            #[must_use]
+            pub fn token_digest(&self) -> [u8; 32] {
+                self.token.digest()
+            }
+
+            $(
+                #[must_use]
+                pub fn $digest_token(token: &str) -> [u8; 32] {
+                    token_digest(token)
+                }
+            )?
         }
-    }
 
-    #[must_use]
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
-    #[must_use]
-    pub fn token_digest(&self) -> [u8; 32] {
-        Self::digest_token(&self.token)
-    }
-
-    #[must_use]
-    pub fn digest_token(token: &str) -> [u8; 32] {
-        Sha256::digest(token.as_bytes()).into()
-    }
-}
-
-impl fmt::Debug for InvitationMaterial {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("InvitationMaterial([REDACTED])")
-    }
-}
-
-impl RecentAuthMaterial {
-    #[must_use]
-    pub fn generate() -> Self {
-        Self {
-            token: Zeroizing::new(random_token(32)),
+        impl fmt::Debug for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(concat!(stringify!($name), "([REDACTED])"))
+            }
         }
-    }
-
-    #[must_use]
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
-    #[must_use]
-    pub fn token_digest(&self) -> [u8; 32] {
-        Self::digest_token(&self.token)
-    }
-
-    #[must_use]
-    pub fn digest_token(token: &str) -> [u8; 32] {
-        Sha256::digest(token.as_bytes()).into()
-    }
+    };
 }
 
-impl fmt::Debug for RecentAuthMaterial {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("RecentAuthMaterial([REDACTED])")
-    }
-}
-
-impl CsrfMaterial {
-    #[must_use]
-    pub fn generate() -> Self {
-        Self {
-            token: Zeroizing::new(random_token(32)),
-        }
-    }
-
-    #[must_use]
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
-    #[must_use]
-    pub fn token_digest(&self) -> [u8; 32] {
-        Sha256::digest(self.token.as_bytes()).into()
-    }
-}
-
-impl fmt::Debug for CsrfMaterial {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("CsrfMaterial([REDACTED])")
-    }
-}
+impl_token_material!(InvitationMaterial, digest_token);
+impl_token_material!(RecentAuthMaterial, digest_token);
+impl_token_material!(CsrfMaterial);
 
 impl SessionMaterial {
     #[must_use]
     pub fn generate() -> Self {
         Self {
-            token: Zeroizing::new(random_token(32)),
-            csrf_token: Zeroizing::new(random_token(32)),
+            token: TokenMaterial::generate(),
+            csrf_token: TokenMaterial::generate(),
         }
     }
 
     #[must_use]
     pub fn token(&self) -> &str {
-        &self.token
+        self.token.token()
     }
 
     #[must_use]
     pub fn csrf_token(&self) -> &str {
-        &self.csrf_token
+        self.csrf_token.token()
     }
 
     #[must_use]
     pub fn token_digest(&self) -> [u8; 32] {
-        Sha256::digest(self.token.as_bytes()).into()
+        self.token.digest()
     }
 
     #[must_use]
     pub fn csrf_digest(&self) -> [u8; 32] {
-        Sha256::digest(self.csrf_token.as_bytes()).into()
+        self.csrf_token.digest()
     }
 
     #[must_use]
     pub fn digest_token(token: &str) -> [u8; 32] {
-        Sha256::digest(token.as_bytes()).into()
+        token_digest(token)
     }
 
     #[must_use]
     pub fn verify_csrf(token: &str, expected_digest: &[u8]) -> bool {
-        let actual: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        constant_time_eq(&actual, expected_digest)
+        constant_time_eq(&token_digest(token), expected_digest)
     }
 }
 
@@ -160,10 +130,14 @@ impl fmt::Debug for SessionMaterial {
     }
 }
 
-fn random_token(size: usize) -> String {
-    let mut bytes = Zeroizing::new(vec![0_u8; size]);
-    rand::rng().fill_bytes(&mut bytes);
-    URL_SAFE_NO_PAD.encode(&bytes)
+pub(crate) fn token_digest(token: &str) -> [u8; 32] {
+    Sha256::digest(token.as_bytes()).into()
+}
+
+pub(crate) fn random_token() -> Zeroizing<String> {
+    let mut bytes = Zeroizing::new([0_u8; 32]);
+    rand::rng().fill_bytes(&mut *bytes);
+    Zeroizing::new(URL_SAFE_NO_PAD.encode(bytes.as_slice()))
 }
 
 #[must_use]

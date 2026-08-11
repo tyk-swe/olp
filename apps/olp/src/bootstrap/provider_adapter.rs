@@ -13,9 +13,7 @@ use olp_storage::{
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::{
-    ManagementState, Problem, bootstrap::cli::AppResult, management::map_configuration_resource,
-};
+use crate::{ManagementState, Problem, bootstrap::cli::AppResult, management::map_configuration};
 
 /// Application-owned provider fields before they cross into `olp-providers`.
 #[derive(Clone, Copy, Debug)]
@@ -190,7 +188,7 @@ pub(crate) async fn provider_connector(
     let provider = store
         .get_provider(provider_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let config = provider_config((&provider).into())
         .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
     if let Some(connector) = state.certification_probe_connector(provider_id, config.kind()) {
@@ -204,7 +202,7 @@ pub(crate) async fn provider_connector(
             let stored = store
                 .active_provider_credential_secret(provider_id)
                 .await
-                .map_err(map_configuration_resource)?;
+                .map_err(map_configuration)?;
             let master_key = state
                 .master_key
                 .as_ref()

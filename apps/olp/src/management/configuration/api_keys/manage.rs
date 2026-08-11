@@ -18,14 +18,11 @@ use uuid::Uuid;
 use crate::{
     ManagementState, Problem,
     management::{
-        Permission, RuntimeGenerationResponse, WriteOnlySecret, idempotency_http_response,
-        if_match, require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session,
+        PageQuery, Permission, RuntimeGenerationResponse, WriteOnlySecret,
+        idempotency_http_response, if_match, json_payload, map_configuration, page,
+        require_idempotency_key, require_mutation_session, require_permission,
+        require_read_session, with_etag,
     },
-};
-
-use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
@@ -97,7 +94,7 @@ pub(crate) async fn list_api_keys(
         .store()
         .list_api_keys(cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(ApiKeyListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -122,7 +119,7 @@ pub(crate) async fn get_api_key(
         .store()
         .get_api_key(api_key_id)
         .await
-        .map_err(map_configuration_resource)?
+        .map_err(map_configuration)?
         .into();
     let etag = key.etag;
     with_etag(Json(key), etag)
@@ -170,7 +167,7 @@ pub(crate) async fn update_api_key(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageApiKeys)?;
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let input = normalize_api_key_policy(
         RawApiKeyPolicy::from(&request),
         ExpirationValidation::RequireFuture(Utc::now()),
@@ -180,14 +177,11 @@ pub(crate) async fn update_api_key(
         .store()
         .update_api_key(api_key_id, if_match(&headers)?, &input, principal.user_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     with_etag(
         Json(ApiKeyMutationResponse {
             etag: result.etag,
-            runtime_generation: RuntimeGenerationResponse {
-                id: result.release.generation_id,
-                sequence: result.release.sequence,
-            },
+            runtime_generation: (&result.release).into(),
         }),
         result.etag,
     )
@@ -274,16 +268,13 @@ pub(crate) async fn rotate_api_key(
                         lookup_id: result.lookup_id.clone(),
                         secret,
                         etag: result.etag,
-                        runtime_generation: RuntimeGenerationResponse {
-                            id: result.release.generation_id,
-                            sequence: result.release.sequence,
-                        },
+                        runtime_generation: (&result.release).into(),
                     },
                     Some(format!("\"{}\"", result.etag)),
                 )
             },
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     idempotency_http_response(result)
 }

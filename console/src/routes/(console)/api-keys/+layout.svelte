@@ -1,15 +1,14 @@
 <script lang="ts">
-  import { setContext } from 'svelte';
   import { emptyCursorHistory } from '$lib/api/pagination';
   import {
-    apiKeyListStateContext,
+    setApiKeyListState,
     type ApiKeyListState
   } from '$lib/features/access/api-keys/apiKeyListState';
 
   let { children } = $props();
   const listState = $state<ApiKeyListState>(emptyCursorHistory());
 
-  setContext(apiKeyListStateContext, listState);
+  setApiKeyListState(listState);
 </script>
 
 {@render children()}

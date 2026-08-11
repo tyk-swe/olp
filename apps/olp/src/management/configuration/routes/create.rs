@@ -227,10 +227,7 @@ pub(crate) async fn activate_route_draft(
             route_id: activated.route_id,
             revision_id: activated.revision_id,
             revision: activated.revision,
-            runtime_generation: RuntimeGenerationResponse {
-                id: activated.release.generation_id,
-                sequence: activated.release.sequence,
-            },
+            runtime_generation: (&activated.release).into(),
         }),
         expected_etag,
     )

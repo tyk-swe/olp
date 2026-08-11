@@ -17,8 +17,7 @@
     type ProviderModel
   } from '$lib/api/management/providers';
   import {
-    popCursor,
-    pushCursor,
+    cursorPaginationProps,
     type CursorHistory
   } from '$lib/api/pagination';
   import CapabilityReview from './CapabilityReview.svelte';
@@ -304,11 +303,7 @@
       </table>
     </div>
     <CursorPagination
-      page={pageState.history.length + 1}
-      hasPrevious={pageState.history.length > 0}
-      hasNext={Boolean(modelPage.page.nextCursor)}
-      onPrevious={() => popCursor(pageState)}
-      onNext={() => pushCursor(pageState, modelPage.page.nextCursor)}
+      {...cursorPaginationProps(pageState, modelPage.page.nextCursor)}
       label="Provider model pages"
     />
   {/if}

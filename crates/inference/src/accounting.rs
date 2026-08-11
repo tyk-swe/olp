@@ -231,22 +231,7 @@ impl RequestAccountingGuard {
 
     pub(crate) fn into_finalizer(mut self) -> RequestMetadataFinalizer {
         self.armed = false;
-        RequestMetadataFinalizer {
-            service: self.service.clone(),
-            generation_id: self.generation_id,
-            api_key_id: self.api_key_id,
-            request_id: self.request_id,
-            route_slug: self.route_slug.clone(),
-            attempts: self.attempts.clone(),
-            request_started_at: self.request_started_at,
-            request_started: self.request_started,
-            attempt_started: self.attempt_started,
-            first_byte_ms: self.first_byte_ms,
-            committed: self.committed,
-            usage: self.usage.clone(),
-            surface: self.surface,
-            operation: self.operation,
-        }
+        RequestMetadataFinalizer(self)
     }
 
     fn take_limit_cleanup(&mut self) -> Option<LimitCleanup> {
@@ -329,45 +314,11 @@ impl Drop for RequestAccountingGuard {
     }
 }
 
-pub(crate) struct RequestMetadataFinalizer {
-    service: InferenceService,
-    generation_id: uuid::Uuid,
-    api_key_id: uuid::Uuid,
-    request_id: uuid::Uuid,
-    route_slug: RouteSlug,
-    attempts: Vec<RequestAttemptMetadata>,
-    request_started_at: chrono::DateTime<Utc>,
-    request_started: tokio::time::Instant,
-    attempt_started: Option<tokio::time::Instant>,
-    first_byte_ms: Option<u64>,
-    committed: bool,
-    usage: UsageCapture,
-    surface: Surface,
-    operation: OperationKind,
-}
+pub(crate) struct RequestMetadataFinalizer(RequestAccountingGuard);
 
 impl RequestMetadataFinalizer {
     pub(crate) fn finalize(self, outcome: &RequestOutcome) {
-        emit_request_metadata_event(
-            &self.service,
-            RequestMetadataInput {
-                generation_id: self.generation_id,
-                api_key_id: self.api_key_id,
-                request_id: self.request_id,
-                route_slug: &self.route_slug,
-                attempts: &self.attempts,
-                request_started_at: self.request_started_at,
-                request_started: self.request_started,
-                final_attempt_started: self.attempt_started,
-                first_byte_ms: self.first_byte_ms,
-                status_code: outcome.status_code,
-                error_class: outcome.error_class.clone(),
-                committed: self.committed,
-                usage: &self.usage,
-                surface: self.surface,
-                operation: self.operation,
-            },
-        );
+        self.0.emit(outcome, true);
     }
 }
 

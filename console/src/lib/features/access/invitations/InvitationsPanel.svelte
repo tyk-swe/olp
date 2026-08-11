@@ -10,9 +10,8 @@
   import { copyText } from '$lib/clipboard';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import {
-    emptyCursorHistory,
-    popCursor,
-    pushCursor
+    cursorPaginationProps,
+    emptyCursorHistory
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
@@ -207,11 +206,7 @@
     </table>
   </div>
   <CursorPagination
-    page={pagination.history.length + 1}
-    hasPrevious={pagination.history.length > 0}
-    hasNext={Boolean(invitations.data?.nextCursor)}
-    onPrevious={() => popCursor(pagination)}
-    onNext={() => pushCursor(pagination, invitations.data?.nextCursor)}
+    {...cursorPaginationProps(pagination, invitations.data?.nextCursor)}
     label="Invitation pages"
   />
 {/if}

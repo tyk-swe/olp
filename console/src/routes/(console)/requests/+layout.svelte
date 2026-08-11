@@ -1,26 +1,14 @@
 <script lang="ts">
-  import { setContext } from 'svelte';
   import {
-    requestListStateContext,
+    emptyRequestListState,
+    setRequestListState,
     type RequestListState
   } from '$lib/features/operations/requests/requestListState';
 
   let { children } = $props();
-  const listState = $state<RequestListState>({
-    route: '',
-    providerId: '',
-    model: '',
-    apiKeyId: '',
-    operation: '',
-    statusCode: '',
-    errorClass: '',
-    startedAfter: '',
-    startedBefore: '',
-    applied: { limit: 25 },
-    cursors: []
-  });
+  const listState = $state<RequestListState>(emptyRequestListState());
 
-  setContext(requestListStateContext, listState);
+  setRequestListState(listState);
 </script>
 
 {@render children()}

@@ -1,6 +1,7 @@
 use std::{fmt, net::IpAddr, time::Duration};
 
 use reqwest::{Client, Url};
+use thiserror::Error;
 
 use crate::http_egress::{
     is_public_ip,
@@ -14,6 +15,7 @@ const MAX_IDLE_CONNECTIONS_PER_HOST: usize = 256;
 #[derive(Clone)]
 pub(crate) struct EndpointCore {
     base_url: Url,
+    provider: &'static str,
     client_connect_timeout: Duration,
     client_pool: PinnedClientPool,
     #[cfg(any(test, feature = "test-util"))]
@@ -21,26 +23,32 @@ pub(crate) struct EndpointCore {
 }
 
 impl EndpointCore {
-    pub(crate) fn parse(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointCoreError> {
-        let mut base_url =
-            Url::parse(value).map_err(|error| EndpointCoreError::InvalidUrl(error.to_string()))?;
+    pub(crate) fn parse(
+        value: &str,
+        provider: &'static str,
+        allow_unsafe_target: bool,
+    ) -> Result<Self, EndpointError> {
+        let mut base_url = Url::parse(value).map_err(|error| EndpointError::InvalidUrl {
+            provider,
+            message: error.to_string(),
+        })?;
         if base_url.scheme() != "https" && !allow_unsafe_target {
-            return Err(EndpointCoreError::HttpsRequired);
+            return Err(EndpointError::HttpsRequired { provider });
         }
         if !matches!(base_url.scheme(), "http" | "https") {
-            return Err(EndpointCoreError::UnsupportedScheme);
+            return Err(EndpointError::UnsupportedScheme { provider });
         }
         if !base_url.username().is_empty() || base_url.password().is_some() {
-            return Err(EndpointCoreError::UserInfoForbidden);
+            return Err(EndpointError::UserInfoForbidden { provider });
         }
         if base_url.host().is_none() {
-            return Err(EndpointCoreError::MissingHost);
+            return Err(EndpointError::MissingHost { provider });
         }
         if base_url.port() == Some(0) {
-            return Err(EndpointCoreError::InvalidPort);
+            return Err(EndpointError::InvalidPort { provider });
         }
         if base_url.query().is_some() || base_url.fragment().is_some() {
-            return Err(EndpointCoreError::QueryOrFragmentForbidden);
+            return Err(EndpointError::QueryOrFragmentForbidden { provider });
         }
         if !base_url.path().ends_with('/') {
             base_url.set_path(&format!("{}/", base_url.path()));
@@ -49,10 +57,11 @@ impl EndpointCore {
             && !allow_unsafe_target
             && !is_public_ip(address)
         {
-            return Err(EndpointCoreError::ForbiddenAddress(address));
+            return Err(EndpointError::ForbiddenAddress { provider, address });
         }
         Ok(Self {
             base_url,
+            provider,
             client_connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             client_pool: PinnedClientPool::default(),
             #[cfg(any(test, feature = "test-util"))]
@@ -64,10 +73,13 @@ impl EndpointCore {
         &self.base_url
     }
 
-    pub(crate) fn join(&self, path: &str) -> Result<Url, EndpointCoreError> {
+    pub(crate) fn join(&self, path: &str) -> Result<Url, EndpointError> {
         self.base_url
             .join(path)
-            .map_err(|error| EndpointCoreError::InvalidUrl(error.to_string()))
+            .map_err(|error| EndpointError::InvalidUrl {
+                provider: self.provider,
+                message: error.to_string(),
+            })
     }
 
     pub(crate) fn set_connect_timeout(&mut self, value: Duration) {
@@ -77,7 +89,7 @@ impl EndpointCore {
     pub(crate) async fn pinned_client(
         &self,
         connect_timeout: Duration,
-    ) -> Result<Client, EndpointCoreError> {
+    ) -> Result<Client, EndpointError> {
         #[cfg(any(test, feature = "test-util"))]
         let allow_unsafe_target = self.allow_unsafe_test_target;
         #[cfg(not(any(test, feature = "test-util")))]
@@ -95,7 +107,7 @@ impl EndpointCore {
                 },
             )
             .await
-            .map_err(EndpointCoreError::from)
+            .map_err(|error| EndpointError::from_pinned(self.provider, error))
     }
 }
 
@@ -111,61 +123,64 @@ impl fmt::Debug for EndpointCore {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum EndpointCoreError {
-    HttpsRequired,
-    UnsupportedScheme,
-    UserInfoForbidden,
-    MissingHost,
-    MissingPort,
-    InvalidPort,
-    QueryOrFragmentForbidden,
-    InvalidUrl(String),
-    ForbiddenAddress(IpAddr),
-    DnsTimeout,
-    DnsResolution(std::io::Error),
-    NoAddresses,
-    ClientBuild(reqwest::Error),
+/// Error shared by all HTTP provider endpoints. The provider label keeps the
+/// existing diagnostics vendor-specific without duplicating endpoint policy.
+#[derive(Debug, Error)]
+pub enum EndpointError {
+    #[error("custom {provider} endpoints must use HTTPS")]
+    HttpsRequired { provider: &'static str },
+    #[error("custom {provider} endpoint scheme must be HTTP or HTTPS")]
+    UnsupportedScheme { provider: &'static str },
+    #[error("custom {provider} endpoints cannot contain user information")]
+    UserInfoForbidden { provider: &'static str },
+    #[error("custom {provider} endpoint must include a host")]
+    MissingHost { provider: &'static str },
+    #[error("custom {provider} endpoint must have a known or explicit port")]
+    MissingPort { provider: &'static str },
+    #[error("custom {provider} endpoint port must be greater than zero")]
+    InvalidPort { provider: &'static str },
+    #[error("custom {provider} endpoints cannot contain a query or fragment")]
+    QueryOrFragmentForbidden { provider: &'static str },
+    #[error("custom {provider} endpoint URL is invalid: {message}")]
+    InvalidUrl {
+        provider: &'static str,
+        message: String,
+    },
+    #[error("custom {provider} endpoint resolves to forbidden address {address}")]
+    ForbiddenAddress {
+        provider: &'static str,
+        address: IpAddr,
+    },
+    #[error("custom {provider} endpoint DNS resolution timed out")]
+    DnsTimeout { provider: &'static str },
+    #[error("custom {provider} endpoint DNS resolution failed")]
+    DnsResolution {
+        provider: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("custom {provider} endpoint did not resolve to an address")]
+    NoAddresses { provider: &'static str },
+    #[error("failed to build the pinned {provider} HTTP client")]
+    ClientBuild {
+        provider: &'static str,
+        #[source]
+        source: reqwest::Error,
+    },
 }
 
-impl From<PinnedClientError> for EndpointCoreError {
-    fn from(error: PinnedClientError) -> Self {
+impl EndpointError {
+    fn from_pinned(provider: &'static str, error: PinnedClientError) -> Self {
         match error {
-            PinnedClientError::MissingHost => Self::MissingHost,
-            PinnedClientError::MissingPort => Self::MissingPort,
-            PinnedClientError::DnsTimeout => Self::DnsTimeout,
-            PinnedClientError::DnsResolution(error) => Self::DnsResolution(error),
-            PinnedClientError::NoAddresses => Self::NoAddresses,
-            PinnedClientError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
-            PinnedClientError::ClientBuild(error) => Self::ClientBuild(error),
+            PinnedClientError::MissingHost => Self::MissingHost { provider },
+            PinnedClientError::MissingPort => Self::MissingPort { provider },
+            PinnedClientError::DnsTimeout => Self::DnsTimeout { provider },
+            PinnedClientError::DnsResolution(source) => Self::DnsResolution { provider, source },
+            PinnedClientError::NoAddresses => Self::NoAddresses { provider },
+            PinnedClientError::ForbiddenAddress(address) => {
+                Self::ForbiddenAddress { provider, address }
+            }
+            PinnedClientError::ClientBuild(source) => Self::ClientBuild { provider, source },
         }
     }
 }
-
-macro_rules! impl_endpoint_core_error {
-    ($target:ident) => {
-        impl From<$crate::endpoint::EndpointCoreError> for $target {
-            fn from(error: $crate::endpoint::EndpointCoreError) -> Self {
-                use $crate::endpoint::EndpointCoreError;
-
-                match error {
-                    EndpointCoreError::HttpsRequired => Self::HttpsRequired,
-                    EndpointCoreError::UnsupportedScheme => Self::UnsupportedScheme,
-                    EndpointCoreError::UserInfoForbidden => Self::UserInfoForbidden,
-                    EndpointCoreError::MissingHost => Self::MissingHost,
-                    EndpointCoreError::MissingPort => Self::MissingPort,
-                    EndpointCoreError::InvalidPort => Self::InvalidPort,
-                    EndpointCoreError::QueryOrFragmentForbidden => Self::QueryOrFragmentForbidden,
-                    EndpointCoreError::InvalidUrl(error) => Self::InvalidUrl(error),
-                    EndpointCoreError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
-                    EndpointCoreError::DnsTimeout => Self::DnsTimeout,
-                    EndpointCoreError::DnsResolution(error) => Self::DnsResolution(error),
-                    EndpointCoreError::NoAddresses => Self::NoAddresses,
-                    EndpointCoreError::ClientBuild(error) => Self::ClientBuild(error),
-                }
-            }
-        }
-    };
-}
-
-pub(crate) use impl_endpoint_core_error;

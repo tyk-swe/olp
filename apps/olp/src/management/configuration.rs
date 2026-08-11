@@ -7,7 +7,6 @@ use utoipa::OpenApi;
 use crate::{ManagementState, Problem};
 
 pub(crate) mod api_keys;
-pub(crate) mod common;
 pub(crate) mod providers;
 mod routes;
 

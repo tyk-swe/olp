@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
-use olp_domain::{
-    CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole, Surface,
-};
+use olp_domain::{CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, Surface};
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use super::finish_reason;
 use crate::sse::{RAW_SSE_FRAME_EXTENSION, SseFrame, decode_raw_sse_frame};
 
 #[derive(Debug, Error)]
@@ -238,16 +237,6 @@ fn rewrite_gemini_model(
     }
     frame.data = serde_json::to_string(&value).map_err(|_| ClientStreamEncodeError::Extension)?;
     Ok(())
-}
-
-fn finish_reason(reason: &FinishReason) -> String {
-    match reason {
-        FinishReason::Stop | FinishReason::ToolCalls => "STOP".to_owned(),
-        FinishReason::Length => "MAX_TOKENS".to_owned(),
-        FinishReason::ContentFilter => "SAFETY".to_owned(),
-        FinishReason::Error => "OTHER".to_owned(),
-        FinishReason::Other(value) => value.clone(),
-    }
 }
 
 const fn error_status(class: ErrorClass) -> u16 {

@@ -1,11 +1,12 @@
-use std::{fmt, net::IpAddr, time::Duration};
+use std::{fmt, time::Duration};
 
 use reqwest::{Client, Url};
-use thiserror::Error;
 
+pub use crate::CommonEndpointError as EndpointError;
 use crate::endpoint::EndpointCore;
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1/";
+const PROVIDER: &str = "Anthropic";
 
 #[derive(Clone)]
 pub(crate) struct Endpoint {
@@ -31,7 +32,7 @@ impl Endpoint {
 
     fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
         Ok(Self {
-            core: EndpointCore::parse(value, allow_unsafe_target)?,
+            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
         })
     }
 
@@ -53,7 +54,7 @@ impl Endpoint {
     }
 
     fn join(&self, path: &str) -> Result<Url, EndpointError> {
-        self.core.join(path).map_err(EndpointError::from)
+        self.core.join(path)
     }
 
     pub(crate) fn set_connect_timeout(&mut self, value: Duration) {
@@ -64,62 +65,29 @@ impl Endpoint {
         &self,
         connect_timeout: Duration,
     ) -> Result<Client, EndpointError> {
-        self.core
-            .pinned_client(connect_timeout)
-            .await
-            .map_err(EndpointError::from)
+        self.core.pinned_client(connect_timeout).await
     }
-}
-
-crate::endpoint::impl_endpoint_core_error!(EndpointError);
-
-#[derive(Debug, Error)]
-pub enum EndpointError {
-    #[error("custom Anthropic endpoints must use HTTPS")]
-    HttpsRequired,
-    #[error("custom Anthropic endpoint scheme must be HTTP or HTTPS")]
-    UnsupportedScheme,
-    #[error("custom Anthropic endpoints cannot contain user information")]
-    UserInfoForbidden,
-    #[error("custom Anthropic endpoint must include a host")]
-    MissingHost,
-    #[error("custom Anthropic endpoint must have a known or explicit port")]
-    MissingPort,
-    #[error("custom Anthropic endpoint port must be greater than zero")]
-    InvalidPort,
-    #[error("custom Anthropic endpoints cannot contain a query or fragment")]
-    QueryOrFragmentForbidden,
-    #[error("custom Anthropic endpoint URL is invalid: {0}")]
-    InvalidUrl(String),
-    #[error("custom Anthropic endpoint resolves to forbidden address {0}")]
-    ForbiddenAddress(IpAddr),
-    #[error("custom Anthropic endpoint DNS resolution timed out")]
-    DnsTimeout,
-    #[error("custom Anthropic endpoint DNS resolution failed")]
-    DnsResolution(#[source] std::io::Error),
-    #[error("custom Anthropic endpoint did not resolve to an address")]
-    NoAddresses,
-    #[error("failed to build the pinned Anthropic HTTP client")]
-    ClientBuild(#[source] reqwest::Error),
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
+
     use super::*;
 
     #[test]
     fn endpoint_policy_and_path_join_are_fail_closed() {
         assert!(matches!(
             Endpoint::parse("http://api.anthropic.com/v1"),
-            Err(EndpointError::HttpsRequired)
+            Err(EndpointError::HttpsRequired { .. })
         ));
         assert!(matches!(
             Endpoint::parse("https://user:secret@api.anthropic.com/v1"),
-            Err(EndpointError::UserInfoForbidden)
+            Err(EndpointError::UserInfoForbidden { .. })
         ));
         assert!(matches!(
             Endpoint::parse("https://api.anthropic.com/v1?next=x"),
-            Err(EndpointError::QueryOrFragmentForbidden)
+            Err(EndpointError::QueryOrFragmentForbidden { .. })
         ));
         let endpoint = Endpoint::parse("https://example.com/proxy/v1").unwrap();
         assert_eq!(
@@ -141,7 +109,7 @@ mod tests {
         let address: IpAddr = "169.254.169.254".parse().unwrap();
         assert!(matches!(
             Endpoint::parse("https://169.254.169.254/v1"),
-            Err(EndpointError::ForbiddenAddress(blocked)) if blocked == address
+            Err(EndpointError::ForbiddenAddress { address: blocked, .. }) if blocked == address
         ));
     }
 }

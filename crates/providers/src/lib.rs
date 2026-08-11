@@ -11,6 +11,8 @@ mod endpoint;
 mod factory;
 pub mod gemini;
 mod http_egress;
+#[cfg(test)]
+mod mock_server;
 mod oidc;
 pub mod openai;
 mod transport_common;
@@ -24,6 +26,7 @@ pub mod test_support;
 pub use anthropic::validate_operation as validate_anthropic_operation;
 pub use bedrock::validate_operation as validate_bedrock_operation;
 pub use connector::ConnectorTimeouts;
+pub use endpoint::EndpointError as CommonEndpointError;
 pub use factory::{
     CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
     CredentialKind, OpenAiConnector, OpenAiConnectorOverrideRegistry, ProviderConfig,

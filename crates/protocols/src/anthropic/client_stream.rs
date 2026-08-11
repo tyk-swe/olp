@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
-use olp_domain::{
-    CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole, Surface, Usage,
-};
+use olp_domain::{CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, Surface, Usage};
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use super::finish_reason;
 use crate::sse::{RAW_SSE_FRAME_EXTENSION, SseFrame, decode_raw_sse_frame};
 
 #[derive(Debug, Error)]
@@ -330,17 +329,6 @@ fn require_candidate(index: u32) -> Result<(), ClientStreamEncodeError> {
         Ok(())
     } else {
         Err(ClientStreamEncodeError::Candidate)
-    }
-}
-
-fn finish_reason(reason: &FinishReason) -> String {
-    match reason {
-        FinishReason::Stop => "end_turn".to_owned(),
-        FinishReason::Length => "max_tokens".to_owned(),
-        FinishReason::ToolCalls => "tool_use".to_owned(),
-        FinishReason::ContentFilter => "refusal".to_owned(),
-        FinishReason::Error => "error".to_owned(),
-        FinishReason::Other(value) => value.clone(),
     }
 }
 

@@ -17,7 +17,7 @@ use olp_inference::{CompletedEventExecution, runtime::RuntimeBundle};
 
 use crate::{
     GatewayState, InferencePrincipal,
-    public_http::json_media::{admit_anthropic_count, admit_anthropic_messages, cleanup_admitted},
+    public_http::json_media::{admit_anthropic_messages, cleanup_admitted},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
         protocol_streaming_response,
@@ -39,7 +39,7 @@ pub(super) async fn messages(
 ) -> Result<Response, ProtocolError> {
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
     let streaming = request.stream;
-    let admitted = admit_anthropic_messages(&state, &mut request)
+    let admitted = admit_anthropic_messages(&state, &mut request.messages)
         .await
         .map_err(ProtocolError::anthropic)?;
     let operation = match decode_messages_request(request) {
@@ -97,7 +97,7 @@ pub(super) async fn count_tokens(
     payload: Result<Json<CountTokensRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
-    let admitted = admit_anthropic_count(&state, &mut request)
+    let admitted = admit_anthropic_messages(&state, &mut request.messages)
         .await
         .map_err(ProtocolError::anthropic)?;
     let operation = match decode_count_tokens_request(request) {

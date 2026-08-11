@@ -5,6 +5,8 @@ mod dto;
 mod stream;
 mod translate;
 
+use olp_domain::FinishReason;
+
 pub use client::{ClientEncodeError, encode_generate_content_response};
 pub use client_stream::{ClientStreamEncodeError, GeminiGenerateContentClientStreamEncoder};
 pub use count::{
@@ -23,3 +25,13 @@ pub use translate::{
     decode_generate_content_response, encode_generate_content_request,
     validate_count_tokens_request,
 };
+
+fn finish_reason(reason: &FinishReason) -> &str {
+    match reason {
+        FinishReason::Stop | FinishReason::ToolCalls => "STOP",
+        FinishReason::Length => "MAX_TOKENS",
+        FinishReason::ContentFilter => "SAFETY",
+        FinishReason::Error => "OTHER",
+        FinishReason::Other(value) => value,
+    }
+}

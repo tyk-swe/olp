@@ -27,6 +27,7 @@ pub use rotation::{
 pub use session_material::{
     CsrfMaterial, InvitationMaterial, RecentAuthMaterial, SessionMaterial, constant_time_eq,
 };
+pub(crate) use session_material::{random_token, token_digest};
 
 #[derive(Debug, Error)]
 pub enum SecurityError {

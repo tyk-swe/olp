@@ -1,8 +1,8 @@
+import { createContext } from 'svelte';
 import type { RequestFilters } from '$lib/api/operations';
+import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 
-export const requestListStateContext = Symbol('request-list-state');
-
-export type RequestListState = {
+export type RequestListState = CursorHistory & {
   route: string;
   providerId: string;
   model: string;
@@ -12,6 +12,24 @@ export type RequestListState = {
   errorClass: string;
   startedAfter: string;
   startedBefore: string;
-  applied: RequestFilters;
-  cursors: string[];
+  applied: Omit<RequestFilters, 'cursor'>;
 };
+
+export const [getRequestListState, setRequestListState] =
+  createContext<RequestListState>();
+
+export function emptyRequestListState(): RequestListState {
+  return {
+    ...emptyCursorHistory(),
+    route: '',
+    providerId: '',
+    model: '',
+    apiKeyId: '',
+    operation: '',
+    statusCode: '',
+    errorClass: '',
+    startedAfter: '',
+    startedBefore: '',
+    applied: { limit: 25 }
+  };
+}

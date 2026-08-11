@@ -26,15 +26,13 @@ use uuid::Uuid;
 use crate::{
     ManagementState, Problem,
     management::{
-        Permission, if_match, require_mutation_session, require_permission, require_read_session,
+        PageQuery, Permission, if_match, json_payload, map_configuration, page,
+        require_mutation_session, require_permission, require_read_session, with_etag,
     },
 };
 
 use super::manage::{ProviderDetailResponse, load_provider_detail};
 use crate::bootstrap::provider_adapter::provider_connector;
-use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, with_etag,
-};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderCapabilityOptionsResponse {
@@ -352,7 +350,7 @@ pub(crate) async fn list_provider_model_inventory(
         .store()
         .list_provider_model_inventory(cursor, limit, enabled)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(ProviderModelInventoryListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -386,7 +384,7 @@ pub(crate) async fn list_provider_models(
         .store()
         .list_provider_models(provider_id, cursor, limit)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     Ok(Json(ProviderModelListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -448,7 +446,7 @@ pub(crate) async fn discover_provider_models(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let models: Vec<DiscoveredModelInput> = if request.models.is_empty() {
         provider_connector(&state, provider_id)
             .await?
@@ -479,7 +477,7 @@ pub(crate) async fn discover_provider_models(
     let etag = store
         .discover_provider_models(provider_id, if_match(&headers)?, &models, principal.user_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
@@ -510,7 +508,7 @@ pub(crate) async fn set_provider_model(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let request = json(payload)?;
+    let request = json_payload(payload)?;
     let store = state.store();
     let etag = store
         .set_provider_model_enabled(
@@ -526,7 +524,7 @@ pub(crate) async fn set_provider_model(
             principal.user_id,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
@@ -580,19 +578,17 @@ pub(crate) async fn certify_provider_model(
     let provider = store
         .get_provider(provider_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     if provider.etag != expected_etag {
-        return Err(map_configuration_resource(
-            ConfigurationError::PreconditionFailed,
-        ));
+        return Err(map_configuration(ConfigurationError::PreconditionFailed));
     }
     if provider.state != olp_domain::ProviderState::Draft {
-        return Err(map_configuration_resource(ConfigurationError::InUse));
+        return Err(map_configuration(ConfigurationError::InUse));
     }
     let model = store
         .get_provider_model(provider_id, model_id)
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     if model.capabilities.is_empty() || model.capabilities.len() > 16 {
         return Err(Problem::field_validation(
             "capabilities",
@@ -636,7 +632,7 @@ pub(crate) async fn certify_provider_model(
             &outcomes,
         )
         .await
-        .map_err(map_configuration_resource)?;
+        .map_err(map_configuration)?;
     let status = if applied.certified_count == applied.attempted_count {
         "succeeded"
     } else if applied.certified_count == 0 {

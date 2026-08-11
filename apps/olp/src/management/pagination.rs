@@ -10,6 +10,12 @@ pub(crate) struct PageQuery {
     pub limit: Option<u16>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct DiffQuery {
+    pub from: Uuid,
+    pub to: Uuid,
+}
+
 pub(crate) fn page(query: PageQuery) -> Result<(Option<Uuid>, i64), Problem> {
     let cursor = query
         .cursor

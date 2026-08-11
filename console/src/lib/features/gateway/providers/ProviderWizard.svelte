@@ -12,9 +12,8 @@
   } from './providerCache';
   import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
   import {
+    cursorPaginationProps,
     emptyCursorHistory,
-    popCursor,
-    pushCursor,
     resetCursor
   } from '$lib/api/pagination';
   import {
@@ -684,12 +683,10 @@
       </table>
     </div>
     <CursorPagination
-      page={wizardModelPagination.history.length + 1}
-      hasPrevious={wizardModelPagination.history.length > 0}
-      hasNext={Boolean(wizardModels.data?.nextCursor)}
-      onPrevious={() => popCursor(wizardModelPagination)}
-      onNext={() =>
-        pushCursor(wizardModelPagination, wizardModels.data?.nextCursor)}
+      {...cursorPaginationProps(
+        wizardModelPagination,
+        wizardModels.data?.nextCursor
+      )}
       label="Provider wizard model pages"
     />
     <ol

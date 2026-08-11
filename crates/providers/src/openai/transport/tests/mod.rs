@@ -8,6 +8,11 @@ use std::{
     time::Duration,
 };
 
+use super::*;
+use crate::mock_server::{
+    MockResponse, find_bytes, response as http_response, spawn_mock as spawn_http_mock,
+};
+use crate::openai::{ConnectorTimeouts, DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES};
 use bytes::Bytes;
 use futures::{StreamExt, stream};
 use http::StatusCode;
@@ -25,23 +30,11 @@ use olp_domain::{
 use olp_protocols::openai::{
     ChatCompletionRequest, ChatContentPart, ChatMessageContent, OpenAiImageResponse, ResponseInput,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-    sync::oneshot,
-};
-
-use super::*;
-use crate::openai::{ConnectorTimeouts, DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES};
 
 mod audio;
 mod chat_and_responses;
 mod media_ops;
 mod streaming_and_timeouts;
-
-struct MockResponse {
-    chunks: Vec<(Duration, Vec<u8>)>,
-}
 
 struct StaticMediaSpool;
 
@@ -200,60 +193,8 @@ impl MediaSpool for RecordingMediaSpool {
     }
 }
 
-async fn spawn_mock(response: MockResponse) -> (String, oneshot::Receiver<Vec<u8>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let (request_sender, request_receiver) = oneshot::channel();
-    tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let request = read_request(&mut socket).await;
-        let _ = request_sender.send(request);
-        for (delay, chunk) in response.chunks {
-            tokio::time::sleep(delay).await;
-            if socket.write_all(&chunk).await.is_err() {
-                return;
-            }
-            let _ = socket.flush().await;
-        }
-    });
-    (format!("http://{address}/v1/"), request_receiver)
-}
-
-async fn read_request(socket: &mut TcpStream) -> Vec<u8> {
-    let mut request = Vec::new();
-    let mut buffer = [0_u8; 4096];
-    let mut expected_length = None;
-    loop {
-        let read = socket.read(&mut buffer).await.unwrap();
-        if read == 0 {
-            return request;
-        }
-        request.extend_from_slice(&buffer[..read]);
-        if expected_length.is_none()
-            && let Some(headers_end) = find_bytes(&request, b"\r\n\r\n")
-        {
-            let headers = String::from_utf8_lossy(&request[..headers_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .unwrap_or_default();
-            expected_length = Some(headers_end + 4 + content_length);
-        }
-        if expected_length.is_some_and(|length| request.len() >= length) {
-            return request;
-        }
-    }
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
+async fn spawn_mock(response: MockResponse) -> (String, tokio::sync::oneshot::Receiver<Vec<u8>>) {
+    spawn_http_mock("/v1/", response).await
 }
 
 fn fixture_request(streaming: bool) -> ProviderRequest {
@@ -512,14 +453,6 @@ async fn execute_events(
         ProviderOutput::Events(events) => events,
         ProviderOutput::Result(_) => panic!("connector unexpectedly returned a unary result"),
     }
-}
-
-fn http_response(content_type: &str, body: &[u8]) -> Vec<u8> {
-    let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    [headers.as_bytes(), body].concat()
 }
 
 fn assert_bearer_auth(request: &str) {

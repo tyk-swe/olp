@@ -363,10 +363,7 @@ pub(crate) async fn activate_provider(
                 id: provider_id,
                 state: "active".to_owned(),
                 etag: activated.etag,
-                runtime_generation: RuntimeGenerationResponse {
-                    id: activated.release.generation_id,
-                    sequence: activated.release.sequence,
-                },
+                runtime_generation: (&activated.release).into(),
             }),
         ),
         activated.etag,

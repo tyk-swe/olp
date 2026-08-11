@@ -1,5 +1,9 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use super::*;
+use crate::gemini::transport::media::hydrate_gemini_contents;
+use crate::gemini::{ConnectorConfig, ConnectorTimeouts, GeminiApiKey};
+use crate::mock_server::{MockResponse, find_bytes, response, spawn_mock as spawn_http_mock};
 use bytes::Bytes;
 use futures::{StreamExt, stream};
 use http::StatusCode;
@@ -11,19 +15,6 @@ use olp_domain::{
     RuntimeGenerationId, SourceExtensions, Surface, TargetId, TokenCountRequest, TransportMode,
 };
 use olp_protocols::gemini::{Content, GEMINI_COUNT_REQUEST_EXTENSION, Part};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-    sync::oneshot,
-};
-
-use super::*;
-use crate::gemini::transport::media::hydrate_gemini_contents;
-use crate::gemini::{ConnectorConfig, ConnectorTimeouts, GeminiApiKey};
-
-struct MockResponse {
-    chunks: Vec<(Duration, Vec<u8>)>,
-}
 
 struct InlineSpool;
 
@@ -88,60 +79,8 @@ async fn same_protocol_inline_data_handle_is_rehydrated() {
     assert_eq!(part.inline_data.data, "aGk=");
 }
 
-async fn spawn_mock(response: MockResponse) -> (String, oneshot::Receiver<Vec<u8>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let (sender, receiver) = oneshot::channel();
-    tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let request = read_request(&mut socket).await;
-        let _ = sender.send(request);
-        for (delay, chunk) in response.chunks {
-            tokio::time::sleep(delay).await;
-            if socket.write_all(&chunk).await.is_err() {
-                return;
-            }
-            let _ = socket.flush().await;
-        }
-    });
-    (format!("http://{address}/v1beta/"), receiver)
-}
-
-async fn read_request(socket: &mut TcpStream) -> Vec<u8> {
-    let mut request = Vec::new();
-    let mut buffer = [0_u8; 4096];
-    let mut expected = None;
-    loop {
-        let read = socket.read(&mut buffer).await.unwrap();
-        if read == 0 {
-            return request;
-        }
-        request.extend_from_slice(&buffer[..read]);
-        if expected.is_none()
-            && let Some(end) = find_bytes(&request, b"\r\n\r\n")
-        {
-            let headers = String::from_utf8_lossy(&request[..end]);
-            let length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .unwrap_or_default();
-            expected = Some(end + 4 + length);
-        }
-        if expected.is_some_and(|length| request.len() >= length) {
-            return request;
-        }
-    }
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|part| part == needle)
+async fn spawn_mock(response: MockResponse) -> (String, tokio::sync::oneshot::Receiver<Vec<u8>>) {
+    spawn_http_mock("/v1beta/", response).await
 }
 
 fn attempt(
@@ -251,14 +190,6 @@ fn connector(base_url: &str) -> GeminiConnector {
         ConnectorConfig::for_local_test(base_url, ConnectorTimeouts::default()),
         GeminiApiKey::new("upstream-secret").unwrap(),
     )
-}
-
-fn response(content_type: &str, body: &[u8]) -> Vec<u8> {
-    let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    [headers.as_bytes(), body].concat()
 }
 
 #[tokio::test]

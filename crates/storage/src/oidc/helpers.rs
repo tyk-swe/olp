@@ -1,11 +1,7 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration};
 use olp_domain::Role;
-use rand::RngCore;
-use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
-use zeroize::{Zeroize, Zeroizing};
 
 use super::configuration::OIDC_CONFIGURATION_LOCK_ID;
 use super::{OidcAuthenticatedUser, OidcError};
@@ -218,16 +214,4 @@ pub(super) const fn role_rank(role: Role) -> u8 {
         Role::Developer => 2,
         Role::Viewer => 3,
     }
-}
-
-pub(super) fn token_digest(value: &str) -> [u8; 32] {
-    Sha256::digest(value.as_bytes()).into()
-}
-
-pub(super) fn random_token() -> Zeroizing<String> {
-    let mut bytes = [0_u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    let token = Zeroizing::new(URL_SAFE_NO_PAD.encode(bytes));
-    bytes.zeroize();
-    token
 }

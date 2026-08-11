@@ -33,6 +33,28 @@ export function resetCursor(state: CursorHistory) {
   state.history = [];
 }
 
+export function cursorPaginationProps(
+  state: CursorHistory,
+  next: string | null | undefined,
+  onPageChange?: () => void
+) {
+  return {
+    page: state.history.length + 1,
+    hasPrevious: state.history.length > 0,
+    hasNext: Boolean(next),
+    onPrevious: () => {
+      if (state.history.length === 0) return;
+      popCursor(state);
+      onPageChange?.();
+    },
+    onNext: () => {
+      if (!next) return;
+      pushCursor(state, next);
+      onPageChange?.();
+    }
+  };
+}
+
 const MAX_COLLECTED_ITEMS = 10_000;
 
 export async function collectCursorPages<T>(

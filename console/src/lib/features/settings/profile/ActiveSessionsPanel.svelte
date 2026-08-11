@@ -4,9 +4,8 @@
   import { listSessionPage, revokeSession } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import {
-    emptyCursorHistory,
-    popCursor,
-    pushCursor
+    cursorPaginationProps,
+    emptyCursorHistory
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
@@ -103,11 +102,7 @@
     </div>
     {#if pagination.history.length > 0 || sessions.data?.nextCursor}
       <CursorPagination
-        page={pagination.history.length + 1}
-        hasPrevious={pagination.history.length > 0}
-        hasNext={Boolean(sessions.data?.nextCursor)}
-        onPrevious={() => popCursor(pagination)}
-        onNext={() => pushCursor(pagination, sessions.data?.nextCursor)}
+        {...cursorPaginationProps(pagination, sessions.data?.nextCursor)}
         label="Session pages"
       />
     {/if}

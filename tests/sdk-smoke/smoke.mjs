@@ -13,6 +13,7 @@ const {
   conflict_api_key: conflictApiKey,
   route_slug: routeSlug
 } = metadata;
+const invalidApiKey = 'olp_not-a-real-key';
 assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/);
 assert.equal(routeSlug, 'sdk-smoke-route');
 assert.ok(apiKey.startsWith('olp_'), 'fixture returned an OLP proxy key');
@@ -35,6 +36,29 @@ function openAIClient(baseURL, options = {}) {
     maxRetries: 0,
     timeout: 5_000,
     ...options
+  });
+}
+
+function anthropicClient(clientApiKey = apiKey) {
+  return new Anthropic({
+    apiKey: clientApiKey,
+    baseURL: `${origin}/anthropic`,
+    fetch: localOnlyFetch,
+    maxRetries: 0,
+    timeout: 5_000
+  });
+}
+
+function googleClient(clientApiKey = apiKey, retryOptions) {
+  return new GoogleGenAI({
+    apiKey: clientApiKey,
+    apiVersion: 'v1beta',
+    httpOptions: {
+      baseUrl: `${origin}/gemini`,
+      apiVersion: 'v1beta',
+      timeout: 5_000,
+      ...(retryOptions && { retryOptions })
+    }
   });
 }
 
@@ -107,13 +131,7 @@ async function smokeOpenAILitellm() {
 }
 
 async function smokeAnthropic() {
-  const client = new Anthropic({
-    apiKey,
-    baseURL: `${origin}/anthropic`,
-    fetch: localOnlyFetch,
-    maxRetries: 0,
-    timeout: 5_000
-  });
+  const client = anthropicClient();
   const message = await client.messages.create({
     model: routeSlug,
     max_tokens: 32,
@@ -138,16 +156,7 @@ async function smokeAnthropic() {
 }
 
 async function smokeGoogle() {
-  const client = new GoogleGenAI({
-    apiKey,
-    apiVersion: 'v1beta',
-    httpOptions: {
-      baseUrl: `${origin}/gemini`,
-      apiVersion: 'v1beta',
-      timeout: 5_000,
-      retryOptions: { attempts: 1 }
-    }
-  });
+  const client = googleClient(apiKey, { attempts: 1 });
   const response = await client.models.generateContent({
     model: routeSlug,
     contents: 'official SDK smoke'
@@ -187,7 +196,7 @@ async function rejection(what, attempt) {
 // each vendor documents for that condition, is not compatible however well its
 // successes are shaped.
 async function errorContractOpenAI(baseURL, label) {
-  const wrongKey = openAIClient(baseURL, { apiKey: 'olp_not-a-real-key' });
+  const wrongKey = openAIClient(baseURL, { apiKey: invalidApiKey });
   const unauthorized = await rejection(`${label} with an invalid key`, () =>
     wrongKey.chat.completions.create({
       model: routeSlug,
@@ -218,10 +227,10 @@ async function errorContractOpenAI(baseURL, label) {
 
 async function directNegativeContracts() {
   for (const [description, litellmApiKey, authorization] of [
-    ['an invalid x-litellm-api-key', 'olp_not-a-real-key', undefined],
+    ['an invalid x-litellm-api-key', invalidApiKey, undefined],
     [
       'an invalid x-litellm-api-key must not fall back to a valid native key',
-      'olp_not-a-real-key',
+      invalidApiKey,
       `Bearer ${apiKey}`
     ],
     [
@@ -245,13 +254,7 @@ async function directNegativeContracts() {
 }
 
 async function errorContractAnthropic() {
-  const wrongKey = new Anthropic({
-    apiKey: 'olp_not-a-real-key',
-    baseURL: `${origin}/anthropic`,
-    fetch: localOnlyFetch,
-    maxRetries: 0,
-    timeout: 5_000
-  });
+  const wrongKey = anthropicClient(invalidApiKey);
   const unauthorized = await rejection('an Anthropic call with an invalid key', () =>
     wrongKey.messages.create({
       model: routeSlug,
@@ -274,17 +277,9 @@ async function errorContractAnthropic() {
 }
 
 async function errorContractGoogle() {
-  const wrongKey = new GoogleGenAI({
-    apiKey: 'olp_not-a-real-key',
-    apiVersion: 'v1beta',
-    // No retryOptions here: the SDK's retry helper replaces a typed ApiError
-    // with a generic Error, which would hide what the gateway actually sent.
-    httpOptions: {
-      baseUrl: `${origin}/gemini`,
-      apiVersion: 'v1beta',
-      timeout: 5_000
-    }
-  });
+  // No retry options here: the SDK's retry helper replaces a typed ApiError
+  // with a generic Error, which would hide what the gateway actually sent.
+  const wrongKey = googleClient(invalidApiKey);
   const unauthorized = await rejection('a Gemini call with an invalid key', () =>
     wrongKey.models.generateContent({ model: routeSlug, contents: 'invalid credential' })
   );

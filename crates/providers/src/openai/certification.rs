@@ -324,12 +324,8 @@ async fn validate_probe_output(
 mod tests {
     use std::time::Duration;
 
-    use tokio::{
-        io::{AsyncReadExt as _, AsyncWriteExt as _},
-        net::{TcpListener, TcpStream},
-    };
-
     use super::*;
+    use crate::mock_server::{MockResponse, response, spawn_mock, spawn_sequence};
     use crate::openai::{ConnectorConfig, ConnectorTimeouts, OpenAiApiKey};
 
     #[tokio::test]
@@ -380,7 +376,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let requests = requests.await.unwrap();
+        let requests: Vec<_> = requests.await.unwrap().into_iter().map(utf8).collect();
         assert!(requests[0].starts_with("POST /v1/chat/completions "));
         assert!(requests[1].starts_with("POST /v1/responses "));
         assert!(
@@ -451,7 +447,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let requests = requests.await.unwrap();
+        let requests: Vec<_> = requests.await.unwrap().into_iter().map(utf8).collect();
         assert!(requests[0].starts_with("POST /v1/chat/completions "));
         assert!(requests[1].starts_with("POST /v1/responses "));
         assert!(
@@ -512,7 +508,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(request.await.unwrap().starts_with(&format!("POST {path} ")));
+            assert!(utf8(request.await.unwrap()).starts_with(&format!("POST {path} ")));
         }
     }
 
@@ -572,7 +568,7 @@ mod tests {
                 evidence,
                 NativeOpenAiCertificationEvidence::ModelDiscoveryAndConnectorContract
             );
-            let request = request.await.unwrap();
+            let request = utf8(request.await.unwrap());
             assert!(request.starts_with("GET /v1/models "));
             assert!(
                 request
@@ -601,7 +597,7 @@ mod tests {
                 .unwrap_err(),
             CompatibleCapabilityCertificationError::ModelNotDiscovered
         );
-        assert!(request.await.unwrap().starts_with("GET /v1/models "));
+        assert!(utf8(request.await.unwrap()).starts_with("GET /v1/models "));
     }
 
     #[tokio::test]
@@ -699,86 +695,35 @@ mod tests {
 
     async fn spawn_json_response(
         body: Vec<u8>,
-    ) -> (String, tokio::sync::oneshot::Receiver<String>) {
+    ) -> (String, tokio::sync::oneshot::Receiver<Vec<u8>>) {
         spawn_response("application/json", body).await
     }
 
     async fn spawn_response(
         content_type: &'static str,
         body: Vec<u8>,
-    ) -> (String, tokio::sync::oneshot::Receiver<String>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let request = read_request(&mut socket).await;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                body.len()
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
-            socket.write_all(&body).await.unwrap();
-            let _ = socket.flush().await;
-            let _ = sender.send(String::from_utf8(request).unwrap());
-        });
-        (format!("http://{address}/v1/"), receiver)
+    ) -> (String, tokio::sync::oneshot::Receiver<Vec<u8>>) {
+        spawn_mock(
+            "/v1/",
+            MockResponse::immediate(response(content_type, body)),
+        )
+        .await
     }
 
     async fn spawn_response_sequence(
         responses: Vec<(&'static str, Vec<u8>)>,
-    ) -> (String, tokio::sync::oneshot::Receiver<Vec<String>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let mut requests = Vec::with_capacity(responses.len());
-            for (content_type, body) in responses {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                requests.push(String::from_utf8(read_request(&mut socket).await).unwrap());
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                    body.len()
-                );
-                socket.write_all(response.as_bytes()).await.unwrap();
-                socket.write_all(&body).await.unwrap();
-                let _ = socket.flush().await;
-            }
-            let _ = sender.send(requests);
-        });
-        (format!("http://{address}/v1/"), receiver)
+    ) -> (String, tokio::sync::oneshot::Receiver<Vec<Vec<u8>>>) {
+        spawn_sequence(
+            "/v1/",
+            responses
+                .into_iter()
+                .map(|(content_type, body)| MockResponse::immediate(response(content_type, body)))
+                .collect(),
+        )
+        .await
     }
 
-    async fn read_request(socket: &mut TcpStream) -> Vec<u8> {
-        let mut request = Vec::new();
-        let mut buffer = [0_u8; 4096];
-        let mut expected = None;
-        loop {
-            let read = socket.read(&mut buffer).await.unwrap();
-            if read == 0 {
-                break;
-            }
-            request.extend_from_slice(&buffer[..read]);
-            if expected.is_none()
-                && let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n")
-            {
-                let end = end + 4;
-                let headers = String::from_utf8_lossy(&request[..end]);
-                let length = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())
-                            .flatten()
-                    })
-                    .unwrap_or_default();
-                expected = Some(end + length);
-            }
-            if expected.is_some_and(|length| request.len() >= length) {
-                break;
-            }
-        }
-        request
+    fn utf8(request: Vec<u8>) -> String {
+        String::from_utf8(request).unwrap()
     }
 }

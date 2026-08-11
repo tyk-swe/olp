@@ -6,9 +6,8 @@ use futures::stream;
 use olp_domain::{MediaHandle, MediaSpool, MediaSpoolError, MediaUpload, inline_media_marker};
 use olp_protocols::{
     anthropic::{
-        ContentBlock as AnthropicContentBlock, CountTokensRequest as AnthropicCountTokensRequest,
-        Message as AnthropicMessage, MessageContent as AnthropicMessageContent,
-        MessagesRequest as AnthropicMessagesRequest, ToolResultContent,
+        ContentBlock as AnthropicContentBlock, Message as AnthropicMessage,
+        MessageContent as AnthropicMessageContent, ToolResultContent,
     },
     gemini::{
         Content as GeminiContent, CountTokensRequest as GeminiCountTokensRequest,
@@ -100,14 +99,16 @@ impl InlineMediaAdmission {
         Ok(inline_media_marker(&artifact.handle))
     }
 
-    fn into_handles(mut self) -> Vec<MediaHandle> {
-        std::mem::take(&mut self.handles)
-    }
-
-    async fn cleanup_and_fail<T>(mut self, error: InferenceError) -> Result<T, InferenceError> {
-        let handles = std::mem::take(&mut self.handles);
-        cleanup_handles_owned(self.spool.clone(), handles).await;
-        Err(error)
+    async fn finish(
+        mut self,
+        result: Result<(), InferenceError>,
+    ) -> Result<Vec<MediaHandle>, InferenceError> {
+        if let Err(error) = result {
+            let handles = std::mem::take(&mut self.handles);
+            cleanup_handles_owned(self.spool.clone(), handles).await;
+            return Err(error);
+        }
+        Ok(std::mem::take(&mut self.handles))
     }
 }
 
@@ -217,26 +218,11 @@ async fn admit_anthropic_block(
 
 pub(crate) async fn admit_anthropic_messages(
     state: &GatewayState,
-    request: &mut AnthropicMessagesRequest,
+    messages: &mut [AnthropicMessage],
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
-    if let Err(error) = admit_anthropic_messages_inner(&mut admission, &mut request.messages).await
-    {
-        return admission.cleanup_and_fail(error).await;
-    }
-    Ok(admission.into_handles())
-}
-
-pub(crate) async fn admit_anthropic_count(
-    state: &GatewayState,
-    request: &mut AnthropicCountTokensRequest,
-) -> Result<Vec<MediaHandle>, InferenceError> {
-    let mut admission = InlineMediaAdmission::new(state);
-    if let Err(error) = admit_anthropic_messages_inner(&mut admission, &mut request.messages).await
-    {
-        return admission.cleanup_and_fail(error).await;
-    }
-    Ok(admission.into_handles())
+    let result = admit_anthropic_messages_inner(&mut admission, messages).await;
+    admission.finish(result).await
 }
 
 async fn admit_gemini_content(
@@ -275,10 +261,8 @@ pub(crate) async fn admit_gemini_generate(
     request: &mut GeminiGenerateContentRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
-    if let Err(error) = admit_gemini_content(&mut admission, &mut request.contents).await {
-        return admission.cleanup_and_fail(error).await;
-    }
-    Ok(admission.into_handles())
+    let result = admit_gemini_content(&mut admission, &mut request.contents).await;
+    admission.finish(result).await
 }
 
 pub(crate) async fn admit_gemini_count(
@@ -294,10 +278,7 @@ pub(crate) async fn admit_gemini_count(
         Ok::<(), InferenceError>(())
     }
     .await;
-    if let Err(error) = result {
-        return admission.cleanup_and_fail(error).await;
-    }
-    Ok(admission.into_handles())
+    admission.finish(result).await
 }
 
 pub(crate) async fn admit_openai_chat(
@@ -327,10 +308,7 @@ pub(crate) async fn admit_openai_chat(
         Ok::<(), InferenceError>(())
     }
     .await;
-    if let Err(error) = result {
-        return admission.cleanup_and_fail(error).await;
-    }
-    Ok(admission.into_handles())
+    admission.finish(result).await
 }
 
 pub(crate) async fn admit_openai_responses(
@@ -437,10 +415,7 @@ async fn admit_openai_response_input(
         Ok::<(), InferenceError>(())
     }
     .await;
-    if let Err(error) = result {
-        return admission.cleanup_and_fail(error).await;
-    }
-    Ok(admission.into_handles())
+    admission.finish(result).await
 }
 
 pub(crate) async fn cleanup_admitted(state: &GatewayState, handles: Vec<MediaHandle>) {
@@ -514,7 +489,7 @@ mod tests {
             }}]}]
         }))
         .unwrap();
-        let handles = admit_anthropic_messages(&state, &mut request)
+        let handles = admit_anthropic_messages(&state, &mut request.messages)
             .await
             .unwrap();
         assert!(!serde_json::to_string(&request).unwrap().contains("aGk="));
