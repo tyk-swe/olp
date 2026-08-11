@@ -9,6 +9,7 @@ use axum::{
 use futures::{StreamExt, stream};
 use olp_domain::{
     CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
+    VideoJobResult,
 };
 use olp_protocols::openai::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
@@ -17,7 +18,8 @@ use olp_protocols::openai::{
 };
 use olp_storage::{
     media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
-    media_jobs::MediaJobOrder, media_jobs::MediaJobRecord, media_jobs::NewMediaJobReservation,
+    media_jobs::MediaJobOrder, media_jobs::MediaJobRecord, media_jobs::MediaJobUpdate,
+    media_jobs::NewMediaJobReservation,
 };
 use tracing::error;
 
@@ -26,8 +28,9 @@ use crate::{GatewayState, InferencePrincipal, MultipartRequestAdmission};
 use super::{
     error::InferenceError,
     execution::{
-        RequiredTarget, authorize_principal, defer_unary_outcome_to_body, execute_routed_result,
-        incompatible_result, mark_unary_outcome, mark_unary_outcome_with_status,
+        RequiredTarget, RoutedUnaryResult, authorize_principal, defer_unary_outcome_to_body,
+        execute_routed_result, incompatible_result, mark_unary_outcome,
+        mark_unary_outcome_with_status,
     },
     media::{open_response_media, response_from_opened_media},
     media_jobs::{
@@ -105,6 +108,240 @@ pub(super) async fn video_create(
     }
 }
 
+async fn retire_failed_video_create(
+    state: &GatewayState,
+    reserved_id: uuid::Uuid,
+    failure: &InferenceError,
+) {
+    if failure.code() == "ambiguous_upstream_result" {
+        if let Err(persistence_error) = state
+            .store()
+            .mark_media_job_create_ambiguous(reserved_id, "upstream_create_result_ambiguous")
+            .await
+        {
+            error!(job_id = %reserved_id, %persistence_error, "failed to mark ambiguous video creation");
+        }
+        return;
+    }
+
+    match media_job_deletion_finalized(state.store(), reserved_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            state.record_media_reconciliation_gap();
+            error!(job_id = %reserved_id, "abandoned video reservation was not finalized");
+        }
+        Err(persistence_error) => {
+            state.record_media_reconciliation_gap();
+            error!(job_id = %reserved_id, %persistence_error, "failed to retire abandoned video reservation");
+        }
+    }
+}
+
+async fn prepare_video_create_attachment(
+    state: &GatewayState,
+    reserved_id: uuid::Uuid,
+    required_target: &RequiredTarget,
+    executed: &mut RoutedUnaryResult,
+) -> Result<(VideoJobResult, String, MediaJobUpdate), InferenceError> {
+    let result = match executed.result.as_ref() {
+        CanonicalResult::VideoJob(result) => result.clone(),
+        _ => {
+            let failure = incompatible_result("video creation");
+            if let Err(error) = state
+                .store()
+                .mark_media_job_create_ambiguous(
+                    reserved_id,
+                    "upstream_create_response_missing_job_identity",
+                )
+                .await
+            {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %reserved_id, %error, "failed to retire malformed video reservation");
+            }
+            executed.mark_failure(failure.accounting_outcome());
+            return Err(failure);
+        }
+    };
+    let upstream_job_id = result.id.clone();
+    if !valid_upstream_media_job_id(&upstream_job_id) {
+        let failure = InferenceError::bad_gateway(
+            "provider_protocol_error",
+            "The provider returned an invalid video job identity.",
+        );
+        if let Err(error) = state
+            .store()
+            .mark_media_job_create_ambiguous(
+                reserved_id,
+                "upstream_create_response_invalid_job_identity",
+            )
+            .await
+        {
+            state.record_media_reconciliation_gap();
+            error!(job_id = %reserved_id, %error, "failed to retire invalid video reservation");
+        }
+        executed.mark_failure(failure.accounting_outcome());
+        return Err(failure);
+    }
+    debug_assert_eq!(executed.provider_id, required_target.provider_id);
+    debug_assert_eq!(executed.upstream_model, required_target.upstream_model);
+    let state_update = match media_job_state(&result.status) {
+        Ok(state_update) => state_update,
+        Err(failure) => {
+            if let Err(error) = state
+                .store()
+                .mark_media_job_create_cleanup_pending(
+                    reserved_id,
+                    &upstream_job_id,
+                    "upstream_create_response_invalid_status",
+                )
+                .await
+            {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %reserved_id, %error, "failed to schedule malformed video cleanup");
+            }
+            executed.mark_failure(failure.accounting_outcome());
+            return Err(failure);
+        }
+    };
+    let update = media_job_update(&result, state_update);
+    Ok((result, upstream_job_id, update))
+}
+
+async fn persist_video_create_cleanup_intent(
+    state: &GatewayState,
+    reserved_id: uuid::Uuid,
+    upstream_job_id: &str,
+    identity_conflict: bool,
+) -> bool {
+    if identity_conflict {
+        return false;
+    }
+
+    match state
+        .store()
+        .mark_media_job_create_cleanup_pending(
+            reserved_id,
+            upstream_job_id,
+            "upstream_created_local_attach_failed",
+        )
+        .await
+    {
+        Ok(record)
+            if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
+                && record.upstream_job_id.as_deref() == Some(upstream_job_id) =>
+        {
+            true
+        }
+        Ok(record) => {
+            error!(
+                job_id = %reserved_id,
+                lifecycle = record.lifecycle.as_str(),
+                "video cleanup intent did not retain the upstream identity"
+            );
+            false
+        }
+        Err(persistence_error) => {
+            error!(job_id = %reserved_id, %persistence_error, "failed to persist video cleanup reconciliation metadata");
+            false
+        }
+    }
+}
+
+async fn compensate_video_create(
+    state: &GatewayState,
+    principal: &InferencePrincipal,
+    executed: &RoutedUnaryResult,
+    upstream_job_id: &str,
+    required_target: RequiredTarget,
+) -> Result<bool, InferenceError> {
+    let mut cleanup = decode_video_delete(upstream_job_id.to_owned());
+    set_video_route(&mut cleanup, executed.route_slug.as_str())?;
+    mark_missing_delete_as_success(&mut cleanup)?;
+    let mut compensation = execute_routed_result(
+        state,
+        principal,
+        cleanup,
+        TransportMode::Unary,
+        Some(required_target),
+    )
+    .await;
+    match &mut compensation {
+        Ok(compensation)
+            if matches!(
+                compensation.result.as_ref(),
+                CanonicalResult::VideoDelete(deleted) if deleted.deleted
+            ) =>
+        {
+            compensation.mark_success();
+            Ok(true)
+        }
+        Ok(compensation) => {
+            let failure = incompatible_result("video deletion");
+            compensation.mark_failure(failure.accounting_outcome());
+            Ok(false)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+async fn handle_failed_video_attachment(
+    state: &GatewayState,
+    principal: &InferencePrincipal,
+    reserved_id: uuid::Uuid,
+    upstream_job_id: &str,
+    required_target: RequiredTarget,
+    executed: &mut RoutedUnaryResult,
+    attachment_error: MediaJobError,
+) -> InferenceError {
+    let cleanup_intent_persisted = persist_video_create_cleanup_intent(
+        state,
+        reserved_id,
+        upstream_job_id,
+        matches!(attachment_error, MediaJobError::UpstreamIdentityConflict),
+    )
+    .await;
+    let compensation_confirmed = if cleanup_intent_persisted {
+        match compensate_video_create(state, principal, executed, upstream_job_id, required_target)
+            .await
+        {
+            Ok(confirmed) => confirmed,
+            Err(failure) => {
+                executed.mark_failure(failure.accounting_outcome());
+                return failure;
+            }
+        }
+    } else {
+        false
+    };
+
+    if compensation_confirmed {
+        match media_job_deletion_finalized(state.store(), reserved_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %reserved_id, "upstream cleanup succeeded but reconciliation tombstone was not finalized");
+            }
+            Err(persistence_error) => {
+                state.record_media_reconciliation_gap();
+                error!(job_id = %reserved_id, %persistence_error, "upstream cleanup succeeded but reconciliation tombstone failed");
+            }
+        }
+    } else {
+        state.record_media_reconciliation_gap();
+        error!(
+            job_id = %reserved_id,
+            upstream_job_id,
+            provider_id = %executed.provider_id,
+            route = %executed.route_slug,
+            "video create reconciliation gap requires operator attention"
+        );
+    }
+
+    let failure = InferenceError::unavailable("media_job_create_reconciliation_pending");
+    executed.mark_failure(failure.accounting_outcome());
+    failure
+}
+
 async fn complete_video_create(
     state: GatewayState,
     principal: InferencePrincipal,
@@ -122,206 +359,33 @@ async fn complete_video_create(
     .await
     {
         Ok(executed) => executed,
-        Err(error) => {
-            if error.code() == "ambiguous_upstream_result" {
-                if let Err(persistence_error) = state
-                    .store()
-                    .mark_media_job_create_ambiguous(
-                        reserved.id,
-                        "upstream_create_result_ambiguous",
-                    )
-                    .await
-                {
-                    error!(job_id = %reserved.id, %persistence_error, "failed to mark ambiguous video creation");
-                }
-            } else {
-                match media_job_deletion_finalized(state.store(), reserved.id).await {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        state.record_media_reconciliation_gap();
-                        error!(job_id = %reserved.id, "abandoned video reservation was not finalized");
-                    }
-                    Err(persistence_error) => {
-                        state.record_media_reconciliation_gap();
-                        error!(job_id = %reserved.id, %persistence_error, "failed to retire abandoned video reservation");
-                    }
-                }
-            }
-            return Err(error);
-        }
-    };
-    let mut result = match executed.result.as_ref() {
-        CanonicalResult::VideoJob(result) => result.clone(),
-        _ => {
-            let failure = incompatible_result("video creation");
-            if let Err(error) = state
-                .store()
-                .mark_media_job_create_ambiguous(
-                    reserved.id,
-                    "upstream_create_response_missing_job_identity",
-                )
-                .await
-            {
-                state.record_media_reconciliation_gap();
-                error!(job_id = %reserved.id, %error, "failed to retire malformed video reservation");
-            }
-            executed.mark_failure(failure.accounting_outcome());
-            return Err(failure);
-        }
-    };
-    let upstream_job_id = result.id.clone();
-    if !valid_upstream_media_job_id(&upstream_job_id) {
-        let failure = InferenceError::bad_gateway(
-            "provider_protocol_error",
-            "The provider returned an invalid video job identity.",
-        );
-        if let Err(error) = state
-            .store()
-            .mark_media_job_create_ambiguous(
-                reserved.id,
-                "upstream_create_response_invalid_job_identity",
-            )
-            .await
-        {
-            state.record_media_reconciliation_gap();
-            error!(job_id = %reserved.id, %error, "failed to retire invalid video reservation");
-        }
-        executed.mark_failure(failure.accounting_outcome());
-        return Err(failure);
-    }
-    debug_assert_eq!(executed.provider_id, required_target.provider_id);
-    debug_assert_eq!(executed.upstream_model, required_target.upstream_model);
-    let state_update = match media_job_state(&result.status) {
-        Ok(state_update) => state_update,
         Err(failure) => {
-            if let Err(error) = state
-                .store()
-                .mark_media_job_create_cleanup_pending(
-                    reserved.id,
-                    &upstream_job_id,
-                    "upstream_create_response_invalid_status",
-                )
-                .await
-            {
-                state.record_media_reconciliation_gap();
-                error!(job_id = %reserved.id, %error, "failed to schedule malformed video cleanup");
-            }
-            executed.mark_failure(failure.accounting_outcome());
+            retire_failed_video_create(&state, reserved.id, &failure).await;
             return Err(failure);
         }
     };
-    let record = attach_media_job_with_retry(
-        &state,
-        reserved.id,
-        &upstream_job_id,
-        media_job_update(&result, state_update),
-    )
-    .await;
-    let record = match record {
-        Ok(record) => record,
-        Err(error) => {
-            let identity_conflict = matches!(error, MediaJobError::UpstreamIdentityConflict);
-            // A compensation DELETE is only safe after PostgreSQL records the
-            // upstream identity and cleanup intent. An ambiguous attachment
-            // outcome can already have committed the active row.
-            let cleanup_intent_persisted = if identity_conflict {
-                false
-            } else {
-                match state
-                    .store()
-                    .mark_media_job_create_cleanup_pending(
-                        reserved.id,
-                        &upstream_job_id,
-                        "upstream_created_local_attach_failed",
-                    )
-                    .await
-                {
-                    Ok(record)
-                        if record.lifecycle == MediaJobLifecycle::CreateCleanupPending
-                            && record.upstream_job_id.as_deref()
-                                == Some(upstream_job_id.as_str()) =>
-                    {
-                        true
-                    }
-                    Ok(record) => {
-                        error!(
-                            job_id = %reserved.id,
-                            lifecycle = record.lifecycle.as_str(),
-                            "video cleanup intent did not retain the upstream identity"
-                        );
-                        false
-                    }
-                    Err(persistence_error) => {
-                        error!(job_id = %reserved.id, %persistence_error, "failed to persist video cleanup reconciliation metadata");
-                        false
-                    }
-                }
-            };
-            let compensation_confirmed = if cleanup_intent_persisted {
-                let mut cleanup = decode_video_delete(upstream_job_id.clone());
-                if let Err(failure) = set_video_route(&mut cleanup, executed.route_slug.as_str()) {
-                    executed.mark_failure(failure.accounting_outcome());
-                    return Err(failure);
-                }
-                if let Err(failure) = mark_missing_delete_as_success(&mut cleanup) {
-                    executed.mark_failure(failure.accounting_outcome());
-                    return Err(failure);
-                }
-                let mut compensation = execute_routed_result(
+    let (mut result, upstream_job_id, update) =
+        prepare_video_create_attachment(&state, reserved.id, &required_target, &mut executed)
+            .await?;
+    let record =
+        match attach_media_job_with_retry(&state, reserved.id, &upstream_job_id, update).await {
+            Ok(record) => record,
+            Err(error) => {
+                // A compensation DELETE is only safe after PostgreSQL records the
+                // upstream identity and cleanup intent. An ambiguous attachment
+                // outcome can already have committed the active row.
+                return Err(handle_failed_video_attachment(
                     &state,
                     &principal,
-                    cleanup,
-                    TransportMode::Unary,
-                    Some(required_target),
+                    reserved.id,
+                    &upstream_job_id,
+                    required_target,
+                    &mut executed,
+                    error,
                 )
-                .await;
-                match &mut compensation {
-                    Ok(compensation)
-                        if matches!(
-                            compensation.result.as_ref(),
-                            CanonicalResult::VideoDelete(deleted) if deleted.deleted
-                        ) =>
-                    {
-                        compensation.mark_success();
-                        true
-                    }
-                    Ok(compensation) => {
-                        let failure = incompatible_result("video deletion");
-                        compensation.mark_failure(failure.accounting_outcome());
-                        false
-                    }
-                    Err(_) => false,
-                }
-            } else {
-                false
-            };
-            if compensation_confirmed {
-                match media_job_deletion_finalized(state.store(), reserved.id).await {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        state.record_media_reconciliation_gap();
-                        error!(job_id = %reserved.id, "upstream cleanup succeeded but reconciliation tombstone was not finalized");
-                    }
-                    Err(persistence_error) => {
-                        state.record_media_reconciliation_gap();
-                        error!(job_id = %reserved.id, %persistence_error, "upstream cleanup succeeded but reconciliation tombstone failed");
-                    }
-                }
-            } else {
-                state.record_media_reconciliation_gap();
-                error!(
-                    job_id = %reserved.id,
-                    upstream_job_id = %upstream_job_id,
-                    provider_id = %executed.provider_id,
-                    route = %executed.route_slug,
-                    "video create reconciliation gap requires operator attention"
-                );
+                .await);
             }
-            let failure = InferenceError::unavailable("media_job_create_reconciliation_pending");
-            executed.mark_failure(failure.accounting_outcome());
-            return Err(failure);
-        }
-    };
+        };
     result.id = record.id.to_string();
     result.model = Some(executed.route_slug.to_string());
     let response = encode_video_object(&result, executed.route_slug.as_str())
@@ -337,6 +401,57 @@ pub(super) async fn video_list(
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
     let key = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
+    let page_request = validate_video_list_query(&query)?;
+    let allowed_routes = key
+        .allowed_routes
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let page = state
+        .store()
+        .media_jobs_after_id(
+            &MediaJobFilters {
+                api_key_id: Some(key.id.as_uuid()),
+                route_slugs: allowed_routes,
+                operation: Some(OperationKind::VideoCreate),
+                surface: Some(Surface::OpenAi),
+                ..MediaJobFilters::default()
+            },
+            page_request.cursor,
+            page_request.order,
+            page_request.limit,
+        )
+        .await
+        .map_err(media_job_error)?;
+    let refreshed = stream::iter(page.items)
+        .map(|record| refresh_video_list_record(&state, &principal, record))
+        .buffered(4)
+        .collect::<Vec<_>>()
+        .await;
+    let jobs = refreshed.iter().map(media_job_result).collect::<Vec<_>>();
+    let result = olp_domain::VideoListResult {
+        first_id: jobs.first().map(|job| job.id.clone()),
+        last_id: jobs.last().map(|job| job.id.clone()),
+        jobs,
+        has_more: page.next_cursor.is_some(),
+        extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+    };
+    let response = encode_video_list_response(&result, "video").map_err(|error| {
+        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
+    })?;
+    Ok((StatusCode::OK, Json(response)).into_response())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ValidatedVideoListQuery {
+    cursor: Option<uuid::Uuid>,
+    order: MediaJobOrder,
+    limit: u16,
+}
+
+fn validate_video_list_query(
+    query: &OpenAiVideoListQuery,
+) -> Result<ValidatedVideoListQuery, InferenceError> {
     if !query.extra.is_empty() {
         return Err(InferenceError::invalid_request(
             "Video list contains unsupported query parameters.",
@@ -367,44 +482,11 @@ pub(super) async fn video_list(
     } else {
         MediaJobOrder::Descending
     };
-    let allowed_routes = key
-        .allowed_routes
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let page = state
-        .store()
-        .media_jobs_after_id(
-            &MediaJobFilters {
-                api_key_id: Some(key.id.as_uuid()),
-                route_slugs: allowed_routes,
-                operation: Some(OperationKind::VideoCreate),
-                surface: Some(Surface::OpenAi),
-                ..MediaJobFilters::default()
-            },
-            cursor,
-            order,
-            query.limit.unwrap_or(20),
-        )
-        .await
-        .map_err(media_job_error)?;
-    let refreshed = stream::iter(page.items)
-        .map(|record| refresh_video_list_record(&state, &principal, record))
-        .buffered(4)
-        .collect::<Vec<_>>()
-        .await;
-    let jobs = refreshed.iter().map(media_job_result).collect::<Vec<_>>();
-    let result = olp_domain::VideoListResult {
-        first_id: jobs.first().map(|job| job.id.clone()),
-        last_id: jobs.last().map(|job| job.id.clone()),
-        jobs,
-        has_more: page.next_cursor.is_some(),
-        extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    };
-    let response = encode_video_list_response(&result, "video").map_err(|error| {
-        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
-    })?;
-    Ok((StatusCode::OK, Json(response)).into_response())
+    Ok(ValidatedVideoListQuery {
+        cursor,
+        order,
+        limit: query.limit.unwrap_or(20),
+    })
 }
 
 pub(super) async fn video_get(
@@ -592,4 +674,90 @@ pub(super) async fn video_delete(
     mark_unary_outcome(&mut executed, &response);
     let response = response?;
     Ok((StatusCode::OK, Json(response)).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+
+    fn list_query(
+        after: Option<&str>,
+        limit: Option<u16>,
+        order: Option<&str>,
+    ) -> OpenAiVideoListQuery {
+        OpenAiVideoListQuery {
+            after: after.map(str::to_owned),
+            limit,
+            order: order.map(str::to_owned),
+            extra: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn video_list_query_defaults_are_explicit() {
+        assert_eq!(
+            validate_video_list_query(&list_query(None, None, None)).unwrap(),
+            ValidatedVideoListQuery {
+                cursor: None,
+                order: MediaJobOrder::Descending,
+                limit: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn video_list_query_accepts_supported_boundaries_and_cursor() {
+        let cursor = uuid::Uuid::now_v7();
+        for limit in [1, 100] {
+            assert_eq!(
+                validate_video_list_query(&list_query(
+                    Some(&cursor.to_string()),
+                    Some(limit),
+                    Some("asc"),
+                ))
+                .unwrap(),
+                ValidatedVideoListQuery {
+                    cursor: Some(cursor),
+                    order: MediaJobOrder::Ascending,
+                    limit,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn video_list_query_rejects_each_unsupported_shape() {
+        let cases = [
+            (
+                list_query(None, Some(0), None),
+                "Video list limit must be between 1 and 100.",
+            ),
+            (
+                list_query(None, Some(101), None),
+                "Video list limit must be between 1 and 100.",
+            ),
+            (
+                list_query(None, None, Some("newest")),
+                "Video list order must be asc or desc.",
+            ),
+            (
+                list_query(Some("not-a-uuid"), None, None),
+                "The video cursor is invalid.",
+            ),
+        ];
+        for (query, expected_message) in cases {
+            let error = validate_video_list_query(&query).unwrap_err();
+            assert_eq!(error.message(), expected_message);
+        }
+
+        let mut query = list_query(None, None, None);
+        query.extra.insert("unknown".into(), Value::Bool(true));
+        let error = validate_video_list_query(&query).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Video list contains unsupported query parameters."
+        );
+    }
 }

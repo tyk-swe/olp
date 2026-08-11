@@ -27,6 +27,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # The dynamic repository root cannot be followed by shellcheck without `-x`.
 # shellcheck disable=SC1091
 source "$repo_root/scripts/lib/cargo-target-dir.sh"
+# shellcheck source=scripts/lib/postgres-test-databases.sh
+source "$repo_root/scripts/lib/postgres-test-databases.sh"
 
 : "${OLP_E2E_DATABASE_ADMIN_URL:=postgres://olp_test:olp_test@localhost:5433/postgres}"
 export OLP_E2E_DATABASE_ADMIN_URL
@@ -38,30 +40,12 @@ for command in cargo psql sha256sum timeout; do
   }
 done
 
-run_token=$(printf '%s' "${GITHUB_RUN_ID:-}_${GITHUB_RUN_ATTEMPT:-}_$$_${RANDOM}_$(date +%s%N)" | sha256sum)
-run_token=${run_token:0:10}
+run_token=$(postgres_test_run_token)
 export OLP_E2E_RUN_TOKEN="$run_token"
 
 sweep_leftover_databases() {
-  local leftovers database
-  if ! leftovers=$(timeout --kill-after=5s 30s \
-    psql "$OLP_E2E_DATABASE_ADMIN_URL" --no-psqlrc --tuples-only --no-align \
-    --command "SELECT datname FROM pg_database
-               WHERE datname ~ '^olp_e2e_${run_token}_[a-f0-9]+$'"); then
-    echo "failed to list E2E databases" >&2
-    return 1
-  fi
-  while IFS= read -r database; do
-    [[ -n $database ]] || continue
-    if [[ ! $database =~ ^olp_e2e_${run_token}_[a-f0-9]+$ ]]; then
-      echo "refusing to drop suspicious E2E database name: $database" >&2
-      return 1
-    fi
-    echo "dropping leftover E2E database $database"
-    timeout --kill-after=5s 30s \
-      psql "$OLP_E2E_DATABASE_ADMIN_URL" --no-psqlrc --quiet \
-      --command "DROP DATABASE IF EXISTS \"$database\" WITH (FORCE)" >/dev/null || return 1
-  done <<<"$leftovers"
+  postgres_test_sweep_databases \
+    "$OLP_E2E_DATABASE_ADMIN_URL" "olp_e2e_${run_token}_" lower-hex E2E
 }
 
 stop_leftover_processes() {

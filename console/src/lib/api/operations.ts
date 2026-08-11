@@ -64,7 +64,7 @@ export type RequestMetadataGatewayEpochState =
   | 'acknowledged';
 
 type UsageSummary = components['schemas']['UsageSummaryResponse'];
-type UsageCompleteness = components['schemas']['UsageCompletenessResponse'];
+export type UsageCompleteness = components['schemas']['UsageCompletenessResponse'];
 type UsageSeriesResult = components['schemas']['UsageTimeSeriesResponse'];
 type UsageBreakdownResult = components['schemas']['UsageBreakdownResponse'];
 

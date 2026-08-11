@@ -3,9 +3,9 @@ use std::{sync::Arc, time::Duration};
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation, OperationKind,
-    ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
+    AttemptFailureClass, AttemptPlan, CanonicalError, CanonicalEvent, CanonicalEventKind,
+    CanonicalResult, ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation,
+    OperationKind, ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
 };
 use olp_storage::request_metadata::{RequestAttemptMetadata, RequestAttemptUsageMetadata};
 
@@ -189,6 +189,10 @@ impl AttemptRecord<'_> {
 
     fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &CircuitBreaker) {
         circuits.record_success(self.plan.target_id);
+        self.record_accepted_output(traces);
+    }
+
+    fn record_accepted_output(&self, traces: &mut Vec<RequestAttemptMetadata>) {
         traces.push(successful_attempt(
             self.plan,
             self.ordinal,
@@ -235,6 +239,65 @@ pub struct FailoverContext<'a> {
     pub on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
 }
 
+/// Failure state that crosses attempt boundaries.
+///
+/// Retryable canonical errors are retained only while no later attempt has
+/// actually run. This preserves the provider error when every remaining
+/// target is circuit-open without allowing it to mask a later transport
+/// failure.
+#[derive(Default)]
+struct FailureHistory {
+    last_transport: Option<TransportError>,
+    last_canonical: Option<(usize, CanonicalError)>,
+}
+
+impl FailureHistory {
+    fn record_retry(
+        &mut self,
+        transport: TransportError,
+        canonical: Option<CanonicalError>,
+        completed_attempts: usize,
+    ) {
+        self.last_transport = Some(transport);
+        if let Some(canonical) = canonical {
+            self.last_canonical = Some((completed_attempts, canonical));
+        }
+    }
+
+    fn into_error(self, completed_attempts: usize) -> InferenceError {
+        match self.last_canonical {
+            Some((failed_at, canonical)) if failed_at == completed_attempts => {
+                InferenceError::from_canonical(&canonical)
+            }
+            _ => self.last_transport.map_or_else(
+                || InferenceError::unavailable("no_eligible_provider"),
+                InferenceError::from_transport,
+            ),
+        }
+    }
+}
+
+struct AttemptExecutionContext<'a> {
+    runtime: &'a RuntimeBundle,
+    media_spool: &'a Arc<dyn MediaSpool>,
+    circuits: &'a CircuitBreaker,
+    metadata: &'a RequestMetadata,
+    operation: &'a Operation,
+    route_deadline: tokio::time::Instant,
+    can_retry_canonical: bool,
+}
+
+enum AttemptDisposition {
+    Retry {
+        transport: TransportError,
+        canonical: Option<CanonicalError>,
+    },
+    Success {
+        output: ExecutionOutput,
+        deadline: tokio::time::Instant,
+    },
+}
+
 pub async fn execute_with_failover(
     context: FailoverContext<'_>,
     attempts: Vec<AttemptPlan>,
@@ -248,12 +311,8 @@ pub async fn execute_with_failover(
         circuits,
         mut on_attempt_started,
     } = context;
-    let deadline = tokio::time::Instant::now() + overall_timeout;
-    let mut last_error = None;
-    // A retryable canonical provider error, with the trace count at the time
-    // it was recorded. When no later attempt runs, the client receives the
-    // provider's own error instead of a synthesized transport failure.
-    let mut last_canonical_error: Option<(usize, olp_domain::CanonicalError)> = None;
+    let route_deadline = tokio::time::Instant::now() + overall_timeout;
+    let mut failures = FailureHistory::default();
     let mut traces = Vec::with_capacity(attempts.len());
     let attempt_count = attempts.len();
     for (attempt_index, attempt) in attempts.into_iter().enumerate() {
@@ -279,157 +338,195 @@ pub async fn execute_with_failover(
             started_at: attempt_started_at,
             started: attempt_started,
         };
-        let attempt_deadline = deadline.min(attempt_started + attempt.timeout.as_duration());
-        let Some(transport) = runtime.transport(attempt.provider_id) else {
-            let error = TransportError {
-                phase: olp_domain::TransportPhase::Connect,
-                class: AttemptFailureClass::Connect,
-                response_committed: false,
-                message: "provider transport is not loaded".to_owned(),
-            };
-            last_error = Some(record.record_failure(&mut traces, circuits, error)?);
-            continue;
-        };
-        let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return Err(record.record_deadline_elapsed(&mut traces, circuits));
-        }
-        let provider_request = ProviderRequest {
-            metadata: metadata.clone(),
-            attempt: attempt.clone(),
-            operation: operation_for_provider(&operation, attempt.provider_kind),
-            media: Some(media_spool.clone()),
-        };
-        let output =
-            match tokio::time::timeout(remaining, transport.execute(provider_request)).await {
-                Ok(Ok(events)) => events,
-                Ok(Err(error)) => {
-                    let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-                    last_error = Some(record.record_failure(&mut traces, circuits, error)?);
-                    continue;
-                }
-                Err(_) => {
-                    let error = reclassify_ambiguous_transport_failure(
-                        TransportError {
-                            phase: olp_domain::TransportPhase::FirstByte,
-                            class: AttemptFailureClass::Timeout,
-                            response_committed: false,
-                            message: "route deadline elapsed before provider response".to_owned(),
-                        },
-                        operation.kind(),
-                    );
-                    last_error = Some(record.record_failure(&mut traces, circuits, error)?);
-                    continue;
-                }
-            };
-        let mut events = match output {
-            ProviderOutput::Events(events) => events,
-            ProviderOutput::Result(result) => {
-                record.record_success(&mut traces, circuits);
+        match execute_attempt(
+            AttemptExecutionContext {
+                runtime,
+                media_spool: &media_spool,
+                circuits,
+                metadata: &metadata,
+                operation: &operation,
+                route_deadline,
+                can_retry_canonical: attempt_index + 1 < attempt_count,
+            },
+            &record,
+            &mut traces,
+        )
+        .await?
+        {
+            AttemptDisposition::Retry {
+                transport,
+                canonical,
+            } => failures.record_retry(transport, canonical, traces.len()),
+            AttemptDisposition::Success { output, deadline } => {
                 return Ok(ExecutionSuccess {
-                    output: ExecutionOutput::Result(result),
-                    deadline: attempt_deadline,
+                    output,
+                    deadline,
                     attempts: traces,
                     attempt_started,
                 });
             }
-        };
-        let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
-        let first = match tokio::time::timeout(remaining, events.next()).await {
-            Ok(Some(Ok(event))) => event,
-            Ok(Some(Err(error))) => {
-                let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-                last_error = Some(record.record_failure(&mut traces, circuits, error)?);
-                continue;
-            }
-            Ok(None) => {
-                let error = TransportError {
-                    phase: olp_domain::TransportPhase::FirstByte,
-                    class: AttemptFailureClass::Protocol,
-                    response_committed: false,
-                    message: "the provider returned an empty response".to_owned(),
-                };
-                let gateway = InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "The provider returned an empty response.",
-                );
-                return Err(record.record_terminal_failure(&mut traces, circuits, error, gateway));
-            }
-            Err(_) => {
-                let error = reclassify_ambiguous_transport_failure(
-                    TransportError {
-                        phase: olp_domain::TransportPhase::FirstByte,
-                        class: AttemptFailureClass::Timeout,
-                        response_committed: false,
-                        message: "route deadline elapsed before a canonical event".to_owned(),
-                    },
-                    operation.kind(),
-                );
-                last_error = Some(record.record_failure(&mut traces, circuits, error)?);
-                continue;
-            }
-        };
-        let mut event_sequence = EventSequenceValidator::new();
-        if let Err(sequence_error) = event_sequence.push(&first) {
-            let error = canonical_event_protocol_error(sequence_error, false);
-            let gateway = InferenceError::from_transport(error.clone());
-            return Err(record.record_terminal_failure(&mut traces, circuits, error, gateway));
         }
-        let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
-            if error.retryable
-                && attempt_index + 1 < attempt_count
-                && let Some(class) = canonical_error_circuit_class(error.class)
-            {
-                let transport_error = TransportError {
-                    phase: olp_domain::TransportPhase::FirstByte,
-                    class,
-                    response_committed: false,
-                    message: error.message.clone(),
-                };
-                last_error = Some(record.record_failure(&mut traces, circuits, transport_error)?);
-                last_canonical_error = Some((traces.len(), error.clone()));
-                continue;
-            }
-            if let Some(class) = canonical_error_circuit_class(error.class) {
-                circuits.record_failure(attempt.target_id, class);
-            }
-            true
-        } else {
-            false
-        };
-        if matches!(first.kind, CanonicalEventKind::Done) && !initial_failure {
-            circuits.record_success(attempt.target_id);
-        }
-        let events = circuit_accounted_event_stream(
-            validated_event_stream(events, event_sequence),
-            circuits.clone(),
-            attempt.target_id,
-            initial_failure,
-        );
-        traces.push(successful_attempt(
-            &attempt,
-            ordinal,
-            attempt_started_at,
-            attempt_started,
-        ));
-        return Ok(ExecutionSuccess {
-            output: ExecutionOutput::Events { first, events },
-            deadline: attempt_deadline,
-            attempts: traces,
-            attempt_started,
-        });
     }
     Err(ExecutionFailure {
-        error: match last_canonical_error {
-            Some((failed_at, canonical)) if failed_at == traces.len() => {
-                InferenceError::from_canonical(&canonical)
-            }
-            _ => last_error.map_or_else(
-                || InferenceError::unavailable("no_eligible_provider"),
-                InferenceError::from_transport,
-            ),
-        },
+        error: failures.into_error(traces.len()),
         attempts: traces,
+    })
+}
+
+async fn execute_attempt(
+    context: AttemptExecutionContext<'_>,
+    record: &AttemptRecord<'_>,
+    traces: &mut Vec<RequestAttemptMetadata>,
+) -> Result<AttemptDisposition, ExecutionFailure> {
+    let AttemptExecutionContext {
+        runtime,
+        media_spool,
+        circuits,
+        metadata,
+        operation,
+        route_deadline,
+        can_retry_canonical,
+    } = context;
+    let attempt = record.plan;
+    let attempt_deadline = route_deadline.min(record.started + attempt.timeout.as_duration());
+    let Some(transport) = runtime.transport(attempt.provider_id) else {
+        let error = TransportError {
+            phase: olp_domain::TransportPhase::Connect,
+            class: AttemptFailureClass::Connect,
+            response_committed: false,
+            message: "provider transport is not loaded".to_owned(),
+        };
+        return Ok(AttemptDisposition::Retry {
+            transport: record.record_failure(traces, circuits, error)?,
+            canonical: None,
+        });
+    };
+    let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(record.record_deadline_elapsed(traces, circuits));
+    }
+    let provider_request = ProviderRequest {
+        metadata: metadata.clone(),
+        attempt: attempt.clone(),
+        operation: operation_for_provider(operation, attempt.provider_kind),
+        media: Some(Arc::clone(media_spool)),
+    };
+    let output = match tokio::time::timeout(remaining, transport.execute(provider_request)).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            let error = reclassify_ambiguous_transport_failure(error, operation.kind());
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, error)?,
+                canonical: None,
+            });
+        }
+        Err(_) => {
+            let error = reclassify_ambiguous_transport_failure(
+                TransportError {
+                    phase: olp_domain::TransportPhase::FirstByte,
+                    class: AttemptFailureClass::Timeout,
+                    response_committed: false,
+                    message: "route deadline elapsed before provider response".to_owned(),
+                },
+                operation.kind(),
+            );
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, error)?,
+                canonical: None,
+            });
+        }
+    };
+    let mut events = match output {
+        ProviderOutput::Events(events) => events,
+        ProviderOutput::Result(result) => {
+            record.record_success(traces, circuits);
+            return Ok(AttemptDisposition::Success {
+                output: ExecutionOutput::Result(result),
+                deadline: attempt_deadline,
+            });
+        }
+    };
+    let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
+    let first = match tokio::time::timeout(remaining, events.next()).await {
+        Ok(Some(Ok(event))) => event,
+        Ok(Some(Err(error))) => {
+            let error = reclassify_ambiguous_transport_failure(error, operation.kind());
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, error)?,
+                canonical: None,
+            });
+        }
+        Ok(None) => {
+            let error = TransportError {
+                phase: olp_domain::TransportPhase::FirstByte,
+                class: AttemptFailureClass::Protocol,
+                response_committed: false,
+                message: "the provider returned an empty response".to_owned(),
+            };
+            let gateway = InferenceError::bad_gateway(
+                "provider_protocol_error",
+                "The provider returned an empty response.",
+            );
+            return Err(record.record_terminal_failure(traces, circuits, error, gateway));
+        }
+        Err(_) => {
+            let error = reclassify_ambiguous_transport_failure(
+                TransportError {
+                    phase: olp_domain::TransportPhase::FirstByte,
+                    class: AttemptFailureClass::Timeout,
+                    response_committed: false,
+                    message: "route deadline elapsed before a canonical event".to_owned(),
+                },
+                operation.kind(),
+            );
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, error)?,
+                canonical: None,
+            });
+        }
+    };
+    let mut event_sequence = EventSequenceValidator::new();
+    if let Err(sequence_error) = event_sequence.push(&first) {
+        let error = canonical_event_protocol_error(sequence_error, false);
+        let gateway = InferenceError::from_transport(error.clone());
+        return Err(record.record_terminal_failure(traces, circuits, error, gateway));
+    }
+    let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
+        if error.retryable
+            && can_retry_canonical
+            && let Some(class) = canonical_error_circuit_class(error.class)
+        {
+            let transport_error = TransportError {
+                phase: olp_domain::TransportPhase::FirstByte,
+                class,
+                response_committed: false,
+                message: error.message.clone(),
+            };
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, transport_error)?,
+                canonical: Some(error.clone()),
+            });
+        }
+        if let Some(class) = canonical_error_circuit_class(error.class) {
+            circuits.record_failure(attempt.target_id, class);
+        }
+        true
+    } else {
+        false
+    };
+    if matches!(first.kind, CanonicalEventKind::Done) && !initial_failure {
+        circuits.record_success(attempt.target_id);
+    }
+    let events = circuit_accounted_event_stream(
+        validated_event_stream(events, event_sequence),
+        circuits.clone(),
+        attempt.target_id,
+        initial_failure,
+    );
+    record.record_accepted_output(traces);
+    Ok(AttemptDisposition::Success {
+        output: ExecutionOutput::Events { first, events },
+        deadline: attempt_deadline,
     })
 }
 
@@ -558,12 +655,12 @@ const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
 mod tests {
     use chrono::Utc;
     use olp_domain::{
-        AttemptFailureClass, AttemptPlan, DurationMs, ProviderId, ProviderKind, RouteId,
-        RuntimeGenerationId, TargetId, TransportError, TransportPhase,
+        AttemptFailureClass, AttemptPlan, CanonicalError, DurationMs, ErrorClass, ProviderId,
+        ProviderKind, RouteId, RuntimeGenerationId, TargetId, TransportError, TransportPhase,
     };
 
-    use super::{AttemptRecord, attempt_billing_is_uncertain};
-    use crate::circuit::CircuitBreaker;
+    use super::{AttemptRecord, FailureHistory, attempt_billing_is_uncertain};
+    use crate::{InferenceErrorKind, circuit::CircuitBreaker};
 
     #[test]
     fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
@@ -637,6 +734,53 @@ mod tests {
         assert!(circuits.is_selectable(target_id));
         circuits.record_failure(target_id, AttemptFailureClass::Connect);
         assert_eq!(circuits.open_count(), 1);
+    }
+
+    #[test]
+    fn final_retryable_canonical_error_is_preserved() {
+        let mut failures = FailureHistory::default();
+        failures.record_retry(
+            failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
+            Some(CanonicalError {
+                class: ErrorClass::RateLimit,
+                message: "provider asked the client to retry".to_owned(),
+                provider_code: Some("busy".to_owned()),
+                retryable: true,
+            }),
+            1,
+        );
+
+        let error = failures.into_error(1);
+
+        assert_eq!(
+            error.kind(),
+            InferenceErrorKind::Canonical(ErrorClass::RateLimit)
+        );
+        assert_eq!(error.message(), "provider asked the client to retry");
+    }
+
+    #[test]
+    fn later_transport_failure_supersedes_a_canonical_error() {
+        let mut failures = FailureHistory::default();
+        failures.record_retry(
+            failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
+            Some(CanonicalError {
+                class: ErrorClass::RateLimit,
+                message: "first failure".to_owned(),
+                provider_code: None,
+                retryable: true,
+            }),
+            1,
+        );
+        failures.record_retry(
+            failure(TransportPhase::Connect, AttemptFailureClass::Connect),
+            None,
+            2,
+        );
+
+        let error = failures.into_error(2);
+
+        assert_eq!(error.code(), "upstream_unavailable");
     }
 
     fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError {

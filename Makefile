@@ -106,14 +106,15 @@ supply-chain: ## Require immutable Action and image references
 helm-verify: ## Verify Helm values, schema, and templates change together
 	scripts/verify-helm-contract.sh deploy/helm
 
-script-selftest: ## Self-tests for backup, repository-validation, and request-metadata helpers
+script-selftest: ## Self-tests for shell helpers and repository invariants
 	scripts/test-backup-manifest.sh
+	scripts/test-postgres-test-databases.sh
 	scripts/test-repository-validation.sh
 	scripts/test-record-request-metadata-stream-loss.sh
 
-shellcheck: ## Shellcheck every tracked shell script
+shellcheck: ## Shellcheck every tracked or untracked repository shell script
 	@scripts=(); \
-	while IFS= read -r -d '' script; do [[ ! -f $$script ]] || scripts+=("$$script"); done < <(git ls-files -z -- '*.sh'); \
+	while IFS= read -r -d '' script; do [[ ! -f $$script ]] || scripts+=("$$script"); done < <(git ls-files --cached --others --exclude-standard -z -- '*.sh'); \
 	if (( $${#scripts[@]} == 0 )); then echo "no tracked shell scripts were found" >&2; exit 1; fi; \
 	shellcheck "$${scripts[@]}" && echo "shellcheck passed"
 

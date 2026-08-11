@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/lib/postgres-test-databases.sh
+source "$script_dir/lib/postgres-test-databases.sh"
+
 # Runs the #[ignore]d PostgreSQL/Valkey integration suites through nextest
 # (profile "db" in .config/nextest.toml, which bounds parallelism and
 # per-test timeouts). Every test provisions its own uniquely named database
@@ -30,38 +34,12 @@ done
 # scoping the sweep below to databases this run created. Hashing the full
 # run identity keeps tokens collision-resistant — a truncated GITHUB_RUN_ID
 # would share its prefix across nearby runs.
-run_token=$(printf '%s' "${GITHUB_RUN_ID:-}_${GITHUB_RUN_ATTEMPT:-}_$$_${RANDOM}_$(date +%s%N)" | sha256sum)
-run_token=${run_token:0:10}
+run_token=$(postgres_test_run_token)
 export OLP_TEST_RUN_TOKEN="$run_token"
 
-# Explicit `return 1`s throughout: this runs under `if !`, where set -e is
-# suspended, so unchecked psql failures would otherwise read as success.
 sweep_leftover_databases() {
-  local leftovers database
-  # The server-side regex is string-anchored (^/$ do not match around
-  # embedded newlines in PostgreSQL), so a hostile quoted identifier like
-  # "olp_test_x\nproduction" can never smuggle a second line into this
-  # newline-framed output; the per-line check below is a second layer.
-  # Bounded psql calls: a stalled server must fail the sweep loudly instead
-  # of hanging the run (or its EXIT trap) until the job timeout.
-  if ! leftovers=$(timeout --kill-after=5s 30s \
-    psql "$OLP_TEST_DATABASE_ADMIN_URL" --no-psqlrc --tuples-only --no-align \
-    --command "SELECT datname FROM pg_database
-               WHERE datname ~ '^olp_test_${run_token}_[a-z0-9_]+$'"); then
-    echo "failed to list integration databases" >&2
-    return 1
-  fi
-  while IFS= read -r database; do
-    [[ -n $database ]] || continue
-    if [[ ! $database =~ ^[a-z0-9_]+$ ]]; then
-      echo "refusing to drop suspicious database name: $database" >&2
-      return 1
-    fi
-    echo "dropping leftover integration database $database"
-    timeout --kill-after=5s 30s \
-      psql "$OLP_TEST_DATABASE_ADMIN_URL" --no-psqlrc --quiet \
-      --command "DROP DATABASE IF EXISTS \"$database\" WITH (FORCE)" >/dev/null || return 1
-  done <<<"$leftovers"
+  postgres_test_sweep_databases \
+    "$OLP_TEST_DATABASE_ADMIN_URL" "olp_test_${run_token}_" lower-identifier integration
 }
 
 cleanup() {

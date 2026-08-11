@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     usageBreakdown,
@@ -9,6 +8,7 @@
     type UsageFilters
   } from '$lib/api/operations';
   import UsageChart from './UsageChart.svelte';
+  import UsageCompletenessStatus from './UsageCompletenessStatus.svelte';
   import { dateTimeLocalValue, formatCompact, formatCost } from '$lib/format';
 
   type Dimension = 'route' | 'provider' | 'model' | 'api_key' | 'operation';
@@ -98,17 +98,7 @@
 {:else if usage.isError}
   <div class="inline-problem" role="alert">Usage could not be loaded. <button class="text-button" onclick={() => usage.refetch()}>Try again</button></div>
 {:else if usage.data}
-  {#if !usage.data.completeness.complete || usage.data.completeness.unpriced_count > 0}
-    <section class="completeness" class:danger={usage.data.completeness.request_metadata_gap_events > 0 || usage.data.completeness.uncertain_request_metadata_gap_count > 0 || usage.data.completeness.request_metadata_consumer.state === 'stale'} role="status" aria-labelledby="completeness-title">
-      <div>
-        <strong id="completeness-title">{usage.data.completeness.request_metadata_consumer.state === 'stale' ? 'Request metadata worker heartbeat is stale' : usage.data.completeness.request_metadata_consumer.state === 'backlogged' ? 'Request metadata persistence backlog detected' : usage.data.completeness.request_metadata_consumer.state === 'unknown' ? 'Request metadata worker has not reported' : !usage.data.completeness.coverage.range_complete ? 'Retained boundary data was excluded' : usage.data.completeness.uncertain_request_metadata_gap_count > 0 ? 'Unclean request metadata gateway epochs make usage uncertain' : usage.data.completeness.request_metadata_gap_events > 0 ? 'Request metadata persistence gaps detected' : usage.data.completeness.incomplete_count > 0 ? 'Usage is still reconciling' : 'Some traffic is unpriced'}</strong>
-        <p>{usage.data.completeness.request_metadata_gap_events} request metadata gap-event lower bound · {usage.data.completeness.uncertain_request_metadata_gap_count} uncertain request metadata gateway epochs · {usage.data.completeness.incomplete_count} incomplete requests · {usage.data.completeness.unpriced_count} unpriced requests. Cost totals exclude anything unpriced and never treat uncertainty as zero.</p>
-      </div>
-      <a href={resolve('/health')}>Open health</a>
-    </section>
-  {:else}
-    <p class="complete-banner"><span aria-hidden="true">✓</span> Usage accounting and pricing are complete for this range.</p>
-  {/if}
+  <UsageCompletenessStatus completeness={usage.data.completeness} />
 
   <section class="pipeline-grid" aria-label="Request metadata persistence and usage range coverage">
     <article class="card pipeline-card">
@@ -170,11 +160,6 @@
   label { display: grid; gap: 0.35rem; color: var(--foreground-muted); font-size: 0.75rem; font-weight: 700; }
   input, select { width: 100%; min-height: 2.5rem; padding: 0.5rem 0.7rem; border: 1px solid var(--border-strong); border-radius: 0.375rem; background: var(--surface); color: var(--foreground); }
   .filter-actions { display: flex; gap: 0.65rem; margin-top: 1rem; }
-  .completeness { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.25rem; padding: 0.9rem 1rem; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 0.375rem; background: var(--warning-soft); color: var(--warning); }
-  .completeness.danger { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
-  .completeness p { margin: 0.2rem 0 0; }
-  .completeness a { min-height: 2.75rem; display: inline-flex; flex: none; align-items: center; font-weight: 700; }
-  .complete-banner { display: flex; align-items: center; gap: 0.5rem; margin: 1.25rem 0 0; color: var(--success); font-weight: 700; }
   .pipeline-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; margin-top: 1rem; }
   .pipeline-card { display: grid; gap: 0.2rem; padding: 0.9rem 1rem; }
   .pipeline-card p, .pipeline-card span { margin: 0; color: var(--foreground-muted); }
@@ -188,5 +173,5 @@
   h2 { margin: 0; font-size: 1.2rem; }
   .text-button { min-height: 2.75rem; border: 0; background: transparent; color: var(--accent-strong); font-weight: 700; }
   @media (max-width: 68rem) { .filter-grid, .pipeline-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 40rem) { .filter-grid, .pipeline-grid { grid-template-columns: 1fr; } .filters { padding: 0.85rem; } .completeness { align-items: flex-start; display: grid; } }
+  @media (max-width: 40rem) { .filter-grid, .pipeline-grid { grid-template-columns: 1fr; } .filters { padding: 0.85rem; } }
 </style>
