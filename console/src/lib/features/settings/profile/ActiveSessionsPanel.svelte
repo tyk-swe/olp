@@ -3,17 +3,22 @@
   import { logout } from '$lib/api/auth';
   import { listSessionPage, revokeSession } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
+  import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor
+  } from '$lib/api/pagination';
+  import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
 
-  let cursor = $state<string | undefined>();
-  let history = $state<string[]>([]);
+  const pagination = $state(emptyCursorHistory());
   let revoking = $state('');
   let error = $state('');
   let notice = $state('');
 
   const sessions = createQuery(() => ({
-    queryKey: ['profile-sessions', cursor],
-    queryFn: () => listSessionPage(undefined, cursor)
+    queryKey: ['profile-sessions', pagination.cursor],
+    queryFn: () => listSessionPage(undefined, pagination.cursor)
   }));
 
   async function endSession(id: string, current: boolean) {
@@ -35,19 +40,6 @@
     } finally {
       revoking = '';
     }
-  }
-
-  function next() {
-    if (!sessions.data?.nextCursor) return;
-    history = [...history, sessions.data.nextCursor];
-    cursor = sessions.data.nextCursor;
-  }
-
-  function previous() {
-    const nextHistory = [...history];
-    nextHistory.pop();
-    history = nextHistory;
-    cursor = nextHistory.at(-1);
   }
 </script>
 
@@ -109,22 +101,16 @@
         </article>
       {/each}
     </div>
-    {#if history.length > 0 || sessions.data?.nextCursor}<nav
-        class="pagination"
-        aria-label="Session pages"
-      >
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={previous}
-          disabled={history.length === 0}>Previous</button
-        ><span>Page {history.length + 1}</span><button
-          class="button button-secondary"
-          type="button"
-          onclick={next}
-          disabled={!sessions.data?.nextCursor}>Next</button
-        >
-      </nav>{/if}
+    {#if pagination.history.length > 0 || sessions.data?.nextCursor}
+      <CursorPagination
+        page={pagination.history.length + 1}
+        hasPrevious={pagination.history.length > 0}
+        hasNext={Boolean(sessions.data?.nextCursor)}
+        onPrevious={() => popCursor(pagination)}
+        onNext={() => pushCursor(pagination, sessions.data?.nextCursor)}
+        label="Session pages"
+      />
+    {/if}
   {/if}
 </section>
 
@@ -168,16 +154,6 @@
     margin: 0.2rem 0 0;
     color: var(--foreground-muted);
     overflow-wrap: anywhere;
-  }
-  .pagination {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-  .pagination span {
-    color: var(--foreground-muted);
   }
   .success-message {
     margin: 0 0 1rem;

@@ -14,9 +14,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    ManagementState, Problem,
-    bootstrap::cli::AppResult,
-    management::{map_configuration_resource, validation},
+    ManagementState, Problem, bootstrap::cli::AppResult, management::map_configuration_resource,
 };
 
 /// Application-owned provider fields before they cross into `olp-providers`.
@@ -194,12 +192,12 @@ pub(crate) async fn provider_connector(
         .await
         .map_err(map_configuration_resource)?;
     let config = provider_config((&provider).into())
-        .map_err(|error| validation("provider", &error.to_string()))?;
+        .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
     if let Some(connector) = state.certification_probe_connector(provider_id, config.kind()) {
         return Ok(connector);
     }
     let plaintext = match ProviderFactory::credential_kind(&config)
-        .map_err(|error| validation("provider", &error.to_string()))?
+        .map_err(|error| Problem::field_validation("provider", error.to_string()))?
     {
         CredentialKind::None => None,
         CredentialKind::ApiKey | CredentialKind::ServiceAccountJson | CredentialKind::AwsStatic => {
@@ -228,10 +226,10 @@ pub(crate) async fn provider_connector(
         &config,
         plaintext.as_ref().map(|plaintext| plaintext.as_slice()),
     )
-    .map_err(|error| validation("provider", &error.to_string()))?;
+    .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
     factory_create(config, credential)
         .await
-        .map_err(|error| validation("provider", &error.to_string()))
+        .map_err(|error| Problem::field_validation("provider", error.to_string()))
 }
 
 pub(crate) fn runtime_provider_config(

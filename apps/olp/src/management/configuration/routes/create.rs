@@ -22,7 +22,7 @@ use crate::management::{
     response_policy::RuntimeGenerationResponse,
     sessions::require_mutation_session,
 };
-use crate::{FieldErrors, ManagementState, Problem};
+use crate::{ManagementState, Problem};
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct CreateRouteDraftRequest {
@@ -106,14 +106,10 @@ pub(crate) async fn create_route_draft(
         })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|operation| {
-            let mut errors = FieldErrors::new();
-            errors.insert(
-                "operations".to_owned(),
-                vec![format!(
-                    "Operation {operation} is not supported by the operation model."
-                )],
-            );
-            Problem::validation(errors)
+            Problem::field_validation(
+                "operations",
+                format!("Operation {operation} is not supported by the operation model."),
+            )
         })?;
     let targets = request
         .targets

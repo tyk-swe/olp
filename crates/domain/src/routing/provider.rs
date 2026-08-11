@@ -1,52 +1,24 @@
-use std::{collections::BTreeSet, fmt, str::FromStr};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::{CredentialVersionId, OperationKind, ProviderId, Surface, TransportMode};
 
-#[derive(
-    Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, ToSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderKind {
-    #[serde(rename = "openai")]
-    OpenAi,
-    Anthropic,
-    Gemini,
-    VertexAi,
-    Bedrock,
-    #[serde(rename = "azure_openai")]
-    AzureOpenAi,
-    #[serde(rename = "openai_compatible")]
-    OpenAiCompatible,
+closed_string_enum! {
+    pub enum ProviderKind {
+        OpenAi => "openai",
+        Anthropic => "anthropic",
+        Gemini => "gemini",
+        VertexAi => "vertex_ai",
+        Bedrock => "bedrock",
+        AzureOpenAi => "azure_openai",
+        OpenAiCompatible => "openai_compatible",
+    }
+    parse_error InvalidProviderKind => |_| InvalidProviderKind;
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 7] = [
-        Self::OpenAi,
-        Self::Anthropic,
-        Self::Gemini,
-        Self::VertexAi,
-        Self::Bedrock,
-        Self::AzureOpenAi,
-        Self::OpenAiCompatible,
-    ];
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Anthropic => "anthropic",
-            Self::Gemini => "gemini",
-            Self::VertexAi => "vertex_ai",
-            Self::Bedrock => "bedrock",
-            Self::AzureOpenAi => "azure_openai",
-            Self::OpenAiCompatible => "openai_compatible",
-        }
-    }
-
     /// Returns whether this provider family can serve a reviewed capability
     /// tuple. Connector-specific request validation remains at the adapter
     /// boundary; this is the canonical configuration eligibility policy.
@@ -115,29 +87,6 @@ impl ProviderKind {
                     .map(move |mode| (operation, surface, mode))
             })
         })
-    }
-}
-
-impl FromStr for ProviderKind {
-    type Err = InvalidProviderKind;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "openai" => Ok(Self::OpenAi),
-            "anthropic" => Ok(Self::Anthropic),
-            "gemini" => Ok(Self::Gemini),
-            "vertex_ai" => Ok(Self::VertexAi),
-            "bedrock" => Ok(Self::Bedrock),
-            "azure_openai" => Ok(Self::AzureOpenAi),
-            "openai_compatible" => Ok(Self::OpenAiCompatible),
-            _ => Err(InvalidProviderKind),
-        }
-    }
-}
-
-impl fmt::Display for ProviderKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
     }
 }
 

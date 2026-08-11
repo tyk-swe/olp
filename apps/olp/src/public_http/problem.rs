@@ -55,6 +55,12 @@ impl Problem {
         problem
     }
 
+    pub(crate) fn field_validation(field: impl Into<String>, detail: impl Into<String>) -> Self {
+        let mut errors = FieldErrors::new();
+        errors.insert(field.into(), vec![detail.into()]);
+        Self::validation(errors)
+    }
+
     pub fn unauthorized(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
@@ -120,5 +126,16 @@ mod tests {
         let problem = Problem::bad_request("example", "example").with_instance(&uri);
 
         assert_eq!(problem.instance.as_deref(), Some("/api/v1/providers"));
+    }
+
+    #[test]
+    fn field_validation_builds_the_standard_problem() {
+        let problem = Problem::field_validation("model", "A model is required.");
+
+        assert_eq!(problem.status, StatusCode::UNPROCESSABLE_ENTITY.as_u16());
+        assert_eq!(
+            problem.errors.get("model"),
+            Some(&vec!["A model is required.".to_owned()])
+        );
     }
 }

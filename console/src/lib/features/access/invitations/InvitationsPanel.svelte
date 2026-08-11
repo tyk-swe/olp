@@ -9,12 +9,16 @@
   } from '$lib/api/management/access';
   import { copyText } from '$lib/clipboard';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor
+  } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import { FIXED_ROLES } from '../shared';
 
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
+  const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
@@ -25,8 +29,8 @@
   let copyError = $state('');
 
   const invitations = createQuery(() => ({
-    queryKey: ['invitation-page', cursor ?? 'first'],
-    queryFn: () => listInvitationPage(cursor)
+    queryKey: ['invitation-page', pagination.cursor ?? 'first'],
+    queryFn: () => listInvitationPage(pagination.cursor)
   }));
 
   onDestroy(() => {
@@ -84,18 +88,6 @@
     }
     copyError = '';
     copied = true;
-  }
-
-  function nextPage() {
-    const next = invitations.data?.nextCursor;
-    if (!next) return;
-    history = [...history, cursor];
-    cursor = next;
-  }
-
-  function previousPage() {
-    cursor = history.at(-1);
-    history = history.slice(0, -1);
   }
 </script>
 
@@ -171,7 +163,7 @@
   <div class="inline-problem" role="alert">
     {accessErrorMessage(invitations.error)}
   </div>
-{:else if !invitations.data?.items.length && history.length === 0}
+{:else if !invitations.data?.items.length && pagination.history.length === 0}
   <section class="card empty-state">
     <p>No invitations have been created.</p>
   </section>
@@ -215,11 +207,11 @@
     </table>
   </div>
   <CursorPagination
-    page={history.length + 1}
-    hasPrevious={history.length > 0}
+    page={pagination.history.length + 1}
+    hasPrevious={pagination.history.length > 0}
     hasNext={Boolean(invitations.data?.nextCursor)}
-    onPrevious={previousPage}
-    onNext={nextPage}
+    onPrevious={() => popCursor(pagination)}
+    onNext={() => pushCursor(pagination, invitations.data?.nextCursor)}
     label="Invitation pages"
   />
 {/if}

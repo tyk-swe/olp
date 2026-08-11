@@ -15,7 +15,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    FieldErrors, ManagementState, Problem,
+    ManagementState, Problem,
     management::operations::helpers::{map_operations, not_found, page_limit, timestamp_cursor},
     management::{
         Permission, map_persistence, require_mutation_session, require_permission,
@@ -149,14 +149,10 @@ fn parse_request_metadata_gateway_epoch_state(
         "gracefully_closed" => Ok(RequestMetadataGatewayEpochState::GracefullyClosed),
         "unresolved" => Ok(RequestMetadataGatewayEpochState::Unresolved),
         "acknowledged" => Ok(RequestMetadataGatewayEpochState::Acknowledged),
-        _ => {
-            let mut errors = FieldErrors::new();
-            errors.insert(
-                "state".to_owned(),
-                vec!["Use open, gracefully_closed, unresolved, or acknowledged.".to_owned()],
-            );
-            Err(Problem::validation(errors))
-        }
+        _ => Err(Problem::field_validation(
+            "state",
+            "Use open, gracefully_closed, unresolved, or acknowledged.",
+        )),
     }
 }
 

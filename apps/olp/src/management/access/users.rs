@@ -19,7 +19,7 @@ use crate::management::{
     preconditions::{if_match, with_etag},
     sessions::{require_mutation_session, require_read_session},
 };
-use crate::{FieldErrors, ManagementState, Problem};
+use crate::{ManagementState, Problem};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct UserDetailResponse {
@@ -148,12 +148,10 @@ pub(in crate::management) async fn update_user_role(
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
     if request.role.is_none() && request.active.is_none() {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "user".to_owned(),
-            vec!["Provide a role or active status.".to_owned()],
-        );
-        return Err(Problem::validation(errors));
+        return Err(Problem::field_validation(
+            "user",
+            "Provide a role or active status.",
+        ));
     }
     if user_id == principal.user_id && request.active == Some(false) {
         return Err(Problem::conflict(

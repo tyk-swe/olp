@@ -5,7 +5,7 @@ use olp_storage::{
 };
 use tracing::error;
 
-use crate::{FieldErrors, Problem};
+use crate::Problem;
 
 use super::sessions::reauthentication_required;
 
@@ -17,14 +17,10 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             "Provider not found",
             "The provider does not exist.",
         ),
-        ConfigurationError::ProviderIncomplete => {
-            let mut errors = FieldErrors::new();
-            errors.insert(
-                "provider".to_owned(),
-                vec!["A credential and enabled model are required before activation; OpenAI-compatible model capabilities must also be live-certified.".to_owned()],
-            );
-            Problem::validation(errors)
-        }
+        ConfigurationError::ProviderIncomplete => Problem::field_validation(
+            "provider",
+            "A credential and enabled model are required before activation; OpenAI-compatible model capabilities must also be live-certified.",
+        ),
         ConfigurationError::PreconditionFailed => Problem::new(
             StatusCode::PRECONDITION_FAILED,
             "etag_mismatch",
@@ -42,11 +38,7 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             "route_not_validated",
             "Validate the route draft before activation.",
         ),
-        ConfigurationError::InvalidRoute(detail) => {
-            let mut errors = FieldErrors::new();
-            errors.insert("route".to_owned(), vec![detail]);
-            Problem::validation(errors)
-        }
+        ConfigurationError::InvalidRoute(detail) => Problem::field_validation("route", detail),
         ConfigurationError::RuntimeCompile(error) => {
             error!(%error, "runtime compilation failed");
             Problem::internal()
@@ -73,20 +65,14 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             "configuration_resource_in_use",
             "The resource is active or referenced and cannot be removed.",
         ),
-        ConfigurationError::Invalid(detail) => {
-            let mut errors = FieldErrors::new();
-            errors.insert("configuration".to_owned(), vec![detail]);
-            Problem::validation(errors)
-        }
+        ConfigurationError::Invalid(detail) => Problem::field_validation("configuration", detail),
         ConfigurationError::ProviderRevisionDiffTooLarge { dimension, maximum } => {
-            let mut errors = FieldErrors::new();
-            errors.insert(
-                "revisions".to_owned(),
-                vec![format!(
+            Problem::field_validation(
+                "revisions",
+                format!(
                     "provider revision diff supports at most {maximum} {dimension} per revision"
-                )],
-            );
-            Problem::validation(errors)
+                ),
+            )
         }
     }
 }
@@ -98,11 +84,7 @@ pub(crate) fn map_access(error: AccessError) -> Problem {
             error!(%error, "runtime compilation failed after API key change");
             Problem::internal()
         }
-        AccessError::Invalid(detail) => {
-            let mut errors = FieldErrors::new();
-            errors.insert("api_key".to_owned(), vec![detail]);
-            Problem::validation(errors)
-        }
+        AccessError::Invalid(detail) => Problem::field_validation("api_key", detail),
         AccessError::NotFound => Problem::new(
             StatusCode::NOT_FOUND,
             "api_key_not_found",
@@ -138,11 +120,7 @@ pub(crate) fn user_not_found() -> Problem {
 pub(crate) fn map_identity(error: IdentityError) -> Problem {
     match error {
         IdentityError::Persistence(error) => map_persistence(error),
-        IdentityError::Invalid(detail) => {
-            let mut errors = FieldErrors::new();
-            errors.insert("identity".to_owned(), vec![detail]);
-            Problem::validation(errors)
-        }
+        IdentityError::Invalid(detail) => Problem::field_validation("identity", detail),
         IdentityError::NotFound => Problem::new(
             StatusCode::NOT_FOUND,
             "identity_resource_not_found",

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit};
 use crate::{
-    FieldErrors, HealthResponse, ManagementState, Problem,
+    HealthResponse, ManagementState, Problem,
     management::{Permission, require_permission, require_read_session},
 };
 
@@ -115,12 +115,10 @@ pub(super) async fn provider_health(
     require_permission(&principal, Permission::ReadOperations)?;
     let window_minutes = query.window_minutes.unwrap_or(15);
     if !(1..=1_440).contains(&window_minutes) {
-        let mut fields = FieldErrors::new();
-        fields.insert(
-            "window_minutes".to_owned(),
-            vec!["Window must be between 1 and 1440 minutes.".to_owned()],
-        );
-        return Err(Problem::validation(fields));
+        return Err(Problem::field_validation(
+            "window_minutes",
+            "Window must be between 1 and 1440 minutes.",
+        ));
     }
     let cursor = query
         .cursor

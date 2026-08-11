@@ -162,12 +162,10 @@ pub(in crate::management) async fn create_invitation(
     let role = parse_user_role(&request.role)?;
     let hours = request.expires_in_hours.unwrap_or(7 * 24);
     if !(1..=30 * 24).contains(&hours) {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "expires_in_hours".to_owned(),
-            vec!["Use a value between 1 and 720 hours.".to_owned()],
-        );
-        return Err(Problem::validation(errors));
+        return Err(Problem::field_validation(
+            "expires_in_hours",
+            "Use a value between 1 and 720 hours.",
+        ));
     }
     let expires_at = Utc::now()
         .checked_add_signed(chrono::Duration::hours(i64::from(hours)))

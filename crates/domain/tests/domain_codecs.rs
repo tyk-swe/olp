@@ -25,24 +25,10 @@ fn canonical_enum_text_and_serde_codecs_agree() {
     assert_codec(&TransportMode::ALL);
     assert_codec(&OperationKind::ALL);
     assert_codec(&ProviderKind::ALL);
-    assert_codec(&[
-        ProviderState::Draft,
-        ProviderState::Active,
-        ProviderState::Disabled,
-    ]);
-    assert_codec(&[RouteDraftState::Draft, RouteDraftState::Validated]);
-    assert_codec(&[
-        CapabilitySource::Declared,
-        CapabilitySource::Probed,
-        CapabilitySource::Certified,
-    ]);
-    assert_codec(&[
-        ProviderAuthMode::ApiKey,
-        ProviderAuthMode::ApplicationDefault,
-        ProviderAuthMode::ServiceAccount,
-        ProviderAuthMode::DefaultChain,
-        ProviderAuthMode::Static,
-    ]);
+    assert_codec(&ProviderState::ALL);
+    assert_codec(&RouteDraftState::ALL);
+    assert_codec(&CapabilitySource::ALL);
+    assert_codec(&ProviderAuthMode::ALL);
 }
 
 #[test]

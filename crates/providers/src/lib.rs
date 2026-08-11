@@ -6,6 +6,7 @@ pub mod anthropic;
 mod azure_openai;
 #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod bedrock;
+mod connector;
 mod endpoint;
 mod factory;
 pub mod gemini;
@@ -22,6 +23,7 @@ pub mod test_support;
 
 pub use anthropic::validate_operation as validate_anthropic_operation;
 pub use bedrock::validate_operation as validate_bedrock_operation;
+pub use connector::ConnectorTimeouts;
 pub use factory::{
     CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
     CredentialKind, OpenAiConnector, OpenAiConnectorOverrideRegistry, ProviderConfig,

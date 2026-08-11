@@ -12,6 +12,12 @@
   } from './providerCache';
   import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
   import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor,
+    resetCursor
+  } from '$lib/api/pagination';
+  import {
     activateProvider,
     certifyProviderModel,
     createProvider,
@@ -58,16 +64,19 @@
   let draft = $state<ProviderDraft | null>(null);
   let wizardProvider = $state<Provider | null>(null);
   let wizardStep = $state(1);
-  let wizardModelCursor = $state<string | undefined>();
-  let wizardModelHistory = $state<Array<string | undefined>>([]);
+  const wizardModelPagination = $state(emptyCursorHistory());
   const wizardModels = createQuery(() => ({
     queryKey: [
       'provider-model-page',
       wizardProvider?.id ?? '',
-      wizardModelCursor ?? 'first'
+      wizardModelPagination.cursor ?? 'first'
     ],
     queryFn: ({ signal }) =>
-      listProviderModelPage(wizardProvider!.id, wizardModelCursor, signal),
+      listProviderModelPage(
+        wizardProvider!.id,
+        wizardModelPagination.cursor,
+        signal
+      ),
     enabled: Boolean(wizardProvider) && wizardStep >= 3
   }));
   const capabilityOptions = createQuery(() => ({
@@ -187,18 +196,6 @@
     }
   }
 
-  function nextWizardModelPage() {
-    const next = wizardModels.data?.nextCursor;
-    if (!next) return;
-    wizardModelHistory = [...wizardModelHistory, wizardModelCursor];
-    wizardModelCursor = next;
-  }
-
-  function previousWizardModelPage() {
-    wizardModelCursor = wizardModelHistory.at(-1);
-    wizardModelHistory = wizardModelHistory.slice(0, -1);
-  }
-
   async function createDraft(event: SubmitEvent) {
     event.preventDefault();
     if (!draft || !selectedSpec) return;
@@ -242,8 +239,7 @@
         );
       }
       clearCertificationResults();
-      wizardModelCursor = undefined;
-      wizardModelHistory = [];
+      resetCursor(wizardModelPagination);
       await refetchWizardModels();
       wizardProvider = discovered;
       wizardStep = 4;
@@ -262,8 +258,7 @@
       const declared = await declareProviderModels(wizardProvider!, names);
       clearCertificationResults();
       manualModelNames = '';
-      wizardModelCursor = undefined;
-      wizardModelHistory = [];
+      resetCursor(wizardModelPagination);
       await refetchWizardModels();
       wizardProvider = declared;
       wizardStep = 4;
@@ -689,11 +684,12 @@
       </table>
     </div>
     <CursorPagination
-      page={wizardModelHistory.length + 1}
-      hasPrevious={wizardModelHistory.length > 0}
+      page={wizardModelPagination.history.length + 1}
+      hasPrevious={wizardModelPagination.history.length > 0}
       hasNext={Boolean(wizardModels.data?.nextCursor)}
-      onPrevious={previousWizardModelPage}
-      onNext={nextWizardModelPage}
+      onPrevious={() => popCursor(wizardModelPagination)}
+      onNext={() =>
+        pushCursor(wizardModelPagination, wizardModels.data?.nextCursor)}
       label="Provider wizard model pages"
     />
     <ol

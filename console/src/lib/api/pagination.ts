@@ -14,7 +14,10 @@ export function emptyCursorHistory(): CursorHistory {
   return { cursor: undefined, history: [] };
 }
 
-export function pushCursor(state: CursorHistory, next: string | null | undefined) {
+export function pushCursor(
+  state: CursorHistory,
+  next: string | null | undefined
+) {
   if (!next) return;
   state.history = [...state.history, state.cursor];
   state.cursor = next;
@@ -23,6 +26,11 @@ export function pushCursor(state: CursorHistory, next: string | null | undefined
 export function popCursor(state: CursorHistory) {
   state.cursor = state.history.at(-1);
   state.history = state.history.slice(0, -1);
+}
+
+export function resetCursor(state: CursorHistory) {
+  state.cursor = undefined;
+  state.history = [];
 }
 
 const MAX_COLLECTED_ITEMS = 10_000;

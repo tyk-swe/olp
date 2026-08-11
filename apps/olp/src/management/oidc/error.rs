@@ -4,7 +4,7 @@ use olp_storage::oidc::OidcError;
 use tracing::{error, warn};
 
 use crate::{
-    FieldErrors, Problem,
+    Problem,
     management::{map_persistence, reauthentication_required},
 };
 
@@ -38,9 +38,7 @@ pub(super) fn invalid_id_token() -> Problem {
 }
 
 pub(super) fn field_problem(field: &str, detail: &str) -> Problem {
-    let mut errors = FieldErrors::new();
-    errors.insert(field.to_owned(), vec![detail.to_owned()]);
-    Problem::validation(errors)
+    Problem::field_validation(field, detail)
 }
 
 pub(super) fn oidc_not_configured() -> Problem {

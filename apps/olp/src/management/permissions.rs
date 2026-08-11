@@ -2,16 +2,11 @@ use olp_domain::{Permission, Role};
 use olp_storage::authentication::SessionPrincipal;
 use tracing::error;
 
-use crate::{FieldErrors, Problem};
+use crate::Problem;
 
 pub(crate) fn parse_user_role(role: &str) -> Result<Role, Problem> {
     role.parse().map_err(|_| {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "role".to_owned(),
-            vec!["Use owner, operator, developer, or viewer.".to_owned()],
-        );
-        Problem::validation(errors)
+        Problem::field_validation("role", "Use owner, operator, developer, or viewer.")
     })
 }
 

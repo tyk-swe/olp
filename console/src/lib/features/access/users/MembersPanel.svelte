@@ -8,19 +8,23 @@
   } from '$lib/api/management/access';
   import type { CursorPage } from '$lib/api/management/shared';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor
+  } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { FIXED_ROLES } from '../shared';
 
   const queryClient = useQueryClient();
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
+  const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
 
   const users = createQuery(() => ({
-    queryKey: ['user-page', cursor ?? 'first'],
-    queryFn: () => listUserPage(cursor)
+    queryKey: ['user-page', pagination.cursor ?? 'first'],
+    queryFn: () => listUserPage(pagination.cursor)
   }));
 
   async function run(label: string, action: () => Promise<void>) {
@@ -37,7 +41,7 @@
 
   function updateCachedUser(updated: User) {
     queryClient.setQueryData<CursorPage<User>>(
-      ['user-page', cursor ?? 'first'],
+      ['user-page', pagination.cursor ?? 'first'],
       (current) =>
         current
           ? {
@@ -76,18 +80,6 @@
         ? `${updated.display_name} can sign in again.`
         : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API Keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
     });
-  }
-
-  function nextPage() {
-    const next = users.data?.nextCursor;
-    if (!next) return;
-    history = [...history, cursor];
-    cursor = next;
-  }
-
-  function previousPage() {
-    cursor = history.at(-1);
-    history = history.slice(0, -1);
   }
 </script>
 
@@ -175,11 +167,11 @@
     </table>
   </div>
   <CursorPagination
-    page={history.length + 1}
-    hasPrevious={history.length > 0}
+    page={pagination.history.length + 1}
+    hasPrevious={pagination.history.length > 0}
     hasNext={Boolean(users.data?.nextCursor)}
-    onPrevious={previousPage}
-    onNext={nextPage}
+    onPrevious={() => popCursor(pagination)}
+    onNext={() => pushCursor(pagination, users.data?.nextCursor)}
     label="Member pages"
   />
 {/if}

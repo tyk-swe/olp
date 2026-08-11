@@ -2,7 +2,6 @@ use std::{
     collections::BTreeSet,
     fmt,
     num::{NonZeroU32, NonZeroU64},
-    str::FromStr,
 };
 
 use chrono::{DateTime, Utc};
@@ -11,47 +10,14 @@ use thiserror::Error;
 
 use crate::{ApiKeyId, ApiKeyLookupId, OperationKind, RouteSlug};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Owner,
-    Operator,
-    Developer,
-    Viewer,
-}
-
-impl Role {
-    pub const ALL: [Self; 4] = [Self::Owner, Self::Operator, Self::Developer, Self::Viewer];
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Operator => "operator",
-            Self::Developer => "developer",
-            Self::Viewer => "viewer",
-        }
+closed_string_enum! {
+    pub enum Role {
+        Owner => "owner",
+        Operator => "operator",
+        Developer => "developer",
+        Viewer => "viewer",
     }
-}
-
-impl FromStr for Role {
-    type Err = InvalidRole;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "owner" => Ok(Self::Owner),
-            "operator" => Ok(Self::Operator),
-            "developer" => Ok(Self::Developer),
-            "viewer" => Ok(Self::Viewer),
-            _ => Err(InvalidRole),
-        }
-    }
-}
-
-impl fmt::Display for Role {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
+    parse_error InvalidRole => |_| InvalidRole;
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]

@@ -8,12 +8,17 @@
   } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor,
+    resetCursor
+  } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
 
   let selectedUser = $state('');
   let previousSelectedUser = $state('');
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
+  const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
@@ -23,15 +28,14 @@
     queryFn: () => listUserPage()
   }));
   const sessions = createQuery(() => ({
-    queryKey: ['session-page', selectedUser, cursor ?? 'first'],
-    queryFn: () => listSessionPage(selectedUser || undefined, cursor)
+    queryKey: ['session-page', selectedUser, pagination.cursor ?? 'first'],
+    queryFn: () => listSessionPage(selectedUser || undefined, pagination.cursor)
   }));
 
   $effect(() => {
     if (selectedUser === previousSelectedUser) return;
     previousSelectedUser = selectedUser;
-    cursor = undefined;
-    history = [];
+    resetCursor(pagination);
   });
 
   async function removeSession(id: string, current: boolean) {
@@ -56,18 +60,6 @@
     } finally {
       busy = '';
     }
-  }
-
-  function nextPage() {
-    const next = sessions.data?.nextCursor;
-    if (!next) return;
-    history = [...history, cursor];
-    cursor = next;
-  }
-
-  function previousPage() {
-    cursor = history.at(-1);
-    history = history.slice(0, -1);
   }
 </script>
 
@@ -96,7 +88,7 @@
   <div class="inline-problem" role="alert">
     {accessErrorMessage(sessions.error)}
   </div>
-{:else if !sessions.data?.items.length && history.length === 0}
+{:else if !sessions.data?.items.length && pagination.history.length === 0}
   <section class="card empty-state">
     <p>No active sessions in this view.</p>
   </section>
@@ -139,11 +131,11 @@
     </table>
   </div>
   <CursorPagination
-    page={history.length + 1}
-    hasPrevious={history.length > 0}
+    page={pagination.history.length + 1}
+    hasPrevious={pagination.history.length > 0}
     hasNext={Boolean(sessions.data?.nextCursor)}
-    onPrevious={previousPage}
-    onNext={nextPage}
+    onPrevious={() => popCursor(pagination)}
+    onNext={() => pushCursor(pagination, sessions.data?.nextCursor)}
     label="Session pages"
   />
 {/if}

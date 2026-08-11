@@ -24,7 +24,7 @@ use crate::{
 
 use super::credentials::ProviderMutationResponse;
 use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, validation, with_etag,
+    PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -343,7 +343,7 @@ fn validate_provider_update(
     request: &UpdateProviderRequest,
 ) -> Result<(), Problem> {
     if request.auth_mode != provider.auth_mode {
-        return Err(validation(
+        return Err(Problem::field_validation(
             "auth_mode",
             "Provider authentication mode is immutable; create a separate provider to change identity mode.",
         ));
@@ -380,9 +380,9 @@ fn validate_provider_update(
         auth_mode: request.auth_mode,
         probe_model: provider.probe_model.as_deref(),
     })
-    .map_err(|error| validation("provider", &error.to_string()))?;
+    .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
     crate::bootstrap::provider_adapter::factory_validate(&config)
-        .map_err(|error| validation("provider", &error.to_string()))
+        .map_err(|error| Problem::field_validation("provider", error.to_string()))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -451,7 +451,7 @@ pub(crate) async fn probe_provider(
         .await
         .map_err(map_configuration_resource)?;
     if !succeeded {
-        return Err(validation("provider", &detail));
+        return Err(Problem::field_validation("provider", detail));
     }
     with_etag(
         Json(ProbeResponse {

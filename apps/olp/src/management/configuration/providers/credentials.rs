@@ -28,7 +28,7 @@ use crate::{
 };
 
 use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, validation, with_etag,
+    PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -151,7 +151,7 @@ pub(crate) async fn rotate_provider_credential(
     })
     .map_err(crate::management::map_persistence)?;
     if request.credential.expose().trim().is_empty() || request.credential.expose().len() > 8_192 {
-        return Err(validation(
+        return Err(Problem::field_validation(
             "credential",
             "Provide a credential no larger than 8 KiB.",
         ));
@@ -162,7 +162,7 @@ pub(crate) async fn rotate_provider_credential(
         .await
         .map_err(map_configuration_resource)?;
     validate_rotated_credential(&provider, request.credential.expose())
-        .map_err(|detail| validation("credential", &detail))?;
+        .map_err(|detail| Problem::field_validation("credential", detail))?;
     let version = store
         .next_credential_version_candidate(provider_id)
         .await

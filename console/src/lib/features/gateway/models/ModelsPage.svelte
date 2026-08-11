@@ -2,6 +2,11 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor
+  } from '$lib/api/pagination';
   import { invalidateProviderSummaries } from '../providers/providerCache';
   import {
     getProvider,
@@ -11,11 +16,13 @@
   } from '$lib/api/management/providers';
 
   const queryClient = useQueryClient();
-  let modelCursor = $state<string | undefined>();
-  let modelHistory = $state<Array<string | undefined>>([]);
+  const pagination = $state(emptyCursorHistory());
   const models = createQuery(() => ({
-    queryKey: ['provider-model-inventory-page', modelCursor ?? 'first'],
-    queryFn: () => listProviderModelInventoryPage(modelCursor)
+    queryKey: [
+      'provider-model-inventory-page',
+      pagination.cursor ?? 'first'
+    ],
+    queryFn: () => listProviderModelInventoryPage(pagination.cursor)
   }));
   let search = $state('');
   let surface = $state('all');
@@ -57,17 +64,6 @@
     }
   }
 
-  function nextPage() {
-    const next = models.data?.nextCursor;
-    if (!next) return;
-    modelHistory = [...modelHistory, modelCursor];
-    modelCursor = next;
-  }
-
-  function previousPage() {
-    modelCursor = modelHistory.at(-1);
-    modelHistory = modelHistory.slice(0, -1);
-  }
 </script>
 
 <svelte:head><title>Models · OpenLLMProxy</title></svelte:head>
@@ -112,7 +108,7 @@
   </tbody></table></div>
 {/if}
 
-{#if !models.isPending && !models.isError}<CursorPagination page={modelHistory.length + 1} hasPrevious={modelHistory.length > 0} hasNext={Boolean(models.data?.nextCursor)} onPrevious={previousPage} onNext={nextPage} label="Model inventory pages" />{/if}
+{#if !models.isPending && !models.isError}<CursorPagination page={pagination.history.length + 1} hasPrevious={pagination.history.length > 0} hasNext={Boolean(models.data?.nextCursor)} onPrevious={() => popCursor(pagination)} onNext={() => pushCursor(pagination, models.data?.nextCursor)} label="Model inventory pages" />{/if}
 
 <aside class="policy-note" aria-label="Capability policy"><strong>No silent semantic loss.</strong> Cross-protocol routes reject operations a target cannot faithfully represent; unknown source fields are not treated as certified support.</aside>
 

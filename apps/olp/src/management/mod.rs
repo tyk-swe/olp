@@ -38,7 +38,7 @@ use auth::{
     UserResponse, authentication_capabilities, current_session, login, logout, setup, setup_status,
 };
 use axum::{Json, Router, routing::get, routing::post};
-pub(crate) use configuration::common::{map_configuration_resource, validation};
+pub(crate) use configuration::common::map_configuration_resource;
 pub(crate) use cookies::{
     RECENT_AUTH_COOKIE, append_recent_auth_cookie, append_security_transition_cookies,
     clear_recent_auth_cookie, validate_session_cookie_ttl,

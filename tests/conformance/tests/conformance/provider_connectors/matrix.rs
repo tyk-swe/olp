@@ -78,39 +78,25 @@ const NO_BEDROCK_RESPONSE_BOUND: &str =
 const NO_BEDROCK_MEDIA: &str =
     "the Bedrock Converse encoder accepts canonical text and tool parts but no media content part";
 
+const fn shared_contracts(kind: ProviderKind) -> ProviderContractRow {
+    ProviderContractRow {
+        kind,
+        cached_usage: Disposition::SharedContract,
+        structured_output: Disposition::SharedContract,
+        request_ids: Disposition::SharedContract,
+        media: Disposition::SharedContract,
+        oversized_responses: Disposition::SharedContract,
+    }
+}
+
 pub(super) const ROWS: [ProviderContractRow; 7] = [
+    shared_contracts(ProviderKind::OpenAi),
     ProviderContractRow {
-        kind: ProviderKind::OpenAi,
-        cached_usage: Disposition::SharedContract,
-        structured_output: Disposition::SharedContract,
-        request_ids: Disposition::SharedContract,
-        media: Disposition::SharedContract,
-        oversized_responses: Disposition::SharedContract,
-    },
-    ProviderContractRow {
-        kind: ProviderKind::Anthropic,
-        cached_usage: Disposition::SharedContract,
         structured_output: Disposition::Inapplicable(NO_ANTHROPIC_STRUCTURED_OUTPUT),
-        request_ids: Disposition::SharedContract,
-        media: Disposition::SharedContract,
-        oversized_responses: Disposition::SharedContract,
+        ..shared_contracts(ProviderKind::Anthropic)
     },
-    ProviderContractRow {
-        kind: ProviderKind::Gemini,
-        cached_usage: Disposition::SharedContract,
-        structured_output: Disposition::SharedContract,
-        request_ids: Disposition::SharedContract,
-        media: Disposition::SharedContract,
-        oversized_responses: Disposition::SharedContract,
-    },
-    ProviderContractRow {
-        kind: ProviderKind::VertexAi,
-        cached_usage: Disposition::SharedContract,
-        structured_output: Disposition::SharedContract,
-        request_ids: Disposition::SharedContract,
-        media: Disposition::SharedContract,
-        oversized_responses: Disposition::SharedContract,
-    },
+    shared_contracts(ProviderKind::Gemini),
+    shared_contracts(ProviderKind::VertexAi),
     ProviderContractRow {
         kind: ProviderKind::Bedrock,
         cached_usage: Disposition::Inapplicable(NO_BEDROCK_CACHED_USAGE),
@@ -119,237 +105,64 @@ pub(super) const ROWS: [ProviderContractRow; 7] = [
         media: Disposition::Inapplicable(NO_BEDROCK_MEDIA),
         oversized_responses: Disposition::Inapplicable(NO_BEDROCK_RESPONSE_BOUND),
     },
-    ProviderContractRow {
-        kind: ProviderKind::AzureOpenAi,
-        cached_usage: Disposition::SharedContract,
-        structured_output: Disposition::SharedContract,
-        request_ids: Disposition::SharedContract,
-        media: Disposition::SharedContract,
-        oversized_responses: Disposition::SharedContract,
-    },
-    ProviderContractRow {
-        kind: ProviderKind::OpenAiCompatible,
-        cached_usage: Disposition::SharedContract,
-        structured_output: Disposition::SharedContract,
-        request_ids: Disposition::SharedContract,
-        media: Disposition::SharedContract,
-        oversized_responses: Disposition::SharedContract,
-    },
+    shared_contracts(ProviderKind::AzureOpenAi),
+    shared_contracts(ProviderKind::OpenAiCompatible),
 ];
 
 pub(super) type CapabilityTuple = (OperationKind, Surface, TransportMode);
 
+macro_rules! capability {
+    ($operation:ident, $surface:ident, $mode:ident) => {
+        (
+            OperationKind::$operation,
+            Surface::$surface,
+            TransportMode::$mode,
+        )
+    };
+}
+
 const SHARED_NATIVE_CAPABILITIES: [CapabilityTuple; 9] = [
-    (
-        OperationKind::Generation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Anthropic,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Anthropic,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Gemini,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Gemini,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::Anthropic,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::Gemini,
-        TransportMode::Unary,
-    ),
+    capability!(Generation, OpenAi, Unary),
+    capability!(Generation, OpenAi, Streaming),
+    capability!(Generation, Anthropic, Unary),
+    capability!(Generation, Anthropic, Streaming),
+    capability!(Generation, Gemini, Unary),
+    capability!(Generation, Gemini, Streaming),
+    capability!(TokenCount, OpenAi, Unary),
+    capability!(TokenCount, Anthropic, Unary),
+    capability!(TokenCount, Gemini, Unary),
 ];
 
 const OPENAI_NATIVE_EXTRA_CAPABILITIES: [CapabilityTuple; 16] = [
-    (
-        OperationKind::Embeddings,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::ImageGeneration,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::ImageGeneration,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::ImageEdit,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::ImageEdit,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::ImageVariation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (OperationKind::Speech, Surface::OpenAi, TransportMode::Unary),
-    (
-        OperationKind::Speech,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Transcription,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Transcription,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::VideoCreate,
-        Surface::OpenAi,
-        TransportMode::Async,
-    ),
-    (
-        OperationKind::VideoList,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::VideoGet,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::VideoContent,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::VideoDelete,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Moderation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
+    capability!(Embeddings, OpenAi, Unary),
+    capability!(ImageGeneration, OpenAi, Unary),
+    capability!(ImageGeneration, OpenAi, Streaming),
+    capability!(ImageEdit, OpenAi, Unary),
+    capability!(ImageEdit, OpenAi, Streaming),
+    capability!(ImageVariation, OpenAi, Unary),
+    capability!(Speech, OpenAi, Unary),
+    capability!(Speech, OpenAi, Streaming),
+    capability!(Transcription, OpenAi, Unary),
+    capability!(Transcription, OpenAi, Streaming),
+    capability!(VideoCreate, OpenAi, Async),
+    capability!(VideoList, OpenAi, Unary),
+    capability!(VideoGet, OpenAi, Unary),
+    capability!(VideoContent, OpenAi, Unary),
+    capability!(VideoDelete, OpenAi, Unary),
+    capability!(Moderation, OpenAi, Unary),
 ];
 
 const OPENAI_COMPATIBLE_CAPABILITIES: [CapabilityTuple; 5] = [
-    (
-        OperationKind::Generation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Embeddings,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Moderation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
+    capability!(Generation, OpenAi, Unary),
+    capability!(Generation, OpenAi, Streaming),
+    capability!(Embeddings, OpenAi, Unary),
+    capability!(TokenCount, OpenAi, Unary),
+    capability!(Moderation, OpenAi, Unary),
 ];
 
-const AZURE_OPENAI_CAPABILITIES: [CapabilityTuple; 11] = [
-    (
-        OperationKind::Generation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::OpenAi,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Anthropic,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Anthropic,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Gemini,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Generation,
-        Surface::Gemini,
-        TransportMode::Streaming,
-    ),
-    (
-        OperationKind::Embeddings,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::Anthropic,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::TokenCount,
-        Surface::Gemini,
-        TransportMode::Unary,
-    ),
-    (
-        OperationKind::Moderation,
-        Surface::OpenAi,
-        TransportMode::Unary,
-    ),
+const AZURE_OPENAI_EXTRA_CAPABILITIES: [CapabilityTuple; 2] = [
+    capability!(Embeddings, OpenAi, Unary),
+    capability!(Moderation, OpenAi, Unary),
 ];
 
 pub(super) fn expected_certifiable_capabilities(kind: ProviderKind) -> BTreeSet<CapabilityTuple> {
@@ -363,7 +176,11 @@ pub(super) fn expected_certifiable_capabilities(kind: ProviderKind) -> BTreeSet<
         | ProviderKind::Gemini
         | ProviderKind::VertexAi
         | ProviderKind::Bedrock => capability_set(SHARED_NATIVE_CAPABILITIES),
-        ProviderKind::AzureOpenAi => capability_set(AZURE_OPENAI_CAPABILITIES),
+        ProviderKind::AzureOpenAi => capability_set(
+            SHARED_NATIVE_CAPABILITIES
+                .into_iter()
+                .chain(AZURE_OPENAI_EXTRA_CAPABILITIES),
+        ),
         ProviderKind::OpenAiCompatible => capability_set(OPENAI_COMPATIBLE_CAPABILITIES),
     }
 }

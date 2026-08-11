@@ -7,7 +7,7 @@
 mod translate;
 mod transport;
 
-use std::{fmt, time::Duration};
+use std::fmt;
 
 use aws_config::{BehaviorVersion, Region, retry::RetryConfig, timeout::TimeoutConfig};
 use aws_credential_types::Credentials;
@@ -16,6 +16,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use zeroize::Zeroize;
 
+pub use crate::ConnectorTimeouts;
 pub use transport::BedrockConnector;
 
 /// Validates that a canonical operation can be encoded by Bedrock without
@@ -35,32 +36,7 @@ pub fn validate_operation(operation: &Operation) -> Result<(), TransportError> {
     }
 }
 
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const DEFAULT_FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_STATIC_CREDENTIAL_DOCUMENT_BYTES: usize = 16 * 1_024;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ConnectorTimeouts {
-    /// DNS/TCP/TLS connection bound applied by the AWS SDK HTTP client.
-    pub connect: Duration,
-    /// Response-setup bound for streaming calls. Buffered unary SDK calls do
-    /// not expose a separate first-body-byte phase and use the total attempt.
-    pub first_byte: Duration,
-    /// Resetting event idle bound for streams and SDK socket-read bound for
-    /// buffered unary calls.
-    pub idle: Duration,
-}
-
-impl Default for ConnectorTimeouts {
-    fn default() -> Self {
-        Self {
-            connect: DEFAULT_CONNECT_TIMEOUT,
-            first_byte: DEFAULT_FIRST_BYTE_TIMEOUT,
-            idle: DEFAULT_IDLE_TIMEOUT,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct ConnectorConfig {
@@ -232,10 +208,10 @@ fn validate_region(region: &str) -> Result<(), ConfigError> {
 
 #[cfg(any(test, feature = "test-util"))]
 fn validate_timeouts(timeouts: ConnectorTimeouts) -> Result<(), ConfigError> {
-    if timeouts.connect.is_zero() || timeouts.first_byte.is_zero() || timeouts.idle.is_zero() {
-        return Err(ConfigError::ZeroTimeout);
-    }
-    Ok(())
+    timeouts
+        .validate()
+        .map(|_| ())
+        .map_err(|_| ConfigError::ZeroTimeout)
 }
 
 fn validate_static_component(
@@ -279,6 +255,8 @@ async fn sdk_config(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]

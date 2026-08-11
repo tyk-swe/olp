@@ -95,41 +95,15 @@ impl<'a> From<&'a CreateProviderRequest> for CreateProviderFingerprint<'a> {
     }
 }
 
-fn connector_validation(error: impl ToString) -> Problem {
-    let mut errors = FieldErrors::new();
-    errors.insert("endpoint".to_owned(), vec![error.to_string()]);
-    Problem::validation(errors)
-}
-
-fn connector_credential_validation(error: impl ToString) -> Problem {
-    let mut errors = FieldErrors::new();
-    errors.insert("credential".to_owned(), vec![error.to_string()]);
-    Problem::validation(errors)
-}
-
-fn bedrock_region_validation(error: impl ToString) -> Problem {
-    let mut errors = FieldErrors::new();
-    errors.insert("cloud_region".to_owned(), vec![error.to_string()]);
-    Problem::validation(errors)
-}
-
-fn bedrock_credential_validation(error: impl ToString) -> Problem {
-    let mut errors = FieldErrors::new();
-    errors.insert("credential".to_owned(), vec![error.to_string()]);
-    Problem::validation(errors)
-}
-
 fn provider_connector_validation(kind: ProviderKind, error: ProviderError) -> Problem {
-    match error {
+    let (field, detail) = match error {
         ProviderError::Configuration(detail) if kind == ProviderKind::Bedrock => {
-            bedrock_region_validation(detail)
+            ("cloud_region", detail)
         }
-        ProviderError::Configuration(detail) => connector_validation(detail),
-        ProviderError::Credential(detail) if kind == ProviderKind::Bedrock => {
-            bedrock_credential_validation(detail)
-        }
-        ProviderError::Credential(detail) => connector_credential_validation(detail),
-    }
+        ProviderError::Configuration(detail) => ("endpoint", detail),
+        ProviderError::Credential(detail) => ("credential", detail),
+    };
+    Problem::field_validation(field, detail)
 }
 
 fn reject_create_field(errors: &mut FieldErrors, field: &str, present: bool, detail: &str) {

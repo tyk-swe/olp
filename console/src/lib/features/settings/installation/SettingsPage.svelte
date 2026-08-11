@@ -3,6 +3,12 @@
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor,
+    resetCursor
+  } from '$lib/api/pagination';
+  import {
     createPricingRevision,
     listPricing,
     listSettings,
@@ -37,8 +43,7 @@
   let currency = $state('USD');
   let effectiveAt = $state(dateTimeLocalValue(new Date()));
   let savingPrice = $state(false);
-  let pricingCursor = $state<string | undefined>();
-  let pricingHistory = $state<Array<string | undefined>>([]);
+  const pricingPagination = $state(emptyCursorHistory());
 
   const settings = createQuery(() => ({
     queryKey: ['settings'],
@@ -59,21 +64,9 @@
   });
 
   const pricing = createQuery(() => ({
-    queryKey: ['pricing', pricingCursor ?? 'first'],
-    queryFn: () => listPricing(pricingCursor)
+    queryKey: ['pricing', pricingPagination.cursor ?? 'first'],
+    queryFn: () => listPricing(pricingPagination.cursor)
   }));
-
-  function nextPricingPage() {
-    const next = pricing.data?.next_cursor ?? undefined;
-    if (!next) return;
-    pricingHistory = [...pricingHistory, pricingCursor];
-    pricingCursor = next;
-  }
-
-  function previousPricingPage() {
-    pricingCursor = pricingHistory.at(-1);
-    pricingHistory = pricingHistory.slice(0, -1);
-  }
 
   function settingLabel(key: string) {
     return key.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase());
@@ -124,8 +117,7 @@
       status = 'Pricing revision created. New usage will use the effective revision.';
       model = inputPrice = outputPrice = unitPrice = providerId = '';
       effectiveAt = dateTimeLocalValue(new Date());
-      pricingCursor = undefined;
-      pricingHistory = [];
+      resetCursor(pricingPagination);
       await pricing.refetch();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'The pricing revision could not be created.';
@@ -166,7 +158,7 @@
   </form>
 
   {#if pricing.isPending}<div class="loading-state" role="status">Loading revisions…</div>
-  {:else if pricing.data?.data.length === 0 && pricingHistory.length === 0}<div class="card empty-state">No pricing revisions. Usage cost will be marked unpriced.</div>
+  {:else if pricing.data?.data.length === 0 && pricingPagination.history.length === 0}<div class="card empty-state">No pricing revisions. Usage cost will be marked unpriced.</div>
   {:else}
     <div class="revision-list">
       {#each pricing.data?.data ?? [] as revision (revision.id)}
@@ -183,7 +175,7 @@
         </details>
       {/each}
     </div>
-    <CursorPagination page={pricingHistory.length + 1} hasPrevious={pricingHistory.length > 0} hasNext={Boolean(pricing.data?.next_cursor)} onPrevious={previousPricingPage} onNext={nextPricingPage} label="Pricing revision pages" />
+    <CursorPagination page={pricingPagination.history.length + 1} hasPrevious={pricingPagination.history.length > 0} hasNext={Boolean(pricing.data?.next_cursor)} onPrevious={() => popCursor(pricingPagination)} onNext={() => pushCursor(pricingPagination, pricing.data?.next_cursor)} label="Pricing revision pages" />
   {/if}
 </section>
 

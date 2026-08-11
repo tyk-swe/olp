@@ -5,7 +5,7 @@ use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;
 
-use crate::{FieldErrors, Problem, management::map_persistence};
+use crate::{Problem, management::map_persistence};
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -19,12 +19,10 @@ pub(super) fn page_limit(value: Option<u16>) -> Result<u16, Problem> {
     if (1..=200).contains(&value) {
         return Ok(value);
     }
-    let mut errors = FieldErrors::new();
-    errors.insert(
-        "limit".to_owned(),
-        vec!["Use a page size between 1 and 200.".to_owned()],
-    );
-    Err(Problem::validation(errors))
+    Err(Problem::field_validation(
+        "limit",
+        "Use a page size between 1 and 200.",
+    ))
 }
 
 pub(super) fn timestamp_cursor(value: Option<&str>) -> Result<Option<TimestampCursor>, Problem> {
@@ -43,12 +41,10 @@ pub(super) fn validate_time_range(
     if start < end {
         return Ok(());
     }
-    let mut errors = FieldErrors::new();
-    errors.insert(
-        end_name.to_owned(),
-        vec![format!("{end_name} must be later than {start_name}.")],
-    );
-    Err(Problem::validation(errors))
+    Err(Problem::field_validation(
+        end_name,
+        format!("{end_name} must be later than {start_name}."),
+    ))
 }
 
 pub(super) fn not_found() -> Problem {
@@ -80,11 +76,7 @@ pub(super) fn map_operations(error: OperationsError) -> Problem {
             "idempotency_in_progress",
             "An operation with this Idempotency-Key is still in progress.",
         ),
-        OperationsError::Invalid(message) => {
-            let mut errors = FieldErrors::new();
-            errors.insert("request".to_owned(), vec![message]);
-            Problem::validation(errors)
-        }
+        OperationsError::Invalid(message) => Problem::field_validation("request", message),
         OperationsError::Database(error) => {
             error!(%error, "operations persistence query failed");
             Problem::internal()

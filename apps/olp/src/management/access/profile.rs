@@ -32,7 +32,7 @@ use crate::management::{
     secrets::WriteOnlySecret,
     sessions::{cookie, reauthentication_required, require_mutation_session, require_read_session},
 };
-use crate::{FieldErrors, ManagementState, Problem};
+use crate::{ManagementState, Problem};
 
 const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
 
@@ -140,24 +140,20 @@ pub(in crate::management) async fn recent_authentication(
     let principal = require_mutation_session(&state, &headers).await?;
     let request = json_payload(payload)?;
     let purpose = RecentAuthPurpose::parse(&request.purpose).ok_or_else(|| {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "purpose".to_owned(),
-            vec!["Use password_enrollment, oidc_link, or oidc_unlink.".to_owned()],
-        );
-        Problem::validation(errors)
+        Problem::field_validation(
+            "purpose",
+            "Use password_enrollment, oidc_link, or oidc_unlink.",
+        )
     })?;
     if request.resource_id.is_some() != purpose.requires_resource() {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "resource_id".to_owned(),
-            vec![if purpose.requires_resource() {
-                "The exact identity ID is required for OIDC unlinking.".to_owned()
+        return Err(Problem::field_validation(
+            "resource_id",
+            if purpose.requires_resource() {
+                "The exact identity ID is required for OIDC unlinking."
             } else {
-                "This operation must not include a resource ID.".to_owned()
-            }],
-        );
-        return Err(Problem::validation(errors));
+                "This operation must not include a resource ID."
+            },
+        ));
     }
     if request.current_password.expose().chars().count() > 1_024 {
         return Err(Problem::forbidden(
@@ -236,6 +232,16 @@ impl fmt::Debug for ChangePasswordRequest {
     }
 }
 
+fn validate_new_password(password: &WriteOnlySecret) -> Result<(), Problem> {
+    if (12..=1_024).contains(&password.expose().chars().count()) {
+        return Ok(());
+    }
+    Err(Problem::field_validation(
+        "new_password",
+        "Use between 12 and 1,024 characters.",
+    ))
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/profile/password",
@@ -259,14 +265,7 @@ pub(in crate::management) async fn change_password(
     validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
     let expected_etag = if_match(&headers)?;
-    if !(12..=1_024).contains(&request.new_password.expose().chars().count()) {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "new_password".to_owned(),
-            vec!["Use between 12 and 1,024 characters.".to_owned()],
-        );
-        return Err(Problem::validation(errors));
-    }
+    validate_new_password(&request.new_password)?;
     let local = state
         .store()
         .local_password_user(&principal.email)
@@ -369,14 +368,7 @@ pub(in crate::management) async fn enroll_password(
     let recent_auth_token_digest = RecentAuthMaterial::digest_token(recent_auth);
     let request = json_payload(payload)?;
     let expected_etag = if_match(&headers)?;
-    if !(12..=1_024).contains(&request.new_password.expose().chars().count()) {
-        let mut errors = FieldErrors::new();
-        errors.insert(
-            "new_password".to_owned(),
-            vec!["Use between 12 and 1,024 characters.".to_owned()],
-        );
-        return Err(Problem::validation(errors));
-    }
+    validate_new_password(&request.new_password)?;
     let new_password = Zeroizing::new(request.new_password.expose().to_owned());
     let password_hash = spawn_password_work(move || hash_password(&new_password))?
         .await

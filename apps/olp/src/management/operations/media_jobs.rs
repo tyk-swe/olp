@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::helpers::{not_found, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
-    FieldErrors, ManagementState, Problem,
+    ManagementState, Problem,
     management::{Permission, require_permission, require_read_session, with_etag},
 };
 
@@ -173,14 +173,10 @@ fn parse_media_job_lifecycle(value: &str) -> Result<MediaJobLifecycle, Problem> 
         "create_cleanup_pending" => Ok(MediaJobLifecycle::CreateCleanupPending),
         "delete_pending" => Ok(MediaJobLifecycle::DeletePending),
         "deleted" => Ok(MediaJobLifecycle::Deleted),
-        _ => {
-            let mut fields = FieldErrors::new();
-            fields.insert(
-                "lifecycle".to_owned(),
-                vec!["Unknown media-job reconciliation lifecycle.".to_owned()],
-            );
-            Err(Problem::validation(fields))
-        }
+        _ => Err(Problem::field_validation(
+            "lifecycle",
+            "Unknown media-job reconciliation lifecycle.",
+        )),
     }
 }
 
@@ -217,14 +213,10 @@ fn parse_media_job_state(value: &str) -> Result<MediaJobState, Problem> {
         "succeeded" => Ok(MediaJobState::Succeeded),
         "failed" => Ok(MediaJobState::Failed),
         "cancelled" => Ok(MediaJobState::Cancelled),
-        _ => {
-            let mut fields = FieldErrors::new();
-            fields.insert(
-                "state".to_owned(),
-                vec!["State must be queued, running, succeeded, failed, or cancelled.".to_owned()],
-            );
-            Err(Problem::validation(fields))
-        }
+        _ => Err(Problem::field_validation(
+            "state",
+            "State must be queued, running, succeeded, failed, or cancelled.",
+        )),
     }
 }
 
@@ -241,11 +233,7 @@ fn map_media_job(error: MediaJobError) -> Problem {
             "media_job_upstream_identity_conflict",
             "The upstream media job is already bound to different metadata.",
         ),
-        MediaJobError::Invalid(message) => {
-            let mut fields = FieldErrors::new();
-            fields.insert("media_job".to_owned(), vec![message]);
-            Problem::validation(fields)
-        }
+        MediaJobError::Invalid(message) => Problem::field_validation("media_job", message),
         MediaJobError::Database(error) => {
             error!(%error, "media job persistence query failed");
             Problem::internal()

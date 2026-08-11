@@ -33,7 +33,7 @@ use crate::{
 use super::manage::{ProviderDetailResponse, load_provider_detail};
 use crate::bootstrap::provider_adapter::provider_connector;
 use crate::management::configuration::common::{
-    PageQuery, json, map_configuration_resource, page, validation, with_etag,
+    PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -402,18 +402,15 @@ pub(crate) struct CapabilityInput {
 
 fn capability_record(input: CapabilityInput) -> Result<CapabilityRecord, Problem> {
     Ok(CapabilityRecord {
-        operation: input
-            .operation
-            .parse()
-            .map_err(|_| validation("capabilities", "A reviewed operation is invalid."))?,
-        surface: input
-            .surface
-            .parse()
-            .map_err(|_| validation("capabilities", "A reviewed surface is invalid."))?,
-        mode: input
-            .mode
-            .parse()
-            .map_err(|_| validation("capabilities", "A reviewed mode is invalid."))?,
+        operation: input.operation.parse().map_err(|_| {
+            Problem::field_validation("capabilities", "A reviewed operation is invalid.")
+        })?,
+        surface: input.surface.parse().map_err(|_| {
+            Problem::field_validation("capabilities", "A reviewed surface is invalid.")
+        })?,
+        mode: input.mode.parse().map_err(|_| {
+            Problem::field_validation("capabilities", "A reviewed mode is invalid.")
+        })?,
         source: olp_domain::CapabilitySource::Declared,
         certified_at: None,
     })
@@ -457,7 +454,7 @@ pub(crate) async fn discover_provider_models(
             .await?
             .discover_models()
             .await
-            .map_err(|detail| validation("provider", &detail))?
+            .map_err(|detail| Problem::field_validation("provider", detail))?
             .into_iter()
             .map(|model| DiscoveredModelInput {
                 upstream_model: model.id,
@@ -597,7 +594,7 @@ pub(crate) async fn certify_provider_model(
         .await
         .map_err(map_configuration_resource)?;
     if model.capabilities.is_empty() || model.capabilities.len() > 16 {
-        return Err(validation(
+        return Err(Problem::field_validation(
             "capabilities",
             "Review between 1 and 16 capability tuples before certification.",
         ));

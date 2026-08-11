@@ -1,6 +1,11 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
+  import {
+    emptyCursorHistory,
+    popCursor,
+    pushCursor
+  } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
     diffProviderRevisions,
@@ -32,15 +37,14 @@
   } = $props();
 
   const queryClient = useQueryClient();
-  let cursor = $state<string | undefined>();
-  let history = $state<Array<string | undefined>>([]);
+  const pagination = $state(emptyCursorHistory());
   let revisionFrom = $state('');
   let revisionTo = $state('');
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
   const revisions = createQuery(() => ({
-    queryKey: ['provider-revisions', current.id, cursor ?? 'first'],
+    queryKey: ['provider-revisions', current.id, pagination.cursor ?? 'first'],
     queryFn: ({ signal }) =>
-      listProviderRevisionPage(current.id, cursor, signal)
+      listProviderRevisionPage(current.id, pagination.cursor, signal)
   }));
 
   $effect(() => {
@@ -85,17 +89,13 @@
   }
 
   function nextPage() {
-    const next = revisions.data?.nextCursor;
-    if (!next) return;
-    history = [...history, cursor];
-    cursor = next;
+    pushCursor(pagination, revisions.data?.nextCursor);
     revisionFrom = revisionTo = '';
     revisionDiff = null;
   }
 
   function previousPage() {
-    cursor = history.at(-1);
-    history = history.slice(0, -1);
+    popCursor(pagination);
     revisionFrom = revisionTo = '';
     revisionDiff = null;
   }
@@ -125,7 +125,7 @@
         onclick={() => revisions.refetch()}>Retry</button
       >
     </div>
-  {:else if !revisions.data?.items.length && history.length === 0}<div
+  {:else if !revisions.data?.items.length && pagination.history.length === 0}<div
       class="empty-state"
     >
       <p>No activated revision exists yet.</p>
@@ -253,8 +253,8 @@
         </article>{/each}
     </div>
     <CursorPagination
-      page={history.length + 1}
-      hasPrevious={history.length > 0}
+      page={pagination.history.length + 1}
+      hasPrevious={pagination.history.length > 0}
       hasNext={Boolean(revisions.data?.nextCursor)}
       onPrevious={previousPage}
       onNext={nextPage}

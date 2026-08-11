@@ -24,7 +24,7 @@ use crate::{
 };
 
 use crate::management::configuration::common::{
-    DiffQuery, PageQuery, json, map_configuration_resource, page, validation, with_etag,
+    DiffQuery, PageQuery, json, map_configuration_resource, page, with_etag,
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -206,9 +206,9 @@ pub(crate) async fn replace_route_draft(
                     .operations
                     .into_iter()
                     .map(|operation| {
-                        operation
-                            .parse()
-                            .map_err(|_| validation("operations", "A route operation is invalid."))
+                        operation.parse().map_err(|_| {
+                            Problem::field_validation("operations", "A route operation is invalid.")
+                        })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
                 overall_timeout_ms: request.overall_timeout_ms,
@@ -323,26 +323,25 @@ pub(crate) async fn simulate_route_draft(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let request = json(payload)?;
-    let simulation = state
-        .store()
-        .simulate_route_draft(
-            draft_id,
-            request
-                .operation
-                .parse()
-                .map_err(|_| validation("operation", "The operation is invalid."))?,
-            request
-                .surface
-                .parse()
-                .map_err(|_| validation("surface", "The surface is invalid."))?,
-            request
-                .mode
-                .parse()
-                .map_err(|_| validation("mode", "The transport mode is invalid."))?,
-            &request.seed,
-        )
-        .await
-        .map_err(map_configuration_resource)?;
+    let simulation =
+        state
+            .store()
+            .simulate_route_draft(
+                draft_id,
+                request.operation.parse().map_err(|_| {
+                    Problem::field_validation("operation", "The operation is invalid.")
+                })?,
+                request
+                    .surface
+                    .parse()
+                    .map_err(|_| Problem::field_validation("surface", "The surface is invalid."))?,
+                request.mode.parse().map_err(|_| {
+                    Problem::field_validation("mode", "The transport mode is invalid.")
+                })?,
+                &request.seed,
+            )
+            .await
+            .map_err(map_configuration_resource)?;
     Ok(Json(simulation.into()))
 }
 

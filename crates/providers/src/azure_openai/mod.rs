@@ -117,14 +117,12 @@ pub struct AzureOpenAiApiKey(Zeroizing<String>);
 
 impl AzureOpenAiApiKey {
     pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(ConnectorBuildError::EmptyApiKey);
-        }
-        if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
-            return Err(ConnectorBuildError::InvalidApiKey);
-        }
-        Ok(Self(Zeroizing::new(value)))
+        crate::connector::visible_secret(
+            value,
+            ConnectorBuildError::EmptyApiKey,
+            ConnectorBuildError::InvalidApiKey,
+        )
+        .map(Self)
     }
 }
 
