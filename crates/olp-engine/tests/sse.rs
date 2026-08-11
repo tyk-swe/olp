@@ -1,6 +1,27 @@
 use olp_engine::protocols::sse::{SseDecodeError, SseDecoder, SseFrame, encode_frame};
 use proptest::prelude::*;
 
+fn decode_fragmented(
+    wire: &[u8],
+    widths: &[usize],
+    finish: bool,
+) -> Result<Vec<SseFrame>, SseDecodeError> {
+    let mut frames = Vec::new();
+    let mut decoder = SseDecoder::default();
+    let mut offset = 0;
+    let mut widths = widths.iter().copied().cycle();
+    while offset < wire.len() {
+        let width = widths.next().expect("property always supplies a width");
+        let end = (offset + width).min(wire.len());
+        frames.extend(decoder.push(&wire[offset..end])?);
+        offset = end;
+    }
+    if finish {
+        frames.extend(decoder.finish()?);
+    }
+    Ok(frames)
+}
+
 #[test]
 fn multiline_crlf_comments_and_persistent_ids_follow_sse_rules() {
     let wire = b": keepalive\r\nid: event-7\r\nevent: message\r\ndata: first\r\ndata: second\r\nretry: 250\r\n\r\ndata: next\r\n\r\n";
@@ -219,16 +240,7 @@ proptest! {
     fn arbitrary_fragmentation_does_not_change_decoding(widths in prop::collection::vec(1_usize..16, 1..40)) {
         let wire = "event: token\ndata: héllø 🌍\n\ndata: second\n\n".as_bytes();
         let expected = SseDecoder::default().push(wire).unwrap();
-        let mut actual = Vec::new();
-        let mut decoder = SseDecoder::default();
-        let mut offset = 0;
-        let mut widths = widths.into_iter().cycle();
-        while offset < wire.len() {
-            let width = widths.next().unwrap();
-            let end = (offset + width).min(wire.len());
-            actual.extend(decoder.push(&wire[offset..end]).unwrap());
-            offset = end;
-        }
+        let actual = decode_fragmented(wire, &widths, false).unwrap();
         prop_assert_eq!(actual, expected);
     }
 
@@ -236,16 +248,7 @@ proptest! {
     fn arbitrary_crlf_fragmentation_does_not_change_decoding(widths in prop::collection::vec(1_usize..16, 1..40)) {
         let wire = "event: token\r\ndata: héllø 🌍\r\n\r\ndata: second\r\n\r\n".as_bytes();
         let expected = SseDecoder::default().push(wire).unwrap();
-        let mut actual = Vec::new();
-        let mut decoder = SseDecoder::default();
-        let mut offset = 0;
-        let mut widths = widths.into_iter().cycle();
-        while offset < wire.len() {
-            let width = widths.next().unwrap();
-            let end = (offset + width).min(wire.len());
-            actual.extend(decoder.push(&wire[offset..end]).unwrap());
-            offset = end;
-        }
+        let actual = decode_fragmented(wire, &widths, false).unwrap();
         prop_assert_eq!(actual, expected);
     }
 
@@ -255,17 +258,7 @@ proptest! {
         let mut contiguous = SseDecoder::default();
         let mut expected = contiguous.push(wire).unwrap();
         expected.extend(contiguous.finish().unwrap());
-        let mut actual = Vec::new();
-        let mut decoder = SseDecoder::default();
-        let mut offset = 0;
-        let mut widths = widths.into_iter().cycle();
-        while offset < wire.len() {
-            let width = widths.next().unwrap();
-            let end = (offset + width).min(wire.len());
-            actual.extend(decoder.push(&wire[offset..end]).unwrap());
-            offset = end;
-        }
-        actual.extend(decoder.finish().unwrap());
+        let actual = decode_fragmented(wire, &widths, true).unwrap();
         prop_assert_eq!(actual, expected);
     }
 

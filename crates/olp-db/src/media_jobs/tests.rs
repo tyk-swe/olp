@@ -2,42 +2,85 @@ use super::lifecycle::{allows_refresh_transition, validate_progress, validate_up
 use super::*;
 
 #[test]
-fn rejects_nonfinite_progress_and_inconsistent_result_state() {
-    assert!(validate_progress(Some(f32::NAN)).is_err());
-    assert!(validate_progress(Some(100.1)).is_err());
-    assert!(
-        validate_update(&MediaJobUpdate {
-            state: MediaJobState::Running,
-            progress_percent: Some(50.0),
-            content_available: true,
-            expires_at: None,
-            error_class: None,
-            last_polled_at: Utc::now(),
-        })
-        .is_err()
-    );
+fn progress_is_a_finite_closed_percentage() {
+    for valid in [None, Some(0.0), Some(50.0), Some(100.0)] {
+        assert!(validate_progress(valid).is_ok(), "rejected {valid:?}");
+    }
+    for invalid in [-0.1, 100.1, f32::NAN] {
+        assert!(
+            validate_progress(Some(invalid)).is_err(),
+            "accepted {invalid:?}"
+        );
+    }
 }
 
 #[test]
-fn refresh_transitions_never_regress_or_change_terminal_outcomes() {
-    assert!(allows_refresh_transition(
+fn update_payloads_bind_content_and_errors_to_terminal_states() {
+    for (state, content_available, error_class, valid) in [
+        (MediaJobState::Running, false, None, true),
+        (MediaJobState::Succeeded, true, None, true),
+        (MediaJobState::Failed, false, Some("upstream"), true),
+        (MediaJobState::Running, true, None, false),
+        (MediaJobState::Succeeded, false, Some("upstream"), false),
+    ] {
+        let result = validate_update(&MediaJobUpdate {
+            state,
+            progress_percent: Some(50.0),
+            content_available,
+            expires_at: None,
+            error_class: error_class.map(str::to_owned),
+            last_polled_at: Utc::now(),
+        });
+        assert_eq!(
+            result.is_ok(),
+            valid,
+            "unexpected validation for {state:?}, content={content_available}, error={error_class:?}"
+        );
+    }
+}
+
+#[test]
+fn refresh_transition_matrix_never_regresses_or_changes_terminal_outcomes() {
+    const STATES: [MediaJobState; 5] = [
         MediaJobState::Queued,
-        MediaJobState::Succeeded
-    ));
-    assert!(!allows_refresh_transition(
         MediaJobState::Running,
-        MediaJobState::Queued
-    ));
-    assert!(!allows_refresh_transition(
         MediaJobState::Succeeded,
-        MediaJobState::Running
-    ));
-    assert!(!allows_refresh_transition(
         MediaJobState::Failed,
-        MediaJobState::Cancelled
-    ));
-    assert!(MediaJobLifecycle::Creating.needs_reconciliation());
-    assert!(MediaJobLifecycle::DeletePending.needs_reconciliation());
-    assert!(!MediaJobLifecycle::Active.needs_reconciliation());
-    assert!(!MediaJobLifecycle::Deleted.needs_reconciliation());
+        MediaJobState::Cancelled,
+    ];
+    for current in STATES {
+        let allowed: &[MediaJobState] = match current {
+            MediaJobState::Queued => &STATES,
+            MediaJobState::Running => &STATES[1..],
+            _ => std::slice::from_ref(&current),
+        };
+        for incoming in STATES {
+            assert_eq!(
+                allows_refresh_transition(current, incoming),
+                allowed.contains(&incoming),
+                "unexpected {current:?} -> {incoming:?} decision"
+            );
+        }
+    }
+}
+
+#[test]
+fn lifecycle_strings_and_reconciliation_inventory_are_complete() {
+    for (lifecycle, stored, needs_reconciliation) in [
+        (MediaJobLifecycle::Creating, "creating", true),
+        (MediaJobLifecycle::Active, "active", false),
+        (MediaJobLifecycle::CreateAmbiguous, "create_ambiguous", true),
+        (
+            MediaJobLifecycle::CreateCleanupPending,
+            "create_cleanup_pending",
+            true,
+        ),
+        (MediaJobLifecycle::DeletePending, "delete_pending", true),
+        (MediaJobLifecycle::Deleted, "deleted", false),
+    ] {
+        assert_eq!(lifecycle.as_str(), stored);
+        assert_eq!(MediaJobLifecycle::parse(stored).unwrap(), lifecycle);
+        assert_eq!(lifecycle.needs_reconciliation(), needs_reconciliation);
+    }
+    assert!(MediaJobLifecycle::parse("unknown").is_err());
 }

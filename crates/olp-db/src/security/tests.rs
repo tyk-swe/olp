@@ -1,9 +1,52 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use uuid::Uuid;
 
 use super::{
-    AuthHmacKey, InvitationMaterial, MasterKey, SecurityError, SessionMaterial, hash_password,
-    verify_password,
+    AuthHmacKey, CsrfMaterial, InvitationMaterial, MasterKey, RecentAuthMaterial, SecurityError,
+    SessionMaterial, constant_time_eq, credential_aad, hash_password, idempotency_replay_aad,
+    idempotency_replay_scope, oidc_client_secret_aad, oidc_flow_payload_aad, verify_password,
 };
+
+#[test]
+fn durable_encryption_scopes_have_stable_domain_separated_encodings() {
+    let first = Uuid::parse_str("018f47f2-d154-7c52-8170-7a16f378bb29").unwrap();
+    let second = Uuid::parse_str("018f47f2-d154-7c52-8170-7a16f378bb2a").unwrap();
+
+    assert_eq!(
+        credential_aad(first, second, 3).as_slice(),
+        b"olp:v2:provider:018f47f2-d154-7c52-8170-7a16f378bb29:credential:018f47f2-d154-7c52-8170-7a16f378bb2a:v3"
+    );
+    assert_eq!(
+        oidc_client_secret_aad(first).as_slice(),
+        b"olp:v2:oidc:018f47f2-d154-7c52-8170-7a16f378bb29:client-secret"
+    );
+    assert_eq!(
+        oidc_flow_payload_aad(second).as_slice(),
+        b"olp:v2:oidc-flow:018f47f2-d154-7c52-8170-7a16f378bb2a"
+    );
+
+    let scope = idempotency_replay_scope(first, "create-route", "request-key");
+    assert_eq!(
+        scope,
+        format!("olp:v2:idempotency:{first}:create-route:request-key")
+    );
+    assert_eq!(
+        idempotency_replay_aad(first, "create-route", "request-key"),
+        scope.into_bytes()
+    );
+}
+
+#[test]
+fn constant_time_comparison_handles_content_and_length_mismatches() {
+    for (left, right, equal) in [
+        (b"".as_slice(), b"".as_slice(), true),
+        (b"digest".as_slice(), b"digest".as_slice(), true),
+        (b"digest".as_slice(), b"digesu".as_slice(), false),
+        (b"digest".as_slice(), b"digest-long".as_slice(), false),
+    ] {
+        assert_eq!(constant_time_eq(left, right), equal);
+    }
+}
 
 #[test]
 fn credential_encryption_binds_ciphertext_to_context() {
@@ -147,6 +190,10 @@ fn passwords_use_argon2id_and_verify() {
 fn session_tokens_have_independent_csrf_material() {
     let material = SessionMaterial::generate();
     assert_ne!(material.token(), material.csrf_token());
+    assert_eq!(
+        material.token_digest(),
+        SessionMaterial::digest_token(material.token())
+    );
     assert!(SessionMaterial::verify_csrf(
         material.csrf_token(),
         &material.csrf_digest()
@@ -155,18 +202,33 @@ fn session_tokens_have_independent_csrf_material() {
         material.token(),
         &material.csrf_digest()
     ));
+    assert!(!format!("{material:?}").contains(material.token()));
 }
 
 #[test]
-fn invitation_tokens_are_random_digest_only_material() {
+fn one_time_tokens_are_random_digest_only_material() {
     let first = InvitationMaterial::generate();
     let second = InvitationMaterial::generate();
-
     assert_ne!(first.token(), second.token());
     assert_eq!(
         first.token_digest(),
         InvitationMaterial::digest_token(first.token())
     );
-    assert_eq!(first.token_digest().len(), 32);
-    assert!(!format!("{first:?}").contains(first.token()));
+
+    let recent = RecentAuthMaterial::generate();
+    assert_eq!(
+        recent.token_digest(),
+        RecentAuthMaterial::digest_token(recent.token())
+    );
+    let csrf = CsrfMaterial::generate();
+
+    for (token, digest, debug) in [
+        (first.token(), first.token_digest(), format!("{first:?}")),
+        (recent.token(), recent.token_digest(), format!("{recent:?}")),
+        (csrf.token(), csrf.token_digest(), format!("{csrf:?}")),
+    ] {
+        assert_eq!(token.len(), 43);
+        assert_eq!(digest.len(), 32);
+        assert!(!debug.contains(token));
+    }
 }

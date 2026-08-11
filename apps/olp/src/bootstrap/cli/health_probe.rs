@@ -137,15 +137,66 @@ fn status_line_is_ready(status_line: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::status_line_is_ready;
+    use std::io;
+
+    use tokio::net::{TcpListener, TcpStream};
+
+    use super::{MAX_STATUS_LINE_BYTES, read_status_line, status_line_is_ready, write_request};
+
+    async fn loopback_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        (client.unwrap(), accepted.unwrap().0)
+    }
 
     #[test]
     fn accepts_only_successful_http_readiness_statuses() {
-        assert!(status_line_is_ready(b"HTTP/1.1 200 OK\r\n"));
-        assert!(status_line_is_ready(b"HTTP/1.0 200 Ready\n"));
-        assert!(!status_line_is_ready(
-            b"HTTP/1.1 503 Service Unavailable\r\n"
-        ));
-        assert!(!status_line_is_ready(b"not-http 200 OK\r\n"));
+        for status_line in [
+            b"HTTP/1.1 200 OK\r\n".as_slice(),
+            b"HTTP/1.0 200 Ready\n".as_slice(),
+        ] {
+            assert!(status_line_is_ready(status_line));
+        }
+        for status_line in [
+            b"HTTP/1.1 503 Service Unavailable\r\n".as_slice(),
+            b"not-http 200 OK\r\n".as_slice(),
+            b"HTTP/1.1\r\n".as_slice(),
+            b"\xff\r\n".as_slice(),
+        ] {
+            assert!(!status_line_is_ready(status_line));
+        }
+    }
+
+    #[tokio::test]
+    async fn status_line_reader_returns_only_the_first_line() {
+        let (client, server) = loopback_pair().await;
+        write_request(&server, b"HTTP/1.1 200 OK\r\nignored body")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            read_status_line(&client).await.unwrap(),
+            b"HTTP/1.1 200 OK\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn status_line_reader_bounds_untrusted_responses() {
+        let (client, server) = loopback_pair().await;
+        write_request(&server, &[b'x'; MAX_STATUS_LINE_BYTES])
+            .await
+            .unwrap();
+        assert_eq!(
+            read_status_line(&client).await.unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let (client, server) = loopback_pair().await;
+        drop(server);
+        assert_eq!(
+            read_status_line(&client).await.unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
     }
 }

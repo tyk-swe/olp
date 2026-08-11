@@ -1,20 +1,85 @@
+use super::cursor::{
+    checked_u16, checked_u64, optional_i32_u64, optional_u16, optional_u64, trimmed_optional,
+};
 use super::*;
 
+fn assert_invalid<T: std::fmt::Debug>(result: Result<T, OperationsError>, expected: &str) {
+    match result {
+        Err(OperationsError::Invalid(message)) => assert_eq!(message, expected),
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
 #[test]
-fn timestamp_cursor_round_trips_and_rejects_non_v7_ids() {
+fn timestamp_cursor_round_trips_and_rejects_malformed_or_non_v7_values() {
     let cursor = TimestampCursor {
-        at: Utc::now(),
+        at: "2025-02-03T04:05:06Z".parse().unwrap(),
         id: Uuid::now_v7(),
     };
     assert_eq!(TimestampCursor::parse(&cursor.encode()).unwrap(), cursor);
-    let invalid = TimestampCursor {
-        at: cursor.at,
-        id: Uuid::nil(),
-    };
-    assert!(matches!(
-        TimestampCursor::parse(&invalid.encode()),
-        Err(OperationsError::InvalidCursor)
-    ));
+    for invalid in [
+        "not-base64".to_owned(),
+        "bm90IGpzb24".to_owned(),
+        TimestampCursor {
+            at: cursor.at,
+            id: Uuid::nil(),
+        }
+        .encode(),
+    ] {
+        assert!(
+            matches!(
+                TimestampCursor::parse(&invalid),
+                Err(OperationsError::InvalidCursor)
+            ),
+            "accepted {invalid}"
+        );
+    }
+}
+
+#[test]
+fn stored_number_conversions_cover_boundaries_and_name_invalid_fields() {
+    assert_eq!(optional_u16(Some(65_535), "value").unwrap(), Some(u16::MAX));
+    assert_eq!(checked_u16(i16::MAX, "value").unwrap(), 32_767);
+    assert_eq!(
+        optional_i32_u64(Some(i32::MAX), "value").unwrap(),
+        Some(i32::MAX as u64)
+    );
+    assert_eq!(checked_u64(i64::MAX, "value").unwrap(), i64::MAX as u64);
+
+    for absent in [
+        optional_u16(None, "value").map(|value| value.map(u64::from)),
+        optional_u64(None, "value"),
+        optional_i32_u64(None, "value"),
+    ] {
+        assert_eq!(absent.unwrap(), None);
+    }
+    for invalid in [
+        checked_u16(-1, "value").map(u64::from),
+        checked_u64(-1, "value"),
+    ] {
+        assert_invalid(invalid, "stored value is invalid");
+    }
+    for invalid in [
+        optional_u16(Some(65_536), "value").map(|value| value.map(u64::from)),
+        optional_u64(Some(-1), "value"),
+        optional_i32_u64(Some(-1), "value"),
+    ] {
+        assert_invalid(invalid, "stored value is invalid");
+    }
+}
+
+#[test]
+fn optional_text_is_trimmed_without_changing_presence() {
+    for (input, expected) in [
+        (None, None),
+        (Some("  model-a\n"), Some("model-a")),
+        (Some(" \t"), Some("")),
+    ] {
+        assert_eq!(
+            trimmed_optional(input.map(str::to_owned)),
+            expected.map(str::to_owned)
+        );
+    }
 }
 
 #[test]

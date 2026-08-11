@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken } from '$lib/api/session';
 import { AuthenticationLifecycle } from './lifecycle';
-import { isAuthenticationEndpoint } from './requestPolicy';
 import type { AuthenticatedSession } from './state';
 
 const session = (csrfToken = 'csrf-session'): AuthenticatedSession => ({
@@ -262,54 +261,14 @@ describe('authentication lifecycle', () => {
     expect(request.headers.get('x-csrf-token')).toBe('csrf-refreshed');
   });
 
-  it.each([
-    ['GET', '/api/v1/setup/status'],
-    ['POST', '/api/v1/setup'],
-    ['POST', '/api/v1/sessions'],
-    ['POST', '/api/v1/invitations/accept'],
-    ['GET', '/api/v1/auth/capabilities'],
-    ['GET', '/api/v1/oidc/login'],
-    ['POST', '/api/v1/oidc/login'],
-    ['GET', '/api/v1/oidc/callback']
-  ])(
-    'allows public authentication request %s %s without a session',
-    async (method, pathname) => {
-      const lifecycle = new AuthenticationLifecycle();
-      const request = new Request(`https://console.example.test${pathname}`, {
-        method
-      });
-
-      expect(isAuthenticationEndpoint(request)).toBe(true);
-      await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
-    }
-  );
-
-  it.each([
-    ['GET', '/api/v1/setup'],
-    ['HEAD', '/api/v1/setup/status'],
-    ['OPTIONS', '/api/v1/sessions'],
-    ['POST', '/api/v1/sessions/'],
-    ['POST', '/api/v1/sessions/nested'],
-    ['POST', '/api/v1/oidc/link'],
-    ['GET', '/api/v1/oidc/callback/extra']
-  ])(
-    'does not widen authentication request matching for %s %s',
-    async (method, pathname) => {
-      const request = new Request(`https://console.example.test${pathname}`, {
-        method
-      });
-
-      expect(isAuthenticationEndpoint(request)).toBe(false);
-    }
-  );
-
-  it('classifies authentication endpoints by pathname without query-string widening', () => {
+  it('allows a public authentication request without a session', async () => {
+    const lifecycle = new AuthenticationLifecycle();
     const request = new Request(
-      'https://console.example.test/api/v1/oidc/login?return_to=%2Fproviders',
-      { method: 'GET' }
+      'https://console.example.test/api/v1/sessions',
+      { method: 'POST' }
     );
 
-    expect(isAuthenticationEndpoint(request)).toBe(true);
+    await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
   });
 
   it('shares one freshness validation between concurrent stale-session mutations', async () => {

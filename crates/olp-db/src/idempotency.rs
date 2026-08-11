@@ -387,7 +387,9 @@ pub(crate) async fn complete_idempotency(
 
 #[cfg(test)]
 mod tests {
-    use super::{IdempotencyResponse, idempotency_fingerprint};
+    use crate::PersistenceError;
+
+    use super::{IdempotencyResponse, MAX_IDEMPOTENCY_REPLAY_BODY_BYTES, idempotency_fingerprint};
 
     #[test]
     fn replay_response_debug_output_redacts_the_body() {
@@ -419,5 +421,68 @@ mod tests {
         .unwrap();
         assert_eq!(first, identical);
         assert_ne!(first, changed);
+    }
+
+    #[test]
+    fn replay_response_accepts_protocol_boundaries_and_round_trips_parts() {
+        for status in [200, 599] {
+            assert!(IdempotencyResponse::new(status, None, None, Vec::new()).is_ok());
+        }
+
+        let longest_header = "x".repeat(256);
+        let response = IdempotencyResponse::new(
+            201,
+            Some(longest_header.clone()),
+            Some(longest_header.clone()),
+            b"response".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            response.into_parts(),
+            (
+                201,
+                Some(longest_header.clone()),
+                Some(longest_header),
+                b"response".to_vec(),
+            )
+        );
+
+        assert!(
+            IdempotencyResponse::new(200, None, None, vec![0; MAX_IDEMPOTENCY_REPLAY_BODY_BYTES],)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn replay_response_rejects_unsafe_or_unbounded_material() {
+        for status in [199, 600] {
+            assert!(matches!(
+                IdempotencyResponse::new(status, None, None, Vec::new()),
+                Err(PersistenceError::IdempotencyReplayUnavailable)
+            ));
+        }
+
+        for (content_type, etag) in [
+            (Some(String::new()), None),
+            (Some("text/plain\nset-cookie: secret".to_owned()), None),
+            (Some("caf\u{e9}".to_owned()), None),
+            (Some("x".repeat(257)), None),
+            (None, Some("\r\n".to_owned())),
+        ] {
+            assert!(matches!(
+                IdempotencyResponse::new(200, content_type, etag, Vec::new()),
+                Err(PersistenceError::IdempotencyReplayUnavailable)
+            ));
+        }
+
+        assert!(matches!(
+            IdempotencyResponse::new(
+                200,
+                None,
+                None,
+                vec![0; MAX_IDEMPOTENCY_REPLAY_BODY_BYTES + 1],
+            ),
+            Err(PersistenceError::IdempotencyReplayUnavailable)
+        ));
     }
 }

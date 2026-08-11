@@ -251,3 +251,126 @@ impl InferenceError {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::domain::{
+        AttemptFailureClass, CanonicalError, ErrorClass, TransportError, TransportPhase,
+    };
+    use crate::inference::limits::LimitDimension;
+
+    use super::{InferenceError, InferenceErrorKind};
+
+    #[test]
+    fn rate_limit_messages_identify_every_dimension() {
+        let retry_after = Duration::from_millis(750);
+        for (dimension, name) in [
+            (LimitDimension::Requests, "requests per minute"),
+            (LimitDimension::Tokens, "tokens per minute"),
+            (LimitDimension::Concurrency, "concurrency"),
+            (LimitDimension::Unknown, "configured"),
+        ] {
+            let error = InferenceError::rate_limited(dimension, retry_after);
+            assert_eq!(error.kind(), InferenceErrorKind::RateLimit);
+            assert_eq!(error.code(), "rate_limit_exceeded");
+            assert_eq!(
+                error.message(),
+                format!("The API key {name} limit was exceeded.")
+            );
+            assert_eq!(error.retry_after(), Some(retry_after));
+        }
+    }
+
+    #[test]
+    fn every_transport_failure_class_has_an_explicit_public_mapping() {
+        use AttemptFailureClass as AFC;
+        use InferenceErrorKind as IEK;
+
+        let cases = [
+            (
+                AFC::RateLimit,
+                IEK::RateLimit,
+                "upstream_rate_limit",
+                "provider detail",
+            ),
+            (
+                AFC::Timeout,
+                IEK::GatewayTimeout,
+                "gateway_timeout",
+                "The route deadline elapsed.",
+            ),
+            (
+                AFC::UpstreamClient,
+                IEK::Upstream,
+                "upstream_rejected",
+                "provider detail",
+            ),
+            (
+                AFC::Connect,
+                IEK::Upstream,
+                "upstream_unavailable",
+                "provider detail",
+            ),
+            (
+                AFC::UpstreamServer,
+                IEK::Upstream,
+                "upstream_unavailable",
+                "provider detail",
+            ),
+            (
+                AFC::Protocol,
+                IEK::Upstream,
+                "provider_protocol_error",
+                "provider detail",
+            ),
+            (
+                AFC::Cancelled,
+                IEK::Upstream,
+                "provider_cancelled",
+                "provider detail",
+            ),
+            (
+                AFC::Ambiguous,
+                IEK::Upstream,
+                "ambiguous_upstream_result",
+                "provider detail",
+            ),
+        ];
+
+        for (class, kind, code, message) in cases {
+            let error = InferenceError::from_transport(TransportError {
+                phase: TransportPhase::FirstByte,
+                class,
+                response_committed: false,
+                message: "provider detail".to_owned(),
+            });
+            assert_eq!(error.kind(), kind, "unexpected kind for {class:?}");
+            assert_eq!(error.code(), code, "unexpected code for {class:?}");
+            assert_eq!(error.message(), message, "unexpected message for {class:?}");
+        }
+    }
+
+    #[test]
+    fn canonical_mapping_clones_the_safe_message_and_debug_redacts_it() {
+        let canonical = CanonicalError {
+            class: ErrorClass::Authorization,
+            message: "private provider detail".to_owned(),
+            provider_code: Some("private-code".to_owned()),
+            retryable: false,
+        };
+        let error = InferenceError::from_canonical(&canonical);
+
+        assert_eq!(
+            error.kind(),
+            InferenceErrorKind::Canonical(ErrorClass::Authorization)
+        );
+        assert_eq!(error.code(), "upstream_error");
+        assert_eq!(error.message(), canonical.message);
+        let debug = format!("{error:?}");
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("private provider detail"));
+        assert!(!debug.contains("private-code"));
+    }
+}

@@ -162,7 +162,7 @@ fn multipart_admission_is_post_only_and_recovers_after_a_parser_drops() {
 }
 
 #[tokio::test]
-async fn malformed_trusted_proxy_chain_is_rejected_before_public_auth_body_handling() {
+async fn malformed_trusted_proxy_chain_precedes_all_public_auth_json_handling() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
@@ -171,53 +171,33 @@ async fn malformed_trusted_proxy_chain_is_rejected_before_public_auth_body_handl
         PathBuf::from("missing-console"),
     );
     state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
-    let response = public_router(state.management_state_for_test())
-        .oneshot(
-            Request::post("/api/v1/sessions")
-                .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .header("x-forwarded-for", "not-an-ip")
-                .extension(axum::extract::ConnectInfo(
-                    "10.2.3.4:443".parse::<SocketAddr>().unwrap(),
-                ))
-                .body(Body::from("{"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
-}
+    let app = public_router(state.management_state_for_test());
 
-#[tokio::test]
-async fn malformed_trusted_proxy_chain_is_rejected_before_oidc_login_post_json_handling() {
-    let mut state = ProcessComposition::new(
-        ApiMode::Control,
-        None,
-        Arc::new(RuntimeManager::empty()),
-        "https://olp.example.test",
-        PathBuf::from("missing-console"),
-    );
-    state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
-    let response = public_router(state.management_state_for_test())
-        .oneshot(
-            Request::post("/api/v1/oidc/login")
-                .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .header(axum::http::header::ORIGIN, "https://olp.example.test")
-                .header("x-forwarded-for", "not-an-ip")
-                .extension(axum::extract::ConnectInfo(
-                    "10.2.3.4:443".parse::<SocketAddr>().unwrap(),
-                ))
-                .body(Body::from("{"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
-    let problem: Problem =
-        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
-    assert_eq!(
-        problem.problem_type.as_ref(),
-        "https://openllmproxy.dev/problems/forwarded_for_invalid"
-    );
+    for (path, requires_origin) in [("/api/v1/sessions", false), ("/api/v1/oidc/login", true)] {
+        let mut request = Request::post(path)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .header("x-forwarded-for", "not-an-ip")
+            .extension(axum::extract::ConnectInfo(
+                "10.2.3.4:443".parse::<SocketAddr>().unwrap(),
+            ));
+        if requires_origin {
+            request = request.header(axum::http::header::ORIGIN, "https://olp.example.test");
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::from("{")).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let problem: Problem =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(
+            problem.problem_type.as_ref(),
+            "https://openllmproxy.dev/problems/forwarded_for_invalid",
+            "source validation must precede JSON handling for {path}"
+        );
+    }
 }
 
 #[test]
@@ -356,22 +336,29 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
         .gateway_state_for_test(),
     );
 
-    let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
-    let response = app
-        .clone()
-        .oneshot(
+    let mut ambiguous_length = Request::post("/openai/not-found")
+        .body(Body::empty())
+        .unwrap();
+    ambiguous_length.headers_mut().append(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static("0"),
+    );
+    ambiguous_length.headers_mut().append(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static("0"),
+    );
+
+    let cases = [
+        (
+            "excessive JSON depth",
             Request::post("/api/not-found")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from(too_deep))
+                .body(Body::from(format!("{}0{}", "[".repeat(65), "]".repeat(65))))
                 .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
-
-    let response = app
-        .clone()
-        .oneshot(
+            axum::http::StatusCode::BAD_REQUEST,
+        ),
+        (
+            "declared body size",
             Request::post("/openai/not-found")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .header(
@@ -380,41 +367,36 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
                 )
                 .body(Body::empty())
                 .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
-
-    let response = app
-        .clone()
-        .oneshot(
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+        (
+            "content encoding",
             Request::post("/openai/not-found")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .header(axum::http::header::CONTENT_ENCODING, "gzip")
                 .body(Body::empty())
                 .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        response.status(),
-        axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE
-    );
-
-    let response = app
-        .oneshot(
+            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ),
+        (
+            "ambiguous body framing",
+            ambiguous_length,
+            axum::http::StatusCode::BAD_REQUEST,
+        ),
+        (
+            "multipart authentication precedence",
             Request::post("/openai/v1/audio/transcriptions")
                 .header(axum::http::header::CONTENT_TYPE, "multipart/form-data")
                 .body(Body::empty())
                 .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        response.status(),
-        axum::http::StatusCode::UNAUTHORIZED,
-        "inference authentication precedes multipart decoding"
-    );
+            axum::http::StatusCode::UNAUTHORIZED,
+        ),
+    ];
+
+    for (case, request, expected) in cases {
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), expected, "failed case: {case}");
+    }
 }
 
 #[tokio::test]
