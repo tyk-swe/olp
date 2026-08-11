@@ -121,14 +121,12 @@ pub(super) async fn execute(
     }
 
     let events = if streaming {
-        connector
-            .streaming_response(
-                response,
-                first_byte_deadline,
-                attempt_deadline,
-                responses_endpoint,
-            )
-            .await
+        connector.streaming_response(
+            response,
+            first_byte_deadline,
+            attempt_deadline,
+            responses_endpoint,
+        )
     } else {
         connector
             .unary_response(

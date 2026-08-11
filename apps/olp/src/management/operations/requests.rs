@@ -6,13 +6,12 @@ use axum::{
 use chrono::{DateTime, Utc};
 use olp_storage::{
     operations::AttemptRecord, operations::RequestFilters, operations::RequestRecord,
-    operations::TimestampCursor,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit, validate_time_range};
+use super::helpers::{map_operations, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
     ManagementState, Problem,
     management::{Permission, require_permission, require_read_session},
@@ -159,12 +158,7 @@ pub(super) async fn list_requests(
 ) -> Result<Json<RequestListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let cursor = query
-        .cursor
-        .as_deref()
-        .map(TimestampCursor::parse)
-        .transpose()
-        .map_err(map_operations)?;
+    let cursor = timestamp_cursor(query.cursor.as_deref())?;
     if let (Some(after), Some(before)) = (query.started_after, query.started_before) {
         validate_time_range("started_after", after, "started_before", before)?;
     }

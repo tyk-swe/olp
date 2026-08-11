@@ -30,7 +30,7 @@ use crate::{
 use super::{
     ConfigurationError,
     validation::{
-        checked_limit, enforce_provider_revision_diff_limit, validate_capability, validate_model,
+        checked_limit, enforce_provider_revision_diff_limit, validate_model,
         validate_provider_capability, validate_provider_update, validate_route_input,
     },
 };

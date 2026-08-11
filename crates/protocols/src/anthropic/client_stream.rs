@@ -350,8 +350,10 @@ fn anthropic_error_type(class: ErrorClass) -> &'static str {
         ErrorClass::Authorization => "permission_error",
         ErrorClass::InvalidRequest => "invalid_request_error",
         ErrorClass::RateLimit => "rate_limit_error",
-        ErrorClass::Timeout | ErrorClass::Transport | ErrorClass::Upstream => "api_error",
-        ErrorClass::Internal => "api_error",
+        ErrorClass::Timeout
+        | ErrorClass::Transport
+        | ErrorClass::Upstream
+        | ErrorClass::Internal => "api_error",
     }
 }
 

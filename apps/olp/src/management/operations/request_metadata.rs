@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_storage::{
-    operations::TimestampCursor, request_metadata::RequestMetadataConsumerStatus,
+    request_metadata::RequestMetadataConsumerStatus,
     request_metadata::RequestMetadataEpochAcknowledgement,
     request_metadata::RequestMetadataGatewayEpochRecord,
     request_metadata::RequestMetadataGatewayEpochState,
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     FieldErrors, ManagementState, Problem,
-    management::operations::helpers::{map_operations, not_found, page_limit},
+    management::operations::helpers::{map_operations, not_found, page_limit, timestamp_cursor},
     management::{
         Permission, map_persistence, require_mutation_session, require_permission,
         require_read_session,
@@ -124,12 +124,7 @@ pub(in crate::management::operations) async fn list_request_metadata_gateway_epo
 ) -> Result<Json<RequestMetadataGatewayEpochListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let cursor = query
-        .cursor
-        .as_deref()
-        .map(TimestampCursor::parse)
-        .transpose()
-        .map_err(map_operations)?;
+    let cursor = timestamp_cursor(query.cursor.as_deref())?;
     let state_filter = query
         .state
         .as_deref()

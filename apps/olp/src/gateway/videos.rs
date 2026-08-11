@@ -6,7 +6,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use futures::{StreamExt, stream};
 use olp_domain::{
     CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
@@ -18,8 +17,7 @@ use olp_protocols::openai::{
 };
 use olp_storage::{
     media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
-    media_jobs::MediaJobOrder, media_jobs::MediaJobRecord, media_jobs::MediaJobUpdate,
-    media_jobs::NewMediaJobReservation,
+    media_jobs::MediaJobOrder, media_jobs::MediaJobRecord, media_jobs::NewMediaJobReservation,
 };
 use tracing::error;
 
@@ -34,7 +32,7 @@ use super::{
     media::{open_response_media, response_from_opened_media},
     media_jobs::{
         attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
-        media_job_error, media_job_result, media_job_state, owned_media_job,
+        media_job_error, media_job_result, media_job_state, media_job_update, owned_media_job,
         refresh_video_list_record, select_video_create_target, set_video_route,
         valid_upstream_media_job_id,
     },
@@ -212,20 +210,13 @@ async fn complete_video_create(
             return Err(failure);
         }
     };
-    let update = MediaJobUpdate {
-        state: state_update,
-        progress_percent: result.progress_percent,
-        content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
-        expires_at: result
-            .expires_at
-            .and_then(chrono::DateTime::from_timestamp_secs),
-        error_class: result
-            .error
-            .as_ref()
-            .map(|error| format!("{:?}", error.class).to_lowercase()),
-        last_polled_at: Utc::now(),
-    };
-    let record = attach_media_job_with_retry(&state, reserved.id, &upstream_job_id, update).await;
+    let record = attach_media_job_with_retry(
+        &state,
+        reserved.id,
+        &upstream_job_id,
+        media_job_update(&result, state_update),
+    )
+    .await;
     let record = match record {
         Ok(record) => record,
         Err(error) => {
@@ -455,20 +446,11 @@ pub(super) async fn video_get(
             return Err(failure);
         }
     };
-    let update = MediaJobUpdate {
-        state: state_update,
-        progress_percent: result.progress_percent,
-        content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
-        expires_at: result
-            .expires_at
-            .and_then(chrono::DateTime::from_timestamp_secs),
-        error_class: result
-            .error
-            .as_ref()
-            .map(|error| format!("{:?}", error.class).to_lowercase()),
-        last_polled_at: Utc::now(),
-    };
-    let updated = match state.store().refresh_media_job(record.id, update).await {
+    let updated = match state
+        .store()
+        .refresh_media_job(record.id, media_job_update(&result, state_update))
+        .await
+    {
         Ok(updated) => updated,
         Err(error) => {
             let failure = media_job_error(error);

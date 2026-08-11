@@ -7,8 +7,9 @@
     type User
   } from '$lib/api/management/access';
   import type { CursorPage } from '$lib/api/management/shared';
+  import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { accessErrorMessage, FIXED_ROLES } from '../shared';
+  import { FIXED_ROLES } from '../shared';
 
   const queryClient = useQueryClient();
   let cursor = $state<string | undefined>();

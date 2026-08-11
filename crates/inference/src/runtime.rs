@@ -118,7 +118,6 @@ impl RuntimeManager {
     }
 
     fn decode_release(
-        &self,
         release: &PublishedRuntimeRelease,
     ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
         let mut snapshot = RuntimeSnapshot::from_persisted_slice(&release.payload)?;
@@ -140,7 +139,7 @@ impl RuntimeManager {
         release: &PublishedRuntimeRelease,
         current_api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
     ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
-        let mut snapshot = self.decode_release(release)?;
+        let mut snapshot = Self::decode_release(release)?;
         snapshot.api_keys = current_api_keys;
         snapshot.validate()?;
         Ok(snapshot)

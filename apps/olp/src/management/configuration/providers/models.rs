@@ -30,7 +30,7 @@ use crate::{
     },
 };
 
-use super::manage::ProviderDetailResponse;
+use super::manage::{ProviderDetailResponse, load_provider_detail};
 use crate::bootstrap::provider_adapter::provider_connector;
 use crate::management::configuration::common::{
     PageQuery, json, map_configuration_resource, page, validation, with_etag,
@@ -483,11 +483,7 @@ pub(crate) async fn discover_provider_models(
         .discover_provider_models(provider_id, if_match(&headers)?, &models, principal.user_id)
         .await
         .map_err(map_configuration_resource)?;
-    let provider: ProviderDetailResponse = store
-        .get_provider(provider_id)
-        .await
-        .map_err(map_configuration_resource)?
-        .into();
+    let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 
@@ -534,11 +530,7 @@ pub(crate) async fn set_provider_model(
         )
         .await
         .map_err(map_configuration_resource)?;
-    let provider: ProviderDetailResponse = store
-        .get_provider(provider_id)
-        .await
-        .map_err(map_configuration_resource)?
-        .into();
+    let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 

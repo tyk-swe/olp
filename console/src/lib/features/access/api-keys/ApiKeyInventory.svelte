@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
+  import { errorMessage as message } from '$lib/api/http';
   import { popCursor, pushCursor } from '$lib/api/pagination';
   import {
     listApiKeyPage,
@@ -34,12 +35,6 @@
     queryFn: () => listApiKeyPage(listState.cursor)
   }));
 
-  function message(error: unknown) {
-    return error instanceof Error
-      ? error.message
-      : 'The control API could not complete the request.';
-  }
-
   async function rotate(key: ApiKey) {
     if (
       !confirm(
@@ -71,11 +66,6 @@
     } finally {
       busy = '';
     }
-  }
-
-  function nextPage() {
-    const next = keys.data?.nextCursor;
-    if (next) pushCursor(listState, next);
   }
 </script>
 
@@ -210,7 +200,7 @@
     hasPrevious={listState.history.length > 0}
     hasNext={Boolean(keys.data?.nextCursor)}
     onPrevious={() => popCursor(listState)}
-    onNext={nextPage}
+    onNext={() => pushCursor(listState, keys.data?.nextCursor)}
     label="API key pages"
   />
 {/if}

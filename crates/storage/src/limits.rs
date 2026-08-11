@@ -67,7 +67,9 @@ impl DistributedLimiter {
                     concurrency_expires_at_ms,
                 })
             }
-            ReservationScriptResult::Granted { .. } => Err(LimitError::UnexpectedResponse),
+            ReservationScriptResult::Granted { .. } | ReservationScriptResult::ScriptFailure => {
+                Err(LimitError::UnexpectedResponse)
+            }
             ReservationScriptResult::Rejected {
                 dimension,
                 retry_after_ms,
@@ -76,7 +78,6 @@ impl DistributedLimiter {
                 retry_after: Duration::from_millis(retry_after_ms),
             }),
             ReservationScriptResult::MalformedState => Err(LimitError::MalformedState),
-            ReservationScriptResult::ScriptFailure => Err(LimitError::UnexpectedResponse),
         }
     }
 

@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use olp_storage::operations::OperationsError;
+use olp_storage::operations::{OperationsError, TimestampCursor};
 use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;
@@ -25,6 +25,13 @@ pub(super) fn page_limit(value: Option<u16>) -> Result<u16, Problem> {
         vec!["Use a page size between 1 and 200.".to_owned()],
     );
     Err(Problem::validation(errors))
+}
+
+pub(super) fn timestamp_cursor(value: Option<&str>) -> Result<Option<TimestampCursor>, Problem> {
+    value
+        .map(TimestampCursor::parse)
+        .transpose()
+        .map_err(map_operations)
 }
 
 pub(super) fn validate_time_range(

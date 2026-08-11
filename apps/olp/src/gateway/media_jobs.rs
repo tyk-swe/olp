@@ -253,22 +253,7 @@ async fn reconcile_media_job_operation(
         };
         let state_update = media_job_state(&result.status).map_err(|error| error.code())?;
         *record = store
-            .refresh_media_job(
-                record.id,
-                MediaJobUpdate {
-                    state: state_update,
-                    progress_percent: result.progress_percent,
-                    content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
-                    expires_at: result
-                        .expires_at
-                        .and_then(chrono::DateTime::from_timestamp_secs),
-                    error_class: result
-                        .error
-                        .as_ref()
-                        .map(|error| format!("{:?}", error.class).to_lowercase()),
-                    last_polled_at: Utc::now(),
-                },
-            )
+            .refresh_media_job(record.id, media_job_update(result, state_update))
             .await
             .map_err(|_| "persistence_unavailable")?;
         return Ok(());
@@ -358,22 +343,9 @@ pub(super) async fn refresh_video_list_record(
             return record;
         }
     };
-    let update = MediaJobUpdate {
-        state: state_update,
-        progress_percent: result.progress_percent,
-        content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
-        expires_at: result
-            .expires_at
-            .and_then(chrono::DateTime::from_timestamp_secs),
-        error_class: result
-            .error
-            .as_ref()
-            .map(|error| format!("{:?}", error.class).to_lowercase()),
-        last_polled_at: Utc::now(),
-    };
     let updated = state
         .store()
-        .refresh_media_job(record.id, update)
+        .refresh_media_job(record.id, media_job_update(&result, state_update))
         .await
         .unwrap_or(record);
     executed.mark_success();
@@ -462,6 +434,25 @@ pub(super) fn media_job_state(
             "provider_protocol_error",
             format!("The provider returned an unsupported video status: {status}."),
         )),
+    }
+}
+
+pub(super) fn media_job_update(
+    result: &olp_domain::VideoJobResult,
+    state: MediaJobState,
+) -> MediaJobUpdate {
+    MediaJobUpdate {
+        state,
+        progress_percent: result.progress_percent,
+        content_available: matches!(result.status, olp_domain::VideoStatus::Completed),
+        expires_at: result
+            .expires_at
+            .and_then(chrono::DateTime::from_timestamp_secs),
+        error_class: result
+            .error
+            .as_ref()
+            .map(|error| format!("{:?}", error.class).to_lowercase()),
+        last_polled_at: Utc::now(),
     }
 }
 

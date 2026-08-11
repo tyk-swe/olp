@@ -7,8 +7,8 @@
     revokeSession
   } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
+  import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { accessErrorMessage } from '../shared';
 
   let selectedUser = $state('');
   let previousSelectedUser = $state('');

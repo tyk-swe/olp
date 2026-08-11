@@ -17,12 +17,6 @@ export type RunProviderAction = (
   action: () => Promise<void>
 ) => Promise<boolean>;
 
-export function providerDetailError(error: unknown): string {
-  return error instanceof Error
-    ? error.message
-    : 'The control API could not complete the request.';
-}
-
 export function providerModelPageKey(
   providerId: string,
   providerSnapshot: Provider | undefined,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
+  import { errorMessage as message } from '$lib/api/http';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { listProviderPage } from '$lib/api/management/providers';
@@ -16,22 +17,6 @@
     queryKey: ['provider-page', listState.cursor ?? 'first'],
     queryFn: ({ signal }) => listProviderPage(listState.cursor, signal)
   }));
-
-  function message(error: unknown) {
-    return error instanceof Error
-      ? error.message
-      : 'The control API could not complete the request.';
-  }
-
-  function nextProviderPage() {
-    const next = providers.data?.nextCursor;
-    if (!next) return;
-    pushCursor(listState, next);
-  }
-
-  function previousProviderPage() {
-    popCursor(listState);
-  }
 </script>
 
 <div class="page-header">
@@ -110,8 +95,8 @@
     page={listState.history.length + 1}
     hasPrevious={listState.history.length > 0}
     hasNext={Boolean(providers.data?.nextCursor)}
-    onPrevious={previousProviderPage}
-    onNext={nextProviderPage}
+    onPrevious={() => popCursor(listState)}
+    onNext={() => pushCursor(listState, providers.data?.nextCursor)}
     label="Provider pages"
   />
 {/if}

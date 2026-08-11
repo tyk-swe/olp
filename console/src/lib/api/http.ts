@@ -63,12 +63,8 @@ function apiProblem(error: unknown, response: Response): ApiProblem {
   });
 }
 
-function throwApiProblem(error: unknown, response: Response): never {
-  throw apiProblem(error, response);
-}
-
 export function ensureSuccess(error: unknown, response: Response): void {
-  if (!response.ok) throwApiProblem(error, response);
+  if (!response.ok) throw apiProblem(error, response);
 }
 
 export function result<T>(
@@ -76,13 +72,17 @@ export function result<T>(
   error: unknown,
   response: Response
 ): NonNullable<T> {
-  if (!response.ok) throwApiProblem(error, response);
+  if (!response.ok) throw apiProblem(error, response);
   if (data !== undefined && data !== null) return data;
   throw new ApiProblem({
     type: 'urn:olp:problem:invalid-api-response',
     title: 'The API response did not include the expected JSON body',
     status: 502
   });
+}
+
+export function errorMessage(error: unknown, fallback = 'The control API could not complete the request.'): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 const BARE_UUID_ETAG =

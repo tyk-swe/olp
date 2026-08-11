@@ -1,5 +1,4 @@
 #![no_main]
-#![allow(clippy::collapsible_if)]
 
 //! Roundtrip oracles for the request and response codecs.
 //!
@@ -113,7 +112,7 @@ fuzz_target!(|data: &[u8]| {
             Ok(Operation::Video(olp_domain::VideoOperation::List(canonical))) => Some(canonical),
             _ => None,
         },
-        |canonical| openai::encode_video_list(canonical),
+        openai::encode_video_list,
     );
     roundtrip(
         data,
@@ -146,7 +145,7 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::response_input_tokens_result",
         |response| Some(openai::decode_response_input_tokens_result(response)),
-        |canonical| openai::encode_response_input_tokens_result(canonical),
+        openai::encode_response_input_tokens_result,
     );
     roundtrip(
         data,

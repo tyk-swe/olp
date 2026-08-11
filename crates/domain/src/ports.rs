@@ -72,10 +72,7 @@ pub trait MediaSpool: Send + Sync {
         None
     }
 
-    fn put<'a>(
-        &'a self,
-        upload: MediaUpload,
-    ) -> BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>>;
+    fn put(&self, upload: MediaUpload) -> BoxFuture<'_, Result<MediaArtifact, MediaSpoolError>>;
 
     fn open<'a>(
         &'a self,
@@ -137,10 +134,10 @@ impl fmt::Debug for ProviderRequest {
 }
 
 pub trait ProviderTransport: Send + Sync {
-    fn execute<'a>(
-        &'a self,
+    fn execute(
+        &self,
         request: ProviderRequest,
-    ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>>;
+    ) -> BoxFuture<'_, Result<ProviderOutput, TransportError>>;
 }
 
 #[derive(Clone, Error, Eq, PartialEq)]

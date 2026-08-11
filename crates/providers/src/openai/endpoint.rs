@@ -3,7 +3,7 @@ use std::{fmt, net::IpAddr, time::Duration};
 use reqwest::{Client, Url};
 use thiserror::Error;
 
-use crate::endpoint::{EndpointCore, EndpointCoreError};
+use crate::endpoint::EndpointCore;
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1/";
 
@@ -91,25 +91,7 @@ impl Endpoint {
     }
 }
 
-impl From<EndpointCoreError> for EndpointError {
-    fn from(error: EndpointCoreError) -> Self {
-        match error {
-            EndpointCoreError::HttpsRequired => Self::HttpsRequired,
-            EndpointCoreError::UnsupportedScheme => Self::UnsupportedScheme,
-            EndpointCoreError::UserInfoForbidden => Self::UserInfoForbidden,
-            EndpointCoreError::MissingHost => Self::MissingHost,
-            EndpointCoreError::MissingPort => Self::MissingPort,
-            EndpointCoreError::InvalidPort => Self::InvalidPort,
-            EndpointCoreError::QueryOrFragmentForbidden => Self::QueryOrFragmentForbidden,
-            EndpointCoreError::InvalidUrl(error) => Self::InvalidUrl(error),
-            EndpointCoreError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
-            EndpointCoreError::DnsTimeout => Self::DnsTimeout,
-            EndpointCoreError::DnsResolution(error) => Self::DnsResolution(error),
-            EndpointCoreError::NoAddresses => Self::NoAddresses,
-            EndpointCoreError::ClientBuild(error) => Self::ClientBuild(error),
-        }
-    }
-}
+crate::endpoint::impl_endpoint_core_error!(EndpointError);
 
 #[derive(Debug, Error)]
 pub enum EndpointError {

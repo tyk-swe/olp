@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { errorMessage as providerDetailError } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
     diffProviderRevisions,
@@ -11,7 +12,6 @@
   import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
-    providerDetailError,
     type RunProviderAction
   } from './providerDetailCoordination';
 

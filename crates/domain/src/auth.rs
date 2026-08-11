@@ -179,10 +179,10 @@ impl ApiKeyScope {
     #[must_use]
     pub const fn permits(self, capability: GatewayCapability) -> bool {
         match (self, capability) {
-            (Self::Inference, GatewayCapability::Inference) => true,
-            (Self::Inference, GatewayCapability::ModelsRead) => false,
-            (Self::ModelsRead, GatewayCapability::Inference) => false,
-            (Self::ModelsRead, GatewayCapability::ModelsRead) => true,
+            (Self::Inference, GatewayCapability::Inference)
+            | (Self::ModelsRead, GatewayCapability::ModelsRead) => true,
+            (Self::Inference, GatewayCapability::ModelsRead)
+            | (Self::ModelsRead, GatewayCapability::Inference) => false,
         }
     }
 }
@@ -331,10 +331,10 @@ mod tests {
 
     const fn expected_scope_capability(scope: ApiKeyScope, capability: GatewayCapability) -> bool {
         match (scope, capability) {
-            (ApiKeyScope::Inference, GatewayCapability::Inference) => true,
-            (ApiKeyScope::Inference, GatewayCapability::ModelsRead) => false,
-            (ApiKeyScope::ModelsRead, GatewayCapability::Inference) => false,
-            (ApiKeyScope::ModelsRead, GatewayCapability::ModelsRead) => true,
+            (ApiKeyScope::Inference, GatewayCapability::Inference)
+            | (ApiKeyScope::ModelsRead, GatewayCapability::ModelsRead) => true,
+            (ApiKeyScope::Inference, GatewayCapability::ModelsRead)
+            | (ApiKeyScope::ModelsRead, GatewayCapability::Inference) => false,
         }
     }
 

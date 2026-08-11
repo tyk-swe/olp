@@ -429,8 +429,8 @@ fn estimated_content_tokens(parts: &[olp_domain::ContentPart]) -> usize {
                 estimated_text_tokens(text)
             }
             olp_domain::ContentPart::Image { .. } => 1_000,
-            olp_domain::ContentPart::InputAudio { .. } => 2_000,
-            olp_domain::ContentPart::InputFile { .. } => 2_000,
+            olp_domain::ContentPart::InputAudio { .. }
+            | olp_domain::ContentPart::InputFile { .. } => 2_000,
         })
         .sum()
 }

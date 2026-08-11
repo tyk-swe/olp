@@ -28,9 +28,7 @@ pub(super) async fn execute_speech(
         .await?;
     if request.metadata.mode == TransportMode::Streaming {
         require_content_type(&response, "text/event-stream")?;
-        return Ok(ProviderOutput::Events(
-            connector.raw_sse_response(response)?,
-        ));
+        return Ok(ProviderOutput::Events(connector.raw_sse_response(response)));
     }
     let content_type = response
         .headers()
@@ -110,9 +108,7 @@ pub(super) async fn execute_transcription(
         .await?;
     if request.metadata.mode == TransportMode::Streaming {
         require_content_type(&response, "text/event-stream")?;
-        return Ok(ProviderOutput::Events(
-            connector.raw_sse_response(response)?,
-        ));
+        return Ok(ProviderOutput::Events(connector.raw_sse_response(response)));
     }
     let response_format = TranscriptionResponseFormat::parse(wire.response_format.as_deref())
         .map_err(|error| protocol_encode_error("transcription", error))?;

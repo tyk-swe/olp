@@ -3,6 +3,7 @@
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
+  import { errorMessage as message } from '$lib/api/http';
   import {
     createApiKey,
     updateApiKey,
@@ -36,12 +37,6 @@
   onDestroy(() => {
     secret = null;
   });
-
-  function message(error: unknown) {
-    return error instanceof Error
-      ? error.message
-      : 'The control API could not complete the request.';
-  }
 
   function edit(key: ApiKey) {
     editing = key;

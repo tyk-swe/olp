@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::Infallible};
+use std::{collections::VecDeque, convert::Infallible, fmt::Display};
 
 use axum::{
     body::{Body, Bytes},
@@ -13,6 +13,17 @@ use crate::gateway::{InferenceError, RoutedEventExecution};
 
 pub(crate) fn encode_sse_frame(frame: &SseFrame) -> Result<Bytes, SseEncodeError> {
     encode_frame(frame).map(Bytes::from)
+}
+
+pub(crate) fn encode_protocol_sse_frames<E: Display>(
+    frames: Result<Vec<SseFrame>, E>,
+) -> Result<Vec<Bytes>, String> {
+    frames
+        .map_err(|error| error.to_string())?
+        .iter()
+        .map(encode_sse_frame)
+        .collect::<Result<_, _>>()
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn encode_server_sse_frame(frame: &SseFrame) -> Bytes {

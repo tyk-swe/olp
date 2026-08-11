@@ -55,11 +55,6 @@ pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Configu
     Ok(())
 }
 
-pub(crate) fn validate_capability(capability: &CapabilityRecord) -> Result<(), ConfigurationError> {
-    let _ = capability;
-    Ok(())
-}
-
 pub(crate) fn validate_provider_capability(
     provider_kind: &str,
     capability: &CapabilityRecord,

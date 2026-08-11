@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use olp_domain::{
     ProviderAuthMode, ProviderConfiguration, ProviderKind, validate_provider_configuration,
 };
-use olp_storage::{configuration::ProviderRecord, configuration::UpdateProvider};
+use olp_storage::{PgStore, configuration::ProviderRecord, configuration::UpdateProvider};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -135,6 +135,17 @@ impl From<ProviderRecord> for ProviderDetailResponse {
     }
 }
 
+pub(super) async fn load_provider_detail(
+    store: &PgStore,
+    provider_id: Uuid,
+) -> Result<ProviderDetailResponse, Problem> {
+    store
+        .get_provider(provider_id)
+        .await
+        .map(Into::into)
+        .map_err(map_configuration_resource)
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderListResponse {
     pub items: Vec<ProviderSummaryResponse>,
@@ -188,12 +199,7 @@ pub(crate) async fn get_provider(
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let provider: ProviderDetailResponse = state
-        .store()
-        .get_provider(provider_id)
-        .await
-        .map_err(map_configuration_resource)?
-        .into();
+    let provider = load_provider_detail(state.store(), provider_id).await?;
     let etag = provider.etag;
     with_etag(Json(provider), etag)
 }
@@ -249,11 +255,7 @@ pub(crate) async fn update_provider(
         )
         .await
         .map_err(map_configuration_resource)?;
-    let provider: ProviderDetailResponse = store
-        .get_provider(provider_id)
-        .await
-        .map_err(map_configuration_resource)?
-        .into();
+    let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 
@@ -332,11 +334,7 @@ pub(crate) async fn restore_provider_as_draft(
         )
         .await
         .map_err(map_configuration_resource)?;
-    let provider: ProviderDetailResponse = store
-        .get_provider(provider_id)
-        .await
-        .map_err(map_configuration_resource)?
-        .into();
+    let provider = load_provider_detail(store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 

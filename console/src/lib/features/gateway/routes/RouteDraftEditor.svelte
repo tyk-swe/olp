@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { isEtagMismatch } from '$lib/api/http';
+  import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     beginReload,
@@ -108,10 +108,6 @@
   const routeEligibilityWarnings = $derived(
     findRouteEligibilityWarnings(targets, modelOptions, operations)
   );
-
-  function message(error: unknown) {
-    return error instanceof Error ? error.message : 'The control API could not complete the request.';
-  }
 
   async function run(label: string, action: () => Promise<void>) {
     busy = label;

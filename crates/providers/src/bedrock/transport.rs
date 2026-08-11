@@ -548,8 +548,9 @@ where
         SdkError::DispatchFailure(failure) if failure.is_timeout() => AttemptFailureClass::Timeout,
         SdkError::DispatchFailure(failure) if failure.is_user() => AttemptFailureClass::Protocol,
         SdkError::DispatchFailure(_) => AttemptFailureClass::Connect,
-        SdkError::ConstructionFailure(_) => AttemptFailureClass::Protocol,
-        SdkError::ResponseError(_) => AttemptFailureClass::Protocol,
+        SdkError::ConstructionFailure(_) | SdkError::ResponseError(_) => {
+            AttemptFailureClass::Protocol
+        }
         SdkError::ServiceError(service) if service.raw().is_successful_response() => {
             AttemptFailureClass::Protocol
         }
@@ -569,13 +570,6 @@ fn classify_service_code(code: Option<&str>) -> AttemptFailureClass {
         Some("ThrottlingException" | "ServiceQuotaExceededException") => {
             AttemptFailureClass::RateLimit
         }
-        Some(
-            "InternalServerException"
-            | "ServiceUnavailableException"
-            | "ModelErrorException"
-            | "ModelNotReadyException"
-            | "ModelStreamErrorException",
-        ) => AttemptFailureClass::UpstreamServer,
         Some("ModelTimeoutException") => AttemptFailureClass::Timeout,
         Some(
             "AccessDeniedException"
@@ -586,8 +580,7 @@ fn classify_service_code(code: Option<&str>) -> AttemptFailureClass {
         Some("ValidationException" | "ResourceNotFoundException" | "ConflictException") => {
             AttemptFailureClass::UpstreamClient
         }
-        None => AttemptFailureClass::UpstreamServer,
-        Some(_) => AttemptFailureClass::UpstreamServer,
+        _ => AttemptFailureClass::UpstreamServer,
     }
 }
 

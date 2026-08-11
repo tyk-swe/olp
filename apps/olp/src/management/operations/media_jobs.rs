@@ -8,14 +8,14 @@ use chrono::{DateTime, Utc};
 use olp_domain::Surface;
 use olp_storage::{
     media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
-    media_jobs::MediaJobRecord, media_jobs::MediaJobState, operations::TimestampCursor,
+    media_jobs::MediaJobRecord, media_jobs::MediaJobState,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{map_operations, not_found, page_limit, validate_time_range};
+use super::helpers::{not_found, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
     FieldErrors, ManagementState, Problem,
     management::{Permission, require_permission, require_read_session, with_etag},
@@ -124,12 +124,7 @@ pub(super) async fn list_media_jobs(
 ) -> Result<Json<MediaJobListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let cursor = query
-        .cursor
-        .as_deref()
-        .map(TimestampCursor::parse)
-        .transpose()
-        .map_err(map_operations)?;
+    let cursor = timestamp_cursor(query.cursor.as_deref())?;
     let state_filter = query
         .state
         .as_deref()

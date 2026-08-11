@@ -8,9 +8,10 @@
     type InvitationSecret
   } from '$lib/api/management/access';
   import { copyText } from '$lib/clipboard';
+  import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
-  import { accessErrorMessage, FIXED_ROLES } from '../shared';
+  import { FIXED_ROLES } from '../shared';
 
   let cursor = $state<string | undefined>();
   let history = $state<Array<string | undefined>>([]);

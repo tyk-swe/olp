@@ -63,20 +63,14 @@ pub(in crate::openai::transport) fn require_content_type(
 }
 
 impl OpenAiConnector {
-    pub(super) fn raw_sse_response(
-        &self,
-        response: DeadlineResponse,
-    ) -> Result<ProviderEventStream, TransportError> {
+    pub(super) fn raw_sse_response(&self, response: DeadlineResponse) -> ProviderEventStream {
         let bytes = RESPONSE_IO.response_stream(
             response.response,
             response.first_body_deadline,
             self.config.timeouts.idle,
             response.attempt_deadline,
         );
-        Ok(Box::pin(RawSseEventStream::new(
-            bytes,
-            self.config.max_event_bytes,
-        )))
+        Box::pin(RawSseEventStream::new(bytes, self.config.max_event_bytes))
     }
 
     pub(super) async fn unary_response(
@@ -108,7 +102,7 @@ impl OpenAiConnector {
         Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
     }
 
-    pub(super) async fn streaming_response(
+    pub(super) fn streaming_response(
         &self,
         response: Response,
         first_byte_deadline: Instant,

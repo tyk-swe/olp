@@ -4,12 +4,12 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{operations::AuditRecord, operations::TimestampCursor};
+use olp_storage::operations::AuditRecord;
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::helpers::{PageQuery, map_operations, page_limit};
+use super::helpers::{PageQuery, map_operations, page_limit, timestamp_cursor};
 use crate::{
     ManagementState, Problem,
     management::{Permission, require_permission, require_read_session},
@@ -64,12 +64,7 @@ pub(super) async fn list_audit_events(
 ) -> Result<Json<AuditListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
-    let cursor = query
-        .cursor
-        .as_deref()
-        .map(TimestampCursor::parse)
-        .transpose()
-        .map_err(map_operations)?;
+    let cursor = timestamp_cursor(query.cursor.as_deref())?;
     let limit = page_limit(query.limit)?;
     let page = state
         .store()

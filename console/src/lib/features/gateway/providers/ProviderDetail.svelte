@@ -2,7 +2,10 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import { isEtagMismatch } from '$lib/api/http';
+  import {
+    errorMessage as providerDetailError,
+    isEtagMismatch
+  } from '$lib/api/http';
   import {
     getProvider,
     listProviderKinds,
@@ -31,7 +34,6 @@
   } from './providerEditor';
   import {
     installProviderWithModels,
-    providerDetailError,
     type RunProviderAction
   } from './providerDetailCoordination';
   import { invalidateProviderSummaries } from './providerCache';

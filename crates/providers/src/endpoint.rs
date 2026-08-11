@@ -141,3 +141,31 @@ impl From<PinnedClientError> for EndpointCoreError {
         }
     }
 }
+
+macro_rules! impl_endpoint_core_error {
+    ($target:ident) => {
+        impl From<$crate::endpoint::EndpointCoreError> for $target {
+            fn from(error: $crate::endpoint::EndpointCoreError) -> Self {
+                use $crate::endpoint::EndpointCoreError;
+
+                match error {
+                    EndpointCoreError::HttpsRequired => Self::HttpsRequired,
+                    EndpointCoreError::UnsupportedScheme => Self::UnsupportedScheme,
+                    EndpointCoreError::UserInfoForbidden => Self::UserInfoForbidden,
+                    EndpointCoreError::MissingHost => Self::MissingHost,
+                    EndpointCoreError::MissingPort => Self::MissingPort,
+                    EndpointCoreError::InvalidPort => Self::InvalidPort,
+                    EndpointCoreError::QueryOrFragmentForbidden => Self::QueryOrFragmentForbidden,
+                    EndpointCoreError::InvalidUrl(error) => Self::InvalidUrl(error),
+                    EndpointCoreError::ForbiddenAddress(address) => Self::ForbiddenAddress(address),
+                    EndpointCoreError::DnsTimeout => Self::DnsTimeout,
+                    EndpointCoreError::DnsResolution(error) => Self::DnsResolution(error),
+                    EndpointCoreError::NoAddresses => Self::NoAddresses,
+                    EndpointCoreError::ClientBuild(error) => Self::ClientBuild(error),
+                }
+            }
+        }
+    };
+}
+
+pub(crate) use impl_endpoint_core_error;

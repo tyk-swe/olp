@@ -37,9 +37,7 @@ pub(super) async fn execute(
     let response = connector.post_raw_json(&request, path, body).await?;
     if request.metadata.mode == TransportMode::Streaming {
         require_content_type(&response, "text/event-stream")?;
-        return Ok(ProviderOutput::Events(
-            connector.raw_sse_response(response)?,
-        ));
+        return Ok(ProviderOutput::Events(connector.raw_sse_response(response)));
     }
     require_content_type(&response, "application/json")?;
     let bytes = read_deadline_body(
@@ -134,9 +132,7 @@ async fn execute_multipart(
     let response = connector.post_multipart_raw(&request, path, form).await?;
     if request.metadata.mode == TransportMode::Streaming {
         require_content_type(&response, "text/event-stream")?;
-        return Ok(ProviderOutput::Events(
-            connector.raw_sse_response(response)?,
-        ));
+        return Ok(ProviderOutput::Events(connector.raw_sse_response(response)));
     }
     require_content_type(&response, "application/json")?;
     let response = read_deadline_body(

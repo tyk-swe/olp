@@ -622,7 +622,7 @@ async fn draft_targets(
     pool: &sqlx::PgPool,
     id: Uuid,
 ) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
-    target_rows(
+    Ok(target_rows(
         sqlx::query_as!(
             RouteTargetRow,
             "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
@@ -635,14 +635,14 @@ async fn draft_targets(
                AND prm.source_provider_model_id = pm.id \
              WHERE rdt.route_draft_id = $1 ORDER BY rdt.position",
         id).fetch_all(pool).await?
-    )
+    ))
 }
 
 async fn revision_targets(
     pool: &sqlx::PgPool,
     id: Uuid,
 ) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
-    target_rows(
+    Ok(target_rows(
         sqlx::query_as!(
             RouteTargetRow,
             "SELECT rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
@@ -655,7 +655,7 @@ async fn revision_targets(
                AND prm.source_provider_model_id = pm.id \
              WHERE rrt.route_revision_id = $1 ORDER BY rrt.position",
         id).fetch_all(pool).await?
-    )
+    ))
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -672,9 +672,8 @@ struct RouteTargetRow {
     position: i32,
 }
 
-fn target_rows(rows: Vec<RouteTargetRow>) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
-    Ok(rows
-        .into_iter()
+fn target_rows(rows: Vec<RouteTargetRow>) -> Vec<RouteTargetRecord> {
+    rows.into_iter()
         .map(|row| RouteTargetRecord {
             id: row.id,
             routing_id: row.routing_id,
@@ -687,7 +686,7 @@ fn target_rows(rows: Vec<RouteTargetRow>) -> Result<Vec<RouteTargetRecord>, Conf
             timeout_ms: row.timeout_ms,
             position: row.position,
         })
-        .collect())
+        .collect()
 }
 
 fn revision_target_map(targets: &[RouteTargetRecord]) -> BTreeMap<String, (i32, i32, i32, i32)> {

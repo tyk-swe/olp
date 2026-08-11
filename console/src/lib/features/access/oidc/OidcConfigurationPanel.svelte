@@ -23,7 +23,8 @@
     markSaved,
     reconcile
   } from '$lib/forms/concurrentEdit';
-  import { accessErrorMessage, FIXED_ROLES } from '../shared';
+  import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import { FIXED_ROLES } from '../shared';
   import { parseRoleMappings } from './mappings';
 
   const queryClient = useQueryClient();

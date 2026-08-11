@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { errorMessage as providerDetailError } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
     certifyProviderModel,
@@ -15,7 +16,11 @@
     type Provider,
     type ProviderModel
   } from '$lib/api/management/providers';
-  import type { CursorHistory } from '$lib/api/pagination';
+  import {
+    popCursor,
+    pushCursor,
+    type CursorHistory
+  } from '$lib/api/pagination';
   import CapabilityReview from './CapabilityReview.svelte';
   import {
     activationReady,
@@ -25,7 +30,6 @@
   import {
     fetchCoordinatedModelPage,
     installProviderWithModels,
-    providerDetailError,
     providerModelPageKey,
     type CoordinatedModelPage,
     type RunProviderAction
@@ -173,18 +177,6 @@
       );
     });
   }
-
-  function nextPage() {
-    const next = models.data?.page.nextCursor;
-    if (!next) return;
-    pageState.history = [...pageState.history, pageState.cursor];
-    pageState.cursor = next;
-  }
-
-  function previousPage() {
-    pageState.cursor = pageState.history.at(-1);
-    pageState.history = pageState.history.slice(0, -1);
-  }
 </script>
 
 <section class="card editor models" aria-labelledby="models-heading">
@@ -315,8 +307,8 @@
       page={pageState.history.length + 1}
       hasPrevious={pageState.history.length > 0}
       hasNext={Boolean(modelPage.page.nextCursor)}
-      onPrevious={previousPage}
-      onNext={nextPage}
+      onPrevious={() => popCursor(pageState)}
+      onNext={() => pushCursor(pageState, modelPage.page.nextCursor)}
       label="Provider model pages"
     />
   {/if}

@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { errorMessage as message } from '$lib/api/http';
   import {
     diffRouteRevisions,
     listRouteRevisions,
@@ -28,10 +29,6 @@
     if (items.length && !toRevision) toRevision = items[0].id;
     if (items.length > 1 && !fromRevision) fromRevision = items[1].id;
   });
-
-  function message(error: unknown) {
-    return error instanceof Error ? error.message : 'The control API could not complete the request.';
-  }
 
   async function run(label: string, action: () => Promise<void>) {
     busy = label;

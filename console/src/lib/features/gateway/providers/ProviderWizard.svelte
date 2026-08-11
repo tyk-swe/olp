@@ -10,7 +10,7 @@
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
   } from './providerCache';
-  import { isEtagMismatch } from '$lib/api/http';
+  import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
   import {
     activateProvider,
     certifyProviderModel,
@@ -120,12 +120,6 @@
   onDestroy(() => {
     if (draft) draft.credential = '';
   });
-
-  function message(error: unknown) {
-    return error instanceof Error
-      ? error.message
-      : 'The control API could not complete the request.';
-  }
 
   function chooseCompatibleProvider(event: Event) {
     if (!draft || !selectedSpec) return;

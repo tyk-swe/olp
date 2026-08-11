@@ -19,7 +19,7 @@ use crate::{
     GatewayState, InferencePrincipal,
     public_http::json_media::{admit_anthropic_count, admit_anthropic_messages, cleanup_admitted},
     public_http::streaming_response::{
-        ProtocolStreamEncoder, encode_server_sse_frame, encode_sse_frame,
+        ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
         protocol_streaming_response,
     },
 };
@@ -261,16 +261,7 @@ struct AnthropicHttpStreamEncoder(AnthropicMessagesClientStreamEncoder);
 
 impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
     fn push(&mut self, event: olp_domain::CanonicalEvent) -> Result<Vec<bytes::Bytes>, String> {
-        self.0
-            .push(event)
-            .map_err(|error| error.to_string())
-            .and_then(|frames| {
-                frames
-                    .iter()
-                    .map(encode_sse_frame)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| error.to_string())
-            })
+        encode_protocol_sse_frames(self.0.push(event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {

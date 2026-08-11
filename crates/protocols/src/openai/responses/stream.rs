@@ -122,14 +122,7 @@ impl OpenAiResponsesStreamDecoder {
                 let item = value
                     .get("item")
                     .ok_or_else(|| ResponsesCodecError::InvalidResponse("stream item".into()))?;
-                let role = item.get("role").and_then(Value::as_str).map_or(
-                    MessageRole::Assistant,
-                    |role| match role {
-                        "assistant" => MessageRole::Assistant,
-                        _ => MessageRole::Assistant,
-                    },
-                );
-                self.ensure_output_started(output_index, role, events);
+                self.ensure_output_started(output_index, MessageRole::Assistant, events);
                 if item.get("type").and_then(Value::as_str) == Some("function_call") {
                     self.emit(
                         events,
