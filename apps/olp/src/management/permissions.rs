@@ -1,5 +1,5 @@
-use olp_domain::{Permission, Role};
-use olp_storage::authentication::SessionPrincipal;
+use olp_db::authentication::SessionPrincipal;
+use olp_engine::domain::{Permission, Role};
 use tracing::error;
 
 use crate::Problem;

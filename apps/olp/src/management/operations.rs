@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 #[cfg(test)]
 use chrono::Utc;
 #[cfg(test)]
-use olp_domain::Surface;
+use olp_engine::domain::Surface;
 #[cfg(test)]
 use uuid::Uuid;
 

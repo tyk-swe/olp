@@ -11,7 +11,7 @@ for required_executable in rg awk dirname; do
   validation_require_executable "$required_executable"
 done
 
-storage_root=crates/storage/src
+storage_root=crates/olp-db/src
 validation_require_directory "$storage_root"
 
 forbidden_row_patterns=(

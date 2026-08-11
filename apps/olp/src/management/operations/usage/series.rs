@@ -4,7 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{usage::UsageGranularity, usage::UsagePoint};
+use olp_db::{usage::UsageGranularity, usage::UsagePoint};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

@@ -5,8 +5,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_domain::{CanonicalEvent, CanonicalResult, GatewayCapability, Operation, TransportMode};
-use olp_protocols::openai::{
+use olp_engine::domain::{
+    CanonicalEvent, CanonicalResult, GatewayCapability, Operation, TransportMode,
+};
+use olp_engine::protocols::openai::{
     OpenAiResponsesStreamEncoder, ResponseCreateRequest, ResponseInputTokensRequest,
     decode_response_create, decode_response_input_tokens, encode_response_input_tokens_result,
     encode_response_object,
@@ -110,7 +112,7 @@ impl ProtocolStreamEncoder for OpenAiResponsesHttpStreamEncoder {
 }
 
 fn responses_error_sse(error: &InferenceError) -> Bytes {
-    encode_server_sse_frame(&olp_protocols::sse::SseFrame {
+    encode_server_sse_frame(&olp_engine::protocols::sse::SseFrame {
         event: Some("error".to_owned()),
         data: json!({
             "type": "error",

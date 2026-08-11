@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-use olp_inference::{circuit::CircuitBreaker, runtime::RuntimeManager};
-use olp_storage::{PgStore, security::MasterKey, valkey::RuntimeHintSubscriber};
+use olp_db::{PgStore, security::MasterKey, valkey::RuntimeHintSubscriber};
+use olp_engine::inference::{circuit::CircuitBreaker, runtime::RuntimeManager};
 use tokio::{sync::watch, task::JoinHandle};
 use tracing::{error, info, warn};
 
@@ -143,7 +143,9 @@ pub(super) async fn activate_latest_runtime(
     let current_api_keys = store.current_runtime_api_keys().await?;
     let mut rejected = Vec::new();
     for release in releases {
-        let snapshot = match runtime.decode_release_candidate(&release, current_api_keys.clone()) {
+        let snapshot = match runtime
+            .decode_release_candidate(release.activation_candidate(), current_api_keys.clone())
+        {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 rejected.push(format!("{}: {error}", release.sequence));

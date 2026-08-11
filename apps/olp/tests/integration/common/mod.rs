@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use olp::test_support::ProcessComposition;
-use olp_storage::security::AuthHmacKey;
+use olp_db::security::AuthHmacKey;
 
 /// URL of the empty PostgreSQL 18 database each integration test expects.
 /// `scripts/run-postgres-tests.sh` (`make db-test`) provisions one per test.

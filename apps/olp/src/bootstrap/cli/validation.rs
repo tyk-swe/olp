@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use olp_storage::{
+use olp_db::{
     PgStore, security::AuthHmacKey, security::MasterKey, security::MasterKeyEncryptionStatus,
 };
 use zeroize::Zeroizing;

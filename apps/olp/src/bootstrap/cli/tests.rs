@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use olp_storage::{
+use olp_db::{
     security::AuthHmacKey, security::EncryptedTable, security::KeyVersionReference,
     security::MasterKey, security::MasterKeyEncryptionStatus,
 };

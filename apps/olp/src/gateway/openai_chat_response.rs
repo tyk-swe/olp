@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use axum::body::Bytes;
-use olp_domain::{CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, Surface};
+use olp_engine::domain::{CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, Surface};
 use serde_json::{Value, json};
 
 use super::{

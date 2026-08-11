@@ -58,7 +58,7 @@ fn install_two_target_streams(
     operation: OperationKind,
     first: Arc<dyn ProviderTransport>,
     second: Arc<dyn ProviderTransport>,
-) -> (Arc<RuntimeBundle>, Vec<olp_domain::AttemptPlan>) {
+) -> (Arc<RuntimeBundle>, Vec<olp_engine::domain::AttemptPlan>) {
     let pinned = state.runtime().pin();
     let first_provider_id = *pinned.providers.keys().next().unwrap();
     let second_provider_id = ProviderId::new();
@@ -229,7 +229,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
 #[test]
 fn post_connect_failure_obeys_media_ambiguity_policy() {
     let failure = TransportError {
-        phase: olp_domain::TransportPhase::FirstByte,
+        phase: olp_engine::domain::TransportPhase::FirstByte,
         class: AttemptFailureClass::Connect,
         response_committed: false,
         message: "connection closed before response headers".to_owned(),
@@ -248,7 +248,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
 
     let connect = reclassify_ambiguous_transport_failure(
         TransportError {
-            phase: olp_domain::TransportPhase::Connect,
+            phase: olp_engine::domain::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
             message: "connection failed".to_owned(),
@@ -347,9 +347,9 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
     install_result(
         &state,
         OperationKind::TokenCount,
-        CanonicalResult::TokenCount(olp_domain::TokenCountResult {
+        CanonicalResult::TokenCount(olp_engine::domain::TokenCountResult {
             input_tokens: 1,
-            extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         }),
     );
     let request: ResponseInputTokensRequest = serde_json::from_value(json!({
@@ -427,14 +427,14 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
     let snapshot = state.runtime().pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
     let lookup = state.auth_hmac_key().as_ref().lookup_id(&key).unwrap();
-    let operation = Operation::Images(olp_domain::ImageOperation::Edit(
-        olp_domain::ImageEditRequest {
+    let operation = Operation::Images(olp_engine::domain::ImageOperation::Edit(
+        olp_engine::domain::ImageEditRequest {
             route: RouteSlug::parse("default").unwrap(),
             images: vec![MediaHandle::new("bounded-image")],
             mask: None,
             prompt: "x".repeat(8_500),
             stream: false,
-            extensions: olp_domain::SourceExtensions::default(),
+            extensions: olp_engine::domain::SourceExtensions::default(),
         },
     ));
     let error = crate::HTTP_INFERENCE_LIMITS_RESERVED

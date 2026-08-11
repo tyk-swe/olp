@@ -6,7 +6,7 @@ use aws_smithy_eventstream::frame::write_message_to;
 use aws_smithy_types::event_stream::{Header, HeaderValue, Message as EventMessage};
 use bytes::Bytes;
 use futures::StreamExt as _;
-use olp_domain::{
+use olp_engine::domain::{
     AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
     ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaArtifact, MediaHandle,
     MediaSource, MediaSpool, MediaSpoolError, MediaUpload, Message, MessageRole, OpenedMedia,
@@ -16,8 +16,8 @@ use olp_domain::{
     TranscriptionRequest, TransportError, TransportMode, TransportPhase, Usage,
     validate_event_sequence,
 };
-use olp_protocols::sse::DEFAULT_MAX_EVENT_BYTES;
-use olp_providers::{
+use olp_engine::protocols::sse::DEFAULT_MAX_EVENT_BYTES;
+use olp_engine::providers::{
     CompatibleCapability,
     test_support::{API_KEY, BEDROCK_ACCESS_KEY, BEDROCK_SECRET_KEY, VERTEX_TOKEN, local_provider},
 };
@@ -195,14 +195,14 @@ impl MediaSpool for InlineMediaSpool {
     fn put<'a>(
         &'a self,
         _upload: MediaUpload,
-    ) -> olp_domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+    ) -> olp_engine::domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> olp_domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+    ) -> olp_engine::domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         let handle = handle.clone();
         let filename = self.filename;
         let content_type = self.content_type;
@@ -225,7 +225,7 @@ impl MediaSpool for InlineMediaSpool {
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> olp_domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
+    ) -> olp_engine::domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::Unavailable) })
     }
 }
@@ -282,7 +282,7 @@ fn generation_request(
         route: RouteSlug::parse("conformance").unwrap(),
         messages: vec![Message {
             role: MessageRole::User,
-            content: vec![olp_domain::ContentPart::Text {
+            content: vec![olp_engine::domain::ContentPart::Text {
                 text: "say hello".to_owned(),
             }],
             name: None,

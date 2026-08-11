@@ -4,7 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::operations::ProviderHealthRecord;
+use olp_db::operations::ProviderHealthRecord;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -51,7 +51,7 @@ pub(super) struct ProviderHealthItem {
     #[schema(value_type = String, format = Uuid)]
     provider_id: Uuid,
     provider_name: String,
-    provider_kind: olp_domain::ProviderKind,
+    provider_kind: olp_engine::domain::ProviderKind,
     provider_state: String,
     status: String,
     last_probe_at: Option<DateTime<Utc>>,

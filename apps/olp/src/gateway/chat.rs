@@ -6,9 +6,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, stream};
-use olp_domain::{CanonicalEventKind, TransportMode};
-use olp_inference::{RequestOutcome, RoutedEventExecution};
-use olp_protocols::openai::{ChatCompletionRequest, decode_chat_completion};
+use olp_engine::domain::{CanonicalEventKind, TransportMode};
+use olp_engine::inference::{RequestOutcome, RoutedEventExecution};
+use olp_engine::protocols::openai::{ChatCompletionRequest, decode_chat_completion};
 
 use crate::{
     GatewayState, InferencePrincipal,

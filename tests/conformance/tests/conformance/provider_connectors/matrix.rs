@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use olp_domain::{OperationKind, ProviderKind, Surface, TransportMode};
-use olp_providers::{certifiable_capabilities, supports_capability_certification};
+use olp_engine::domain::{OperationKind, ProviderKind, Surface, TransportMode};
+use olp_engine::providers::{certifiable_capabilities, supports_capability_certification};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Contract {

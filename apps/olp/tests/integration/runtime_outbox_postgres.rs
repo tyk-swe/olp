@@ -8,7 +8,7 @@ use chrono::{TimeDelta, Utc};
 use olp::test_support::{
     OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch,
 };
-use olp_storage::{
+use olp_db::{
     PgStore, runtime::RuntimeOutboxState, test_support::TestDb, valkey::ValkeyAdapterError,
 };
 use tokio::sync::{Barrier, oneshot, watch};

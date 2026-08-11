@@ -2,7 +2,7 @@ use axum::{
     http::{HeaderValue, header},
     response::Response,
 };
-use olp_storage::runtime::PublishedRuntimeRelease;
+use olp_db::runtime::PublishedRuntimeRelease;
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;

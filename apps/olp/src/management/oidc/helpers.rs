@@ -1,5 +1,5 @@
-use olp_providers::OidcNetworkPolicy;
-use olp_storage::security::MasterKey;
+use olp_db::security::MasterKey;
+use olp_engine::providers::OidcNetworkPolicy;
 
 use crate::{ManagementState, Problem};
 

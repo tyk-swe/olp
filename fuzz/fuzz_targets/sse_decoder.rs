@@ -19,7 +19,7 @@
 use std::mem::{Discriminant, discriminant};
 
 use libfuzzer_sys::fuzz_target;
-use olp_protocols::{
+use olp_engine::protocols::{
     anthropic::AnthropicMessagesStreamDecoder,
     gemini::GeminiGenerateContentStreamDecoder,
     openai::{

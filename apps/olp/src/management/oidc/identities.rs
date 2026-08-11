@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use olp_storage::{
+use olp_db::{
     oidc::OidcIdentityRecord, oidc::UnlinkOidcIdentity, security::RecentAuthMaterial,
     security::SessionMaterial,
 };

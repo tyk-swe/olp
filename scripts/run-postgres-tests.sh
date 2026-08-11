@@ -8,7 +8,7 @@ source "$script_dir/lib/postgres-test-databases.sh"
 # Runs the #[ignore]d PostgreSQL/Valkey integration suites through nextest
 # (profile "db" in .config/nextest.toml, which bounds parallelism and
 # per-test timeouts). Every test provisions its own uniquely named database
-# via olp_storage::test_support::TestDb and drops it on completion; this
+# via olp_db::test_support::TestDb and drops it on completion; this
 # script only sweeps leftovers from workers that were killed mid-test.
 #
 # Databases are namespaced by a per-run token so the sweep never touches a
@@ -76,7 +76,7 @@ fi
 (
   unset OLP_DATABASE_URL
   SQLX_OFFLINE=true cargo nextest run --locked --all-features \
-    --package olp-storage --package olp \
+    --package olp-db --package olp \
     --profile db --run-ignored ignored-only \
     "$@" "${skip_args[@]}"
 )

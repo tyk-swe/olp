@@ -6,7 +6,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use olp_storage::{
+use olp_db::{
     identity::InstallationSetupInput, security::CsrfMaterial, security::SessionMaterial,
     security::hash_password, security::verify_password,
 };
@@ -206,7 +206,7 @@ pub(super) async fn setup(
         )
         .await
         .map_err(|error| match error {
-            olp_storage::PersistenceError::AlreadySetup => Problem::conflict(
+            olp_db::PersistenceError::AlreadySetup => Problem::conflict(
                 "setup_already_completed",
                 "This installation already has an owner.",
             ),

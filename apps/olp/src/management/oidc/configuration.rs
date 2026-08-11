@@ -7,12 +7,12 @@ use axum::{
     response::Response,
 };
 use jsonwebtoken::jwk::{JwkSet, PublicKeyUse};
-use olp_domain::Role;
-use olp_providers::OidcNetworkPolicy;
-use olp_storage::{
+use olp_db::{
     oidc::OidcConfiguration, oidc::OidcError, oidc::OidcRoleMapping, oidc::UpsertOidcConfiguration,
     security::oidc_client_secret_aad as client_secret_aad,
 };
+use olp_engine::domain::Role;
+use olp_engine::providers::OidcNetworkPolicy;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use url::Url;

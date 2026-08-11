@@ -12,7 +12,11 @@ use axum::{
 };
 use http_body_util::BodyExt as _;
 use olp::test_support::{ApiMode, ProcessComposition, public_router, reconcile_media_jobs_once};
-use olp_domain::{
+use olp_db::{
+    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
+    security::AuthHmacKey,
+};
+use olp_engine::domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     BoxFuture, CanonicalResult, Capability, DurationMs, MediaSpool, MediaUpload, Operation,
     OperationKind, Provider, ProviderId, ProviderKind, ProviderOutput, ProviderRequest,
@@ -20,11 +24,7 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode,
     VideoContentResult, VideoDeleteResult, VideoJobResult, VideoOperation, VideoStatus,
 };
-use olp_inference::runtime::RuntimeManager;
-use olp_storage::{
-    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
-    security::AuthHmacKey,
-};
+use olp_engine::inference::runtime::RuntimeManager;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -89,7 +89,7 @@ impl ProviderTransport for VideoLifecycleTransport {
                         operation
                             .extensions
                             .values
-                            .get(olp_domain::MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION),
+                            .get(olp_engine::domain::MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION),
                         Some(&serde_json::Value::Bool(true))
                     );
                     self.delete_calls.fetch_add(1, Ordering::AcqRel);
@@ -97,8 +97,8 @@ impl ProviderTransport for VideoLifecycleTransport {
                         && operation.job_id != "upstream-video-created"
                     {
                         return Err(TransportError {
-                            phase: olp_domain::TransportPhase::FirstByte,
-                            class: olp_domain::AttemptFailureClass::Ambiguous,
+                            phase: olp_engine::domain::TransportPhase::FirstByte,
+                            class: olp_engine::domain::AttemptFailureClass::Ambiguous,
                             response_committed: true,
                             message: "injected cleanup ambiguity".to_owned(),
                         });
@@ -139,7 +139,7 @@ fn video_job(id: &str, status: VideoStatus) -> VideoJobResult {
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn media_job_management_views_are_session_authorized_and_metadata_only() {
-    let db = olp_storage::test_support::TestDb::create_migrated("media_jobs_http").await;
+    let db = olp_db::test_support::TestDb::create_migrated("media_jobs_http").await;
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,
@@ -534,7 +534,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
             .await
             .unwrap()
             .lifecycle,
-        olp_storage::media_jobs::MediaJobLifecycle::DeletePending
+        olp_db::media_jobs::MediaJobLifecycle::DeletePending
     );
     sqlx::query("DROP TRIGGER fail_test_media_finalize ON async_media_jobs")
         .execute(store.pool())

@@ -4,17 +4,17 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
-use olp_domain::{
-    ProviderAuthMode, ProviderConfiguration, ProviderKind, provider_kind_spec,
-    validate_provider_configuration,
-};
-use olp_providers::ProviderError;
-use olp_storage::{
+use olp_db::{
     configuration::NewProviderDraft, idempotency::IdempotencyOutcome,
     idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
     idempotency::idempotency_fingerprint, idempotency::idempotency_secret_digest,
     security::credential_aad,
 };
+use olp_engine::domain::{
+    ProviderAuthMode, ProviderConfiguration, ProviderKind, provider_kind_spec,
+    validate_provider_configuration,
+};
+use olp_engine::providers::ProviderError;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
@@ -313,9 +313,10 @@ pub(crate) async fn create_provider(
         IdempotencyOutcome::Replayed(_) => None,
     };
     if let Some(provider_id) = executed_provider_id {
-        state
-            .transports
-            .register(olp_domain::ProviderId::from_uuid(provider_id), transport);
+        state.transports.register(
+            olp_engine::domain::ProviderId::from_uuid(provider_id),
+            transport,
+        );
     }
     idempotency_http_response(created)
 }

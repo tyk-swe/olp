@@ -5,11 +5,11 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_domain::Surface;
-use olp_storage::{
+use olp_db::{
     media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
     media_jobs::MediaJobRecord, media_jobs::MediaJobState,
 };
+use olp_engine::domain::Surface;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::{IntoParams, ToSchema};

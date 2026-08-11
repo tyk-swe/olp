@@ -6,7 +6,7 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
-use olp_storage::{
+use olp_db::{
     authentication::RecentAuthPurpose, oidc::OidcFlowPurpose, security::EncryptedSecret,
     security::MasterKey, security::RecentAuthMaterial, security::SessionMaterial,
     security::constant_time_eq,

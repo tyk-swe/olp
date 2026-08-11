@@ -3,8 +3,10 @@ use std::sync::Arc;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use futures::stream;
-use olp_domain::{MediaHandle, MediaSpool, MediaSpoolError, MediaUpload, inline_media_marker};
-use olp_protocols::{
+use olp_engine::domain::{
+    MediaHandle, MediaSpool, MediaSpoolError, MediaUpload, inline_media_marker,
+};
+use olp_engine::protocols::{
     anthropic::{
         ContentBlock as AnthropicContentBlock, Message as AnthropicMessage,
         MessageContent as AnthropicMessageContent, ToolResultContent,
@@ -86,7 +88,7 @@ impl InlineMediaAdmission {
             })
             .await
             .map_err(|error| match error {
-                olp_domain::MediaSpoolError::TooLarge { .. } => {
+                olp_engine::domain::MediaSpoolError::TooLarge { .. } => {
                     invalid_inline_media("Inline media exceeds its decoded size limit.")
                 }
                 _ => InferenceError::unavailable("media_spool_unavailable"),
@@ -444,8 +446,8 @@ mod tests {
 
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use futures::StreamExt as _;
-    use olp_domain::{ContentPart, MediaSource, Operation, Surface};
-    use olp_protocols::{
+    use olp_engine::domain::{ContentPart, MediaSource, Operation, Surface};
+    use olp_engine::protocols::{
         anthropic::{MessagesRequest, decode_messages_request},
         gemini::{GenerateContentRequest, decode_generate_content_request},
         openai::{
@@ -456,7 +458,7 @@ mod tests {
     };
 
     use super::*;
-    use olp_inference::runtime::RuntimeManager;
+    use olp_engine::inference::runtime::RuntimeManager;
 
     use crate::ApiMode;
 

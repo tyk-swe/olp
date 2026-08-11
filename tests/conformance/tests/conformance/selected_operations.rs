@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 
 use olp_conformance::read_json;
-use olp_domain::{ImageOperation, MediaHandle, Operation, OperationKind, Surface, VideoOperation};
-use olp_protocols::{anthropic, gemini, openai};
+use olp_engine::domain::{
+    ImageOperation, MediaHandle, Operation, OperationKind, Surface, VideoOperation,
+};
+use olp_engine::protocols::{anthropic, gemini, openai};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -30,7 +32,7 @@ fn every_selected_operation_family_has_a_decoding_and_encoding_golden_case() {
             fixture.name
         );
         assert_eq!(
-            operation.route().map(olp_domain::RouteSlug::as_str),
+            operation.route().map(olp_engine::domain::RouteSlug::as_str),
             fixture.expected_route.as_deref(),
             "{} decoded to the wrong public route",
             fixture.name

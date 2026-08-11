@@ -43,7 +43,7 @@ fi
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 olp_bin=${OLP_BIN:-"$root_dir/target/release/olp"}
 psql_command=${OLP_PSQL:-psql}
-migration_directory="$root_dir/crates/storage/migrations"
+migration_directory="$root_dir/crates/olp-db/migrations"
 shopt -s nullglob
 migration_files=("$migration_directory"/[0-9][0-9][0-9][0-9]_*.sql)
 shopt -u nullglob

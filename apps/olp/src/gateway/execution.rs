@@ -10,8 +10,8 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
-use olp_domain::{ApiKey, GatewayCapability, Operation, TransportMode};
-use olp_inference::{
+use olp_engine::domain::{ApiKey, GatewayCapability, Operation, TransportMode};
+use olp_engine::inference::{
     RequestAdmission, RoutedUnaryFinalizer, limits::DistributedLimitReservation,
     runtime::RuntimeBundle,
 };
@@ -20,7 +20,7 @@ use crate::{GatewayState, InferencePrincipal};
 
 use super::error::InferenceError;
 
-pub(crate) use olp_inference::{RequiredTarget, RoutedEventExecution, RoutedUnaryResult};
+pub(crate) use olp_engine::inference::{RequiredTarget, RoutedEventExecution, RoutedUnaryResult};
 
 fn admitted_request() -> RequestAdmission {
     RequestAdmission::new(
@@ -34,7 +34,7 @@ pub(super) fn authorize_principal<'a>(
     state: &GatewayState,
     principal: &'a InferencePrincipal,
     capability: GatewayCapability,
-    route: Option<&olp_domain::RouteSlug>,
+    route: Option<&olp_engine::domain::RouteSlug>,
 ) -> Result<&'a ApiKey, InferenceError> {
     state
         .inference()

@@ -15,7 +15,7 @@ use std::{convert::Infallible, sync::LazyLock};
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
 use libfuzzer_sys::fuzz_target;
-use olp_domain::{MediaSpoolError, MediaUpload};
+use olp_engine::domain::{MediaSpoolError, MediaUpload};
 
 const MAXIMUM_FILE_BYTES: u64 = 2 * 1024 * 1024;
 

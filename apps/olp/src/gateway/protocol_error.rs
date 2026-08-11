@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_domain::Surface;
+use olp_engine::domain::Surface;
 use serde_json::json;
 
 use crate::Problem;
@@ -188,7 +188,7 @@ mod tests {
     use std::time::Duration;
 
     use axum::http::header;
-    use olp_storage::limits::LimitDimension;
+    use olp_engine::inference::limits::LimitDimension;
 
     use super::*;
 

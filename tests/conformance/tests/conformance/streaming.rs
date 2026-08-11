@@ -1,6 +1,6 @@
 use olp_conformance::{read_fixture, read_json};
-use olp_domain::{CanonicalEvent, CanonicalEventKind, validate_event_sequence};
-use olp_protocols::{
+use olp_engine::domain::{CanonicalEvent, CanonicalEventKind, validate_event_sequence};
+use olp_engine::protocols::{
     anthropic::AnthropicMessagesStreamDecoder,
     gemini::GeminiGenerateContentStreamDecoder,
     openai::OpenAiChatStreamDecoder,

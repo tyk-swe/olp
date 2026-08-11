@@ -3,7 +3,7 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
 };
-use olp_storage::usage::UsageSummary;
+use olp_db::usage::UsageSummary;
 use serde::Serialize;
 use utoipa::ToSchema;
 

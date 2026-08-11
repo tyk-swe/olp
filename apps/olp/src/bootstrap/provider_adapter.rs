@@ -1,21 +1,21 @@
-use olp_domain::{
+use olp_db::{
+    configuration::ProviderRecord, configuration::RuntimeProviderConfiguration,
+    security::MasterKey, security::credential_aad,
+};
+use olp_engine::domain::{
     ProviderAuthMode, ProviderConfiguration, ProviderId, ProviderKind, RuntimeSnapshot,
     validate_provider_configuration,
 };
-use olp_providers::{
+use olp_engine::providers::{
     CredentialKind, ProviderConfig, ProviderCredential, ProviderError, ProviderFacade,
     ProviderFactory,
-};
-use olp_storage::{
-    configuration::ProviderRecord, configuration::RuntimeProviderConfiguration,
-    security::MasterKey, security::credential_aad,
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{ManagementState, Problem, bootstrap::cli::AppResult, management::map_configuration};
 
-/// Application-owned provider fields before they cross into `olp-providers`.
+/// Application-owned provider fields before they cross into `olp-engine::providers`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProviderConfigFields<'a> {
     pub kind: ProviderKind,
@@ -86,7 +86,7 @@ pub(crate) async fn factory_create(
 pub(crate) async fn factory_transport(
     config: ProviderConfig,
     credential: ProviderCredential,
-) -> Result<std::sync::Arc<dyn olp_domain::ProviderTransport>, ProviderError> {
+) -> Result<std::sync::Arc<dyn olp_engine::domain::ProviderTransport>, ProviderError> {
     #[cfg(all(debug_assertions, feature = "test-util"))]
     if insecure_provider_endpoints_for_tests() {
         return ProviderFactory::transport_with_unsafe_test_endpoints(config, credential).await;
@@ -356,11 +356,11 @@ fn runtime_provider_model(
 
 #[cfg(test)]
 mod tests {
-    use olp_domain::{ProviderAuthMode, ProviderId, ProviderKind};
-    use olp_providers::{ProviderConfig, ProviderCredential};
-    use olp_storage::{
+    use olp_db::{
         configuration::RuntimeProviderConfiguration, security::MasterKey, security::credential_aad,
     };
+    use olp_engine::domain::{ProviderAuthMode, ProviderId, ProviderKind};
+    use olp_engine::providers::{ProviderConfig, ProviderCredential};
 
     use super::{
         ProviderConfigFields, decrypt_provider_credential, provider_config, provider_credential,
@@ -383,7 +383,7 @@ mod tests {
         provider_id: ProviderId,
         credential_id: Option<uuid::Uuid>,
         credential_version: Option<u32>,
-        encrypted: Option<olp_storage::security::EncryptedSecret>,
+        encrypted: Option<olp_db::security::EncryptedSecret>,
     ) -> RuntimeProviderConfiguration {
         RuntimeProviderConfiguration {
             provider_id,

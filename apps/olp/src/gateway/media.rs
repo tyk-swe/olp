@@ -8,11 +8,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, stream};
-use olp_domain::{
+use olp_engine::domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, MediaHandle, Surface, TransportMode,
 };
-use olp_inference::CleanupMediaStream;
-use olp_protocols::openai::{
+use olp_engine::inference::CleanupMediaStream;
+use olp_engine::protocols::openai::{
     EmbeddingRequest, OpenAiImageEditRequest, OpenAiImageGenerationRequest,
     OpenAiImageVariationRequest, OpenAiModerationRequest, OpenAiSpeechRequest,
     OpenAiTranscriptionRequest, decode_embedding_request, decode_image_edit,
@@ -379,7 +379,7 @@ fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response
             TerminalFrames::one(openai_error_sse(error))
         });
         let outcome = failure.as_ref().map_or_else(
-            olp_inference::RequestOutcome::success,
+            olp_engine::inference::RequestOutcome::success,
             InferenceError::accounting_outcome,
         );
         accounting.finish(outcome).await;
@@ -415,7 +415,7 @@ fn raw_media_event_bytes(event: CanonicalEvent) -> Result<Option<Bytes>, Inferen
                     "A media stream event contained unrepresentable extensions.",
                 ));
             }
-            encode_sse_frame(&olp_protocols::sse::SseFrame {
+            encode_sse_frame(&olp_engine::protocols::sse::SseFrame {
                 event: event_name,
                 data: serde_json::to_string(&data).map_err(|_| {
                     InferenceError::bad_gateway(
@@ -446,13 +446,13 @@ fn raw_media_event_bytes(event: CanonicalEvent) -> Result<Option<Bytes>, Inferen
 pub(super) async fn open_response_media(
     state: &GatewayState,
     handle: &MediaHandle,
-) -> Result<olp_domain::OpenedMedia, InferenceError> {
+) -> Result<olp_engine::domain::OpenedMedia, InferenceError> {
     match state.media_spool().open(handle).await {
         Ok(opened) => Ok(opened),
         Err(error) => {
             let mapped = media_spool_error(error);
             if let Err(cleanup_error) = state.media_spool().remove(handle).await
-                && cleanup_error != olp_domain::MediaSpoolError::NotFound
+                && cleanup_error != olp_engine::domain::MediaSpoolError::NotFound
             {
                 warn!(%cleanup_error, "failed to remove unreadable response media");
             }
@@ -464,8 +464,8 @@ pub(super) async fn open_response_media(
 /// Converts bounded spooled media into an HTTP response that removes the
 /// artifact when the body is exhausted or dropped.
 pub(super) fn response_from_opened_media(
-    opened: olp_domain::OpenedMedia,
-    spool: Arc<dyn olp_domain::MediaSpool>,
+    opened: olp_engine::domain::OpenedMedia,
+    spool: Arc<dyn olp_engine::domain::MediaSpool>,
     invalid_content_type_message: &'static str,
     invalid_content_length_message: &'static str,
 ) -> Result<Response, InferenceError> {

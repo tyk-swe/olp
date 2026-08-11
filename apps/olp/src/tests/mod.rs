@@ -11,7 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use olp_storage::{request_metadata::RequestMetadataEmitter, security::AuthHmacKey};
+use olp_db::security::AuthHmacKey;
+use olp_engine::inference::request_metadata::RequestMetadataEmitter;
 
 use axum::{
     Router,
@@ -23,11 +24,11 @@ use axum::{
 };
 use base64::Engine as _;
 use http_body_util::BodyExt as _;
-use olp_domain::{
+use olp_engine::domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     OperationKind, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface,
 };
-use olp_inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::RuntimeManager;
 use tower::{ServiceBuilder, ServiceExt, service_fn};
 use tower_http::{
     sensitive_headers::{SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer},

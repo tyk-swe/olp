@@ -1,5 +1,5 @@
 //! Single conformance-test binary. One binary instead of six keeps link
-//! time and target size in check — olp-providers alone added ~220 MB of
+//! time and target size in check — olp-engine::providers alone added ~220 MB of
 //! debug link output when `ssrf` linked it as a standalone binary.
 
 mod corpus;

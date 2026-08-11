@@ -3,8 +3,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode, jwk::JwkSet};
-use olp_inference::runtime::RuntimeManager;
-use olp_storage::{oidc::OidcConfiguration, oidc::OidcFlowPurpose, security::MasterKey};
+use olp_db::{oidc::OidcConfiguration, oidc::OidcFlowPurpose, security::MasterKey};
+use olp_engine::inference::runtime::RuntimeManager;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -426,7 +426,7 @@ fn test_configuration() -> OidcConfiguration {
         jwks_uri: "https://idp.example/jwks".to_owned(),
         token_endpoint_auth_method: "client_secret_basic".to_owned(),
         client_id: "olp".to_owned(),
-        encrypted_client_secret: olp_storage::security::EncryptedSecret {
+        encrypted_client_secret: olp_db::security::EncryptedSecret {
             key_version: 1,
             nonce: [0; 12],
             ciphertext: vec![0; 16],

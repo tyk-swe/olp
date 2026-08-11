@@ -1,0 +1,291 @@
+use chrono::{DateTime, Utc};
+use olp_engine::domain::{OperationKind, Surface};
+use sqlx::{FromRow, Postgres, QueryBuilder};
+use uuid::Uuid;
+
+use super::{
+    MAX_PAGE_SIZE,
+    cursor::{
+        OperationsError, OperationsPage, TimestampCursor, checked_u16, optional_i32_u64,
+        optional_u16, optional_u64, trimmed_optional,
+    },
+};
+use crate::{PersistenceError, PgStore, split_page};
+
+#[derive(Clone, Debug, Default)]
+pub struct RequestFilters {
+    pub route_slug: Option<String>,
+    pub provider_id: Option<Uuid>,
+    pub upstream_model: Option<String>,
+    pub api_key_id: Option<Uuid>,
+    pub operation: Option<OperationKind>,
+    pub status_code: Option<u16>,
+    pub error_class: Option<String>,
+    pub started_after: Option<DateTime<Utc>>,
+    pub started_before: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RequestRecord {
+    pub id: Uuid,
+    pub runtime_generation_id: Uuid,
+    pub api_key_id: Uuid,
+    pub route_slug: String,
+    pub operation: OperationKind,
+    pub surface: Surface,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub status_code: Option<u16>,
+    pub error_class: Option<String>,
+    pub total_latency_ms: Option<u64>,
+    pub first_byte_ms: Option<u64>,
+    pub attempt_count: u16,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub estimated_cost: Option<String>,
+    pub currency: Option<String>,
+    pub unpriced: Option<bool>,
+    pub usage_complete: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AttemptRecord {
+    pub id: Uuid,
+    pub ordinal: u16,
+    pub provider_id: Uuid,
+    pub provider_name: String,
+    pub upstream_model: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub status_code: Option<u16>,
+    pub error_class: Option<String>,
+    pub committed: bool,
+    pub latency_ms: Option<u64>,
+    pub first_byte_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RequestDetail {
+    pub request: RequestRecord,
+    pub attempts: Vec<AttemptRecord>,
+}
+
+#[derive(Debug, FromRow)]
+struct RequestRow {
+    id: Uuid,
+    runtime_generation_id: Uuid,
+    api_key_id: Uuid,
+    route_slug: String,
+    operation: String,
+    surface: String,
+    started_at: DateTime<Utc>,
+    completed_at: Option<DateTime<Utc>>,
+    status_code: Option<i32>,
+    error_class: Option<String>,
+    total_latency_ms: Option<i32>,
+    first_byte_ms: Option<i32>,
+    attempt_count: i16,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cached_input_tokens: Option<i64>,
+    estimated_cost: Option<String>,
+    currency: Option<String>,
+    unpriced: Option<bool>,
+    usage_complete: Option<bool>,
+}
+
+impl PgStore {
+    pub async fn requests(
+        &self,
+        filters: &RequestFilters,
+        cursor: Option<&TimestampCursor>,
+        limit: u16,
+    ) -> Result<OperationsPage<RequestRecord>, OperationsError> {
+        let page_size = limit.clamp(1, MAX_PAGE_SIZE);
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
+                    r.surface, r.started_at, r.completed_at, r.status_code, r.error_class, \
+                    r.total_latency_ms, r.first_byte_ms, r.attempt_count, u.input_tokens, \
+                    u.output_tokens, u.cached_input_tokens, u.estimated_cost::text AS estimated_cost, \
+                    u.currency::text AS currency, u.unpriced, u.usage_complete \
+             FROM requests r LEFT JOIN LATERAL ( \
+               SELECT SUM(f.input_tokens)::bigint AS input_tokens, \
+                      SUM(f.output_tokens)::bigint AS output_tokens, \
+                      SUM(f.cached_input_tokens)::bigint AS cached_input_tokens, \
+                      SUM(f.estimated_cost) AS estimated_cost, \
+                      MAX(f.currency)::text AS currency, BOOL_OR(f.unpriced) AS unpriced, \
+                      BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) \
+                          AS usage_complete \
+                 FROM attempt_usage_facts f \
+                WHERE f.request_id = r.id AND f.request_started_at = r.started_at \
+               HAVING count(*) > 0 \
+             ) u ON true WHERE true",
+        );
+        push_request_filters(&mut query, filters);
+        if let Some(cursor) = cursor {
+            query.push(" AND (r.started_at, r.id) < (");
+            query.push_bind(cursor.at);
+            query.push(", ");
+            query.push_bind(cursor.id);
+            query.push(")");
+        }
+        query.push(" ORDER BY r.started_at DESC, r.id DESC LIMIT ");
+        query.push_bind(i64::from(page_size) + 1);
+        let rows = query
+            .build_query_as::<RequestRow>()
+            .fetch_all(self.pool())
+            .await?;
+        let items = rows
+            .into_iter()
+            .map(request_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
+            TimestampCursor {
+                at: item.started_at,
+                id: item.id,
+            }
+            .encode()
+        });
+        Ok(OperationsPage { items, next_cursor })
+    }
+
+    pub async fn request_detail(&self, id: Uuid) -> Result<RequestDetail, OperationsError> {
+        let row = sqlx::query_as!(
+            RequestRow,
+            "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
+                    r.surface, r.started_at, r.completed_at, r.status_code, r.error_class, \
+                    r.total_latency_ms, r.first_byte_ms, r.attempt_count, \
+                    u.input_tokens AS \"input_tokens?\", \
+                    u.output_tokens AS \"output_tokens?\", \
+                    u.cached_input_tokens AS \"cached_input_tokens?\", \
+                    u.estimated_cost::text AS \"estimated_cost?\", \
+                    u.currency::text AS \"currency?\", u.unpriced AS \"unpriced?\", \
+                    u.usage_complete AS \"usage_complete?\" \
+             FROM requests r LEFT JOIN LATERAL ( \
+               SELECT SUM(f.input_tokens)::bigint AS input_tokens, \
+                      SUM(f.output_tokens)::bigint AS output_tokens, \
+                      SUM(f.cached_input_tokens)::bigint AS cached_input_tokens, \
+                      SUM(f.estimated_cost) AS estimated_cost, \
+                      MAX(f.currency)::text AS currency, BOOL_OR(f.unpriced) AS unpriced, \
+                      BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) \
+                          AS usage_complete \
+                 FROM attempt_usage_facts f \
+                WHERE f.request_id = r.id AND f.request_started_at = r.started_at \
+               HAVING count(*) > 0 \
+             ) u ON true \
+             WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1",
+            id
+        )
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or(OperationsError::NotFound)?;
+        let request = request_from_row(row)?;
+        let rows = sqlx::query!(
+            "SELECT a.id, a.ordinal, a.provider_id, p.name AS provider_name, a.upstream_model, \
+                    a.started_at, a.completed_at, a.status_code, a.error_class, a.committed, \
+                    a.latency_ms, a.first_byte_ms \
+             FROM attempts a JOIN providers p ON p.id = a.provider_id \
+             WHERE a.request_id = $1 AND a.request_started_at = $2 ORDER BY a.ordinal",
+            request.id,
+            request.started_at
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let attempts = rows
+            .into_iter()
+            .map(|row| {
+                Ok(AttemptRecord {
+                    id: row.id,
+                    ordinal: checked_u16(row.ordinal, "attempt ordinal")?,
+                    provider_id: row.provider_id,
+                    provider_name: row.provider_name,
+                    upstream_model: row.upstream_model,
+                    started_at: row.started_at,
+                    completed_at: row.completed_at,
+                    status_code: optional_u16(row.status_code, "attempt status")?,
+                    error_class: row.error_class,
+                    committed: row.committed,
+                    latency_ms: optional_i32_u64(row.latency_ms, "attempt latency")?,
+                    first_byte_ms: optional_i32_u64(row.first_byte_ms, "attempt first byte")?,
+                })
+            })
+            .collect::<Result<Vec<_>, OperationsError>>()?;
+        Ok(RequestDetail { request, attempts })
+    }
+}
+
+fn push_request_filters(query: &mut QueryBuilder<Postgres>, filters: &RequestFilters) {
+    if let Some(value) = &filters.route_slug {
+        query.push(" AND r.route_slug = ").push_bind(value);
+    }
+    if filters.provider_id.is_some() || filters.upstream_model.is_some() {
+        query.push(
+            " AND EXISTS (SELECT 1 FROM attempt_usage_facts filter_fact \
+             WHERE filter_fact.request_id = r.id \
+               AND filter_fact.request_started_at = r.started_at",
+        );
+        if let Some(value) = filters.provider_id {
+            query
+                .push(" AND filter_fact.provider_id = ")
+                .push_bind(value);
+        }
+        if let Some(value) = &filters.upstream_model {
+            query
+                .push(" AND filter_fact.upstream_model = ")
+                .push_bind(value);
+        }
+        query.push(")");
+    }
+    if let Some(value) = filters.api_key_id {
+        query.push(" AND r.api_key_id = ").push_bind(value);
+    }
+    if let Some(value) = filters.operation {
+        query.push(" AND r.operation = ").push_bind(value.as_str());
+    }
+    if let Some(value) = filters.status_code {
+        query
+            .push(" AND r.status_code = ")
+            .push_bind(i32::from(value));
+    }
+    if let Some(value) = &filters.error_class {
+        query.push(" AND r.error_class = ").push_bind(value);
+    }
+    if let Some(value) = filters.started_after {
+        query.push(" AND r.started_at >= ").push_bind(value);
+    }
+    if let Some(value) = filters.started_before {
+        query.push(" AND r.started_at < ").push_bind(value);
+    }
+}
+
+fn request_from_row(row: RequestRow) -> Result<RequestRecord, OperationsError> {
+    Ok(RequestRecord {
+        id: row.id,
+        runtime_generation_id: row.runtime_generation_id,
+        api_key_id: row.api_key_id,
+        route_slug: row.route_slug,
+        operation: row
+            .operation
+            .parse()
+            .map_err(|_| PersistenceError::InvalidStoredValue("request operation"))?,
+        surface: row
+            .surface
+            .parse()
+            .map_err(|_| PersistenceError::InvalidStoredValue("request surface"))?,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        status_code: optional_u16(row.status_code, "request status")?,
+        error_class: row.error_class,
+        total_latency_ms: optional_i32_u64(row.total_latency_ms, "request latency")?,
+        first_byte_ms: optional_i32_u64(row.first_byte_ms, "request first byte")?,
+        attempt_count: checked_u16(row.attempt_count, "attempt count")?,
+        input_tokens: optional_u64(row.input_tokens, "input tokens")?,
+        output_tokens: optional_u64(row.output_tokens, "output tokens")?,
+        cached_input_tokens: optional_u64(row.cached_input_tokens, "cached tokens")?,
+        estimated_cost: row.estimated_cost,
+        currency: trimmed_optional(row.currency),
+        unpriced: row.unpriced,
+        usage_complete: row.usage_complete,
+    })
+}

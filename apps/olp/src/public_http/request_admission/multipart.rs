@@ -7,7 +7,7 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_domain::{ApiKey, GatewayCapability, RouteSlug, authorize_api_key};
+use olp_engine::domain::{ApiKey, GatewayCapability, RouteSlug, authorize_api_key};
 
 use crate::{Problem, gateway};
 

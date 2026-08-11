@@ -7,8 +7,8 @@ use axum::{
 };
 use http_body_util::BodyExt as _;
 use olp::test_support::{ApiMode, ProcessComposition, public_router};
-use olp_inference::runtime::RuntimeManager;
-use olp_storage::security::MasterKey;
+use olp_db::security::MasterKey;
+use olp_engine::inference::runtime::RuntimeManager;
 use serde_json::{Value, json};
 use sqlx::Row as _;
 use tower::ServiceExt as _;
@@ -20,7 +20,7 @@ const ORIGIN: &str = "https://olp.example.test";
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
-    let db = olp_storage::test_support::TestDb::create_migrated("identity_http").await;
+    let db = olp_db::test_support::TestDb::create_migrated("identity_http").await;
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use olp_inference::limits::ReloadableLimiter;
-use olp_storage::{PgStore, limits::DistributedLimiter, request_metadata::RequestMetadataEmitter};
+use olp_db::{PgStore, limits::DistributedLimiter};
+use olp_engine::inference::{limits::ReloadableLimiter, request_metadata::RequestMetadataEmitter};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 

@@ -16,7 +16,8 @@ use axum::{
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use http_body_util::BodyExt;
-use olp_domain::{
+use olp_db::security::AuthHmacKey;
+use olp_engine::domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalError, CanonicalEvent, CanonicalEventKind,
     CanonicalResult, Capability, CredentialVersionId, DurationMs, ErrorClass,
@@ -26,7 +27,7 @@ use olp_domain::{
     Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot,
     SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode, select_attempts,
 };
-use olp_inference::{
+use olp_engine::inference::{
     circuit::CircuitBreaker,
     failover::{
         EventStream, FailoverContext, circuit_accounted_event_stream, execute_with_failover,
@@ -35,11 +36,10 @@ use olp_inference::{
     limits::reserve_limits,
     runtime::{RuntimeBundle, RuntimeManager},
 };
-use olp_protocols::openai::{
+use olp_engine::protocols::openai::{
     ChatCompletionRequest, ResponseInputTokensRequest, decode_chat_completion,
     decode_response_input_tokens,
 };
-use olp_storage::security::AuthHmacKey;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -233,7 +233,7 @@ fn test_principal(state: &GatewayState, surface: Surface) -> crate::InferencePri
         Arc::clone(&runtime),
         lookup_id.clone(),
         surface,
-        Some(olp_domain::GatewayCapability::Inference),
+        Some(olp_engine::domain::GatewayCapability::Inference),
     )
 }
 
@@ -341,7 +341,7 @@ fn generation_stream_events(text: &str) -> Vec<CanonicalEvent> {
         CanonicalEvent::new(
             4,
             CanonicalEventKind::Usage {
-                usage: olp_domain::Usage {
+                usage: olp_engine::domain::Usage {
                     input_tokens: 7,
                     output_tokens: 3,
                     total_tokens: 10,

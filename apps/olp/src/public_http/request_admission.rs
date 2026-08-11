@@ -17,9 +17,9 @@ use axum::{
     middleware,
     response::{IntoResponse, Response},
 };
-use olp_domain::{OperationKind, Surface};
-use olp_storage::{
-    request_metadata::RequestMetadataEmitter, request_metadata::RequestMetadataEvent,
+use olp_engine::{
+    domain::{OperationKind, Surface},
+    inference::request_metadata::{RequestMetadataEmitter, RequestMetadataEvent},
 };
 
 use crate::{
@@ -46,7 +46,7 @@ use validation::{
 pub(crate) use limits::{ReleaseReservationBody, estimate_http_json_request_tokens};
 pub(crate) use multipart::{MultipartAdmissionState, validate_multipart_boundary};
 pub(crate) use multipart::{MultipartRequestAdmission, MultipartRouteAdmission};
-pub(crate) use olp_inference::{InferencePrincipal, InferenceReservation};
+pub(crate) use olp_engine::inference::{InferencePrincipal, InferenceReservation};
 pub(crate) use public::{
     DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS, DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
     MAX_ADMISSION_CAPACITY, PublicAdmission, PublicAdmissionMiddleware, admit_public_request,

@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{
+use olp_db::{
     access::NewApiKeyRecord, idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
     idempotency::idempotency_fingerprint,
 };

@@ -10,7 +10,7 @@ fn prometheus_labels_escape_control_syntax() {
 
 #[test]
 fn replicated_worker_metrics_declare_types_and_render_durable_values() {
-    use olp_storage::{
+    use olp_db::{
         request_metadata::RequestMetadataConsumerStatus,
         runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
         worker_health::{
@@ -25,14 +25,12 @@ fn replicated_worker_metrics_declare_types_and_render_durable_values() {
         .unwrap()
         .with_timezone(&chrono::Utc);
     let consumer = RequestMetadataConsumerStatus::from_health(
-        Some(
-            olp_storage::request_metadata::RequestMetadataConsumerHealth {
-                pending_events: 2,
-                lag_events: 3,
-                oldest_pending_at: Some(now - chrono::Duration::seconds(30)),
-                checked_at: now - chrono::Duration::seconds(2),
-            },
-        ),
+        Some(olp_db::request_metadata::RequestMetadataConsumerHealth {
+            pending_events: 2,
+            lag_events: 3,
+            oldest_pending_at: Some(now - chrono::Duration::seconds(30)),
+            checked_at: now - chrono::Duration::seconds(2),
+        }),
         now,
     );
     let outbox = RuntimeOutboxStatus {

@@ -13,7 +13,8 @@ mod world;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt as _;
-use olp_storage::limits::{DistributedLimiter, LimitError, LimitRequest};
+use olp_db::limits::DistributedLimiter;
+use olp_engine::inference::limits::{LimitError, LimitRequest};
 use redis::{
     AsyncCommands as _,
     streams::{StreamInfoGroupsReply, StreamPendingCountReply},

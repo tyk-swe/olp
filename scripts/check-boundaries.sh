@@ -37,7 +37,7 @@ report_matches() {
 
 architecture_role_is_known() {
   case "$1" in
-    delivery|domain|inference|protocol|provider|storage|test-harness) return 0 ;;
+    db|delivery|engine|test-harness) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -48,14 +48,12 @@ architecture_role_allows_dependency() {
 
   # Same-role edges permit a responsibility to be decomposed into multiple
   # crates without changing policy. Cargo remains responsible for rejecting
-  # dependency cycles between those crates.
+  # dependency cycles between those crates. The engine defines the ports used
+  # by the database implementation, so the dependency direction stays inward.
   case "$source_role:$dependency_role" in
-    domain:domain) return 0 ;;
-    protocol:domain|protocol:protocol) return 0 ;;
-    provider:domain|provider:protocol|provider:provider) return 0 ;;
-    storage:domain|storage:storage) return 0 ;;
-    inference:domain|inference:protocol|inference:provider|inference:storage|inference:inference) return 0 ;;
-    delivery:domain|delivery:protocol|delivery:provider|delivery:storage|delivery:inference|delivery:delivery) return 0 ;;
+    engine:engine) return 0 ;;
+    db:engine|db:db) return 0 ;;
+    delivery:engine|delivery:db|delivery:delivery) return 0 ;;
     test-harness:*) architecture_role_is_known "$dependency_role" ;;
     *) return 1 ;;
   esac
@@ -257,10 +255,10 @@ if [[ -n $dependency_rows ]]; then
     fi
     case "$dependency" in
       sqlx|redis)
-        expected_role=storage
+        expected_role=db
         ;;
       reqwest|aws-*|google-cloud-auth)
-        expected_role=provider
+        expected_role=engine
         ;;
       axum|tower|tower-http|clap)
         expected_role=delivery
@@ -277,9 +275,11 @@ if [[ -n $dependency_rows ]]; then
 fi
 
 declare -a production_source_roots=()
-declare -a non_provider_source_roots=()
+declare -a non_engine_source_roots=()
+declare -a engine_source_roots=()
 declare -A production_source_root_seen=()
-declare -A non_provider_source_root_seen=()
+declare -A non_engine_source_root_seen=()
+declare -A engine_source_root_seen=()
 source_root_rows="$(awk -F'\t' '$1 == "source-root" { print $2 "\t" $3 "\t" $4 }' <<< "$metadata_rows")"
 if [[ -n $source_root_rows ]]; then
   while IFS=$'\t' read -r package role source_root; do
@@ -307,11 +307,107 @@ if [[ -n $source_root_rows ]]; then
       production_source_root_seen[$relative_source_root]=1
       production_source_roots+=("$relative_source_root")
     fi
-    if [[ $role != provider && ! ${non_provider_source_root_seen[$relative_source_root]+present} ]]; then
-      non_provider_source_root_seen[$relative_source_root]=1
-      non_provider_source_roots+=("$relative_source_root")
+    if [[ $role != engine && ! ${non_engine_source_root_seen[$relative_source_root]+present} ]]; then
+      non_engine_source_root_seen[$relative_source_root]=1
+      non_engine_source_roots+=("$relative_source_root")
+    fi
+    if [[ $role == engine && ! ${engine_source_root_seen[$relative_source_root]+present} ]]; then
+      engine_source_root_seen[$relative_source_root]=1
+      engine_source_roots+=("$relative_source_root")
     fi
   done <<< "$source_root_rows"
+fi
+
+# Cargo roles constrain edges between packages. The consolidated engine keeps
+# the same inward dependency direction between its four source modules, so
+# enforce that topology by path as well.
+declare -a engine_domain_source_roots=()
+declare -a engine_protocol_source_roots=()
+declare -a engine_provider_source_roots=()
+declare -a engine_inference_source_roots=()
+declare -a non_provider_construction_roots=("${non_engine_source_roots[@]}")
+for engine_source_root in "${engine_source_roots[@]}"; do
+  for engine_module in domain protocols providers inference; do
+    engine_module_root="$engine_source_root/$engine_module"
+    if [[ ! -d $engine_module_root ]]; then
+      echo "engine source root is missing its $engine_module module: $engine_module_root" >&2
+      violations=1
+      continue
+    fi
+    case "$engine_module" in
+      domain) engine_domain_source_roots+=("$engine_module_root") ;;
+      protocols) engine_protocol_source_roots+=("$engine_module_root") ;;
+      providers) engine_provider_source_roots+=("$engine_module_root") ;;
+      inference) engine_inference_source_roots+=("$engine_module_root") ;;
+    esac
+  done
+
+  # Root-level engine files are outside the providers module too. Avoid
+  # scanning the whole engine root because that would include providers.
+  shopt -s nullglob
+  engine_root_source_files=("$engine_source_root"/*.rs)
+  shopt -u nullglob
+  non_provider_construction_roots+=("${engine_root_source_files[@]}")
+done
+non_provider_construction_roots+=(
+  "${engine_domain_source_roots[@]}"
+  "${engine_protocol_source_roots[@]}"
+  "${engine_inference_source_roots[@]}"
+)
+
+engine_infrastructure_pattern='\b(reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::'
+if (( ${#engine_domain_source_roots[@]} )); then
+  report_matches \
+    "engine domain must not depend on sibling modules:" \
+    '\b(protocols|providers|inference)::' \
+    "engine domain modules" \
+    "${engine_domain_source_roots[@]}" \
+    --glob '*.rs'
+  report_matches \
+    "engine domain must remain infrastructure-free:" \
+    "$engine_infrastructure_pattern" \
+    "engine domain modules" \
+    "${engine_domain_source_roots[@]}" \
+    --glob '*.rs'
+fi
+
+if (( ${#engine_protocol_source_roots[@]} )); then
+  report_matches \
+    "engine protocols may depend only on the domain module:" \
+    '\b(providers|inference)::' \
+    "engine protocol modules" \
+    "${engine_protocol_source_roots[@]}" \
+    --glob '*.rs'
+  report_matches \
+    "engine protocols must remain infrastructure-free:" \
+    "$engine_infrastructure_pattern" \
+    "engine protocol modules" \
+    "${engine_protocol_source_roots[@]}" \
+    --glob '*.rs'
+fi
+
+if (( ${#engine_provider_source_roots[@]} )); then
+  report_matches \
+    "engine providers must not depend on inference:" \
+    '\binference::' \
+    "engine provider modules" \
+    "${engine_provider_source_roots[@]}" \
+    --glob '*.rs'
+  report_matches \
+    "engine providers must not depend on database or delivery infrastructure:" \
+    '\b(olp_db|sqlx|redis|axum|tower|tower_http|clap)::' \
+    "engine provider modules" \
+    "${engine_provider_source_roots[@]}" \
+    --glob '*.rs'
+fi
+
+if (( ${#engine_inference_source_roots[@]} )); then
+  report_matches \
+    "engine inference must use provider and persistence ports instead of infrastructure:" \
+    '\b(olp_db|reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::' \
+    "engine inference modules" \
+    "${engine_inference_source_roots[@]}" \
+    --glob '*.rs'
 fi
 
 if (( ${#production_source_roots[@]} )); then
@@ -412,12 +508,12 @@ if (( ! ssr_disabled_matched )); then
   violations=1
 fi
 
-if (( ${#non_provider_source_roots[@]} )); then
+if (( ${#non_provider_construction_roots[@]} )); then
   report_matches \
-    "concrete provider construction escaped the provider role:" \
+    "concrete provider construction escaped olp_engine::providers:" \
     '(OpenAiConnector|AnthropicConnector|GeminiConnector|VertexConnector|BedrockConnector|AzureOpenAiConnector)::(new|with_application_default|with_service_account_json)' \
-    "non-provider production source roots" \
-    "${non_provider_source_roots[@]}" \
+    "production sources outside the engine providers module" \
+    "${non_provider_construction_roots[@]}" \
     --glob '*.rs'
 fi
 

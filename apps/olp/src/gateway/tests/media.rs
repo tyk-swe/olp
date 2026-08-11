@@ -2,8 +2,10 @@ use super::*;
 
 #[test]
 fn unknown_upstream_video_status_fails_closed() {
-    let error = media_job_state(&olp_domain::VideoStatus::Other("mystery".to_owned()))
-        .expect_err("unknown upstream status must not become a local terminal state");
+    let error = media_job_state(&olp_engine::domain::VideoStatus::Other(
+        "mystery".to_owned(),
+    ))
+    .expect_err("unknown upstream status must not become a local terminal state");
     assert_eq!(error.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(error.code(), "provider_protocol_error");
 }
@@ -22,26 +24,28 @@ struct CountingAdmissionSpool {
     puts: AtomicUsize,
 }
 
-impl olp_domain::MediaSpool for CountingAdmissionSpool {
+impl olp_engine::domain::MediaSpool for CountingAdmissionSpool {
     fn put<'a>(
         &'a self,
-        _upload: olp_domain::MediaUpload,
-    ) -> BoxFuture<'a, Result<olp_domain::MediaArtifact, olp_domain::MediaSpoolError>> {
+        _upload: olp_engine::domain::MediaUpload,
+    ) -> BoxFuture<'a, Result<olp_engine::domain::MediaArtifact, olp_engine::domain::MediaSpoolError>>
+    {
         self.puts.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Err(olp_domain::MediaSpoolError::Unavailable) })
+        Box::pin(async { Err(olp_engine::domain::MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<olp_domain::OpenedMedia, olp_domain::MediaSpoolError>> {
-        Box::pin(async { Err(olp_domain::MediaSpoolError::NotFound) })
+    ) -> BoxFuture<'a, Result<olp_engine::domain::OpenedMedia, olp_engine::domain::MediaSpoolError>>
+    {
+        Box::pin(async { Err(olp_engine::domain::MediaSpoolError::NotFound) })
     }
 
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<(), olp_domain::MediaSpoolError>> {
+    ) -> BoxFuture<'a, Result<(), olp_engine::domain::MediaSpoolError>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -71,8 +75,9 @@ impl MediaSpool for RecordingSpool {
 
     fn put<'a>(
         &'a self,
-        upload: olp_domain::MediaUpload,
-    ) -> BoxFuture<'a, Result<olp_domain::MediaArtifact, olp_domain::MediaSpoolError>> {
+        upload: olp_engine::domain::MediaUpload,
+    ) -> BoxFuture<'a, Result<olp_engine::domain::MediaArtifact, olp_engine::domain::MediaSpoolError>>
+    {
         Box::pin(async move {
             let artifact = self.inner.put(upload).await?;
             self.handles.lock().unwrap().push(artifact.handle.clone());
@@ -83,14 +88,15 @@ impl MediaSpool for RecordingSpool {
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<olp_domain::OpenedMedia, olp_domain::MediaSpoolError>> {
+    ) -> BoxFuture<'a, Result<olp_engine::domain::OpenedMedia, olp_engine::domain::MediaSpoolError>>
+    {
         self.inner.open(handle)
     }
 
     fn remove<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<(), olp_domain::MediaSpoolError>> {
+    ) -> BoxFuture<'a, Result<(), olp_engine::domain::MediaSpoolError>> {
         self.inner.remove(handle)
     }
 }
@@ -211,7 +217,7 @@ async fn multipart_route_header_mismatch_cleans_the_staged_file() {
     assert_eq!(handles.len(), 1);
     assert!(matches!(
         recording.open(&handles[0]).await,
-        Err(olp_domain::MediaSpoolError::NotFound)
+        Err(olp_engine::domain::MediaSpoolError::NotFound)
     ));
 }
 
@@ -249,7 +255,7 @@ async fn malformed_multipart_is_rejected_before_routing() {
 async fn failed_multipart_validation_removes_staged_files() {
     let spool = crate::bootstrap::media_spool::FileMediaSpool::create().unwrap();
     let artifact = spool
-        .put(olp_domain::MediaUpload {
+        .put(olp_engine::domain::MediaUpload {
             filename: "upload.png".to_owned(),
             content_type: Some("image/png".to_owned()),
             maximum_length: 16,
@@ -264,7 +270,7 @@ async fn failed_multipart_validation_removes_staged_files() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             match spool.open(&artifact.handle).await {
-                Err(olp_domain::MediaSpoolError::NotFound) => break,
+                Err(olp_engine::domain::MediaSpoolError::NotFound) => break,
                 Ok(_) => tokio::task::yield_now().await,
                 Err(error) => panic!("unexpected spool cleanup error: {error}"),
             }

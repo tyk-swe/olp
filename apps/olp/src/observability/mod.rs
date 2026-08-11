@@ -12,13 +12,13 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use olp_storage::{
+use olp_db::{
     request_metadata::RequestMetadataConsumerStatus,
-    request_metadata::RequestMetadataEmitter,
     request_metadata::RequestMetadataEpochHealth,
     runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
     worker_health::{WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary, WorkerTaskState},
 };
+use olp_engine::inference::request_metadata::RequestMetadataEmitter;
 use serde::Serialize;
 use tower::ServiceBuilder;
 use utoipa::ToSchema;
@@ -600,8 +600,8 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
 fn request_metadata_consumer_is_current(status: RequestMetadataConsumerStatus) -> bool {
     matches!(
         status.state,
-        olp_storage::request_metadata::RequestMetadataConsumerState::Healthy
-            | olp_storage::request_metadata::RequestMetadataConsumerState::Backlogged
+        olp_db::request_metadata::RequestMetadataConsumerState::Healthy
+            | olp_db::request_metadata::RequestMetadataConsumerState::Backlogged
     )
 }
 
@@ -651,7 +651,7 @@ fn asynchronous_plane_state(
     } else if tasks.unknown_tasks_for(expected_tasks) > 0
         || matches!(
             consumer.state,
-            olp_storage::request_metadata::RequestMetadataConsumerState::Unknown
+            olp_db::request_metadata::RequestMetadataConsumerState::Unknown
         )
         || outbox.state == RuntimeOutboxState::Unknown
     {
@@ -833,7 +833,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         u8::from(request_metadata_consumer.complete()),
         u8::from(matches!(
             request_metadata_consumer.state,
-            olp_storage::request_metadata::RequestMetadataConsumerState::Stale
+            olp_db::request_metadata::RequestMetadataConsumerState::Stale
         )),
         request_metadata_epochs.open_epochs,
         request_metadata_epochs.unresolved_epochs,
@@ -1185,12 +1185,12 @@ pub(super) fn prometheus_label(value: &str) -> String {
 mod tests {
     use std::{path::PathBuf, sync::Arc};
 
-    use olp_inference::runtime::RuntimeManager;
-    use olp_storage::{
+    use olp_db::{
         request_metadata::{RequestMetadataConsumerHealth, RequestMetadataConsumerStatus},
         runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
         worker_health::{WorkerTaskState, WorkerTaskStatus},
     };
+    use olp_engine::inference::runtime::RuntimeManager;
 
     use super::*;
     use crate::{ApiMode, ProcessComposition};

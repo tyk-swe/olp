@@ -3,7 +3,7 @@ use jsonwebtoken::{
     Algorithm, DecodingKey, Validation, decode, decode_header,
     jwk::{Jwk, JwkSet, KeyOperations, PublicKeyUse},
 };
-use olp_storage::{oidc::OidcConfiguration, security::SessionMaterial};
+use olp_db::{oidc::OidcConfiguration, security::SessionMaterial};
 use serde_json::Value;
 
 use super::error::invalid_id_token;

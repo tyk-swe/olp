@@ -6,18 +6,18 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, stream};
-use olp_domain::{
-    CredentialRequirement, ProviderAuthMode, ProviderConfigurationField, ProviderKind,
-    ProviderKindSpec, ProviderPresetSpec, provider_kind_specs,
-};
-use olp_providers::{
-    CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
-    certifiable_capabilities,
-};
-use olp_storage::{
+use olp_db::{
     configuration::CapabilityCertificationOutcome, configuration::CapabilityRecord,
     configuration::ConfigurationError, configuration::DiscoveredModelInput,
     configuration::ProviderModelInventoryRecord, configuration::ProviderModelRecord,
+};
+use olp_engine::domain::{
+    CredentialRequirement, ProviderAuthMode, ProviderConfigurationField, ProviderKind,
+    ProviderKindSpec, ProviderPresetSpec, provider_kind_specs,
+};
+use olp_engine::providers::{
+    CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
+    certifiable_capabilities,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -409,7 +409,7 @@ fn capability_record(input: CapabilityInput) -> Result<CapabilityRecord, Problem
         mode: input.mode.parse().map_err(|_| {
             Problem::field_validation("capabilities", "A reviewed mode is invalid.")
         })?,
-        source: olp_domain::CapabilitySource::Declared,
+        source: olp_engine::domain::CapabilitySource::Declared,
         certified_at: None,
     })
 }
@@ -582,7 +582,7 @@ pub(crate) async fn certify_provider_model(
     if provider.etag != expected_etag {
         return Err(map_configuration(ConfigurationError::PreconditionFailed));
     }
-    if provider.state != olp_domain::ProviderState::Draft {
+    if provider.state != olp_engine::domain::ProviderState::Draft {
         return Err(map_configuration(ConfigurationError::InUse));
     }
     let model = store
@@ -711,15 +711,15 @@ pub(crate) fn certification_item(
     }
 }
 
-const fn transport_failure_code(class: olp_domain::AttemptFailureClass) -> &'static str {
+const fn transport_failure_code(class: olp_engine::domain::AttemptFailureClass) -> &'static str {
     match class {
-        olp_domain::AttemptFailureClass::Connect => "connect_failed",
-        olp_domain::AttemptFailureClass::Timeout => "timeout",
-        olp_domain::AttemptFailureClass::RateLimit => "rate_limited",
-        olp_domain::AttemptFailureClass::UpstreamServer => "upstream_server_error",
-        olp_domain::AttemptFailureClass::UpstreamClient => "upstream_rejected_probe",
-        olp_domain::AttemptFailureClass::Protocol => "protocol_mismatch",
-        olp_domain::AttemptFailureClass::Cancelled => "cancelled",
-        olp_domain::AttemptFailureClass::Ambiguous => "ambiguous_result",
+        olp_engine::domain::AttemptFailureClass::Connect => "connect_failed",
+        olp_engine::domain::AttemptFailureClass::Timeout => "timeout",
+        olp_engine::domain::AttemptFailureClass::RateLimit => "rate_limited",
+        olp_engine::domain::AttemptFailureClass::UpstreamServer => "upstream_server_error",
+        olp_engine::domain::AttemptFailureClass::UpstreamClient => "upstream_rejected_probe",
+        olp_engine::domain::AttemptFailureClass::Protocol => "protocol_mismatch",
+        olp_engine::domain::AttemptFailureClass::Cancelled => "cancelled",
+        olp_engine::domain::AttemptFailureClass::Ambiguous => "ambiguous_result",
     }
 }

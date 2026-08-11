@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use jsonwebtoken::jwk::JwkSet;
-use olp_storage::{
+use olp_db::{
     authentication::SessionPrincipal, oidc::CompleteOidcLink, oidc::CompleteOidcLogin,
     oidc::CompleteOidcReauthentication, oidc::OidcFlowPurpose, security::RecentAuthMaterial,
     security::SessionMaterial, security::oidc_client_secret_aad as client_secret_aad,

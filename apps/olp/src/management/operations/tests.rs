@@ -42,20 +42,20 @@ fn media_job_surface_preserves_wire_contract() {
 #[test]
 fn pricing_provider_kind_uses_current_wire_names_only() {
     assert_eq!(
-        serde_json::to_value(olp_domain::ProviderKind::OpenAi).unwrap(),
+        serde_json::to_value(olp_engine::domain::ProviderKind::OpenAi).unwrap(),
         "openai"
     );
     assert_eq!(
-        serde_json::to_value(olp_domain::ProviderKind::AzureOpenAi).unwrap(),
+        serde_json::to_value(olp_engine::domain::ProviderKind::AzureOpenAi).unwrap(),
         "azure_openai"
     );
     assert_eq!(
-        serde_json::to_value(olp_domain::ProviderKind::OpenAiCompatible).unwrap(),
+        serde_json::to_value(olp_engine::domain::ProviderKind::OpenAiCompatible).unwrap(),
         "openai_compatible"
     );
     for legacy in ["open_ai", "azure_open_ai", "open_ai_compatible"] {
         assert!(
-            serde_json::from_value::<olp_domain::ProviderKind>(legacy.into()).is_err(),
+            serde_json::from_value::<olp_engine::domain::ProviderKind>(legacy.into()).is_err(),
             "accepted legacy provider kind {legacy}"
         );
     }

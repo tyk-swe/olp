@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use olp_storage::operations::{OperationsError, TimestampCursor};
+use olp_db::operations::{OperationsError, TimestampCursor};
 use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;

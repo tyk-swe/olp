@@ -2316,11 +2316,8 @@ dependencies = [
  "ipnet",
  "jsonwebtoken 11.0.0",
  "mime",
- "olp-domain",
- "olp-inference",
- "olp-protocols",
- "olp-providers",
- "olp-storage",
+ "olp-db",
+ "olp-engine",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -2348,29 +2345,35 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "futures",
- "olp-domain",
- "olp-protocols",
- "olp-providers",
+ "olp-engine",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "olp-domain"
+name = "olp-db"
 version = "2.0.0"
 dependencies = [
- "bytes",
+ "aes-gcm",
+ "argon2",
+ "base64",
  "chrono",
  "futures",
- "proptest",
+ "hmac",
+ "olp-engine",
+ "rand 0.9.5",
+ "redis",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "sqlx",
  "thiserror",
- "url",
- "utoipa",
+ "tokio",
+ "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2381,7 +2384,8 @@ dependencies = [
  "base64",
  "chrono",
  "futures",
- "olp-storage",
+ "olp-db",
+ "olp-engine",
  "rand 0.9.5",
  "redis",
  "reqwest",
@@ -2391,40 +2395,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "olp-inference"
-version = "2.0.0"
-dependencies = [
- "arc-swap",
- "bytes",
- "chrono",
- "futures",
- "olp-domain",
- "olp-protocols",
- "olp-providers",
- "olp-storage",
- "rust_decimal",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "olp-protocols"
-version = "2.0.0"
-dependencies = [
- "base64",
- "bytes",
- "olp-domain",
- "proptest",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "olp-providers"
+name = "olp-engine"
 version = "2.0.0"
 dependencies = [
  "arc-swap",
@@ -2437,43 +2408,22 @@ dependencies = [
  "aws-smithy-types",
  "base64",
  "bytes",
+ "chrono",
  "futures",
  "google-cloud-auth",
  "http 1.5.0",
  "jsonwebtoken 11.0.0",
- "olp-domain",
- "olp-protocols",
+ "proptest",
  "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "url",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "olp-storage"
-version = "2.0.0"
-dependencies = [
- "aes-gcm",
- "argon2",
- "base64",
- "chrono",
- "futures",
- "hmac",
- "olp-domain",
- "rand 0.9.5",
- "redis",
  "rust_decimal",
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "sqlx",
  "thiserror",
  "tokio",
  "tracing",
+ "url",
+ "utoipa",
  "uuid",
  "zeroize",
 ]

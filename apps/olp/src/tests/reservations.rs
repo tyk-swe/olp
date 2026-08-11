@@ -213,7 +213,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
         Arc::clone(&pinned),
         lookup_id.clone(),
         Surface::OpenAi,
-        Some(olp_domain::GatewayCapability::Inference),
+        Some(olp_engine::domain::GatewayCapability::Inference),
     );
     state
         .runtime()
@@ -269,7 +269,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     assert_eq!(principal_surface, Surface::OpenAi);
     assert_eq!(
         principal_capability,
-        Some(olp_domain::GatewayCapability::Inference)
+        Some(olp_engine::domain::GatewayCapability::Inference)
     );
     assert_ne!(state.runtime().pin().generation.id, pinned.generation.id);
     assert_eq!(reserved_tokens, Some(2_000));

@@ -14,7 +14,8 @@ use std::{
 use chrono::Utc;
 use futures::stream;
 use olp::test_support::{ApiMode, ProcessComposition, public_router};
-use olp_domain::{
+use olp_db::{PgStore, security::AuthHmacKey};
+use olp_engine::domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, Capability, DurationMs,
     FinishReason, MessageRole, OperationKind, Provider, ProviderId, ProviderKind, ProviderOutput,
@@ -22,8 +23,7 @@ use olp_domain::{
     RuntimeGenerationId, RuntimeSnapshot, Surface, Target, TargetId, TransportError, TransportMode,
     TransportPhase, Usage,
 };
-use olp_inference::runtime::RuntimeManager;
-use olp_storage::{PgStore, security::AuthHmacKey};
+use olp_engine::inference::runtime::RuntimeManager;
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 

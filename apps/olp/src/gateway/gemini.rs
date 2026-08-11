@@ -5,15 +5,17 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use olp_domain::{ApiKey, CanonicalResult, OperationKind, RouteSlug, Surface, TransportMode};
-use olp_protocols::gemini::{
+use olp_engine::domain::{
+    ApiKey, CanonicalResult, OperationKind, RouteSlug, Surface, TransportMode,
+};
+use olp_engine::protocols::gemini::{
     CountTokensRequest, GeminiGenerateContentClientStreamEncoder, GenerateContentRequest,
     decode_count_tokens_request, decode_generate_content_request, encode_count_tokens_result,
     encode_generate_content_response,
 };
 use serde::{Deserialize, Serialize};
 
-use olp_inference::{CompletedEventExecution, runtime::RuntimeBundle};
+use olp_engine::inference::{CompletedEventExecution, runtime::RuntimeBundle};
 
 use crate::{
     GatewayState, InferencePrincipal,
@@ -339,12 +341,15 @@ fn decode_page_token(token: &str) -> Result<String, ProtocolError> {
 struct GeminiHttpStreamEncoder(GeminiGenerateContentClientStreamEncoder);
 
 impl ProtocolStreamEncoder for GeminiHttpStreamEncoder {
-    fn push(&mut self, event: olp_domain::CanonicalEvent) -> Result<Vec<bytes::Bytes>, String> {
+    fn push(
+        &mut self,
+        event: olp_engine::domain::CanonicalEvent,
+    ) -> Result<Vec<bytes::Bytes>, String> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
-        encode_server_sse_frame(&olp_protocols::sse::SseFrame {
+        encode_server_sse_frame(&olp_engine::protocols::sse::SseFrame {
             event: None,
             data: gemini_error_body(error).to_string(),
             id: None,

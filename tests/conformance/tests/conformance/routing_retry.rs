@@ -1,5 +1,5 @@
 use olp_conformance::read_json;
-use olp_domain::{
+use olp_engine::domain::{
     AttemptFailureClass, OperationKind, RouteSlug, RoutingError, RuntimeSnapshot, Surface,
     TransportError, TransportMode, TransportPhase, select_attempts,
 };

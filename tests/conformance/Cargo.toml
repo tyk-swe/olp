@@ -14,9 +14,7 @@ aws-smithy-eventstream = "0.61.1"
 aws-smithy-types = "1.6.1"
 bytes.workspace = true
 futures.workspace = true
-olp-domain.workspace = true
-olp-protocols.workspace = true
-olp-providers = { workspace = true, features = ["test-util"] }
+olp-engine = { workspace = true, features = ["test-util"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util"] }

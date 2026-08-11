@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use olp_storage::request_metadata::RequestMetadataEmitter;
+use olp_db::request_metadata::run_request_metadata_writer_connecting;
+use olp_engine::inference::request_metadata::RequestMetadataEmitter;
 use tokio::{
     net::TcpListener,
     sync::{oneshot, watch},
@@ -8,7 +9,7 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-use olp_inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::RuntimeManager;
 
 use crate::{ApiMode, ProcessComposition, create_media_spool};
 use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
@@ -198,14 +199,14 @@ pub(super) async fn serve(
             let (status_sender, status_receiver) = oneshot::channel();
             request_metadata_writer_status = Some(status_receiver);
             background_tasks.push(tokio::spawn(async move {
-                let result: AppResult<()> = receiver
-                    .run_connecting(
-                        &request_metadata_writer_url,
-                        &request_metadata_stream,
-                        request_metadata_writer_shutdown,
-                    )
-                    .await
-                    .map_err(Into::into);
+                let result: AppResult<()> = run_request_metadata_writer_connecting(
+                    receiver,
+                    &request_metadata_writer_url,
+                    &request_metadata_stream,
+                    request_metadata_writer_shutdown,
+                )
+                .await
+                .map_err(Into::into);
                 if let Err(error) = &result {
                     error!(%error, "request metadata stream writer stopped");
                 }

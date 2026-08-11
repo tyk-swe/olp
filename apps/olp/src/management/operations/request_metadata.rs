@@ -4,7 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{
+use olp_db::{
     request_metadata::RequestMetadataConsumerStatus,
     request_metadata::RequestMetadataEpochAcknowledgement,
     request_metadata::RequestMetadataGatewayEpochRecord,

@@ -5,10 +5,10 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_domain::{
+use olp_db::{PgStore, configuration::ProviderRecord, configuration::UpdateProvider};
+use olp_engine::domain::{
     ProviderAuthMode, ProviderConfiguration, ProviderKind, validate_provider_configuration,
 };
-use olp_storage::{PgStore, configuration::ProviderRecord, configuration::UpdateProvider};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -419,7 +419,7 @@ pub(crate) async fn probe_provider(
         .map_err(map_configuration)?;
     if provider.etag != expected_etag {
         return Err(map_configuration(
-            olp_storage::configuration::ConfigurationError::PreconditionFailed,
+            olp_db::configuration::ConfigurationError::PreconditionFailed,
         ));
     }
     let connector = provider_connector(&state, provider_id).await?;

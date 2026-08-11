@@ -1,6 +1,6 @@
 use olp_conformance::read_json;
-use olp_domain::{GenerationRequest, Operation, Surface};
-use olp_protocols::{
+use olp_engine::domain::{GenerationRequest, Operation, Surface};
+use olp_engine::protocols::{
     anthropic::{MessagesRequest, decode_messages_request, encode_messages_request},
     gemini::{
         GenerateContentRequest, decode_generate_content_request, encode_generate_content_request,

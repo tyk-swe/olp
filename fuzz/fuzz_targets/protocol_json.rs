@@ -8,8 +8,8 @@
 //! encode is excluded from the comparison.
 
 use libfuzzer_sys::fuzz_target;
-use olp_domain::{MediaArtifact, MediaHandle, Operation, TokenCountResult};
-use olp_protocols::{anthropic, gemini, openai};
+use olp_engine::domain::{MediaArtifact, MediaHandle, Operation, TokenCountResult};
+use olp_engine::protocols::{anthropic, gemini, openai};
 
 mod oracle;
 use oracle::roundtrip;
@@ -69,7 +69,7 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::image_generation_request",
         |request| match openai::decode_image_generation(request) {
-            Ok(Operation::Images(olp_domain::ImageOperation::Generation(canonical))) => {
+            Ok(Operation::Images(olp_engine::domain::ImageOperation::Generation(canonical))) => {
                 Some(canonical)
             }
             _ => None,
@@ -89,7 +89,7 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::video_create_request",
         |request| match openai::decode_video_create(request) {
-            Ok(Operation::Video(olp_domain::VideoOperation::Create(canonical))) => Some(canonical),
+            Ok(Operation::Video(olp_engine::domain::VideoOperation::Create(canonical))) => Some(canonical),
             _ => None,
         },
         |canonical| {
@@ -109,7 +109,7 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::video_list_query",
         |query| match openai::decode_video_list(query) {
-            Ok(Operation::Video(olp_domain::VideoOperation::List(canonical))) => Some(canonical),
+            Ok(Operation::Video(olp_engine::domain::VideoOperation::List(canonical))) => Some(canonical),
             _ => None,
         },
         openai::encode_video_list,
@@ -254,8 +254,8 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(response) = serde_json::from_slice::<anthropic::CountTokensResponse>(data) {
         let _ = anthropic::encode_count_tokens_result(&TokenCountResult {
             input_tokens: response.input_tokens,
-            extensions: olp_domain::SourceExtensions::new(
-                olp_domain::Surface::Anthropic,
+            extensions: olp_engine::domain::SourceExtensions::new(
+                olp_engine::domain::Surface::Anthropic,
                 response.extra,
             ),
         });
@@ -273,7 +273,7 @@ fuzz_target!(|data: &[u8]| {
         );
         let _ = gemini::encode_count_tokens_result(&TokenCountResult {
             input_tokens: response.total_tokens,
-            extensions: olp_domain::SourceExtensions::new(olp_domain::Surface::Gemini, values),
+            extensions: olp_engine::domain::SourceExtensions::new(olp_engine::domain::Surface::Gemini, values),
         });
     }
 

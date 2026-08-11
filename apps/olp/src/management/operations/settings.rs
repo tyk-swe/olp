@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::operations::SettingRecord;
+use olp_db::operations::SettingRecord;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;

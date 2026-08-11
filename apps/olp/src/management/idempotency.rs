@@ -3,7 +3,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
 };
-use olp_storage::idempotency::IdempotencyOutcome;
+use olp_db::idempotency::IdempotencyOutcome;
 
 use crate::Problem;
 

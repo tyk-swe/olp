@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{
+use olp_db::{
     configuration::ReplaceRouteDraftInput, configuration::RouteDraftRecord,
     configuration::RouteRecord, configuration::RouteRevisionDiff,
     configuration::RouteRevisionRecord, configuration::RouteSimulation,

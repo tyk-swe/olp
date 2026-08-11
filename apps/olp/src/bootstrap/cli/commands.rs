@@ -1,7 +1,7 @@
 use std::{path::Path, time::Duration};
 
 use base64::Engine as _;
-use olp_storage::{
+use olp_db::{
     PgStore,
     limits::DistributedLimiter,
     runtime::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
@@ -48,7 +48,7 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
             )
             .into());
         }
-        olp_storage::MIGRATOR.run_to(target, store.pool()).await?;
+        olp_db::MIGRATOR.run_to(target, store.pool()).await?;
         info!(target, "PostgreSQL migrations reached test target");
     } else {
         let legacy_stream_claim_token =
@@ -56,7 +56,7 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
         let should_claim_legacy_stream =
             store.should_claim_legacy_request_metadata_stream().await?;
         let legacy_stream_claim_prepared = if should_claim_legacy_stream {
-            olp_storage::valkey::mark_legacy_request_metadata_stream_claim(
+            olp_db::valkey::mark_legacy_request_metadata_stream_claim(
                 &args.persistence.valkey_url,
                 &legacy_stream_claim_token,
             )
@@ -67,7 +67,7 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
         store.migrate().await?;
         info!("PostgreSQL migrations are current");
         let keyspace = store.valkey_keyspace().await?;
-        let migrated = olp_storage::valkey::migrate_claimed_legacy_request_metadata_stream(
+        let migrated = olp_db::valkey::migrate_claimed_legacy_request_metadata_stream(
             &args.persistence.valkey_url,
             &keyspace.request_metadata_stream(),
             &legacy_stream_claim_token,
@@ -80,10 +80,8 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
                 "legacy request metadata stream transition is complete"
             );
         } else {
-            olp_storage::valkey::verify_request_metadata_stream_upgrade(
-                &args.persistence.valkey_url,
-            )
-            .await?;
+            olp_db::valkey::verify_request_metadata_stream_upgrade(&args.persistence.valkey_url)
+                .await?;
             info!("legacy request metadata stream claim skipped for non-upgrade database");
         }
     }
@@ -707,7 +705,7 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
 pub mod test_support {
     use std::error::Error;
 
-    use olp_storage::runtime::RuntimeOutboxLeader;
+    use olp_db::runtime::RuntimeOutboxLeader;
     use tokio::sync::watch;
 
     pub use super::{OutboxBatchOutcome, RuntimeHintPublication};
@@ -933,8 +931,7 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
     .await?;
     limiter.ping().await?;
     checks.insert("valkey".into(), json!({ "ok": true }));
-    olp_storage::valkey::verify_request_metadata_stream_upgrade(&args.persistence.valkey_url)
-        .await?;
+    olp_db::valkey::verify_request_metadata_stream_upgrade(&args.persistence.valkey_url).await?;
     checks.insert(
         "request_metadata_stream_upgrade".into(),
         json!({ "ok": true }),

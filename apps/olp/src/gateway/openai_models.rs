@@ -4,10 +4,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_domain::{OperationKind, RouteSlug, Surface};
+use olp_engine::domain::{OperationKind, RouteSlug, Surface};
 use serde::Serialize;
 
-use olp_inference::runtime::RuntimeBundle;
+use olp_engine::inference::runtime::RuntimeBundle;
 
 use crate::{
     GatewayState, InferencePrincipal,
@@ -180,13 +180,13 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use futures::stream;
     use http_body_util::BodyExt;
-    use olp_domain::{
+    use olp_db::security::AuthHmacKey;
+    use olp_engine::domain::{
         ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
         BoxFuture, Capability, DurationMs, Provider, ProviderEventStream, ProviderId, ProviderKind,
         ProviderOutput, ProviderRequest, ProviderTransport, Route, RouteId, RuntimeGeneration,
         RuntimeGenerationId, RuntimeSnapshot, Target, TargetId, TransportError, TransportMode,
     };
-    use olp_storage::security::AuthHmacKey;
     use serde_json::Value;
     use tower::ServiceExt;
 
@@ -288,7 +288,7 @@ mod tests {
                 },
             )]),
         };
-        let runtime = Arc::new(olp_inference::runtime::RuntimeManager::empty());
+        let runtime = Arc::new(olp_engine::inference::runtime::RuntimeManager::empty());
         let transport: Arc<dyn ProviderTransport> = Arc::new(UnusedTransport);
         runtime
             .install(snapshot, BTreeMap::from([(provider_id, transport)]))

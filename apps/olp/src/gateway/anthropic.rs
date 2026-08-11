@@ -4,8 +4,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_domain::{ApiKey, CanonicalResult, RouteSlug, Surface, TransportMode};
-use olp_protocols::anthropic::{
+use olp_engine::domain::{ApiKey, CanonicalResult, RouteSlug, Surface, TransportMode};
+use olp_engine::protocols::anthropic::{
     AnthropicMessagesClientStreamEncoder, CountTokensRequest, MessagesRequest,
     decode_count_tokens_request, decode_messages_request, encode_count_tokens_result,
     encode_messages_response,
@@ -13,7 +13,7 @@ use olp_protocols::anthropic::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use olp_inference::{CompletedEventExecution, runtime::RuntimeBundle};
+use olp_engine::inference::{CompletedEventExecution, runtime::RuntimeBundle};
 
 use crate::{
     GatewayState, InferencePrincipal,
@@ -260,12 +260,15 @@ fn model_object(runtime: &RuntimeBundle, slug: &RouteSlug) -> Model {
 struct AnthropicHttpStreamEncoder(AnthropicMessagesClientStreamEncoder);
 
 impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
-    fn push(&mut self, event: olp_domain::CanonicalEvent) -> Result<Vec<bytes::Bytes>, String> {
+    fn push(
+        &mut self,
+        event: olp_engine::domain::CanonicalEvent,
+    ) -> Result<Vec<bytes::Bytes>, String> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
-        encode_server_sse_frame(&olp_protocols::sse::SseFrame {
+        encode_server_sse_frame(&olp_engine::protocols::sse::SseFrame {
             event: Some("error".to_owned()),
             data: json!({
                 "type": "error",

@@ -8,10 +8,12 @@ use axum::{
     body::{Body, HttpBody},
     http::HeaderMap,
 };
-use olp_domain::{ApiKeyLookupId, ApiKeyStatus, GatewayCapability, Surface};
-use olp_inference::{InferencePrincipal, InferenceReservation};
-use olp_protocols::openai::EmbeddingWireInput;
-use olp_storage::{limits::LimitError, limits::LimitRequest};
+use olp_engine::domain::{ApiKeyLookupId, ApiKeyStatus, GatewayCapability, Surface};
+use olp_engine::inference::{
+    InferencePrincipal, InferenceReservation,
+    limits::{LimitError, LimitRequest},
+};
+use olp_engine::protocols::openai::EmbeddingWireInput;
 use serde::Deserialize;
 
 use crate::{RequestBoundaryState, gateway};
@@ -173,7 +175,7 @@ pub(super) async fn reserve_http_inference_limits(
     .await
     .map_err(|_| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
     match result {
-        Ok(lease) => Ok(Some(InferenceReservation::distributed(limiter, lease))),
+        Ok(lease) => Ok(Some(InferenceReservation::distributed(lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,

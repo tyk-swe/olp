@@ -1,6 +1,8 @@
-use olp_domain::{ApiKey, OperationKind, RouteSlug, Surface, TransportMode, select_attempts};
+use olp_engine::domain::{
+    ApiKey, OperationKind, RouteSlug, Surface, TransportMode, select_attempts,
+};
 
-use olp_inference::runtime::RuntimeBundle;
+use olp_engine::inference::runtime::RuntimeBundle;
 
 use super::protocol_error::ProtocolError;
 

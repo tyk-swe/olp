@@ -12,8 +12,8 @@
 //! the media spool.
 
 use libfuzzer_sys::fuzz_target;
-use olp_domain::{ImageOperation, MediaHandle, Operation};
-use olp_protocols::openai::{
+use olp_engine::domain::{ImageOperation, MediaHandle, Operation};
+use olp_engine::protocols::openai::{
     self, BoundedMediaPart, ImageCodecError, MediaPartError, OpenAiImageEditRequest,
     OpenAiImageVariationRequest, OpenAiTranscriptionRequest,
 };

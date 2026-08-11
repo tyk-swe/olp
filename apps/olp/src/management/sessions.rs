@@ -1,5 +1,5 @@
 use axum::http::{HeaderMap, StatusCode, header};
-use olp_storage::{authentication::SessionPrincipal, security::SessionMaterial};
+use olp_db::{authentication::SessionPrincipal, security::SessionMaterial};
 use tracing::warn;
 
 use crate::{

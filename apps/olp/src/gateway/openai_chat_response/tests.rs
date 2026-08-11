@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use axum::body::Bytes;
-use olp_domain::{
+use olp_engine::domain::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
     SourceExtensions, Surface, Usage, validate_event_sequence,
 };
-use olp_protocols::openai::{OpenAiChatStreamDecoder, OpenAiStreamError};
+use olp_engine::protocols::openai::{OpenAiChatStreamDecoder, OpenAiStreamError};
 use serde_json::{Value, json};
 
 use super::{

@@ -17,7 +17,8 @@ use chrono::Utc;
 use futures::{Stream, stream};
 use http_body_util::BodyExt;
 use olp::test_support::{ApiMode, GatewayState, ProcessComposition, public_router};
-use olp_domain::{
+use olp_db::{PgStore, security::AuthHmacKey};
+use olp_engine::domain::{
     ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
     AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, CanonicalResult,
     Capability, DurationMs, FinishReason, MessageRole, OperationKind, Provider,
@@ -26,8 +27,7 @@ use olp_domain::{
     RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TokenCountResult, TransportError,
     TransportMode, TransportPhase, Usage,
 };
-use olp_inference::runtime::RuntimeManager;
-use olp_storage::{PgStore, security::AuthHmacKey};
+use olp_engine::inference::runtime::RuntimeManager;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 

@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use olp_domain::{
+use olp_engine::domain::{
     CanonicalEventKind, ContentPart, FinishReason, GenerationParameters, GenerationRequest,
     Message, MessageRole, Operation, ResponseFormat, RouteSlug, SourceExtensions, Surface,
     ToolCall, ToolDefinition, Usage,

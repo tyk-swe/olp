@@ -1,0 +1,62 @@
+use std::sync::Arc;
+
+use crate::domain::{ApiKey, ApiKeyLookupId, GatewayCapability, Surface};
+
+use crate::inference::runtime::RuntimeBundle;
+
+/// Authenticated API-key identity pinned to the runtime generation that
+/// performed credential verification.
+#[derive(Clone)]
+pub struct InferencePrincipal {
+    runtime: Arc<RuntimeBundle>,
+    lookup_id: ApiKeyLookupId,
+    surface: Surface,
+    gateway_capability: Option<GatewayCapability>,
+}
+
+impl InferencePrincipal {
+    #[must_use]
+    pub fn new(
+        runtime: Arc<RuntimeBundle>,
+        lookup_id: ApiKeyLookupId,
+        surface: Surface,
+        gateway_capability: Option<GatewayCapability>,
+    ) -> Self {
+        Self {
+            runtime,
+            lookup_id,
+            surface,
+            gateway_capability,
+        }
+    }
+
+    #[must_use]
+    pub fn runtime(&self) -> &Arc<RuntimeBundle> {
+        &self.runtime
+    }
+
+    #[must_use]
+    pub fn key(&self) -> &ApiKey {
+        self.runtime
+            .api_keys
+            .get(&self.lookup_id)
+            .expect("authenticated API key must remain in its pinned runtime")
+    }
+
+    #[must_use]
+    pub const fn lookup_id(&self) -> &ApiKeyLookupId {
+        &self.lookup_id
+    }
+
+    #[must_use]
+    pub const fn surface(&self) -> Surface {
+        self.surface
+    }
+
+    /// Capability declared by the classified public endpoint, if the action
+    /// has a supported authorization policy.
+    #[must_use]
+    pub const fn gateway_capability(&self) -> Option<GatewayCapability> {
+        self.gateway_capability
+    }
+}

@@ -1,7 +1,7 @@
 use olp_conformance::read_json;
-use olp_providers::anthropic::ConnectorConfig as AnthropicConnectorConfig;
-use olp_providers::gemini::ConnectorConfig as GeminiConnectorConfig;
-use olp_providers::openai::ConnectorConfig as OpenAiConnectorConfig;
+use olp_engine::providers::anthropic::ConnectorConfig as AnthropicConnectorConfig;
+use olp_engine::providers::gemini::ConnectorConfig as GeminiConnectorConfig;
+use olp_engine::providers::openai::ConnectorConfig as OpenAiConnectorConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

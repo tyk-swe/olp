@@ -12,9 +12,8 @@ bytes = "1"
 futures = "0.3"
 libfuzzer-sys = "0.4"
 multer = "3.1"
-olp-domain = { path = "../crates/domain" }
+olp-engine = { path = "../crates/olp-engine" }
 olp = { path = "../apps/olp", features = ["test-util"] }
-olp-protocols = { path = "../crates/protocols" }
 serde = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["rt"] }

@@ -7,19 +7,19 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, stream};
-use olp_domain::{
-    CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
-    VideoJobResult,
-};
-use olp_protocols::openai::{
-    OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
-    decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
-    encode_video_delete_response, encode_video_list_response, encode_video_object,
-};
-use olp_storage::{
+use olp_db::{
     media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
     media_jobs::MediaJobOrder, media_jobs::MediaJobRecord, media_jobs::MediaJobUpdate,
     media_jobs::NewMediaJobReservation,
+};
+use olp_engine::domain::{
+    CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
+    VideoJobResult,
+};
+use olp_engine::protocols::openai::{
+    OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
+    decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
+    encode_video_delete_response, encode_video_list_response, encode_video_object,
 };
 use tracing::error;
 
@@ -51,7 +51,7 @@ pub(super) async fn video_create(
     let mut form = parse_multipart(
         &state,
         multipart,
-        olp_protocols::openai::DEFAULT_VIDEO_REFERENCE_LIMIT,
+        olp_engine::protocols::openai::DEFAULT_VIDEO_REFERENCE_LIMIT,
         1,
         admission,
     )
@@ -429,12 +429,12 @@ pub(super) async fn video_list(
         .collect::<Vec<_>>()
         .await;
     let jobs = refreshed.iter().map(media_job_result).collect::<Vec<_>>();
-    let result = olp_domain::VideoListResult {
+    let result = olp_engine::domain::VideoListResult {
         first_id: jobs.first().map(|job| job.id.clone()),
         last_id: jobs.last().map(|job| job.id.clone()),
         jobs,
         has_more: page.next_cursor.is_some(),
-        extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
     };
     let response = encode_video_list_response(&result, "video").map_err(|error| {
         InferenceError::bad_gateway("provider_protocol_error", error.to_string())
@@ -611,10 +611,10 @@ pub(super) async fn video_delete(
         .await
         .map_err(media_job_error)?;
     if record.lifecycle == MediaJobLifecycle::Deleted {
-        let response = encode_video_delete_response(&olp_domain::VideoDeleteResult {
+        let response = encode_video_delete_response(&olp_engine::domain::VideoDeleteResult {
             id: record.id.to_string(),
             deleted: true,
-            extensions: olp_domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         })
         .map_err(|error| {
             InferenceError::bad_gateway("provider_protocol_error", error.to_string())

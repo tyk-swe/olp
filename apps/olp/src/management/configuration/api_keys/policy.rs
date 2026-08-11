@@ -4,8 +4,8 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use olp_domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
-use olp_storage::configuration::UpdateApiKeyInput;
+use olp_db::configuration::UpdateApiKeyInput;
+use olp_engine::domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
 
 use crate::{FieldErrors, Problem};
 
@@ -234,7 +234,7 @@ fn normalize_u64_limit(
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
-    use olp_storage::idempotency::idempotency_fingerprint;
+    use olp_db::idempotency::idempotency_fingerprint;
     use serde_json::json;
 
     use super::*;

@@ -10,14 +10,17 @@ use http_body_util::BodyExt as _;
 use olp::test_support::{
     ApiMode, ProcessComposition, observability_router, public_router, refresh_observability_cache,
 };
-use olp_domain::Surface;
-use olp_inference::runtime::RuntimeManager;
-use olp_storage::{
-    request_metadata::RequestAttemptMetadata,
-    request_metadata::RequestMetadataEvent,
+use olp_db::{
     request_metadata::RequestMetadataGap,
     security::MasterKey,
     worker_health::{RequestMetadataConsumerActivity, WorkerTask, WorkerTaskCheckpointOutcome},
+};
+use olp_engine::{
+    domain::Surface,
+    inference::{
+        request_metadata::{RequestAttemptMetadata, RequestMetadataEvent},
+        runtime::RuntimeManager,
+    },
 };
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
@@ -30,7 +33,7 @@ const ORIGIN: &str = "https://olp.example.test";
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
 async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_only() {
-    let db = olp_storage::test_support::TestDb::create_migrated("operations_http").await;
+    let db = olp_db::test_support::TestDb::create_migrated("operations_http").await;
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,

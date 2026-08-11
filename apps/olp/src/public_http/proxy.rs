@@ -12,7 +12,7 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_storage::security::AuthHmacKey;
+use olp_db::security::AuthHmacKey;
 
 use crate::{Problem, RequestBoundaryState};
 

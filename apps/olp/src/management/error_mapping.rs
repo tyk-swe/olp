@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use olp_storage::{
+use olp_db::{
     PersistenceError, access::AccessError, configuration::ConfigurationError,
     identity::IdentityError,
 };

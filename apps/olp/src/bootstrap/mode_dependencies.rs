@@ -14,10 +14,11 @@ use std::{
     time::Instant,
 };
 
-use olp_domain::{MediaSpool, ProviderKind};
-use olp_inference::{InferenceService, limits::ReloadableLimiter, runtime::RuntimeManager};
-use olp_storage::{
-    PgStore, request_metadata::RequestMetadataEmitter, security::AuthHmacKey, security::MasterKey,
+use olp_db::{PgStore, security::AuthHmacKey, security::MasterKey};
+use olp_engine::domain::{MediaSpool, ProviderKind};
+use olp_engine::inference::{
+    InferenceService, limits::ReloadableLimiter, request_metadata::RequestMetadataEmitter,
+    runtime::RuntimeManager,
 };
 use thiserror::Error;
 
@@ -127,7 +128,7 @@ impl GatewayState {
     }
 
     #[must_use]
-    pub(crate) fn circuits(&self) -> &olp_inference::circuit::CircuitBreaker {
+    pub(crate) fn circuits(&self) -> &olp_engine::inference::circuit::CircuitBreaker {
         self.inference().circuits()
     }
 
@@ -189,7 +190,7 @@ pub struct ManagementState {
     request_boundary: RequestBoundaryState,
     pub(crate) transports: TransportRegistry,
     pub(crate) master_key: Option<Arc<MasterKey>>,
-    certification_probe_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
+    certification_probe_connectors: olp_engine::providers::OpenAiConnectorOverrideRegistry,
     pub(crate) public_origin: PublicOrigin,
     pub(crate) console_dir: Arc<PathBuf>,
     pub(crate) session_ttl: chrono::Duration,
@@ -248,7 +249,7 @@ impl ManagementState {
         &self,
         provider_id: uuid::Uuid,
         kind: ProviderKind,
-    ) -> Option<olp_providers::ProviderFacade> {
+    ) -> Option<olp_engine::providers::ProviderFacade> {
         self.certification_probe_connectors.get(provider_id, kind)
     }
 
@@ -286,7 +287,7 @@ impl ObservabilityState {
     }
 
     #[must_use]
-    pub(crate) fn circuits(&self) -> &olp_inference::circuit::CircuitBreaker {
+    pub(crate) fn circuits(&self) -> &olp_engine::inference::circuit::CircuitBreaker {
         self.inference.circuits()
     }
 

@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use axum::extract::Multipart;
 use encoding_rs::{Encoding, UTF_8};
 use futures::stream;
-use olp_domain::{MediaHandle, MediaSpool};
-use olp_protocols::openai::BoundedMediaPart;
+use olp_engine::domain::{MediaHandle, MediaSpool};
+use olp_engine::protocols::openai::BoundedMediaPart;
 use serde_json::Value;
 
 use crate::{GatewayState, MultipartRequestAdmission, MultipartRouteAdmission};
@@ -61,7 +61,7 @@ impl MultipartFormData {
         }
         while let Some(handle) = self.cleanup_handles.last().cloned() {
             match self.cleanup_spool.remove(&handle).await {
-                Ok(()) | Err(olp_domain::MediaSpoolError::NotFound) => {
+                Ok(()) | Err(olp_engine::domain::MediaSpoolError::NotFound) => {
                     self.cleanup_handles.pop();
                 }
                 Err(_) => {
@@ -282,7 +282,7 @@ async fn parse_multipart_fields(
             let stream = stream::unfold(receiver, |mut receiver| async move {
                 receiver.recv().await.map(|item| (item, receiver))
             });
-            let put = state.media_spool().put(olp_domain::MediaUpload {
+            let put = state.media_spool().put(olp_engine::domain::MediaUpload {
                 filename: filename.clone(),
                 content_type: content_type.clone(),
                 maximum_length: maximum_file_bytes,
@@ -298,7 +298,7 @@ async fn parse_multipart_fields(
                         }
                         Err(error) => {
                             let _ = sender
-                                .send(Err(olp_domain::MediaSpoolError::Unavailable))
+                                .send(Err(olp_engine::domain::MediaSpoolError::Unavailable))
                                 .await;
                             return Err(InferenceError::invalid_request(format!(
                                 "The multipart file is invalid: {error}"
@@ -387,7 +387,7 @@ async fn parse_multipart_fields(
                         ));
                     }
                     MultipartRouteAdmission::RequireModelBeforeFile(allowed_routes) => {
-                        let route = olp_domain::RouteSlug::parse(text.as_str()).map_err(|_| {
+                        let route = olp_engine::domain::RouteSlug::parse(text.as_str()).map_err(|_| {
                             InferenceError::invalid_request(
                                 "The model field must contain a valid authorized route before file parts.",
                             )
@@ -412,17 +412,18 @@ async fn parse_multipart_fields(
     Ok(())
 }
 
-pub(super) fn media_spool_error(error: olp_domain::MediaSpoolError) -> InferenceError {
+pub(super) fn media_spool_error(error: olp_engine::domain::MediaSpoolError) -> InferenceError {
     match error {
-        olp_domain::MediaSpoolError::TooLarge { .. } => {
+        olp_engine::domain::MediaSpoolError::TooLarge { .. } => {
             InferenceError::payload_too_large("media_too_large")
         }
-        olp_domain::MediaSpoolError::InvalidFilename
-        | olp_domain::MediaSpoolError::InvalidHandle
-        | olp_domain::MediaSpoolError::ZeroLimit => {
+        olp_engine::domain::MediaSpoolError::InvalidFilename
+        | olp_engine::domain::MediaSpoolError::InvalidHandle
+        | olp_engine::domain::MediaSpoolError::ZeroLimit => {
             InferenceError::invalid_request(error.to_string())
         }
-        olp_domain::MediaSpoolError::NotFound | olp_domain::MediaSpoolError::Unavailable => {
+        olp_engine::domain::MediaSpoolError::NotFound
+        | olp_engine::domain::MediaSpoolError::Unavailable => {
             InferenceError::unavailable("media_spool_unavailable")
         }
     }

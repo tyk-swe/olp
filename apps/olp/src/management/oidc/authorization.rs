@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use olp_storage::{
+use olp_db::{
     authentication::RecentAuthPurpose, authentication::SessionPrincipal, oidc::NewOidcFlow,
     oidc::OidcFlowMaterial, oidc::OidcFlowPurpose, security::RecentAuthMaterial,
     security::oidc_flow_payload_aad as flow_payload_aad,

@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
-use olp_providers::OidcNetworkError;
-use olp_storage::oidc::OidcError;
+use olp_db::oidc::OidcError;
+use olp_engine::providers::OidcNetworkError;
 use tracing::{error, warn};
 
 use crate::{

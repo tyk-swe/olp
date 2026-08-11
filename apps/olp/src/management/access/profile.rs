@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Duration;
-use olp_storage::{
+use olp_db::{
     authentication::RecentAuthPurpose, authentication::SessionSecurityContext,
     security::RecentAuthMaterial, security::SessionMaterial, security::hash_password,
     security::verify_password,

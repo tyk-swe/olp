@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{
+use olp_db::{
     configuration::ApiKeyRecord, configuration::RotateApiKeyInput,
     idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
 };
@@ -261,7 +261,7 @@ pub(crate) async fn rotate_api_key(
             },
             ReplayableIdempotency::new(request_fingerprint, master_key),
             move |result| {
-                olp_storage::idempotency::IdempotencyResponse::json(
+                olp_db::idempotency::IdempotencyResponse::json(
                     StatusCode::OK.as_u16(),
                     &RotateApiKeyResponse {
                         id: result.id,

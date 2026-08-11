@@ -11,7 +11,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
-use olp_domain::{
+use olp_engine::domain::{
     BoxFuture, MediaArtifact, MediaByteStream, MediaHandle, MediaSpool, MediaSpoolError,
     MediaUpload, OpenedMedia,
 };

@@ -7,8 +7,8 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
-use olp_domain::{ImagesResult, MediaHandle, MediaSpool, OpenedMedia};
-use olp_protocols::openai::{OpenAiImagePayload, encode_image_response};
+use olp_engine::domain::{ImagesResult, MediaHandle, MediaSpool, OpenedMedia};
+use olp_engine::protocols::openai::{OpenAiImagePayload, encode_image_response};
 use uuid::Uuid;
 
 use crate::gateway::InferenceError;
@@ -245,7 +245,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use futures::stream;
-    use olp_domain::{ImageArtifact, MediaSource, MediaUpload, SourceExtensions, Surface};
+    use olp_engine::domain::{ImageArtifact, MediaSource, MediaUpload, SourceExtensions, Surface};
 
     use super::*;
 

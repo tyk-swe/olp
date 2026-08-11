@@ -1,8 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
-use olp_domain::ErrorClass;
-use olp_protocols::sse::{SseFrame, encode_frame};
+use olp_engine::domain::ErrorClass;
+use olp_engine::protocols::sse::{SseFrame, encode_frame};
 use serde_json::{Value, json};
 
 use super::InferenceError;

@@ -6,16 +6,17 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use olp_domain::{CanonicalError, ErrorClass, TransportError};
-use olp_inference::{InferenceError as CoreInferenceError, InferenceErrorKind};
-use olp_storage::limits::LimitDimension;
+use olp_engine::domain::{CanonicalError, ErrorClass, TransportError};
+use olp_engine::inference::{
+    InferenceError as CoreInferenceError, InferenceErrorKind, limits::LimitDimension,
+};
 use serde::Serialize;
 
 use crate::Problem;
 
 /// Delivery adapter for transport-neutral inference failures.
 ///
-/// `olp_inference` owns the error's classification, code, message, and retry
+/// `olp_engine::inference` owns the error's classification, code, message, and retry
 /// policy. The gateway only maps that stable contract to HTTP status codes and
 /// OpenAI-compatible error envelopes.
 #[derive(Debug)]
@@ -30,8 +31,8 @@ pub(super) fn valid_json<T>(
 }
 
 impl InferenceError {
-    pub(crate) fn accounting_outcome(&self) -> olp_inference::RequestOutcome {
-        olp_inference::RequestOutcome::failure(
+    pub(crate) fn accounting_outcome(&self) -> olp_engine::inference::RequestOutcome {
+        olp_engine::inference::RequestOutcome::failure(
             (self.code() != "client_cancelled").then_some(self.status().as_u16()),
             self.code(),
         )

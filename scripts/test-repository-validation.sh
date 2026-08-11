@@ -112,6 +112,20 @@ write_two_role_fixture() {
     "$workspace/packages/dependency/Cargo.toml"
   : > "$workspace/packages/source/src/lib.rs"
   : > "$workspace/packages/dependency/src/lib.rs"
+  if [[ $source_role == engine ]]; then
+    mkdir -p \
+      "$workspace/packages/source/src/domain" \
+      "$workspace/packages/source/src/protocols" \
+      "$workspace/packages/source/src/providers" \
+      "$workspace/packages/source/src/inference"
+  fi
+  if [[ $dependency_role == engine ]]; then
+    mkdir -p \
+      "$workspace/packages/dependency/src/domain" \
+      "$workspace/packages/dependency/src/protocols" \
+      "$workspace/packages/dependency/src/providers" \
+      "$workspace/packages/dependency/src/inference"
+  fi
 
   jq -n \
     --arg workspace "$workspace" \
@@ -336,7 +350,7 @@ test_semantic_role_edge_allows_new_packages() {
   local output="$fixture_root/output.log"
 
   write_boundary_fixture "$workspace"
-  write_two_role_fixture "$workspace" "$metadata_file" provider provider
+  write_two_role_fixture "$workspace" "$metadata_file" db engine
   write_fake_cargo_metadata "$fake_bin" "$metadata_file"
 
   PATH="$fake_bin:$original_path" \
@@ -353,7 +367,7 @@ test_forbidden_role_edge_is_rejected() {
   local status
 
   write_boundary_fixture "$workspace"
-  write_two_role_fixture "$workspace" "$metadata_file" domain provider
+  write_two_role_fixture "$workspace" "$metadata_file" engine db
   write_fake_cargo_metadata "$fake_bin" "$metadata_file"
 
   if PATH="$fake_bin:$original_path" \
@@ -364,7 +378,7 @@ test_forbidden_role_edge_is_rejected() {
   fi
   [[ $status == 1 ]] || return 1
   assert_contains "$output" \
-    "fixture-source (domain) must not depend on fixture-dependency (provider)"
+    "fixture-source (engine) must not depend on fixture-dependency (db)"
 }
 
 test_missing_architecture_role_is_rejected() {
@@ -377,7 +391,7 @@ test_missing_architecture_role_is_rejected() {
   local status
 
   write_boundary_fixture "$workspace"
-  write_two_role_fixture "$workspace" "$metadata_file" protocol domain
+  write_two_role_fixture "$workspace" "$metadata_file" db engine
   jq 'del(.packages[0].metadata.olp.role)' "$metadata_file" > "$missing_metadata_file"
   write_fake_cargo_metadata "$fake_bin" "$missing_metadata_file"
 
@@ -402,7 +416,7 @@ test_infrastructure_dependency_wrong_role_is_rejected() {
   local status
 
   write_boundary_fixture "$workspace"
-  write_two_role_fixture "$workspace" "$metadata_file" domain domain
+  write_two_role_fixture "$workspace" "$metadata_file" db db
   jq '.packages[0].dependencies += [{name: "reqwest", path: null, kind: null}]' \
     "$metadata_file" > "$ownership_metadata_file"
   write_fake_cargo_metadata "$fake_bin" "$ownership_metadata_file"
@@ -415,7 +429,48 @@ test_infrastructure_dependency_wrong_role_is_rejected() {
   fi
   [[ $status == 1 ]] || return 1
   assert_contains "$output" \
-    "reqwest is owned by the provider role, not fixture-source (domain)"
+    "reqwest is owned by the engine role, not fixture-source (db)"
+}
+
+test_engine_internal_boundaries_are_rejected() {
+  local fixture_root="$test_root/engine-internal-boundaries"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local output="$fixture_root/output.log"
+  local status
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" engine engine
+  write_fake_cargo_metadata "$fake_bin" "$metadata_file"
+  printf '%s\n' 'use crate::providers::Connector;' > \
+    "$workspace/packages/source/src/domain/forbidden.rs"
+  printf '%s\n' 'fn forbidden() { let _ = reqwest::Client::new(); }' > \
+    "$workspace/packages/source/src/protocols/forbidden.rs"
+  printf '%s\n' \
+    'use olp_db::Store;' \
+    'fn forbidden() { let _ = OpenAiConnector::new(); }' > \
+    "$workspace/packages/source/src/inference/forbidden.rs"
+  printf '%s\n' 'fn allowed() { let _ = OpenAiConnector::new(); }' > \
+    "$workspace/packages/source/src/providers/allowed.rs"
+
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" "engine domain must not depend on sibling modules:" || return
+  assert_contains "$output" "engine protocols must remain infrastructure-free:" || return
+  assert_contains "$output" \
+    "engine inference must use provider and persistence ports instead of infrastructure:" || return
+  assert_contains "$output" \
+    "concrete provider construction escaped olp_engine::providers:" || return
+  assert_contains "$output" "src/inference/forbidden.rs" || return
+  if assert_contains "$output" "src/providers/allowed.rs"; then
+    return 1
+  fi
 }
 
 test_same_name_non_workspace_path_is_rejected() {
@@ -428,7 +483,7 @@ test_same_name_non_workspace_path_is_rejected() {
   local status
 
   write_boundary_fixture "$workspace"
-  write_two_role_fixture "$workspace" "$metadata_file" provider domain
+  write_two_role_fixture "$workspace" "$metadata_file" db engine
   mkdir -p "$workspace/tools/spoof/src"
   sed -i 's#path = "../dependency"#path = "../../tools/spoof"#' \
     "$workspace/packages/source/Cargo.toml"
@@ -452,7 +507,7 @@ test_same_name_non_workspace_path_is_rejected() {
   fi
   [[ $status == 1 ]] || return 1
   assert_contains "$output" \
-    'fixture-source (provider) has an unclassified path dependency on fixture-dependency'
+    'fixture-source (db) has an unclassified path dependency on fixture-dependency'
 }
 
 test_external_cargo_patch_path_is_rejected() {
@@ -522,6 +577,8 @@ run_test "missing architecture roles are rejected" \
   test_missing_architecture_role_is_rejected
 run_test "infrastructure dependencies follow role ownership" \
   test_infrastructure_dependency_wrong_role_is_rejected
+run_test "engine internal module boundaries are enforced" \
+  test_engine_internal_boundaries_are_rejected
 run_test "same-name non-workspace paths remain unclassified" \
   test_same_name_non_workspace_path_is_rejected
 run_test "external Cargo patch paths are rejected" \

@@ -7,13 +7,14 @@ use std::{
     sync::{Arc, RwLock, atomic::AtomicU64},
 };
 
-use olp_domain::{MediaSpool, ProviderId, ProviderTransport};
-use olp_inference::{circuit::CircuitBreaker, limits::ReloadableLimiter, runtime::RuntimeManager};
-#[cfg(any(test, feature = "test-util"))]
-use olp_providers::OpenAiConnector;
-use olp_storage::{
-    PgStore, request_metadata::RequestMetadataEmitter, security::AuthHmacKey, security::MasterKey,
+use olp_db::{PgStore, security::AuthHmacKey, security::MasterKey};
+use olp_engine::domain::{MediaSpool, ProviderId, ProviderTransport};
+use olp_engine::inference::{
+    circuit::CircuitBreaker, limits::ReloadableLimiter, request_metadata::RequestMetadataEmitter,
+    runtime::RuntimeManager,
 };
+#[cfg(any(test, feature = "test-util"))]
+use olp_engine::providers::OpenAiConnector;
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
@@ -64,7 +65,8 @@ pub struct ProcessComposition {
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: request_admission::PublicAdmission,
     pub transports: TransportRegistry,
-    pub(crate) certification_probe_connectors: olp_providers::OpenAiConnectorOverrideRegistry,
+    pub(crate) certification_probe_connectors:
+        olp_engine::providers::OpenAiConnectorOverrideRegistry,
     pub public_origin: PublicOrigin,
     pub console_dir: Arc<PathBuf>,
     pub session_ttl: chrono::Duration,

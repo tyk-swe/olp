@@ -37,29 +37,31 @@ only through locked/frozen installs.
 
 | Role | Responsibility |
 |---|---|
-| `domain` | Canonical model, provider configuration, routing; no infrastructure |
-| `protocols` | Vendor DTOs, translation, bounded SSE |
-| `providers` | Outbound/OIDC networking, authentication, egress, error mapping |
-| `storage` | PostgreSQL, Valkey, encryption, migrations, Lua |
-| `inference` | Pinning, selection, failover, limits, event collection, accounting |
+| `engine` | Canonical model, vendor protocols, provider networking, routing, inference, and persistence ports |
+| `db` | PostgreSQL, Valkey, encryption, migrations, Lua, and engine port implementations |
 | `delivery` | HTTP, CLI, process composition, workers |
+| `test-harness` | Conformance and end-to-end support that production packages never depend on |
 
 Every workspace package declares `[package.metadata.olp]`; the boundary checker
-enforces semantic role edges and infrastructure ownership. Domain is the base;
-storage owns SQLx/Redis, providers own Reqwest/AWS/Google auth, and delivery
-owns Axum/Tower/Clap. Test harnesses never enter production dependency graphs.
-Transport-neutral behavior belongs in an inference-role crate. Delivery roots
-are `bootstrap/`, `public_http/`, `gateway/`, `management/`,
-`observability/`, and `console/`.
+enforces semantic role edges and infrastructure ownership. The engine is the
+base; the database crate depends on engine-defined ports, and delivery composes
+both. Within the engine, dependencies point left in `domain <- protocols <-
+providers <- inference`; a module may use only itself and modules to its left. Database
+code owns SQLx/Redis, `olp_engine::providers` exclusively owns
+Reqwest/AWS/Google auth and concrete connector construction, and delivery owns
+Axum/Tower/Clap. Test harnesses never enter production dependency graphs.
+Transport-neutral behavior belongs in `olp_engine::inference`. Delivery roots
+are `bootstrap/`, `public_http/`, `gateway/`, `management/`, `observability/`,
+and `console/`.
 
 ### Source map
 
-- Provider kinds, auth, fields, presets: `crates/domain/src/provider_configuration.rs`.
+- Provider kinds, auth, fields, presets: `crates/olp-engine/src/domain/provider_configuration.rs`.
 - Endpoint method/path/admission/routing: `apps/olp/src/gateway/endpoint_policy.rs`.
-- Routing eligibility/scoring: `crates/domain/src/routing/`.
-- Pinning, failover, limits, terminal accounting: `crates/inference/src/`.
-- Public egress classification: `crates/providers/src/http_egress.rs`.
-- SQL migrations: `crates/storage/migrations/` (forward-only, sequential).
+- Routing eligibility/scoring: `crates/olp-engine/src/domain/routing/`.
+- Pinning, failover, limits, terminal accounting: `crates/olp-engine/src/inference/`.
+- Public egress classification: `crates/olp-engine/src/providers/http_egress.rs`.
+- SQL migrations: `crates/olp-db/migrations/` (forward-only, sequential).
 - Management contract: `openapi/management.json` → `make openapi`.
 - Helm values/schema/templates: `deploy/helm/` → `make helm-verify`.
 - Runtime settings: `docs/configuration.md`.

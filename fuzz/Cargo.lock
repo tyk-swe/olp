@@ -2309,11 +2309,8 @@ dependencies = [
  "ipnet",
  "jsonwebtoken 11.0.0",
  "mime",
- "olp-domain",
- "olp-inference",
- "olp-protocols",
- "olp-providers",
- "olp-storage",
+ "olp-db",
+ "olp-engine",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -2332,99 +2329,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "olp-domain"
-version = "2.0.0"
-dependencies = [
- "bytes",
- "chrono",
- "futures",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "thiserror",
- "utoipa",
- "uuid",
-]
-
-[[package]]
-name = "olp-fuzz"
-version = "0.0.0"
-dependencies = [
- "bytes",
- "futures",
- "libfuzzer-sys",
- "multer",
- "olp",
- "olp-domain",
- "olp-protocols",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "olp-inference"
-version = "2.0.0"
-dependencies = [
- "arc-swap",
- "bytes",
- "chrono",
- "futures",
- "olp-domain",
- "olp-protocols",
- "olp-providers",
- "olp-storage",
- "rust_decimal",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "olp-protocols"
-version = "2.0.0"
-dependencies = [
- "base64",
- "bytes",
- "olp-domain",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "olp-providers"
-version = "2.0.0"
-dependencies = [
- "arc-swap",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-bedrock",
- "aws-sdk-bedrockruntime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "base64",
- "bytes",
- "futures",
- "google-cloud-auth",
- "http 1.5.0",
- "jsonwebtoken 11.0.0",
- "olp-domain",
- "olp-protocols",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "url",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "olp-storage"
+name = "olp-db"
 version = "2.0.0"
 dependencies = [
  "aes-gcm",
@@ -2433,7 +2338,7 @@ dependencies = [
  "chrono",
  "futures",
  "hmac",
- "olp-domain",
+ "olp-engine",
  "rand 0.9.5",
  "redis",
  "rust_decimal",
@@ -2446,6 +2351,53 @@ dependencies = [
  "tracing",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "olp-engine"
+version = "2.0.0"
+dependencies = [
+ "arc-swap",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-bedrock",
+ "aws-sdk-bedrockruntime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures",
+ "google-cloud-auth",
+ "http 1.5.0",
+ "jsonwebtoken 11.0.0",
+ "reqwest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+ "utoipa",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "olp-fuzz"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "libfuzzer-sys",
+ "multer",
+ "olp",
+ "olp-engine",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

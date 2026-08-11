@@ -4,9 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_storage::{
-    operations::AttemptRecord, operations::RequestFilters, operations::RequestRecord,
-};
+use olp_db::{operations::AttemptRecord, operations::RequestFilters, operations::RequestRecord};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;

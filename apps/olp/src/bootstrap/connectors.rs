@@ -4,9 +4,9 @@ use crate::{
     TransportRegistry,
     bootstrap::provider_adapter::{runtime_provider_config, runtime_provider_credential},
 };
-use olp_domain::{ProviderId, ProviderTransport, RuntimeSnapshot};
-use olp_providers::{ProviderConfig, ProviderCredential, ProviderFactory};
-use olp_storage::{PgStore, security::MasterKey};
+use olp_db::{PgStore, security::MasterKey};
+use olp_engine::domain::{ProviderId, ProviderTransport, RuntimeSnapshot};
+use olp_engine::providers::{ProviderConfig, ProviderCredential, ProviderFactory};
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
@@ -212,7 +212,7 @@ mod tests {
     use std::{io::Write as _, path::Path};
 
     use crate::TransportRegistry;
-    use olp_domain::ProviderId;
+    use olp_engine::domain::ProviderId;
     use serde_json::json;
     use tempfile::NamedTempFile;
 

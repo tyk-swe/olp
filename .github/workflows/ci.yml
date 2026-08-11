@@ -331,7 +331,7 @@ jobs:
         env:
           DATABASE_URL: postgres://olp:olp@localhost:5432/olp
         run: |
-          cargo sqlx migrate run --source crates/storage/migrations
+          cargo sqlx migrate run --source crates/olp-db/migrations
           cargo sqlx prepare --workspace --check -- --all-targets --all-features
       - name: Run isolated PostgreSQL and Valkey integration suites
         run: ./scripts/run-postgres-tests.sh

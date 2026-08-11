@@ -71,7 +71,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
         let mut validator = EventSequenceValidator::new();
         validator.push(&first).unwrap();
         let provider: EventStream = Box::pin(stream::iter([Err(TransportError {
-            phase: olp_domain::TransportPhase::Body,
+            phase: olp_engine::domain::TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: false,
             message: "stream failed after its first event".to_owned(),
@@ -209,7 +209,7 @@ fn raw_media_event(sequence: u64, event: &str, data: Value) -> CanonicalEvent {
     CanonicalEvent::new(
         sequence,
         CanonicalEventKind::SourceExtension {
-            extensions: olp_domain::SourceExtensions::new(
+            extensions: olp_engine::domain::SourceExtensions::new(
                 Surface::OpenAi,
                 BTreeMap::from([
                     ("/__olp/raw_sse/event".into(), Value::String(event.into())),
@@ -224,7 +224,7 @@ fn raw_media_event(sequence: u64, event: &str, data: Value) -> CanonicalEvent {
 async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     let (mut state, key) = test_state(true);
     let (emitter, mut request_metadata) =
-        olp_storage::request_metadata::RequestMetadataEmitter::bounded(8);
+        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(8);
     state.replace_request_metadata_for_test(emitter);
 
     install_event_stream(
@@ -286,7 +286,7 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
 async fn canonical_stream_error_is_not_persisted_as_success() {
     let (mut state, key) = test_state(true);
     let (emitter, mut request_metadata) =
-        olp_storage::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     install_event_stream(
         &state,
@@ -386,7 +386,7 @@ async fn real_router_generation_streams_report_truncation_in_native_envelopes() 
 async fn image_speech_and_transcription_stream_native_sse_and_usage_through_router() {
     let (mut state, key) = test_state(true);
     let (emitter, mut request_metadata) =
-        olp_storage::request_metadata::RequestMetadataEmitter::bounded(8);
+        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(8);
     state.replace_request_metadata_for_test(emitter);
 
     install_event_stream(

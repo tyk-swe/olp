@@ -2,7 +2,7 @@ use axum::{
     http::{HeaderValue, header},
     response::Response,
 };
-use olp_storage::{security::RecentAuthMaterial, security::SessionMaterial};
+use olp_db::{security::RecentAuthMaterial, security::SessionMaterial};
 use tracing::error;
 
 use crate::{

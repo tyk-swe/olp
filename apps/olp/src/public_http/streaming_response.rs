@@ -6,8 +6,8 @@ use axum::{
     response::Response,
 };
 use futures::{StreamExt, stream};
-use olp_domain::{CanonicalEvent, CanonicalEventKind};
-use olp_protocols::sse::{SseEncodeError, SseFrame, encode_frame};
+use olp_engine::domain::{CanonicalEvent, CanonicalEventKind};
+use olp_engine::protocols::sse::{SseEncodeError, SseFrame, encode_frame};
 
 use crate::gateway::{InferenceError, RoutedEventExecution};
 
@@ -297,7 +297,7 @@ where
         });
         drop(events);
         let outcome = failure.as_ref().map_or_else(
-            olp_inference::RequestOutcome::success,
+            olp_engine::inference::RequestOutcome::success,
             InferenceError::accounting_outcome,
         );
         accounting.finish(outcome).await;
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn encode_sse_frame_preserves_event_id_and_data_line_bytes() {
-        let encoded = encode_sse_frame(&olp_protocols::sse::SseFrame {
+        let encoded = encode_sse_frame(&olp_engine::protocols::sse::SseFrame {
             event: Some("message".to_owned()),
             data: "first\nsecond".to_owned(),
             id: Some("event-7".to_owned()),
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn encode_sse_frame_includes_retry_and_empty_data() {
-        let encoded = encode_sse_frame(&olp_protocols::sse::SseFrame {
+        let encoded = encode_sse_frame(&olp_engine::protocols::sse::SseFrame {
             event: None,
             data: String::new(),
             id: Some("event-8".to_owned()),

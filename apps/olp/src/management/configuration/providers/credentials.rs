@@ -5,13 +5,13 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_providers::ProviderFactory;
-use olp_storage::{
+use olp_db::{
     configuration::CredentialVersionRecord, configuration::ProviderRecord,
     configuration::RotateCredentialInput, idempotency::ReplayableIdempotency,
     idempotency::idempotency_fingerprint, idempotency::idempotency_secret_digest,
     security::credential_aad,
 };
+use olp_engine::providers::ProviderFactory;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
@@ -191,7 +191,7 @@ pub(crate) async fn rotate_provider_credential(
             },
             ReplayableIdempotency::new(request_fingerprint, master_key),
             |result| {
-                olp_storage::idempotency::IdempotencyResponse::json(
+                olp_db::idempotency::IdempotencyResponse::json(
                     StatusCode::CREATED.as_u16(),
                     &ProviderMutationResponse {
                         provider_id,

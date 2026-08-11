@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use olp_storage::{usage::UsageFilters, usage::UsageRangeCoverage};
+use olp_db::{usage::UsageFilters, usage::UsageRangeCoverage};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;

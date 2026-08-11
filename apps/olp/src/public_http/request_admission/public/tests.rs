@@ -26,7 +26,7 @@ use tokio::{
 use tower::ServiceExt as _;
 
 use super::*;
-use olp_inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::RuntimeManager;
 
 use crate::{ApiMode, ProcessComposition, observability_router, public_http::listener};
 

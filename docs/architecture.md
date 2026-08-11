@@ -6,33 +6,39 @@ kept in [`CONTRIBUTING.md`](../CONTRIBUTING.md) and the agent guides.
 
 ## Component boundaries
 
-Production dependencies point toward `olp-domain`, which owns canonical types,
-provider configuration, routing, and ports without infrastructure. The other
-roles are deliberately narrow:
+Production dependencies point toward `olp-engine`. It owns canonical types,
+vendor protocols, provider transports, routing, inference, and the ports used
+by infrastructure. The production crate graph is deliberately one-way:
 
 ```text
-domain
-├── protocols  -> domain
-├── providers  -> domain, protocols
-├── storage    -> domain
-├── inference  -> domain, protocols, providers, storage
-└── delivery   -> all production roles
+olp-engine
+olp-db   -> olp-engine
+apps/olp -> olp-engine, olp-db
 ```
 
-`olp-protocols` translates vendor wire formats; `olp-providers` owns outbound
-provider/OIDC networking and egress policy; `olp-storage` owns PostgreSQL,
-Valkey, migrations, encryption, outbox, request-metadata ingestion, and usage
-facts; `olp-inference` owns transport-neutral execution, pinning, selection,
-failover, limits, event collection, and terminal accounting. `apps/olp` owns
-HTTP delivery, CLI modes, workers, and process wiring. Test harnesses are
-outside the production dependency graph. The console is a client-only static
-application; its feature slices share only neutral `$lib` modules.
+Within `olp-engine`, `domain` owns the canonical model and routing policy,
+`protocols` translates vendor wire formats, `providers` owns outbound
+provider/OIDC networking and egress policy, and `inference` owns
+transport-neutral execution, pinning, selection, failover, limits, event
+collection, terminal accounting, and persistence ports. `olp-db` implements
+those ports and owns PostgreSQL, Valkey, migrations, encryption, outbox,
+request-metadata ingestion, and usage facts. `apps/olp` owns HTTP delivery, CLI
+modes, workers, and process wiring. The engine never depends on the database
+crate. Test harnesses are outside the production dependency graph. The console
+is a client-only static application; its feature slices share only neutral
+`$lib` modules.
+
+The engine preserves the same inward module dependency order: `protocols` may
+use `domain`; `providers` may use `domain` and `protocols`; and `inference` may
+use all three. `domain` imports no sibling module, and no engine module except
+`providers` may use outbound networking libraries or construct concrete
+connectors. Inference reaches persistence only through its own ports.
 
 Delivery is grouped under `bootstrap/`, `public_http/`, `gateway/`,
-`management/`, `observability/`, and `console/`. Storage exposes subsystem
-namespaces rather than a flat persistence API. The role checker validates
-semantic role edges and infrastructure ownership, so package names and
-directory lists are not architectural contracts.
+`management/`, `observability/`, and `console/`. The database crate exposes
+subsystem namespaces rather than a flat persistence API. The role checker
+validates semantic package-role edges, the engine's module ordering, and
+infrastructure ownership.
 
 ## Typed HTTP composition
 
@@ -48,12 +54,13 @@ private bootstrap machinery and is exposed to fixtures only through the
 ## Transport-neutral inference service
 
 Gateway adapters and the authenticated playground call the same cloneable
-`olp_inference::InferenceService`. It pins one runtime generation before
-selection, retains its transports and credential revision for the request,
-releases distributed leases on cancellation, and finalizes exactly one
-terminal request/attempt metadata envelope. Axum extraction, admission,
+`olp_engine::inference::InferenceService`. It pins one runtime generation
+before selection, retains its transports and credential revision for the
+request, releases distributed leases on cancellation, and finalizes exactly
+one terminal request/attempt metadata envelope. Axum extraction, admission,
 protocol rendering, and HTTP problem mapping remain in delivery; provider
-construction and persistence remain in their owning roles.
+construction remains in `olp_engine::providers`, and persistence remains in
+the database crate.
 
 ### Request and attempt lifecycle
 
@@ -84,12 +91,12 @@ operation, handler, admission, route extraction, token estimation, and
 metadata behavior. Routing, visibility, and classification consume this same
 registry; uniqueness checks reject duplicate identities or method/path pairs.
 
-`crates/domain/src/provider_configuration.rs` is the provider policy registry:
-it binds each provider kind to authentication modes, credential rules,
-applicable fields, defaults, stable API metadata, compatible-provider presets,
-and complete-candidate validation. Presets resolve to ordinary connector
-fields and never bypass certification. Management create and update share the
-validator.
+`crates/olp-engine/src/domain/provider_configuration.rs` is the provider policy
+registry: it binds each provider kind to authentication modes, credential
+rules, applicable fields, defaults, stable API metadata, compatible-provider
+presets, and complete-candidate validation. Presets resolve to ordinary
+connector fields and never bypass certification. Management create and update
+share the validator.
 
 Gateway capabilities and model visibility are default-deny. A capability is
 advertised only when the endpoint policy exposes it and the caller's key has

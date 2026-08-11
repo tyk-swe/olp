@@ -45,7 +45,7 @@ pub(crate) use cookies::{
 pub(crate) use error_mapping::{map_configuration, map_persistence};
 pub(crate) use idempotency::{idempotency_http_response, require_idempotency_key};
 pub(crate) use json_payload::json_payload;
-pub(crate) use olp_domain::Permission;
+pub(crate) use olp_engine::domain::Permission;
 pub(crate) use pagination::{DiffQuery, PageQuery, page};
 pub(crate) use permissions::require_permission;
 pub(crate) use preconditions::{if_match, optional_if_match, with_etag};
