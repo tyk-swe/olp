@@ -502,7 +502,7 @@ impl PgStore {
                 && attempt.event.error_class.is_none()
                 && matches!(attempt.event.status_code, Some(200..=299));
             let unpriced = charge_status != AttemptChargeStatus::NotBillable
-                && (successful_without_usage || !pricing_complete);
+                && (!attempt.usage.complete || successful_without_usage || !pricing_complete);
 
             sqlx::query!(
                 "INSERT INTO attempt_usage_facts \

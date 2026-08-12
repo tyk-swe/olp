@@ -7,7 +7,8 @@ use olp_engine::protocols::gemini::{
     GeminiGenerateContentClientStreamEncoder, GeminiGenerateContentStreamDecoder,
     GenerateContentRequest, GenerateContentResponse, StreamError, decode_count_tokens_request,
     decode_generate_content_request, decode_generate_content_response, encode_count_tokens_result,
-    encode_generate_content_request, validate_count_tokens_request,
+    encode_generate_content_request, encode_generate_content_response,
+    validate_count_tokens_request,
 };
 use serde_json::{Value, json};
 
@@ -114,6 +115,82 @@ fn request_translation_round_trips_structured_tools_results_and_extensions() {
 }
 
 #[test]
+fn request_translation_round_trips_signed_text_and_hidden_thoughts() {
+    let wire = json!({
+        "contents": [{"role": "model", "parts": [
+            {"text": "hidden", "thought": true, "thoughtSignature": "hidden-sig"},
+            {"text": "visible", "thoughtSignature": "visible-sig"},
+            {"functionCall": {"name": "lookup", "args": {"q": "x"}}, "thoughtSignature": "call-sig"}
+        ]}]
+    });
+    let dto: GenerateContentRequest = serde_json::from_value(wire.clone()).unwrap();
+    let Operation::Generation(canonical) =
+        decode_generate_content_request("default", dto, false).unwrap()
+    else {
+        unreachable!();
+    };
+    assert!(matches!(
+        canonical.messages[0].content.as_slice(),
+        [olp_engine::domain::ContentPart::Text { text }] if text == "visible"
+    ));
+    let encoded =
+        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    assert_eq!(
+        encoded["contents"][0]["parts"],
+        wire["contents"][0]["parts"]
+    );
+}
+
+#[test]
+fn request_translation_round_trips_a_hidden_thought_only_message() {
+    let wire = json!({
+        "contents": [
+            {"role": "model", "parts": [{
+                "text": "hidden",
+                "thought": true,
+                "thoughtSignature": "hidden-sig"
+            }]},
+            {"role": "user", "parts": [{"text": "continue"}]}
+        ]
+    });
+    let dto: GenerateContentRequest = serde_json::from_value(wire.clone()).unwrap();
+    let Operation::Generation(canonical) =
+        decode_generate_content_request("default", dto, false).unwrap()
+    else {
+        unreachable!();
+    };
+    assert!(canonical.messages[0].content.is_empty());
+    assert!(canonical.messages[0].tool_calls.is_empty());
+    let encoded =
+        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    assert_eq!(encoded["contents"], wire["contents"]);
+}
+
+#[test]
+fn request_translation_round_trips_media_after_a_hidden_thought() {
+    let wire = json!({
+        "contents": [{"role": "model", "parts": [
+            {"text": "hidden", "thought": true, "thoughtSignature": "hidden-sig"},
+            {"fileData": {"mimeType": "image/png", "fileUri": "https://files.example/image"}},
+            {"inlineData": {
+                "mimeType": "image/jpeg",
+                "data": "urn:olp:inline-media:image-handle"
+            }}
+        ]}]
+    });
+    let dto: GenerateContentRequest = serde_json::from_value(wire.clone()).unwrap();
+    let Operation::Generation(canonical) =
+        decode_generate_content_request("default", dto, false).unwrap()
+    else {
+        unreachable!();
+    };
+
+    let encoded =
+        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    assert_eq!(encoded["contents"], wire["contents"]);
+}
+
+#[test]
 fn file_media_round_trips_mime_and_inline_media_is_rejected() {
     let file_request: GenerateContentRequest = serde_json::from_value(json!({
         "contents": [{"role": "user", "parts": [{
@@ -198,6 +275,72 @@ fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
 }
 
 #[test]
+fn signed_visible_text_is_canonical_and_native_parts_round_trip_in_order() {
+    let wire = json!({
+        "responseId": "response-1",
+        "modelVersion": "gemini-upstream",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [
+                {"text": "Running code. "},
+                {"executableCode": {"language": "PYTHON", "code": "print(1)"}},
+                {"codeExecutionResult": {"outcome": "OUTCOME_OK", "output": "1"}},
+                {"text": "The answer is 1.", "thoughtSignature": "sig"}
+            ]},
+            "finishReason": "STOP"
+        }]
+    });
+    let response: GenerateContentResponse = serde_json::from_value(wire.clone()).unwrap();
+    let events = decode_generate_content_response(response).unwrap();
+    let text = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            CanonicalEventKind::TextDelta { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(text, "Running code. The answer is 1.");
+    let encoded = serde_json::to_value(
+        encode_generate_content_response(&events, "public-route", "fallback").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        encoded["candidates"][0]["content"]["parts"],
+        wire["candidates"][0]["content"]["parts"]
+    );
+}
+
+#[test]
+fn signed_visible_text_streams_without_native_extensions_cross_surface() {
+    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let mut events = decoder
+        .push(
+            sse(json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{
+                        "text": "visible answer",
+                        "thoughtSignature": "sig"
+                    }]},
+                    "finishReason": "STOP"
+                }]
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    events.extend(decoder.finish().unwrap());
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        CanonicalEventKind::TextDelta { text, .. } if text == "visible answer"
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::SourceExtension { .. }))
+    );
+}
+
+#[test]
 fn usage_requires_all_counters_and_folds_detailed_components() {
     let response = |usage_metadata: Value| {
         serde_json::from_value(json!({
@@ -254,6 +397,14 @@ fn usage_requires_all_counters_and_folds_detailed_components() {
                 && usage.total_tokens == 20
                 && usage.reasoning_tokens == Some(2)
     )));
+
+    let encoded = encode_generate_content_response(&events, "public-route", "fallback").unwrap();
+    let usage = encoded.usage_metadata.unwrap();
+    assert_eq!(usage.prompt_token_count, Some(10));
+    assert_eq!(usage.candidates_token_count, Some(5));
+    assert_eq!(usage.thoughts_token_count, Some(2));
+    assert_eq!(usage.tool_use_prompt_token_count, Some(3));
+    assert_eq!(usage.total_token_count, Some(20));
 
     assert!(
         decode_generate_content_response(response(json!({
@@ -351,7 +502,7 @@ fn stream_error_is_terminal_and_missing_finish_reason_is_truncation() {
 }
 
 #[test]
-fn stream_merges_partial_usage_once_and_preserves_incomplete_observations() {
+fn stream_uses_latest_usage_snapshot_and_preserves_incomplete_observations() {
     let mut decoder = GeminiGenerateContentStreamDecoder::new();
     let mut events = decoder
         .push(
@@ -360,7 +511,7 @@ fn stream_merges_partial_usage_once_and_preserves_incomplete_observations() {
                     "index": 0,
                     "content": {"role": "model", "parts": [{"text": "ok"}]}
                 }],
-                "usageMetadata": {"promptTokenCount": 5}
+                    "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 1, "totalTokenCount": 6}
             }))
             .as_bytes(),
         )
@@ -370,7 +521,7 @@ fn stream_merges_partial_usage_once_and_preserves_incomplete_observations() {
             .push(
                 sse(json!({
                     "candidates": [{"index": 0, "finishReason": "STOP"}],
-                    "usageMetadata": {"candidatesTokenCount": 2, "totalTokenCount": 7}
+                    "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 2, "totalTokenCount": 7}
                 }))
                 .as_bytes(),
             )
@@ -411,6 +562,83 @@ fn stream_merges_partial_usage_once_and_preserves_incomplete_observations() {
     assert_eq!(observation.input_tokens, Some(9));
     assert_eq!(observation.output_tokens, Some(0));
     assert_eq!(observation.total_tokens, None);
+
+    let mut total_only = GeminiGenerateContentStreamDecoder::new();
+    total_only
+        .push(
+            sse(json!({
+                "candidates": [{"index": 0, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 9, "totalTokenCount": 10}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    let events = total_only.finish().unwrap();
+    let observation = events.last().unwrap().usage_observation.unwrap();
+    assert_eq!(observation.input_tokens, Some(9));
+    assert_eq!(observation.output_tokens, None);
+    assert_eq!(observation.total_tokens, Some(10));
+}
+
+#[test]
+fn stream_uses_usage_snapshot_after_candidate_finish() {
+    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let events = decoder
+        .push(
+            sse(json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "ok"}]},
+                    "finishReason": "STOP"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 5,
+                    "candidatesTokenCount": 1,
+                    "totalTokenCount": 6
+                }
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+    );
+    decoder
+        .push(
+            sse(json!({
+                "usageMetadata": {
+                    "promptTokenCount": 5,
+                    "candidatesTokenCount": 2,
+                    "totalTokenCount": 7
+                }
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+    );
+
+    let events = decoder.finish().unwrap();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            olp_engine::domain::CanonicalEvent {
+                kind: CanonicalEventKind::Usage { usage },
+                ..
+            },
+            olp_engine::domain::CanonicalEvent {
+                kind: CanonicalEventKind::Done,
+                ..
+            }
+        ] if usage.input_tokens == 5
+            && usage.output_tokens == 2
+            && usage.total_tokens == 7
+    ));
 }
 
 #[test]
@@ -434,9 +662,7 @@ fn stream_rejects_prompt_feedback_that_hides_an_unfinished_candidate() {
 }
 
 #[test]
-fn stream_rejects_duplicate_complete_usage_frames() {
-    let complete_usage =
-        json!({"promptTokenCount": 3, "candidatesTokenCount": 1, "totalTokenCount": 4});
+fn stream_allows_repeated_and_reset_usage_snapshots() {
     let mut decoder = GeminiGenerateContentStreamDecoder::new();
     decoder
         .push(
@@ -445,51 +671,45 @@ fn stream_rejects_duplicate_complete_usage_frames() {
                     "index": 0,
                     "content": {"role": "model", "parts": [{"text": "ok"}]}
                 }],
-                "usageMetadata": complete_usage
+                "usageMetadata": {"promptTokenCount": 13, "candidatesTokenCount": 67, "thoughtsTokenCount": 212, "totalTokenCount": 292}
             }))
             .as_bytes(),
         )
         .unwrap();
-    assert!(matches!(
-        decoder.push(
-            sse(json!({
-                "candidates": [{"index": 0, "finishReason": "STOP"}],
-                "usageMetadata": complete_usage
-            }))
-            .as_bytes()
-        ),
-        Err(StreamError::DuplicateCompleteUsage)
-    ));
-
-    let mut fragmented = GeminiGenerateContentStreamDecoder::new();
-    fragmented
-        .push(sse(json!({"usageMetadata": {"promptTokenCount": 3}})).as_bytes())
-        .unwrap();
-    fragmented
+    decoder
         .push(
             sse(json!({
-                "usageMetadata": {"candidatesTokenCount": 1, "totalTokenCount": 4}
+                "candidates": [{"index": 0}],
+                "usageMetadata": {"promptTokenCount": 13, "totalTokenCount": 13}
             }))
             .as_bytes(),
         )
         .unwrap();
-    assert!(matches!(
-        fragmented.push(
+    decoder
+        .push(
             sse(json!({
+                "candidates": [{"index": 0, "finishReason": "STOP"}],
                 "usageMetadata": {
-                    "promptTokenCount": 3,
-                    "candidatesTokenCount": 1,
-                    "totalTokenCount": 4
+                    "promptTokenCount": 225,
+                    "candidatesTokenCount": 119,
+                    "toolUsePromptTokenCount": 300,
+                    "thoughtsTokenCount": 212,
+                    "totalTokenCount": 856
                 }
             }))
-            .as_bytes()
-        ),
-        Err(StreamError::DuplicateCompleteUsage)
-    ));
+            .as_bytes(),
+        )
+        .unwrap();
+    let events = decoder.finish().unwrap();
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        CanonicalEventKind::Usage { usage }
+            if usage.input_tokens == 525 && usage.output_tokens == 331 && usage.total_tokens == 856
+    )));
 }
 
 #[test]
-fn stream_rejects_conflicting_partial_usage_counters() {
+fn stream_partial_snapshots_replace_omitted_counters() {
     let usage_frame = |field: &str, value: u64| {
         let mut usage = serde_json::Map::new();
         usage.insert(field.to_owned(), Value::from(value));
@@ -507,23 +727,32 @@ fn stream_rejects_conflicting_partial_usage_counters() {
         let mut decoder = GeminiGenerateContentStreamDecoder::new();
         decoder.push(usage_frame(field, 3).as_bytes()).unwrap();
         decoder.push(usage_frame(field, 3).as_bytes()).unwrap();
-        assert!(matches!(
-            decoder.push(usage_frame(field, 4).as_bytes()),
-            Err(StreamError::ConflictingUsageCounter(name)) if name == field
-        ));
+        decoder.push(usage_frame(field, 4).as_bytes()).unwrap();
     }
 }
 
 #[test]
 fn stream_rejects_fragmented_usage_contradictions_and_keeps_error_usage_incomplete() {
     let mut contradictory = GeminiGenerateContentStreamDecoder::new();
-    contradictory
-        .push(sse(json!({"usageMetadata": {"promptTokenCount": 5}})).as_bytes())
-        .unwrap();
     assert!(matches!(
         contradictory.push(
             sse(json!({
-                "usageMetadata": {"candidatesTokenCount": 2, "totalTokenCount": 8}
+                "usageMetadata": {"cachedContentTokenCount": 5, "thoughtsTokenCount": 4, "totalTokenCount": 8}
+            }))
+            .as_bytes()
+        ),
+        Err(StreamError::Response(_))
+    ));
+
+    let mut additive_lower_bound = GeminiGenerateContentStreamDecoder::new();
+    assert!(matches!(
+        additive_lower_bound.push(
+            sse(json!({
+                "usageMetadata": {
+                    "cachedContentTokenCount": 5,
+                    "toolUsePromptTokenCount": 4,
+                    "totalTokenCount": 8
+                }
             }))
             .as_bytes()
         ),
@@ -555,6 +784,58 @@ fn stream_rejects_fragmented_usage_contradictions_and_keeps_error_usage_incomple
     assert_eq!(observation.input_tokens, Some(3));
     assert_eq!(observation.output_tokens, Some(1));
     assert_eq!(observation.total_tokens, None);
+}
+
+#[test]
+fn stream_timeout_error_round_trips_as_deadline_exceeded() {
+    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let events = decoder
+        .push(
+            sse(json!({
+                "error": {"code": 504, "message": "deadline", "status": "DEADLINE_EXCEEDED"}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(matches!(
+        &events[0].kind,
+        CanonicalEventKind::Error { error }
+            if error.class == olp_engine::domain::ErrorClass::Timeout && error.retryable
+    ));
+    let mut encoder = GeminiGenerateContentClientStreamEncoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    let output: Value = serde_json::from_str(&frames[0].data).unwrap();
+    assert_eq!(output["error"]["code"], 504);
+    assert_eq!(output["error"]["status"], "DEADLINE_EXCEEDED");
+}
+
+#[test]
+fn prompt_blocked_unary_round_trips_no_candidates_and_partial_usage() {
+    let wire = json!({
+        "promptFeedback": {"blockReason": "PROHIBITED_CONTENT"},
+        "usageMetadata": {"promptTokenCount": 18, "totalTokenCount": 18}
+    });
+    let response: GenerateContentResponse = serde_json::from_value(wire).unwrap();
+    let events = decode_generate_content_response(response).unwrap();
+    let encoded = serde_json::to_value(
+        encode_generate_content_response(&events, "public-route", "fallback").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(encoded["candidates"], json!([]));
+    assert_eq!(
+        encoded["promptFeedback"]["blockReason"],
+        "PROHIBITED_CONTENT"
+    );
+    assert_eq!(encoded["usageMetadata"]["promptTokenCount"], 18);
+    assert_eq!(encoded["usageMetadata"]["totalTokenCount"], 18);
+    assert!(
+        encoded["usageMetadata"]
+            .get("candidatesTokenCount")
+            .is_none()
+    );
 }
 
 #[test]
@@ -756,10 +1037,10 @@ fn native_gemini_stream_losslessly_preserves_safety_and_grounding_metadata() {
     validate_event_sequence(&events).unwrap();
 
     let mut encoder = GeminiGenerateContentClientStreamEncoder::new("public-route", "fallback");
-    let frames = events
-        .into_iter()
-        .flat_map(|event| encoder.push(event).unwrap())
-        .collect::<Vec<_>>();
+    let mut frames = Vec::new();
+    for event in events {
+        frames.extend(encoder.push(event).unwrap());
+    }
     assert_eq!(frames.len(), 1);
     let output: Value = serde_json::from_str(&frames[0].data).unwrap();
     assert_eq!(output["modelVersion"], "public-route");

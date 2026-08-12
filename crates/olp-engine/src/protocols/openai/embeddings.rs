@@ -202,20 +202,28 @@ pub fn decode_embedding_response(
     }
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
-    let (usage, usage_observation) = response.usage.map_or(Ok((None, None)), |usage| {
-        collect_extra("/usage", &usage.extra, &mut extensions);
-        let observed = ObservedUsage {
-            input_tokens: usage.prompt_tokens,
-            output_tokens: Some(0),
-            total_tokens: usage.total_tokens,
-            cached_input_tokens: None,
-            reasoning_tokens: None,
-        };
-        observed
-            .with_exact_total()
-            .map(|usage| (usage, usage.is_none().then(|| observed.observation())))
-            .map_err(|_| EmbeddingCodecError::InvalidUsage)
-    })?;
+    let (usage, usage_observation) =
+        response
+            .usage
+            .map_or(Ok::<_, EmbeddingCodecError>((None, None)), |usage| {
+                let observed = ObservedUsage {
+                    input_tokens: usage.prompt_tokens,
+                    output_tokens: Some(0),
+                    total_tokens: usage.total_tokens,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                };
+                let canonical = observed
+                    .with_exact_total()
+                    .map_err(|_| EmbeddingCodecError::InvalidUsage)?;
+                if canonical.is_some() {
+                    collect_extra("/usage", &usage.extra, &mut extensions);
+                }
+                Ok((
+                    canonical,
+                    canonical.is_none().then(|| observed.observation()),
+                ))
+            })?;
     let mut data = Vec::with_capacity(response.data.len());
     for item in response.data {
         if item.object != "embedding" {

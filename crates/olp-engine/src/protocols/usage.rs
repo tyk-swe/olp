@@ -48,19 +48,40 @@ impl ObservedUsage {
         ] {
             validate_counter(counter)?;
         }
+
+        if self
+            .cached_input_tokens
+            .zip(self.input_tokens)
+            .is_some_and(|(cached, input)| cached > input)
+            || self
+                .reasoning_tokens
+                .zip(self.output_tokens)
+                .is_some_and(|(reasoning, output)| reasoning > output)
+        {
+            return Err(InvalidUsage);
+        }
+        if let Some(total_tokens) = self.total_tokens {
+            let input_lower_bound = self
+                .input_tokens
+                .unwrap_or_default()
+                .max(self.cached_input_tokens.unwrap_or_default());
+            let output_lower_bound = self
+                .output_tokens
+                .unwrap_or_default()
+                .max(self.reasoning_tokens.unwrap_or_default());
+            if input_lower_bound
+                .checked_add(output_lower_bound)
+                .ok_or(InvalidUsage)?
+                > total_tokens
+            {
+                return Err(InvalidUsage);
+            }
+        }
+
         let (Some(input_tokens), Some(output_tokens)) = (self.input_tokens, self.output_tokens)
         else {
             return Ok(None);
         };
-        if self
-            .cached_input_tokens
-            .is_some_and(|cached| cached > input_tokens)
-            || self
-                .reasoning_tokens
-                .is_some_and(|reasoning| reasoning > output_tokens)
-        {
-            return Err(InvalidUsage);
-        }
         let expected_total = input_tokens
             .checked_add(output_tokens)
             .ok_or(InvalidUsage)?;
@@ -107,8 +128,15 @@ mod tests {
                 ..ObservedUsage::default()
             },
             ObservedUsage {
+                input_tokens: Some(1),
+                total_tokens: Some(3),
+                cached_input_tokens: Some(1),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
                 output_tokens: Some(2),
-                total_tokens: Some(2),
+                total_tokens: Some(3),
+                reasoning_tokens: Some(2),
                 ..ObservedUsage::default()
             },
             ObservedUsage {
@@ -132,6 +160,50 @@ mod tests {
         assert_eq!(zero.input_tokens, 0);
         assert_eq!(zero.output_tokens, 0);
         assert_eq!(zero.total_tokens, 0);
+    }
+
+    #[test]
+    fn provably_contradictory_partial_usage_is_rejected() {
+        for observation in [
+            ObservedUsage {
+                input_tokens: Some(5),
+                total_tokens: Some(4),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
+                output_tokens: Some(5),
+                total_tokens: Some(4),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
+                cached_input_tokens: Some(5),
+                total_tokens: Some(4),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
+                reasoning_tokens: Some(5),
+                total_tokens: Some(4),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
+                input_tokens: Some(2),
+                output_tokens: Some(3),
+                total_tokens: Some(4),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
+                input_tokens: Some(2),
+                cached_input_tokens: Some(3),
+                ..ObservedUsage::default()
+            },
+            ObservedUsage {
+                output_tokens: Some(2),
+                reasoning_tokens: Some(3),
+                ..ObservedUsage::default()
+            },
+        ] {
+            assert_eq!(observation.with_exact_total(), Err(InvalidUsage));
+        }
     }
 
     #[test]

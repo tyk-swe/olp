@@ -532,6 +532,43 @@ async fn executes_unary_generation_with_header_auth_and_model_path() {
 }
 
 #[tokio::test]
+async fn unary_response_extensions_follow_the_client_surface() {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "candidates": [{
+            "content": {"role": "model", "parts": [{
+                "text": "signed answer",
+                "thoughtSignature": "signature"
+            }]},
+            "finishReason": "STOP",
+            "index": 0,
+            "safetyRatings": [{
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "probability": "NEGLIGIBLE"
+            }]
+        }]
+    }))
+    .unwrap();
+
+    for (surface, expect_extensions) in [(Surface::Gemini, true), (Surface::OpenAi, false)] {
+        let (base, _) =
+            spawn_mock(MockResponse::immediate(response("application/json", &body))).await;
+        let mut request = generation(false);
+        request.metadata.surface = surface;
+        let events = collect(&connector(&base), request).await;
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::TextDelta { text, .. } if text == "signed answer"
+        )));
+        assert_eq!(
+            events
+                .iter()
+                .any(|event| matches!(event.kind, CanonicalEventKind::SourceExtension { .. })),
+            expect_extensions
+        );
+    }
+}
+
+#[tokio::test]
 async fn decodes_fragmented_sse_and_count_tokens() {
     let sse = concat!(
         "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"snow ☃\"}]},\"index\":0}]}\n\n",

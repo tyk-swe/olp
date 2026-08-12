@@ -253,19 +253,36 @@ pub(super) async fn exercise(
         "the resolved pricing revision must be immutable"
     );
     assert_eq!(facts[2].4, "billing_uncertain");
-    assert!(!facts[2].7, "incomplete usage is not inherently unpriced");
+    assert!(facts[2].7, "incomplete usage must remain unpriced");
     assert_eq!(facts[3].6.as_deref(), Some("0.000040000000"));
     assert_eq!(facts[4].4, "billable");
     assert_eq!(facts[4].6, None);
-    assert!(
-        !facts[4].7,
-        "partial priced usage stays priced but incomplete"
-    );
+    assert!(facts[4].7, "partial usage must remain unpriced");
+    assert!(facts[4].8, "partial usage still resolves available pricing");
     assert_eq!(facts[5].3, "unpriced-attempt-model");
     assert!(facts[5].7);
     assert!(!facts[5].8);
     assert_eq!(facts[6].0, cancelled_request_id);
     assert_eq!(facts[6].4, "billing_uncertain");
+
+    let partial_fact: (String, bool, Option<String>, bool, bool) = sqlx::query_as(
+        "SELECT charge_status::text, usage_complete, estimated_cost::text, unpriced,
+                request_unpriced_counted
+           FROM attempt_usage_facts
+          WHERE request_id = $1",
+    )
+    .bind(partial_request_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(partial_fact.0, "billable");
+    assert!(!partial_fact.1);
+    assert_eq!(partial_fact.2, None);
+    assert!(partial_fact.3);
+    assert!(
+        partial_fact.4,
+        "partial usage must mark its request unpriced"
+    );
 
     let compatibility_rows: i64 =
         sqlx::query_scalar("SELECT count(*) FROM usage_facts WHERE request_id = $1")
@@ -292,7 +309,7 @@ pub(super) async fn exercise(
     assert_eq!(summary.input_tokens, "38");
     assert_eq!(summary.output_tokens, "16");
     assert_eq!(summary.estimated_cost.as_deref(), Some("0.000060000000"));
-    assert_eq!(summary.unpriced_count, 1);
+    assert_eq!(summary.unpriced_count, 4);
     assert_eq!(summary.incomplete_count, 3);
 
     let providers = store
@@ -310,6 +327,7 @@ pub(super) async fn exercise(
         .unwrap();
     assert_eq!(first_provider.request_count, 3);
     assert_eq!(first_provider.input_tokens, "0");
+    assert_eq!(first_provider.unpriced_count, 2);
     assert_eq!(first_provider.incomplete_count, 2);
     assert_eq!(second_provider.request_count, 4);
     assert_eq!(second_provider.input_tokens, "38");
@@ -317,7 +335,7 @@ pub(super) async fn exercise(
         second_provider.estimated_cost.as_deref(),
         Some("0.000060000000")
     );
-    assert_eq!(second_provider.unpriced_count, 1);
+    assert_eq!(second_provider.unpriced_count, 2);
     assert_eq!(second_provider.incomplete_count, 1);
 
     let detail = store.request_detail(uncertain_request_id).await.unwrap();

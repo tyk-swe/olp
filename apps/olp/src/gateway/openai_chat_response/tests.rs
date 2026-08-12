@@ -5,7 +5,10 @@ use olp_engine::domain::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
     SourceExtensions, Surface, Usage, validate_event_sequence,
 };
-use olp_engine::protocols::openai::{OpenAiChatStreamDecoder, OpenAiStreamError};
+use olp_engine::protocols::openai::{
+    ChatCompletionResponse, OpenAiChatStreamDecoder, OpenAiStreamError,
+    decode_chat_completion_response,
+};
 use serde_json::{Value, json};
 
 use super::{
@@ -834,6 +837,65 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
             },
             "system_fingerprint": "fp_fixture"
         })
+    );
+}
+
+#[test]
+fn unary_aggregation_omits_incomplete_usage_extensions() {
+    let response: ChatCompletionResponse = serde_json::from_value(json!({
+        "id": "chatcmpl-partial",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "upstream-model",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "hello"},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 4,
+            "prompt_tokens_details": {"cached_tokens": 2, "vendor_detail": true},
+            "vendor_usage": true
+        },
+        "system_fingerprint": "fp-kept"
+    }))
+    .unwrap();
+    let events = decode_chat_completion_response(response).unwrap();
+    assert!(events.last().unwrap().usage_observation.is_some());
+    let encoded =
+        aggregate_chat_completion_response(uuid::Uuid::nil(), "route-model", &events).unwrap();
+    assert!(encoded["usage"].is_null());
+    assert_eq!(encoded["system_fingerprint"], "fp-kept");
+}
+
+#[test]
+fn stream_round_trip_omits_incomplete_usage_extensions() {
+    let wire = concat!(
+        "data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"prompt_tokens_details\":{\"cached_tokens\":2,\"vendor_detail\":true},\"vendor_usage\":true},\"system_fingerprint\":\"fp-kept\"}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut events = decoder.push(wire.as_bytes()).unwrap();
+    events.extend(decoder.finish().unwrap());
+    assert!(events.last().unwrap().usage_observation.is_some());
+
+    let mut encoder = OpenAiChatCompletionStreamEncoder::new(uuid::Uuid::nil(), "route-model");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.encode(event).unwrap())
+        .collect::<Vec<_>>();
+    let values = frames
+        .iter()
+        .filter(|frame| frame.as_ref() != b"data: [DONE]\n\n")
+        .map(sse_json_value)
+        .collect::<Vec<_>>();
+    assert!(values.iter().all(|value| value.get("usage").is_none()));
+    assert!(
+        values
+            .iter()
+            .any(|value| value["system_fingerprint"] == "fp-kept")
     );
 }
 

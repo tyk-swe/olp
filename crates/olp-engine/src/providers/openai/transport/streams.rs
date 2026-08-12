@@ -276,7 +276,10 @@ struct CompatibleChatBodyDecoder {
 enum CompatibleChatBodyMode {
     Undecided(Vec<u8>),
     EventStream(Box<OpenAiChatStreamDecoder>),
-    UnaryJson(Vec<u8>),
+    UnaryJson {
+        body: Vec<u8>,
+        received_bytes: usize,
+    },
 }
 
 impl CompatibleChatBodyDecoder {
@@ -293,27 +296,49 @@ impl CompatibleChatBodyDecoder {
             CompatibleChatBodyMode::EventStream(decoder) => {
                 decoder.push(bytes).map_err(|error| error.to_string())
             }
-            CompatibleChatBodyMode::UnaryJson(body) => {
-                extend_bounded(body, bytes, self.maximum_response_bytes)?;
+            CompatibleChatBodyMode::UnaryJson {
+                body,
+                received_bytes,
+            } => {
+                if bytes.len() > self.maximum_response_bytes.saturating_sub(*received_bytes) {
+                    return Err(
+                        "OpenAI compatible response exceeded the configured maximum".to_owned()
+                    );
+                }
+                *received_bytes += bytes.len();
+                body.extend_from_slice(bytes);
                 Ok(Vec::new())
             }
             CompatibleChatBodyMode::Undecided(prefix) => {
-                extend_bounded(prefix, bytes, self.maximum_response_bytes)?;
-                let Some(first) = prefix
+                let maximum_prefix_bytes =
+                    self.maximum_response_bytes.max(self.maximum_event_bytes);
+                let first_index = bytes
                     .iter()
-                    .copied()
-                    .find(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
-                else {
+                    .position(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
+                let Some(first_index) = first_index else {
+                    extend_sniff_prefix(prefix, bytes, maximum_prefix_bytes)?;
                     return Ok(Vec::new());
                 };
-                let prefix = std::mem::take(prefix);
-                if first == b'{' {
-                    self.mode = CompatibleChatBodyMode::UnaryJson(prefix);
+                extend_sniff_prefix(prefix, &bytes[..first_index], maximum_prefix_bytes)?;
+
+                if bytes[first_index] == b'{' {
+                    let received_bytes = prefix.len().saturating_add(bytes.len() - first_index);
+                    if received_bytes > self.maximum_response_bytes {
+                        return Err(
+                            "OpenAI compatible response exceeded the configured maximum".to_owned()
+                        );
+                    }
+                    self.mode = CompatibleChatBodyMode::UnaryJson {
+                        body: bytes[first_index..].to_vec(),
+                        received_bytes,
+                    };
                     Ok(Vec::new())
                 } else {
+                    prefix.extend_from_slice(&bytes[first_index..]);
+                    let body = std::mem::take(prefix);
                     let mut decoder =
                         OpenAiChatStreamDecoder::with_compatible_profile(self.maximum_event_bytes);
-                    let events = decoder.push(&prefix).map_err(|error| error.to_string())?;
+                    let events = decoder.push(&body).map_err(|error| error.to_string())?;
                     self.mode = CompatibleChatBodyMode::EventStream(Box::new(decoder));
                     Ok(events)
                 }
@@ -329,7 +354,7 @@ impl CompatibleChatBodyDecoder {
             CompatibleChatBodyMode::EventStream(mut decoder) => {
                 decoder.finish().map_err(|error| error.to_string())
             }
-            CompatibleChatBodyMode::UnaryJson(body) => {
+            CompatibleChatBodyMode::UnaryJson { body, .. } => {
                 crate::protocols::openai::decode_compatible_chat_completion_response(&body)
                     .map_err(|error| error.to_string())
             }
@@ -343,11 +368,11 @@ impl CompatibleChatBodyDecoder {
     }
 }
 
-fn extend_bounded(body: &mut Vec<u8>, bytes: &[u8], maximum: usize) -> Result<(), String> {
-    if bytes.len() > maximum.saturating_sub(body.len()) {
+fn extend_sniff_prefix(prefix: &mut Vec<u8>, bytes: &[u8], maximum: usize) -> Result<(), String> {
+    if bytes.len() > maximum.saturating_sub(prefix.len()) {
         return Err("OpenAI compatible response exceeded the configured maximum".to_owned());
     }
-    body.extend_from_slice(bytes);
+    prefix.extend_from_slice(bytes);
     Ok(())
 }
 
@@ -465,10 +490,23 @@ impl RawUsage {
             return Err(());
         }
 
-        if let (Some(input), Some(output), Some(total)) = (self.input, self.output, self.total)
-            && input.checked_add(output) != Some(total)
-        {
-            return Err(());
+        if let Some(total) = self.total {
+            let input_lower_bound = self
+                .input
+                .unwrap_or_default()
+                .max(self.cached.unwrap_or_default());
+            let output_lower_bound = self.output.unwrap_or_default();
+            if input_lower_bound
+                .checked_add(output_lower_bound)
+                .is_none_or(|lower_bound| lower_bound > total)
+            {
+                return Err(());
+            }
+            if let (Some(input), Some(output)) = (self.input, self.output)
+                && input.checked_add(output) != Some(total)
+            {
+                return Err(());
+            }
         }
         Ok(())
     }
@@ -609,4 +647,45 @@ fn is_raw_media_terminal(kind: &str) -> bool {
             | "transcription.done"
             | "transcription.completed"
     ) || kind.ends_with(".failed")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatible_chat_sniffing_is_independent_of_transport_chunk_size() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .as_bytes();
+
+        fn decode(chunks: &[&[u8]]) -> Vec<CanonicalEvent> {
+            let mut decoder = CompatibleChatBodyDecoder::new(1, 512);
+            let mut events = Vec::new();
+            for chunk in chunks {
+                events.extend(decoder.push(chunk).unwrap());
+            }
+            events.extend(decoder.finish().unwrap());
+            events
+        }
+
+        let whole = decode(&[body]);
+        let fragmented = decode(&[&body[..1], &body[1..]]);
+        assert_eq!(whole, fragmented);
+        assert!(matches!(
+            whole.last().map(|event| &event.kind),
+            Some(CanonicalEventKind::Done)
+        ));
+    }
+
+    #[test]
+    fn compatible_chat_sniffing_bounds_leading_whitespace() {
+        let mut decoder = CompatibleChatBodyDecoder::new(3, 4);
+        decoder.push(b"  ").unwrap();
+        decoder.push(b"\t\n").unwrap();
+        let error = decoder.push(b" ").unwrap_err();
+        assert!(error.contains("configured maximum"));
+    }
 }

@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, SourceExtensions, Surface,
-    UsageObservation,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,7 +9,9 @@ use thiserror::Error;
 
 use super::{
     GenerateContentResponse, UsageMetadata,
-    translate::{ResponseError, canonical_usage, decode_generate_content_chunk},
+    translate::{
+        ResponseError, canonical_usage, decode_generate_content_chunk, usage_observation_for,
+    },
 };
 use crate::protocols::sse::{
     DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame, raw_sse_frame_event,
@@ -25,8 +26,6 @@ pub struct GeminiGenerateContentStreamDecoder {
     next_tool_indexes: BTreeMap<u32, u32>,
     prompt_blocked: bool,
     usage: Option<UsageMetadata>,
-    complete_usage_frame_seen: bool,
-    usage_emitted: bool,
     done: bool,
     preserve_raw_frames: bool,
 }
@@ -76,8 +75,6 @@ impl GeminiGenerateContentStreamDecoder {
             next_tool_indexes: BTreeMap::new(),
             prompt_blocked: false,
             usage: None,
-            complete_usage_frame_seen: false,
-            usage_emitted: false,
             done: false,
             preserve_raw_frames,
         }
@@ -100,8 +97,9 @@ impl GeminiGenerateContentStreamDecoder {
         if !prompt_only && !candidates_complete {
             return Err(StreamError::UnexpectedEof);
         }
+        let usage_complete = self.canonical_usage()?.is_some();
         self.emit_terminal_usage_if_ready(&mut events)?;
-        self.emit_done(&mut events, false)?;
+        self.emit_done(&mut events, !usage_complete, false)?;
         self.done = true;
         Ok(events)
     }
@@ -163,7 +161,7 @@ impl GeminiGenerateContentStreamDecoder {
                     return Err(StreamError::PromptFeedbackAfterCandidateStart);
                 }
                 self.prompt_blocked |= prompt_blocked;
-                let canonical = decode_generate_content_chunk(response)?;
+                let canonical = decode_generate_content_chunk(response, self.preserve_raw_frames)?;
                 for event in canonical {
                     match event.kind {
                         CanonicalEventKind::ResponseStart { .. } if self.response_started => {}
@@ -210,7 +208,6 @@ impl GeminiGenerateContentStreamDecoder {
                         kind => self.emit(&mut events, kind),
                     }
                 }
-                self.emit_terminal_usage_if_ready(&mut events)?;
             }
             if let Some(raw_frame) = raw_frame {
                 let semantic_events = events.len().saturating_sub(event_start);
@@ -242,6 +239,8 @@ impl GeminiGenerateContentStreamDecoder {
         let code = envelope.error.code;
         let (class, retryable) = if code == Some(429) || status == "RESOURCE_EXHAUSTED" {
             (ErrorClass::RateLimit, true)
+        } else if matches!(code, Some(408 | 504)) || status == "DEADLINE_EXCEEDED" {
+            (ErrorClass::Timeout, true)
         } else if code.is_some_and(|code| code >= 500) || status == "UNAVAILABLE" {
             (ErrorClass::Upstream, true)
         } else if code == Some(401) || status == "UNAUTHENTICATED" {
@@ -264,51 +263,14 @@ impl GeminiGenerateContentStreamDecoder {
                 },
             },
         );
-        self.emit_done(events, true)?;
+        self.emit_done(events, true, true)?;
         self.done = true;
         Ok(())
     }
 
     fn observe_usage(&mut self, usage: &UsageMetadata) -> Result<(), StreamError> {
-        let frame_is_complete = canonical_usage(usage)?.is_some();
-        if frame_is_complete && self.complete_usage_frame_seen {
-            return Err(StreamError::DuplicateCompleteUsage);
-        }
-        let mut merged = self.usage.take().unwrap_or_default();
-        merged.prompt_token_count = merge_usage_counter(
-            "promptTokenCount",
-            merged.prompt_token_count,
-            usage.prompt_token_count,
-        )?;
-        merged.candidates_token_count = merge_usage_counter(
-            "candidatesTokenCount",
-            merged.candidates_token_count,
-            usage.candidates_token_count,
-        )?;
-        merged.total_token_count = merge_usage_counter(
-            "totalTokenCount",
-            merged.total_token_count,
-            usage.total_token_count,
-        )?;
-        merged.cached_content_token_count = merge_usage_counter(
-            "cachedContentTokenCount",
-            merged.cached_content_token_count,
-            usage.cached_content_token_count,
-        )?;
-        merged.thoughts_token_count = merge_usage_counter(
-            "thoughtsTokenCount",
-            merged.thoughts_token_count,
-            usage.thoughts_token_count,
-        )?;
-        merged.tool_use_prompt_token_count = merge_usage_counter(
-            "toolUsePromptTokenCount",
-            merged.tool_use_prompt_token_count,
-            usage.tool_use_prompt_token_count,
-        )?;
-        usage_observation(&merged, false)?;
-        let merged_is_complete = canonical_usage(&merged)?.is_some();
-        self.complete_usage_frame_seen |= frame_is_complete || merged_is_complete;
-        self.usage = Some(merged);
+        canonical_usage(usage)?;
+        self.usage = Some(usage.clone());
         Ok(())
     }
 
@@ -325,9 +287,6 @@ impl GeminiGenerateContentStreamDecoder {
         &mut self,
         events: &mut Vec<CanonicalEvent>,
     ) -> Result<(), StreamError> {
-        if self.usage_emitted {
-            return Ok(());
-        }
         let candidates_complete = !self.started_candidates.is_empty()
             && self.started_candidates == self.finished_candidates;
         let prompt_only = self.prompt_blocked && self.started_candidates.is_empty();
@@ -335,7 +294,6 @@ impl GeminiGenerateContentStreamDecoder {
             && let Some(usage) = self.canonical_usage()?
         {
             self.emit(events, CanonicalEventKind::Usage { usage });
-            self.usage_emitted = true;
         }
         Ok(())
     }
@@ -343,13 +301,16 @@ impl GeminiGenerateContentStreamDecoder {
     fn emit_done(
         &mut self,
         events: &mut Vec<CanonicalEvent>,
+        include_usage_observation: bool,
         force_incomplete: bool,
     ) -> Result<(), StreamError> {
         let mut event = CanonicalEvent::new(self.sequence, CanonicalEventKind::Done);
-        if !self.usage_emitted
-            && let Some(usage) = &self.usage
-        {
-            event = event.with_usage_observation(usage_observation(usage, force_incomplete)?);
+        if include_usage_observation && let Some(usage) = &self.usage {
+            let mut observation = usage_observation_for(usage)?;
+            if force_incomplete {
+                observation.total_tokens = None;
+            }
+            event = event.with_usage_observation(observation);
         }
         events.push(event);
         self.sequence = self.sequence.saturating_add(1);
@@ -377,76 +338,6 @@ struct WireError {
     status: Option<String>,
 }
 
-fn merge_usage_counter(
-    name: &'static str,
-    current: Option<u64>,
-    newer: Option<u64>,
-) -> Result<Option<u64>, StreamError> {
-    match (current, newer) {
-        (Some(current), Some(newer)) if current != newer => {
-            Err(StreamError::ConflictingUsageCounter(name))
-        }
-        (current, newer) => Ok(newer.or(current)),
-    }
-}
-
-fn usage_observation(
-    usage: &UsageMetadata,
-    force_incomplete: bool,
-) -> Result<UsageObservation, StreamError> {
-    for counter in [
-        usage.prompt_token_count,
-        usage.candidates_token_count,
-        usage.total_token_count,
-        usage.cached_content_token_count,
-        usage.thoughts_token_count,
-        usage.tool_use_prompt_token_count,
-    ] {
-        crate::protocols::usage::validate_counter(counter)
-            .map_err(|_| ResponseError::InvalidUsage)?;
-    }
-    let input_tokens = usage
-        .prompt_token_count
-        .map(|prompt| {
-            prompt
-                .checked_add(usage.tool_use_prompt_token_count.unwrap_or(0))
-                .ok_or(ResponseError::InvalidUsage)
-        })
-        .transpose()?;
-    let output_tokens = usage
-        .candidates_token_count
-        .map(|candidates| {
-            candidates
-                .checked_add(usage.thoughts_token_count.unwrap_or(0))
-                .ok_or(ResponseError::InvalidUsage)
-        })
-        .transpose()?;
-    for counter in [input_tokens, output_tokens] {
-        crate::protocols::usage::validate_counter(counter)
-            .map_err(|_| ResponseError::InvalidUsage)?;
-    }
-    if usage
-        .cached_content_token_count
-        .zip(input_tokens)
-        .is_some_and(|(cached, input)| cached > input)
-        || usage
-            .thoughts_token_count
-            .zip(output_tokens)
-            .is_some_and(|(thoughts, output)| thoughts > output)
-    {
-        return Err(ResponseError::InvalidUsage.into());
-    }
-    Ok(UsageObservation {
-        input_tokens,
-        output_tokens,
-        total_tokens: (!force_incomplete)
-            .then_some(usage.total_token_count)
-            .flatten(),
-        cached_input_tokens: usage.cached_content_token_count,
-        reasoning_tokens: usage.thoughts_token_count,
-    })
-}
-
 #[derive(Debug, Error)]
 pub enum StreamError {
     #[error(transparent)]
@@ -467,8 +358,4 @@ pub enum StreamError {
     DuplicateCandidateFinish(u32),
     #[error("Gemini promptFeedback cannot terminate candidates that already started")]
     PromptFeedbackAfterCandidateStart,
-    #[error("Gemini stream emitted complete usage metadata more than once")]
-    DuplicateCompleteUsage,
-    #[error("Gemini stream changed the observed {0} usage counter")]
-    ConflictingUsageCounter(&'static str),
 }

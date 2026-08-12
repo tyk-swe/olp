@@ -411,18 +411,23 @@ impl UsageCapture {
         };
         let input_tokens = usage
             .get("input_tokens")
-            .or_else(|| usage.get("prompt_tokens"))
-            .and_then(Value::as_u64);
+            .and_then(Value::as_u64)
+            .or_else(|| usage.get("prompt_tokens").and_then(Value::as_u64));
         let output_tokens = usage
             .get("output_tokens")
-            .or_else(|| usage.get("completion_tokens"))
-            .and_then(Value::as_u64);
+            .and_then(Value::as_u64)
+            .or_else(|| usage.get("completion_tokens").and_then(Value::as_u64));
         let total_tokens = usage.get("total_tokens").and_then(Value::as_u64);
         let cached_input_tokens = usage
             .get("input_tokens_details")
-            .or_else(|| usage.get("prompt_tokens_details"))
             .and_then(|details| details.get("cached_tokens"))
-            .and_then(Value::as_u64);
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                usage
+                    .get("prompt_tokens_details")
+                    .and_then(|details| details.get("cached_tokens"))
+                    .and_then(Value::as_u64)
+            });
         if input_tokens.is_none()
             && output_tokens.is_none()
             && total_tokens.is_none()
@@ -758,6 +763,26 @@ mod tests {
         assert!(inconsistent.observed);
         assert!(!inconsistent.complete);
         assert_eq!(inconsistent.actual_tokens(), None);
+
+        let mut aliased = UsageCapture::default();
+        aliased.observe_openai_media_event(&raw_event(
+            0,
+            serde_json::json!({
+                "input_tokens": null,
+                "prompt_tokens": 8,
+                "output_tokens": null,
+                "completion_tokens": 3,
+                "total_tokens": 11,
+                "input_tokens_details": null,
+                "prompt_tokens_details": { "cached_tokens": 2 }
+            }),
+        ));
+        assert!(aliased.observed);
+        assert!(aliased.complete);
+        assert_eq!(aliased.input_tokens, Some(8));
+        assert_eq!(aliased.output_tokens, Some(3));
+        assert_eq!(aliased.cached_input_tokens, Some(2));
+        assert_eq!(aliased.actual_tokens(), Some(11));
     }
 
     #[test]

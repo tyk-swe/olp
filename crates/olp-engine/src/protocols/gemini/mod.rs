@@ -20,6 +20,7 @@ pub use dto::{
     InlineDataPart, Part, TextPart, Tool, ToolConfig, UsageMetadata,
 };
 pub use stream::{GeminiGenerateContentStreamDecoder, StreamError};
+pub(crate) use translate::decode_generate_content_response_for_surface;
 pub use translate::{
     CountTokensError, DecodeError, EncodeError, ResponseError, decode_generate_content_request,
     decode_generate_content_response, encode_generate_content_request,

@@ -11,7 +11,10 @@ use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecoder, SseFrame};
 use super::super::extensions::escape_json_pointer;
 use super::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::errors::ResponsesCodecError;
-use super::response::{ResponseUsage, decode_response_usage, incomplete_finish_reason};
+use super::response::{
+    ResponseUsage, collect_response_usage_extensions, decode_response_usage,
+    incomplete_finish_reason,
+};
 
 pub struct OpenAiResponsesStreamDecoder {
     sse: SseDecoder,
@@ -19,6 +22,7 @@ pub struct OpenAiResponsesStreamDecoder {
     response_started: bool,
     started_outputs: BTreeSet<u32>,
     finished_outputs: BTreeSet<u32>,
+    incomplete_outputs: BTreeSet<u32>,
     output_kinds: BTreeMap<u32, StreamOutputKind>,
     done: bool,
 }
@@ -56,6 +60,7 @@ impl OpenAiResponsesStreamDecoder {
             response_started: false,
             started_outputs: BTreeSet::new(),
             finished_outputs: BTreeSet::new(),
+            incomplete_outputs: BTreeSet::new(),
             output_kinds: BTreeMap::new(),
             done: false,
         }
@@ -234,7 +239,8 @@ impl OpenAiResponsesStreamDecoder {
                 let item = value
                     .get("item")
                     .ok_or_else(|| ResponsesCodecError::InvalidResponse("stream item".into()))?;
-                if item.get("status").and_then(Value::as_str) != Some("completed") {
+                let status = item.get("status").and_then(Value::as_str);
+                if !matches!(status, Some("completed" | "incomplete")) {
                     return Err(ResponsesCodecError::InvalidStreamState);
                 }
                 let item_kind = match item.get("type").and_then(Value::as_str) {
@@ -247,60 +253,64 @@ impl OpenAiResponsesStreamDecoder {
                         ));
                     }
                 };
-                if !self.finished_outputs.insert(output_index) {
+                if self.finished_outputs.contains(&output_index)
+                    || self.output_kinds.get(&output_index) != Some(&item_kind)
+                {
                     return Err(ResponsesCodecError::InvalidStreamState);
                 }
-                if self.output_kinds.get(&output_index) != Some(&item_kind) {
-                    return Err(ResponsesCodecError::InvalidStreamState);
-                }
-                let reason = match item_kind {
-                    StreamOutputKind::FunctionCall => FinishReason::ToolCalls,
-                    StreamOutputKind::Message => FinishReason::Stop,
-                };
-                self.emit(
-                    events,
-                    CanonicalEventKind::Finish {
-                        output_index,
-                        reason,
-                    },
-                );
-            }
-            "response.completed" => {
-                let response = value.get("response").unwrap_or(value);
-                if response.get("status").and_then(Value::as_str) != Some("completed") {
-                    return Err(ResponsesCodecError::InvalidStreamState);
-                }
-                self.require_success_terminal_state()?;
-                validate_completed_output(response, &self.output_kinds)?;
-                let raw_output = raw_response_output_extensions(response)?;
-                if !raw_output.is_empty() {
+                self.finished_outputs.insert(output_index);
+                if status == Some("incomplete") {
+                    self.incomplete_outputs.insert(output_index);
+                } else {
+                    let reason = match item_kind {
+                        StreamOutputKind::FunctionCall => FinishReason::ToolCalls,
+                        StreamOutputKind::Message => FinishReason::Stop,
+                    };
                     self.emit(
                         events,
-                        CanonicalEventKind::SourceExtension {
-                            extensions: SourceExtensions::new(Surface::OpenAi, raw_output),
+                        CanonicalEventKind::Finish {
+                            output_index,
+                            reason,
                         },
                     );
                 }
-                let observation = self.emit_terminal_usage(response, events)?;
+            }
+            "response.completed" => {
+                let response = value.get("response").unwrap_or(value);
+                if response.get("status").and_then(Value::as_str) != Some("completed")
+                    || present(response, "error")
+                    || present(response, "incomplete_details")
+                {
+                    return Err(ResponsesCodecError::InvalidStreamState);
+                }
+                self.require_completed_terminal_state(response)?;
+                validate_terminal_output(response, &self.output_kinds, &self.incomplete_outputs)?;
+                let mut extensions = terminal_response_extensions(response)?;
+                extensions.extend(raw_response_output_extensions(response)?);
+                let observation = self.emit_terminal_usage(response, events, &mut extensions)?;
+                if !extensions.is_empty() {
+                    self.emit(
+                        events,
+                        CanonicalEventKind::SourceExtension {
+                            extensions: SourceExtensions::new(Surface::OpenAi, extensions),
+                        },
+                    );
+                }
                 self.emit_done(events, observation);
                 self.done = true;
             }
             "response.incomplete" => {
                 let response = value.get("response").unwrap_or(value);
                 if response.get("status").and_then(Value::as_str) != Some("incomplete")
-                    || !self.response_started
-                    || self.started_outputs.is_empty()
+                    || present(response, "error")
                 {
                     return Err(ResponsesCodecError::InvalidStreamState);
                 }
+                self.require_terminal_state()?;
+                validate_terminal_output(response, &self.output_kinds, &self.incomplete_outputs)?;
                 let reason = incomplete_finish_reason(response.get("incomplete_details"))?;
-                let unfinished = self
-                    .started_outputs
-                    .difference(&self.finished_outputs)
-                    .copied()
-                    .collect::<Vec<_>>();
-                for output_index in unfinished {
-                    self.finished_outputs.insert(output_index);
+                let incomplete = self.incomplete_outputs.iter().copied().collect::<Vec<_>>();
+                for output_index in incomplete {
                     self.emit(
                         events,
                         CanonicalEventKind::Finish {
@@ -309,19 +319,32 @@ impl OpenAiResponsesStreamDecoder {
                         },
                     );
                 }
-                let observation = self.emit_terminal_usage(response, events)?;
+                let mut extensions = terminal_response_extensions(response)?;
+                extensions.extend(raw_response_output_extensions(response)?);
+                let observation = self.emit_terminal_usage(response, events, &mut extensions)?;
+                if !extensions.is_empty() {
+                    self.emit(
+                        events,
+                        CanonicalEventKind::SourceExtension {
+                            extensions: SourceExtensions::new(Surface::OpenAi, extensions),
+                        },
+                    );
+                }
                 self.emit_done(events, observation);
                 self.done = true;
             }
             "response.failed" | "response.cancelled" | "error" => {
                 let response = value.get("response").unwrap_or(value);
                 if kind != "error"
-                    && response.get("status").and_then(Value::as_str)
+                    && (response.get("status").and_then(Value::as_str)
                         != Some(if kind == "response.failed" {
                             "failed"
                         } else {
                             "cancelled"
                         })
+                        || present(response, "incomplete_details")
+                        || (kind == "response.failed" && !present(response, "error"))
+                        || (kind == "response.cancelled" && present(response, "error")))
                 {
                     return Err(ResponsesCodecError::InvalidStreamState);
                 }
@@ -335,8 +358,22 @@ impl OpenAiResponsesStreamDecoder {
                     provider_code.as_deref(),
                     error.get("type").and_then(Value::as_str),
                 );
-                self.emit(
-                    events,
+                let mut extensions = if kind == "error" {
+                    BTreeMap::new()
+                } else {
+                    terminal_response_extensions(response)?
+                };
+                let observation = self.emit_terminal_usage(response, events, &mut extensions)?;
+                if !extensions.is_empty() {
+                    self.emit(
+                        events,
+                        CanonicalEventKind::SourceExtension {
+                            extensions: SourceExtensions::new(Surface::OpenAi, extensions),
+                        },
+                    );
+                }
+                let mut event = CanonicalEvent::new(
+                    self.sequence,
                     CanonicalEventKind::Error {
                         error: CanonicalError {
                             class: if retryable {
@@ -354,8 +391,12 @@ impl OpenAiResponsesStreamDecoder {
                         },
                     },
                 );
-                let observation = self.emit_terminal_usage(response, events)?;
-                self.emit_done(events, observation);
+                if let Some(observation) = observation {
+                    event = event.with_usage_observation(observation);
+                }
+                events.push(event);
+                self.sequence = self.sequence.saturating_add(1);
+                self.emit_done(events, None);
                 self.done = true;
             }
             // Lifecycle events that contain no new semantic payload.
@@ -429,10 +470,23 @@ impl OpenAiResponsesStreamDecoder {
         Ok(())
     }
 
-    fn require_success_terminal_state(&self) -> Result<(), ResponsesCodecError> {
-        if !self.response_started
-            || self.started_outputs.is_empty()
-            || self.started_outputs != self.finished_outputs
+    fn require_terminal_state(&self) -> Result<(), ResponsesCodecError> {
+        if !self.response_started || self.started_outputs != self.finished_outputs {
+            return Err(ResponsesCodecError::InvalidStreamState);
+        }
+        Ok(())
+    }
+
+    fn require_completed_terminal_state(
+        &self,
+        response: &Value,
+    ) -> Result<(), ResponsesCodecError> {
+        self.require_terminal_state()?;
+        if !self.incomplete_outputs.is_empty()
+            || !matches!(
+                response.get("output").and_then(Value::as_array),
+                Some(output) if !output.is_empty()
+            )
         {
             return Err(ResponsesCodecError::InvalidStreamState);
         }
@@ -448,14 +502,16 @@ impl OpenAiResponsesStreamDecoder {
         &mut self,
         response: &Value,
         events: &mut Vec<CanonicalEvent>,
+        extensions: &mut BTreeMap<String, Value>,
     ) -> Result<Option<UsageObservation>, ResponsesCodecError> {
         let Some(usage) = response.get("usage").filter(|usage| !usage.is_null()) else {
             return Ok(None);
         };
         let usage: ResponseUsage = serde_json::from_value(usage.clone())?;
         let (canonical, observation) = decode_response_usage(&usage)?;
-        if let Some(usage) = canonical {
-            self.emit(events, CanonicalEventKind::Usage { usage });
+        if let Some(canonical) = canonical {
+            collect_response_usage_extensions(&usage, extensions);
+            self.emit(events, CanonicalEventKind::Usage { usage: canonical });
             Ok(None)
         } else {
             Ok(Some(observation))
@@ -476,15 +532,40 @@ impl OpenAiResponsesStreamDecoder {
     }
 }
 
+fn terminal_response_extensions(
+    response: &Value,
+) -> Result<BTreeMap<String, Value>, ResponsesCodecError> {
+    let object = response
+        .as_object()
+        .ok_or_else(|| ResponsesCodecError::InvalidResponse("terminal response".into()))?;
+    let mut extensions = BTreeMap::new();
+    for (key, value) in object {
+        match key.as_str() {
+            "status" => {
+                extensions.insert("/status".into(), value.clone());
+            }
+            "incomplete_details" => {
+                extensions.insert("/incomplete_details".into(), value.clone());
+            }
+            "type" | "id" | "object" | "created_at" | "model" | "output" | "usage" | "error" => {}
+            _ => {
+                extensions.insert(format!("/{}", escape_json_pointer(key)), value.clone());
+            }
+        }
+    }
+    Ok(extensions)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamOutputKind {
     Message,
     FunctionCall,
 }
 
-fn validate_completed_output(
+fn validate_terminal_output(
     response: &Value,
     output_kinds: &BTreeMap<u32, StreamOutputKind>,
+    incomplete_outputs: &BTreeSet<u32>,
 ) -> Result<(), ResponsesCodecError> {
     let Some(output) = response.get("output").and_then(Value::as_array) else {
         return Ok(());
@@ -503,7 +584,12 @@ fn validate_completed_output(
         if let Some(kind) = kind {
             let index =
                 u32::try_from(index).map_err(|_| ResponsesCodecError::TooManyOutputItems)?;
-            if item.get("status").and_then(Value::as_str) != Some("completed")
+            let expected_status = if incomplete_outputs.contains(&index) {
+                "incomplete"
+            } else {
+                "completed"
+            };
+            if item.get("status").and_then(Value::as_str) != Some(expected_status)
                 || output_kinds.get(&index) != Some(&kind)
             {
                 return Err(ResponsesCodecError::InvalidStreamState);
@@ -549,6 +635,10 @@ fn stream_string(value: &Value, field: &'static str) -> Result<String, Responses
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| ResponsesCodecError::InvalidResponse(field.into()))
+}
+
+fn present(value: &Value, field: &str) -> bool {
+    value.get(field).is_some_and(|value| !value.is_null())
 }
 
 #[cfg(test)]
@@ -600,7 +690,7 @@ mod tests {
             "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n",
             "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"opaque\"}}\n\n",
             "data: {\"type\":\"future/event~name\",\"vendor\":{\"retained\":true}}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"status\":\"completed\"},{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":3},\"output_tokens_details\":{\"reasoning_tokens\":1}}}}\n\n"
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"status\":\"completed\"},{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":3,\"vendor_cached\":true},\"output_tokens_details\":{\"vendor_reasoning\":true},\"vendor_usage\":true},\"vendor_terminal\":true}}\n\n"
         );
         let mut decoder = OpenAiResponsesStreamDecoder::new();
         let events = decoder.push(wire.as_bytes()).unwrap();
@@ -642,7 +732,7 @@ mod tests {
             &event.kind,
             CanonicalEventKind::Usage { usage }
                 if usage.cached_input_tokens == Some(3)
-                    && usage.reasoning_tokens == Some(1)
+                    && usage.reasoning_tokens.is_none()
         )));
         assert!(events.iter().any(|event| matches!(
             &event.kind,
@@ -656,7 +746,145 @@ mod tests {
                     "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/1"
                 ))
         )));
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.get("/vendor_terminal") == Some(&json!(true))
+                    && extensions.values.get("/usage/vendor_usage") == Some(&json!(true))
+                    && extensions
+                        .values
+                        .get("/usage/input_tokens_details/vendor_cached")
+                        == Some(&json!(true))
+                    && extensions
+                        .values
+                        .get("/usage/output_tokens_details")
+                        == Some(&json!({"vendor_reasoning": true}))
+        )));
+        let mut encoder = crate::protocols::openai::client::OpenAiResponsesStreamEncoder::new(
+            "route", "fallback", 0,
+        );
+        let encoded = events
+            .into_iter()
+            .flat_map(|event| encoder.push(event).unwrap())
+            .collect::<Vec<_>>();
+        let terminal: Value = serde_json::from_str(&encoded.last().unwrap().data).unwrap();
+        assert_eq!(terminal["response"]["vendor_terminal"], true);
+        assert_eq!(terminal["response"]["usage"]["vendor_usage"], true);
+        assert_eq!(
+            terminal["response"]["usage"]["output_tokens_details"],
+            json!({"vendor_reasoning": true})
+        );
         assert!(decoder.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_incomplete_stream_round_trips_terminal_state() {
+        let wire = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"type": "message", "role": "assistant", "status": "in_progress"}
+            })),
+            data(json!({
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "delta": "partial"
+            })),
+            data(json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "message", "status": "incomplete"}
+            })),
+            data(json!({
+                "type": "response.incomplete",
+                "response": {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "content_filter", "vendor": true},
+                    "output": [{"type": "message", "status": "incomplete"}],
+                    "vendor_terminal": "kept"
+                }
+            })),
+        ]
+        .concat();
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        let mut encoder = crate::protocols::openai::client::OpenAiResponsesStreamEncoder::new(
+            "route", "fallback", 0,
+        );
+        let frames = events
+            .into_iter()
+            .flat_map(|event| encoder.push(event).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            frames
+                .iter()
+                .find(|frame| frame.event.as_deref() == Some("response.output_item.done"))
+                .map(
+                    |frame| serde_json::from_str::<Value>(&frame.data).unwrap()["item"]["status"]
+                        .clone()
+                ),
+            Some(json!("incomplete"))
+        );
+        let terminal = frames.last().unwrap();
+        assert_eq!(terminal.event.as_deref(), Some("response.incomplete"));
+        let terminal: Value = serde_json::from_str(&terminal.data).unwrap();
+        assert_eq!(
+            terminal["response"]["incomplete_details"],
+            json!({"reason": "content_filter", "vendor": true})
+        );
+        assert_eq!(terminal["response"]["vendor_terminal"], "kept");
+    }
+
+    #[test]
+    fn partial_stream_usage_is_accounting_only_and_drops_usage_extensions() {
+        let wire = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"type": "message", "role": "assistant", "status": "in_progress"}
+            })),
+            data(json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "message", "status": "completed"}
+            })),
+            data(json!({
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "status": "completed"}],
+                    "usage": {"input_tokens": 3, "vendor_usage": true},
+                    "vendor_terminal": true
+                }
+            })),
+        ]
+        .concat();
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+        );
+        assert_eq!(
+            events
+                .last()
+                .unwrap()
+                .usage_observation
+                .unwrap()
+                .input_tokens,
+            Some(3)
+        );
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.get("/vendor_terminal") == Some(&json!(true))
+                    && !extensions.values.keys().any(|path| path.starts_with("/usage"))
+        )));
     }
 
     #[test]
@@ -664,13 +892,14 @@ mod tests {
         let wire = concat!(
             "event: response.created\n",
             "data: {\"response\":{\"id\":\"resp_2\",\"model\":\"private\"}}\n\n",
-            "data: {\"type\":\"response.output_item.added\",\"output_index\":2,",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,",
             "\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"in_progress\"}}\n\n",
-            "data: {\"type\":\"response.refusal.delta\",\"output_index\":2,",
+            "data: {\"type\":\"response.refusal.delta\",\"output_index\":0,",
             "\"delta\":\"cannot\"}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":2,",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,",
             "\"item\":{\"type\":\"message\",\"status\":\"completed\"}}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",",
+            "\"output\":[{\"type\":\"message\",\"status\":\"completed\"}]}}\n\n",
             "data: [DONE]\n\n"
         );
         let mut decoder = OpenAiResponsesStreamDecoder::new();
@@ -679,12 +908,12 @@ mod tests {
         validate_event_sequence(&events).unwrap();
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::RefusalDelta { output_index: 2, text } if text == "cannot"
+            CanonicalEventKind::RefusalDelta { output_index: 0, text } if text == "cannot"
         )));
         assert!(events.iter().any(|event| matches!(
             event.kind,
             CanonicalEventKind::Finish {
-                output_index: 2,
+                output_index: 0,
                 reason: FinishReason::Stop,
             }
         )));
@@ -735,6 +964,169 @@ mod tests {
             events.last().unwrap().kind,
             CanonicalEventKind::Done
         ));
+
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder
+            .push(
+                data(json!({
+                    "type": "response.failed",
+                    "response": {
+                        "id": "r",
+                        "object": "response",
+                        "status": "failed",
+                        "error": {"code": "upstream_error", "message": "failed"},
+                        "usage": {
+                            "input_tokens": 2,
+                            "output_tokens": 1,
+                            "total_tokens": 3,
+                            "input_tokens_details": {"vendor_detail": true},
+                            "vendor_usage": "kept"
+                        },
+                        "vendor_response": "kept"
+                    }
+                }))
+                .as_bytes(),
+            )
+            .unwrap();
+        let usage_index = events
+            .iter()
+            .position(|event| matches!(&event.kind, CanonicalEventKind::Usage { .. }))
+            .unwrap();
+        let error_index = events
+            .iter()
+            .position(|event| matches!(&event.kind, CanonicalEventKind::Error { .. }))
+            .unwrap();
+        assert!(usage_index < error_index);
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values["/status"] == "failed"
+                    && extensions.values["/vendor_response"] == "kept"
+                    && extensions.values["/usage/vendor_usage"] == "kept"
+                    && extensions.values["/usage/input_tokens_details"]["vendor_detail"] == true
+        )));
+
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder
+            .push(
+                data(json!({
+                    "type": "response.failed",
+                    "response": {
+                        "status": "failed",
+                        "error": {"code": "upstream_error", "message": "failed"},
+                        "usage": {"input_tokens": 2, "vendor_usage": "dropped"},
+                        "vendor_response": "kept"
+                    }
+                }))
+                .as_bytes(),
+            )
+            .unwrap();
+        let error = events
+            .iter()
+            .find(|event| matches!(&event.kind, CanonicalEventKind::Error { .. }))
+            .unwrap();
+        assert!(error.usage_observation.is_some());
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values["/vendor_response"] == "kept"
+                    && !extensions.values.keys().any(|path| path.starts_with("/usage"))
+        )));
+    }
+
+    #[test]
+    fn incomplete_stream_may_terminate_without_output() {
+        let wire = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "r",
+                    "object": "response",
+                    "status": "incomplete",
+                    "output": [],
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": null
+                }
+            })),
+        ]
+        .concat();
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        validate_event_sequence(&events).unwrap();
+        assert!(matches!(
+            events.first().map(|event| &event.kind),
+            Some(CanonicalEventKind::ResponseStart { .. })
+        ));
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.get("/status") == Some(&json!("incomplete"))
+                    && extensions.values.get("/incomplete_details")
+                        == Some(&json!({"reason": "max_output_tokens"}))
+        )));
+        assert!(matches!(
+            events.last().map(|event| &event.kind),
+            Some(CanonicalEventKind::Done)
+        ));
+        assert!(decoder.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn completed_stream_preserves_output_when_only_raw_items_exist() {
+        let terminal_item = json!({
+            "id": "rs_1",
+            "type": "reasoning",
+            "status": "completed",
+            "summary": []
+        });
+        let wire = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": "rs_1",
+                    "type": "reasoning",
+                    "status": "in_progress",
+                    "summary": []
+                }
+            })),
+            data(json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": terminal_item.clone()
+            })),
+            data(json!({
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [terminal_item.clone()]
+                }
+            })),
+        ]
+        .concat();
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        validate_event_sequence(&events).unwrap();
+        assert!(!events.iter().any(|event| matches!(
+            event.kind,
+            CanonicalEventKind::MessageStart { .. } | CanonicalEventKind::Finish { .. }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.get(&format!(
+                    "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/0"
+                )) == Some(&terminal_item)
+        )));
+        assert!(matches!(
+            events.last().map(|event| &event.kind),
+            Some(CanonicalEventKind::Done)
+        ));
+        assert!(decoder.finish().unwrap().is_empty());
     }
 
     #[test]
@@ -742,6 +1134,36 @@ mod tests {
         for wire in [
             "data: [DONE]\n\n".to_owned(),
             data(json!({"type": "response.completed", "response": {}})),
+            [
+                data(json!({"type": "response.created", "response": {"id": "r"}})),
+                data(json!({
+                    "type": "response.completed",
+                    "response": {"status": "completed", "output": []}
+                })),
+            ]
+            .concat(),
+            [
+                data(json!({"type": "response.created", "response": {"id": "r"}})),
+                data(json!({
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {"type": "message", "role": "assistant", "status": "in_progress"}
+                })),
+                data(json!({
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {"type": "message", "status": "completed"}
+                })),
+                data(json!({
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "incomplete_details": {"reason": "max_output_tokens"},
+                        "output": [{"type": "message", "status": "completed"}]
+                    }
+                })),
+            ]
+            .concat(),
             [
                 data(json!({"type": "response.created", "response": {"id": "r"}})),
                 data(json!({
@@ -813,7 +1235,7 @@ mod tests {
             ));
         }
 
-        let mut incomplete = OpenAiResponsesStreamDecoder::new();
+        let mut incomplete_without_item_done = OpenAiResponsesStreamDecoder::new();
         let wire = [
             data(json!({"type": "response.created", "response": {"id": "r"}})),
             data(
@@ -825,14 +1247,147 @@ mod tests {
             }})),
         ]
         .concat();
-        let events = incomplete.push(wire.as_bytes()).unwrap();
-        assert!(events.iter().any(|event| matches!(
-            event.kind,
-            CanonicalEventKind::Finish {
-                reason: FinishReason::Length,
-                ..
+        assert!(matches!(
+            incomplete_without_item_done.push(wire.as_bytes()),
+            Err(ResponsesCodecError::InvalidStreamState)
+        ));
+
+        for terminal in [
+            json!({"type": "response.incomplete", "response": {
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "error": {"code": "unexpected", "message": "bad"}
+            }}),
+            json!({"type": "response.failed", "response": {"status": "failed"}}),
+            json!({"type": "response.cancelled", "response": {
+                "status": "cancelled", "error": {"message": "unexpected"}
+            }}),
+        ] {
+            let mut decoder = OpenAiResponsesStreamDecoder::new();
+            assert!(matches!(
+                decoder.push(data(terminal).as_bytes()),
+                Err(ResponsesCodecError::InvalidStreamState)
+            ));
+        }
+    }
+
+    #[test]
+    fn incomplete_item_defers_finish_until_the_terminal_reason() {
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let prefix = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"type": "message", "role": "assistant", "status": "in_progress"}
+            })),
+            data(json!({
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "delta": "partial"
+            })),
+            data(json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "message", "status": "incomplete"}
+            })),
+        ]
+        .concat();
+        let mut events = decoder.push(prefix.as_bytes()).unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event.kind, CanonicalEventKind::Finish { .. }))
+        );
+
+        let terminal = data(json!({
+            "type": "response.incomplete",
+            "response": {
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "output": [
+                    {"type": "message", "status": "incomplete"},
+                    {"type": "reasoning", "status": "incomplete", "summary": []}
+                ]
             }
+        }));
+        events.extend(decoder.push(terminal.as_bytes()).unwrap());
+
+        validate_event_sequence(&events).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.kind,
+                    CanonicalEventKind::Finish {
+                        output_index: 0,
+                        reason: FinishReason::Length,
+                    }
+                ))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.contains_key(&format!(
+                    "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/1"
+                ))
         )));
+        assert!(matches!(
+            events.last().map(|event| &event.kind),
+            Some(CanonicalEventKind::Done)
+        ));
+        assert!(decoder.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn incomplete_item_closure_rejects_incompatible_follow_up_events() {
+        let prefix = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"type": "message", "role": "assistant", "status": "in_progress"}
+            })),
+            data(json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "message", "status": "incomplete"}
+            })),
+        ]
+        .concat();
+        for follow_up in [
+            data(json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "message", "status": "incomplete"}
+            })),
+            data(json!({
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "delta": "late"
+            })),
+            data(json!({
+                "type": "response.completed",
+                "response": {"status": "completed"}
+            })),
+            data(json!({
+                "type": "response.incomplete",
+                "response": {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "output": [{"type": "message", "status": "completed"}]
+                }
+            })),
+        ] {
+            let mut decoder = OpenAiResponsesStreamDecoder::new();
+            let wire = format!("{prefix}{follow_up}");
+            assert!(matches!(
+                decoder.push(wire.as_bytes()),
+                Err(ResponsesCodecError::InvalidStreamState)
+            ));
+        }
     }
 
     #[test]

@@ -12,7 +12,7 @@ use super::super::dto::{
     GenerationConfig, InlineDataPart, Part, TextPart, Tool, ToolConfig,
 };
 use super::errors::EncodeError;
-use super::extensions::apply_extensions;
+use super::extensions::{apply_extensions, native_part_index};
 
 pub fn encode_generate_content_request(
     request: &GenerationRequest,
@@ -173,7 +173,7 @@ fn encode_content(
     }
     let mut parts = Vec::new();
     for part in &message.content {
-        let part_index = parts.len();
+        let part_index = native_part_index(content_index, parts.len(), extensions);
         parts.push(match part {
             ContentPart::Text { text } => Part::Text(TextPart {
                 text: text.clone(),

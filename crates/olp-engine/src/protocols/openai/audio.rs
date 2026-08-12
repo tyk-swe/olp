@@ -538,13 +538,9 @@ pub fn decode_transcription_response(
                     input_token_details,
                     extra,
                 }) => {
-                    collect_extra("/usage", &extra, &mut extensions);
+                    let mut usage_extensions = BTreeMap::new();
+                    collect_extra("/usage", &extra, &mut usage_extensions);
                     if let Some(details) = input_token_details {
-                        collect_extra(
-                            "/usage/input_token_details",
-                            &details.extra,
-                            &mut extensions,
-                        );
                         for counter in [details.text_tokens, details.audio_tokens] {
                             crate::protocols::usage::validate_counter(counter)
                                 .map_err(|_| AudioCodecError::InvalidUsage)?;
@@ -555,6 +551,10 @@ pub fn decode_transcription_response(
                         {
                             return Err(AudioCodecError::InvalidUsage);
                         }
+                        usage_extensions.insert(
+                            "/usage/input_token_details".to_owned(),
+                            serde_json::to_value(details)?,
+                        );
                     }
                     let observed = ObservedUsage {
                         input_tokens,
@@ -566,6 +566,9 @@ pub fn decode_transcription_response(
                     let usage = observed
                         .with_exact_total()
                         .map_err(|_| AudioCodecError::InvalidUsage)?;
+                    if usage.is_some() {
+                        extensions.extend(usage_extensions);
+                    }
                     (usage, usage.is_none().then(|| observed.observation()), None)
                 }
                 Some(OpenAiTranscriptionUsage::Duration { seconds, extra }) => {
@@ -734,6 +737,17 @@ impl OpenAiTranscriptionStreamDecoder {
                     },
                 ),
                 "transcript.text.done" => {
+                    let object = value
+                        .as_object()
+                        .ok_or(AudioCodecError::InvalidStreamPayload)?;
+                    let extra = object
+                        .iter()
+                        .filter(|(field, _)| !matches!(field.as_str(), "type" | "usage"))
+                        .map(|(field, value)| (field.clone(), value.clone()))
+                        .collect::<BTreeMap<_, _>>();
+                    let mut extensions = BTreeMap::new();
+                    collect_extra("", &extra, &mut extensions);
+                    let mut canonical_usage = None;
                     let mut usage_observation = None;
                     if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
                         let usage: TranscriptionStreamUsage =
@@ -745,15 +759,28 @@ impl OpenAiTranscriptionStreamDecoder {
                             cached_input_tokens: None,
                             reasoning_tokens: None,
                         };
+                        let usage_extra = usage.extra;
                         match observed
                             .with_exact_total()
                             .map_err(|_| AudioCodecError::InvalidUsage)?
                         {
                             Some(usage) => {
-                                self.emit(&mut output, CanonicalEventKind::Usage { usage });
+                                canonical_usage = Some(usage);
+                                collect_extra("/usage", &usage_extra, &mut extensions);
                             }
                             None => usage_observation = Some(observed.observation()),
                         }
+                    }
+                    if !extensions.is_empty() {
+                        self.emit(
+                            &mut output,
+                            CanonicalEventKind::SourceExtension {
+                                extensions: SourceExtensions::new(Surface::OpenAi, extensions),
+                            },
+                        );
+                    }
+                    if let Some(usage) = canonical_usage {
+                        self.emit(&mut output, CanonicalEventKind::Usage { usage });
                     }
                     self.emit(
                         &mut output,
@@ -832,11 +859,14 @@ struct TranscriptionStreamUsage {
     output_tokens: Option<u64>,
     #[serde(default)]
     total_tokens: Option<u64>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
 }
 
 pub struct OpenAiTranscriptionStreamEncoder {
     next_sequence: u64,
     usage: Option<Usage>,
+    terminal_extensions: BTreeMap<String, Value>,
     done: bool,
 }
 
@@ -846,6 +876,7 @@ impl std::fmt::Debug for OpenAiTranscriptionStreamEncoder {
             .debug_struct("OpenAiTranscriptionStreamEncoder")
             .field("next_sequence", &self.next_sequence)
             .field("has_usage", &self.usage.is_some())
+            .field("terminal_extension_count", &self.terminal_extensions.len())
             .field("done", &self.done)
             .finish()
     }
@@ -863,6 +894,7 @@ impl OpenAiTranscriptionStreamEncoder {
         Self {
             next_sequence: 0,
             usage: None,
+            terminal_extensions: BTreeMap::new(),
             done: false,
         }
     }
@@ -894,18 +926,23 @@ impl OpenAiTranscriptionStreamEncoder {
                 if extensions.source != Some(Surface::OpenAi) {
                     return Err(AudioCodecError::CrossProtocolExtensions);
                 }
-                extensions
-                    .values
-                    .iter()
-                    .filter(|(path, _)| path.starts_with("/stream/"))
-                    .map(|(path, value)| {
+                let mut frames = Vec::new();
+                for (path, value) in &extensions.values {
+                    if path.starts_with("/stream/") {
                         let kind = value
                             .get("type")
                             .and_then(Value::as_str)
                             .ok_or_else(|| AudioCodecError::InvalidExtension(path.clone()))?;
-                        transcription_sse_frame(kind, value.clone())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
+                        frames.push(transcription_sse_frame(kind, value.clone())?);
+                    } else if self
+                        .terminal_extensions
+                        .insert(path.clone(), value.clone())
+                        .is_some()
+                    {
+                        return Err(AudioCodecError::InvalidExtension(path.clone()));
+                    }
+                }
+                frames
             }
             CanonicalEventKind::Error { error } => vec![transcription_sse_frame(
                 "error",
@@ -922,10 +959,15 @@ impl OpenAiTranscriptionStreamEncoder {
                         "total_tokens": usage.total_tokens,
                     })
                 });
-                vec![transcription_sse_frame(
-                    "transcript.text.done",
-                    serde_json::json!({"usage": usage}),
-                )?]
+                let payload = apply_pointer_extensions(
+                    serde_json::json!({
+                        "type": "transcript.text.done",
+                        "usage": usage,
+                    }),
+                    &self.terminal_extensions,
+                )
+                .map_err(AudioCodecError::InvalidExtension)?;
+                vec![transcription_sse_frame("transcript.text.done", payload)?]
             }
             CanonicalEventKind::RefusalDelta { .. } | CanonicalEventKind::ToolCallDelta { .. } => {
                 return Err(AudioCodecError::UnrepresentableStreamEvent);

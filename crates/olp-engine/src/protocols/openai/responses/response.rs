@@ -165,10 +165,10 @@ pub fn decode_response_object(
         )?;
     }
     let mut usage_observation = None;
-    if let Some(usage) = response.usage {
-        collect_response_usage_extensions(&usage, &mut extensions);
-        let (canonical, observation) = decode_response_usage(&usage)?;
+    if let Some(wire_usage) = response.usage {
+        let (canonical, observation) = decode_response_usage(&wire_usage)?;
         if let Some(usage) = canonical {
+            collect_response_usage_extensions(&wire_usage, &mut extensions);
             builder.push(CanonicalEventKind::Usage { usage });
         } else {
             usage_observation = Some(observation);
@@ -377,16 +377,30 @@ pub(super) fn decode_response_usage(
         .map_err(|_| ResponsesCodecError::InvalidUsage)
 }
 
-fn collect_response_usage_extensions(
+pub(super) fn collect_response_usage_extensions(
     usage: &ResponseUsage,
     extensions: &mut BTreeMap<String, Value>,
 ) {
     collect_extra("/usage", &usage.extra, extensions);
     if let Some(details) = &usage.input_tokens_details {
-        collect_extra("/usage/input_tokens_details", &details.extra, extensions);
+        if details.cached_tokens.is_some() {
+            collect_extra("/usage/input_tokens_details", &details.extra, extensions);
+        } else {
+            extensions.insert(
+                "/usage/input_tokens_details".into(),
+                Value::Object(details.extra.clone().into_iter().collect()),
+            );
+        }
     }
     if let Some(details) = &usage.output_tokens_details {
-        collect_extra("/usage/output_tokens_details", &details.extra, extensions);
+        if details.reasoning_tokens.is_some() {
+            collect_extra("/usage/output_tokens_details", &details.extra, extensions);
+        } else {
+            extensions.insert(
+                "/usage/output_tokens_details".into(),
+                Value::Object(details.extra.clone().into_iter().collect()),
+            );
+        }
     }
 }
 

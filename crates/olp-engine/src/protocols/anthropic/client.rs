@@ -75,12 +75,6 @@ pub fn encode_messages_response(
     if usage.reasoning_tokens.is_some() {
         return Err(ClientEncodeError::ReasoningUsage);
     }
-    let uncached_input_tokens = usage
-        .cached_input_tokens
-        .map_or(Some(usage.input_tokens), |cached| {
-            usage.input_tokens.checked_sub(cached)
-        })
-        .ok_or(ClientEncodeError::InvalidUsage)?;
     let response = MessagesResponse {
         id: aggregate
             .response_id
@@ -92,7 +86,7 @@ pub fn encode_messages_response(
         stop_reason: Some(stop_reason),
         stop_sequence: None,
         usage: Usage {
-            input_tokens: Some(uncached_input_tokens),
+            input_tokens: Some(usage.input_tokens),
             output_tokens: Some(usage.output_tokens),
             cache_creation_input_tokens: None,
             cache_read_input_tokens: usage.cached_input_tokens,
@@ -100,7 +94,14 @@ pub fn encode_messages_response(
         },
         extra: BTreeMap::new(),
     };
-    apply_extensions(response, &aggregate.extensions)
+    let mut response = apply_extensions(response, &aggregate.extensions)?;
+    let base_input_tokens = usage
+        .input_tokens
+        .checked_sub(response.usage.cache_creation_input_tokens.unwrap_or(0))
+        .and_then(|tokens| tokens.checked_sub(response.usage.cache_read_input_tokens.unwrap_or(0)))
+        .ok_or(ClientEncodeError::InvalidUsage)?;
+    response.usage.input_tokens = Some(base_input_tokens);
+    Ok(response)
 }
 
 fn apply_extensions(

@@ -111,9 +111,10 @@ Within the existing byte and deadline limits it accepts a single leading
 UTF-8 BOM, JSON-compatible media types, absent or generic success media types
 when the bounded body unambiguously decodes as the expected JSON protocol, and
 a valid unary Chat Completions response to a streaming request. Native OpenAI
-and Azure OpenAI remain strict. The profile does not coerce values, invent
-finish reasons or indices, accept ambiguous tool associations, or relax
-terminal and truncation checks.
+and Azure OpenAI remain strict. The profile does not coerce values or invent
+finish reasons. It infers omitted indices only when the association is
+unambiguous; it does not accept ambiguous tool associations or relax terminal
+and truncation checks.
 
 Gateway capabilities and model visibility are default-deny. A capability is
 advertised only when the endpoint policy exposes it and the caller's key has

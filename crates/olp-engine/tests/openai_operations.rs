@@ -156,7 +156,12 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
             "status": "completed",
             "content": [{"type": "output_text", "text": "hello", "annotations": []}]
         }],
-        "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
+        "usage": {
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "total_tokens": 5,
+            "input_tokens_details": {"vendor_detail": true}
+        }
     }))
     .unwrap();
     let events = decode_response_object(response).unwrap();
@@ -167,6 +172,10 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
     )));
     let client = encode_response_object(&events, "team-route", "fallback").unwrap();
     assert_eq!(client.model, "team-route");
+    assert_eq!(
+        serde_json::to_value(&client).unwrap()["usage"]["input_tokens_details"]["vendor_detail"],
+        true
+    );
     validate_event_sequence(&decode_response_object(client).unwrap()).unwrap();
 
     let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1_800_000_000);
@@ -189,6 +198,7 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
             "type":"message","status":"completed"
         }}),
         json!({"type":"response.completed","response":{"status":"completed",
+            "output":[{"type":"message","status":"completed"}],
             "usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}),
     ];
     let wire = frames
@@ -211,6 +221,35 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
         &event.kind,
         CanonicalEventKind::TextDelta { text, .. } if text == "hé 🌍"
     )));
+
+    let partial: ResponseObject = serde_json::from_value(json!({
+        "id": "resp_partial",
+        "object": "response",
+        "created_at": 1800000000,
+        "status": "completed",
+        "model": "gpt-upstream",
+        "output": [{
+            "id": "msg_partial",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "hello", "annotations": []}]
+        }],
+        "usage": {
+            "input_tokens": 3,
+            "input_tokens_details": {"cached_tokens": 1, "vendor_detail": true},
+            "vendor_usage": true
+        },
+        "vendor_response": "kept"
+    }))
+    .unwrap();
+    let partial = decode_response_object(partial).unwrap();
+    assert!(partial.last().unwrap().usage_observation.is_some());
+    let encoded =
+        serde_json::to_value(encode_response_object(&partial, "team-route", "fallback").unwrap())
+            .unwrap();
+    assert!(encoded.get("usage").is_none());
+    assert_eq!(encoded["vendor_response"], "kept");
 }
 
 #[test]
@@ -371,6 +410,24 @@ fn embeddings_support_text_tokens_float_and_bounded_base64_forms() {
     let wire = encode_embedding_response(&without_usage, "embed-route", Some("float")).unwrap();
     assert!(wire.usage.is_none());
 
+    let partial: EmbeddingResponse = serde_json::from_value(json!({
+        "object": "list",
+        "model": "text-embedding-upstream",
+        "data": [{"object": "embedding", "index": 0, "embedding": [1.0]}],
+        "usage": {"prompt_tokens": 3, "vendor_usage": true},
+        "vendor_response": "kept"
+    }))
+    .unwrap();
+    let partial = decode_embedding_response(partial).unwrap();
+    assert!(partial.usage.is_none());
+    assert!(partial.usage_observation.is_some());
+    let encoded = serde_json::to_value(
+        encode_embedding_response(&partial, "embed-route", Some("float")).unwrap(),
+    )
+    .unwrap();
+    assert!(encoded.get("usage").is_none());
+    assert_eq!(encoded["vendor_response"], "kept");
+
     let non_finite: EmbeddingResponse = serde_json::from_value(json!({
         "object": "list",
         "model": "text-embedding-upstream",
@@ -447,6 +504,21 @@ fn image_json_and_multipart_forms_use_handles_and_preserve_extensions() {
     })
     .unwrap();
     assert_eq!(wire.data[0].b64_json.as_deref(), Some("re-encoded"));
+
+    let partial: OpenAiImageResponse = serde_json::from_value(json!({
+        "created": 1800000000,
+        "data": [{"url": "https://example.test/image.png"}],
+        "usage": {"input_tokens": 2, "vendor_usage": true},
+        "vendor_response": "kept"
+    }))
+    .unwrap();
+    let partial = decode_image_response(partial, |_| unreachable!()).unwrap();
+    assert!(partial.usage.is_none());
+    assert!(partial.usage_observation.is_some());
+    let encoded =
+        serde_json::to_value(encode_image_response(&partial, |_| unreachable!()).unwrap()).unwrap();
+    assert!(encoded.get("usage").is_none());
+    assert_eq!(encoded["vendor_response"], "kept");
 }
 
 #[test]
@@ -523,15 +595,46 @@ fn transcription_usage_is_presence_aware_and_round_trips_token_or_duration_units
         assert!(result.usage_observation.is_some());
     }
 
+    let partial: OpenAiTranscriptionResponse = serde_json::from_value(json!({
+        "text": "x",
+        "vendor_response": "kept",
+        "usage": {
+            "type": "tokens",
+            "input_tokens": 3,
+            "input_token_details": {
+                "text_tokens": 1,
+                "audio_tokens": 2,
+                "vendor_detail": true
+            }
+        }
+    }))
+    .unwrap();
+    let partial = decode_transcription_response(partial).unwrap();
+    assert!(partial.usage.is_none());
+    assert!(partial.usage_observation.is_some());
+    let encoded = serde_json::to_value(encode_transcription_response(&partial).unwrap()).unwrap();
+    assert!(encoded.get("usage").is_none());
+    assert_eq!(encoded["vendor_response"], "kept");
+
     let response: OpenAiTranscriptionResponse = serde_json::from_value(json!({
         "text":"x",
         "usage":{"type":"tokens","input_tokens":3,"output_tokens":2,"total_tokens":5,
-            "input_token_details":{"text_tokens":1,"audio_tokens":2}}
+            "input_token_details":{"text_tokens":1,"audio_tokens":2,
+                "vendor_detail":{"kind":"audio"}}}
     }))
     .unwrap();
     let result = decode_transcription_response(response).unwrap();
     assert_eq!(result.usage.unwrap().total_tokens, 5);
     let encoded = encode_transcription_response(&result).unwrap();
+    let encoded_json = serde_json::to_value(&encoded).unwrap();
+    assert_eq!(
+        encoded_json["usage"]["input_token_details"],
+        json!({
+            "text_tokens": 1,
+            "audio_tokens": 2,
+            "vendor_detail": {"kind": "audio"}
+        })
+    );
     assert_eq!(
         decode_transcription_response(encoded)
             .unwrap()
@@ -762,6 +865,76 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
     .unwrap();
     assert_eq!(encoded.b64_json.as_deref(), Some("re-encoded"));
 
+    let completed: OpenAiImageStreamEvent = serde_json::from_value(json!({
+        "type": "image_generation.completed",
+        "usage": {
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "total_tokens": 5,
+            "vendor_usage": {"tier": "fast"}
+        },
+        "vendor_event": "kept"
+    }))
+    .unwrap();
+    let completed = decode_image_stream_event(completed, |_| unreachable!()).unwrap();
+    let olp_engine::protocols::openai::ImageStreamUpdate::Completed {
+        usage,
+        usage_observation,
+        extensions,
+    } = &completed
+    else {
+        panic!("wrong image stream update")
+    };
+    assert!(usage.is_some());
+    assert!(usage_observation.is_none());
+    assert_eq!(extensions.values["/usage/vendor_usage"]["tier"], "fast");
+    let encoded = serde_json::to_value(
+        encode_image_stream_update(
+            &completed,
+            ImageStreamOperation::Generation,
+            |_| unreachable!(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(encoded["usage"]["vendor_usage"]["tier"], "fast");
+    assert_eq!(encoded["vendor_event"], "kept");
+
+    let partial_usage: OpenAiImageStreamEvent = serde_json::from_value(json!({
+        "type": "image_generation.completed",
+        "usage": {"input_tokens": 2, "vendor_usage": true},
+        "vendor_event": "partial-kept"
+    }))
+    .unwrap();
+    let partial_usage = decode_image_stream_event(partial_usage, |_| unreachable!()).unwrap();
+    let olp_engine::protocols::openai::ImageStreamUpdate::Completed {
+        usage,
+        usage_observation,
+        extensions,
+    } = &partial_usage
+    else {
+        panic!("wrong image stream update")
+    };
+    assert!(usage.is_none());
+    assert!(usage_observation.is_some());
+    assert!(
+        !extensions
+            .values
+            .keys()
+            .any(|path| path.starts_with("/usage"))
+    );
+    let encoded = serde_json::to_value(
+        encode_image_stream_update(
+            &partial_usage,
+            ImageStreamOperation::Generation,
+            |_| unreachable!(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(encoded.get("usage").is_none());
+    assert_eq!(encoded["vendor_event"], "partial-kept");
+
     let speech: OpenAiSpeechStreamEvent = serde_json::from_value(json!({
         "type": "speech.audio.delta",
         "delta": "opaque"
@@ -787,7 +960,7 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
         "event: transcript.text.delta\n",
         "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hé 🌍\"}\n\n",
         "event: transcript.text.done\n",
-        "data: {\"type\":\"transcript.text.done\",\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"total_tokens\":4}}\n\n"
+        "data: {\"type\":\"transcript.text.done\",\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"total_tokens\":4,\"vendor_usage\":{\"tier\":\"fast\"}},\"vendor_terminal\":\"kept\"}\n\n"
     );
     let mut decoder = OpenAiTranscriptionStreamDecoder::new();
     let mut events = Vec::new();
@@ -800,6 +973,12 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
         &event.kind,
         CanonicalEventKind::TextDelta { text, .. } if text == "hé 🌍"
     )));
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        CanonicalEventKind::SourceExtension { extensions }
+            if extensions.values["/usage/vendor_usage"]["tier"] == "fast"
+                && extensions.values["/vendor_terminal"] == "kept"
+    )));
     let mut encoder = OpenAiTranscriptionStreamEncoder::new();
     let frames = events
         .iter()
@@ -809,6 +988,41 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
         frames.last().unwrap().event.as_deref(),
         Some("transcript.text.done")
     );
+    let terminal: serde_json::Value = serde_json::from_str(&frames.last().unwrap().data).unwrap();
+    assert_eq!(terminal["usage"]["vendor_usage"]["tier"], "fast");
+    assert_eq!(terminal["vendor_terminal"], "kept");
+
+    let partial_wire = concat!(
+        "event: transcript.text.done\n",
+        "data: {\"type\":\"transcript.text.done\",\"usage\":{\"input_tokens\":2,\"vendor_usage\":true},\"vendor_terminal\":\"partial-kept\"}\n\n"
+    );
+    let mut decoder = OpenAiTranscriptionStreamDecoder::new();
+    let mut partial_events = decoder.push(partial_wire.as_bytes()).unwrap();
+    partial_events.extend(decoder.finish().unwrap());
+    assert!(
+        !partial_events
+            .iter()
+            .any(|event| matches!(&event.kind, CanonicalEventKind::Usage { .. }))
+    );
+    assert!(
+        partial_events
+            .last()
+            .is_some_and(|event| event.usage_observation.is_some())
+    );
+    assert!(partial_events.iter().any(|event| matches!(
+        &event.kind,
+        CanonicalEventKind::SourceExtension { extensions }
+            if extensions.values["/vendor_terminal"] == "partial-kept"
+                && !extensions.values.keys().any(|path| path.starts_with("/usage"))
+    )));
+    let mut encoder = OpenAiTranscriptionStreamEncoder::new();
+    let frames = partial_events
+        .iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    let terminal: serde_json::Value = serde_json::from_str(&frames.last().unwrap().data).unwrap();
+    assert!(terminal["usage"].is_null());
+    assert_eq!(terminal["vendor_terminal"], "partial-kept");
 }
 
 #[test]

@@ -8,7 +8,7 @@ use crate::domain::{
 use crate::protocols::gemini::{
     Content, CountTokensRequest, CountTokensResponse, FileData, FileDataPart,
     GEMINI_COUNT_REQUEST_EXTENSION, GenerateContentResponse, Part, TextPart,
-    decode_generate_content_response, encode_generate_content_request,
+    decode_generate_content_response_for_surface, encode_generate_content_request,
     validate_count_tokens_request,
 };
 use futures::stream;
@@ -317,6 +317,7 @@ impl GeminiConnector {
                 response_kind,
                 first_byte_deadline,
                 attempt_deadline,
+                request.metadata.surface == Surface::Gemini,
             )
             .await
         }
@@ -395,6 +396,7 @@ impl GeminiConnector {
         kind: ResponseKind,
         first_byte_deadline: Instant,
         attempt_deadline: Instant,
+        preserve_extensions: bool,
     ) -> Result<ProviderOutput, TransportError> {
         RESPONSE_IO.require_content_type(&response, "application/json")?;
         let body = RESPONSE_IO
@@ -412,9 +414,11 @@ impl GeminiConnector {
                     serde_json::from_slice(&body).map_err(|error| {
                         protocol_body_error(format!("Gemini response is not valid JSON: {error}"))
                     })?;
-                let events = decode_generate_content_response(response).map_err(|error| {
-                    protocol_body_error(format!("Gemini response is invalid: {error}"))
-                })?;
+                let events =
+                    decode_generate_content_response_for_surface(response, preserve_extensions)
+                        .map_err(|error| {
+                            protocol_body_error(format!("Gemini response is invalid: {error}"))
+                        })?;
                 Ok(ProviderOutput::Events(Box::pin(stream::iter(
                     events.into_iter().map(Ok),
                 ))))

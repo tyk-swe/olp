@@ -163,7 +163,7 @@ impl AzureOpenAiConnector {
     pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         let chat = self
             .inner
-            .certify_chat_completions_capability(&self.deployment, TransportMode::Unary)
+            .certify_azure_chat_completions_capability(&self.deployment, TransportMode::Unary)
             .await;
         if let Err(chat_error) = chat {
             let embedding_capability = CompatibleCapability {
@@ -173,7 +173,7 @@ impl AzureOpenAiConnector {
             };
             if let Err(embedding_error) = self
                 .inner
-                .certify_compatible_capability(&self.deployment, embedding_capability)
+                .certify_azure_capability(&self.deployment, embedding_capability)
                 .await
             {
                 return Err(deployment_probe_error(chat_error, embedding_error));
@@ -204,11 +204,11 @@ impl AzureOpenAiConnector {
         {
             return self
                 .inner
-                .certify_chat_completions_capability(upstream_model, capability.mode)
+                .certify_azure_chat_completions_capability(upstream_model, capability.mode)
                 .await;
         }
         self.inner
-            .certify_compatible_capability(
+            .certify_azure_capability(
                 upstream_model,
                 CompatibleCapability {
                     surface: Surface::OpenAi,

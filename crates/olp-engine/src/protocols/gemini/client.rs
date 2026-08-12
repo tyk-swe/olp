@@ -35,31 +35,44 @@ pub fn encode_generate_content_response(
     public_model: &str,
     fallback_id: &str,
 ) -> Result<GenerateContentResponse, ClientEncodeError> {
-    let aggregate = aggregate_generation(events, Surface::Gemini)?;
+    let mut aggregate = aggregate_generation(events, Surface::Gemini)?;
+    let preserve_empty_candidates = matches!(
+        aggregate.extensions.get("/candidates"),
+        Some(Value::Array(candidates)) if candidates.is_empty()
+    );
+    if preserve_empty_candidates {
+        aggregate.extensions.remove("/candidates");
+    }
     let mut candidates = Vec::with_capacity(aggregate.outputs.len());
     for (index, output) in aggregate.outputs {
-        let mut parts = Vec::new();
-        if !output.text.is_empty() {
-            parts.push(Part::Text(TextPart {
-                text: output.text,
-                thought: None,
-                thought_signature: None,
-                extra: BTreeMap::new(),
-            }));
+        if preserve_empty_candidates {
+            continue;
         }
-        for tool in output.tools.into_values() {
-            let name = tool.name.ok_or(ClientEncodeError::IncompleteTool)?;
-            let args =
-                serde_json::from_str(&tool.arguments).map_err(ClientEncodeError::ToolJson)?;
-            parts.push(Part::FunctionCall(FunctionCallPart {
-                function_call: FunctionCall {
-                    name,
-                    args,
-                    id: tool.id,
+        let preserved_parts = take_preserved_parts(&mut aggregate.extensions, index)?;
+        let mut parts = preserved_parts.unwrap_or_default();
+        if parts.is_empty() {
+            if !output.text.is_empty() {
+                parts.push(Part::Text(TextPart {
+                    text: output.text,
+                    thought: None,
+                    thought_signature: None,
                     extra: BTreeMap::new(),
-                },
-                extra: BTreeMap::new(),
-            }));
+                }));
+            }
+            for tool in output.tools.into_values() {
+                let name = tool.name.ok_or(ClientEncodeError::IncompleteTool)?;
+                let args =
+                    serde_json::from_str(&tool.arguments).map_err(ClientEncodeError::ToolJson)?;
+                parts.push(Part::FunctionCall(FunctionCallPart {
+                    function_call: FunctionCall {
+                        name,
+                        args,
+                        id: tool.id,
+                        extra: BTreeMap::new(),
+                    },
+                    extra: BTreeMap::new(),
+                }));
+            }
         }
         let finish_reason = output
             .finish
@@ -78,17 +91,26 @@ pub fn encode_generate_content_response(
         });
     }
     let usage_metadata = if let Some(usage) = aggregate.usage {
+        let tool_use_prompt_token_count = aggregate
+            .extensions
+            .remove("/usageMetadata/toolUsePromptTokenCount")
+            .map(|value| value.as_u64().ok_or(ClientEncodeError::InvalidUsage))
+            .transpose()?;
+        let prompt_token_count = usage
+            .input_tokens
+            .checked_sub(tool_use_prompt_token_count.unwrap_or(0))
+            .ok_or(ClientEncodeError::InvalidUsage)?;
         let candidates_token_count = usage
             .output_tokens
             .checked_sub(usage.reasoning_tokens.unwrap_or(0))
             .ok_or(ClientEncodeError::InvalidUsage)?;
         Some(UsageMetadata {
-            prompt_token_count: Some(usage.input_tokens),
+            prompt_token_count: Some(prompt_token_count),
             candidates_token_count: Some(candidates_token_count),
             total_token_count: Some(usage.total_tokens),
             cached_content_token_count: usage.cached_input_tokens,
             thoughts_token_count: usage.reasoning_tokens,
-            tool_use_prompt_token_count: None,
+            tool_use_prompt_token_count,
             extra: BTreeMap::new(),
         })
     } else {
@@ -105,7 +127,44 @@ pub fn encode_generate_content_response(
         ),
         extra: BTreeMap::new(),
     };
-    apply_extensions(response, &aggregate.extensions)
+    let partial_usage = aggregate.extensions.remove("/usageMetadata");
+    let mut response = apply_extensions(response, &aggregate.extensions)?;
+    if let Some(Value::Object(usage)) = partial_usage {
+        response
+            .extra
+            .insert("usageMetadata".into(), Value::Object(usage));
+    }
+    Ok(response)
+}
+
+fn take_preserved_parts(
+    extensions: &mut BTreeMap<String, Value>,
+    output_index: u32,
+) -> Result<Option<Vec<Part>>, ClientEncodeError> {
+    let prefix = format!("/candidates/{output_index}/content/parts/");
+    let mut entries = extensions
+        .keys()
+        .filter_map(|path| {
+            path.strip_prefix(&prefix)
+                .and_then(|index| index.parse::<usize>().ok())
+                .map(|index| (index, path.clone()))
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    entries.sort_by_key(|(index, _)| *index);
+    let mut parts = Vec::with_capacity(entries.len());
+    for (expected_index, (index, path)) in entries.into_iter().enumerate() {
+        if index != expected_index {
+            return Err(ClientEncodeError::Extension);
+        }
+        let value = extensions
+            .remove(&path)
+            .ok_or(ClientEncodeError::Extension)?;
+        parts.push(serde_json::from_value(value).map_err(ClientEncodeError::Json)?);
+    }
+    Ok(Some(parts))
 }
 
 fn apply_extensions(

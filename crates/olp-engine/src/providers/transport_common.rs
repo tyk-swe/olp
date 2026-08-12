@@ -60,6 +60,9 @@ fn sanitize_upstream_message(message: &str, secret: &str) -> Option<String> {
     } else {
         message.replace(secret, "[REDACTED]")
     };
+    if looks_like_html(&redacted) || looks_like_structured_content(&redacted) {
+        return None;
+    }
     let mut sanitized = String::new();
     let mut characters = 0;
     let mut previous_was_space = false;
@@ -444,6 +447,28 @@ mod tests {
                 "provider returned HTTP 400 Bad Request"
             );
         }
+
+        let long_private = "private".repeat(100);
+        let body = serde_json::to_vec(&json!({
+            "message": format!(r#"{{"prompt":"{long_private}"}}"#)
+        }))
+        .unwrap();
+        assert_eq!(
+            safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, &body, "secret"),
+            "provider returned HTTP 400 Bad Request"
+        );
+
+        let ordinary = "x".repeat(700);
+        let body = serde_json::to_vec(&json!({ "message": ordinary })).unwrap();
+        let message =
+            safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, &body, "secret");
+        assert_eq!(
+            message,
+            format!(
+                "provider returned HTTP 400 Bad Request: {}",
+                "x".repeat(512)
+            )
+        );
     }
 
     #[test]

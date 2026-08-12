@@ -123,6 +123,16 @@ fn assert_chat_events(events: &[CanonicalEvent], expected_text: &str) {
     ));
 }
 
+fn assert_omitted_response_metadata(events: &[CanonicalEvent]) {
+    assert!(matches!(
+        events.first().map(|event| &event.kind),
+        Some(CanonicalEventKind::ResponseStart {
+            response_id: None,
+            provider_model: None,
+        })
+    ));
+}
+
 #[tokio::test]
 async fn compatible_unary_chat_accepts_bom_omitted_metadata_and_safe_content_types() {
     let body = with_bom(&compatible_chat_body("compatible unary"));
@@ -139,6 +149,7 @@ async fn compatible_unary_chat_accepts_bom_omitted_metadata_and_safe_content_typ
         )
         .await;
         assert_chat_events(&events, "compatible unary");
+        assert_omitted_response_metadata(&events);
     }
 }
 
@@ -174,6 +185,7 @@ async fn compatible_sse_accepts_fragmented_bom_omitted_metadata_and_usage_only_c
     )
     .await;
     assert_chat_events(&events, "fragmented");
+    assert_omitted_response_metadata(&events);
     assert!(events.iter().any(|event| matches!(
         event.kind,
         CanonicalEventKind::Finish {

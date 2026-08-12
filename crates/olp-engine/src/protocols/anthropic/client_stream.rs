@@ -7,6 +7,8 @@ use thiserror::Error;
 use super::finish_reason;
 use crate::protocols::sse::{RAW_SSE_FRAME_EXTENSION, SseFrame, decode_raw_sse_frame};
 
+const MAX_BUFFERED_SEMANTIC_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
 #[derive(Debug, Error)]
 pub enum ClientStreamEncodeError {
     #[error("Anthropic stream received events out of order")]
@@ -19,10 +21,16 @@ pub enum ClientStreamEncodeError {
     Tool,
     #[error("canonical reasoning-token usage is not representable in Anthropic usage")]
     ReasoningUsage,
+    #[error("canonical usage details are internally inconsistent")]
+    InvalidUsage,
     #[error("source extensions cannot be represented in an Anthropic client stream")]
     Extension,
     #[error("Anthropic stream completed without a finish reason")]
     MissingFinish,
+    #[error("Anthropic stream completed without complete usage")]
+    MissingUsage,
+    #[error("Anthropic stream exceeded the buffered semantic-frame limit")]
+    BufferedFramesTooLarge,
 }
 
 #[derive(Debug)]
@@ -34,11 +42,18 @@ pub struct AnthropicMessagesClientStreamEncoder {
     response_started: bool,
     message_declared: bool,
     message_emitted: bool,
-    usage: Usage,
+    message_pending: bool,
+    usage: Option<Usage>,
+    buffered_frames: Vec<SseFrame>,
+    buffered_frame_bytes: usize,
+    max_buffered_frame_bytes: usize,
     text_block: Option<u32>,
     tools: BTreeMap<u32, ToolState>,
     next_block: u32,
     finished: bool,
+    finish_reason: Option<crate::domain::FinishReason>,
+    terminal_usage_emitted: bool,
+    errored: bool,
     done: bool,
     skip_native_events: usize,
 }
@@ -61,14 +76,32 @@ impl AnthropicMessagesClientStreamEncoder {
             response_started: false,
             message_declared: false,
             message_emitted: false,
-            usage: Usage::default(),
+            message_pending: false,
+            usage: None,
+            buffered_frames: Vec::new(),
+            buffered_frame_bytes: 0,
+            max_buffered_frame_bytes: MAX_BUFFERED_SEMANTIC_FRAME_BYTES,
             text_block: None,
             tools: BTreeMap::new(),
             next_block: 0,
             finished: false,
+            finish_reason: None,
+            terminal_usage_emitted: false,
+            errored: false,
             done: false,
             skip_native_events: 0,
         }
+    }
+
+    #[cfg(test)]
+    fn with_max_buffered_frame_bytes(
+        public_model: impl Into<String>,
+        fallback_id: impl Into<String>,
+        maximum: usize,
+    ) -> Self {
+        let mut encoder = Self::new(public_model, fallback_id);
+        encoder.max_buffered_frame_bytes = maximum;
+        encoder
     }
 
     pub fn push(
@@ -181,9 +214,19 @@ impl AnthropicMessagesClientStreamEncoder {
                 if usage.reasoning_tokens.is_some() {
                     return Err(ClientStreamEncodeError::ReasoningUsage);
                 }
-                self.usage = usage;
-                if self.message_declared && !self.message_emitted {
+                base_input_tokens(&usage)?;
+                self.usage = Some(usage);
+                if self.message_pending {
+                    let pending = std::mem::take(&mut self.buffered_frames);
+                    let mut buffered = Vec::with_capacity(pending.len().saturating_add(1));
+                    self.emit_message_start(&mut buffered)?;
+                    buffered.extend(pending);
+                    self.buffered_frames = buffered;
+                } else if self.message_declared && !self.message_emitted {
                     self.ensure_message(&mut frames)?;
+                }
+                if self.finish_reason.is_some() && !self.terminal_usage_emitted {
+                    self.emit_terminal_delta(&mut frames)?;
                 }
             }
             CanonicalEventKind::Finish {
@@ -208,21 +251,16 @@ impl AnthropicMessagesClientStreamEncoder {
                         json!({"type": "content_block_stop", "index": block}),
                     ));
                 }
-                frames.push(frame(
-                    "message_delta",
-                    json!({
-                        "type": "message_delta",
-                        "delta": {"stop_reason": finish_reason(&reason), "stop_sequence": null},
-                        "usage": {
-                            "input_tokens": self.usage.input_tokens,
-                            "output_tokens": self.usage.output_tokens,
-                            "cache_read_input_tokens": self.usage.cached_input_tokens
-                        }
-                    }),
-                ));
                 self.finished = true;
+                self.finish_reason = Some(reason);
+                if self.usage.is_some() {
+                    self.emit_terminal_delta(&mut frames)?;
+                }
             }
             CanonicalEventKind::Error { error } => {
+                self.buffered_frames.clear();
+                self.buffered_frame_bytes = 0;
+                self.message_pending = false;
                 frames.push(frame(
                     "error",
                     json!({
@@ -231,6 +269,7 @@ impl AnthropicMessagesClientStreamEncoder {
                     }),
                 ));
                 self.finished = true;
+                self.errored = true;
             }
             CanonicalEventKind::SourceExtension { extensions } => {
                 if extensions.source != Some(Surface::Anthropic) {
@@ -256,25 +295,45 @@ impl AnthropicMessagesClientStreamEncoder {
                 if !self.finished {
                     return Err(ClientStreamEncodeError::MissingFinish);
                 }
-                if self.message_emitted {
-                    frames.push(frame("message_stop", json!({"type": "message_stop"})));
+                if !self.errored {
+                    if self.finish_reason.is_some() && !self.terminal_usage_emitted {
+                        return Err(ClientStreamEncodeError::MissingUsage);
+                    }
+                    if self.message_emitted {
+                        frames.push(frame("message_stop", json!({"type": "message_stop"})));
+                    }
                 }
                 self.done = true;
             }
         }
-        Ok(frames)
+        self.flush_or_buffer(frames)
     }
 
     fn ensure_message(
         &mut self,
         frames: &mut Vec<SseFrame>,
     ) -> Result<(), ClientStreamEncodeError> {
-        if self.message_emitted {
+        if self.message_emitted || self.message_pending {
             return Ok(());
         }
         if !self.response_started || !self.message_declared {
             return Err(ClientStreamEncodeError::Response);
         }
+        if self.usage.is_none() {
+            self.message_pending = true;
+            return Ok(());
+        }
+        self.emit_message_start(frames)
+    }
+
+    fn emit_message_start(
+        &mut self,
+        frames: &mut Vec<SseFrame>,
+    ) -> Result<(), ClientStreamEncodeError> {
+        let usage = self
+            .usage
+            .as_ref()
+            .ok_or(ClientStreamEncodeError::MissingUsage)?;
         frames.push(frame(
             "message_start",
             json!({
@@ -287,15 +346,60 @@ impl AnthropicMessagesClientStreamEncoder {
                     "model": self.public_model,
                     "stop_reason": null,
                     "stop_sequence": null,
-                    "usage": {
-                        "input_tokens": self.usage.input_tokens,
-                        "output_tokens": 0,
-                        "cache_read_input_tokens": self.usage.cached_input_tokens
-                    }
+                    "usage": message_start_usage(usage)?
                 }
             }),
         ));
+        self.message_pending = false;
         self.message_emitted = true;
+        Ok(())
+    }
+
+    fn flush_or_buffer(
+        &mut self,
+        mut frames: Vec<SseFrame>,
+    ) -> Result<Vec<SseFrame>, ClientStreamEncodeError> {
+        if self.message_pending && self.usage.is_none() && !self.errored {
+            let additional = frames.iter().try_fold(0_usize, |total, frame| {
+                total.checked_add(buffered_frame_size(frame)?)
+            });
+            let total = additional
+                .and_then(|additional| self.buffered_frame_bytes.checked_add(additional))
+                .filter(|total| *total <= self.max_buffered_frame_bytes)
+                .ok_or(ClientStreamEncodeError::BufferedFramesTooLarge)?;
+            self.buffered_frame_bytes = total;
+            self.buffered_frames.append(&mut frames);
+            return Ok(Vec::new());
+        }
+        if self.buffered_frames.is_empty() {
+            return Ok(frames);
+        }
+        self.buffered_frames.append(&mut frames);
+        self.buffered_frame_bytes = 0;
+        Ok(std::mem::take(&mut self.buffered_frames))
+    }
+
+    fn emit_terminal_delta(
+        &mut self,
+        frames: &mut Vec<SseFrame>,
+    ) -> Result<(), ClientStreamEncodeError> {
+        let reason = self
+            .finish_reason
+            .as_ref()
+            .ok_or(ClientStreamEncodeError::MissingFinish)?;
+        let usage = self
+            .usage
+            .as_ref()
+            .ok_or(ClientStreamEncodeError::MissingUsage)?;
+        frames.push(frame(
+            "message_delta",
+            json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": finish_reason(reason), "stop_sequence": null},
+                "usage": terminal_usage(usage)?
+            }),
+        ));
+        self.terminal_usage_emitted = true;
         Ok(())
     }
 
@@ -307,6 +411,47 @@ impl AnthropicMessagesClientStreamEncoder {
             .ok_or(ClientStreamEncodeError::Candidate)?;
         Ok(block)
     }
+}
+
+fn buffered_frame_size(frame: &SseFrame) -> Option<usize> {
+    // Semantic frames contain compact, single-line JSON. This allowance covers
+    // every SSE field prefix, terminator, and a maximum-width retry value.
+    const FRAMING_BYTES: usize = 64;
+    frame
+        .data
+        .len()
+        .checked_add(frame.event.as_ref().map_or(0, String::len))?
+        .checked_add(frame.id.as_ref().map_or(0, String::len))?
+        .checked_add(FRAMING_BYTES)
+}
+
+fn base_input_tokens(usage: &Usage) -> Result<u64, ClientStreamEncodeError> {
+    usage
+        .input_tokens
+        .checked_sub(usage.cached_input_tokens.unwrap_or(0))
+        .ok_or(ClientStreamEncodeError::InvalidUsage)
+}
+
+fn message_start_usage(usage: &Usage) -> Result<Value, ClientStreamEncodeError> {
+    let mut value = json!({
+        "input_tokens": base_input_tokens(usage)?,
+        "output_tokens": 0
+    });
+    if let Some(cached) = usage.cached_input_tokens {
+        value["cache_read_input_tokens"] = Value::from(cached);
+    }
+    Ok(value)
+}
+
+fn terminal_usage(usage: &Usage) -> Result<Value, ClientStreamEncodeError> {
+    let mut value = json!({
+        "input_tokens": base_input_tokens(usage)?,
+        "output_tokens": usage.output_tokens
+    });
+    if let Some(cached) = usage.cached_input_tokens {
+        value["cache_read_input_tokens"] = Value::from(cached);
+    }
+    Ok(value)
 }
 
 fn rewrite_anthropic_model(
@@ -351,5 +496,82 @@ fn frame(event: &'static str, value: Value) -> SseFrame {
         data: value.to_string(),
         id: None,
         retry_ms: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CanonicalEventKind, MessageRole};
+
+    #[test]
+    fn semantic_buffer_rejects_the_first_frame_past_its_byte_limit() {
+        let expected = [
+            frame(
+                "content_block_start",
+                json!({
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""}
+                }),
+            ),
+            frame(
+                "content_block_delta",
+                json!({
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "a"}
+                }),
+            ),
+        ];
+        let maximum = expected
+            .iter()
+            .map(|frame| buffered_frame_size(frame).unwrap())
+            .sum();
+        let mut encoder = AnthropicMessagesClientStreamEncoder::with_max_buffered_frame_bytes(
+            "route", "fallback", maximum,
+        );
+        for event in [
+            CanonicalEvent::new(
+                0,
+                CanonicalEventKind::ResponseStart {
+                    response_id: None,
+                    provider_model: None,
+                },
+            ),
+            CanonicalEvent::new(
+                1,
+                CanonicalEventKind::MessageStart {
+                    output_index: 0,
+                    role: MessageRole::Assistant,
+                },
+            ),
+        ] {
+            assert!(encoder.push(event).unwrap().is_empty());
+        }
+        assert!(
+            encoder
+                .push(CanonicalEvent::new(
+                    2,
+                    CanonicalEventKind::TextDelta {
+                        output_index: 0,
+                        text: "a".into(),
+                    },
+                ))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(encoder.buffered_frame_bytes, maximum);
+        assert!(matches!(
+            encoder.push(CanonicalEvent::new(
+                3,
+                CanonicalEventKind::TextDelta {
+                    output_index: 0,
+                    text: "b".into(),
+                },
+            )),
+            Err(ClientStreamEncodeError::BufferedFramesTooLarge)
+        ));
+        assert_eq!(encoder.buffered_frame_bytes, maximum);
     }
 }

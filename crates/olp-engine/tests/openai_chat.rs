@@ -471,6 +471,112 @@ fn stream_accepts_extension_only_annotation_after_choice_finish() {
 }
 
 #[test]
+fn stream_accepts_azure_annotations_before_and_during_choice_output() {
+    let prompt_annotation = json!({
+        "id": "",
+        "object": "",
+        "created": 0,
+        "model": "",
+        "choices": [],
+        "prompt_filter_results": [{
+            "prompt_index": 0,
+            "content_filter_results": {
+                "violence": {"filtered": false, "severity": "safe"}
+            }
+        }],
+        "usage": null
+    });
+    let first = json!({
+        "id": "chatcmpl_stream",
+        "object": "chat.completion.chunk",
+        "created": 1800000000,
+        "model": "gpt-upstream",
+        "choices": [{
+            "index": 0,
+            "delta": {"role": "assistant", "content": "safe"},
+            "finish_reason": null
+        }]
+    });
+    let completion_annotation = json!({
+        "id": "",
+        "object": "",
+        "created": 0,
+        "model": "",
+        "choices": [{
+            "index": 0,
+            "finish_reason": null,
+            "content_filter_results": {
+                "violence": {"filtered": false, "severity": "safe"}
+            },
+            "content_filter_offsets": {
+                "check_offset": 4,
+                "start_offset": 0,
+                "end_offset": 4
+            }
+        }],
+        "usage": null
+    });
+    let finished = json!({
+        "id": "chatcmpl_stream",
+        "object": "chat.completion.chunk",
+        "created": 1800000000,
+        "model": "gpt-upstream",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": " output"},
+            "finish_reason": "stop"
+        }]
+    });
+    let wire = format!(
+        "data: {prompt_annotation}\n\ndata: {first}\n\ndata: {completion_annotation}\n\ndata: {finished}\n\ndata: [DONE]\n\n"
+    );
+    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut events = decoder.push(wire.as_bytes()).unwrap();
+    events.extend(decoder.finish().unwrap());
+
+    validate_event_sequence(&events).unwrap();
+    let position_of_extension = |pointer: &str| {
+        events
+            .iter()
+            .position(|event| {
+                matches!(
+                    &event.kind,
+                    CanonicalEventKind::SourceExtension { extensions }
+                        if extensions.values.contains_key(pointer)
+                )
+            })
+            .unwrap()
+    };
+    let response_start = events
+        .iter()
+        .position(|event| matches!(event.kind, CanonicalEventKind::ResponseStart { .. }))
+        .unwrap();
+    assert!(position_of_extension("/prompt_filter_results") < response_start);
+    assert!(position_of_extension("/choices/0/content_filter_results") > response_start);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, CanonicalEventKind::MessageStart { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                CanonicalEventKind::TextDelta { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>(),
+        "safe output"
+    );
+    assert!(matches!(
+        events.last().map(|event| &event.kind),
+        Some(CanonicalEventKind::Done)
+    ));
+}
+
+#[test]
 fn provider_error_frame_is_terminal_and_canonical() {
     let wire = b"data: {\"error\":{\"message\":\"slow down\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit\"}}\n\n";
     let mut decoder = OpenAiChatStreamDecoder::new();

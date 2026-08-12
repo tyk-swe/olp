@@ -32,6 +32,7 @@ pub struct GeminiGenerateContentClientStreamEncoder {
     tools: BTreeMap<(u32, u32), ToolState>,
     done: bool,
     skip_native_events: usize,
+    native_usage_seen: bool,
 }
 
 #[derive(Debug, Default)]
@@ -52,6 +53,7 @@ impl GeminiGenerateContentClientStreamEncoder {
             tools: BTreeMap::new(),
             done: false,
             skip_native_events: 0,
+            native_usage_seen: false,
         }
     }
 
@@ -111,6 +113,10 @@ impl GeminiGenerateContentClientStreamEncoder {
                 tool.arguments.push_str(&arguments_delta);
             }
             CanonicalEventKind::Usage { usage } => {
+                if self.native_usage_seen {
+                    self.native_usage_seen = false;
+                    return Ok(frames);
+                }
                 let candidates_token_count = usage
                     .output_tokens
                     .checked_sub(usage.reasoning_tokens.unwrap_or(0))
@@ -181,7 +187,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                     }
                     let (mut raw, semantic_events) =
                         decode_raw_sse_frame(value).ok_or(ClientStreamEncodeError::Extension)?;
-                    rewrite_gemini_model(&mut raw, &self.public_model)?;
+                    self.native_usage_seen |= rewrite_gemini_model(&mut raw, &self.public_model)?;
                     self.skip_native_events = semantic_events;
                     frames.push(raw);
                 } else if !extensions.values.is_empty() {
@@ -229,12 +235,13 @@ impl GeminiGenerateContentClientStreamEncoder {
 fn rewrite_gemini_model(
     frame: &mut SseFrame,
     public_model: &str,
-) -> Result<(), ClientStreamEncodeError> {
+) -> Result<bool, ClientStreamEncodeError> {
     let mut value: Value =
         serde_json::from_str(&frame.data).map_err(|_| ClientStreamEncodeError::Extension)?;
     let object = value
         .as_object_mut()
         .ok_or(ClientStreamEncodeError::Extension)?;
+    let contains_usage = object.contains_key("usageMetadata");
     if object.contains_key("modelVersion") {
         object.insert(
             "modelVersion".into(),
@@ -242,7 +249,7 @@ fn rewrite_gemini_model(
         );
     }
     frame.data = serde_json::to_string(&value).map_err(|_| ClientStreamEncodeError::Extension)?;
-    Ok(())
+    Ok(contains_usage)
 }
 
 const fn error_status(class: ErrorClass) -> u16 {

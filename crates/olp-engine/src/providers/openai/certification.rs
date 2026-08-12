@@ -58,8 +58,13 @@ impl OpenAiConnector {
         upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
-        self.execute_probe_operations(upstream_model, capability, probe_operations(capability)?)
-            .await
+        self.execute_probe_operations(
+            upstream_model,
+            capability,
+            ProviderKind::OpenAiCompatible,
+            probe_operations(capability)?,
+        )
+        .await
     }
 
     /// Certifies an official native OpenAI tuple. Safe content-minimal live
@@ -77,9 +82,14 @@ impl OpenAiConnector {
         upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<NativeOpenAiCertificationEvidence, CompatibleCapabilityCertificationError> {
-        if probe_operations(capability).is_ok() {
-            self.certify_compatible_capability(upstream_model, capability)
-                .await?;
+        if let Ok(operations) = probe_operations(capability) {
+            self.execute_probe_operations(
+                upstream_model,
+                capability,
+                ProviderKind::OpenAi,
+                operations,
+            )
+            .await?;
             return Ok(NativeOpenAiCertificationEvidence::LiveProbe);
         }
         if !native_openai_discovery_contract(capability) {
@@ -99,10 +109,10 @@ impl OpenAiConnector {
 
     /// Proves only the Chat Completions transport for a canonical generation
     /// tuple. Azure uses this bounded probe to test a deployment path before
-    /// its operation breadth is known. Full OpenAI-surface generation
-    /// certification must still use [`Self::certify_compatible_capability`],
-    /// which proves both Chat Completions and Responses.
-    pub async fn certify_chat_completions_capability(
+    /// its operation breadth is known. Full Azure OpenAI-surface generation
+    /// certification uses [`Self::certify_azure_capability`] to prove both
+    /// Chat Completions and Responses.
+    pub(in crate::providers) async fn certify_azure_chat_completions_capability(
         &self,
         upstream_model: &str,
         mode: TransportMode,
@@ -113,14 +123,34 @@ impl OpenAiConnector {
             mode,
         };
         let operation = generation_probe_operation(mode, false)?;
-        self.execute_probe_operations(upstream_model, capability, vec![operation])
-            .await
+        self.execute_probe_operations(
+            upstream_model,
+            capability,
+            ProviderKind::AzureOpenAi,
+            vec![operation],
+        )
+        .await
+    }
+
+    pub(in crate::providers) async fn certify_azure_capability(
+        &self,
+        upstream_model: &str,
+        capability: CompatibleCapability,
+    ) -> Result<(), CompatibleCapabilityCertificationError> {
+        self.execute_probe_operations(
+            upstream_model,
+            capability,
+            ProviderKind::AzureOpenAi,
+            probe_operations(capability)?,
+        )
+        .await
     }
 
     async fn execute_probe_operations(
         &self,
         upstream_model: &str,
         capability: CompatibleCapability,
+        provider_kind: ProviderKind,
         operations: Vec<Operation>,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
         for operation in operations {
@@ -136,7 +166,7 @@ impl OpenAiConnector {
                     route_id: RouteId::new(),
                     target_id: TargetId::new(),
                     provider_id: ProviderId::new(),
-                    provider_kind: ProviderKind::OpenAiCompatible,
+                    provider_kind,
                     upstream_model: upstream_model.to_owned(),
                     timeout: DurationMs::new(PROBE_TIMEOUT_MS),
                     priority: 0,
@@ -394,6 +424,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_and_compatible_generation_probes_use_their_wire_profiles() {
+        let capability = CompatibleCapability {
+            operation: OperationKind::Generation,
+            surface: Surface::OpenAi,
+            mode: TransportMode::Unary,
+        };
+        let chat = serde_json::to_vec(&serde_json::json!({
+            "id": "chatcmpl-certification",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "probe-model",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "OK"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4}
+        }))
+        .unwrap();
+        let responses = serde_json::to_vec(&serde_json::json!({
+            "id": "resp_certification",
+            "object": "response",
+            "created_at": 1,
+            "status": "completed",
+            "model": "probe-model",
+            "output": [{
+                "id": "msg_certification",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "OK", "annotations": []}]
+            }],
+            "usage": {"input_tokens": 3, "output_tokens": 1, "total_tokens": 4}
+        }))
+        .unwrap();
+
+        let (base_url, _) = spawn_response("application/octet-stream", chat.clone()).await;
+        let error = connector(&base_url)
+            .certify_native_openai_capability("probe-model", capability)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CompatibleCapabilityCertificationError::Transport {
+                class: AttemptFailureClass::Protocol,
+                ..
+            }
+        ));
+
+        let (base_url, _) = spawn_response_sequence(vec![
+            ("application/octet-stream", chat),
+            ("application/octet-stream", responses),
+        ])
+        .await;
+        connector(&base_url)
+            .certify_compatible_capability("probe-model", capability)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_and_compatible_typed_probes_use_their_wire_profiles() {
+        let capability = CompatibleCapability {
+            operation: OperationKind::Embeddings,
+            surface: Surface::OpenAi,
+            mode: TransportMode::Unary,
+        };
+        let body = serde_json::to_vec(&serde_json::json!({
+            "object": "list",
+            "model": "probe-model",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.25]}],
+            "usage": {"prompt_tokens": 1, "total_tokens": 1}
+        }))
+        .unwrap();
+
+        let (base_url, _) = spawn_response("application/octet-stream", body.clone()).await;
+        let error = connector(&base_url)
+            .certify_native_openai_capability("probe-model", capability)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CompatibleCapabilityCertificationError::Transport {
+                class: AttemptFailureClass::Protocol,
+                ..
+            }
+        ));
+
+        let (base_url, _) = spawn_response("application/octet-stream", body).await;
+        connector(&base_url)
+            .certify_compatible_capability("probe-model", capability)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn malformed_success_response_is_not_certified() {
         let (base_url, _) = spawn_json_response(br#"{"not":"a chat response"}"#.to_vec()).await;
         let error = connector(&base_url)
@@ -433,7 +559,7 @@ mod tests {
             "event: response.output_item.done\n",
             "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"completed\"}}\n\n",
             "event: response.completed\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}}\n\n"
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"status\":\"completed\"}],\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}}\n\n"
         );
         let (base_url, requests) = spawn_response_sequence(vec![
             ("text/event-stream", body.as_bytes().to_vec()),

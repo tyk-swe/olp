@@ -14,18 +14,27 @@ use crate::protocols::CanonicalEventBuilder as EventBuilder;
 pub fn decode_generate_content_response(
     response: GenerateContentResponse,
 ) -> Result<Vec<CanonicalEvent>, ResponseError> {
-    decode_response(response, true)
+    decode_response(response, true, true)
+}
+
+pub(crate) fn decode_generate_content_response_for_surface(
+    response: GenerateContentResponse,
+    preserve_extensions: bool,
+) -> Result<Vec<CanonicalEvent>, ResponseError> {
+    decode_response(response, true, preserve_extensions)
 }
 
 pub(in crate::protocols) fn decode_generate_content_chunk(
     response: GenerateContentResponse,
+    preserve_extensions: bool,
 ) -> Result<Vec<CanonicalEvent>, ResponseError> {
-    decode_response(response, false)
+    decode_response(response, false, preserve_extensions)
 }
 
 fn decode_response(
     response: GenerateContentResponse,
     require_finish: bool,
+    preserve_extensions: bool,
 ) -> Result<Vec<CanonicalEvent>, ResponseError> {
     let mut builder = EventBuilder::default();
     builder.push(CanonicalEventKind::ResponseStart {
@@ -57,7 +66,13 @@ fn decode_response(
         }
     }
     for (position, candidate) in response.candidates.into_iter().enumerate() {
-        if decode_candidate(candidate, position, &mut builder, &mut extensions)? {
+        if decode_candidate(
+            candidate,
+            position,
+            &mut builder,
+            &mut extensions,
+            preserve_extensions,
+        )? {
             finished_count += 1;
         }
     }
@@ -66,14 +81,29 @@ fn decode_response(
     }
     let mut usage_observation = None;
     if let Some(usage) = response.usage_metadata {
-        collect_extra("/usageMetadata", &usage.extra, &mut extensions);
-        if let Some(usage) = canonical_usage(&usage)? {
-            builder.push(CanonicalEventKind::Usage { usage });
+        let observation = usage_observation_for(&usage)?;
+        if let Some(canonical) = canonical_usage(&usage)? {
+            builder.push(CanonicalEventKind::Usage { usage: canonical });
+            if preserve_extensions && let Some(tool_use) = usage.tool_use_prompt_token_count {
+                extensions.insert(
+                    "/usageMetadata/toolUsePromptTokenCount".into(),
+                    Value::from(tool_use),
+                );
+            }
+            if preserve_extensions {
+                collect_extra("/usageMetadata", &usage.extra, &mut extensions);
+            }
         } else {
-            usage_observation = Some(usage_observation_for(&usage)?);
+            usage_observation = Some(observation);
+            if preserve_extensions {
+                extensions.insert("/usageMetadata".into(), usage_metadata_value(&usage));
+            }
         }
     }
-    if !extensions.is_empty() {
+    if prompt_blocked && preserve_extensions {
+        extensions.insert("/candidates".into(), Value::Array(Vec::new()));
+    }
+    if preserve_extensions && !extensions.is_empty() {
         builder.push(CanonicalEventKind::SourceExtension {
             extensions: SourceExtensions::new(Surface::Gemini, extensions),
         });
@@ -97,6 +127,7 @@ fn decode_candidate(
     position: usize,
     builder: &mut EventBuilder,
     extensions: &mut BTreeMap<String, Value>,
+    preserve_extensions: bool,
 ) -> Result<bool, ResponseError> {
     let output_index = candidate.index.unwrap_or(
         position
@@ -104,7 +135,9 @@ fn decode_candidate(
             .map_err(|_| ResponseError::TooManyCandidates)?,
     );
     let prefix = format!("/candidates/{output_index}");
-    collect_extra(&prefix, &candidate.extra, extensions);
+    if preserve_extensions {
+        collect_extra(&prefix, &candidate.extra, extensions);
+    }
     builder.push(CanonicalEventKind::MessageStart {
         output_index,
         role: MessageRole::Assistant,
@@ -116,39 +149,24 @@ fn decode_candidate(
                 content.role.unwrap_or_default(),
             ));
         }
-        collect_extra(&format!("{prefix}/content"), &content.extra, extensions);
+        if preserve_extensions {
+            collect_extra(&format!("{prefix}/content"), &content.extra, extensions);
+        }
         for (part_index, part) in content.parts.into_iter().enumerate() {
+            if preserve_extensions {
+                extensions.insert(
+                    format!("{prefix}/content/parts/{part_index}"),
+                    part.as_value(),
+                );
+            }
             match part {
-                Part::Text(part)
-                    if part.thought != Some(true) && part.thought_signature.is_none() =>
-                {
-                    collect_extra(
-                        &format!("{prefix}/content/parts/{part_index}"),
-                        &part.extra,
-                        extensions,
-                    );
-                    if let Some(thought) = part.thought {
-                        extensions.insert(
-                            format!("{prefix}/content/parts/{part_index}/thought"),
-                            Value::Bool(thought),
-                        );
-                    }
+                Part::Text(part) if part.thought != Some(true) => {
                     builder.push(CanonicalEventKind::TextDelta {
                         output_index,
                         text: part.text,
                     });
                 }
                 Part::FunctionCall(part) => {
-                    collect_extra(
-                        &format!("{prefix}/content/parts/{part_index}"),
-                        &part.extra,
-                        extensions,
-                    );
-                    collect_extra(
-                        &format!("{prefix}/content/parts/{part_index}/functionCall"),
-                        &part.function_call.extra,
-                        extensions,
-                    );
                     builder.push(CanonicalEventKind::ToolCallDelta {
                         output_index,
                         tool_index,
@@ -161,12 +179,7 @@ fn decode_candidate(
                         .checked_add(1)
                         .ok_or(ResponseError::TooManyToolCalls)?;
                 }
-                part => {
-                    extensions.insert(
-                        format!("{prefix}/content/parts/{part_index}"),
-                        part.as_value(),
-                    );
-                }
+                _ => {}
             }
         }
     }
@@ -187,53 +200,32 @@ fn decode_candidate(
 pub(in crate::protocols) fn canonical_usage(
     usage: &UsageMetadata,
 ) -> Result<Option<Usage>, ResponseError> {
-    for counter in [
-        usage.prompt_token_count,
-        usage.candidates_token_count,
-        usage.total_token_count,
-        usage.cached_content_token_count,
-        usage.thoughts_token_count,
-        usage.tool_use_prompt_token_count,
-    ] {
-        crate::protocols::usage::validate_counter(counter)
-            .map_err(|_| ResponseError::InvalidUsage)?;
-    }
+    let observation = usage_observation_for(usage)?;
     let (Some(input_tokens), Some(output_tokens), Some(total_tokens)) = (
-        usage.prompt_token_count,
-        usage.candidates_token_count,
-        usage.total_token_count,
+        observation.input_tokens,
+        observation.output_tokens,
+        observation.total_tokens,
     ) else {
         return Ok(None);
     };
-    let canonical_input_tokens = input_tokens
-        .checked_add(usage.tool_use_prompt_token_count.unwrap_or(0))
+    let expected_total = input_tokens
+        .checked_add(output_tokens)
         .ok_or(ResponseError::InvalidUsage)?;
-    let canonical_output_tokens = output_tokens
-        .checked_add(usage.thoughts_token_count.unwrap_or(0))
-        .ok_or(ResponseError::InvalidUsage)?;
-    let expected_total = canonical_input_tokens
-        .checked_add(canonical_output_tokens)
-        .ok_or(ResponseError::InvalidUsage)?;
-    if total_tokens != expected_total
-        || usage
-            .cached_content_token_count
-            .is_some_and(|cached| cached > canonical_input_tokens)
-        || usage
-            .thoughts_token_count
-            .is_some_and(|thoughts| thoughts > canonical_output_tokens)
-    {
+    if total_tokens != expected_total {
         return Err(ResponseError::InvalidUsage);
     }
     Ok(Some(Usage {
-        input_tokens: canonical_input_tokens,
-        output_tokens: canonical_output_tokens,
+        input_tokens,
+        output_tokens,
         total_tokens,
         cached_input_tokens: usage.cached_content_token_count,
         reasoning_tokens: usage.thoughts_token_count,
     }))
 }
 
-fn usage_observation_for(usage: &UsageMetadata) -> Result<UsageObservation, ResponseError> {
+pub(in crate::protocols) fn usage_observation_for(
+    usage: &UsageMetadata,
+) -> Result<UsageObservation, ResponseError> {
     for counter in [
         usage.prompt_token_count,
         usage.candidates_token_count,
@@ -276,6 +268,24 @@ fn usage_observation_for(usage: &UsageMetadata) -> Result<UsageObservation, Resp
     {
         return Err(ResponseError::InvalidUsage);
     }
+    let input_lower_bound = match input_tokens {
+        Some(input) => input.max(usage.cached_content_token_count.unwrap_or(0)),
+        None => usage
+            .cached_content_token_count
+            .unwrap_or(0)
+            .checked_add(usage.tool_use_prompt_token_count.unwrap_or(0))
+            .ok_or(ResponseError::InvalidUsage)?,
+    };
+    let output_lower_bound = output_tokens
+        .unwrap_or(usage.thoughts_token_count.unwrap_or(0))
+        .max(usage.thoughts_token_count.unwrap_or(0));
+    if usage.total_token_count.is_some_and(|total| {
+        input_lower_bound
+            .checked_add(output_lower_bound)
+            .is_none_or(|lower_bound| lower_bound > total)
+    }) {
+        return Err(ResponseError::InvalidUsage);
+    }
     Ok(UsageObservation {
         input_tokens,
         output_tokens,
@@ -283,6 +293,23 @@ fn usage_observation_for(usage: &UsageMetadata) -> Result<UsageObservation, Resp
         cached_input_tokens: usage.cached_content_token_count,
         reasoning_tokens: usage.thoughts_token_count,
     })
+}
+
+fn usage_metadata_value(usage: &UsageMetadata) -> Value {
+    let mut object = serde_json::Map::from_iter(usage.extra.clone());
+    for (name, value) in [
+        ("promptTokenCount", usage.prompt_token_count),
+        ("candidatesTokenCount", usage.candidates_token_count),
+        ("totalTokenCount", usage.total_token_count),
+        ("cachedContentTokenCount", usage.cached_content_token_count),
+        ("thoughtsTokenCount", usage.thoughts_token_count),
+        ("toolUsePromptTokenCount", usage.tool_use_prompt_token_count),
+    ] {
+        if let Some(value) = value {
+            object.insert(name.into(), Value::from(value));
+        }
+    }
+    Value::Object(object)
 }
 
 pub(in crate::protocols) fn gemini_finish_reason(reason: &str) -> FinishReason {

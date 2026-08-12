@@ -2,10 +2,10 @@ use olp_engine::domain::{
     CanonicalEventKind, FinishReason, MessageRole, Operation, Surface, validate_event_sequence,
 };
 use olp_engine::protocols::anthropic::{
-    AnthropicMessagesClientStreamEncoder, AnthropicMessagesStreamDecoder, CountTokensRequest,
-    CountTokensResponse, MessagesRequest, MessagesResponse, StreamError,
+    AnthropicMessagesClientStreamEncoder, AnthropicMessagesStreamDecoder, ClientStreamEncodeError,
+    CountTokensRequest, CountTokensResponse, MessagesRequest, MessagesResponse, StreamError,
     decode_count_tokens_request, decode_messages_request, decode_messages_response,
-    encode_count_tokens_result, encode_messages_request,
+    encode_count_tokens_result, encode_messages_request, encode_messages_response,
 };
 use serde_json::{Value, json};
 
@@ -188,6 +188,56 @@ fn unary_partial_usage_is_attached_to_done_for_accounting() {
     assert_eq!(observation.output_tokens, None);
     assert_eq!(observation.total_tokens, None);
     assert_eq!(observation.cached_input_tokens, Some(4));
+}
+
+#[test]
+fn unary_usage_rejects_derived_counters_outside_the_accounting_range() {
+    for usage in [
+        json!({"input_tokens": i64::MAX as u64, "output_tokens": 1}),
+        json!({
+            "input_tokens": i64::MAX as u64,
+            "output_tokens": 0,
+            "cache_read_input_tokens": 1
+        }),
+    ] {
+        let response: MessagesResponse = serde_json::from_value(json!({
+            "id": "msg_usage_range",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-upstream",
+            "content": [],
+            "stop_reason": "end_turn",
+            "usage": usage
+        }))
+        .unwrap();
+        assert!(decode_messages_response(response).is_err());
+    }
+}
+
+#[test]
+fn unary_response_cache_usage_round_trips_without_double_counting() {
+    let response: MessagesResponse = serde_json::from_value(json!({
+        "id": "msg_cache",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-upstream",
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 4,
+            "cache_creation_input_tokens": 3,
+            "cache_read_input_tokens": 2
+        }
+    }))
+    .unwrap();
+
+    let events = decode_messages_response(response).unwrap();
+    let encoded = encode_messages_response(&events, "public-route", "fallback").unwrap();
+    assert_eq!(encoded.usage.input_tokens, Some(10));
+    assert_eq!(encoded.usage.output_tokens, Some(4));
+    assert_eq!(encoded.usage.cache_creation_input_tokens, Some(3));
+    assert_eq!(encoded.usage.cache_read_input_tokens, Some(2));
 }
 
 fn sse(event: &str, data: Value) -> String {
@@ -629,6 +679,253 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
             ))
             .is_err()
     );
+}
+
+#[test]
+fn client_stream_buffers_finish_for_later_cached_usage() {
+    let canonical = vec![
+        olp_engine::domain::CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: Some("msg-client-order".into()),
+                provider_model: Some("private".into()),
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            1,
+            CanonicalEventKind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            2,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "hello".into(),
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            3,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::Stop,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            4,
+            CanonicalEventKind::Usage {
+                usage: olp_engine::domain::Usage {
+                    input_tokens: 10,
+                    output_tokens: 2,
+                    total_tokens: 12,
+                    cached_input_tokens: Some(4),
+                    reasoning_tokens: None,
+                },
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(5, CanonicalEventKind::Done),
+    ];
+    let mut encoder = AnthropicMessagesClientStreamEncoder::new("public-route", "fallback");
+    let mut wire = String::new();
+    for (index, event) in canonical.into_iter().enumerate() {
+        let frames = encoder.push(event).unwrap();
+        if index == 2 || index == 3 {
+            assert!(frames.is_empty());
+        }
+        if index == 4 {
+            let message_start = frames
+                .iter()
+                .find(|frame| frame.event.as_deref() == Some("message_start"))
+                .unwrap();
+            let start: Value = serde_json::from_str(&message_start.data).unwrap();
+            assert_eq!(start["message"]["usage"]["input_tokens"], 6);
+            assert_eq!(start["message"]["usage"]["output_tokens"], 0);
+            assert_eq!(start["message"]["usage"]["cache_read_input_tokens"], 4);
+            let terminal = frames
+                .iter()
+                .find(|frame| frame.event.as_deref() == Some("message_delta"))
+                .unwrap();
+            let usage: Value = serde_json::from_str(&terminal.data).unwrap();
+            assert_eq!(usage["usage"]["input_tokens"], 6);
+            assert_eq!(usage["usage"]["output_tokens"], 2);
+            assert_eq!(usage["usage"]["cache_read_input_tokens"], 4);
+        }
+        for frame in frames {
+            wire.push_str(&format!(
+                "event: {}\ndata: {}\n\n",
+                frame.event.unwrap(),
+                frame.data
+            ));
+        }
+    }
+
+    let mut decoder = AnthropicMessagesStreamDecoder::new();
+    let mut decoded = decoder.push(wire.as_bytes()).unwrap();
+    decoded.extend(decoder.finish().unwrap());
+    assert!(decoded.iter().any(|event| matches!(
+        event.kind,
+        CanonicalEventKind::Usage { usage }
+            if usage.input_tokens == 10
+                && usage.output_tokens == 2
+                && usage.cached_input_tokens == Some(4)
+    )));
+}
+
+#[test]
+fn client_stream_error_drops_buffered_content_and_does_not_emit_message_stop() {
+    let mut encoder = AnthropicMessagesClientStreamEncoder::new("route", "fallback");
+    for event in [
+        olp_engine::domain::CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            1,
+            CanonicalEventKind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            2,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "discard me".into(),
+            },
+        ),
+    ] {
+        assert!(encoder.push(event).unwrap().is_empty());
+    }
+    let error_frames = encoder
+        .push(olp_engine::domain::CanonicalEvent::new(
+            3,
+            CanonicalEventKind::Error {
+                error: olp_engine::domain::CanonicalError {
+                    class: olp_engine::domain::ErrorClass::Upstream,
+                    message: "failed".into(),
+                    provider_code: None,
+                    retryable: false,
+                },
+            },
+        ))
+        .unwrap();
+    assert_eq!(error_frames.len(), 1);
+    assert_eq!(error_frames[0].event.as_deref(), Some("error"));
+
+    let done_frames = encoder
+        .push(olp_engine::domain::CanonicalEvent::new(
+            4,
+            CanonicalEventKind::Done,
+        ))
+        .unwrap();
+    assert!(done_frames.is_empty());
+
+    let mut encoder = AnthropicMessagesClientStreamEncoder::new("route", "fallback");
+    for event in [
+        olp_engine::domain::CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            1,
+            CanonicalEventKind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            2,
+            CanonicalEventKind::Usage {
+                usage: olp_engine::domain::Usage {
+                    input_tokens: 1,
+                    output_tokens: 0,
+                    total_tokens: 1,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                },
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            3,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "already emitted".into(),
+            },
+        ),
+    ] {
+        encoder.push(event).unwrap();
+    }
+    assert_eq!(
+        encoder
+            .push(olp_engine::domain::CanonicalEvent::new(
+                4,
+                CanonicalEventKind::Error {
+                    error: olp_engine::domain::CanonicalError {
+                        class: olp_engine::domain::ErrorClass::Upstream,
+                        message: "failed".into(),
+                        provider_code: None,
+                        retryable: false,
+                    },
+                },
+            ))
+            .unwrap()[0]
+            .event
+            .as_deref(),
+        Some("error")
+    );
+    assert!(
+        encoder
+            .push(olp_engine::domain::CanonicalEvent::new(
+                5,
+                CanonicalEventKind::Done,
+            ))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn client_stream_rejects_successful_done_without_usage() {
+    let mut encoder = AnthropicMessagesClientStreamEncoder::new("route", "fallback");
+    for event in [
+        olp_engine::domain::CanonicalEvent::new(
+            0,
+            CanonicalEventKind::ResponseStart {
+                response_id: None,
+                provider_model: None,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            1,
+            CanonicalEventKind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(
+            2,
+            CanonicalEventKind::Finish {
+                output_index: 0,
+                reason: FinishReason::Stop,
+            },
+        ),
+    ] {
+        encoder.push(event).unwrap();
+    }
+    assert!(matches!(
+        encoder.push(olp_engine::domain::CanonicalEvent::new(
+            3,
+            CanonicalEventKind::Done
+        )),
+        Err(ClientStreamEncodeError::MissingUsage)
+    ));
 }
 
 #[test]

@@ -110,6 +110,37 @@ async fn raw_media_stream_rejects_malformed_conflicting_and_inconsistent_usage()
             "type": "image_generation.completed",
             "usage": { "input_tokens": 2, "output_tokens": 1, "total_tokens": 4 }
         })],
+        vec![
+            serde_json::json!({
+                "type": "image_generation.partial_image",
+                "usage": { "input_tokens": 2 }
+            }),
+            serde_json::json!({
+                "type": "image_generation.completed",
+                "usage": { "total_tokens": 1 }
+            }),
+        ],
+        vec![
+            serde_json::json!({
+                "type": "image_generation.partial_image",
+                "usage": { "total_tokens": 1 }
+            }),
+            serde_json::json!({
+                "type": "image_generation.completed",
+                "usage": { "output_tokens": 2 }
+            }),
+        ],
+        vec![serde_json::json!({
+            "type": "image_generation.completed",
+            "usage": { "input_tokens": 2, "output_tokens": 2, "total_tokens": 3 }
+        })],
+        vec![serde_json::json!({
+            "type": "image_generation.completed",
+            "usage": {
+                "total_tokens": 1,
+                "input_tokens_details": { "cached_tokens": 2 }
+            }
+        })],
     ] {
         let body = frames
             .into_iter()

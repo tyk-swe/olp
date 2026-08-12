@@ -348,20 +348,28 @@ pub fn decode_image_response(
             revised_prompt: data.revised_prompt,
         });
     }
-    let (usage, usage_observation) = response.usage.map_or(Ok((None, None)), |usage| {
-        collect_extra("/usage", &usage.extra, &mut extensions);
-        let observed = ObservedUsage {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            total_tokens: usage.total_tokens,
-            cached_input_tokens: None,
-            reasoning_tokens: None,
-        };
-        observed
-            .with_exact_total()
-            .map(|usage| (usage, usage.is_none().then(|| observed.observation())))
-            .map_err(|_| ImageCodecError::InvalidUsage)
-    })?;
+    let (usage, usage_observation) =
+        response
+            .usage
+            .map_or(Ok::<_, ImageCodecError>((None, None)), |usage| {
+                let observed = ObservedUsage {
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    total_tokens: usage.total_tokens,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                };
+                let canonical = observed
+                    .with_exact_total()
+                    .map_err(|_| ImageCodecError::InvalidUsage)?;
+                if canonical.is_some() {
+                    collect_extra("/usage", &usage.extra, &mut extensions);
+                }
+                Ok((
+                    canonical,
+                    canonical.is_none().then(|| observed.observation()),
+                ))
+            })?;
     Ok(ImagesResult {
         created_at: Some(response.created),
         images,
@@ -476,19 +484,28 @@ pub fn decode_image_stream_event(
             })
         }
         "image_generation.completed" | "image_edit.completed" => {
-            let (usage, usage_observation) = event.usage.map_or(Ok((None, None)), |usage| {
-                let observed = ObservedUsage {
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                    total_tokens: usage.total_tokens,
-                    cached_input_tokens: None,
-                    reasoning_tokens: None,
-                };
-                observed
-                    .with_exact_total()
-                    .map(|usage| (usage, usage.is_none().then(|| observed.observation())))
-                    .map_err(|_| ImageCodecError::InvalidUsage)
-            })?;
+            let (usage, usage_observation) =
+                event
+                    .usage
+                    .map_or(Ok::<_, ImageCodecError>((None, None)), |usage| {
+                        let observed = ObservedUsage {
+                            input_tokens: usage.input_tokens,
+                            output_tokens: usage.output_tokens,
+                            total_tokens: usage.total_tokens,
+                            cached_input_tokens: None,
+                            reasoning_tokens: None,
+                        };
+                        let canonical = observed
+                            .with_exact_total()
+                            .map_err(|_| ImageCodecError::InvalidUsage)?;
+                        if canonical.is_some() {
+                            collect_extra("/usage", &usage.extra, &mut extensions);
+                        }
+                        Ok((
+                            canonical,
+                            canonical.is_none().then(|| observed.observation()),
+                        ))
+                    })?;
             Ok(ImageStreamUpdate::Completed {
                 usage,
                 usage_observation,

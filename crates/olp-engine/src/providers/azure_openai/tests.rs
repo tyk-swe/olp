@@ -211,6 +211,34 @@ async fn embedding_only_deployment_passes_the_bounded_fallback_probe() {
 }
 
 #[tokio::test]
+async fn deployment_certification_uses_the_strict_wire_profile() {
+    let body = r#"{"object":"list","data":[{"object":"embedding","embedding":[0.25],"index":0}],"model":"embedding-model","usage":{"prompt_tokens":2,"total_tokens":2}}"#;
+    let (origin, captured) = spawn_server(response("application/octet-stream", body)).await;
+    let error = connector(&origin)
+        .certify_deployment_capability(
+            "team-chat",
+            CompatibleCapability {
+                operation: OperationKind::Embeddings,
+                surface: Surface::OpenAi,
+                mode: TransportMode::Unary,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        CompatibleCapabilityCertificationError::Transport {
+            class: AttemptFailureClass::Protocol,
+            ..
+        }
+    ));
+    let request = String::from_utf8(captured.await.unwrap()).unwrap();
+    assert!(request.starts_with(
+        "POST /openai/deployments/team-chat/embeddings?api-version=2024-10-21 HTTP/1.1"
+    ));
+}
+
+#[tokio::test]
 async fn rejected_deployment_or_api_version_never_becomes_probe_evidence() {
     let (origin, captured) = spawn_response_sequence(vec![
         error_response("404 Not Found"),

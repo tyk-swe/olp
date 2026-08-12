@@ -281,6 +281,32 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     assert_eq!(event.operation, OperationKind::Generation);
     assert_eq!(event.input_tokens, Some(7));
     assert!(event.usage_complete);
+
+    let mut incomplete = generation_stream_events("partial response");
+    let finish = incomplete
+        .iter_mut()
+        .find(|event| matches!(event.kind, CanonicalEventKind::Finish { .. }))
+        .unwrap();
+    finish.kind = CanonicalEventKind::Finish {
+        output_index: 0,
+        reason: FinishReason::Length,
+    };
+    install_event_stream(&state, OperationKind::Generation, incomplete, false);
+    let response = post_json(
+        &state,
+        &key,
+        "/openai/v1/responses",
+        r#"{"model":"default","input":"hi","stream":true}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("\"status\":\"incomplete\""));
+    assert!(body.contains("\"reason\":\"max_output_tokens\""));
+    assert!(body.contains("event: response.incomplete"));
+    assert!(!body.contains("event: response.completed"));
+    let event = request_metadata.recv_next().await.unwrap();
+    assert_eq!(event.operation, OperationKind::Generation);
 }
 
 #[tokio::test]

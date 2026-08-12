@@ -155,6 +155,7 @@ fn decode_content(
     let mut tool_calls = Vec::new();
     let mut extensions = BTreeMap::new();
     let mut seen_function_call = false;
+    let mut preserved_part_count = 0_usize;
 
     for part in content.parts {
         match part {
@@ -169,6 +170,7 @@ fn decode_content(
                     &mut tool_calls,
                     &mut extensions,
                 );
+                preserved_part_count = 0;
                 let mut local_extensions = BTreeMap::new();
                 collect_extra("/parts/0", &part.extra, &mut local_extensions);
                 collect_extra(
@@ -199,16 +201,27 @@ fn decode_content(
                 seen_function_call = false;
             }
             Part::Text(part) => {
-                if part.thought == Some(true) || part.thought_signature.is_some() {
-                    return Err(DecodeError::ThoughtPartUnsupported);
+                let index = parts.len() + tool_calls.len() + preserved_part_count;
+                if part.thought == Some(true) {
+                    if role != MessageRole::Assistant {
+                        return Err(DecodeError::ThoughtPartUnsupported);
+                    }
+                    extensions.insert(format!("/parts/{index}"), Part::Text(part).as_value());
+                    preserved_part_count += 1;
+                    continue;
                 }
                 if seen_function_call {
                     return Err(DecodeError::InterleavedFunctionCall);
                 }
-                let index = parts.len();
                 collect_extra(&format!("/parts/{index}"), &part.extra, &mut extensions);
                 if let Some(thought) = part.thought {
                     extensions.insert(format!("/parts/{index}/thought"), Value::Bool(thought));
+                }
+                if let Some(signature) = part.thought_signature {
+                    extensions.insert(
+                        format!("/parts/{index}/thoughtSignature"),
+                        Value::String(signature),
+                    );
                 }
                 parts.push(ContentPart::Text { text: part.text });
             }
@@ -221,7 +234,7 @@ fn decode_content(
                         part.file_data.mime_type,
                     ));
                 }
-                let index = parts.len();
+                let index = parts.len() + tool_calls.len() + preserved_part_count;
                 collect_extra(&format!("/parts/{index}"), &part.extra, &mut extensions);
                 collect_extra(
                     &format!("/parts/{index}/fileData"),
@@ -241,7 +254,7 @@ fn decode_content(
                 if seen_function_call {
                     return Err(DecodeError::InterleavedFunctionCall);
                 }
-                let index = parts.len();
+                let index = parts.len() + tool_calls.len() + preserved_part_count;
                 collect_extra(&format!("/parts/{index}"), &part.extra, &mut extensions);
                 collect_extra(
                     &format!("/parts/{index}/inlineData"),
@@ -274,7 +287,7 @@ fn decode_content(
                     return Err(DecodeError::FunctionCallRole);
                 }
                 seen_function_call = true;
-                let part_index = parts.len() + tool_calls.len();
+                let part_index = parts.len() + tool_calls.len() + preserved_part_count;
                 collect_extra(
                     &format!("/parts/{part_index}"),
                     &part.extra,
@@ -334,7 +347,10 @@ fn flush_regular(
     tool_calls: &mut Vec<ToolCall>,
     extensions: &mut BTreeMap<String, Value>,
 ) {
-    if parts.is_empty() && tool_calls.is_empty() {
+    if parts.is_empty()
+        && tool_calls.is_empty()
+        && (role != MessageRole::Assistant || extensions.is_empty())
+    {
         return;
     }
     segments.push(DecodedContent {

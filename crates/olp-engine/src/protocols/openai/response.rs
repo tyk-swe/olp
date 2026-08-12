@@ -52,9 +52,27 @@ pub(crate) fn decode_compatible_chat_completion_response(
     body: &[u8],
 ) -> Result<Vec<CanonicalEvent>, OpenAiCompatibleDecodeError> {
     let mut value: Value = serde_json::from_slice(body)?;
+    let response_id = value.get("id").and_then(Value::as_str).map(str::to_owned);
+    let provider_model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     normalize_compatible_chat_response(&mut value)?;
     let response: ChatCompletionResponse = serde_json::from_value(value)?;
-    Ok(decode_chat_completion_response(response)?)
+    let mut events = decode_chat_completion_response(response)?;
+    if let Some(CanonicalEvent {
+        kind:
+            CanonicalEventKind::ResponseStart {
+                response_id: emitted_id,
+                provider_model: emitted_model,
+            },
+        ..
+    }) = events.first_mut()
+    {
+        *emitted_id = response_id;
+        *emitted_model = provider_model;
+    }
+    Ok(events)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -201,13 +219,15 @@ pub fn decode_chat_completion_response(
 
     let mut usage_observation = None;
     if let Some(usage) = response.usage {
-        collect_usage_extensions("/usage", &usage, &mut extensions);
         let observed = observed_usage(&usage);
         match observed
             .with_exact_total()
             .map_err(|_| OpenAiResponseError::InvalidUsage)?
         {
-            Some(usage) => builder.push(CanonicalEventKind::Usage { usage }),
+            Some(canonical) => {
+                collect_usage_extensions("/usage", &usage, &mut extensions);
+                builder.push(CanonicalEventKind::Usage { usage: canonical });
+            }
             None => usage_observation = Some(observed.observation()),
         }
     }
@@ -555,17 +575,26 @@ impl OpenAiChatStreamDecoder {
                 continue;
             }
             if self.compatible {
+                let response_metadata = (
+                    value.get("id").and_then(Value::as_str).map(str::to_owned),
+                    value
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                );
                 normalize_compatible_chat_chunk(
                     &mut value,
                     &self.started_choices,
                     &self.known_tools,
                 )
                 .map_err(OpenAiStreamError::Compatible)?;
+                let chunk: ChatCompletionChunk = serde_json::from_value(value)?;
+                self.decode_chunk(chunk, Some(response_metadata), &mut events)?;
             } else {
                 validate_strict_chat_chunk_envelope(&value)?;
+                let chunk: ChatCompletionChunk = serde_json::from_value(value)?;
+                self.decode_chunk(chunk, None, &mut events)?;
             }
-            let chunk: ChatCompletionChunk = serde_json::from_value(value)?;
-            self.decode_chunk(chunk, &mut events)?;
         }
         Ok(events)
     }
@@ -573,6 +602,7 @@ impl OpenAiChatStreamDecoder {
     fn decode_chunk(
         &mut self,
         chunk: ChatCompletionChunk,
+        compatible_metadata: Option<(Option<String>, Option<String>)>,
         events: &mut Vec<CanonicalEvent>,
     ) -> Result<(), OpenAiStreamError> {
         if let Some(choice) = chunk.choices.iter().find(|choice| {
@@ -580,21 +610,24 @@ impl OpenAiChatStreamDecoder {
         }) {
             return Err(OpenAiStreamError::DataAfterChoiceFinish(choice.index));
         }
-        let azure_extension_only = chunk.object.is_empty()
+        let azure_annotation = chunk.object.is_empty()
             && chunk.usage.is_none()
-            && !chunk.choices.is_empty()
-            && chunk.choices.iter().all(|choice| {
-                self.finished_choices.contains(&choice.index) && choice.is_extension_only()
-            });
-        if chunk.object != "chat.completion.chunk" && !azure_extension_only {
+            && if chunk.choices.is_empty() {
+                chunk.extra.contains_key("prompt_filter_results")
+            } else {
+                chunk.choices.iter().all(ChatChunkChoice::is_extension_only)
+            };
+        if chunk.object != "chat.completion.chunk" && !azure_annotation {
             return Err(OpenAiStreamError::UnexpectedObject(chunk.object));
         }
-        if !self.response_started {
+        if !self.response_started && !azure_annotation {
+            let (response_id, provider_model) = compatible_metadata
+                .unwrap_or_else(|| (Some(chunk.id.clone()), Some(chunk.model.clone())));
             self.emit(
                 events,
                 CanonicalEventKind::ResponseStart {
-                    response_id: Some(chunk.id.clone()),
-                    provider_model: Some(chunk.model.clone()),
+                    response_id,
+                    provider_model,
                 },
             );
             self.response_started = true;
@@ -609,7 +642,8 @@ impl OpenAiChatStreamDecoder {
                 return Err(OpenAiStreamError::DuplicateChoiceIndex(choice.index));
             }
             let choice_finished = self.finished_choices.contains(&choice.index);
-            if choice_finished && !choice.is_extension_only() {
+            let extension_only = choice.is_extension_only();
+            if choice_finished && !extension_only {
                 return Err(OpenAiStreamError::DataAfterChoiceFinish(choice.index));
             }
             let prefix = format!("/choices/{}", choice.index);
@@ -619,7 +653,7 @@ impl OpenAiChatStreamDecoder {
                 &choice.delta.extra,
                 &mut extensions,
             );
-            if choice_finished {
+            if azure_annotation && extension_only {
                 continue;
             }
             if self.started_choices.insert(choice.index) {
@@ -740,13 +774,15 @@ impl OpenAiChatStreamDecoder {
                 return Err(OpenAiStreamError::DuplicateUsage);
             }
             self.usage_seen = true;
-            collect_usage_extensions("/usage", &usage, &mut extensions);
             let observed = observed_usage(&usage);
             match observed
                 .with_exact_total()
                 .map_err(|_| OpenAiStreamError::InvalidUsage)?
             {
-                Some(usage) => self.emit(events, CanonicalEventKind::Usage { usage }),
+                Some(canonical) => {
+                    collect_usage_extensions("/usage", &usage, &mut extensions);
+                    self.emit(events, CanonicalEventKind::Usage { usage: canonical });
+                }
                 None => self.usage_observation = Some(observed.observation()),
             }
         }

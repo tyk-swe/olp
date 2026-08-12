@@ -111,9 +111,13 @@ pub(in crate::protocols) fn canonical_usage(
         .checked_add(usage.cache_creation_input_tokens.unwrap_or(0))
         .and_then(|tokens| tokens.checked_add(usage.cache_read_input_tokens.unwrap_or(0)))
         .ok_or(ResponseError::InvalidUsage)?;
+    crate::protocols::usage::validate_counter(Some(input_tokens))
+        .map_err(|_| ResponseError::InvalidUsage)?;
     let total_tokens = input_tokens
         .checked_add(output_tokens)
         .ok_or(ResponseError::InvalidUsage)?;
+    crate::protocols::usage::validate_counter(Some(total_tokens))
+        .map_err(|_| ResponseError::InvalidUsage)?;
     Ok(Some(CanonicalUsage {
         input_tokens,
         output_tokens,

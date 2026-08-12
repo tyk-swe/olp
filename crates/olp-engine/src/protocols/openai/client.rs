@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, Surface};
+use crate::domain::{CanonicalEvent, CanonicalEventKind, FinishReason, Surface};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -21,8 +21,27 @@ pub fn encode_response_object(
 ) -> Result<ResponseObject, OpenAiClientEncodeError> {
     let mut aggregate = aggregate_generation(events, Surface::OpenAi)?;
     let raw_output = take_raw_response_output(&mut aggregate.extensions)?;
+    let incomplete_reason = aggregate
+        .outputs
+        .values()
+        .filter_map(|output| {
+            output
+                .finish
+                .as_ref()
+                .and_then(ResponsesIncompleteReason::from_finish)
+        })
+        .try_fold(None, merge_incomplete_reason)?;
     let mut output = Vec::new();
     for (output_index, item) in aggregate.outputs {
+        let extension_status = take_string_extension(
+            &mut aggregate.extensions,
+            &format!("/output/{output_index}/status"),
+        );
+        let item_status = match item.finish.as_ref() {
+            Some(FinishReason::Length | FinishReason::ContentFilter) => "incomplete".to_owned(),
+            Some(_) => "completed".to_owned(),
+            None => extension_status.unwrap_or_else(|| "completed".into()),
+        };
         if !item.text.is_empty() || !item.refusal.is_empty() || item.tools.is_empty() {
             let mut content = Vec::new();
             if !item.text.is_empty() {
@@ -44,16 +63,11 @@ pub fn encode_response_object(
                 &format!("/output/{output_index}/id"),
             )
             .unwrap_or_else(|| format!("msg_{output_index}"));
-            let status = take_string_extension(
-                &mut aggregate.extensions,
-                &format!("/output/{output_index}/status"),
-            )
-            .unwrap_or_else(|| "completed".into());
             output.push(json!({
                 "id": id,
                 "type": "message",
                 "role": "assistant",
-                "status": status,
+                "status": item_status.clone(),
                 "content": content,
             }));
         }
@@ -69,18 +83,13 @@ pub fn encode_response_object(
                 &format!("/output/{output_index}/id"),
             )
             .unwrap_or_else(|| format!("fc_{output_index}"));
-            let status = take_string_extension(
-                &mut aggregate.extensions,
-                &format!("/output/{output_index}/status"),
-            )
-            .unwrap_or_else(|| "completed".into());
             output.push(json!({
                 "id": wire_id,
                 "type": "function_call",
                 "call_id": id,
                 "name": name,
                 "arguments": tool.arguments,
-                "status": status,
+                "status": item_status,
             }));
         }
     }
@@ -93,9 +102,14 @@ pub fn encode_response_object(
         output.insert(index, item);
     }
     let created_at = take_i64_extension(&mut aggregate.extensions, "/created_at").unwrap_or(0);
-    let status = take_string_extension(&mut aggregate.extensions, "/status")
-        .unwrap_or_else(|| "completed".into());
-    let incomplete_details = aggregate.extensions.remove("/incomplete_details");
+    let extension_status = take_string_extension(&mut aggregate.extensions, "/status");
+    let mut incomplete_details = aggregate.extensions.remove("/incomplete_details");
+    let status = if let Some(reason) = incomplete_reason {
+        set_incomplete_reason(&mut incomplete_details, reason);
+        "incomplete".into()
+    } else {
+        extension_status.unwrap_or_else(|| "completed".into())
+    };
     let usage = aggregate.usage.map(|usage| ResponseUsage {
         input_tokens: Some(usage.input_tokens),
         output_tokens: Some(usage.output_tokens),
@@ -141,6 +155,7 @@ pub struct OpenAiResponsesStreamEncoder {
     collected_event_bytes: usize,
     emitted_outputs: BTreeSet<u32>,
     tool_outputs: BTreeSet<u32>,
+    incomplete_reason: Option<ResponsesIncompleteReason>,
     done: bool,
 }
 
@@ -172,6 +187,7 @@ impl OpenAiResponsesStreamEncoder {
             collected_event_bytes: 0,
             emitted_outputs: BTreeSet::new(),
             tool_outputs: BTreeSet::new(),
+            incomplete_reason: None,
             done: false,
         }
     }
@@ -253,19 +269,29 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::Finish { output_index, .. } => {
+            CanonicalEventKind::Finish {
+                output_index,
+                reason,
+            } => {
                 self.ensure_stream_output(
                     *output_index,
                     self.tool_outputs.contains(output_index),
                     &mut frames,
                 )?;
+                let status = if let Some(reason) = ResponsesIncompleteReason::from_finish(reason) {
+                    self.incomplete_reason =
+                        merge_incomplete_reason(self.incomplete_reason, reason)?;
+                    "incomplete"
+                } else {
+                    "completed"
+                };
                 frames.push(response_sse_frame(
                     "response.output_item.done",
                     json!({
                         "output_index": output_index,
                         "item": {
                             "type": if self.tool_outputs.contains(output_index) {"function_call"} else {"message"},
-                            "status": "completed"
+                            "status": status
                         }
                     }),
                 )?);
@@ -302,10 +328,12 @@ impl OpenAiResponsesStreamEncoder {
                 let normalized = self.normalized_events_with(event.clone());
                 let response =
                     encode_response_object(&normalized, &self.client_model, &self.fallback_id)?;
-                frames.push(response_sse_frame(
-                    "response.completed",
-                    json!({"response": response}),
-                )?);
+                let kind = if response.status == "incomplete" {
+                    "response.incomplete"
+                } else {
+                    "response.completed"
+                };
+                frames.push(response_sse_frame(kind, json!({"response": response}))?);
                 self.done = true;
             }
         }
@@ -353,6 +381,51 @@ impl OpenAiResponsesStreamEncoder {
             })
             .collect()
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResponsesIncompleteReason {
+    MaxOutputTokens,
+    ContentFilter,
+}
+
+impl ResponsesIncompleteReason {
+    fn from_finish(reason: &FinishReason) -> Option<Self> {
+        match reason {
+            FinishReason::Length => Some(Self::MaxOutputTokens),
+            FinishReason::ContentFilter => Some(Self::ContentFilter),
+            _ => None,
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::MaxOutputTokens => "max_output_tokens",
+            Self::ContentFilter => "content_filter",
+        }
+    }
+}
+
+fn merge_incomplete_reason(
+    current: Option<ResponsesIncompleteReason>,
+    next: ResponsesIncompleteReason,
+) -> Result<Option<ResponsesIncompleteReason>, OpenAiClientEncodeError> {
+    if current.is_some_and(|current| current != next) {
+        return Err(OpenAiClientEncodeError::ConflictingIncompleteReasons);
+    }
+    Ok(Some(next))
+}
+
+fn set_incomplete_reason(details: &mut Option<Value>, reason: ResponsesIncompleteReason) {
+    let value = details.get_or_insert_with(|| json!({}));
+    let object = match value {
+        Value::Object(object) => object,
+        _ => {
+            *value = json!({});
+            value.as_object_mut().expect("the replacement is an object")
+        }
+    };
+    object.insert("reason".into(), Value::String(reason.as_str().into()));
 }
 
 fn response_sse_frame(kind: &str, mut payload: Value) -> Result<SseFrame, OpenAiClientEncodeError> {
@@ -424,6 +497,8 @@ pub enum OpenAiClientEncodeError {
     InvalidStreamPayload,
     #[error("canonical event history exceeded the Responses stream encoder limit")]
     EventHistoryTooLarge,
+    #[error("canonical response contains conflicting incomplete finish reasons")]
+    ConflictingIncompleteReasons,
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
@@ -431,6 +506,171 @@ pub enum OpenAiClientEncodeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn event(sequence: u64, kind: CanonicalEventKind) -> CanonicalEvent {
+        CanonicalEvent::new(sequence, kind)
+    }
+
+    fn incomplete_events(reason: FinishReason) -> Vec<CanonicalEvent> {
+        vec![
+            event(
+                0,
+                CanonicalEventKind::ResponseStart {
+                    response_id: Some("response".into()),
+                    provider_model: Some("upstream".into()),
+                },
+            ),
+            event(
+                1,
+                CanonicalEventKind::MessageStart {
+                    output_index: 0,
+                    role: crate::domain::MessageRole::Assistant,
+                },
+            ),
+            event(
+                2,
+                CanonicalEventKind::TextDelta {
+                    output_index: 0,
+                    text: "partial".into(),
+                },
+            ),
+            event(
+                3,
+                CanonicalEventKind::Finish {
+                    output_index: 0,
+                    reason,
+                },
+            ),
+            event(4, CanonicalEventKind::Done),
+        ]
+    }
+
+    #[test]
+    fn responses_encoders_preserve_incomplete_finish_reasons() {
+        for (reason, wire_reason) in [
+            (FinishReason::Length, "max_output_tokens"),
+            (FinishReason::ContentFilter, "content_filter"),
+        ] {
+            let events = incomplete_events(reason);
+            let response = encode_response_object(&events, "route", "fallback").unwrap();
+            let value = serde_json::to_value(&response).unwrap();
+            assert_eq!(value["status"], "incomplete");
+            assert_eq!(value["incomplete_details"]["reason"], wire_reason);
+            assert_eq!(value["output"][0]["status"], "incomplete");
+
+            let mut encoder = OpenAiResponsesStreamEncoder::new("route", "fallback", 0);
+            let frames = events
+                .into_iter()
+                .flat_map(|event| encoder.push(event).unwrap())
+                .collect::<Vec<_>>();
+            let item_done = frames
+                .iter()
+                .find(|frame| frame.event.as_deref() == Some("response.output_item.done"))
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&item_done.data).unwrap()["item"]["status"],
+                "incomplete"
+            );
+            let terminal = frames.last().unwrap();
+            assert_eq!(terminal.event.as_deref(), Some("response.incomplete"));
+            let terminal: Value = serde_json::from_str(&terminal.data).unwrap();
+            assert_eq!(
+                terminal["response"]["incomplete_details"]["reason"],
+                wire_reason
+            );
+        }
+    }
+
+    #[test]
+    fn responses_encoder_supports_mixed_completed_and_incomplete_outputs() {
+        let events = vec![
+            event(
+                0,
+                CanonicalEventKind::ResponseStart {
+                    response_id: None,
+                    provider_model: None,
+                },
+            ),
+            event(
+                1,
+                CanonicalEventKind::MessageStart {
+                    output_index: 0,
+                    role: crate::domain::MessageRole::Assistant,
+                },
+            ),
+            event(
+                2,
+                CanonicalEventKind::Finish {
+                    output_index: 0,
+                    reason: FinishReason::Stop,
+                },
+            ),
+            event(
+                3,
+                CanonicalEventKind::MessageStart {
+                    output_index: 1,
+                    role: crate::domain::MessageRole::Assistant,
+                },
+            ),
+            event(
+                4,
+                CanonicalEventKind::Finish {
+                    output_index: 1,
+                    reason: FinishReason::Length,
+                },
+            ),
+            event(5, CanonicalEventKind::Done),
+        ];
+
+        let value =
+            serde_json::to_value(encode_response_object(&events, "route", "fallback").unwrap())
+                .unwrap();
+        assert_eq!(value["status"], "incomplete");
+        assert_eq!(value["output"][0]["status"], "completed");
+        assert_eq!(value["output"][1]["status"], "incomplete");
+    }
+
+    #[test]
+    fn responses_encoder_rejects_conflicting_incomplete_reasons() {
+        let mut events = incomplete_events(FinishReason::Length);
+        events.pop();
+        events.extend([
+            event(
+                4,
+                CanonicalEventKind::MessageStart {
+                    output_index: 1,
+                    role: crate::domain::MessageRole::Assistant,
+                },
+            ),
+            event(
+                5,
+                CanonicalEventKind::Finish {
+                    output_index: 1,
+                    reason: FinishReason::ContentFilter,
+                },
+            ),
+            event(6, CanonicalEventKind::Done),
+        ]);
+
+        assert!(matches!(
+            encode_response_object(&events, "route", "fallback"),
+            Err(OpenAiClientEncodeError::ConflictingIncompleteReasons)
+        ));
+        let mut encoder = OpenAiResponsesStreamEncoder::new("route", "fallback", 0);
+        for event in events.into_iter().take(5) {
+            encoder.push(event).unwrap();
+        }
+        assert!(matches!(
+            encoder.push(event(
+                5,
+                CanonicalEventKind::Finish {
+                    output_index: 1,
+                    reason: FinishReason::ContentFilter,
+                }
+            )),
+            Err(OpenAiClientEncodeError::ConflictingIncompleteReasons)
+        ));
+    }
 
     #[test]
     fn responses_stream_encoder_rejects_oversized_event_history() {

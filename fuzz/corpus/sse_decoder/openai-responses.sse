@@ -1,7 +1,13 @@
 event: response.created
 data: {"type":"response.created","response":{"id":"resp_fuzz","model":"gpt-fuzz"}}
 
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","status":"completed"}}
+
 event: response.completed
-data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}
+data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}
 
 : end

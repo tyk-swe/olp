@@ -343,13 +343,35 @@ fn responses_response(body: &Value, model: &str) -> Response {
         "event: response.created\ndata: {}",
         json!({"type": "response.created", "response": {"id": "resp_e2e", "model": model}})
     ));
+    frames.push(format!(
+        "event: response.output_item.added\ndata: {}",
+        json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"type": "message", "role": "assistant", "status": "in_progress"}
+        })
+    ));
     for delta in deltas {
         frames.push(format!(
             "event: response.output_text.delta\ndata: {}",
             json!({"type": "response.output_text.delta", "output_index": 0, "delta": delta})
         ));
     }
-    let mut completed = json!({"type": "response.completed", "response": {}});
+    frames.push(format!(
+        "event: response.output_item.done\ndata: {}",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {"type": "message", "status": "completed"}
+        })
+    ));
+    let mut completed = json!({
+        "type": "response.completed",
+        "response": {
+            "status": "completed",
+            "output": [{"type": "message", "status": "completed"}]
+        }
+    });
     if let Some(usage) = usage {
         completed["response"]["usage"] = usage;
     }
