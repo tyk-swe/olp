@@ -682,7 +682,7 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
 }
 
 #[test]
-fn client_stream_buffers_finish_for_later_cached_usage() {
+fn client_stream_emits_content_before_later_terminal_usage() {
     let canonical = vec![
         olp_engine::domain::CanonicalEvent::new(
             0,
@@ -730,18 +730,31 @@ fn client_stream_buffers_finish_for_later_cached_usage() {
     let mut wire = String::new();
     for (index, event) in canonical.into_iter().enumerate() {
         let frames = encoder.push(event).unwrap();
-        if index == 2 || index == 3 {
-            assert!(frames.is_empty());
+        if index == 2 {
+            assert_eq!(
+                frames
+                    .iter()
+                    .map(|frame| frame.event.as_deref().unwrap())
+                    .collect::<Vec<_>>(),
+                [
+                    "message_start",
+                    "content_block_start",
+                    "content_block_delta"
+                ]
+            );
+            let start: Value = serde_json::from_str(&frames[0].data).unwrap();
+            assert_eq!(start["message"]["usage"]["input_tokens"], 0);
+            assert_eq!(start["message"]["usage"]["output_tokens"], 0);
+            assert_eq!(
+                start["message"]["usage"]["cache_read_input_tokens"],
+                Value::Null
+            );
+        }
+        if index == 3 {
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0].event.as_deref(), Some("content_block_stop"));
         }
         if index == 4 {
-            let message_start = frames
-                .iter()
-                .find(|frame| frame.event.as_deref() == Some("message_start"))
-                .unwrap();
-            let start: Value = serde_json::from_str(&message_start.data).unwrap();
-            assert_eq!(start["message"]["usage"]["input_tokens"], 6);
-            assert_eq!(start["message"]["usage"]["output_tokens"], 0);
-            assert_eq!(start["message"]["usage"]["cache_read_input_tokens"], 4);
             let terminal = frames
                 .iter()
                 .find(|frame| frame.event.as_deref() == Some("message_delta"))
@@ -773,9 +786,9 @@ fn client_stream_buffers_finish_for_later_cached_usage() {
 }
 
 #[test]
-fn client_stream_error_drops_buffered_content_and_does_not_emit_message_stop() {
+fn client_stream_error_is_terminal_and_does_not_emit_message_stop() {
     let mut encoder = AnthropicMessagesClientStreamEncoder::new("route", "fallback");
-    for event in [
+    for (index, event) in [
         olp_engine::domain::CanonicalEvent::new(
             0,
             CanonicalEventKind::ResponseStart {
@@ -797,8 +810,26 @@ fn client_stream_error_drops_buffered_content_and_does_not_emit_message_stop() {
                 text: "discard me".into(),
             },
         ),
-    ] {
-        assert!(encoder.push(event).unwrap().is_empty());
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let frames = encoder.push(event).unwrap();
+        if index < 2 {
+            assert!(frames.is_empty());
+        } else {
+            assert_eq!(
+                frames
+                    .iter()
+                    .map(|frame| frame.event.as_deref().unwrap())
+                    .collect::<Vec<_>>(),
+                [
+                    "message_start",
+                    "content_block_start",
+                    "content_block_delta"
+                ]
+            );
+        }
     }
     let error_frames = encoder
         .push(olp_engine::domain::CanonicalEvent::new(
