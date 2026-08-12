@@ -12,6 +12,7 @@ mod errors;
 mod media;
 mod operations;
 mod streams;
+mod wire;
 
 use errors::{
     bearer_header, first_byte_timeout, map_endpoint_error, map_send_error, protocol_body_error,

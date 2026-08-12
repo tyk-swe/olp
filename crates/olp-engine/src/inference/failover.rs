@@ -26,6 +26,7 @@ fn canonical_event_protocol_error(
         phase: crate::domain::TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed,
+        retry_after: None,
         message: format!("invalid canonical event stream: {error}"),
     }
 }
@@ -209,6 +210,7 @@ impl AttemptRecord<'_> {
             phase: crate::domain::TransportPhase::Connect,
             class: AttemptFailureClass::Timeout,
             response_committed: false,
+            retry_after: None,
             message: "route deadline elapsed before provider execution".to_owned(),
         };
         traces.push(failed_attempt(
@@ -393,6 +395,7 @@ async fn execute_attempt(
             phase: crate::domain::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
+            retry_after: None,
             message: "provider transport is not loaded".to_owned(),
         };
         return Ok(AttemptDisposition::Retry {
@@ -425,6 +428,7 @@ async fn execute_attempt(
                     phase: crate::domain::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Timeout,
                     response_committed: false,
+                    retry_after: None,
                     message: "route deadline elapsed before provider response".to_owned(),
                 },
                 operation.kind(),
@@ -460,6 +464,7 @@ async fn execute_attempt(
                 phase: crate::domain::TransportPhase::FirstByte,
                 class: AttemptFailureClass::Protocol,
                 response_committed: false,
+                retry_after: None,
                 message: "the provider returned an empty response".to_owned(),
             };
             let gateway = InferenceError::bad_gateway(
@@ -474,6 +479,7 @@ async fn execute_attempt(
                     phase: crate::domain::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Timeout,
                     response_committed: false,
+                    retry_after: None,
                     message: "route deadline elapsed before a canonical event".to_owned(),
                 },
                 operation.kind(),
@@ -499,6 +505,7 @@ async fn execute_attempt(
                 phase: crate::domain::TransportPhase::FirstByte,
                 class,
                 response_committed: false,
+                retry_after: None,
                 message: error.message.clone(),
             };
             return Ok(AttemptDisposition::Retry {
@@ -759,10 +766,12 @@ mod tests {
     }
 
     #[test]
-    fn later_transport_failure_supersedes_a_canonical_error() {
+    fn only_the_selected_terminal_failure_contributes_a_retry_hint() {
         let mut failures = FailureHistory::default();
+        let mut first = failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit);
+        first.retry_after = Some(std::time::Duration::from_secs(900));
         failures.record_retry(
-            failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
+            first,
             Some(CanonicalError {
                 class: ErrorClass::RateLimit,
                 message: "first failure".to_owned(),
@@ -771,15 +780,17 @@ mod tests {
             }),
             1,
         );
-        failures.record_retry(
-            failure(TransportPhase::Connect, AttemptFailureClass::Connect),
-            None,
-            2,
-        );
+        let mut selected = failure(TransportPhase::Connect, AttemptFailureClass::Connect);
+        selected.retry_after = Some(std::time::Duration::from_secs(29));
+        failures.record_retry(selected, None, 2);
 
         let error = failures.into_error(2);
 
         assert_eq!(error.code(), "upstream_unavailable");
+        assert_eq!(
+            error.retry_after(),
+            Some(std::time::Duration::from_secs(29))
+        );
     }
 
     fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError {
@@ -787,6 +798,7 @@ mod tests {
             phase,
             class,
             response_committed: false,
+            retry_after: None,
             message: "metadata-free fixture".to_owned(),
         }
     }

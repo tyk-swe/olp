@@ -19,6 +19,8 @@ pub enum ClientStreamEncodeError {
     Extension,
     #[error("Gemini stream completed with unfinished function calls")]
     UnfinishedTools,
+    #[error("canonical usage is inconsistent")]
+    InvalidUsage,
 }
 
 #[derive(Debug)]
@@ -109,10 +111,14 @@ impl GeminiGenerateContentClientStreamEncoder {
                 tool.arguments.push_str(&arguments_delta);
             }
             CanonicalEventKind::Usage { usage } => {
+                let candidates_token_count = usage
+                    .output_tokens
+                    .checked_sub(usage.reasoning_tokens.unwrap_or(0))
+                    .ok_or(ClientStreamEncodeError::InvalidUsage)?;
                 frames.push(self.response_frame(json!({
                     "usageMetadata": {
                         "promptTokenCount": usage.input_tokens,
-                        "candidatesTokenCount": usage.output_tokens,
+                        "candidatesTokenCount": candidates_token_count,
                         "totalTokenCount": usage.total_tokens,
                         "cachedContentTokenCount": usage.cached_input_tokens,
                         "thoughtsTokenCount": usage.reasoning_tokens

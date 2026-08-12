@@ -97,18 +97,18 @@ pub fn encode_response_object(
         .unwrap_or_else(|| "completed".into());
     let incomplete_details = aggregate.extensions.remove("/incomplete_details");
     let usage = aggregate.usage.map(|usage| ResponseUsage {
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        total_tokens: usage.total_tokens,
+        input_tokens: Some(usage.input_tokens),
+        output_tokens: Some(usage.output_tokens),
+        total_tokens: Some(usage.total_tokens),
         input_tokens_details: usage.cached_input_tokens.map(|cached_tokens| {
             ResponseInputTokenDetails {
-                cached_tokens,
+                cached_tokens: Some(cached_tokens),
                 extra: BTreeMap::new(),
             }
         }),
         output_tokens_details: usage.reasoning_tokens.map(|reasoning_tokens| {
             ResponseOutputTokenDetails {
-                reasoning_tokens,
+                reasoning_tokens: Some(reasoning_tokens),
                 extra: BTreeMap::new(),
             }
         }),
@@ -263,7 +263,10 @@ impl OpenAiResponsesStreamEncoder {
                     "response.output_item.done",
                     json!({
                         "output_index": output_index,
-                        "item": {"type": if self.tool_outputs.contains(output_index) {"function_call"} else {"message"}}
+                        "item": {
+                            "type": if self.tool_outputs.contains(output_index) {"function_call"} else {"message"},
+                            "status": "completed"
+                        }
                     }),
                 )?);
             }
@@ -321,7 +324,7 @@ impl OpenAiResponsesStreamEncoder {
         }
         if self.emitted_outputs.insert(output_index) {
             let item = if tool {
-                json!({"type": "function_call", "call_id": format!("call_{output_index}"), "name": "function", "arguments": ""})
+                json!({"type": "function_call", "status": "in_progress", "call_id": format!("call_{output_index}"), "name": "function", "arguments": ""})
             } else {
                 json!({"type": "message", "role": "assistant", "status": "in_progress", "content": []})
             };

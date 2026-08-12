@@ -176,6 +176,59 @@ fn unary_response_becomes_one_ordered_canonical_event_sequence() {
 }
 
 #[test]
+fn unary_response_rejects_missing_finish_and_duplicate_choice_indices() {
+    let missing_finish: ChatCompletionResponse = serde_json::from_value(json!({
+        "id": "chatcmpl_bad",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "gpt",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "x"}}]
+    }))
+    .unwrap();
+    assert!(decode_chat_completion_response(missing_finish).is_err());
+
+    let duplicate: ChatCompletionResponse = serde_json::from_value(json!({
+        "id": "chatcmpl_bad",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "gpt",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"},
+            {"index": 0, "message": {"role": "assistant", "content": "y"}, "finish_reason": "stop"}
+        ]
+    }))
+    .unwrap();
+    assert!(decode_chat_completion_response(duplicate).is_err());
+}
+
+#[test]
+fn partial_unary_usage_is_accounting_only_and_not_serialized() {
+    let response: ChatCompletionResponse = serde_json::from_value(json!({
+        "id": "chatcmpl_partial",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "gpt",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "x"},
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 4, "total_tokens": 4}
+    }))
+    .unwrap();
+    let events = decode_chat_completion_response(response).unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+    );
+    let done = events.last().unwrap();
+    assert_eq!(done.usage_observation.unwrap().input_tokens, Some(4));
+    let serialized = serde_json::to_value(done).unwrap();
+    assert!(serialized.get("usage_observation").is_none());
+}
+
+#[test]
 fn fragmented_unicode_sse_and_tool_deltas_decode_without_corruption() {
     let first = json!({
         "id": "chatcmpl_stream",
@@ -218,6 +271,52 @@ fn fragmented_unicode_sse_and_tool_deltas_decode_without_corruption() {
     assert!(matches!(
         events.last().unwrap().kind,
         CanonicalEventKind::Done
+    ));
+}
+
+#[test]
+fn stream_rejects_duplicate_indices_metadata_and_usage() {
+    let duplicate_choice = json!({
+        "id": "chatcmpl_stream", "object": "chat.completion.chunk", "created": 1, "model": "gpt",
+        "choices": [
+            {"index": 0, "delta": {"content": "a"}, "finish_reason": null},
+            {"index": 0, "delta": {"content": "b"}, "finish_reason": null}
+        ]
+    });
+    let mut decoder = OpenAiChatStreamDecoder::new();
+    assert!(matches!(
+        decoder.push(format!("data: {duplicate_choice}\n\n").as_bytes()),
+        Err(OpenAiStreamError::DuplicateChoiceIndex(0))
+    ));
+
+    let first_tool = json!({
+        "id": "chatcmpl_stream", "object": "chat.completion.chunk", "created": 1, "model": "gpt",
+        "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "a", "type": "function", "function": {"name": "lookup", "arguments": ""}}]}, "finish_reason": null}]
+    });
+    let conflicting_tool = json!({
+        "id": "chatcmpl_stream", "object": "chat.completion.chunk", "created": 1, "model": "gpt",
+        "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "b", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}, "finish_reason": null}]
+    });
+    let mut decoder = OpenAiChatStreamDecoder::new();
+    decoder
+        .push(format!("data: {first_tool}\n\n").as_bytes())
+        .unwrap();
+    assert!(matches!(
+        decoder.push(format!("data: {conflicting_tool}\n\n").as_bytes()),
+        Err(OpenAiStreamError::ConflictingToolMetadata { .. })
+    ));
+
+    let usage = json!({
+        "id": "chatcmpl_stream", "object": "chat.completion.chunk", "created": 1, "model": "gpt",
+        "choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1}
+    });
+    let mut decoder = OpenAiChatStreamDecoder::new();
+    decoder
+        .push(format!("data: {usage}\n\n").as_bytes())
+        .unwrap();
+    assert!(matches!(
+        decoder.push(format!("data: {usage}\n\n").as_bytes()),
+        Err(OpenAiStreamError::DuplicateUsage)
     ));
 }
 

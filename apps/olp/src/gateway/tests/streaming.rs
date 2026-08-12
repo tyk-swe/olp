@@ -74,6 +74,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
             phase: olp_engine::domain::TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: false,
+            retry_after: None,
             message: "stream failed after its first event".to_owned(),
         })]));
         let mut events = circuit_accounted_event_stream(

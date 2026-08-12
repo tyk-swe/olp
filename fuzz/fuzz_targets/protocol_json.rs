@@ -89,7 +89,9 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::video_create_request",
         |request| match openai::decode_video_create(request) {
-            Ok(Operation::Video(olp_engine::domain::VideoOperation::Create(canonical))) => Some(canonical),
+            Ok(Operation::Video(olp_engine::domain::VideoOperation::Create(canonical))) => {
+                Some(canonical)
+            }
             _ => None,
         },
         |canonical| {
@@ -109,7 +111,9 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::video_list_query",
         |query| match openai::decode_video_list(query) {
-            Ok(Operation::Video(olp_engine::domain::VideoOperation::List(canonical))) => Some(canonical),
+            Ok(Operation::Video(olp_engine::domain::VideoOperation::List(canonical))) => {
+                Some(canonical)
+            }
             _ => None,
         },
         openai::encode_video_list,
@@ -156,7 +160,7 @@ fuzz_target!(|data: &[u8]| {
     roundtrip(
         data,
         "openai::transcription_response",
-        |response| Some(openai::decode_transcription_response(response)),
+        |response| openai::decode_transcription_response(response).ok(),
         openai::encode_transcription_response,
     );
     roundtrip(
@@ -242,6 +246,10 @@ fuzz_target!(|data: &[u8]| {
     // These have no encode that returns the decoded type, so only the decode
     // side is exercised. Kept so the corpus still reaches them.
 
+    if let Ok(response) = serde_json::from_slice::<openai::ChatCompletionResponse>(data) {
+        let _ = openai::decode_chat_completion_response(response);
+    }
+
     if let Ok(request) = serde_json::from_slice::<anthropic::CountTokensRequest>(data) {
         let _ = anthropic::decode_count_tokens_request(request);
     }
@@ -273,7 +281,10 @@ fuzz_target!(|data: &[u8]| {
         );
         let _ = gemini::encode_count_tokens_result(&TokenCountResult {
             input_tokens: response.total_tokens,
-            extensions: olp_engine::domain::SourceExtensions::new(olp_engine::domain::Surface::Gemini, values),
+            extensions: olp_engine::domain::SourceExtensions::new(
+                olp_engine::domain::Surface::Gemini,
+                values,
+            ),
         });
     }
 

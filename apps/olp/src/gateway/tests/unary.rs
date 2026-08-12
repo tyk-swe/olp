@@ -232,6 +232,7 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
                 cached_input_tokens: None,
                 reasoning_tokens: None,
             }),
+            usage_observation: None,
             extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         }),
     );
@@ -347,6 +348,7 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
                 revised_prompt: Some("revised".into()),
             }],
             usage: None,
+            usage_observation: None,
             extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         })
     };
@@ -394,6 +396,9 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
             text: "transcribed".to_owned(),
             language: Some("en".to_owned()),
             duration_seconds: Some(1.0),
+            usage: None,
+            usage_observation: None,
+            usage_duration_seconds: None,
             segments: Vec::new(),
             extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         }),

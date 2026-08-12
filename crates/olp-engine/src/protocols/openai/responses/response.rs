@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::domain::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
-    SourceExtensions, Surface, Usage,
+    SourceExtensions, Surface, Usage, UsageObservation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,6 +12,7 @@ use super::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::errors::ResponsesCodecError;
 use super::helpers::collect_object_extra;
 use crate::protocols::CanonicalEventBuilder as ResponsesEventBuilder;
+use crate::protocols::usage::ObservedUsage;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct ResponseObject {
@@ -34,9 +35,21 @@ pub struct ResponseObject {
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct ResponseUsage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: u64,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub input_tokens: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub output_tokens: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub total_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens_details: Option<ResponseInputTokenDetails>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,16 +60,16 @@ pub struct ResponseUsage {
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct ResponseInputTokenDetails {
-    #[serde(default)]
-    pub cached_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct ResponseOutputTokenDetails {
-    #[serde(default)]
-    pub reasoning_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -75,6 +88,58 @@ pub fn decode_response_object(
     if response.object != "response" {
         return Err(ResponsesCodecError::InvalidResponse(response.object));
     }
+    let cancelled = response.status == "cancelled";
+    let policy = match response.status.as_str() {
+        "completed" => {
+            if response.error.is_some() || response.incomplete_details.is_some() {
+                return Err(ResponsesCodecError::InvalidResponse(
+                    "completed response has terminal error details".into(),
+                ));
+            }
+            if response.output.is_empty() {
+                return Err(ResponsesCodecError::InvalidResponse(
+                    "completed response has no output".into(),
+                ));
+            }
+            OutputPolicy::Completed
+        }
+        "incomplete" => {
+            if response.error.is_some() {
+                return Err(ResponsesCodecError::InvalidResponse(
+                    "incomplete response has an error".into(),
+                ));
+            }
+            OutputPolicy::Incomplete(incomplete_finish_reason(
+                response.incomplete_details.as_ref(),
+            )?)
+        }
+        "failed" => {
+            if response.error.is_none() || response.incomplete_details.is_some() {
+                return Err(ResponsesCodecError::InvalidResponse(
+                    "failed response has incoherent terminal details".into(),
+                ));
+            }
+            OutputPolicy::Failed
+        }
+        "cancelled" => {
+            if response.error.is_some() || response.incomplete_details.is_some() {
+                return Err(ResponsesCodecError::InvalidResponse(
+                    "cancelled response has terminal details".into(),
+                ));
+            }
+            OutputPolicy::Failed
+        }
+        "queued" | "in_progress" => {
+            return Err(ResponsesCodecError::InvalidResponse(
+                "response is not terminal".into(),
+            ));
+        }
+        status => {
+            return Err(ResponsesCodecError::InvalidResponse(format!(
+                "unknown response status {status}"
+            )));
+        }
+    };
     let mut builder = ResponsesEventBuilder::default();
     builder.push(CanonicalEventKind::ResponseStart {
         response_id: Some(response.id),
@@ -94,15 +159,20 @@ pub fn decode_response_object(
                 .try_into()
                 .map_err(|_| ResponsesCodecError::TooManyOutputItems)?,
             item,
+            &policy,
             &mut extensions,
             &mut builder,
         )?;
     }
+    let mut usage_observation = None;
     if let Some(usage) = response.usage {
         collect_response_usage_extensions(&usage, &mut extensions);
-        builder.push(CanonicalEventKind::Usage {
-            usage: canonical_response_usage(&usage),
-        });
+        let (canonical, observation) = decode_response_usage(&usage)?;
+        if let Some(usage) = canonical {
+            builder.push(CanonicalEventKind::Usage { usage });
+        } else {
+            usage_observation = Some(observation);
+        }
     }
     if let Some(error) = response.error {
         collect_extra("/error", &error.extra, &mut extensions);
@@ -122,19 +192,33 @@ pub fn decode_response_object(
                 retryable,
             },
         });
+    } else if cancelled {
+        builder.push(CanonicalEventKind::Error {
+            error: CanonicalError {
+                class: ErrorClass::Upstream,
+                message: "OpenAI response was cancelled".into(),
+                provider_code: Some("response_cancelled".into()),
+                retryable: false,
+            },
+        });
     }
     if !extensions.is_empty() {
         builder.push(CanonicalEventKind::SourceExtension {
             extensions: SourceExtensions::new(Surface::OpenAi, extensions),
         });
     }
-    builder.push(CanonicalEventKind::Done);
+    if let Some(observation) = usage_observation {
+        builder.push_with_usage_observation(CanonicalEventKind::Done, observation);
+    } else {
+        builder.push(CanonicalEventKind::Done);
+    }
     Ok(builder.events)
 }
 
 fn decode_response_output_item(
     output_index: u32,
     item: Value,
+    policy: &OutputPolicy,
     extensions: &mut BTreeMap<String, Value>,
     builder: &mut ResponsesEventBuilder,
 ) -> Result<(), ResponsesCodecError> {
@@ -146,6 +230,7 @@ fn decode_response_output_item(
     let kind = take_required_output_string(&mut object, "type")?;
     match kind.as_str() {
         "message" => {
+            let finish = output_finish_reason(&mut object, policy, FinishReason::Stop)?;
             let role = match take_required_output_string(&mut object, "role")?.as_str() {
                 "assistant" => MessageRole::Assistant,
                 value => return Err(ResponsesCodecError::UnsupportedRole(value.into())),
@@ -180,16 +265,16 @@ fn decode_response_output_item(
                 );
             }
             collect_object_extra(&format!("/output/{output_index}"), object, extensions);
-            builder.push(CanonicalEventKind::Finish {
-                output_index,
-                reason: FinishReason::Stop,
-            });
+            if let Some(reason) = finish {
+                builder.push(CanonicalEventKind::Finish {
+                    output_index,
+                    reason,
+                });
+            }
         }
         "function_call" => {
-            let id = object
-                .remove("call_id")
-                .or_else(|| object.remove("id"))
-                .and_then(|value| value.as_str().map(str::to_owned));
+            let finish = output_finish_reason(&mut object, policy, FinishReason::ToolCalls)?;
+            let id = Some(take_required_output_string(&mut object, "call_id")?);
             let name = Some(take_required_output_string(&mut object, "name")?);
             let arguments_delta = take_required_output_string(&mut object, "arguments")?;
             builder.push(CanonicalEventKind::MessageStart {
@@ -204,10 +289,12 @@ fn decode_response_output_item(
                 arguments_delta,
             });
             collect_object_extra(&format!("/output/{output_index}"), object, extensions);
-            builder.push(CanonicalEventKind::Finish {
-                output_index,
-                reason: FinishReason::ToolCalls,
-            });
+            if let Some(reason) = finish {
+                builder.push(CanonicalEventKind::Finish {
+                    output_index,
+                    reason,
+                });
+            }
         }
         _ => {
             object.insert("type".into(), Value::String(kind));
@@ -220,6 +307,44 @@ fn decode_response_output_item(
     Ok(())
 }
 
+enum OutputPolicy {
+    Completed,
+    Incomplete(FinishReason),
+    Failed,
+}
+
+fn output_finish_reason(
+    object: &mut Map<String, Value>,
+    policy: &OutputPolicy,
+    completed_reason: FinishReason,
+) -> Result<Option<FinishReason>, ResponsesCodecError> {
+    let status = take_required_output_string(object, "status")?;
+    match (policy, status.as_str()) {
+        (OutputPolicy::Completed, "completed") => Ok(Some(completed_reason)),
+        (OutputPolicy::Incomplete(_), "completed") => Ok(Some(completed_reason)),
+        (OutputPolicy::Incomplete(reason), "incomplete") => Ok(Some(reason.clone())),
+        (OutputPolicy::Failed, "in_progress" | "incomplete" | "completed") => Ok(None),
+        _ => Err(ResponsesCodecError::InvalidResponse(
+            "output item status contradicts response status".into(),
+        )),
+    }
+}
+
+pub(super) fn incomplete_finish_reason(
+    details: Option<&Value>,
+) -> Result<FinishReason, ResponsesCodecError> {
+    match details
+        .and_then(|details| details.get("reason"))
+        .and_then(Value::as_str)
+    {
+        Some("max_output_tokens") => Ok(FinishReason::Length),
+        Some("content_filter") => Ok(FinishReason::ContentFilter),
+        _ => Err(ResponsesCodecError::InvalidResponse(
+            "unsupported incomplete response reason".into(),
+        )),
+    }
+}
+
 fn take_required_output_string(
     object: &mut Map<String, Value>,
     field: &'static str,
@@ -230,20 +355,26 @@ fn take_required_output_string(
         .ok_or_else(|| ResponsesCodecError::InvalidResponse(field.into()))
 }
 
-pub(super) fn canonical_response_usage(usage: &ResponseUsage) -> Usage {
-    Usage {
+pub(super) fn decode_response_usage(
+    usage: &ResponseUsage,
+) -> Result<(Option<Usage>, UsageObservation), ResponsesCodecError> {
+    let observed = ObservedUsage {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         total_tokens: usage.total_tokens,
         cached_input_tokens: usage
             .input_tokens_details
             .as_ref()
-            .map(|details| details.cached_tokens),
+            .and_then(|details| details.cached_tokens),
         reasoning_tokens: usage
             .output_tokens_details
             .as_ref()
-            .map(|details| details.reasoning_tokens),
-    }
+            .and_then(|details| details.reasoning_tokens),
+    };
+    observed
+        .with_exact_total()
+        .map(|usage| (usage, observed.observation()))
+        .map_err(|_| ResponsesCodecError::InvalidUsage)
 }
 
 fn collect_response_usage_extensions(
@@ -262,6 +393,7 @@ fn collect_response_usage_extensions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn response_rate_limit_error_is_retryable() {
@@ -292,5 +424,90 @@ mod tests {
             .expect("failed response must emit a canonical error");
         assert_eq!(error.class, ErrorClass::RateLimit);
         assert!(error.retryable);
+    }
+
+    #[test]
+    fn unary_terminal_status_and_output_status_are_authoritative() {
+        let base = json!({
+            "id":"r","object":"response","created_at":1,"model":"m",
+            "status":"completed","output":[{
+                "type":"message","status":"completed","role":"assistant",
+                "content":[{"type":"output_text","text":"ok"}]
+            }]
+        });
+        assert!(decode_response_object(serde_json::from_value(base.clone()).unwrap()).is_ok());
+
+        for mutation in [
+            json!({"status":"queued"}),
+            json!({"status":"in_progress"}),
+            json!({"status":"completed","output":[{"type":"message","status":"in_progress","role":"assistant","content":[]}]}),
+            json!({"status":"failed","error":null}),
+            json!({"status":"incomplete","incomplete_details":{"reason":"unknown"}}),
+        ] {
+            let mut invalid = base.clone();
+            for (key, value) in mutation.as_object().unwrap() {
+                invalid[key] = value.clone();
+            }
+            let response: ResponseObject = serde_json::from_value(invalid).unwrap();
+            assert!(decode_response_object(response).is_err());
+        }
+
+        for (reason, expected) in [
+            ("max_output_tokens", FinishReason::Length),
+            ("content_filter", FinishReason::ContentFilter),
+        ] {
+            let response: ResponseObject = serde_json::from_value(json!({
+                "id":"r","object":"response","created_at":1,"model":"m",
+                "status":"incomplete","incomplete_details":{"reason":reason},
+                "output":[{"type":"message","status":"incomplete","role":"assistant","content":[]}]
+            }))
+            .unwrap();
+            let events = decode_response_object(response).unwrap();
+            assert!(events.iter().any(|event| matches!(&event.kind,
+                CanonicalEventKind::Finish { reason, .. } if reason == &expected)));
+        }
+
+        let cancelled: ResponseObject = serde_json::from_value(json!({
+            "id":"r","object":"response","created_at":1,"model":"m",
+            "status":"cancelled","output":[]
+        }))
+        .unwrap();
+        let events = decode_response_object(cancelled).unwrap();
+        assert!(events.iter().any(|event| matches!(&event.kind,
+            CanonicalEventKind::Error { error }
+                if error.provider_code.as_deref() == Some("response_cancelled"))));
+        assert!(!events.iter().any(|event| matches!(
+            event.kind,
+            CanonicalEventKind::Finish {
+                reason: FinishReason::Stop,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn partial_unary_usage_is_accounting_only() {
+        let response: ResponseObject = serde_json::from_value(json!({
+            "id":"r","object":"response","created_at":1,"model":"m",
+            "status":"completed","output":[{
+                "type":"message","status":"completed","role":"assistant","content":[]
+            }],
+            "usage":{"input_tokens":3}
+        }))
+        .unwrap();
+        let events = decode_response_object(response).unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+        );
+        let done = events.last().unwrap();
+        assert_eq!(done.usage_observation.unwrap().input_tokens, Some(3));
+        assert!(
+            serde_json::to_value(done)
+                .unwrap()
+                .get("usage_observation")
+                .is_none()
+        );
     }
 }

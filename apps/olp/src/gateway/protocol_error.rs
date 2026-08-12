@@ -188,7 +188,10 @@ mod tests {
     use std::time::Duration;
 
     use axum::http::header;
-    use olp_engine::inference::limits::LimitDimension;
+    use olp_engine::{
+        domain::{AttemptFailureClass, TransportError, TransportPhase},
+        inference::limits::LimitDimension,
+    };
 
     use super::*;
 
@@ -207,6 +210,29 @@ mod tests {
             assert_eq!(
                 response.headers().get(header::RETRY_AFTER).unwrap(),
                 "2",
+                "surface: {surface:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_retry_after_reaches_every_protocol_surface() {
+        for surface in [Surface::OpenAi, Surface::Anthropic, Surface::Gemini] {
+            let response = inference_error_response(
+                surface,
+                InferenceError::from_transport(TransportError {
+                    phase: TransportPhase::FirstByte,
+                    class: AttemptFailureClass::RateLimit,
+                    response_committed: false,
+                    retry_after: Some(Duration::from_secs(37)),
+                    message: "upstream rate limit".to_owned(),
+                }),
+            );
+
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(
+                response.headers().get(header::RETRY_AFTER).unwrap(),
+                "37",
                 "surface: {surface:?}"
             );
         }

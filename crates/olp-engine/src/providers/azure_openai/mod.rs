@@ -235,6 +235,7 @@ fn deployment_probe_error(
         phase,
         class,
         response_committed: false,
+        retry_after: None,
         message: format!(
             "configured Azure deployment rejected bounded chat and embedding probes ({chat}; {embeddings})"
         ),
@@ -264,6 +265,7 @@ impl ProviderTransport for AzureOpenAiConnector {
                     phase: TransportPhase::Connect,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,
+                    retry_after: None,
                     message: "Azure OpenAI connector received a different provider kind".into(),
                 })
             });

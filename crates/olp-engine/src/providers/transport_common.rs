@@ -1,11 +1,13 @@
 //! Shared request metadata and error construction for native HTTP transports.
 
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 use crate::domain::{
-    AttemptFailureClass, SourceExtensions, Surface, TransportError, TransportPhase,
+    AttemptFailureClass, MAX_UPSTREAM_RETRY_AFTER, SourceExtensions, Surface, TransportError,
+    TransportPhase,
 };
-use http::{HeaderValue, StatusCode};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 use zeroize::Zeroizing;
 
 use crate::providers::transport_io::ProviderResponseIo;
@@ -30,21 +32,136 @@ pub(in crate::providers) fn safe_upstream_error_message(
 ) -> String {
     let message = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
-        .and_then(|value| value.get("error").cloned())
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        })
-        .map(|message| message.replace(secret, "[REDACTED]"))
-        .map(|message| message.chars().take(512).collect::<String>());
+        .and_then(|value| {
+            let candidates = [
+                value
+                    .pointer("/error/message")
+                    .and_then(serde_json::Value::as_str),
+                value.get("error").and_then(serde_json::Value::as_str),
+                value.get("message").and_then(serde_json::Value::as_str),
+                value.get("detail").and_then(serde_json::Value::as_str),
+            ];
+            candidates
+                .into_iter()
+                .flatten()
+                .find_map(|candidate| sanitize_upstream_message(candidate, secret))
+        });
     match message {
         Some(message) if !message.is_empty() => {
             format!("{provider} returned HTTP {status}: {message}")
         }
         _ => format!("{provider} returned HTTP {status}"),
     }
+}
+
+fn sanitize_upstream_message(message: &str, secret: &str) -> Option<String> {
+    let redacted = if secret.is_empty() {
+        message.to_owned()
+    } else {
+        message.replace(secret, "[REDACTED]")
+    };
+    let mut sanitized = String::new();
+    let mut characters = 0;
+    let mut previous_was_space = false;
+    for character in redacted.chars() {
+        if characters == 512 {
+            break;
+        }
+        if character.is_control()
+            || character.is_whitespace()
+            || is_unsafe_format_control(character)
+        {
+            if !previous_was_space && !sanitized.is_empty() {
+                sanitized.push(' ');
+                characters += 1;
+            }
+            previous_was_space = true;
+        } else {
+            sanitized.push(character);
+            characters += 1;
+            previous_was_space = false;
+        }
+    }
+    let sanitized = sanitized.trim().to_owned();
+    if sanitized.is_empty()
+        || looks_like_html(&sanitized)
+        || looks_like_structured_content(&sanitized)
+    {
+        None
+    } else {
+        Some(sanitized)
+    }
+}
+
+fn is_unsafe_format_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{00ad}'
+            | '\u{061c}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{feff}'
+    )
+}
+
+fn looks_like_structured_content(message: &str) -> bool {
+    if serde_json::from_str::<serde_json::Value>(message)
+        .is_ok_and(|value| value.is_object() || value.is_array())
+    {
+        return true;
+    }
+    let without_redaction = message.replace("[REDACTED]", "");
+    (without_redaction.contains('{') && without_redaction.contains('}'))
+        || (without_redaction.contains('[') && without_redaction.contains(']'))
+}
+
+fn looks_like_html(message: &str) -> bool {
+    let bytes = message.as_bytes();
+    bytes.iter().enumerate().any(|(index, byte)| {
+        if *byte != b'<' {
+            return false;
+        }
+        let Some(next) = bytes.get(index + 1) else {
+            return false;
+        };
+        (next.is_ascii_alphabetic() || matches!(next, b'!' | b'/' | b'?'))
+            && bytes[index + 2..].contains(&b'>')
+    })
+}
+
+pub(in crate::providers) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
+    retry_after_at(headers, Utc::now())
+}
+
+/// Parses either Retry-After wire form against an injected clock, keeping
+/// HTTP-date tests deterministic.
+pub(in crate::providers) fn retry_after_at(
+    headers: &HeaderMap,
+    now: DateTime<Utc>,
+) -> Option<Duration> {
+    let value = headers.get(header::RETRY_AFTER)?.to_str().ok()?.trim();
+    let delay = if value.bytes().all(|byte| byte.is_ascii_digit()) && !value.is_empty() {
+        Duration::from_secs(value.parse::<u64>().ok()?)
+    } else {
+        let retry_at = parse_http_date(value)?;
+        retry_at.signed_duration_since(now).to_std().ok()?
+    };
+    Some(delay.min(MAX_UPSTREAM_RETRY_AFTER))
+}
+
+fn parse_http_date(value: &str) -> Option<DateTime<Utc>> {
+    [
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%A, %d-%b-%y %H:%M:%S GMT",
+        "%a %b %e %H:%M:%S %Y",
+    ]
+    .into_iter()
+    .find_map(|format| {
+        NaiveDateTime::parse_from_str(value, format)
+            .ok()
+            .map(|value| value.and_utc())
+    })
 }
 
 pub(in crate::providers) fn source_extensions(
@@ -129,6 +246,7 @@ pub(in crate::providers) fn transport_error(
         phase,
         class,
         response_committed,
+        retry_after: None,
         message: message.into(),
     }
 }
@@ -175,7 +293,7 @@ pub(in crate::providers) async fn read_inline_media(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
     use bytes::Bytes;
     use futures::stream;
@@ -272,6 +390,109 @@ mod tests {
         let body_error = protocol_body_error("invalid response body");
         assert_eq!(body_error.phase, TransportPhase::Body);
         assert_eq!(body_error.class, AttemptFailureClass::Protocol);
+    }
+
+    #[test]
+    fn upstream_error_messages_accept_only_bounded_safe_scalar_shapes() {
+        for (body, expected) in [
+            (json!({"error": {"message": "nested"}}), "nested"),
+            (json!({"error": "string error"}), "string error"),
+            (json!({"message": "top-level message"}), "top-level message"),
+            (json!({"detail": "top-level detail"}), "top-level detail"),
+        ] {
+            let body = serde_json::to_vec(&body).unwrap();
+            let message =
+                safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, &body, "secret");
+            assert!(message.ends_with(expected), "{message}");
+        }
+
+        let body = serde_json::to_vec(&json!({
+            "message": "before\n\u{0} secret\tafter"
+        }))
+        .unwrap();
+        let message =
+            safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, &body, "secret");
+        assert_eq!(
+            message,
+            "provider returned HTTP 400 Bad Request: before [REDACTED] after"
+        );
+        assert!(!message.chars().any(char::is_control));
+
+        let body = serde_json::to_vec(&json!({
+            "message": "before\u{202e}after"
+        }))
+        .unwrap();
+        let message =
+            safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, &body, "secret");
+        assert_eq!(
+            message,
+            "provider returned HTTP 400 Bad Request: before after"
+        );
+
+        for body in [
+            b"not JSON".as_slice(),
+            b"\xff\xfe".as_slice(),
+            br#"[{"message":"array body"}]"#,
+            br#"{"error":{"message":{"nested":"object"}}}"#,
+            br#"{"detail":["array"]}"#,
+            br#"{"message":"<!doctype html><html>error</html>"}"#,
+            br#"{"message":"{\"messages\":[{\"role\":\"user\",\"content\":\"private\"}]}"}"#,
+            br#"{"message":"request failed: {\"messages\":[{\"role\":\"user\",\"content\":\"private\"}]}"}"#,
+        ] {
+            assert_eq!(
+                safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, body, "secret"),
+                "provider returned HTTP 400 Bad Request"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_after_supports_delta_seconds_and_http_dates_with_a_fixed_clock() {
+        let now = DateTime::parse_from_rfc2822("Wed, 21 Oct 2015 07:28:00 GMT")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut headers = HeaderMap::new();
+
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("17"));
+        assert_eq!(retry_after_at(&headers, now), Some(Duration::from_secs(17)));
+
+        headers.insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:30 GMT"),
+        );
+        assert_eq!(retry_after_at(&headers, now), Some(Duration::from_secs(30)));
+
+        for legacy_http_date in [
+            "Wednesday, 21-Oct-15 07:28:30 GMT",
+            "Wed Oct 21 07:28:30 2015",
+        ] {
+            headers.insert(
+                header::RETRY_AFTER,
+                HeaderValue::from_str(legacy_http_date).unwrap(),
+            );
+            assert_eq!(
+                retry_after_at(&headers, now),
+                Some(Duration::from_secs(30)),
+                "{legacy_http_date}"
+            );
+        }
+
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("7200"));
+        assert_eq!(
+            retry_after_at(&headers, now),
+            Some(MAX_UPSTREAM_RETRY_AFTER)
+        );
+
+        for invalid in [
+            "Wed, 21 Oct 2015 07:27:59 GMT",
+            "17.5",
+            "-1",
+            "18446744073709551616",
+            "tomorrow",
+        ] {
+            headers.insert(header::RETRY_AFTER, HeaderValue::from_str(invalid).unwrap());
+            assert_eq!(retry_after_at(&headers, now), None, "{invalid}");
+        }
     }
 
     #[test]

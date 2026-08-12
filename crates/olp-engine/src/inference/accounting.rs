@@ -1,5 +1,6 @@
 use crate::domain::{
     CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
+    UsageObservation,
 };
 use chrono::Utc;
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
@@ -325,29 +326,73 @@ pub struct UsageCapture {
     complete: bool,
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
+    total_tokens: Option<i64>,
     cached_input_tokens: Option<i64>,
+    reasoning_tokens: Option<i64>,
     media_units: Option<Decimal>,
 }
 
 impl UsageCapture {
     #[must_use]
     pub fn actual_tokens(&self) -> Option<i64> {
+        if !self.observed || !self.complete {
+            return None;
+        }
         self.input_tokens?.checked_add(self.output_tokens?)
     }
 
     pub fn observe(&mut self, event: &CanonicalEvent) {
-        let CanonicalEventKind::Usage { usage } = &event.kind else {
-            return;
-        };
+        if let CanonicalEventKind::Usage { usage } = &event.kind {
+            let total_exact = usage
+                .input_tokens
+                .checked_add(usage.output_tokens)
+                .is_some_and(|total| total == usage.total_tokens);
+            self.capture_observation(UsageObservation {
+                input_tokens: Some(usage.input_tokens),
+                output_tokens: Some(usage.output_tokens),
+                total_tokens: Some(usage.total_tokens),
+                cached_input_tokens: usage.cached_input_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+            });
+            self.complete &= total_exact;
+        } else if let Some(observation) = event.usage_observation {
+            self.capture_observation(observation);
+        }
+    }
+
+    fn capture_observation(&mut self, observation: UsageObservation) {
         self.observed = true;
-        self.input_tokens = i64::try_from(usage.input_tokens).ok();
-        self.output_tokens = i64::try_from(usage.output_tokens).ok();
-        self.cached_input_tokens = usage
-            .cached_input_tokens
-            .and_then(|value| i64::try_from(value).ok());
-        self.complete = self.input_tokens.is_some()
-            && self.output_tokens.is_some()
-            && (usage.cached_input_tokens.is_none() || self.cached_input_tokens.is_some());
+        if let Some(value) = observation.input_tokens {
+            self.input_tokens = i64::try_from(value).ok();
+        }
+        if let Some(value) = observation.output_tokens {
+            self.output_tokens = i64::try_from(value).ok();
+        }
+        if let Some(value) = observation.total_tokens {
+            self.total_tokens = i64::try_from(value).ok();
+        }
+        if let Some(value) = observation.cached_input_tokens {
+            self.cached_input_tokens = i64::try_from(value).ok();
+        }
+        if let Some(value) = observation.reasoning_tokens {
+            self.reasoning_tokens = i64::try_from(value).ok();
+        }
+        self.complete = self
+            .input_tokens
+            .zip(self.output_tokens)
+            .and_then(|(input, output)| input.checked_add(output))
+            .zip(self.total_tokens)
+            .is_some_and(|(expected, total)| expected == total)
+            && (observation.cached_input_tokens.is_none() || self.cached_input_tokens.is_some())
+            && self
+                .cached_input_tokens
+                .zip(self.input_tokens)
+                .is_none_or(|(cached, input)| cached <= input)
+            && (observation.reasoning_tokens.is_none() || self.reasoning_tokens.is_some())
+            && self
+                .reasoning_tokens
+                .zip(self.output_tokens)
+                .is_none_or(|(reasoning, output)| reasoning <= output);
     }
 
     pub fn observe_openai_media_event(&mut self, event: &CanonicalEvent) {
@@ -364,42 +409,55 @@ impl UsageCapture {
         else {
             return;
         };
-        let input = usage
+        let input_tokens = usage
             .get("input_tokens")
             .or_else(|| usage.get("prompt_tokens"))
-            .and_then(Value::as_u64)
-            .and_then(|value| i64::try_from(value).ok());
-        let output = usage
+            .and_then(Value::as_u64);
+        let output_tokens = usage
             .get("output_tokens")
             .or_else(|| usage.get("completion_tokens"))
-            .and_then(Value::as_u64)
-            .and_then(|value| i64::try_from(value).ok());
-        let cached = usage
+            .and_then(Value::as_u64);
+        let total_tokens = usage.get("total_tokens").and_then(Value::as_u64);
+        let cached_input_tokens = usage
             .get("input_tokens_details")
             .or_else(|| usage.get("prompt_tokens_details"))
             .and_then(|details| details.get("cached_tokens"))
-            .and_then(Value::as_u64)
-            .and_then(|value| i64::try_from(value).ok());
-        if input.is_none() && output.is_none() && cached.is_none() {
+            .and_then(Value::as_u64);
+        if input_tokens.is_none()
+            && output_tokens.is_none()
+            && total_tokens.is_none()
+            && cached_input_tokens.is_none()
+        {
             return;
         }
-        self.observed = true;
-        self.input_tokens = input;
-        self.output_tokens = output;
-        self.cached_input_tokens = cached;
-        self.complete = input.is_some() && output.is_some();
+        self.capture_observation(UsageObservation {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cached_input_tokens,
+            reasoning_tokens: None,
+        });
     }
 }
 
 pub(in crate::inference) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
-    let (usage, media_units) = match result {
-        CanonicalResult::Embeddings(result) => (result.usage, None),
-        CanonicalResult::Images(result) => (result.usage, Decimal::from_usize(result.images.len())),
+    let (usage, usage_observation, media_units) = match result {
+        CanonicalResult::Embeddings(result) => (result.usage, result.usage_observation, None),
+        CanonicalResult::Images(result) => (
+            result.usage,
+            result.usage_observation,
+            Decimal::from_usize(result.images.len()),
+        ),
         CanonicalResult::Transcription(result) => (
-            None,
-            result.duration_seconds.and_then(Decimal::from_f64_retain),
+            result.usage,
+            result.usage_observation,
+            result
+                .usage_duration_seconds
+                .or(result.duration_seconds)
+                .and_then(Decimal::from_f64_retain),
         ),
         CanonicalResult::VideoJob(result) => (
+            None,
             None,
             result
                 .seconds
@@ -415,32 +473,31 @@ pub(in crate::inference) fn usage_from_result(result: &CanonicalResult) -> Usage
                 reasoning_tokens: None,
             }),
             None,
+            None,
         ),
-        _ => (None, None),
+        _ => (None, None, None),
     };
-    if usage.is_none() && media_units.is_none() {
+    if usage.is_none() && usage_observation.is_none() && media_units.is_none() {
         return UsageCapture::default();
     }
-    let (input_tokens, output_tokens, cached_input_tokens, token_complete) =
-        usage.map_or((None, None, None, true), |usage| {
-            let input = i64::try_from(usage.input_tokens).ok();
-            let output = i64::try_from(usage.output_tokens).ok();
-            let cached = usage
-                .cached_input_tokens
-                .and_then(|value| i64::try_from(value).ok());
-            let complete = input.is_some()
-                && output.is_some()
-                && (usage.cached_input_tokens.is_none() || cached.is_some());
-            (input, output, cached, complete)
-        });
-    UsageCapture {
-        observed: true,
-        complete: token_complete,
-        input_tokens,
-        output_tokens,
-        cached_input_tokens,
+    let mut capture = UsageCapture {
+        observed: media_units.is_some(),
+        complete: usage.is_none() && usage_observation.is_none(),
         media_units,
+        ..UsageCapture::default()
+    };
+    if let Some(usage) = usage {
+        capture.capture_observation(UsageObservation {
+            input_tokens: Some(usage.input_tokens),
+            output_tokens: Some(usage.output_tokens),
+            total_tokens: Some(usage.total_tokens),
+            cached_input_tokens: usage.cached_input_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        });
+    } else if let Some(observation) = usage_observation {
+        capture.capture_observation(observation);
     }
+    capture
 }
 
 struct RequestMetadataInput<'a> {
@@ -553,6 +610,9 @@ mod tests {
         FinalAttemptUpdate, RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestOutcome,
         UsageCapture, split_actual_tokens, update_final_attempt,
     };
+    use crate::domain::{
+        CanonicalEvent, CanonicalEventKind, SourceExtensions, Surface, Usage, UsageObservation,
+    };
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -578,6 +638,129 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_usage_never_reconciles_as_actual_tokens() {
+        for usage in [
+            UsageCapture {
+                observed: false,
+                complete: false,
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                ..UsageCapture::default()
+            },
+            UsageCapture {
+                observed: true,
+                complete: false,
+                input_tokens: Some(12),
+                output_tokens: None,
+                ..UsageCapture::default()
+            },
+            UsageCapture {
+                observed: true,
+                complete: false,
+                input_tokens: Some(12),
+                output_tokens: Some(0),
+                ..UsageCapture::default()
+            },
+        ] {
+            assert_eq!(usage.actual_tokens(), None);
+            assert_eq!(
+                split_actual_tokens(usage.actual_tokens(), Some(100)),
+                (None, None)
+            );
+        }
+    }
+
+    #[test]
+    fn accounting_rejects_inconsistent_canonical_totals_and_retains_partial_observations() {
+        let mut usage = UsageCapture::default();
+        usage.observe(&CanonicalEvent::new(
+            0,
+            CanonicalEventKind::Usage {
+                usage: Usage {
+                    input_tokens: 3,
+                    output_tokens: 2,
+                    total_tokens: 6,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                },
+            },
+        ));
+        assert!(usage.observed);
+        assert!(!usage.complete);
+        assert_eq!(usage.actual_tokens(), None);
+
+        let mut partial = UsageCapture::default();
+        partial.observe(
+            &CanonicalEvent::new(0, CanonicalEventKind::Done).with_usage_observation(
+                UsageObservation {
+                    input_tokens: Some(8),
+                    ..UsageObservation::default()
+                },
+            ),
+        );
+        partial.observe(
+            &CanonicalEvent::new(1, CanonicalEventKind::Done).with_usage_observation(
+                UsageObservation {
+                    output_tokens: Some(5),
+                    ..UsageObservation::default()
+                },
+            ),
+        );
+        assert!(partial.observed);
+        assert!(!partial.complete);
+        assert_eq!(partial.input_tokens, Some(8));
+        assert_eq!(partial.output_tokens, Some(5));
+        assert_eq!(partial.actual_tokens(), None);
+    }
+
+    #[test]
+    fn raw_media_usage_requires_an_exact_total_and_merges_valid_partials() {
+        let raw_event = |sequence, usage| {
+            CanonicalEvent::new(
+                sequence,
+                CanonicalEventKind::SourceExtension {
+                    extensions: SourceExtensions::new(
+                        Surface::OpenAi,
+                        std::collections::BTreeMap::from([(
+                            "/__olp/raw_sse/data".to_owned(),
+                            serde_json::json!({ "usage": usage }),
+                        )]),
+                    ),
+                },
+            )
+        };
+
+        let mut capture = UsageCapture::default();
+        capture
+            .observe_openai_media_event(&raw_event(0, serde_json::json!({ "prompt_tokens": 8 })));
+        capture.observe_openai_media_event(&raw_event(
+            1,
+            serde_json::json!({ "completion_tokens": 3 }),
+        ));
+        assert!(capture.observed);
+        assert!(!capture.complete);
+        assert_eq!(capture.actual_tokens(), None);
+
+        capture
+            .observe_openai_media_event(&raw_event(2, serde_json::json!({ "total_tokens": 11 })));
+        assert!(capture.complete);
+        assert_eq!(capture.actual_tokens(), Some(11));
+
+        let mut inconsistent = UsageCapture::default();
+        inconsistent.observe_openai_media_event(&raw_event(
+            0,
+            serde_json::json!({
+                "input_tokens": 8,
+                "output_tokens": 3,
+                "total_tokens": 12
+            }),
+        ));
+        assert!(inconsistent.observed);
+        assert!(!inconsistent.complete);
+        assert_eq!(inconsistent.actual_tokens(), None);
+    }
+
+    #[test]
     fn final_streaming_usage_is_attached_to_the_final_attempt() {
         let mut attempt = uncertain_attempt();
         let usage = UsageCapture {
@@ -585,7 +768,9 @@ mod tests {
             complete: true,
             input_tokens: Some(12),
             output_tokens: Some(7),
+            total_tokens: Some(19),
             cached_input_tokens: Some(2),
+            reasoning_tokens: None,
             media_units: None,
         };
         let no_error = None;

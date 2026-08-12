@@ -31,6 +31,26 @@ fn transport_error_never_allows_failover_after_commit() {
 }
 
 #[tokio::test]
+async fn status_errors_retain_bounded_retry_after_metadata() {
+    let response = status_response_with_headers(
+        "429 Too Many Requests",
+        "application/json",
+        &[("Retry-After", "41")],
+        br#"{"error":{"message":"busy"}}"#,
+    );
+    let (base_url, _) = spawn_mock(MockResponse::immediate(response)).await;
+
+    let error = execute_error(
+        &test_connector(&base_url, ConnectorTimeouts::default()),
+        fixture_request(false),
+    )
+    .await;
+
+    assert_eq!(error.class, AttemptFailureClass::RateLimit);
+    assert_eq!(error.retry_after, Some(Duration::from_secs(41)));
+}
+
+#[tokio::test]
 async fn raw_media_stream_is_bounded_ordered_and_terminal() {
     let body = concat!(
         "event: image_generation.partial_image\n",
@@ -64,6 +84,55 @@ async fn raw_media_stream_is_bounded_ordered_and_terminal() {
             .enumerate()
             .all(|(index, event)| event.sequence == index as u64)
     );
+}
+
+#[tokio::test]
+async fn raw_media_stream_rejects_malformed_conflicting_and_inconsistent_usage() {
+    for frames in [
+        vec![
+            serde_json::json!({
+                "type": "image_generation.partial_image",
+                "usage": { "input_tokens": true }
+            }),
+            serde_json::json!({ "type": "image_generation.completed" }),
+        ],
+        vec![
+            serde_json::json!({
+                "type": "image_generation.partial_image",
+                "usage": { "input_tokens": 2 }
+            }),
+            serde_json::json!({
+                "type": "image_generation.completed",
+                "usage": { "input_tokens": 3 }
+            }),
+        ],
+        vec![serde_json::json!({
+            "type": "image_generation.completed",
+            "usage": { "input_tokens": 2, "output_tokens": 1, "total_tokens": 4 }
+        })],
+    ] {
+        let body = frames
+            .into_iter()
+            .map(|frame| format!("data: {frame}\n\n"))
+            .collect::<String>();
+        let headers =
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+        let (base_url, _) = spawn_mock(MockResponse::immediate(
+            [headers.as_slice(), body.as_bytes()].concat(),
+        ))
+        .await;
+        let connector = test_connector(&base_url, ConnectorTimeouts::default());
+        let mut events = execute_events(&connector, image_request(true)).await;
+        let failure = loop {
+            match events.next().await {
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => break error,
+                None => panic!("invalid raw usage must fail the stream"),
+            }
+        };
+        assert_eq!(failure.phase, TransportPhase::Body);
+        assert_eq!(failure.class, AttemptFailureClass::Protocol);
+    }
 }
 
 #[tokio::test]

@@ -1,0 +1,6 @@
+﻿data: {"id":"chatcmpl_bom","object":"chat.completion.chunk","created":1,"model":"gpt-fuzz","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_bom","object":"chat.completion.chunk","created":1,"model":"gpt-fuzz","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

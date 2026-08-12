@@ -101,9 +101,9 @@ pub use canonical::{
     ModerationItem, ModerationRequest, ModerationResult, Operation, OperationKind, RequestMetadata,
     ResponseFormat, SourceExtensions, SpeechRequest, SpeechResult, Surface, TokenCountRequest,
     TokenCountResult, ToolCall, ToolChoice, ToolDefinition, TranscriptionRequest,
-    TranscriptionResult, TranscriptionSegment, TransportMode, Usage, VideoContentResult,
-    VideoCreateRequest, VideoDeleteResult, VideoJobRequest, VideoJobResult, VideoListRequest,
-    VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
+    TranscriptionResult, TranscriptionSegment, TransportMode, Usage, UsageObservation,
+    VideoContentResult, VideoCreateRequest, VideoDeleteResult, VideoJobRequest, VideoJobResult,
+    VideoListRequest, VideoListResult, VideoOperation, VideoStatus, inline_media_marker,
     media_handle_from_inline_marker, validate_event_sequence,
 };
 pub use ids::{
@@ -111,9 +111,9 @@ pub use ids::{
     ProviderId, RequestId, RouteId, RouteSlug, RouteSlugError, RuntimeGenerationId, TargetId,
 };
 pub use ports::{
-    AttemptFailureClass, BoxFuture, DiscoveredProviderModel, MediaByteStream, MediaSpool,
-    MediaSpoolError, MediaUpload, OpenedMedia, ProviderEventStream, ProviderOutput,
-    ProviderRequest, ProviderTransport, TransportError, TransportPhase,
+    AttemptFailureClass, BoxFuture, DiscoveredProviderModel, MAX_UPSTREAM_RETRY_AFTER,
+    MediaByteStream, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia, ProviderEventStream,
+    ProviderOutput, ProviderRequest, ProviderTransport, TransportError, TransportPhase,
 };
 pub use provider::{
     CapabilitySource, ClosedSetParseError, ProviderAuthMode, ProviderState, RouteDraftState,

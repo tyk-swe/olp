@@ -127,7 +127,11 @@ impl RoutedEventExecution {
             &mut self.events,
             self.deadline,
             MAX_COLLECTED_CANONICAL_EVENT_BYTES,
-            &mut |event| accounting.usage_mut().observe(event),
+            &mut |event| {
+                let usage = accounting.usage_mut();
+                usage.observe(event);
+                usage.observe_openai_media_event(event);
+            },
         )
         .await;
         let events = match events {

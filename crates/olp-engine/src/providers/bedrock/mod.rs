@@ -31,6 +31,7 @@ pub fn validate_operation(operation: &Operation) -> Result<(), TransportError> {
             phase: crate::domain::TransportPhase::Connect,
             class: crate::domain::AttemptFailureClass::Protocol,
             response_committed: false,
+            retry_after: None,
             message: "Bedrock does not represent this canonical operation".to_owned(),
         }),
     }

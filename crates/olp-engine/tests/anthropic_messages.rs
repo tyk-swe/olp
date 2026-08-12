@@ -160,6 +160,36 @@ fn unary_response_preserves_thinking_and_maps_tools_usage_and_finish() {
     )));
 }
 
+#[test]
+fn unary_partial_usage_is_attached_to_done_for_accounting() {
+    let response: MessagesResponse = serde_json::from_value(json!({
+        "id": "msg_partial",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-upstream",
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": {
+            "input_tokens": 20,
+            "cache_creation_input_tokens": 2,
+            "cache_read_input_tokens": 4
+        }
+    }))
+    .unwrap();
+
+    let events = decode_messages_response(response).unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+    );
+    let observation = events.last().unwrap().usage_observation.unwrap();
+    assert_eq!(observation.input_tokens, Some(26));
+    assert_eq!(observation.output_tokens, None);
+    assert_eq!(observation.total_tokens, None);
+    assert_eq!(observation.cached_input_tokens, Some(4));
+}
+
 fn sse(event: &str, data: Value) -> String {
     format!("event: {event}\ndata: {data}\n\n")
 }
@@ -325,6 +355,116 @@ fn stream_errors_are_terminal_and_truncation_is_not_success() {
         truncated.finish(),
         Err(StreamError::UnexpectedEof)
     ));
+}
+
+#[test]
+fn stream_usage_is_complete_only_on_the_terminal_delta_and_later_deltas_fail() {
+    let start = sse(
+        "message_start",
+        json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_usage", "type": "message", "role": "assistant", "content": [],
+                "model": "claude-upstream", "stop_reason": null, "stop_sequence": null,
+                "usage": {
+                    "input_tokens": 4,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 2,
+                    "cache_read_input_tokens": 1
+                }
+            }
+        }),
+    );
+    let terminal_without_final_usage = sse(
+        "message_delta",
+        json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+            "usage": {}
+        }),
+    );
+    let stop = sse("message_stop", json!({"type": "message_stop"}));
+
+    let mut partial = AnthropicMessagesStreamDecoder::new();
+    let mut events = partial
+        .push(format!("{start}{terminal_without_final_usage}{stop}").as_bytes())
+        .unwrap();
+    events.extend(partial.finish().unwrap());
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+    );
+    let observation = events.last().unwrap().usage_observation.unwrap();
+    assert_eq!(observation.input_tokens, Some(7));
+    assert_eq!(observation.output_tokens, Some(0));
+    assert_eq!(observation.total_tokens, None);
+    assert_eq!(observation.cached_input_tokens, Some(1));
+
+    let mut complete = AnthropicMessagesStreamDecoder::new();
+    complete.push(start.as_bytes()).unwrap();
+    let events = complete
+        .push(
+            sse(
+                "message_delta",
+                json!({
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+                    "usage": {"output_tokens": 3}
+                }),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+            .count(),
+        1
+    );
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        CanonicalEventKind::Usage { usage }
+            if usage.input_tokens == 7 && usage.output_tokens == 3 && usage.total_tokens == 10
+    )));
+    assert!(matches!(
+        complete.push(
+            sse(
+                "message_delta",
+                json!({
+                    "type": "message_delta",
+                    "delta": {"stop_reason": null, "stop_sequence": null},
+                    "usage": {"output_tokens": 4}
+                }),
+            )
+            .as_bytes()
+        ),
+        Err(StreamError::ContentAfterFinish)
+    ));
+}
+
+#[test]
+fn stream_usage_rejects_counters_outside_the_accounting_range() {
+    let mut decoder = AnthropicMessagesStreamDecoder::new();
+    let error = decoder
+        .push(
+            sse(
+                "message_start",
+                json!({
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_usage", "type": "message", "role": "assistant",
+                        "content": [], "model": "claude-upstream", "stop_reason": null,
+                        "stop_sequence": null,
+                        "usage": {"input_tokens": (i64::MAX as u64) + 1, "output_tokens": 0}
+                    }
+                }),
+            )
+            .as_bytes(),
+        )
+        .unwrap_err();
+    assert!(matches!(error, StreamError::InvalidUsage));
 }
 
 #[test]

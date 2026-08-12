@@ -5,7 +5,7 @@ mod results;
 
 pub use events::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, EventSequenceError,
-    EventSequenceValidator, FinishReason, Usage, validate_event_sequence,
+    EventSequenceValidator, FinishReason, Usage, UsageObservation, validate_event_sequence,
 };
 pub use identity::{
     InvalidOperationKind, InvalidSurface, InvalidTransportMode, OperationKind, RequestMetadata,

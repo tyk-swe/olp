@@ -62,6 +62,7 @@ pub(super) struct ProviderContractRow {
     pub(super) cached_usage: Disposition,
     pub(super) structured_output: Disposition,
     pub(super) request_ids: Disposition,
+    pub(super) retry_after: Disposition,
     pub(super) media: Disposition,
     pub(super) oversized_responses: Disposition,
 }
@@ -75,6 +76,8 @@ const NO_BEDROCK_CACHED_USAGE: &str =
 const NO_BEDROCK_REQUEST_ID: &str = "the AWS SDK owns outbound metadata with no request-id injection hook, and Converse exposes no canonical response ID";
 const NO_BEDROCK_RESPONSE_BOUND: &str =
     "Bedrock response bodies are owned by the AWS SDK and have no connector-level byte limit";
+const NO_BEDROCK_RETRY_AFTER: &str =
+    "the AWS SDK error path does not expose the upstream Retry-After header to the connector";
 const NO_BEDROCK_MEDIA: &str =
     "the Bedrock Converse encoder accepts canonical text and tool parts but no media content part";
 
@@ -84,6 +87,7 @@ const fn shared_contracts(kind: ProviderKind) -> ProviderContractRow {
         cached_usage: Disposition::SharedContract,
         structured_output: Disposition::SharedContract,
         request_ids: Disposition::SharedContract,
+        retry_after: Disposition::SharedContract,
         media: Disposition::SharedContract,
         oversized_responses: Disposition::SharedContract,
     }
@@ -102,6 +106,7 @@ pub(super) const ROWS: [ProviderContractRow; 7] = [
         cached_usage: Disposition::Inapplicable(NO_BEDROCK_CACHED_USAGE),
         structured_output: Disposition::Inapplicable(NO_BEDROCK_STRUCTURED_OUTPUT),
         request_ids: Disposition::Inapplicable(NO_BEDROCK_REQUEST_ID),
+        retry_after: Disposition::Inapplicable(NO_BEDROCK_RETRY_AFTER),
         media: Disposition::Inapplicable(NO_BEDROCK_MEDIA),
         oversized_responses: Disposition::Inapplicable(NO_BEDROCK_RESPONSE_BOUND),
     },
@@ -201,9 +206,7 @@ pub(super) fn disposition(row: ProviderContractRow, contract: Contract) -> Dispo
         Contract::CachedInputUsage => row.cached_usage,
         Contract::StructuredOutput => row.structured_output,
         Contract::ProviderRequestIds => row.request_ids,
-        Contract::RetryAfter => Disposition::Inapplicable(
-            "TransportError does not carry upstream Retry-After metadata; retryability is the current contract",
-        ),
+        Contract::RetryAfter => row.retry_after,
         Contract::MediaOrMultipart => row.media,
         Contract::OversizedResponses => row.oversized_responses,
         Contract::EndpointAndAuthentication

@@ -14,10 +14,10 @@ pub use audio::{
     AudioCodecError, DEFAULT_AUDIO_UPLOAD_LIMIT, OpenAiSpeechRequest, OpenAiSpeechStreamEvent,
     OpenAiTranscriptionJson, OpenAiTranscriptionRequest, OpenAiTranscriptionResponse,
     OpenAiTranscriptionSegment, OpenAiTranscriptionStreamDecoder, OpenAiTranscriptionStreamEncoder,
-    SpeechStreamUpdate, TranscriptionResponseFormat, decode_speech, decode_speech_body,
-    decode_speech_stream_event, decode_transcription, decode_transcription_response, encode_speech,
-    encode_speech_body, encode_speech_stream_update, encode_transcription,
-    encode_transcription_response,
+    OpenAiTranscriptionUsage, SpeechStreamUpdate, TranscriptionInputTokenDetails,
+    TranscriptionResponseFormat, decode_speech, decode_speech_body, decode_speech_stream_event,
+    decode_transcription, decode_transcription_response, encode_speech, encode_speech_body,
+    encode_speech_stream_update, encode_transcription, encode_transcription_response,
 };
 pub use chat::{
     ChatCompletionRequest, ChatContentPart, ChatFunctionCall, ChatFunctionDefinition, ChatImageUrl,
@@ -46,6 +46,7 @@ pub use moderation::{
     OpenAiModerationResult, decode_moderation, decode_moderation_response, encode_moderation,
     encode_moderation_response,
 };
+pub(crate) use response::decode_compatible_chat_completion_response;
 pub use response::{
     ChatChunkChoice, ChatCompletionChoice, ChatCompletionChunk, ChatCompletionResponse, ChatDelta,
     ChatFunctionCallDelta, ChatResponseMessage, ChatToolCallDelta, ChatUsage,

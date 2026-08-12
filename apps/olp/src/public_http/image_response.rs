@@ -269,6 +269,7 @@ mod tests {
                 revised_prompt: Some("bounded".into()),
             }],
             usage: None,
+            usage_observation: None,
             extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         };
         let response = streaming_image_json_response(Arc::clone(&spool), &result)

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
     CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, SourceExtensions,
-    Surface, Usage as CanonicalUsage,
+    Surface, Usage as CanonicalUsage, UsageObservation,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,10 +23,12 @@ pub struct AnthropicMessagesStreamDecoder {
     message_started: bool,
     finished: bool,
     done: bool,
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_creation_input_tokens: u64,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
+    usage_observed: bool,
+    complete_usage_emitted: bool,
     blocks: BTreeMap<u32, BlockState>,
     next_tool_index: u32,
     preserve_raw_frames: bool,
@@ -74,10 +76,12 @@ impl AnthropicMessagesStreamDecoder {
             message_started: false,
             finished: false,
             done: false,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_input_tokens: 0,
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_input_tokens: None,
             cached_input_tokens: None,
+            usage_observed: false,
+            complete_usage_emitted: false,
             blocks: BTreeMap::new(),
             next_tool_index: 0,
             preserve_raw_frames,
@@ -183,11 +187,17 @@ impl AnthropicMessagesStreamDecoder {
         {
             return Err(StreamError::InvalidMessageStartState);
         }
+        validate_usage_counters([
+            event.message.usage.input_tokens,
+            event.message.usage.output_tokens,
+            event.message.usage.cache_creation_input_tokens,
+            event.message.usage.cache_read_input_tokens,
+        ])?;
         self.input_tokens = event.message.usage.input_tokens;
         self.output_tokens = event.message.usage.output_tokens;
-        self.cache_creation_input_tokens =
-            event.message.usage.cache_creation_input_tokens.unwrap_or(0);
+        self.cache_creation_input_tokens = event.message.usage.cache_creation_input_tokens;
         self.cached_input_tokens = event.message.usage.cache_read_input_tokens;
+        self.usage_observed = true;
         self.emit(
             events,
             CanonicalEventKind::ResponseStart {
@@ -400,18 +410,26 @@ impl AnthropicMessagesStreamDecoder {
         events: &mut Vec<CanonicalEvent>,
     ) -> Result<(), StreamError> {
         self.require_started()?;
+        self.require_not_finished()?;
         let event: MessageDelta = serde_json::from_value(value)?;
+        validate_usage_counters([
+            event.usage.input_tokens,
+            event.usage.output_tokens,
+            event.usage.cache_creation_input_tokens,
+            event.usage.cache_read_input_tokens,
+        ])?;
+        let final_output_observed = event.usage.output_tokens.is_some();
         if let Some(input_tokens) = event.usage.input_tokens {
-            self.input_tokens = input_tokens;
+            self.input_tokens = Some(input_tokens);
         }
         if let Some(output_tokens) = event.usage.output_tokens {
-            self.output_tokens = output_tokens;
+            self.output_tokens = Some(output_tokens);
         }
         if event.usage.cache_read_input_tokens.is_some() {
             self.cached_input_tokens = event.usage.cache_read_input_tokens;
         }
         if let Some(tokens) = event.usage.cache_creation_input_tokens {
-            self.cache_creation_input_tokens = tokens;
+            self.cache_creation_input_tokens = Some(tokens);
         }
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
@@ -427,28 +445,10 @@ impl AnthropicMessagesStreamDecoder {
             );
         }
         self.emit_extensions(events, extensions);
-        self.emit(
-            events,
-            CanonicalEventKind::Usage {
-                usage: CanonicalUsage {
-                    input_tokens: self
-                        .input_tokens
-                        .saturating_add(self.cache_creation_input_tokens)
-                        .saturating_add(self.cached_input_tokens.unwrap_or(0)),
-                    output_tokens: self.output_tokens,
-                    total_tokens: self
-                        .input_tokens
-                        .saturating_add(self.cache_creation_input_tokens)
-                        .saturating_add(self.cached_input_tokens.unwrap_or(0))
-                        .saturating_add(self.output_tokens),
-                    cached_input_tokens: self.cached_input_tokens,
-                    reasoning_tokens: None,
-                },
-            },
-        );
         if let Some(reason) = event.delta.stop_reason {
-            if self.finished {
-                return Err(StreamError::DuplicateFinishReason);
+            if final_output_observed && let Some(usage) = self.complete_usage()? {
+                self.emit(events, CanonicalEventKind::Usage { usage });
+                self.complete_usage_emitted = true;
             }
             self.emit(
                 events,
@@ -480,7 +480,7 @@ impl AnthropicMessagesStreamDecoder {
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
         self.emit_extensions(events, extensions);
-        self.emit(events, CanonicalEventKind::Done);
+        self.emit_done(events)?;
         self.done = true;
         Ok(())
     }
@@ -517,7 +517,7 @@ impl AnthropicMessagesStreamDecoder {
                 },
             },
         );
-        self.emit(events, CanonicalEventKind::Done);
+        self.emit_done(events)?;
         self.done = true;
         Ok(())
     }
@@ -540,6 +540,68 @@ impl AnthropicMessagesStreamDecoder {
         } else {
             Ok(())
         }
+    }
+
+    fn usage_observation(&self, force_incomplete: bool) -> Result<UsageObservation, StreamError> {
+        let input_tokens = self
+            .input_tokens
+            .map(|base_input| {
+                base_input
+                    .checked_add(self.cache_creation_input_tokens.unwrap_or(0))
+                    .and_then(|value| value.checked_add(self.cached_input_tokens.unwrap_or(0)))
+                    .ok_or(StreamError::InvalidUsage)
+            })
+            .transpose()?;
+        validate_usage_counters([
+            input_tokens,
+            self.output_tokens,
+            self.cached_input_tokens,
+            None,
+        ])?;
+        let total_tokens = if force_incomplete {
+            None
+        } else {
+            input_tokens
+                .zip(self.output_tokens)
+                .map(|(input, output)| input.checked_add(output).ok_or(StreamError::InvalidUsage))
+                .transpose()?
+        };
+        validate_usage_counters([total_tokens, None, None, None])?;
+        Ok(UsageObservation {
+            input_tokens,
+            output_tokens: self.output_tokens,
+            total_tokens,
+            cached_input_tokens: self.cached_input_tokens,
+            reasoning_tokens: None,
+        })
+    }
+
+    fn complete_usage(&self) -> Result<Option<CanonicalUsage>, StreamError> {
+        let observation = self.usage_observation(false)?;
+        let (Some(input_tokens), Some(output_tokens), Some(total_tokens)) = (
+            observation.input_tokens,
+            observation.output_tokens,
+            observation.total_tokens,
+        ) else {
+            return Ok(None);
+        };
+        Ok(Some(CanonicalUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cached_input_tokens: observation.cached_input_tokens,
+            reasoning_tokens: None,
+        }))
+    }
+
+    fn emit_done(&mut self, events: &mut Vec<CanonicalEvent>) -> Result<(), StreamError> {
+        let mut event = CanonicalEvent::new(self.sequence, CanonicalEventKind::Done);
+        if self.usage_observed && !self.complete_usage_emitted {
+            event = event.with_usage_observation(self.usage_observation(true)?);
+        }
+        events.push(event);
+        self.sequence = self.sequence.saturating_add(1);
+        Ok(())
     }
 
     fn emit_extensions(
@@ -686,8 +748,18 @@ fn collect_unknown_delta_fields(
     }
 }
 
+fn validate_usage_counters(counters: [Option<u64>; 4]) -> Result<(), StreamError> {
+    for counter in counters {
+        crate::protocols::usage::validate_counter(counter)
+            .map_err(|_| StreamError::InvalidUsage)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum StreamError {
+    #[error("Anthropic stream usage counters are invalid or out of range")]
+    InvalidUsage,
     #[error(transparent)]
     Sse(#[from] SseDecodeError),
     #[error("Anthropic stream frame is not valid JSON: {0}")]

@@ -3,7 +3,7 @@ use http::{HeaderMap, HeaderValue, StatusCode, header};
 use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
-use super::super::{OpenAiConnector, errors::*, streams::*};
+use super::super::{OpenAiConnector, errors::*, streams::*, wire::*};
 
 impl OpenAiConnector {
     pub(super) async fn post_raw_json(
@@ -251,15 +251,17 @@ impl OpenAiConnector {
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
-        require_content_type(&response, "application/json")?;
-        read_bounded_body(
+        let profile = WireProfile::for_provider(request.attempt.provider_kind);
+        require_json_response(&response, profile)?;
+        let body = read_bounded_body(
             response,
             first_byte_deadline,
             attempt_deadline,
             self.config.timeouts.idle,
             self.config.max_response_bytes,
         )
-        .await
+        .await?;
+        Ok(strip_json_bom(&body, profile).to_vec())
     }
 
     pub(in crate::providers::openai::transport) async fn map_error_response(
@@ -268,6 +270,7 @@ impl OpenAiConnector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let retry_after = crate::providers::transport_common::retry_after(response.headers());
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match read_bounded_body(
             response,
@@ -290,6 +293,8 @@ impl OpenAiConnector {
         } else {
             AttemptFailureClass::UpstreamClient
         };
-        transport_error(TransportPhase::FirstByte, class, false, message)
+        let mut error = transport_error(TransportPhase::FirstByte, class, false, message);
+        error.retry_after = retry_after;
+        error
     }
 }

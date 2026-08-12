@@ -14,6 +14,7 @@ use crate::providers::gemini::transport::media::hydrate_gemini_contents;
 use crate::providers::gemini::{ConnectorConfig, ConnectorTimeouts, GeminiApiKey};
 use crate::providers::mock_server::{
     MockResponse, find_bytes, response, spawn_mock as spawn_http_mock, status_response,
+    status_response_with_headers,
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -379,6 +380,26 @@ fn connector(base_url: &str) -> GeminiConnector {
         ConnectorConfig::for_local_test(base_url, ConnectorTimeouts::default()),
         GeminiApiKey::new("upstream-secret").unwrap(),
     )
+}
+
+#[tokio::test]
+async fn status_errors_retain_bounded_retry_after_metadata() {
+    let response = status_response_with_headers(
+        "429 Too Many Requests",
+        "application/json",
+        &[("Retry-After", "43")],
+        br#"{"error":{"message":"busy"}}"#,
+    );
+    let (base_url, _) = spawn_mock(MockResponse::immediate(response)).await;
+
+    let error = connector(&base_url)
+        .execute(generation(false))
+        .await
+        .err()
+        .unwrap();
+
+    assert_eq!(error.class, AttemptFailureClass::RateLimit);
+    assert_eq!(error.retry_after, Some(Duration::from_secs(43)));
 }
 
 #[tokio::test]

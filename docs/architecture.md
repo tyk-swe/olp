@@ -75,6 +75,14 @@ and token/media units are attached to the exact attempt that produced them,
 which keeps retries, provider changes, and partial streams auditable without
 storing request content.
 
+Provider usage is presence-aware at the wire boundary. An explicit integer
+zero is an observation; a missing or null counter is not. Malformed,
+fractional, negative, boolean, and out-of-range counters are protocol errors.
+OLP emits canonical usage and reconciles reserved token capacity only when all
+authoritative input and output counters are present and their exact total is
+consistent. Partial counters may be retained as content-free attempt facts,
+but remain incomplete and cannot be priced or used as actual token usage.
+
 The terminal collector is bounded independently of response size. It records
 status, timing, transport/error class, usage completeness, and pricing
 provenance, then emits one terminal envelope. Cancellation follows the same
@@ -97,6 +105,15 @@ rules, applicable fields, defaults, stable API metadata, compatible-provider
 presets, and complete-candidate validation. Presets resolve to ordinary
 connector fields and never bypass certification. Management create and update
 share the validator.
+
+OpenAI-compatible connectors apply one narrow decode-only wire profile.
+Within the existing byte and deadline limits it accepts a single leading
+UTF-8 BOM, JSON-compatible media types, absent or generic success media types
+when the bounded body unambiguously decodes as the expected JSON protocol, and
+a valid unary Chat Completions response to a streaming request. Native OpenAI
+and Azure OpenAI remain strict. The profile does not coerce values, invent
+finish reasons or indices, accept ambiguous tool associations, or relax
+terminal and truncation checks.
 
 Gateway capabilities and model visibility are default-deny. A capability is
 advertised only when the endpoint policy exposes it and the caller's key has

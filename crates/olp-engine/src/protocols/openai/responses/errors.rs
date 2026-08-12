@@ -63,6 +63,8 @@ pub enum ResponsesCodecError {
     UnsupportedOutputItem(String),
     #[error("Responses response contains too many output items")]
     TooManyOutputItems,
+    #[error("Responses usage is internally inconsistent")]
+    InvalidUsage,
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
@@ -71,4 +73,6 @@ pub enum ResponsesCodecError {
     UnexpectedEof,
     #[error("Responses stream contained data after its terminal event")]
     DataAfterDone,
+    #[error("Responses stream lifecycle events are inconsistent")]
+    InvalidStreamState,
 }

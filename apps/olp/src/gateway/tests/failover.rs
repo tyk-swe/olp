@@ -232,6 +232,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
         phase: olp_engine::domain::TransportPhase::FirstByte,
         class: AttemptFailureClass::Connect,
         response_committed: false,
+        retry_after: None,
         message: "connection closed before response headers".to_owned(),
     };
 
@@ -251,6 +252,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
             phase: olp_engine::domain::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
+            retry_after: None,
             message: "connection failed".to_owned(),
         },
         OperationKind::ImageGeneration,

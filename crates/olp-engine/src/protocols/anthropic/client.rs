@@ -17,12 +17,16 @@ pub enum ClientEncodeError {
     CandidateCount,
     #[error("canonical output is missing a finish reason")]
     MissingFinish,
+    #[error("canonical output is missing complete usage")]
+    MissingUsage,
     #[error("canonical tool call is missing an ID or name")]
     IncompleteTool,
     #[error("canonical tool arguments are not valid JSON")]
     ToolJson(#[source] serde_json::Error),
     #[error("canonical reasoning-token usage is not representable in Anthropic usage")]
     ReasoningUsage,
+    #[error("canonical usage details are internally inconsistent")]
+    InvalidUsage,
     #[error("source extension path cannot be represented on the Anthropic response")]
     Extension,
     #[error("Anthropic response encoding failed")]
@@ -67,10 +71,16 @@ pub fn encode_messages_response(
         .as_ref()
         .ok_or(ClientEncodeError::MissingFinish)?;
     let stop_reason = finish_reason(finish).to_owned();
-    let usage = aggregate.usage.unwrap_or_default();
+    let usage = aggregate.usage.ok_or(ClientEncodeError::MissingUsage)?;
     if usage.reasoning_tokens.is_some() {
         return Err(ClientEncodeError::ReasoningUsage);
     }
+    let uncached_input_tokens = usage
+        .cached_input_tokens
+        .map_or(Some(usage.input_tokens), |cached| {
+            usage.input_tokens.checked_sub(cached)
+        })
+        .ok_or(ClientEncodeError::InvalidUsage)?;
     let response = MessagesResponse {
         id: aggregate
             .response_id
@@ -82,10 +92,8 @@ pub fn encode_messages_response(
         stop_reason: Some(stop_reason),
         stop_sequence: None,
         usage: Usage {
-            input_tokens: usage
-                .input_tokens
-                .saturating_sub(usage.cached_input_tokens.unwrap_or(0)),
-            output_tokens: usage.output_tokens,
+            input_tokens: Some(uncached_input_tokens),
+            output_tokens: Some(usage.output_tokens),
             cache_creation_input_tokens: None,
             cache_read_input_tokens: usage.cached_input_tokens,
             extra: BTreeMap::new(),
@@ -170,7 +178,7 @@ mod tests {
         let response = encode_messages_response(&events, "route", "fallback").unwrap();
         assert_eq!(response.model, "route");
         assert_eq!(response.extra["vendor_flag"], true);
-        assert_eq!(response.usage.input_tokens, 5);
+        assert_eq!(response.usage.input_tokens, Some(5));
     }
 
     #[test]
@@ -192,6 +200,38 @@ mod tests {
             Err(ClientEncodeError::Aggregate(
                 AggregateError::CrossProtocolExtensions
             ))
+        ));
+    }
+
+    #[test]
+    fn refuses_to_fabricate_missing_usage() {
+        let events = vec![
+            CanonicalEvent::new(
+                0,
+                CanonicalEventKind::ResponseStart {
+                    response_id: Some("msg_1".into()),
+                    provider_model: None,
+                },
+            ),
+            CanonicalEvent::new(
+                1,
+                CanonicalEventKind::MessageStart {
+                    output_index: 0,
+                    role: MessageRole::Assistant,
+                },
+            ),
+            CanonicalEvent::new(
+                2,
+                CanonicalEventKind::Finish {
+                    output_index: 0,
+                    reason: FinishReason::Stop,
+                },
+            ),
+            CanonicalEvent::new(3, CanonicalEventKind::Done),
+        ];
+        assert!(matches!(
+            encode_messages_response(&events, "route", "fallback"),
+            Err(ClientEncodeError::MissingUsage)
         ));
     }
 }

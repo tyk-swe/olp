@@ -310,10 +310,16 @@ pub struct MessagesResponse {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct Usage {
-    #[serde(default)]
-    pub input_tokens: u64,
-    #[serde(default)]
-    pub output_tokens: u64,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub input_tokens: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

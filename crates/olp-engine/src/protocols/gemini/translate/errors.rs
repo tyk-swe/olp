@@ -91,6 +91,8 @@ pub enum EncodeError {
 
 #[derive(Debug, Error)]
 pub enum ResponseError {
+    #[error("Gemini response usage is internally inconsistent")]
+    InvalidUsage,
     #[error("Gemini response has no candidates or prompt feedback")]
     EmptyResponse,
     #[error("Gemini unary response candidate is missing finishReason")]

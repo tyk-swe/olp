@@ -22,6 +22,8 @@ pub enum ClientEncodeError {
     IncompleteTool,
     #[error("canonical tool arguments are not valid JSON")]
     ToolJson(#[source] serde_json::Error),
+    #[error("canonical usage is inconsistent")]
+    InvalidUsage,
     #[error("source extension path cannot be represented on the Gemini response")]
     Extension,
     #[error("Gemini response encoding failed")]
@@ -75,14 +77,23 @@ pub fn encode_generate_content_response(
             extra: BTreeMap::new(),
         });
     }
-    let usage_metadata = aggregate.usage.map(|usage| UsageMetadata {
-        prompt_token_count: usage.input_tokens,
-        candidates_token_count: usage.output_tokens,
-        total_token_count: usage.total_tokens,
-        cached_content_token_count: usage.cached_input_tokens,
-        thoughts_token_count: usage.reasoning_tokens,
-        extra: BTreeMap::new(),
-    });
+    let usage_metadata = if let Some(usage) = aggregate.usage {
+        let candidates_token_count = usage
+            .output_tokens
+            .checked_sub(usage.reasoning_tokens.unwrap_or(0))
+            .ok_or(ClientEncodeError::InvalidUsage)?;
+        Some(UsageMetadata {
+            prompt_token_count: Some(usage.input_tokens),
+            candidates_token_count: Some(candidates_token_count),
+            total_token_count: Some(usage.total_tokens),
+            cached_content_token_count: usage.cached_input_tokens,
+            thoughts_token_count: usage.reasoning_tokens,
+            tool_use_prompt_token_count: None,
+            extra: BTreeMap::new(),
+        })
+    } else {
+        None
+    };
     let response = GenerateContentResponse {
         candidates,
         usage_metadata,
@@ -151,10 +162,10 @@ mod tests {
                 CanonicalEventKind::Usage {
                     usage: CanonicalUsage {
                         input_tokens: 3,
-                        output_tokens: 2,
-                        total_tokens: 5,
+                        output_tokens: 3,
+                        total_tokens: 6,
                         cached_input_tokens: Some(1),
-                        reasoning_tokens: None,
+                        reasoning_tokens: Some(1),
                     },
                 },
             ),
@@ -172,6 +183,9 @@ mod tests {
         let response = encode_generate_content_response(&events, "route", "fallback").unwrap();
         assert_eq!(response.model_version.as_deref(), Some("route"));
         assert_eq!(response.extra["vendorFlag"], true);
-        assert_eq!(response.usage_metadata.unwrap().total_token_count, 5);
+        let usage = response.usage_metadata.unwrap();
+        assert_eq!(usage.candidates_token_count, Some(2));
+        assert_eq!(usage.thoughts_token_count, Some(1));
+        assert_eq!(usage.total_token_count, Some(6));
     }
 }

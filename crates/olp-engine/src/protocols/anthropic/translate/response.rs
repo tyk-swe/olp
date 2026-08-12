@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::domain::{
     CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Surface,
-    Usage as CanonicalUsage,
+    Usage as CanonicalUsage, UsageObservation,
 };
 use serde_json::Value;
 
@@ -71,9 +71,12 @@ pub fn decode_messages_response(
             extensions: SourceExtensions::new(Surface::Anthropic, extensions),
         });
     }
-    builder.push(CanonicalEventKind::Usage {
-        usage: canonical_usage(&response.usage),
-    });
+    let usage_observation = if let Some(usage) = canonical_usage(&response.usage)? {
+        builder.push(CanonicalEventKind::Usage { usage });
+        None
+    } else {
+        Some(usage_observation_for(&response.usage)?)
+    };
     let stop_reason = response
         .stop_reason
         .ok_or(ResponseError::MissingStopReason)?;
@@ -81,22 +84,75 @@ pub fn decode_messages_response(
         output_index: 0,
         reason: anthropic_finish_reason(&stop_reason),
     });
-    builder.push(CanonicalEventKind::Done);
+    if let Some(observation) = usage_observation {
+        builder.push_with_usage_observation(CanonicalEventKind::Done, observation);
+    } else {
+        builder.push(CanonicalEventKind::Done);
+    }
     Ok(builder.events)
 }
 
-pub(in crate::protocols) fn canonical_usage(usage: &super::super::dto::Usage) -> CanonicalUsage {
-    let input_tokens = usage
-        .input_tokens
-        .saturating_add(usage.cache_creation_input_tokens.unwrap_or(0))
-        .saturating_add(usage.cache_read_input_tokens.unwrap_or(0));
-    CanonicalUsage {
+pub(in crate::protocols) fn canonical_usage(
+    usage: &super::super::dto::Usage,
+) -> Result<Option<CanonicalUsage>, ResponseError> {
+    for counter in [
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cache_creation_input_tokens,
+        usage.cache_read_input_tokens,
+    ] {
+        crate::protocols::usage::validate_counter(counter)
+            .map_err(|_| ResponseError::InvalidUsage)?;
+    }
+    let (Some(base_input), Some(output_tokens)) = (usage.input_tokens, usage.output_tokens) else {
+        return Ok(None);
+    };
+    let input_tokens = base_input
+        .checked_add(usage.cache_creation_input_tokens.unwrap_or(0))
+        .and_then(|tokens| tokens.checked_add(usage.cache_read_input_tokens.unwrap_or(0)))
+        .ok_or(ResponseError::InvalidUsage)?;
+    let total_tokens = input_tokens
+        .checked_add(output_tokens)
+        .ok_or(ResponseError::InvalidUsage)?;
+    Ok(Some(CanonicalUsage {
         input_tokens,
-        output_tokens: usage.output_tokens,
-        total_tokens: input_tokens.saturating_add(usage.output_tokens),
+        output_tokens,
+        total_tokens,
         cached_input_tokens: usage.cache_read_input_tokens,
         reasoning_tokens: None,
+    }))
+}
+
+fn usage_observation_for(
+    usage: &super::super::dto::Usage,
+) -> Result<UsageObservation, ResponseError> {
+    for counter in [
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cache_creation_input_tokens,
+        usage.cache_read_input_tokens,
+    ] {
+        crate::protocols::usage::validate_counter(counter)
+            .map_err(|_| ResponseError::InvalidUsage)?;
     }
+    let input_tokens = usage
+        .input_tokens
+        .map(|base_input| {
+            base_input
+                .checked_add(usage.cache_creation_input_tokens.unwrap_or(0))
+                .and_then(|tokens| tokens.checked_add(usage.cache_read_input_tokens.unwrap_or(0)))
+                .ok_or(ResponseError::InvalidUsage)
+        })
+        .transpose()?;
+    crate::protocols::usage::validate_counter(input_tokens)
+        .map_err(|_| ResponseError::InvalidUsage)?;
+    Ok(UsageObservation {
+        input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: None,
+        cached_input_tokens: usage.cache_read_input_tokens,
+        reasoning_tokens: None,
+    })
 }
 
 pub(in crate::protocols) fn collect_usage_extensions(

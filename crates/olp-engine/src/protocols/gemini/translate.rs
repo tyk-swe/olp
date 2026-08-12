@@ -11,4 +11,4 @@ pub use errors::{CountTokensError, DecodeError, EncodeError, ResponseError};
 pub use response::decode_generate_content_response;
 pub use validation::validate_count_tokens_request;
 
-pub(in crate::protocols) use response::decode_generate_content_chunk;
+pub(in crate::protocols) use response::{canonical_usage, decode_generate_content_chunk};

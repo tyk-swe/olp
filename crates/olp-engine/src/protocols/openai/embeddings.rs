@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::domain::{
     EmbeddingInput, EmbeddingVector, EmbeddingsRequest, EmbeddingsResult, Operation, RouteSlug,
-    RouteSlugError, SourceExtensions, Surface, Usage,
+    RouteSlugError, SourceExtensions, Surface,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::extensions::{apply_flat_extensions, collect_extra};
+use crate::protocols::usage::ObservedUsage;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EmbeddingRequest {
@@ -155,7 +156,8 @@ pub struct EmbeddingResponse {
     pub object: String,
     pub data: Vec<EmbeddingData>,
     pub model: String,
-    pub usage: EmbeddingUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<EmbeddingUsage>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -178,8 +180,16 @@ pub enum EmbeddingWireVector {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EmbeddingUsage {
-    pub prompt_tokens: u64,
-    pub total_tokens: u64,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub prompt_tokens: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub total_tokens: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -192,7 +202,20 @@ pub fn decode_embedding_response(
     }
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
-    collect_extra("/usage", &response.usage.extra, &mut extensions);
+    let (usage, usage_observation) = response.usage.map_or(Ok((None, None)), |usage| {
+        collect_extra("/usage", &usage.extra, &mut extensions);
+        let observed = ObservedUsage {
+            input_tokens: usage.prompt_tokens,
+            output_tokens: Some(0),
+            total_tokens: usage.total_tokens,
+            cached_input_tokens: None,
+            reasoning_tokens: None,
+        };
+        observed
+            .with_exact_total()
+            .map(|usage| (usage, usage.is_none().then(|| observed.observation())))
+            .map_err(|_| EmbeddingCodecError::InvalidUsage)
+    })?;
     let mut data = Vec::with_capacity(response.data.len());
     for item in response.data {
         if item.object != "embedding" {
@@ -216,13 +239,8 @@ pub fn decode_embedding_response(
     Ok(EmbeddingsResult {
         model: Some(response.model),
         data,
-        usage: Some(Usage {
-            input_tokens: response.usage.prompt_tokens,
-            output_tokens: 0,
-            total_tokens: response.usage.total_tokens,
-            cached_input_tokens: None,
-            reasoning_tokens: None,
-        }),
+        usage,
+        usage_observation,
         extensions: SourceExtensions::new(Surface::OpenAi, extensions),
     })
 }
@@ -257,17 +275,17 @@ pub fn encode_embedding_response(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let usage = result.usage.unwrap_or_default();
+    let usage = result.usage.map(|usage| EmbeddingUsage {
+        prompt_tokens: Some(usage.input_tokens),
+        total_tokens: Some(usage.total_tokens),
+        extra: BTreeMap::new(),
+    });
     super::extensions::apply_pointer_extensions(
         EmbeddingResponse {
             object: "list".into(),
             data,
             model: client_model.into(),
-            usage: EmbeddingUsage {
-                prompt_tokens: usage.input_tokens,
-                total_tokens: usage.total_tokens,
-                extra: BTreeMap::new(),
-            },
+            usage,
             extra: BTreeMap::new(),
         },
         &result.extensions.values,
@@ -317,6 +335,8 @@ pub enum EmbeddingCodecError {
     InvalidExtension(String),
     #[error("unexpected OpenAI object type: {0}")]
     UnexpectedObject(String),
+    #[error("embedding response usage is internally inconsistent")]
+    InvalidUsage,
     #[error("base64 embedding payload is invalid")]
     InvalidBase64Embedding,
     #[error("embedding payload exceeds the bounded decoder limit")]

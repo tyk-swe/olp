@@ -215,29 +215,50 @@ impl InferenceError {
 
     #[must_use]
     pub fn from_transport(error: TransportError) -> Self {
+        let retry_after = error.retry_after;
         match error.class {
             AttemptFailureClass::RateLimit => Self::new(
                 InferenceErrorKind::RateLimit,
                 "upstream_rate_limit",
                 error.message,
-                None,
+                retry_after,
             ),
-            AttemptFailureClass::Timeout => Self::timeout(),
-            AttemptFailureClass::UpstreamClient => {
-                Self::bad_gateway("upstream_rejected", error.message)
-            }
-            AttemptFailureClass::Connect | AttemptFailureClass::UpstreamServer => {
-                Self::bad_gateway("upstream_unavailable", error.message)
-            }
-            AttemptFailureClass::Protocol => {
-                Self::bad_gateway("provider_protocol_error", error.message)
-            }
-            AttemptFailureClass::Cancelled => {
-                Self::bad_gateway("provider_cancelled", error.message)
-            }
-            AttemptFailureClass::Ambiguous => {
-                Self::bad_gateway("ambiguous_upstream_result", error.message)
-            }
+            AttemptFailureClass::Timeout => Self::new(
+                InferenceErrorKind::GatewayTimeout,
+                "gateway_timeout",
+                "The route deadline elapsed.",
+                retry_after,
+            ),
+            AttemptFailureClass::UpstreamClient => Self::new(
+                InferenceErrorKind::Upstream,
+                "upstream_rejected",
+                error.message,
+                retry_after,
+            ),
+            AttemptFailureClass::Connect | AttemptFailureClass::UpstreamServer => Self::new(
+                InferenceErrorKind::Upstream,
+                "upstream_unavailable",
+                error.message,
+                retry_after,
+            ),
+            AttemptFailureClass::Protocol => Self::new(
+                InferenceErrorKind::Upstream,
+                "provider_protocol_error",
+                error.message,
+                retry_after,
+            ),
+            AttemptFailureClass::Cancelled => Self::new(
+                InferenceErrorKind::Upstream,
+                "provider_cancelled",
+                error.message,
+                retry_after,
+            ),
+            AttemptFailureClass::Ambiguous => Self::new(
+                InferenceErrorKind::Upstream,
+                "ambiguous_upstream_result",
+                error.message,
+                retry_after,
+            ),
         }
     }
 
@@ -340,15 +361,18 @@ mod tests {
         ];
 
         for (class, kind, code, message) in cases {
+            let retry_after = Duration::from_secs(23);
             let error = InferenceError::from_transport(TransportError {
                 phase: TransportPhase::FirstByte,
                 class,
                 response_committed: false,
+                retry_after: Some(retry_after),
                 message: "provider detail".to_owned(),
             });
             assert_eq!(error.kind(), kind, "unexpected kind for {class:?}");
             assert_eq!(error.code(), code, "unexpected code for {class:?}");
             assert_eq!(error.message(), message, "unexpected message for {class:?}");
+            assert_eq!(error.retry_after(), Some(retry_after));
         }
     }
 

@@ -1,3 +1,4 @@
+mod compatibility;
 mod matrix;
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -533,10 +534,14 @@ fn certification_response(kind: ProviderKind, request: &CapturedRequest) -> Vec<
                 concat!(
                     "event: response.created\n",
                     "data: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-response-id\",\"model\":\"conformance-model\"}}\n\n",
+                    "event: response.output_item.added\n",
+                    "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"in_progress\"}}\n\n",
                     "event: response.output_text.delta\n",
                     "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"OK\"}\n\n",
+                    "event: response.output_item.done\n",
+                    "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"completed\"}}\n\n",
                     "event: response.completed\n",
-                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}}\n\n"
+                    "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}}\n\n"
                 ),
             );
         }
@@ -1056,6 +1061,14 @@ async fn all_connectors_redact_secrets_and_classify_retryability() {
                 .expect_err("error status must fail");
             assert_eq!(error.class, class, "{kind:?} {status}");
             assert_eq!(error.allows_failover(), retryable, "{kind:?} {status}");
+            assert_eq!(
+                error.retry_after,
+                match matrix::row_for(kind).retry_after {
+                    matrix::Disposition::SharedContract => Some(Duration::from_secs(7)),
+                    matrix::Disposition::Inapplicable(_) => None,
+                },
+                "{kind:?} {status} Retry-After propagation"
+            );
             for secret in [
                 API_KEY,
                 VERTEX_TOKEN,

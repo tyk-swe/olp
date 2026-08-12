@@ -1,4 +1,4 @@
-use std::{fmt, future::Future, pin::Pin, sync::Arc};
+use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use futures::Stream;
@@ -146,8 +146,17 @@ pub struct TransportError {
     pub phase: TransportPhase,
     pub class: AttemptFailureClass,
     pub response_committed: bool,
+    /// A bounded upstream retry hint. This is metadata for the eventual
+    /// client response; failover never waits for this duration.
+    pub retry_after: Option<Duration>,
     pub message: String,
 }
+
+/// Longest upstream retry window OLP will pass through to a client.
+///
+/// Provider-controlled values are capped so an excessive header cannot ask a
+/// client to disappear for an operationally surprising amount of time.
+pub const MAX_UPSTREAM_RETRY_AFTER: Duration = Duration::from_secs(60 * 60);
 
 impl fmt::Debug for TransportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -156,6 +165,7 @@ impl fmt::Debug for TransportError {
             .field("phase", &self.phase)
             .field("class", &self.class)
             .field("response_committed", &self.response_committed)
+            .field("retry_after", &self.retry_after)
             .field("message", &"[REDACTED]")
             .finish()
     }

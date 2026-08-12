@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use super::extensions::{apply_pointer_extensions, collect_extra};
 use super::media::BoundedMediaPart;
+use crate::protocols::usage::ObservedUsage;
 
 pub const DEFAULT_IMAGE_UPLOAD_LIMIT: u64 = 50 * 1024 * 1024;
 
@@ -307,12 +308,21 @@ pub struct OpenAiImageData {
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiImageUsage {
-    #[serde(default)]
-    pub input_tokens: u64,
-    #[serde(default)]
-    pub output_tokens: u64,
-    #[serde(default)]
-    pub total_tokens: u64,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub input_tokens: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub output_tokens: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub total_tokens: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -338,20 +348,25 @@ pub fn decode_image_response(
             revised_prompt: data.revised_prompt,
         });
     }
-    let usage = response.usage.map(|usage| {
+    let (usage, usage_observation) = response.usage.map_or(Ok((None, None)), |usage| {
         collect_extra("/usage", &usage.extra, &mut extensions);
-        Usage {
+        let observed = ObservedUsage {
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,
             cached_input_tokens: None,
             reasoning_tokens: None,
-        }
-    });
+        };
+        observed
+            .with_exact_total()
+            .map(|usage| (usage, usage.is_none().then(|| observed.observation())))
+            .map_err(|_| ImageCodecError::InvalidUsage)
+    })?;
     Ok(ImagesResult {
         created_at: Some(response.created),
         images,
         usage,
+        usage_observation,
         extensions: SourceExtensions::new(Surface::OpenAi, extensions),
     })
 }
@@ -387,9 +402,9 @@ pub fn encode_image_response(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let usage = result.usage.map(|usage| OpenAiImageUsage {
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        total_tokens: usage.total_tokens,
+        input_tokens: Some(usage.input_tokens),
+        output_tokens: Some(usage.output_tokens),
+        total_tokens: Some(usage.total_tokens),
         extra: BTreeMap::new(),
     });
     apply_pointer_extensions(
@@ -428,6 +443,7 @@ pub enum ImageStreamUpdate {
     },
     Completed {
         usage: Option<Usage>,
+        usage_observation: Option<crate::domain::UsageObservation>,
         extensions: SourceExtensions,
     },
 }
@@ -460,15 +476,22 @@ pub fn decode_image_stream_event(
             })
         }
         "image_generation.completed" | "image_edit.completed" => {
-            let usage = event.usage.map(|usage| Usage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                total_tokens: usage.total_tokens,
-                cached_input_tokens: None,
-                reasoning_tokens: None,
-            });
+            let (usage, usage_observation) = event.usage.map_or(Ok((None, None)), |usage| {
+                let observed = ObservedUsage {
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    total_tokens: usage.total_tokens,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                };
+                observed
+                    .with_exact_total()
+                    .map(|usage| (usage, usage.is_none().then(|| observed.observation())))
+                    .map_err(|_| ImageCodecError::InvalidUsage)
+            })?;
             Ok(ImageStreamUpdate::Completed {
                 usage,
+                usage_observation,
                 extensions: SourceExtensions::new(Surface::OpenAi, extensions),
             })
         }
@@ -500,7 +523,9 @@ pub fn encode_image_stream_update(
                 extensions,
             )
         }
-        ImageStreamUpdate::Completed { usage, extensions } => {
+        ImageStreamUpdate::Completed {
+            usage, extensions, ..
+        } => {
             extensions.ensure_representable_on(Surface::OpenAi)?;
             (
                 "completed",
@@ -508,9 +533,9 @@ pub fn encode_image_stream_update(
                 None,
                 None,
                 usage.map(|usage| OpenAiImageUsage {
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                    total_tokens: usage.total_tokens,
+                    input_tokens: Some(usage.input_tokens),
+                    output_tokens: Some(usage.output_tokens),
+                    total_tokens: Some(usage.total_tokens),
                     extra: BTreeMap::new(),
                 }),
                 extensions,
@@ -593,6 +618,8 @@ pub enum ImageCodecError {
     InvalidMediaPart(String),
     #[error("image response must contain exactly one of url or b64_json")]
     AmbiguousImageResult,
+    #[error("image response usage is internally inconsistent")]
+    InvalidUsage,
     #[error("invalid source extension path: {0}")]
     InvalidExtension(String),
     #[error("base64 media staging failed: {0}")]

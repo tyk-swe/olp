@@ -361,6 +361,7 @@ impl ProviderResponseIo {
             phase,
             class,
             response_committed,
+            retry_after: None,
             message: message.into(),
         }
     }

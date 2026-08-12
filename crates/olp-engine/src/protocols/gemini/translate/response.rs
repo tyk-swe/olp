@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Surface, Usage,
+    CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Surface,
+    Usage, UsageObservation,
 };
 use serde_json::Value;
 
@@ -63,11 +64,14 @@ fn decode_response(
     if require_finish && !prompt_blocked && finished_count != candidate_count {
         return Err(ResponseError::MissingFinishReason);
     }
+    let mut usage_observation = None;
     if let Some(usage) = response.usage_metadata {
         collect_extra("/usageMetadata", &usage.extra, &mut extensions);
-        builder.push(CanonicalEventKind::Usage {
-            usage: canonical_usage(&usage),
-        });
+        if let Some(usage) = canonical_usage(&usage)? {
+            builder.push(CanonicalEventKind::Usage { usage });
+        } else {
+            usage_observation = Some(usage_observation_for(&usage)?);
+        }
     }
     if !extensions.is_empty() {
         builder.push(CanonicalEventKind::SourceExtension {
@@ -80,7 +84,11 @@ fn decode_response(
             reason: FinishReason::ContentFilter,
         });
     }
-    builder.push(CanonicalEventKind::Done);
+    if let Some(observation) = usage_observation {
+        builder.push_with_usage_observation(CanonicalEventKind::Done, observation);
+    } else {
+        builder.push(CanonicalEventKind::Done);
+    }
     Ok(builder.events)
 }
 
@@ -176,22 +184,105 @@ fn decode_candidate(
     Ok(finished)
 }
 
-pub(in crate::protocols) fn canonical_usage(usage: &UsageMetadata) -> Usage {
-    let total_tokens = if usage.total_token_count == 0 {
-        usage
-            .prompt_token_count
-            .saturating_add(usage.candidates_token_count)
-            .saturating_add(usage.thoughts_token_count.unwrap_or(0))
-    } else {
-        usage.total_token_count
+pub(in crate::protocols) fn canonical_usage(
+    usage: &UsageMetadata,
+) -> Result<Option<Usage>, ResponseError> {
+    for counter in [
+        usage.prompt_token_count,
+        usage.candidates_token_count,
+        usage.total_token_count,
+        usage.cached_content_token_count,
+        usage.thoughts_token_count,
+        usage.tool_use_prompt_token_count,
+    ] {
+        crate::protocols::usage::validate_counter(counter)
+            .map_err(|_| ResponseError::InvalidUsage)?;
+    }
+    let (Some(input_tokens), Some(output_tokens), Some(total_tokens)) = (
+        usage.prompt_token_count,
+        usage.candidates_token_count,
+        usage.total_token_count,
+    ) else {
+        return Ok(None);
     };
-    Usage {
-        input_tokens: usage.prompt_token_count,
-        output_tokens: usage.candidates_token_count,
+    let canonical_input_tokens = input_tokens
+        .checked_add(usage.tool_use_prompt_token_count.unwrap_or(0))
+        .ok_or(ResponseError::InvalidUsage)?;
+    let canonical_output_tokens = output_tokens
+        .checked_add(usage.thoughts_token_count.unwrap_or(0))
+        .ok_or(ResponseError::InvalidUsage)?;
+    let expected_total = canonical_input_tokens
+        .checked_add(canonical_output_tokens)
+        .ok_or(ResponseError::InvalidUsage)?;
+    if total_tokens != expected_total
+        || usage
+            .cached_content_token_count
+            .is_some_and(|cached| cached > canonical_input_tokens)
+        || usage
+            .thoughts_token_count
+            .is_some_and(|thoughts| thoughts > canonical_output_tokens)
+    {
+        return Err(ResponseError::InvalidUsage);
+    }
+    Ok(Some(Usage {
+        input_tokens: canonical_input_tokens,
+        output_tokens: canonical_output_tokens,
         total_tokens,
         cached_input_tokens: usage.cached_content_token_count,
         reasoning_tokens: usage.thoughts_token_count,
+    }))
+}
+
+fn usage_observation_for(usage: &UsageMetadata) -> Result<UsageObservation, ResponseError> {
+    for counter in [
+        usage.prompt_token_count,
+        usage.candidates_token_count,
+        usage.total_token_count,
+        usage.cached_content_token_count,
+        usage.thoughts_token_count,
+        usage.tool_use_prompt_token_count,
+    ] {
+        crate::protocols::usage::validate_counter(counter)
+            .map_err(|_| ResponseError::InvalidUsage)?;
     }
+    let input_tokens = usage
+        .prompt_token_count
+        .map(|prompt| {
+            prompt
+                .checked_add(usage.tool_use_prompt_token_count.unwrap_or(0))
+                .ok_or(ResponseError::InvalidUsage)
+        })
+        .transpose()?;
+    let output_tokens = usage
+        .candidates_token_count
+        .map(|candidates| {
+            candidates
+                .checked_add(usage.thoughts_token_count.unwrap_or(0))
+                .ok_or(ResponseError::InvalidUsage)
+        })
+        .transpose()?;
+    for counter in [input_tokens, output_tokens] {
+        crate::protocols::usage::validate_counter(counter)
+            .map_err(|_| ResponseError::InvalidUsage)?;
+    }
+    if usage
+        .cached_content_token_count
+        .zip(input_tokens)
+        .is_some_and(|(cached, input)| cached > input)
+        || usage
+            .thoughts_token_count
+            .zip(output_tokens)
+            .is_some_and(|(thoughts, output)| thoughts > output)
+    {
+        return Err(ResponseError::InvalidUsage);
+    }
+    Ok(UsageObservation {
+        input_tokens,
+        output_tokens,
+        total_tokens: usage.total_token_count,
+        cached_input_tokens: usage.cached_content_token_count,
+        reasoning_tokens: usage.thoughts_token_count,
+    })
 }
 
 pub(in crate::protocols) fn gemini_finish_reason(reason: &str) -> FinishReason {

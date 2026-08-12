@@ -96,6 +96,7 @@ fn retry_taxonomy_only_allows_precommit_transient_failures() {
             phase: case.phase,
             class: case.class,
             response_committed: case.response_committed,
+            retry_after: None,
             message: case.name.clone(),
         };
         assert_eq!(

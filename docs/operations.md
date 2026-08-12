@@ -55,7 +55,8 @@ counts rise.
 2. Check PostgreSQL replication, WAL archiving, disk headroom, and backup age;
    check Valkey latency/memory (Valkey is runtime state, not backup authority).
 3. Review usage completeness and pricing coverage before exporting costs.
-   Missing upstream usage is incomplete and unpriced, never zero.
+   Missing or partial upstream usage is incomplete and unpriced, never zero;
+   only complete, internally consistent usage reconciles token reservations.
 4. Review provider health, authentication, role/key changes, credential
    rotations, and route activations in the audit stream.
 5. Offboarding requires rotating or revoking installation-scoped keys;
@@ -77,6 +78,11 @@ not hide a local capacity regression.
 
 Never put prompts, outputs, raw headers, credentials, sessions, proxy-key
 secrets, or master keys in tickets or diagnostic bundles.
+
+Upstream `Retry-After` is forwarded only from the failure selected as the
+terminal response. OLP accepts future HTTP dates and nonnegative delta seconds,
+ignores malformed or past values, and clamps hints to one hour. A hint never
+causes OLP to sleep or delays immediate failover to another eligible target.
 
 ### OpenAI-compatible capability certification
 

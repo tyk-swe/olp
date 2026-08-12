@@ -8,7 +8,7 @@ use crate::protocols::openai::{
 use http::{HeaderMap, HeaderValue, header};
 use tokio::time::{Instant, timeout};
 
-use super::super::{OpenAiConnector, errors::*, media::*};
+use super::super::{OpenAiConnector, errors::*, media::*, wire::WireProfile};
 
 pub(super) async fn execute(
     connector: &OpenAiConnector,
@@ -38,6 +38,7 @@ pub(super) async fn execute(
         })?;
 
     let streaming = request.metadata.mode == TransportMode::Streaming;
+    let wire_profile = WireProfile::for_provider(request.attempt.provider_kind);
     let body = if responses_endpoint {
         let mut wire = encode_response_create(&generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("Responses", error))?;
@@ -121,12 +122,15 @@ pub(super) async fn execute(
     }
 
     let events = if streaming {
-        connector.streaming_response(
-            response,
-            first_byte_deadline,
-            attempt_deadline,
-            responses_endpoint,
-        )
+        connector
+            .streaming_response(
+                response,
+                first_byte_deadline,
+                attempt_deadline,
+                responses_endpoint,
+                wire_profile,
+            )
+            .await
     } else {
         connector
             .unary_response(
@@ -134,6 +138,7 @@ pub(super) async fn execute(
                 first_byte_deadline,
                 attempt_deadline,
                 responses_endpoint,
+                wire_profile,
             )
             .await
     }?;

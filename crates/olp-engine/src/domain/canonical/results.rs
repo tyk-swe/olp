@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CanonicalError, MediaHandle, MediaSource, SourceExtensions, Usage};
+use super::{CanonicalError, MediaHandle, MediaSource, SourceExtensions, Usage, UsageObservation};
 
 /// A provider-neutral result from an embeddings operation.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -10,6 +10,8 @@ pub struct EmbeddingsResult {
     pub model: Option<String>,
     pub data: Vec<EmbeddingVector>,
     pub usage: Option<Usage>,
+    #[serde(skip)]
+    pub usage_observation: Option<UsageObservation>,
     #[serde(default)]
     pub extensions: SourceExtensions,
 }
@@ -41,6 +43,8 @@ pub struct ImagesResult {
     pub created_at: Option<i64>,
     pub images: Vec<ImageArtifact>,
     pub usage: Option<Usage>,
+    #[serde(skip)]
+    pub usage_observation: Option<UsageObservation>,
     #[serde(default)]
     pub extensions: SourceExtensions,
 }
@@ -63,6 +67,11 @@ pub struct TranscriptionResult {
     pub text: String,
     pub language: Option<String>,
     pub duration_seconds: Option<f64>,
+    pub usage: Option<Usage>,
+    #[serde(skip)]
+    pub usage_observation: Option<UsageObservation>,
+    #[serde(skip)]
+    pub usage_duration_seconds: Option<f64>,
     #[serde(default)]
     pub segments: Vec<TranscriptionSegment>,
     #[serde(default)]

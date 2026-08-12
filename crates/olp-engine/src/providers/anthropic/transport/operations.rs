@@ -364,6 +364,7 @@ impl AnthropicConnector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let retry_after = crate::providers::transport_common::retry_after(response.headers());
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(
@@ -387,7 +388,9 @@ impl AnthropicConnector {
         } else {
             AttemptFailureClass::UpstreamClient
         };
-        transport_error(TransportPhase::FirstByte, class, false, message)
+        let mut error = transport_error(TransportPhase::FirstByte, class, false, message);
+        error.retry_after = retry_after;
+        error
     }
 }
 

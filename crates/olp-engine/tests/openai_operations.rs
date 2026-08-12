@@ -181,8 +181,15 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
 
     let frames = [
         json!({"type":"response.created","response":{"id":"resp_s","model":"gpt-upstream"}}),
+        json!({"type":"response.output_item.added","output_index":0,"item":{
+            "type":"message","role":"assistant","status":"in_progress"
+        }}),
         json!({"type":"response.output_text.delta","output_index":0,"delta":"hé 🌍"}),
-        json!({"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}),
+        json!({"type":"response.output_item.done","output_index":0,"item":{
+            "type":"message","status":"completed"
+        }}),
+        json!({"type":"response.completed","response":{"status":"completed",
+            "usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}),
     ];
     let wire = frames
         .iter()
@@ -358,6 +365,12 @@ fn embeddings_support_text_tokens_float_and_bounded_base64_forms() {
     let decoded = decode_embedding_response(wire).unwrap();
     assert_eq!(decoded.data[0].values, vec![1.0, -2.5]);
 
+    let mut without_usage = result.clone();
+    without_usage.usage = None;
+    without_usage.usage_observation = None;
+    let wire = encode_embedding_response(&without_usage, "embed-route", Some("float")).unwrap();
+    assert!(wire.usage.is_none());
+
     let non_finite: EmbeddingResponse = serde_json::from_value(json!({
         "object": "list",
         "model": "text-embedding-upstream",
@@ -477,10 +490,77 @@ fn audio_requests_never_embed_uploaded_bytes() {
         "segments": [{"id": 0, "start": 0.0, "end": 1.5, "text": "hello", "speaker": "A"}]
     }))
     .unwrap();
-    let result = decode_transcription_response(response);
+    let result = decode_transcription_response(response).unwrap();
     assert_eq!(result.segments[0].speaker.as_deref(), Some("A"));
     let encoded = encode_transcription_response(&result).unwrap();
-    assert_eq!(decode_transcription_response(encoded).text, "hello");
+    assert_eq!(
+        decode_transcription_response(encoded).unwrap().text,
+        "hello"
+    );
+}
+
+#[test]
+fn transcription_usage_is_presence_aware_and_round_trips_token_or_duration_units() {
+    for malformed in [
+        json!({"text":"x","usage":{"type":"tokens","input_tokens":-1,"output_tokens":0,"total_tokens":0}}),
+        json!({"text":"x","usage":{"type":"tokens","input_tokens":1.5,"output_tokens":0,"total_tokens":0}}),
+        json!({"text":"x","usage":{"type":"tokens","input_tokens":true,"output_tokens":0,"total_tokens":0}}),
+        json!({"text":"x","usage":{"type":"tokens","input_tokens":9223372036854775808u64,"output_tokens":0,"total_tokens":9223372036854775808u64}}),
+    ] {
+        match serde_json::from_value::<OpenAiTranscriptionResponse>(malformed) {
+            Err(_) => {}
+            Ok(response) => assert!(decode_transcription_response(response).is_err()),
+        }
+    }
+
+    for value in [
+        json!({"text":"x","usage":{"type":"tokens"}}),
+        json!({"text":"x","usage":{"type":"tokens","input_tokens":3,"output_tokens":null,"total_tokens":null}}),
+    ] {
+        let response: OpenAiTranscriptionResponse = serde_json::from_value(value).unwrap();
+        let result = decode_transcription_response(response).unwrap();
+        assert_eq!(result.usage, None);
+        assert!(result.usage_observation.is_some());
+    }
+
+    let response: OpenAiTranscriptionResponse = serde_json::from_value(json!({
+        "text":"x",
+        "usage":{"type":"tokens","input_tokens":3,"output_tokens":2,"total_tokens":5,
+            "input_token_details":{"text_tokens":1,"audio_tokens":2}}
+    }))
+    .unwrap();
+    let result = decode_transcription_response(response).unwrap();
+    assert_eq!(result.usage.unwrap().total_tokens, 5);
+    let encoded = encode_transcription_response(&result).unwrap();
+    assert_eq!(
+        decode_transcription_response(encoded)
+            .unwrap()
+            .usage
+            .unwrap()
+            .total_tokens,
+        5
+    );
+
+    let contradictory: OpenAiTranscriptionResponse = serde_json::from_value(json!({
+        "text":"x","usage":{"type":"tokens","input_tokens":3,"output_tokens":2,"total_tokens":6}
+    }))
+    .unwrap();
+    assert!(decode_transcription_response(contradictory).is_err());
+
+    let duration: OpenAiTranscriptionResponse = serde_json::from_value(json!({
+        "text":"x","usage":{"type":"duration","seconds":1.25}
+    }))
+    .unwrap();
+    let result = decode_transcription_response(duration).unwrap();
+    assert_eq!(result.usage, None);
+    assert_eq!(result.usage_duration_seconds, Some(1.25));
+    let encoded = encode_transcription_response(&result).unwrap();
+    assert_eq!(
+        decode_transcription_response(encoded)
+            .unwrap()
+            .usage_duration_seconds,
+        Some(1.25)
+    );
 }
 
 #[test]

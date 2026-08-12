@@ -203,7 +203,6 @@ pub(super) fn insert_retry_after_header(response: &mut Response, retry_after: Op
         let seconds = retry_after
             .as_secs()
             .saturating_add(u64::from(retry_after.subsec_nanos() != 0))
-            .max(1)
             .to_string();
         if let Ok(value) = HeaderValue::from_str(&seconds) {
             response.headers_mut().insert(header::RETRY_AFTER, value);
@@ -373,7 +372,7 @@ mod tests {
     #[test]
     fn retry_after_delta_seconds_round_up() {
         for (retry_after, expected) in [
-            (Duration::ZERO, "1"),
+            (Duration::ZERO, "0"),
             (Duration::from_nanos(1), "1"),
             (Duration::from_secs(1), "1"),
             (Duration::from_millis(1_001), "2"),

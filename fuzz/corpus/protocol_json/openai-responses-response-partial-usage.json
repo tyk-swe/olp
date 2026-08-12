@@ -1,0 +1,1 @@
+{"id":"resp_partial","object":"response","created_at":1,"status":"completed","model":"model","output":[{"type":"message","id":"msg_partial","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"total_tokens":1}}

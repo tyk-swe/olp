@@ -185,7 +185,8 @@ fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
     assert!(events.iter().any(|event| matches!(
         event.kind,
         CanonicalEventKind::Usage { usage } if usage.input_tokens == 10
-            && usage.output_tokens == 5 && usage.reasoning_tokens == Some(2)
+            && usage.output_tokens == 7 && usage.total_tokens == 17
+            && usage.reasoning_tokens == Some(2)
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
@@ -194,6 +195,74 @@ fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
             ..
         }
     )));
+}
+
+#[test]
+fn usage_requires_all_counters_and_folds_detailed_components() {
+    let response = |usage_metadata: Value| {
+        serde_json::from_value(json!({
+            "candidates": [{
+                "index": 0,
+                "content": {"role": "model", "parts": [{"text": "ok"}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": usage_metadata
+        }))
+        .unwrap()
+    };
+
+    for (partial, expected_input, expected_output, expected_total) in [
+        (json!({}), None, None, None),
+        (
+            json!({"promptTokenCount": null, "candidatesTokenCount": 2, "totalTokenCount": 2}),
+            None,
+            Some(2),
+            Some(2),
+        ),
+        (
+            json!({"promptTokenCount": 1, "candidatesTokenCount": 2}),
+            Some(1),
+            Some(2),
+            None,
+        ),
+    ] {
+        let events = decode_generate_content_response(response(partial)).unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+        );
+        let observation = events.last().unwrap().usage_observation.unwrap();
+        assert_eq!(observation.input_tokens, expected_input);
+        assert_eq!(observation.output_tokens, expected_output);
+        assert_eq!(observation.total_tokens, expected_total);
+    }
+
+    let events = decode_generate_content_response(response(json!({
+        "promptTokenCount": 10,
+        "candidatesTokenCount": 5,
+        "thoughtsTokenCount": 2,
+        "toolUsePromptTokenCount": 3,
+        "totalTokenCount": 20
+    })))
+    .unwrap();
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        CanonicalEventKind::Usage { usage }
+            if usage.input_tokens == 13
+                && usage.output_tokens == 7
+                && usage.total_tokens == 20
+                && usage.reasoning_tokens == Some(2)
+    )));
+
+    assert!(
+        decode_generate_content_response(response(json!({
+            "promptTokenCount": 1,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 4
+        })))
+        .is_err()
+    );
 }
 
 fn sse(data: Value) -> String {
@@ -279,6 +348,213 @@ fn stream_error_is_terminal_and_missing_finish_reason_is_truncation() {
         truncated.finish(),
         Err(StreamError::UnexpectedEof)
     ));
+}
+
+#[test]
+fn stream_merges_partial_usage_once_and_preserves_incomplete_observations() {
+    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let mut events = decoder
+        .push(
+            sse(json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "ok"}]}
+                }],
+                "usageMetadata": {"promptTokenCount": 5}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    events.extend(
+        decoder
+            .push(
+                sse(json!({
+                    "candidates": [{"index": 0, "finishReason": "STOP"}],
+                    "usageMetadata": {"candidatesTokenCount": 2, "totalTokenCount": 7}
+                }))
+                .as_bytes(),
+            )
+            .unwrap(),
+    );
+    events.extend(decoder.finish().unwrap());
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+            .count(),
+        1
+    );
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        CanonicalEventKind::Usage { usage }
+            if usage.input_tokens == 5 && usage.output_tokens == 2 && usage.total_tokens == 7
+    )));
+    assert!(events.last().unwrap().usage_observation.is_none());
+
+    let mut incomplete = GeminiGenerateContentStreamDecoder::new();
+    incomplete
+        .push(
+            sse(json!({
+                "candidates": [{"index": 0, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 9, "candidatesTokenCount": 0}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    let events = incomplete.finish().unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+    );
+    let observation = events.last().unwrap().usage_observation.unwrap();
+    assert_eq!(observation.input_tokens, Some(9));
+    assert_eq!(observation.output_tokens, Some(0));
+    assert_eq!(observation.total_tokens, None);
+}
+
+#[test]
+fn stream_rejects_prompt_feedback_that_hides_an_unfinished_candidate() {
+    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    decoder
+        .push(
+            sse(json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "partial"}]}
+                }]
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(matches!(
+        decoder.push(sse(json!({"promptFeedback": {"blockReason": "SAFETY"}})).as_bytes()),
+        Err(StreamError::PromptFeedbackAfterCandidateStart)
+    ));
+}
+
+#[test]
+fn stream_rejects_duplicate_complete_usage_frames() {
+    let complete_usage =
+        json!({"promptTokenCount": 3, "candidatesTokenCount": 1, "totalTokenCount": 4});
+    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    decoder
+        .push(
+            sse(json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "ok"}]}
+                }],
+                "usageMetadata": complete_usage
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(matches!(
+        decoder.push(
+            sse(json!({
+                "candidates": [{"index": 0, "finishReason": "STOP"}],
+                "usageMetadata": complete_usage
+            }))
+            .as_bytes()
+        ),
+        Err(StreamError::DuplicateCompleteUsage)
+    ));
+
+    let mut fragmented = GeminiGenerateContentStreamDecoder::new();
+    fragmented
+        .push(sse(json!({"usageMetadata": {"promptTokenCount": 3}})).as_bytes())
+        .unwrap();
+    fragmented
+        .push(
+            sse(json!({
+                "usageMetadata": {"candidatesTokenCount": 1, "totalTokenCount": 4}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(matches!(
+        fragmented.push(
+            sse(json!({
+                "usageMetadata": {
+                    "promptTokenCount": 3,
+                    "candidatesTokenCount": 1,
+                    "totalTokenCount": 4
+                }
+            }))
+            .as_bytes()
+        ),
+        Err(StreamError::DuplicateCompleteUsage)
+    ));
+}
+
+#[test]
+fn stream_rejects_conflicting_partial_usage_counters() {
+    let usage_frame = |field: &str, value: u64| {
+        let mut usage = serde_json::Map::new();
+        usage.insert(field.to_owned(), Value::from(value));
+        sse(json!({"usageMetadata": usage}))
+    };
+
+    for field in [
+        "promptTokenCount",
+        "candidatesTokenCount",
+        "totalTokenCount",
+        "cachedContentTokenCount",
+        "thoughtsTokenCount",
+        "toolUsePromptTokenCount",
+    ] {
+        let mut decoder = GeminiGenerateContentStreamDecoder::new();
+        decoder.push(usage_frame(field, 3).as_bytes()).unwrap();
+        decoder.push(usage_frame(field, 3).as_bytes()).unwrap();
+        assert!(matches!(
+            decoder.push(usage_frame(field, 4).as_bytes()),
+            Err(StreamError::ConflictingUsageCounter(name)) if name == field
+        ));
+    }
+}
+
+#[test]
+fn stream_rejects_fragmented_usage_contradictions_and_keeps_error_usage_incomplete() {
+    let mut contradictory = GeminiGenerateContentStreamDecoder::new();
+    contradictory
+        .push(sse(json!({"usageMetadata": {"promptTokenCount": 5}})).as_bytes())
+        .unwrap();
+    assert!(matches!(
+        contradictory.push(
+            sse(json!({
+                "usageMetadata": {"candidatesTokenCount": 2, "totalTokenCount": 8}
+            }))
+            .as_bytes()
+        ),
+        Err(StreamError::Response(_))
+    ));
+
+    let mut failed = GeminiGenerateContentStreamDecoder::new();
+    failed
+        .push(
+            sse(json!({
+                "usageMetadata": {
+                    "promptTokenCount": 3,
+                    "candidatesTokenCount": 1,
+                    "totalTokenCount": 4
+                }
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    let events = failed
+        .push(
+            sse(json!({
+                "error": {"code": 503, "message": "failed", "status": "UNAVAILABLE"}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    let observation = events.last().unwrap().usage_observation.unwrap();
+    assert_eq!(observation.input_tokens, Some(3));
+    assert_eq!(observation.output_tokens, Some(1));
+    assert_eq!(observation.total_tokens, None);
 }
 
 #[test]
@@ -414,7 +690,19 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
                 reason: FinishReason::ToolCalls,
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(6, CanonicalEventKind::Done),
+        olp_engine::domain::CanonicalEvent::new(
+            6,
+            CanonicalEventKind::Usage {
+                usage: olp_engine::domain::Usage {
+                    input_tokens: 3,
+                    output_tokens: 3,
+                    total_tokens: 6,
+                    cached_input_tokens: None,
+                    reasoning_tokens: Some(1),
+                },
+            },
+        ),
+        olp_engine::domain::CanonicalEvent::new(7, CanonicalEventKind::Done),
     ];
     let mut encoder = GeminiGenerateContentClientStreamEncoder::new("public-route", "fallback");
     let mut wire = String::new();
@@ -424,6 +712,8 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
         }
     }
     assert!(wire.contains("\"modelVersion\":\"public-route\""));
+    assert!(wire.contains("\"candidatesTokenCount\":2"));
+    assert!(wire.contains("\"thoughtsTokenCount\":1"));
     let mut decoder = GeminiGenerateContentStreamDecoder::new();
     let mut decoded = Vec::new();
     for byte in wire.as_bytes() {
@@ -434,6 +724,11 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
         &event.kind,
         CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "lookup" && arguments_delta.contains("Paris")
+    )));
+    assert!(decoded.iter().any(|event| matches!(
+        event.kind,
+        CanonicalEventKind::Usage { usage }
+            if usage.output_tokens == 3 && usage.reasoning_tokens == Some(1)
     )));
 }
 

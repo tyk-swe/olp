@@ -25,6 +25,7 @@ use crate::protocols::openai::{
 };
 use crate::providers::mock_server::{
     MockResponse, find_bytes, response as http_response, spawn_mock as spawn_http_mock,
+    status_response_with_headers,
 };
 use crate::providers::openai::{
     ConnectorTimeouts, DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES,

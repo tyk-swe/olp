@@ -267,16 +267,27 @@ pub struct Candidate {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetadata {
-    #[serde(default)]
-    pub prompt_token_count: u64,
-    #[serde(default)]
-    pub candidates_token_count: u64,
-    #[serde(default)]
-    pub total_token_count: u64,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub prompt_token_count: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub candidates_token_count: Option<u64>,
+    #[serde(
+        default,
+        serialize_with = "crate::protocols::usage::serialize_required_option"
+    )]
+    pub total_token_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached_content_token_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thoughts_token_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_prompt_token_count: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }

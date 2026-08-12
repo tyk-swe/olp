@@ -90,6 +90,8 @@ pub enum EncodeError {
 
 #[derive(Debug, Error)]
 pub enum ResponseError {
+    #[error("Anthropic response usage counters overflow")]
+    InvalidUsage,
     #[error("Anthropic response role is not assistant")]
     UnexpectedRole,
     #[error("unexpected Anthropic response content type {0}")]

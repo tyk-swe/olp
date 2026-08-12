@@ -165,6 +165,7 @@ mod tests {
             phase: TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: true,
+            retry_after: None,
             message: "safe upstream failure".to_owned(),
         };
         let cases = [

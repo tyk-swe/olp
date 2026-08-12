@@ -111,10 +111,26 @@ pub(in crate::providers) fn status_response(
     content_type: &str,
     body: impl AsRef<[u8]>,
 ) -> Vec<u8> {
+    status_response_with_headers(status, content_type, &[], body)
+}
+
+pub(in crate::providers) fn status_response_with_headers(
+    status: &str,
+    content_type: &str,
+    extra_headers: &[(&str, &str)],
+    body: impl AsRef<[u8]>,
+) -> Vec<u8> {
     let body = body.as_ref();
-    let headers = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    let mut headers = format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n");
+    for (name, value) in extra_headers {
+        headers.push_str(name);
+        headers.push_str(": ");
+        headers.push_str(value);
+        headers.push_str("\r\n");
+    }
+    headers.push_str(&format!(
+        "Content-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
-    );
+    ));
     [headers.as_bytes(), body].concat()
 }

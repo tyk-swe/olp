@@ -481,6 +481,7 @@ pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> Transp
         phase: crate::domain::TransportPhase::Connect,
         class: crate::domain::AttemptFailureClass::Protocol,
         response_committed: false,
+        retry_after: None,
         message: message.into(),
     }
 }
@@ -490,6 +491,7 @@ pub(in crate::providers) fn protocol_body_error(message: impl Into<String>) -> T
         phase: crate::domain::TransportPhase::Body,
         class: crate::domain::AttemptFailureClass::Protocol,
         response_committed: true,
+        retry_after: None,
         message: message.into(),
     }
 }
