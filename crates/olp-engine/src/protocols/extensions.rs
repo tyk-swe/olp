@@ -257,3 +257,205 @@ pub(in crate::protocols) fn insert_flat_extension(
     object.insert(key, value);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+
+    use super::*;
+
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct ClosedWire {
+        count: u8,
+    }
+
+    #[test]
+    fn pointer_escaping_and_collection_round_trip_field_names() {
+        let extra = BTreeMap::from([
+            ("plain".to_owned(), json!(1)),
+            ("a/b~c".to_owned(), json!({"retained": true})),
+        ]);
+        let mut extensions = BTreeMap::new();
+        collect_extra("/body", &extra, &mut extensions);
+
+        assert_eq!(escape_json_pointer("a/b~c"), "a~1b~0c");
+        assert_eq!(unescape_json_pointer("a~1b~0c"), "a/b~c");
+        assert_eq!(extensions["/body/a~1b~0c"], json!({"retained": true}));
+    }
+
+    #[test]
+    fn flat_extensions_accept_only_noncolliding_top_level_fields() {
+        let mut extra = BTreeMap::new();
+        apply_flat_extensions(
+            &mut extra,
+            &BTreeMap::from([
+                ("/simple".to_owned(), json!(1)),
+                ("/a~1b~0c".to_owned(), json!(2)),
+            ]),
+        )
+        .ok()
+        .unwrap();
+        assert_eq!(extra["simple"], 1);
+        assert_eq!(extra["a/b~c"], 2);
+
+        for path in ["", "missing-slash", "/", "/nested/value"] {
+            assert_eq!(
+                apply_flat_extensions(
+                    &mut BTreeMap::new(),
+                    &BTreeMap::from([(path.to_owned(), Value::Null)]),
+                ),
+                Err(path.to_owned())
+            );
+        }
+
+        let mut root = json!({"known": true});
+        assert_eq!(
+            insert_flat_extension(&mut root, "/known", json!(false)),
+            Err("/known".to_owned())
+        );
+        assert_eq!(
+            insert_flat_extension(&mut json!([]), "/vendor", json!(1)),
+            Err("/vendor".to_owned())
+        );
+    }
+
+    #[test]
+    fn pointer_extensions_restore_nested_object_fields_without_overwrite() {
+        let wire = json!({
+            "items": [{"known": 1}],
+            "object": {"stable": true}
+        });
+        let restored = apply_pointer_extensions(
+            wire,
+            &BTreeMap::from([
+                ("/items/0/a~1b".to_owned(), json!("array item")),
+                ("/object/vendor".to_owned(), json!({"kept": true})),
+            ]),
+        )
+        .ok()
+        .unwrap();
+        assert_eq!(restored["items"][0]["a/b"], "array item");
+        assert_eq!(restored["object"]["vendor"], json!({"kept": true}));
+
+        for path in [
+            "",
+            "no-leading-slash",
+            "/missing/child",
+            "/items/not-an-index/vendor",
+            "/items/4/vendor",
+            "/items/0/known",
+            "/items/0/known/child",
+        ] {
+            assert_eq!(
+                apply_pointer_extensions(
+                    json!({"items": [{"known": 1}]}),
+                    &BTreeMap::from([(path.to_owned(), json!(2))]),
+                ),
+                Err(path.to_owned()),
+                "path {path} must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn request_extensions_insert_array_items_in_stable_index_order() {
+        let mut request = json!({
+            "tools": [{"name": "canonical"}],
+            "metadata": {"known": true}
+        });
+        apply_request_extensions(
+            &mut request,
+            &BTreeMap::from([
+                ("/tools/1".to_owned(), json!({"name": "extension-1"})),
+                ("/tools/0".to_owned(), json!({"name": "extension-0"})),
+                ("/metadata/vendor".to_owned(), json!("preserved")),
+            ]),
+        )
+        .ok()
+        .unwrap();
+
+        assert_eq!(
+            request["tools"],
+            json!([
+                {"name": "extension-0"},
+                {"name": "extension-1"},
+                {"name": "canonical"}
+            ])
+        );
+        assert_eq!(request["metadata"]["vendor"], "preserved");
+    }
+
+    #[test]
+    fn request_extensions_reject_invalid_paths_and_invalid_wire_mutations() {
+        let paths = [
+            "missing-slash".to_owned(),
+            "/missing/child".to_owned(),
+            "/tools/not-an-index/name".to_owned(),
+            "/tools/9/name".to_owned(),
+            format!("/{}", vec!["level"; 17].join("/")),
+        ];
+        for path in paths {
+            let mut request = json!({"tools": [{"name": "known"}]});
+            assert!(matches!(
+                apply_request_extensions(
+                    &mut request,
+                    &BTreeMap::from([(path.clone(), json!(1))]),
+                ),
+                Err(PointerExtensionError::InvalidPath(invalid)) if invalid == path
+            ));
+        }
+
+        let mut request = ClosedWire { count: 1 };
+        assert!(matches!(
+            apply_request_extensions(
+                &mut request,
+                &BTreeMap::from([("/count".to_owned(), json!("not a number"))]),
+            ),
+            Err(PointerExtensionError::Json(_))
+        ));
+        assert_eq!(request, ClosedWire { count: 1 });
+    }
+
+    #[test]
+    fn response_extensions_create_parent_array_items_before_children() {
+        let restored = apply_response_extensions(
+            json!({"output": []}),
+            &BTreeMap::from([
+                ("/output/0/vendor".to_owned(), json!("nested")),
+                ("/output/0".to_owned(), json!({"type": "future"})),
+                ("/top~1level".to_owned(), json!(true)),
+            ]),
+        )
+        .ok()
+        .unwrap();
+        assert_eq!(restored["output"][0]["type"], "future");
+        assert_eq!(restored["output"][0]["vendor"], "nested");
+        assert_eq!(restored["top/level"], true);
+
+        for path in [
+            "",
+            "/",
+            "missing-slash",
+            "/output/not-an-index",
+            "/output/2",
+            "/output/0/type",
+        ] {
+            assert!(matches!(
+                apply_response_extensions(
+                    json!({"output": [{"type": "known"}]}),
+                    &BTreeMap::from([(path.to_owned(), json!(1))]),
+                ),
+                Err(PointerExtensionError::InvalidPath(invalid)) if invalid == path
+            ));
+        }
+        let too_deep = format!("/{}", vec!["level"; 25].join("/"));
+        assert!(matches!(
+            apply_response_extensions(
+                json!({}),
+                &BTreeMap::from([(too_deep.clone(), json!(1))]),
+            ),
+            Err(PointerExtensionError::InvalidPath(invalid)) if invalid == too_deep
+        ));
+    }
+}

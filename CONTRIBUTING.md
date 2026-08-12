@@ -87,7 +87,7 @@ make check-local
 It runs boundary and SQLx checks, Rust formatting, locked Clippy, the locked
 nextest workspace suite, console verification, release-version checks, and
 supply-chain pin checks. `make coverage` is the CI Rust gate: llvm-cov nextest
-with a 51% line floor. Plain `cargo test` is not a substitute. The workspace
+with a 62% line floor. Plain `cargo test` is not a substitute. The workspace
 has no doctests by policy; if one is added, restore a `cargo test --doc` gate.
 
 The pass-gated contract suite (`make e2e`) drives the real `olp all` binary

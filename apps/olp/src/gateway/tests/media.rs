@@ -1,24 +1,5 @@
 use super::*;
 
-#[test]
-fn unknown_upstream_video_status_fails_closed() {
-    let error = media_job_state(&olp_engine::domain::VideoStatus::Other(
-        "mystery".to_owned(),
-    ))
-    .expect_err("unknown upstream status must not become a local terminal state");
-    assert_eq!(error.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(error.code(), "provider_protocol_error");
-}
-
-#[test]
-fn upstream_media_identity_is_bounded_before_durable_attachment() {
-    assert!(valid_upstream_media_job_id("video_123"));
-    assert!(!valid_upstream_media_job_id(""));
-    assert!(!valid_upstream_media_job_id(" video_123"));
-    assert!(!valid_upstream_media_job_id("video\n123"));
-    assert!(!valid_upstream_media_job_id(&"x".repeat(1_025)));
-}
-
 #[derive(Default)]
 struct CountingAdmissionSpool {
     puts: AtomicUsize,
@@ -53,6 +34,7 @@ impl olp_engine::domain::MediaSpool for CountingAdmissionSpool {
 struct RecordingSpool {
     inner: Arc<dyn MediaSpool>,
     handles: Mutex<Vec<MediaHandle>>,
+    removed: Mutex<Vec<MediaHandle>>,
 }
 
 impl RecordingSpool {
@@ -60,11 +42,16 @@ impl RecordingSpool {
         Arc::new(Self {
             inner,
             handles: Mutex::new(Vec::new()),
+            removed: Mutex::new(Vec::new()),
         })
     }
 
     fn handles(&self) -> Vec<MediaHandle> {
         self.handles.lock().unwrap().clone()
+    }
+
+    fn removed(&self, handle: &MediaHandle) -> bool {
+        self.removed.lock().unwrap().contains(handle)
     }
 }
 
@@ -97,8 +84,176 @@ impl MediaSpool for RecordingSpool {
         &'a self,
         handle: &'a MediaHandle,
     ) -> BoxFuture<'a, Result<(), olp_engine::domain::MediaSpoolError>> {
+        self.removed.lock().unwrap().push(handle.clone());
         self.inner.remove(handle)
     }
+}
+
+fn recording_spool() -> Arc<RecordingSpool> {
+    RecordingSpool::new(
+        crate::bootstrap::media_spool::FileMediaSpool::create().unwrap() as Arc<dyn MediaSpool>,
+    )
+}
+
+async fn assert_cleanup(spool: &RecordingSpool, handle: &MediaHandle) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !spool.removed(handle) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("media cleanup must be scheduled promptly");
+}
+
+fn raw_media_extension(
+    source: Surface,
+    data: bool,
+    event: Option<&str>,
+    extra: bool,
+) -> CanonicalEvent {
+    let values = [
+        data.then(|| ("/__olp/raw_sse/data".to_owned(), json!({"ok":true}))),
+        event.map(|event| ("/__olp/raw_sse/event".to_owned(), json!(event))),
+        extra.then(|| ("unsupported".to_owned(), json!(true))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    CanonicalEvent::new(
+        0,
+        CanonicalEventKind::SourceExtension {
+            extensions: SourceExtensions::new(source, values),
+        },
+    )
+}
+
+#[test]
+fn raw_media_events_are_strictly_validated_and_encoded() {
+    use crate::gateway::media::raw_media_event_bytes;
+
+    let event = |kind| CanonicalEvent::new(0, kind);
+    assert_eq!(
+        raw_media_event_bytes(raw_media_extension(
+            Surface::OpenAi,
+            true,
+            Some("audio.delta"),
+            false,
+        ))
+        .unwrap(),
+        Some(Bytes::from_static(
+            b"event: audio.delta\ndata: {\"ok\":true}\n\n"
+        ))
+    );
+    assert_eq!(
+        raw_media_event_bytes(event(CanonicalEventKind::Done)).unwrap(),
+        None
+    );
+
+    for event in [
+        raw_media_extension(Surface::Anthropic, true, None, false),
+        raw_media_extension(Surface::OpenAi, false, None, false),
+        raw_media_extension(Surface::OpenAi, true, None, true),
+        raw_media_extension(Surface::OpenAi, true, Some("invalid\nevent"), false),
+        event(CanonicalEventKind::TextDelta {
+            output_index: 0,
+            text: "unexpected".to_owned(),
+        }),
+    ] {
+        let error = raw_media_event_bytes(event).unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(error.code(), "provider_protocol_error");
+    }
+
+    let error = raw_media_event_bytes(event(CanonicalEventKind::Error {
+        error: CanonicalError {
+            class: ErrorClass::RateLimit,
+            message: "slow down".to_owned(),
+            provider_code: None,
+            retryable: true,
+        },
+    }))
+    .unwrap_err();
+    assert_eq!(error.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(error.code(), "upstream_error");
+    assert_eq!(error.message(), "slow down");
+}
+
+fn opened_media(
+    content_type: Option<&str>,
+    content_length: Option<u64>,
+) -> (olp_engine::domain::OpenedMedia, MediaHandle) {
+    let handle = MediaHandle::new("00000000000000000000000000000000");
+    (
+        olp_engine::domain::OpenedMedia {
+            artifact: olp_engine::domain::MediaArtifact {
+                handle: handle.clone(),
+                content_type: content_type.map(str::to_owned),
+                content_length,
+            },
+            filename: "speech.mp3".to_owned(),
+            bytes: Box::pin(stream::once(async { Ok(Bytes::from_static(b"audio")) })),
+        },
+        handle,
+    )
+}
+
+#[tokio::test]
+async fn opened_media_response_preserves_metadata_and_cleans_up() {
+    use crate::gateway::media::response_from_opened_media;
+
+    for (content_type, content_length) in [(Some("audio/mpeg"), Some(5)), (None, None)] {
+        let spool = recording_spool();
+        let (opened, handle) = opened_media(content_type, content_length);
+        let response = response_from_opened_media(opened, spool.clone(), "type", "length").unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .map(|value| value.to_str().unwrap()),
+            content_type
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .map(|value| value.to_str().unwrap()),
+            content_length.map(|_| "5")
+        );
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            "audio"
+        );
+        assert_cleanup(&spool, &handle).await;
+    }
+}
+
+#[tokio::test]
+async fn media_open_and_header_failures_still_schedule_cleanup() {
+    use crate::gateway::media::{open_response_media, response_from_opened_media};
+
+    let (mut state, _) = test_state(false);
+    let spool = recording_spool();
+    state.replace_media_spool_for_test(spool.clone());
+    let invalid = MediaHandle::new("invalid");
+    let error = open_response_media(&state, &invalid).await.unwrap_err();
+    assert_eq!(
+        (error.status(), error.code()),
+        (StatusCode::BAD_REQUEST, "invalid_request")
+    );
+    assert_cleanup(&spool, &invalid).await;
+
+    let (opened, handle) = opened_media(Some("invalid\ncontent-type"), Some(5));
+    let error =
+        response_from_opened_media(opened, spool.clone(), "invalid type", "length").unwrap_err();
+    assert_eq!(
+        (error.status(), error.code(), error.message()),
+        (
+            StatusCode::BAD_GATEWAY,
+            "provider_protocol_error",
+            "invalid type"
+        )
+    );
+    assert_cleanup(&spool, &handle).await;
 }
 
 #[tokio::test]
@@ -180,9 +335,7 @@ async fn restricted_multipart_key_rejects_file_before_model_without_spooling() {
 #[tokio::test]
 async fn multipart_route_header_mismatch_cleans_the_staged_file() {
     let (mut state, key) = test_state(false);
-    let recording = RecordingSpool::new(
-        crate::bootstrap::media_spool::FileMediaSpool::create().unwrap() as Arc<dyn MediaSpool>,
-    );
+    let recording = recording_spool();
     state.replace_media_spool_for_test(recording.clone());
     restrict_api_key_to_route(&state, RouteSlug::parse("default").unwrap());
     let body = concat!(

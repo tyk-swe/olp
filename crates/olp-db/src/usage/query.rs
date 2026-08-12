@@ -259,3 +259,145 @@ pub(super) fn validate_usage_range(filters: &UsageFilters) -> Result<(), Operati
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use olp_engine::domain::OperationKind;
+    use uuid::Uuid;
+
+    use super::*;
+
+    fn filters(after: &str, before: &str) -> UsageFilters {
+        UsageFilters {
+            observed_after: after.parse().unwrap(),
+            observed_before: before.parse().unwrap(),
+            route_slug: None,
+            provider_id: None,
+            upstream_model: None,
+            api_key_id: None,
+            operation: None,
+        }
+    }
+
+    #[test]
+    fn count_scope_selects_the_exact_request_dimension() {
+        let mut filters = filters("2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z");
+        for (provider, model, raw, hourly) in [
+            (false, false, "request_counted", "request_count"),
+            (
+                true,
+                false,
+                "provider_request_counted",
+                "provider_request_count",
+            ),
+            (false, true, "model_request_counted", "model_request_count"),
+            (true, true, "target_request_counted", "target_request_count"),
+        ] {
+            filters.provider_id = provider.then(Uuid::now_v7);
+            filters.upstream_model = model.then(|| "model-a".to_owned());
+            let scope = UsageCountScope::for_filters(&filters);
+            assert_eq!(scope.raw_columns().0, raw);
+            assert_eq!(scope.hourly_columns().0, hourly);
+        }
+    }
+
+    #[test]
+    fn usage_cte_contains_raw_and_retained_ranges_with_every_dimension_filter() {
+        let mut filters = filters("2026-01-01T00:15:00Z", "2026-01-01T03:45:00Z");
+        filters.route_slug = Some("primary".to_owned());
+        filters.provider_id = Some(Uuid::now_v7());
+        filters.upstream_model = Some("model-a".to_owned());
+        filters.api_key_id = Some(Uuid::now_v7());
+        filters.operation = Some(OperationKind::Generation);
+        let mut query = QueryBuilder::<Postgres>::new("");
+
+        push_usage_rows_cte(&mut query, &filters, UsageCountScope::Target);
+        let sql = query.sql();
+        let sql = sql.as_str();
+
+        for fragment in [
+            "FROM attempt_usage_facts WHERE true",
+            "target_request_counted",
+            "target_unpriced_counted",
+            "target_incomplete_counted",
+            "FROM attempt_usage_hourly WHERE true",
+            "target_request_count",
+            "target_unpriced_count",
+            "target_incomplete_count",
+            "observed_at >= ",
+            "observed_at < ",
+            "bucket >= ",
+            "bucket + interval '1 hour' <= ",
+            "route_slug =",
+            "provider_id =",
+            "upstream_model =",
+            "api_key_id =",
+            "operation =",
+        ] {
+            assert!(sql.contains(fragment), "missing {fragment:?} in {sql}");
+        }
+    }
+
+    #[test]
+    fn hour_rounding_is_exact_on_both_sides_of_the_unix_epoch() {
+        for (value, floor, ceil) in [
+            (
+                "2026-07-12T10:00:00Z",
+                "2026-07-12T10:00:00Z",
+                "2026-07-12T10:00:00Z",
+            ),
+            (
+                "2026-07-12T10:59:59.999Z",
+                "2026-07-12T10:00:00Z",
+                "2026-07-12T11:00:00Z",
+            ),
+            (
+                "1969-12-31T23:59:59Z",
+                "1969-12-31T23:00:00Z",
+                "1970-01-01T00:00:00Z",
+            ),
+        ] {
+            let value = value.parse::<DateTime<Utc>>().unwrap();
+            assert_eq!(
+                floor_usage_hour(value),
+                floor.parse::<DateTime<Utc>>().unwrap()
+            );
+            assert_eq!(
+                ceil_usage_hour(value),
+                ceil.parse::<DateTime<Utc>>().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn usage_range_is_positive_and_bounded_to_366_days() {
+        let start = "2024-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let mut filters = UsageFilters {
+            observed_after: start,
+            observed_before: start + chrono::Duration::nanoseconds(1),
+            route_slug: None,
+            provider_id: None,
+            upstream_model: None,
+            api_key_id: None,
+            operation: None,
+        };
+        assert!(validate_usage_range(&filters).is_ok());
+        filters.observed_before = start + chrono::Duration::days(366);
+        assert!(validate_usage_range(&filters).is_ok());
+
+        for invalid_end in [
+            start,
+            start - chrono::Duration::nanoseconds(1),
+            start + chrono::Duration::days(366) + chrono::Duration::nanoseconds(1),
+        ] {
+            filters.observed_before = invalid_end;
+            assert!(
+                matches!(
+                    validate_usage_range(&filters),
+                    Err(OperationsError::Invalid(_))
+                ),
+                "accepted range ending at {invalid_end}"
+            );
+        }
+    }
+}

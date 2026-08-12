@@ -65,43 +65,32 @@ fn legacy_request_metadata_stream_claim_token_ignores_credentials_and_non_identi
 
 #[test]
 fn legacy_request_metadata_stream_claim_token_preserves_query_database_identity() {
-    let host_one = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@placeholder.example:5432/olp?host=db-one.example&sslmode=require",
-    )
-    .unwrap();
-    let host_two = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@placeholder.example:5432/olp?host=db-two.example&sslmode=require",
-    )
-    .unwrap();
-    let hostaddr_one = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@placeholder.example:5432/olp?hostaddr=10.0.0.1",
-    )
-    .unwrap();
-    let hostaddr_two = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@placeholder.example:5432/olp?hostaddr=10.0.0.2",
-    )
-    .unwrap();
-    let port_one = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@db.example:5432/olp?port=5432&application_name=one",
-    )
-    .unwrap();
-    let port_two = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@db.example:5432/olp?port=6432&application_name=one",
-    )
-    .unwrap();
-    let database_one = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@db.example:5432/postgres?dbname=tenant_one&sslmode=require",
-    )
-    .unwrap();
-    let database_two = legacy_request_metadata_stream_claim_token(
-        "postgres://user:secret@db.example:5432/postgres?dbname=tenant_two&sslmode=require",
-    )
-    .unwrap();
+    let cases = [
+        (
+            "postgres://u:p@placeholder:5432/olp?host=db-one.example&sslmode=require",
+            "postgres://u:p@placeholder:5432/olp?host=db-two.example&sslmode=require",
+        ),
+        (
+            "postgres://u:p@placeholder:5432/olp?hostaddr=10.0.0.1",
+            "postgres://u:p@placeholder:5432/olp?hostaddr=10.0.0.2",
+        ),
+        (
+            "postgres://u:p@db.example:5432/olp?port=5432&application_name=one",
+            "postgres://u:p@db.example:5432/olp?port=6432&application_name=one",
+        ),
+        (
+            "postgres://u:p@db.example:5432/postgres?dbname=tenant_one&sslmode=require",
+            "postgres://u:p@db.example:5432/postgres?dbname=tenant_two&sslmode=require",
+        ),
+    ];
 
-    assert_ne!(host_one, host_two);
-    assert_ne!(hostaddr_one, hostaddr_two);
-    assert_ne!(port_one, port_two);
-    assert_ne!(database_one, database_two);
+    for (first, second) in cases {
+        assert_ne!(
+            legacy_request_metadata_stream_claim_token(first).unwrap(),
+            legacy_request_metadata_stream_claim_token(second).unwrap(),
+            "identity parameters must affect the claim token: {first}"
+        );
+    }
 }
 
 struct DropSignal(Arc<AtomicBool>);

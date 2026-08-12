@@ -428,3 +428,160 @@ pub(super) fn media_spool_error(error: olp_engine::domain::MediaSpoolError) -> I
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use olp_engine::domain::{BoxFuture, MediaArtifact, MediaSpoolError, MediaUpload, OpenedMedia};
+
+    struct UnusedSpool;
+
+    impl MediaSpool for UnusedSpool {
+        fn put(&self, _: MediaUpload) -> BoxFuture<'_, Result<MediaArtifact, MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+
+        fn open<'a>(
+            &'a self,
+            _: &'a MediaHandle,
+        ) -> BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+
+        fn remove<'a>(&'a self, _: &'a MediaHandle) -> BoxFuture<'a, Result<(), MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+    }
+
+    fn form() -> MultipartFormData {
+        MultipartFormData::new(
+            Arc::new(UnusedSpool),
+            MultipartRequestAdmission::unrestricted(),
+        )
+    }
+
+    fn file(name: &str) -> BoundedMediaPart {
+        BoundedMediaPart::new(
+            MediaHandle::new(format!("{name}-handle")),
+            name,
+            Some("application/octet-stream".to_owned()),
+            3,
+            10,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn text_fields_enforce_cardinality_parsing_and_array_aliases() {
+        let mut data = form();
+        assert_eq!(data.optional("missing").unwrap(), None);
+        assert_eq!(
+            data.required("model").unwrap_err().message(),
+            "The model field is required."
+        );
+
+        data.text.insert("count".to_owned(), vec!["7".to_owned()]);
+        assert_eq!(data.optional_parse::<u16>("count").unwrap(), Some(7));
+        data.text
+            .insert("count".to_owned(), vec!["invalid".to_owned()]);
+        assert_eq!(
+            data.optional_parse::<u16>("count").unwrap_err().message(),
+            "The count field is invalid."
+        );
+        data.text.insert(
+            "model".to_owned(),
+            vec!["first".to_owned(), "second".to_owned()],
+        );
+        assert_eq!(
+            data.optional("model").unwrap_err().message(),
+            "The model field must appear at most once."
+        );
+
+        data.text.insert(
+            "include[]".to_owned(),
+            vec!["usage".to_owned(), "logprobs".to_owned()],
+        );
+        assert_eq!(data.take_repeated("include"), ["usage", "logprobs"]);
+        assert!(data.take_repeated("include").is_empty());
+    }
+
+    #[test]
+    fn file_fields_are_selected_without_consuming_unrelated_uploads() {
+        let mut data = form();
+        assert!(data.take_single_file("missing").unwrap().is_none());
+
+        data.files.insert("mask".to_owned(), vec![file("mask")]);
+        assert_eq!(
+            data.take_single_file("mask").unwrap().unwrap().filename,
+            "mask"
+        );
+        data.files
+            .insert("mask".to_owned(), vec![file("first"), file("second")]);
+        assert_eq!(
+            data.take_single_file("mask").unwrap_err().message(),
+            "The mask file must appear at most once."
+        );
+
+        data.files.insert("image".to_owned(), vec![file("base")]);
+        data.files
+            .insert("image[1]".to_owned(), vec![file("second")]);
+        data.files
+            .insert("unrelated".to_owned(), vec![file("other")]);
+        let selected = data.take_files_with_prefix("image");
+        assert_eq!(
+            selected
+                .iter()
+                .map(|part| part.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["base", "second"]
+        );
+        assert_eq!(
+            data.files.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["unrelated"]
+        );
+    }
+
+    #[test]
+    fn extensions_accept_single_text_values_and_reject_ambiguous_remainders() {
+        let mut data = form();
+        data.text
+            .insert("vendor".to_owned(), vec!["value".to_owned()]);
+        assert_eq!(
+            data.take_extensions().unwrap(),
+            BTreeMap::from([("vendor".to_owned(), Value::String("value".to_owned()))])
+        );
+
+        let mut repeated = form();
+        repeated
+            .text
+            .insert("vendor".to_owned(), vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(
+            repeated.take_extensions().unwrap_err().message(),
+            "The unsupported vendor field cannot be repeated."
+        );
+
+        let mut with_file = form();
+        with_file
+            .files
+            .insert("unexpected".to_owned(), vec![file("payload")]);
+        assert_eq!(
+            with_file.take_extensions().unwrap_err().message(),
+            "The multipart request contains an unsupported file field."
+        );
+    }
+
+    #[test]
+    fn spool_failures_map_to_stable_public_error_classes() {
+        let cases = [
+            (MediaSpoolError::TooLarge { maximum: 1 }, "media_too_large"),
+            (MediaSpoolError::InvalidFilename, "invalid_request"),
+            (MediaSpoolError::InvalidHandle, "invalid_request"),
+            (MediaSpoolError::ZeroLimit, "invalid_request"),
+            (MediaSpoolError::NotFound, "media_spool_unavailable"),
+            (MediaSpoolError::Unavailable, "media_spool_unavailable"),
+        ];
+        for (error, code) in cases {
+            assert_eq!(media_spool_error(error).code(), code);
+        }
+    }
+}

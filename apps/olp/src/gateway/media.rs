@@ -387,7 +387,9 @@ fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response
     response
 }
 
-fn raw_media_event_bytes(event: CanonicalEvent) -> Result<Option<Bytes>, InferenceError> {
+pub(super) fn raw_media_event_bytes(
+    event: CanonicalEvent,
+) -> Result<Option<Bytes>, InferenceError> {
     match event.kind {
         CanonicalEventKind::SourceExtension { mut extensions } => {
             if extensions.source != Some(Surface::OpenAi) {

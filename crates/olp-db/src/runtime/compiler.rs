@@ -457,3 +457,67 @@ struct RuntimeHint {
     generation_id: Uuid,
     sequence: i64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_api_key_limits_require_positive_representable_values() {
+        assert_eq!(optional_nonzero_u32(None, "rpm").unwrap(), None);
+        assert_eq!(optional_nonzero_u64(None, "tpm").unwrap(), None);
+        assert_eq!(
+            optional_nonzero_u32(Some(1), "rpm").unwrap().unwrap().get(),
+            1
+        );
+        assert_eq!(
+            optional_nonzero_u64(Some(i64::MAX), "tpm")
+                .unwrap()
+                .unwrap()
+                .get(),
+            i64::MAX as u64
+        );
+        for invalid in [Some(0), Some(-1)] {
+            assert!(optional_nonzero_u32(invalid, "rpm").is_err());
+        }
+        for invalid in [Some(0_i64), Some(-1)] {
+            assert!(optional_nonzero_u64(invalid, "tpm").is_err());
+        }
+    }
+
+    #[test]
+    fn stored_runtime_closed_sets_parse_canonical_names_only() {
+        assert_eq!(parse_provider_kind("openai").unwrap(), ProviderKind::OpenAi);
+        assert_eq!(
+            parse_operation("generation").unwrap(),
+            OperationKind::Generation
+        );
+        assert_eq!(parse_surface("anthropic").unwrap(), Surface::Anthropic);
+        assert_eq!(parse_mode("streaming").unwrap(), TransportMode::Streaming);
+
+        for error in [
+            parse_provider_kind("open_ai").unwrap_err(),
+            parse_operation("chat").unwrap_err(),
+            parse_surface("unknown").unwrap_err(),
+            parse_mode("stream").unwrap_err(),
+        ] {
+            assert!(matches!(
+                error,
+                RuntimeCompileError::InvalidConfiguration(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn runtime_hint_serializes_the_exact_publication_identity() {
+        let generation_id = Uuid::now_v7();
+        assert_eq!(
+            serde_json::to_value(RuntimeHint {
+                generation_id,
+                sequence: 42,
+            })
+            .unwrap(),
+            serde_json::json!({"generation_id": generation_id, "sequence": 42})
+        );
+    }
+}

@@ -102,3 +102,58 @@ fn usage_point_from_row(row: UsagePointRow) -> Result<UsagePoint, OperationsErro
         incomplete_count: checked_u64(row.incomplete_count, "incomplete count")?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row() -> UsagePointRow {
+        UsagePointRow {
+            bucket: "2026-08-01T04:00:00Z".parse().unwrap(),
+            request_count: 3,
+            input_tokens: "10".to_owned(),
+            output_tokens: "20".to_owned(),
+            cached_input_tokens: "2".to_owned(),
+            media_units: "0.5".to_owned(),
+            estimated_cost: Some("0.025".to_owned()),
+            unpriced_count: 1,
+            incomplete_count: 0,
+            currency: Some(" USD ".to_owned()),
+        }
+    }
+
+    #[test]
+    fn usage_rows_convert_without_losing_exact_numeric_strings() {
+        let point = usage_point_from_row(row()).unwrap();
+        assert_eq!(
+            point.bucket,
+            "2026-08-01T04:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(point.request_count, 3);
+        assert_eq!(point.input_tokens, "10");
+        assert_eq!(point.output_tokens, "20");
+        assert_eq!(point.cached_input_tokens, "2");
+        assert_eq!(point.media_units, "0.5");
+        assert_eq!(point.estimated_cost.as_deref(), Some("0.025"));
+        assert_eq!(point.currency.as_deref(), Some("USD"));
+        assert_eq!(point.unpriced_count, 1);
+        assert_eq!(point.incomplete_count, 0);
+    }
+
+    #[test]
+    fn usage_rows_fail_closed_on_negative_database_counts() {
+        let mutators: [fn(&mut UsagePointRow); 3] = [
+            |row: &mut UsagePointRow| row.request_count = -1,
+            |row: &mut UsagePointRow| row.unpriced_count = -1,
+            |row: &mut UsagePointRow| row.incomplete_count = -1,
+        ];
+        for mutate in mutators {
+            let mut candidate = row();
+            mutate(&mut candidate);
+            assert!(matches!(
+                usage_point_from_row(candidate),
+                Err(OperationsError::Invalid(_))
+            ));
+        }
+    }
+}

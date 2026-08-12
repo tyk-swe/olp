@@ -3,16 +3,17 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use super::*;
 use crate::domain::{
     AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaSpool, Message,
-    MessageRole, Operation, OperationKind, ProviderId, ProviderKind, ProviderOutput,
-    ProviderRequest, ProviderTransport, RequestId, RequestMetadata, RouteId, RouteSlug,
-    RuntimeGenerationId, SourceExtensions, Surface, TargetId, TokenCountRequest, TransportMode,
+    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaHandle, MediaSource,
+    MediaSpool, Message, MessageRole, ModerationRequest, Operation, OperationKind, ProviderId,
+    ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, RequestId, RequestMetadata,
+    RouteId, RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId,
+    TokenCountRequest, TransportMode,
 };
 use crate::protocols::gemini::{Content, GEMINI_COUNT_REQUEST_EXTENSION, Part};
 use crate::providers::gemini::transport::media::hydrate_gemini_contents;
 use crate::providers::gemini::{ConnectorConfig, ConnectorTimeouts, GeminiApiKey};
 use crate::providers::mock_server::{
-    MockResponse, find_bytes, response, spawn_mock as spawn_http_mock,
+    MockResponse, find_bytes, response, spawn_mock as spawn_http_mock, status_response,
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -191,6 +192,188 @@ fn preserved_count_tokens_body_keeps_nested_semantics_and_rebinds_model() {
     assert_eq!(wire["vendorOption"], true);
 }
 
+fn count_request(input: Vec<ContentPart>, extensions: SourceExtensions) -> TokenCountRequest {
+    TokenCountRequest {
+        route: RouteSlug::parse("default").unwrap(),
+        input,
+        extensions,
+    }
+}
+
+fn extensions(
+    surface: Surface,
+    values: impl IntoIterator<Item = (&'static str, serde_json::Value)>,
+) -> SourceExtensions {
+    SourceExtensions::new(
+        surface,
+        values
+            .into_iter()
+            .map(|(path, value)| (path.to_owned(), value))
+            .collect(),
+    )
+}
+
+fn image(source: MediaSource, detail: Option<&str>) -> ContentPart {
+    ContentPart::Image {
+        source,
+        detail: detail.map(str::to_owned),
+    }
+}
+
+#[test]
+fn operation_validation_and_count_reconstruction_fail_closed() {
+    let generation = generation(false).operation;
+    validate_operation(&generation, "gemini-private").unwrap();
+    let count = count().operation;
+    validate_operation(&count, "gemini-private").unwrap();
+    let unsupported = Operation::Moderation(ModerationRequest {
+        route: RouteSlug::parse("default").unwrap(),
+        input: vec![ContentPart::Text { text: "x".into() }],
+        extensions: SourceExtensions::default(),
+    });
+    assert_eq!(
+        validate_operation(&unsupported, "gemini-private")
+            .unwrap_err()
+            .class,
+        AttemptFailureClass::Protocol
+    );
+
+    let uri = MediaSource::Uri("gs://bucket/image.png".into());
+    let wire = encode_count_tokens(
+        &count_request(
+            vec![
+                ContentPart::Text {
+                    text: "hello".into(),
+                },
+                image(uri.clone(), None),
+            ],
+            extensions(
+                Surface::Gemini,
+                [(
+                    "/contents/0/parts/1/fileData/mimeType",
+                    serde_json::json!("image/png"),
+                )],
+            ),
+        ),
+        "gemini-private",
+    )
+    .unwrap();
+    assert!(matches!(wire.contents[0].parts[0], Part::Text(_)));
+    assert!(matches!(wire.contents[0].parts[1], Part::FileData(_)));
+
+    let invalid = [
+        count_request(Vec::new(), SourceExtensions::default()),
+        count_request(
+            vec![image(uri.clone(), Some("high"))],
+            extensions(
+                Surface::Gemini,
+                [(
+                    "/contents/0/parts/0/fileData/mimeType",
+                    serde_json::json!("image/png"),
+                )],
+            ),
+        ),
+        count_request(
+            vec![image(MediaSource::Handle(MediaHandle::new("image")), None)],
+            extensions(
+                Surface::Gemini,
+                [(
+                    "/contents/0/parts/0/fileData/mimeType",
+                    serde_json::json!("image/png"),
+                )],
+            ),
+        ),
+        count_request(vec![image(uri, None)], SourceExtensions::default()),
+        count_request(
+            vec![ContentPart::InputAudio {
+                media: MediaHandle::new("audio"),
+                format: "wav".into(),
+            }],
+            SourceExtensions::default(),
+        ),
+        count_request(
+            vec![ContentPart::Refusal { text: "no".into() }],
+            SourceExtensions::default(),
+        ),
+        count_request(
+            vec![ContentPart::Text { text: "x".into() }],
+            extensions(Surface::Gemini, [("/unconsumed", serde_json::json!(true))]),
+        ),
+        count_request(
+            vec![ContentPart::Text { text: "x".into() }],
+            extensions(Surface::OpenAi, [("/foreign", serde_json::json!(true))]),
+        ),
+        count_request(
+            vec![ContentPart::Text { text: "x".into() }],
+            extensions(
+                Surface::Gemini,
+                [(GEMINI_COUNT_REQUEST_EXTENSION, serde_json::json!({}))],
+            ),
+        ),
+        count_request(
+            vec![ContentPart::Text { text: "x".into() }],
+            extensions(
+                Surface::Gemini,
+                [
+                    (
+                        GEMINI_COUNT_REQUEST_EXTENSION,
+                        serde_json::json!({
+                            "generateContentRequest": {
+                                "model": "models/public-route",
+                                "contents": [{"role":"user","parts":[{"text":"x"}]}]
+                            }
+                        }),
+                    ),
+                    ("/extra", serde_json::json!(true)),
+                ],
+            ),
+        ),
+    ];
+    for request in invalid {
+        assert_eq!(
+            encode_count_tokens(&request, "gemini-private")
+                .unwrap_err()
+                .class,
+            AttemptFailureClass::Protocol
+        );
+    }
+}
+
+#[tokio::test]
+async fn request_envelope_and_transport_mode_mismatches_stop_before_network() {
+    let transport = connector("http://127.0.0.1:1/v1beta/");
+    let mut cases = Vec::new();
+
+    let mut metadata_mismatch = generation(false);
+    metadata_mismatch.metadata.operation = OperationKind::TokenCount;
+    cases.push(metadata_mismatch);
+
+    let mut provider_mismatch = generation(false);
+    provider_mismatch.attempt.provider_kind = ProviderKind::OpenAi;
+    cases.push(provider_mismatch);
+
+    let mut asynchronous = generation(false);
+    asynchronous.metadata.mode = TransportMode::Async;
+    cases.push(asynchronous);
+
+    let mut stream_mismatch = generation(false);
+    let Operation::Generation(generation) = &mut stream_mismatch.operation else {
+        unreachable!()
+    };
+    generation.parameters.stream = true;
+    cases.push(stream_mismatch);
+
+    let mut streaming_count = count();
+    streaming_count.metadata.mode = TransportMode::Streaming;
+    cases.push(streaming_count);
+
+    for request in cases {
+        let error = transport.execute(request).await.err().unwrap();
+        assert_eq!(error.class, AttemptFailureClass::Protocol);
+        assert!(!error.message.is_empty());
+    }
+}
+
 fn connector(base_url: &str) -> GeminiConnector {
     GeminiConnector::new(
         ConnectorConfig::for_local_test(base_url, ConnectorTimeouts::default()),
@@ -210,6 +393,85 @@ async fn model_discovery_uses_gemini_pagination_contract() {
     let request = String::from_utf8(captured.await.unwrap()).unwrap();
     assert!(request.starts_with("GET /v1beta/models?pageSize=1000 "));
     assert!(request.contains("x-goog-api-key: upstream-secret"));
+}
+
+#[tokio::test]
+async fn discovery_and_probe_reject_malformed_provider_contracts() {
+    for (body, expected) in [
+        (b"not json".as_slice(), "not valid JSON"),
+        (br#"{"other":[]}"#.as_slice(), "omitted models"),
+        (br#"{"models":[{"name":""}]}"#.as_slice(), "invalid name"),
+    ] {
+        let (base, _) =
+            spawn_mock(MockResponse::immediate(response("application/json", body))).await;
+        let error = connector(&base).discover_models().await.unwrap_err();
+        assert_eq!(error.class, AttemptFailureClass::Protocol);
+        assert!(error.message.contains(expected));
+    }
+
+    let (base, captured) = spawn_mock(MockResponse::immediate(response(
+        "application/json",
+        br#"{"totalTokens":1}"#,
+    )))
+    .await;
+    connector(&base)
+        .probe_model("models/gemini-test")
+        .await
+        .unwrap();
+    let request = String::from_utf8(captured.await.unwrap()).unwrap();
+    assert!(request.starts_with("POST /v1beta/models/gemini-test:countTokens "));
+    assert!(request.contains("\"health\""));
+
+    for body in [br#"{"totalTokens":0}"#.as_slice(), b"not json".as_slice()] {
+        let (base, _) =
+            spawn_mock(MockResponse::immediate(response("application/json", body))).await;
+        let error = connector(&base)
+            .probe_model("gemini-test")
+            .await
+            .unwrap_err();
+        assert_eq!(error.class, AttemptFailureClass::Protocol);
+    }
+}
+
+#[tokio::test]
+async fn upstream_statuses_and_unary_body_contracts_are_classified() {
+    for (status, class) in [
+        ("408 Request Timeout", AttemptFailureClass::Timeout),
+        ("429 Too Many Requests", AttemptFailureClass::RateLimit),
+        (
+            "503 Service Unavailable",
+            AttemptFailureClass::UpstreamServer,
+        ),
+        ("400 Bad Request", AttemptFailureClass::UpstreamClient),
+    ] {
+        let (base, _) = spawn_mock(MockResponse::immediate(status_response(
+            status,
+            "application/json",
+            br#"{"error":{"message":"provider rejected request"}}"#,
+        )))
+        .await;
+        let error = connector(&base)
+            .execute(generation(false))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.class, class, "status {status}");
+        assert!(!error.response_committed);
+    }
+
+    for (request, content_type, body) in [
+        (generation(false), "text/plain", b"{}".as_slice()),
+        (
+            generation(false),
+            "application/json",
+            b"not json".as_slice(),
+        ),
+        (count(), "application/json", b"not json".as_slice()),
+    ] {
+        let (base, _) = spawn_mock(MockResponse::immediate(response(content_type, body))).await;
+        let error = connector(&base).execute(request).await.err().unwrap();
+        assert_eq!(error.class, AttemptFailureClass::Protocol);
+    }
 }
 
 async fn collect(connector: &GeminiConnector, request: ProviderRequest) -> Vec<CanonicalEvent> {

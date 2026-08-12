@@ -479,3 +479,219 @@ pub(super) fn media_job_result(record: &MediaJobRecord) -> olp_engine::domain::V
         extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone as _;
+    use olp_engine::domain::{CanonicalError, ErrorClass, VideoJobResult, VideoStatus};
+
+    use super::*;
+
+    fn record(state: MediaJobState) -> MediaJobRecord {
+        let created_at = Utc.with_ymd_and_hms(2025, 2, 3, 4, 5, 6).unwrap();
+        MediaJobRecord {
+            id: uuid::Uuid::from_u128(1),
+            upstream_job_id: Some("upstream-1".to_owned()),
+            api_key_id: uuid::Uuid::from_u128(2),
+            provider_id: uuid::Uuid::from_u128(3),
+            provider_name: "provider".to_owned(),
+            upstream_model: "video-model".to_owned(),
+            route_slug: "videos".to_owned(),
+            operation: OperationKind::VideoGet,
+            surface: Surface::OpenAi,
+            state,
+            lifecycle: MediaJobLifecycle::Active,
+            progress_percent: Some(75.5),
+            content_available: false,
+            expires_at: Some(created_at + chrono::Duration::hours(1)),
+            error_class: None,
+            completed_at: Some(created_at + chrono::Duration::minutes(1)),
+            last_polled_at: None,
+            reconciliation_error: None,
+            deleted_at: None,
+            runtime_generation_id: None,
+            provider_revision_id: None,
+            reconciliation_claim_id: None,
+            reconciliation_attempts: 0,
+            next_reconciliation_at: created_at,
+            last_reconciliation_at: None,
+            etag: uuid::Uuid::from_u128(4),
+            created_at,
+            updated_at: created_at,
+        }
+    }
+
+    #[test]
+    fn upstream_job_ids_are_trimmed_bounded_and_control_free() {
+        for (value, valid) in [
+            ("job-1".to_owned(), true),
+            ("".to_owned(), false),
+            (" job-1".to_owned(), false),
+            ("job-1 ".to_owned(), false),
+            ("job\n1".to_owned(), false),
+            ("x".repeat(1_024), true),
+            ("x".repeat(1_025), false),
+        ] {
+            assert_eq!(valid_upstream_media_job_id(&value), valid, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn route_and_delete_metadata_are_applied_only_to_supported_video_operations() {
+        for mut operation in [
+            olp_engine::protocols::openai::decode_video_get("upstream".to_owned()),
+            olp_engine::protocols::openai::decode_video_content("upstream".to_owned()),
+            olp_engine::protocols::openai::decode_video_delete("upstream".to_owned()),
+        ] {
+            set_video_route(&mut operation, "video-route").unwrap();
+            assert_eq!(operation.route().unwrap().as_str(), "video-route");
+        }
+
+        let mut delete = olp_engine::protocols::openai::decode_video_delete("upstream".to_owned());
+        mark_missing_delete_as_success(&mut delete).unwrap();
+        let Operation::Video(olp_engine::domain::VideoOperation::Delete(request)) = delete else {
+            panic!("expected video delete")
+        };
+        assert_eq!(request.extensions.source, Some(Surface::OpenAi));
+        assert_eq!(
+            request
+                .extensions
+                .values
+                .get(MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION),
+            Some(&Value::Bool(true))
+        );
+
+        let mut list = olp_engine::protocols::openai::decode_video_list(
+            olp_engine::protocols::openai::OpenAiVideoListQuery {
+                after: None,
+                limit: None,
+                order: None,
+                extra: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            set_video_route(&mut list, "video-route")
+                .unwrap_err()
+                .code(),
+            "media_job_operation_invalid"
+        );
+        let mut invalid = olp_engine::protocols::openai::decode_video_get("upstream".to_owned());
+        assert_eq!(
+            set_video_route(&mut invalid, "Invalid Route")
+                .unwrap_err()
+                .code(),
+            "media_job_route_invalid"
+        );
+    }
+
+    #[test]
+    fn provider_statuses_map_to_persistent_states() {
+        for (status, expected) in [
+            (VideoStatus::Queued, MediaJobState::Queued),
+            (VideoStatus::InProgress, MediaJobState::Running),
+            (VideoStatus::Completed, MediaJobState::Succeeded),
+            (VideoStatus::Failed, MediaJobState::Failed),
+        ] {
+            assert_eq!(media_job_state(&status).unwrap(), expected);
+        }
+        assert_eq!(
+            media_job_state(&VideoStatus::Other("paused".to_owned()))
+                .unwrap_err()
+                .code(),
+            "provider_protocol_error"
+        );
+    }
+
+    #[test]
+    fn persistence_errors_keep_client_visible_failure_classes_stable() {
+        let cases = [
+            (MediaJobError::NotFound, 404, "video_not_found"),
+            (MediaJobError::PreconditionFailed, 409, "video_changed"),
+            (
+                MediaJobError::UpstreamIdentityConflict,
+                503,
+                "media_job_upstream_identity_conflict",
+            ),
+            (
+                MediaJobError::Invalid("invalid job".to_owned()),
+                400,
+                "invalid_request",
+            ),
+            (
+                MediaJobError::Database(sqlx::Error::RowNotFound),
+                503,
+                "persistence_unavailable",
+            ),
+        ];
+        for (error, status, code) in cases {
+            let error = media_job_error(error);
+            assert_eq!(error.status().as_u16(), status);
+            assert_eq!(error.code(), code);
+        }
+    }
+
+    #[test]
+    fn provider_result_updates_preserve_progress_expiry_and_error_class() {
+        let now = Utc::now();
+        let result = VideoJobResult {
+            id: "upstream".to_owned(),
+            model: None,
+            status: VideoStatus::Completed,
+            progress_percent: Some(100.0),
+            created_at: None,
+            completed_at: Some(now.timestamp()),
+            expires_at: Some((now + chrono::Duration::hours(1)).timestamp()),
+            prompt: None,
+            seconds: None,
+            size: None,
+            error: Some(CanonicalError {
+                class: ErrorClass::RateLimit,
+                message: "busy".to_owned(),
+                provider_code: None,
+                retryable: true,
+            }),
+            extensions: Default::default(),
+        };
+        let update = media_job_update(&result, MediaJobState::Succeeded);
+        assert_eq!(update.state, MediaJobState::Succeeded);
+        assert_eq!(update.progress_percent, Some(100.0));
+        assert!(update.content_available);
+        assert_eq!(
+            update.expires_at.unwrap().timestamp(),
+            result.expires_at.unwrap()
+        );
+        assert_eq!(update.error_class.as_deref(), Some("ratelimit"));
+    }
+
+    #[test]
+    fn stored_states_round_trip_to_public_video_results() {
+        for (state, expected) in [
+            (MediaJobState::Queued, VideoStatus::Queued),
+            (MediaJobState::Running, VideoStatus::InProgress),
+            (MediaJobState::Succeeded, VideoStatus::Completed),
+            (MediaJobState::Failed, VideoStatus::Failed),
+            (
+                MediaJobState::Cancelled,
+                VideoStatus::Other("cancelled".to_owned()),
+            ),
+        ] {
+            let record = record(state);
+            let result = media_job_result(&record);
+            assert_eq!(result.id, record.id.to_string());
+            assert_eq!(result.model.as_deref(), Some("videos"));
+            assert_eq!(result.status, expected);
+            assert_eq!(result.progress_percent, record.progress_percent);
+            assert_eq!(result.created_at, Some(record.created_at.timestamp()));
+            assert_eq!(
+                result.completed_at,
+                record.completed_at.map(|value| value.timestamp())
+            );
+            assert_eq!(
+                result.expires_at,
+                record.expires_at.map(|value| value.timestamp())
+            );
+            assert_eq!(result.extensions.source, Some(Surface::OpenAi));
+        }
+    }
+}

@@ -757,3 +757,270 @@ fn checked_optional_decimal_sum<T>(
             .ok_or(PersistenceError::InvalidRequestMetadataEvent)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+    use olp_engine::{
+        domain::{OperationKind, Surface},
+        inference::request_metadata::{
+            RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestMetadataEvent,
+        },
+    };
+
+    use super::*;
+
+    fn attempt(
+        ordinal: u16,
+        provider_id: Uuid,
+        model: &str,
+        committed: bool,
+    ) -> RequestAttemptMetadata {
+        let completed_at = Utc::now();
+        RequestAttemptMetadata {
+            id: Uuid::now_v7(),
+            ordinal,
+            provider_id,
+            upstream_model: model.to_owned(),
+            started_at: completed_at - Duration::milliseconds(10),
+            completed_at,
+            status_code: Some(200),
+            error_class: None,
+            committed,
+            latency_ms: 10,
+            first_byte_ms: Some(3),
+            usage: Some(RequestAttemptUsageMetadata {
+                observed: committed,
+                complete: true,
+                billing_uncertain: false,
+                input_tokens: committed.then_some(7),
+                output_tokens: None,
+                cached_input_tokens: None,
+                media_units: None,
+            }),
+        }
+    }
+
+    fn event() -> RequestMetadataEvent {
+        let completed_at = Utc::now();
+        let first_provider = Uuid::now_v7();
+        let final_provider = Uuid::now_v7();
+        RequestMetadataEvent {
+            event_id: Uuid::now_v7(),
+            request_id: Uuid::now_v7(),
+            runtime_generation_id: Uuid::now_v7(),
+            api_key_id: Uuid::now_v7(),
+            provider_id: Some(final_provider),
+            route_slug: "primary".to_owned(),
+            upstream_model: Some("model-b".to_owned()),
+            operation: OperationKind::Generation,
+            surface: Surface::OpenAi,
+            request_started_at: completed_at - Duration::milliseconds(25),
+            request_completed_at: completed_at,
+            observed_at: completed_at,
+            status_code: Some(200),
+            error_class: None,
+            committed: true,
+            latency_ms: 25,
+            first_byte_ms: Some(18),
+            input_tokens: Some(7),
+            output_tokens: None,
+            cached_input_tokens: None,
+            media_units: None,
+            usage_complete: true,
+            unpriced: false,
+            attempts: vec![
+                attempt(1, first_provider, "model-a", false),
+                attempt(2, final_provider, "model-b", true),
+            ],
+        }
+    }
+
+    type EventMutation = fn(&mut RequestMetadataEvent);
+
+    fn assert_invalid_events(cases: &[(&str, EventMutation)]) {
+        for (name, mutate) in cases {
+            let mut candidate = event();
+            mutate(&mut candidate);
+            assert!(
+                matches!(
+                    ValidatedRequestMetadata::validate(&candidate),
+                    Err(PersistenceError::InvalidRequestMetadataEvent)
+                ),
+                "accepted {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_normalizes_a_well_formed_attempt_sequence() {
+        let event = event();
+        let validated = ValidatedRequestMetadata::validate(&event).unwrap();
+
+        assert!(validated.has_attempts);
+        assert_eq!(validated.status_code, Some(200));
+        assert_eq!(validated.latency_ms, 25);
+        assert_eq!(validated.first_byte_ms, Some(18));
+        assert_eq!(validated.attempt_count, 2);
+        assert_eq!(validated.attempts[0].ordinal, 1);
+        assert_eq!(validated.attempts[1].status_code, Some(200));
+        assert_eq!(validated.attempts[1].latency_ms, 10);
+        assert_eq!(validated.attempts[1].first_byte_ms, Some(3));
+        assert_eq!(validated.attempts[1].event.id, event.attempts[1].id);
+        assert!(validated.attempts[1].usage.observed);
+        assert_eq!(validated.attempts[1].usage.input_tokens, Some(7));
+    }
+
+    #[test]
+    fn validation_rejects_malformed_envelopes_and_attempts() {
+        assert_invalid_events(&[
+            ("reversed request timing", |event| {
+                event.request_completed_at = event.request_started_at - Duration::nanoseconds(1)
+            }),
+            ("blank route", |event| event.route_slug = "  ".to_owned()),
+            ("request status outside HTTP range", |event| {
+                event.status_code = Some(99)
+            }),
+            ("final provider mismatch", |event| {
+                event.provider_id = Some(Uuid::now_v7())
+            }),
+            ("target metadata without an attempt", |event| {
+                event.attempts.clear()
+            }),
+            ("mixed legacy and attempt-local usage", |event| {
+                event.attempts[0].usage = None
+            }),
+            ("non-contiguous ordinal", |event| {
+                event.attempts[0].ordinal = 2
+            }),
+            ("reversed attempt timing", |event| {
+                event.attempts[0].completed_at =
+                    event.attempts[0].started_at - Duration::nanoseconds(1)
+            }),
+            ("attempt status outside HTTP range", |event| {
+                event.attempts[0].status_code = Some(600)
+            }),
+            ("request latency overflow", |event| {
+                event.latency_ms = i32::MAX as u64 + 1
+            }),
+            ("attempt first-byte overflow", |event| {
+                event.attempts[0].first_byte_ms = Some(i32::MAX as u64 + 1)
+            }),
+        ]);
+    }
+
+    #[test]
+    fn attempt_usage_state_machine_rejects_inconsistent_or_negative_evidence() {
+        assert_invalid_events(&[
+            ("missing evidence without billing uncertainty", |event| {
+                event.attempts[0].usage.as_mut().unwrap().complete = false
+            }),
+            ("complete and billing-uncertain", |event| {
+                let usage = event.attempts[0].usage.as_mut().unwrap();
+                usage.billing_uncertain = true;
+                usage.complete = true;
+            }),
+            ("tokens without observed usage", |event| {
+                event.attempts[0].usage.as_mut().unwrap().input_tokens = Some(1)
+            }),
+            ("negative token count", |event| {
+                event.attempts[1].usage.as_mut().unwrap().output_tokens = Some(-1)
+            }),
+            ("negative media units", |event| {
+                event.attempts[1].usage.as_mut().unwrap().media_units = Some(Decimal::NEGATIVE_ONE)
+            }),
+        ]);
+    }
+
+    #[test]
+    fn legacy_attempts_derive_conservative_billing_evidence() {
+        let mut event = event();
+        for attempt in &mut event.attempts {
+            attempt.usage = None;
+        }
+        event.attempts[0].error_class = Some("timeout".to_owned());
+
+        let validated = ValidatedRequestMetadata::validate(&event).unwrap();
+        let first = &validated.attempts[0].usage;
+        assert!(!first.observed);
+        assert!(!first.complete);
+        assert!(first.billing_uncertain);
+        assert!(validated.attempts[1].usage.observed);
+        assert!(validated.attempts[1].usage.complete);
+        assert!(!validated.attempts[1].usage.billing_uncertain);
+
+        for (error, committed, billable) in [
+            (None, false, false),
+            (Some("connect"), false, false),
+            (Some("ambiguous"), false, true),
+            (Some("timeout"), false, true),
+            (Some("upstream_server"), false, true),
+            (Some("protocol"), false, true),
+            (Some("cancelled"), false, true),
+            (None, true, true),
+        ] {
+            let mut candidate = event.attempts[0].clone();
+            candidate.error_class = error.map(str::to_owned);
+            candidate.committed = committed;
+            assert_eq!(
+                legacy_attempt_may_be_billable(&candidate),
+                billable,
+                "error={error:?}, committed={committed}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_pre_attempt_events_are_valid_only_without_usage_or_target_metadata() {
+        let mut event = event();
+        event.attempts.clear();
+        event.provider_id = None;
+        event.upstream_model = None;
+        event.committed = false;
+        event.first_byte_ms = None;
+        event.input_tokens = None;
+        event.output_tokens = None;
+        event.cached_input_tokens = None;
+        event.media_units = None;
+        event.usage_complete = false;
+
+        let validated = ValidatedRequestMetadata::validate(&event).unwrap();
+        assert!(!validated.has_attempts);
+        assert_eq!(validated.attempt_count, 0);
+    }
+
+    #[test]
+    fn charge_status_and_optional_sums_cover_closed_boundaries() {
+        assert_eq!(AttemptChargeStatus::NotBillable.as_str(), "not_billable");
+        assert_eq!(AttemptChargeStatus::Billable.as_str(), "billable");
+        assert_eq!(
+            AttemptChargeStatus::BillingUncertain.as_str(),
+            "billing_uncertain"
+        );
+
+        let integers = [None, Some(2_i64), None, Some(3)];
+        let integer_refs = integers.iter().collect::<Vec<_>>();
+        assert_eq!(
+            checked_optional_i64_sum(&integer_refs, |value| *value).unwrap(),
+            Some(5)
+        );
+        assert_eq!(
+            checked_optional_i64_sum(&[&None::<i64>], |value| *value).unwrap(),
+            None
+        );
+        assert!(checked_optional_i64_sum(&[&Some(i64::MAX), &Some(1)], |value| *value).is_err());
+
+        let decimals = [None, Some(Decimal::ONE), Some(Decimal::new(25, 1))];
+        let decimal_refs = decimals.iter().collect::<Vec<_>>();
+        assert_eq!(
+            checked_optional_decimal_sum(&decimal_refs, |value| *value).unwrap(),
+            Some(Decimal::new(35, 1))
+        );
+        assert!(
+            checked_optional_decimal_sum(&[&Some(Decimal::MAX), &Some(Decimal::ONE)], |value| {
+                *value
+            })
+            .is_err()
+        );
+    }
+}

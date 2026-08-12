@@ -143,3 +143,130 @@ pub(super) fn map_token_network(error: OidcNetworkError) -> Problem {
     warn!(%error, "OIDC provider request failed");
     Problem::service_unavailable("oidc_provider_unavailable")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn code(problem: &Problem) -> &str {
+        problem
+            .problem_type
+            .strip_prefix("https://openllmproxy.dev/problems/")
+            .unwrap()
+    }
+
+    #[test]
+    fn oidc_domain_failures_have_stable_http_semantics() {
+        let cases = [
+            (
+                OidcError::Invalid("bad".to_owned()),
+                422,
+                "validation_failed",
+            ),
+            (OidcError::NotConfigured, 404, "oidc_not_configured"),
+            (OidcError::Disabled, 404, "oidc_not_configured"),
+            (OidcError::PreconditionRequired, 428, "if_match_required"),
+            (OidcError::PreconditionFailed, 412, "etag_mismatch"),
+            (OidcError::FlowUnavailable, 400, "oidc_flow_unavailable"),
+            (
+                OidcError::FlowSessionMismatch,
+                403,
+                "oidc_flow_session_changed",
+            ),
+            (OidcError::FlowCapacity, 503, "oidc_flow_capacity_exhausted"),
+            (OidcError::FlowRateLimited, 429, "oidc_flow_rate_limited"),
+            (
+                OidcError::IdentityAlreadyLinked,
+                409,
+                "oidc_identity_already_linked",
+            ),
+            (OidcError::IdentityNotFound, 404, "oidc_identity_not_found"),
+            (
+                OidcError::LastAuthenticationMethod,
+                409,
+                "last_authentication_method",
+            ),
+            (OidcError::LinkRequired, 409, "oidc_explicit_link_required"),
+            (
+                OidcError::ProvisioningDenied,
+                403,
+                "oidc_provisioning_denied",
+            ),
+            (OidcError::InactiveUser, 403, "account_inactive"),
+            (
+                OidcError::RecentAuthenticationRequired,
+                428,
+                "reauthentication_required",
+            ),
+            (
+                OidcError::SessionUnavailable,
+                401,
+                "authentication_required",
+            ),
+            (
+                OidcError::ReauthenticationIdentityMismatch,
+                403,
+                "oidc_reauthentication_identity_mismatch",
+            ),
+            (OidcError::Corrupt, 500, "internal_error"),
+        ];
+
+        for (error, status, expected_code) in cases {
+            let problem = map_oidc(error);
+            assert_eq!(problem.status, status, "wrong status for {expected_code}");
+            assert_eq!(code(&problem), expected_code);
+        }
+    }
+
+    #[test]
+    fn flow_completion_translates_changed_configuration_to_a_restartable_error() {
+        for error in [
+            OidcError::NotConfigured,
+            OidcError::Disabled,
+            OidcError::PreconditionFailed,
+        ] {
+            let problem = map_oidc_flow_completion(error);
+            assert_eq!(problem.status, 400);
+            assert_eq!(code(&problem), "oidc_flow_stale");
+        }
+        assert_eq!(
+            code(&map_oidc_flow_completion(OidcError::FlowUnavailable)),
+            "oidc_flow_unavailable"
+        );
+    }
+
+    #[test]
+    fn network_failures_expose_only_generic_client_details() {
+        let discovery_error = OidcNetworkError::ForbiddenAddress;
+        let discovery_private_detail = discovery_error.to_string();
+        let discovery = map_discovery_network(discovery_error);
+        assert_eq!(discovery.status, 422);
+        assert_eq!(code(&discovery), "validation_failed");
+        assert_eq!(discovery.detail.as_ref(), "One or more fields are invalid.");
+        assert_eq!(
+            discovery.errors.get("discovery_url").unwrap(),
+            &["Discovery, endpoint safety validation, or JWKS retrieval failed.".to_owned()]
+        );
+        assert!(
+            !serde_json::to_string(&discovery)
+                .unwrap()
+                .contains(&discovery_private_detail)
+        );
+
+        let token_error = OidcNetworkError::ResponseTimeout;
+        let token_private_detail = token_error.to_string();
+        let token = map_token_network(token_error);
+        assert_eq!(token.status, 503);
+        assert_eq!(code(&token), "oidc_provider_unavailable");
+        assert_eq!(
+            token.detail.as_ref(),
+            "A required service is temporarily unavailable."
+        );
+        assert!(token.errors.is_empty());
+        assert!(
+            !serde_json::to_string(&token)
+                .unwrap()
+                .contains(&token_private_detail)
+        );
+    }
+}

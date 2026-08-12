@@ -670,28 +670,72 @@ mod tests {
     fn connector_and_model_validation_is_explicit() {
         let request = provider_request();
         assert!(validate_request(&request).is_ok());
-        assert!(validate_model_id("us.anthropic.claude-3-7-sonnet-20250219-v1:0").is_ok());
-        assert!(
-            validate_model_id("arn:aws:bedrock:us-east-1:123456789012:inference-profile/example")
-                .is_ok()
-        );
-        assert!(validate_model_id("bad model").is_err());
+        for model in [
+            "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            "arn:aws:bedrock:us-east-1:123456789012:inference-profile/example",
+        ] {
+            assert!(validate_model_id(model).is_ok(), "{model}");
+        }
+        for model in ["", " bad", "bad model", "bad\nmodel"] {
+            assert!(validate_model_id(model).is_err(), "{model:?}");
+        }
+        assert!(validate_model_id(&"x".repeat(2_049)).is_err());
+
+        let cases: [fn(&mut ProviderRequest); 5] = [
+            |r| r.attempt.provider_kind = ProviderKind::OpenAi,
+            |r| r.metadata.operation = OperationKind::TokenCount,
+            |r| r.metadata.mode = TransportMode::Streaming,
+            |r| {
+                r.metadata.mode = TransportMode::Async;
+                let Operation::Generation(generation) = &mut r.operation else {
+                    unreachable!()
+                };
+                generation.parameters.stream = true;
+            },
+            |r| {
+                *r = token_count_request();
+                r.metadata.mode = TransportMode::Streaming;
+            },
+        ];
+        for mutate in cases {
+            let mut invalid = provider_request();
+            mutate(&mut invalid);
+            assert!(validate_request(&invalid).is_err());
+        }
     }
 
     #[test]
     fn service_error_taxonomy_is_retry_aware() {
-        assert_eq!(
-            classify_service_code(Some("ThrottlingException")),
-            AttemptFailureClass::RateLimit
-        );
-        assert_eq!(
-            classify_service_code(Some("ValidationException")),
-            AttemptFailureClass::UpstreamClient
-        );
-        assert_eq!(
-            classify_service_code(Some("ServiceUnavailableException")),
-            AttemptFailureClass::UpstreamServer
-        );
+        for (code, expected) in [
+            ("ThrottlingException", AttemptFailureClass::RateLimit),
+            (
+                "ServiceQuotaExceededException",
+                AttemptFailureClass::RateLimit,
+            ),
+            ("ModelTimeoutException", AttemptFailureClass::Timeout),
+            ("AccessDeniedException", AttemptFailureClass::UpstreamClient),
+            (
+                "UnrecognizedClientException",
+                AttemptFailureClass::UpstreamClient,
+            ),
+            (
+                "InvalidSignatureException",
+                AttemptFailureClass::UpstreamClient,
+            ),
+            ("ExpiredTokenException", AttemptFailureClass::UpstreamClient),
+            ("ValidationException", AttemptFailureClass::UpstreamClient),
+            (
+                "ResourceNotFoundException",
+                AttemptFailureClass::UpstreamClient,
+            ),
+            ("ConflictException", AttemptFailureClass::UpstreamClient),
+            (
+                "ServiceUnavailableException",
+                AttemptFailureClass::UpstreamServer,
+            ),
+        ] {
+            assert_eq!(classify_service_code(Some(code)), expected, "{code}");
+        }
         let uncoded = classify_service_code(None);
         assert_eq!(uncoded, AttemptFailureClass::UpstreamServer);
         assert!(
@@ -993,6 +1037,73 @@ mod tests {
         assert!(error.response_committed);
         drop(events);
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_event_stream_sequences_fail_closed_after_commit() {
+        let cases = [
+            (
+                "role",
+                vec![event_frame("messageStart", r#"{"role":"user"}"#)],
+            ),
+            (
+                "content before message",
+                vec![event_frame(
+                    "contentBlockDelta",
+                    r#"{"delta":{"text":"early"},"contentBlockIndex":0}"#,
+                )],
+            ),
+            (
+                "missing stop",
+                vec![event_frame("messageStart", r#"{"role":"assistant"}"#)],
+            ),
+            (
+                "duplicate start",
+                vec![
+                    event_frame("messageStart", r#"{"role":"assistant"}"#),
+                    event_frame("messageStart", r#"{"role":"assistant"}"#),
+                ],
+            ),
+            (
+                "tool delta before start",
+                vec![
+                    event_frame("messageStart", r#"{"role":"assistant"}"#),
+                    event_frame(
+                        "contentBlockDelta",
+                        r#"{"delta":{"toolUse":{"input":"{}"}},"contentBlockIndex":0}"#,
+                    ),
+                ],
+            ),
+            (
+                "negative index",
+                vec![
+                    event_frame("messageStart", r#"{"role":"assistant"}"#),
+                    event_frame("contentBlockStop", r#"{"contentBlockIndex":-1}"#),
+                ],
+            ),
+        ];
+        for (name, frames) in cases {
+            let (endpoint, server) = serve_once(
+                frames.into_iter().flatten().collect(),
+                "application/vnd.amazon.eventstream",
+            )
+            .await;
+            let connector = mock_connector(&endpoint).await;
+            let ProviderOutput::Events(events) =
+                connector.execute(streaming_request()).await.unwrap()
+            else {
+                panic!("expected event stream");
+            };
+            let items = events.collect::<Vec<_>>().await;
+            let error = items
+                .into_iter()
+                .find_map(Result::err)
+                .unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(error.phase, TransportPhase::Body, "{name}");
+            assert_eq!(error.class, AttemptFailureClass::Protocol, "{name}");
+            assert!(error.response_committed, "{name}");
+            server.await.unwrap();
+        }
     }
 
     #[tokio::test]

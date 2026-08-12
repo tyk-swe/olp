@@ -386,7 +386,14 @@ fn stream_string(value: &Value, field: &'static str) -> Result<String, Responses
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::validate_event_sequence;
+    use serde_json::json;
+
     use super::*;
+
+    fn data(value: Value) -> String {
+        format!("data: {value}\n\n")
+    }
 
     #[test]
     fn streamed_rate_limit_error_is_retryable() {
@@ -412,5 +419,169 @@ mod tests {
             .expect("failed response event must emit a canonical error");
         assert_eq!(error.class, ErrorClass::RateLimit);
         assert!(error.retryable);
+    }
+
+    #[test]
+    fn completed_stream_aggregates_tools_usage_and_raw_output_in_order() {
+        let wire = concat!(
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"private-model\"}}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{\\\"city\\\":\"}}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"item_id\":\"call_1\",\"delta\":\"\\\"Paris\\\"}\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\"}}\n\n",
+            "data: {\"type\":\"future/event~name\",\"vendor\":{\"retained\":true}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\"},{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":3},\"output_tokens_details\":{\"reasoning_tokens\":1}}}}\n\n"
+        );
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        validate_event_sequence(&events).unwrap();
+        assert!(decoder.is_done());
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::ResponseStart {
+                response_id: Some(id),
+                provider_model: Some(model),
+            } if id == "resp_1" && model == "private-model"
+        )));
+        let argument_fragments = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                CanonicalEventKind::ToolCallDelta {
+                    arguments_delta, ..
+                } => Some(arguments_delta.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(argument_fragments, "{\"city\":\"Paris\"}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, CanonicalEventKind::MessageStart { .. }))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            CanonicalEventKind::Finish {
+                reason: FinishReason::ToolCalls,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::Usage { usage }
+                if usage.cached_input_tokens == Some(3)
+                    && usage.reasoning_tokens == Some(1)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.contains_key("/stream/future~1event~0name")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::SourceExtension { extensions }
+                if extensions.values.contains_key(&format!(
+                    "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/1"
+                ))
+        )));
+        assert!(decoder.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn done_marker_finishes_open_outputs_and_rejects_later_data() {
+        let wire = concat!(
+            "event: response.in_progress\n",
+            "data: {\"response\":{\"id\":\"resp_2\",\"model\":\"private\"}}\n\n",
+            "data: {\"type\":\"response.refusal.delta\",\"output_index\":2,",
+            "\"delta\":\"cannot\"}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        validate_event_sequence(&events).unwrap();
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            CanonicalEventKind::RefusalDelta { output_index: 2, text } if text == "cannot"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            CanonicalEventKind::Finish {
+                output_index: 2,
+                reason: FinishReason::Stop,
+            }
+        )));
+        assert!(matches!(
+            decoder.push(data(json!({"type": "response.created"})).as_bytes()),
+            Err(ResponsesCodecError::DataAfterDone)
+        ));
+    }
+
+    #[test]
+    fn failed_stream_closes_started_outputs_and_uses_safe_fallbacks() {
+        let wire = [
+            data(json!({
+                "type": "response.output_text.delta",
+                "output_index": 1,
+                "delta": "partial"
+            })),
+            data(json!({"type": "error"})),
+        ]
+        .concat();
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let events = decoder.push(wire.as_bytes()).unwrap();
+
+        validate_event_sequence(&events).unwrap();
+        let error = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                CanonicalEventKind::Error { error } => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(error.class, ErrorClass::Upstream);
+        assert_eq!(error.message, "OpenAI Responses stream failed");
+        assert_eq!(error.provider_code, None);
+        assert!(!error.retryable);
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            CanonicalEventKind::Finish {
+                output_index: 1,
+                ..
+            }
+        )));
+        assert!(matches!(
+            events.last().unwrap().kind,
+            CanonicalEventKind::Done
+        ));
+    }
+
+    #[test]
+    fn malformed_stream_fields_and_raw_outputs_fail_closed() {
+        for value in [
+            json!({}),
+            json!({"type": "response.output_text.delta", "output_index": -1, "delta": "x"}),
+            json!({"type": "response.output_text.delta", "output_index": 0, "delta": 7}),
+            json!({
+                "type": "response.completed",
+                "response": {"output": [{"vendor": true}]}
+            }),
+        ] {
+            let mut decoder = OpenAiResponsesStreamDecoder::new();
+            assert!(matches!(
+                decoder.push(data(value).as_bytes()),
+                Err(ResponsesCodecError::InvalidResponse(_))
+            ));
+        }
+
+        let mut truncated = OpenAiResponsesStreamDecoder::new();
+        truncated
+            .push(data(json!({"type": "response.created"})).as_bytes())
+            .unwrap();
+        assert!(matches!(
+            truncated.finish(),
+            Err(ResponsesCodecError::UnexpectedEof)
+        ));
     }
 }

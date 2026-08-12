@@ -197,3 +197,201 @@ pub(crate) fn map_persistence(error: PersistenceError) -> Problem {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_problem(problem: Problem, status: u16, code: &str) {
+        assert_eq!(problem.status, status, "wrong status for {code}");
+        assert_eq!(
+            problem.problem_type.as_ref(),
+            format!("https://openllmproxy.dev/problems/{code}")
+        );
+    }
+
+    #[test]
+    fn configuration_failures_retain_actionable_status_and_problem_codes() {
+        let cases = [
+            (
+                ConfigurationError::ProviderNotFound,
+                404,
+                "provider_not_found",
+            ),
+            (
+                ConfigurationError::ProviderIncomplete,
+                422,
+                "validation_failed",
+            ),
+            (ConfigurationError::PreconditionFailed, 412, "etag_mismatch"),
+            (
+                ConfigurationError::RouteNotFound,
+                404,
+                "route_draft_not_found",
+            ),
+            (
+                ConfigurationError::RouteNotValidated,
+                409,
+                "route_not_validated",
+            ),
+            (
+                ConfigurationError::InvalidRoute("invalid route".to_owned()),
+                422,
+                "validation_failed",
+            ),
+            (ConfigurationError::InvalidCredential, 500, "internal_error"),
+            (
+                ConfigurationError::IdempotencyConflict,
+                409,
+                "idempotency_key_reused",
+            ),
+            (
+                ConfigurationError::IdempotencyInProgress,
+                409,
+                "idempotency_in_progress",
+            ),
+            (
+                ConfigurationError::NotFound,
+                404,
+                "configuration_resource_not_found",
+            ),
+            (
+                ConfigurationError::InUse,
+                409,
+                "configuration_resource_in_use",
+            ),
+            (
+                ConfigurationError::Invalid("invalid".to_owned()),
+                422,
+                "validation_failed",
+            ),
+            (
+                ConfigurationError::ProviderRevisionDiffTooLarge {
+                    dimension: "models",
+                    maximum: 10,
+                },
+                422,
+                "validation_failed",
+            ),
+        ];
+        for (error, status, code) in cases {
+            assert_problem(map_configuration(error), status, code);
+        }
+    }
+
+    #[test]
+    fn access_failures_distinguish_invalid_missing_stale_and_replayed_requests() {
+        for (error, status, code) in [
+            (
+                AccessError::Invalid("invalid".to_owned()),
+                422,
+                "validation_failed",
+            ),
+            (AccessError::NotFound, 404, "api_key_not_found"),
+            (AccessError::PreconditionFailed, 412, "etag_mismatch"),
+            (
+                AccessError::IdempotencyConflict,
+                409,
+                "idempotency_key_reused",
+            ),
+            (
+                AccessError::IdempotencyInProgress,
+                409,
+                "idempotency_in_progress",
+            ),
+        ] {
+            assert_problem(map_access(error), status, code);
+        }
+    }
+
+    #[test]
+    fn identity_failures_preserve_security_sensitive_distinctions() {
+        let cases = [
+            (
+                IdentityError::Invalid("invalid".to_owned()),
+                422,
+                "validation_failed",
+            ),
+            (IdentityError::NotFound, 404, "identity_resource_not_found"),
+            (IdentityError::PreconditionFailed, 412, "etag_mismatch"),
+            (IdentityError::LastOwner, 409, "last_owner_required"),
+            (
+                IdentityError::EmailAlreadyMember,
+                409,
+                "email_already_member",
+            ),
+            (
+                IdentityError::PendingInvitationExists,
+                409,
+                "pending_invitation_exists",
+            ),
+            (
+                IdentityError::InvitationUnavailable,
+                410,
+                "invitation_unavailable",
+            ),
+            (IdentityError::SessionForbidden, 403, "permission_denied"),
+            (IdentityError::CorruptIdentity, 500, "internal_error"),
+            (
+                IdentityError::IdempotencyConflict,
+                409,
+                "idempotency_key_reused",
+            ),
+            (
+                IdentityError::IdempotencyInProgress,
+                409,
+                "idempotency_in_progress",
+            ),
+            (
+                IdentityError::LocalPasswordUnavailable,
+                403,
+                "local_password_unavailable",
+            ),
+            (
+                IdentityError::LocalPasswordAlreadyConfigured,
+                409,
+                "local_password_already_configured",
+            ),
+            (
+                IdentityError::RecentAuthenticationRequired,
+                428,
+                "reauthentication_required",
+            ),
+            (
+                IdentityError::SessionUnavailable,
+                401,
+                "authentication_required",
+            ),
+        ];
+        for (error, status, code) in cases {
+            assert_problem(map_identity(error), status, code);
+        }
+    }
+
+    #[test]
+    fn persistence_mapping_exposes_only_session_availability() {
+        assert_problem(
+            map_persistence(PersistenceError::SessionUnavailable),
+            401,
+            "authentication_required",
+        );
+        for error in [
+            PersistenceError::InvalidSessionTtl,
+            PersistenceError::InvalidRecentAuthentication,
+        ] {
+            assert_problem(map_persistence(error), 500, "internal_error");
+        }
+        for error in [
+            PersistenceError::RuntimeOutboxLeadershipLost,
+            PersistenceError::InvalidWorkerHealth,
+            PersistenceError::InvalidRequestMetadataGap,
+        ] {
+            assert_problem(map_persistence(error), 503, "database_unavailable");
+        }
+    }
+
+    #[test]
+    fn user_not_found_is_resource_specific() {
+        assert_problem(user_not_found(), 404, "user_not_found");
+    }
+}

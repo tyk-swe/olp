@@ -98,3 +98,77 @@ pub(super) fn supported_operations(
 fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug, surface: Surface) -> bool {
     !supported_operations(runtime, slug, surface).is_empty()
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::response::IntoResponse as _;
+    use http_body_util::BodyExt as _;
+    use serde_json::json;
+
+    use super::*;
+
+    fn routes() -> Vec<RouteSlug> {
+        ["alpha", "beta", "gamma"]
+            .into_iter()
+            .map(RouteSlug::parse)
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn cursor_windows_exclude_the_named_boundary() {
+        let routes = routes();
+        assert_eq!(
+            after_cursor_start(&routes, None, Surface::OpenAi, "stale").unwrap(),
+            0
+        );
+        assert_eq!(
+            after_cursor_start(&routes, Some("beta"), Surface::OpenAi, "stale").unwrap(),
+            2
+        );
+        assert_eq!(
+            before_cursor_end(&routes, None, Surface::OpenAi, "stale").unwrap(),
+            routes.len()
+        );
+        assert_eq!(
+            before_cursor_end(&routes, Some("beta"), Surface::OpenAi, "stale").unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_cursor_errors_retain_the_callers_surface_and_message() {
+        let cases = [
+            (
+                after_cursor_start(
+                    &routes(),
+                    Some("missing"),
+                    Surface::Anthropic,
+                    "after stale",
+                )
+                .unwrap_err(),
+                json!({
+                    "type": "error",
+                    "error": {"type": "invalid_request_error", "message": "after stale"}
+                }),
+            ),
+            (
+                before_cursor_end(&routes(), Some("missing"), Surface::Gemini, "before stale")
+                    .unwrap_err(),
+                json!({
+                    "error": {"code": 400, "message": "before stale", "status": "INVALID_ARGUMENT"}
+                }),
+            ),
+        ];
+
+        for (error, expected_body) in cases {
+            let response = error.into_response();
+            assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                expected_body
+            );
+        }
+    }
+}

@@ -63,3 +63,21 @@ impl fmt::Display for UsageDimension {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::UsageDimension;
+
+    #[test]
+    fn usage_dimension_names_are_stable() {
+        for (dimension, expected) in [
+            (UsageDimension::Route, "route"),
+            (UsageDimension::Provider, "provider"),
+            (UsageDimension::Model, "model"),
+            (UsageDimension::ApiKey, "api_key"),
+            (UsageDimension::Operation, "operation"),
+        ] {
+            assert_eq!(dimension.to_string(), expected);
+        }
+    }
+}

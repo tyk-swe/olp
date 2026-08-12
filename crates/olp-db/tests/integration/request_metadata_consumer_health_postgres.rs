@@ -45,6 +45,25 @@ async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
             .await,
         Err(PersistenceError::InvalidRequestMetadataGap)
     ));
+    for invalid in [
+        store
+            .report_request_metadata_consumer_health(1, 0, None)
+            .await,
+        store
+            .report_request_metadata_consumer_health(u64::MAX, 0, Some(oldest))
+            .await,
+        store
+            .report_request_metadata_consumer_health(0, u64::MAX, None)
+            .await,
+        store
+            .report_request_metadata_consumer_health(1, 0, Some(Utc::now() + Duration::minutes(10)))
+            .await,
+    ] {
+        assert!(matches!(
+            invalid,
+            Err(PersistenceError::InvalidRequestMetadataGap)
+        ));
+    }
     let drained = store
         .report_request_metadata_consumer_health(0, 0, None)
         .await

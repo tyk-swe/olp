@@ -300,3 +300,79 @@ fn inference_header_token<'a>(headers: &'a HeaderMap, name: &'static str) -> Opt
         .and_then(|value| value.to_str().ok())
         .and_then(non_whitespace_token)
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderValue, header};
+
+    use super::*;
+
+    #[test]
+    fn native_auth_headers_are_surface_specific_and_strictly_single_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("bEaReR openai-key"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("anthropic-key"));
+        headers.insert("x-goog-api-key", HeaderValue::from_static("gemini-key"));
+        assert_eq!(
+            native_inference_token(&headers, Surface::OpenAi),
+            Some("openai-key")
+        );
+        assert_eq!(
+            native_inference_token(&headers, Surface::Anthropic),
+            Some("anthropic-key")
+        );
+        assert_eq!(
+            native_inference_token(&headers, Surface::Gemini),
+            Some("gemini-key")
+        );
+
+        for value in [
+            "Bearer",
+            "Bearer ",
+            "Bearer two words",
+            "Basic token",
+            "token",
+        ] {
+            headers.insert(header::AUTHORIZATION, HeaderValue::from_str(value).unwrap());
+            assert_eq!(
+                native_inference_token(&headers, Surface::OpenAi),
+                None,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn litellm_compatibility_header_accepts_raw_or_bearer_but_not_whitespace() {
+        for (value, expected) in [
+            ("raw-key", Some("raw-key")),
+            ("Bearer wrapped-key", Some("wrapped-key")),
+            ("bearer wrapped-key", Some("wrapped-key")),
+            ("Bearer two words", None),
+            (" key", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                litellm_header_token(&HeaderValue::from_str(value).unwrap()),
+                expected,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_json_estimates_are_conservative_by_operation_cost() {
+        for (category, expected) in [
+            (gateway::TokenEstimate::Generation, 4_096),
+            (gateway::TokenEstimate::Transcription, 1_500),
+            (gateway::TokenEstimate::Media, 2_000),
+            (gateway::TokenEstimate::Default, 1),
+            (gateway::TokenEstimate::Embeddings, 1),
+        ] {
+            assert_eq!(estimate_http_non_json_request_tokens(category), expected);
+        }
+    }
+}

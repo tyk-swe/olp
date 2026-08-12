@@ -356,14 +356,21 @@ fn runtime_provider_model(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use chrono::Utc;
     use olp_db::{
         configuration::RuntimeProviderConfiguration, security::MasterKey, security::credential_aad,
     };
-    use olp_engine::domain::{ProviderAuthMode, ProviderId, ProviderKind};
+    use olp_engine::domain::{
+        Capability, OperationKind, Provider, ProviderAuthMode, ProviderId, ProviderKind,
+        RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface, TransportMode,
+    };
     use olp_engine::providers::{ProviderConfig, ProviderCredential};
 
     use super::{
         ProviderConfigFields, decrypt_provider_credential, provider_config, provider_credential,
+        runtime_provider_config, runtime_provider_credential,
     };
 
     fn fields(kind: ProviderKind) -> ProviderConfigFields<'static> {
@@ -397,6 +404,40 @@ mod tests {
             credential_id,
             credential_version,
             encrypted_credential: encrypted,
+        }
+    }
+
+    fn snapshot(provider_id: ProviderId, models: &[&str]) -> RuntimeSnapshot {
+        let capabilities = models
+            .iter()
+            .map(|model| {
+                Capability::new(
+                    *model,
+                    OperationKind::Generation,
+                    Surface::OpenAi,
+                    TransportMode::Unary,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        RuntimeSnapshot {
+            generation: RuntimeGeneration {
+                id: RuntimeGenerationId::new(),
+                ordinal: 1,
+                activated_at: Utc::now(),
+            },
+            providers: BTreeMap::from([(
+                provider_id,
+                Provider {
+                    id: provider_id,
+                    name: "provider".to_owned(),
+                    kind: ProviderKind::VertexAi,
+                    enabled: true,
+                    active_credential: None,
+                    capabilities,
+                },
+            )]),
+            routes: BTreeMap::new(),
+            api_keys: BTreeMap::new(),
         }
     }
 
@@ -510,5 +551,191 @@ mod tests {
         let config = provider_config(fields(ProviderKind::OpenAi)).unwrap();
         let error = provider_credential(&config, Some(&[0xff, 0xfe])).unwrap_err();
         assert_eq!(error.to_string(), "provider credential is not valid UTF-8");
+    }
+
+    #[test]
+    fn cloud_and_compatible_configuration_preserves_required_fields() {
+        let mut compatible = fields(ProviderKind::OpenAiCompatible);
+        compatible.endpoint = Some("https://inference.example.test/v1");
+        assert!(matches!(
+            provider_config(compatible).unwrap(),
+            ProviderConfig::OpenAiCompatible { endpoint }
+                if endpoint == "https://inference.example.test/v1"
+        ));
+
+        let mut vertex = fields(ProviderKind::VertexAi);
+        vertex.cloud_project = Some("project");
+        vertex.cloud_region = Some("us-central1");
+        vertex.probe_model = Some("gemini-model");
+        vertex.auth_mode = ProviderAuthMode::ApplicationDefault;
+        assert!(matches!(
+            provider_config(vertex).unwrap(),
+            ProviderConfig::VertexAi { project, location, probe_model, auth_mode }
+                if project == "project" && location == "us-central1"
+                    && probe_model == "gemini-model"
+                    && auth_mode == ProviderAuthMode::ApplicationDefault
+        ));
+
+        let mut azure = fields(ProviderKind::AzureOpenAi);
+        azure.endpoint = Some("https://resource.openai.azure.com");
+        azure.deployment = Some("deployment");
+        azure.api_version = Some("2025-01-01-preview");
+        assert!(matches!(
+            provider_config(azure).unwrap(),
+            ProviderConfig::AzureOpenAi { endpoint, deployment, api_version }
+                if endpoint == "https://resource.openai.azure.com"
+                    && deployment == "deployment" && api_version == "2025-01-01-preview"
+        ));
+
+        let mut missing_vertex_project = fields(ProviderKind::VertexAi);
+        missing_vertex_project.auth_mode = ProviderAuthMode::ApplicationDefault;
+        missing_vertex_project.cloud_region = Some("location");
+        missing_vertex_project.probe_model = Some("model");
+        let mut missing_bedrock_region = fields(ProviderKind::Bedrock);
+        missing_bedrock_region.auth_mode = ProviderAuthMode::DefaultChain;
+        let mut missing_azure_endpoint = fields(ProviderKind::AzureOpenAi);
+        missing_azure_endpoint.deployment = Some("deployment");
+        missing_azure_endpoint.api_version = Some("2025-01-01-preview");
+        for (invalid, expected_field) in [
+            (fields(ProviderKind::OpenAiCompatible), "endpoint"),
+            (missing_vertex_project, "project"),
+            (missing_bedrock_region, "region"),
+            (missing_azure_endpoint, "endpoint"),
+        ] {
+            assert!(
+                provider_config(invalid)
+                    .unwrap_err()
+                    .to_string()
+                    .to_ascii_lowercase()
+                    .contains(expected_field),
+                "missing {expected_field} should be identified"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_cloud_configuration_rejects_incomplete_snapshots() {
+        let provider_id = ProviderId::from_uuid(uuid::Uuid::from_u128(21));
+        let valid_snapshot = snapshot(provider_id, &["model-b", "model-a"]);
+        let mut provider = runtime_provider_configuration(provider_id, None, None, None);
+        provider.kind = ProviderKind::VertexAi;
+        provider.auth_mode = ProviderAuthMode::ApplicationDefault;
+        provider.cloud_project = Some("project".to_owned());
+        provider.cloud_region = Some("location".to_owned());
+        assert!(matches!(
+            runtime_provider_config(&provider, &valid_snapshot).unwrap(),
+            ProviderConfig::VertexAi { probe_model, .. } if probe_model == "model-a"
+        ));
+
+        let missing_provider = snapshot(ProviderId::new(), &["model"]);
+        assert_eq!(
+            runtime_provider_config(&provider, &missing_provider)
+                .unwrap_err()
+                .to_string(),
+            "runtime provider is missing"
+        );
+        assert_eq!(
+            runtime_provider_config(&provider, &snapshot(provider_id, &[]))
+                .unwrap_err()
+                .to_string(),
+            "provider has no configured model"
+        );
+
+        let mut missing_project = provider.clone();
+        missing_project.cloud_project = None;
+        let mut missing_location = provider.clone();
+        missing_location.cloud_region = None;
+        for (invalid, message) in [
+            (missing_project, "Vertex provider cloud project is missing"),
+            (
+                missing_location,
+                "Vertex provider cloud location is missing",
+            ),
+        ] {
+            assert_eq!(
+                runtime_provider_config(&invalid, &valid_snapshot)
+                    .unwrap_err()
+                    .to_string(),
+                message
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_credentials_enforce_auth_mode_and_metadata() {
+        let master_key = MasterKey::new(1, [3; 32]);
+        let provider_id = ProviderId::from_uuid(uuid::Uuid::from_u128(31));
+        let credential_id = uuid::Uuid::from_u128(32);
+        let version = 2;
+        let encrypted = master_key
+            .seal(
+                b"runtime-secret",
+                &credential_aad(provider_id.as_uuid(), credential_id, version),
+            )
+            .unwrap();
+        let provider = runtime_provider_configuration(
+            provider_id,
+            Some(credential_id),
+            Some(version),
+            Some(encrypted),
+        );
+        let config = ProviderConfig::OpenAi { endpoint: None };
+        let credential = runtime_provider_credential(&provider, &config, &master_key).unwrap();
+        assert!(matches!(credential, ProviderCredential::ApiKey(_)));
+        let debug = format!("{credential:?}");
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("runtime-secret"));
+
+        let missing = runtime_provider_configuration(provider_id, None, None, None);
+        assert_eq!(
+            runtime_provider_credential(&missing, &config, &master_key)
+                .unwrap_err()
+                .to_string(),
+            "provider credential is missing"
+        );
+
+        let mut default_chain = provider.clone();
+        default_chain.kind = ProviderKind::Bedrock;
+        default_chain.auth_mode = ProviderAuthMode::DefaultChain;
+        let default_config = ProviderConfig::Bedrock {
+            region: "us-east-1".to_owned(),
+            auth_mode: ProviderAuthMode::DefaultChain,
+        };
+        assert_eq!(
+            runtime_provider_credential(&default_chain, &default_config, &master_key)
+                .unwrap_err()
+                .to_string(),
+            "Bedrock default-chain provider must not store static credentials"
+        );
+
+        for (kind, config, message) in [
+            (
+                ProviderKind::VertexAi,
+                ProviderConfig::VertexAi {
+                    project: "project".to_owned(),
+                    location: "location".to_owned(),
+                    probe_model: "model".to_owned(),
+                    auth_mode: ProviderAuthMode::ApiKey,
+                },
+                "Vertex provider authentication mode is invalid",
+            ),
+            (
+                ProviderKind::Bedrock,
+                ProviderConfig::Bedrock {
+                    region: "us-east-1".to_owned(),
+                    auth_mode: ProviderAuthMode::ApiKey,
+                },
+                "Bedrock provider authentication mode is invalid",
+            ),
+        ] {
+            let mut invalid = provider.clone();
+            invalid.kind = kind;
+            assert_eq!(
+                runtime_provider_credential(&invalid, &config, &master_key)
+                    .unwrap_err()
+                    .to_string(),
+                message
+            );
+        }
     }
 }

@@ -311,12 +311,7 @@ pub(crate) async fn checkpoint_worker_task_on(
     outcome: WorkerTaskCheckpointOutcome,
     progress: bool,
 ) -> Result<(), PersistenceError> {
-    let (successes, failures, skipped) = match outcome {
-        WorkerTaskCheckpointOutcome::Success => (1_i64, 0_i64, 0_i64),
-        WorkerTaskCheckpointOutcome::Failure => (0_i64, 1_i64, 0_i64),
-        WorkerTaskCheckpointOutcome::Skipped => (0_i64, 0_i64, 1_i64),
-    };
-    let success = outcome == WorkerTaskCheckpointOutcome::Success;
+    let (success, successes, failures, skipped) = worker_task_checkpoint_values(outcome);
     // Callers that also touch outbox health or counters must keep the order:
     // runtime_outbox_health, async_worker_counters, then worker_task_health.
     sqlx::query!(
@@ -461,13 +456,7 @@ impl PgStore {
             WorkerTask::parse(&row.task)?;
             let heartbeat_age_seconds = age_seconds(now, row.checked_at);
             let last_success_age_seconds = row.last_success_at.map(|at| age_seconds(now, at));
-            let state = if last_success_age_seconds
-                .is_some_and(|age| age <= u64::try_from(task.stale_after_seconds()).unwrap_or(0))
-            {
-                WorkerTaskState::Healthy
-            } else {
-                WorkerTaskState::Stale
-            };
+            let state = worker_task_state(task, last_success_age_seconds);
             tasks.push(WorkerTaskStatus {
                 task,
                 state,
@@ -485,6 +474,24 @@ impl PgStore {
             });
         }
         Ok(WorkerTaskHealthSummary { tasks })
+    }
+}
+
+fn worker_task_checkpoint_values(outcome: WorkerTaskCheckpointOutcome) -> (bool, i64, i64, i64) {
+    match outcome {
+        WorkerTaskCheckpointOutcome::Success => (true, 1, 0, 0),
+        WorkerTaskCheckpointOutcome::Failure => (false, 0, 1, 0),
+        WorkerTaskCheckpointOutcome::Skipped => (false, 0, 0, 1),
+    }
+}
+
+fn worker_task_state(task: WorkerTask, last_success_age_seconds: Option<u64>) -> WorkerTaskState {
+    if last_success_age_seconds
+        .is_some_and(|age| age <= u64::try_from(task.stale_after_seconds()).unwrap_or(0))
+    {
+        WorkerTaskState::Healthy
+    } else {
+        WorkerTaskState::Stale
     }
 }
 
@@ -573,15 +580,128 @@ mod tests {
     }
 
     #[test]
-    fn worker_task_parse_accepts_fixed_values_only() {
-        assert_eq!(
-            WorkerTask::parse("runtime_outbox").unwrap(),
-            WorkerTask::RuntimeOutbox
-        );
-        assert_eq!(
-            WorkerTask::parse("request_metadata_consumer").unwrap(),
-            WorkerTask::RequestMetadataConsumer
-        );
+    fn worker_task_names_thresholds_and_states_are_closed() {
+        for (task, name, stale_after) in [
+            (WorkerTask::RuntimeOutbox, "runtime_outbox", 20),
+            (
+                WorkerTask::RequestMetadataConsumer,
+                "request_metadata_consumer",
+                20,
+            ),
+            (WorkerTask::Maintenance, "maintenance", 180),
+            (
+                WorkerTask::RequestMetadataGatewayEpochDetection,
+                "request_metadata_gateway_epoch_detection",
+                20,
+            ),
+        ] {
+            assert_eq!(task.as_str(), name);
+            assert_eq!(task.stale_after_seconds(), stale_after);
+            assert_eq!(WorkerTask::parse(name).unwrap(), task);
+        }
         assert!(WorkerTask::parse("unexpected").is_err());
+
+        for (state, name) in [
+            (WorkerTaskState::Unknown, "unknown"),
+            (WorkerTaskState::Healthy, "healthy"),
+            (WorkerTaskState::Stale, "stale"),
+        ] {
+            assert_eq!(state.as_str(), name);
+        }
+    }
+
+    #[test]
+    fn checkpoint_and_health_state_boundaries_are_exact() {
+        for (outcome, expected) in [
+            (WorkerTaskCheckpointOutcome::Success, (true, 1, 0, 0)),
+            (WorkerTaskCheckpointOutcome::Failure, (false, 0, 1, 0)),
+            (WorkerTaskCheckpointOutcome::Skipped, (false, 0, 0, 1)),
+        ] {
+            assert_eq!(worker_task_checkpoint_values(outcome), expected);
+        }
+
+        for task in WorkerTask::ALL {
+            let threshold = u64::try_from(task.stale_after_seconds()).unwrap();
+            assert_eq!(
+                worker_task_state(task, Some(threshold)),
+                WorkerTaskState::Healthy
+            );
+            assert_eq!(
+                worker_task_state(task, Some(threshold + 1)),
+                WorkerTaskState::Stale
+            );
+            assert_eq!(worker_task_state(task, None), WorkerTaskState::Stale);
+        }
+    }
+
+    #[test]
+    fn counter_deltas_preserve_binding_order_and_reject_overflow() {
+        let deltas = WorkerCounterDeltas {
+            request_metadata_reclaimed: 1,
+            request_metadata_recovered: 2,
+            request_metadata_duplicates: 3,
+            request_metadata_processed: 4,
+            runtime_outbox_attempts: 5,
+            runtime_outbox_retry_scheduled: 6,
+            runtime_outbox_repeated_attempts: 7,
+            runtime_outbox_published: 8,
+            runtime_outbox_duplicate_publications: 9,
+            runtime_outbox_abandoned_ownership: 10,
+            runtime_outbox_abandoned_claims: 11,
+            runtime_outbox_failed_takeovers: 12,
+        };
+        assert_eq!(
+            deltas.checked().unwrap(),
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        );
+
+        type Mutation = fn(&mut WorkerCounterDeltas);
+        let invalidators: [Mutation; 12] = [
+            |value| value.request_metadata_reclaimed = u64::MAX,
+            |value| value.request_metadata_recovered = u64::MAX,
+            |value| value.request_metadata_duplicates = u64::MAX,
+            |value| value.request_metadata_processed = u64::MAX,
+            |value| value.runtime_outbox_attempts = u64::MAX,
+            |value| value.runtime_outbox_retry_scheduled = u64::MAX,
+            |value| value.runtime_outbox_repeated_attempts = u64::MAX,
+            |value| value.runtime_outbox_published = u64::MAX,
+            |value| value.runtime_outbox_duplicate_publications = u64::MAX,
+            |value| value.runtime_outbox_abandoned_ownership = u64::MAX,
+            |value| value.runtime_outbox_abandoned_claims = u64::MAX,
+            |value| value.runtime_outbox_failed_takeovers = u64::MAX,
+        ];
+        for invalidate in invalidators {
+            let mut value = WorkerCounterDeltas::default();
+            invalidate(&mut value);
+            assert!(matches!(
+                value.checked(),
+                Err(PersistenceError::InvalidWorkerHealth)
+            ));
+        }
+    }
+
+    #[test]
+    fn consumer_activity_is_empty_only_when_every_counter_is_zero() {
+        assert!(RequestMetadataConsumerActivity::default().is_empty());
+        for activity in [
+            RequestMetadataConsumerActivity {
+                reclaimed: 1,
+                ..Default::default()
+            },
+            RequestMetadataConsumerActivity {
+                recovered: 1,
+                ..Default::default()
+            },
+            RequestMetadataConsumerActivity {
+                duplicates: 1,
+                ..Default::default()
+            },
+            RequestMetadataConsumerActivity {
+                processed: 1,
+                ..Default::default()
+            },
+        ] {
+            assert!(!activity.is_empty());
+        }
     }
 }

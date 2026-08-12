@@ -172,3 +172,175 @@ pub(in crate::providers) async fn read_inline_media(
     }
     Ok(STANDARD.encode(bytes))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
+    use bytes::Bytes;
+    use futures::stream;
+    use http::StatusCode;
+    use serde_json::json;
+
+    use super::*;
+    use crate::domain::{
+        BoxFuture, MediaArtifact, MediaByteStream, MediaHandle, MediaSpool, MediaSpoolError,
+        MediaUpload, OpenedMedia, inline_media_marker,
+    };
+
+    #[derive(Clone)]
+    struct ReadSpool {
+        content_length: Option<u64>,
+        chunks: Vec<Result<Bytes, MediaSpoolError>>,
+        open_error: Option<MediaSpoolError>,
+    }
+
+    impl ReadSpool {
+        fn bytes(bytes: impl Into<Bytes>) -> Arc<dyn MediaSpool> {
+            let bytes = bytes.into();
+            Arc::new(Self {
+                content_length: Some(bytes.len() as u64),
+                chunks: vec![Ok(bytes)],
+                open_error: None,
+            })
+        }
+    }
+
+    impl MediaSpool for ReadSpool {
+        fn put(&self, _: MediaUpload) -> BoxFuture<'_, Result<MediaArtifact, MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+
+        fn open<'a>(
+            &'a self,
+            handle: &'a MediaHandle,
+        ) -> BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+            Box::pin(async move {
+                if let Some(error) = &self.open_error {
+                    return Err(error.clone());
+                }
+                let bytes: MediaByteStream = Box::pin(stream::iter(self.chunks.clone()));
+                Ok(OpenedMedia {
+                    artifact: MediaArtifact {
+                        handle: handle.clone(),
+                        content_type: Some("image/png".to_owned()),
+                        content_length: self.content_length,
+                    },
+                    filename: "bounded.png".to_owned(),
+                    bytes,
+                })
+            })
+        }
+
+        fn remove<'a>(&'a self, _: &'a MediaHandle) -> BoxFuture<'a, Result<(), MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+    }
+
+    #[test]
+    fn shared_error_helpers_classify_failures_without_leaking_secrets() {
+        let secret = "credential-value";
+        let long_detail = format!("{secret}{}", "x".repeat(600));
+        let body = serde_json::to_vec(&json!({"error": {"message": long_detail}})).unwrap();
+        let message =
+            safe_upstream_error_message("provider", StatusCode::BAD_GATEWAY, &body, secret);
+        assert!(message.contains("[REDACTED]"));
+        assert!(!message.contains(secret));
+        assert!(message.len() < 600, "upstream messages must remain bounded");
+
+        for body in [b"not-json".as_slice(), br#"{"error":{"message":""}}"#] {
+            assert_eq!(
+                safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, body, secret),
+                "provider returned HTTP 400 Bad Request"
+            );
+        }
+
+        let invalid_header = secret_header("line one\nline two", "provider").unwrap_err();
+        assert_eq!(invalid_header.class, AttemptFailureClass::Protocol);
+        assert_eq!(invalid_header.phase, TransportPhase::Connect);
+
+        for (dns_timeout, expected) in [
+            (false, AttemptFailureClass::Connect),
+            (true, AttemptFailureClass::Timeout),
+        ] {
+            let error = map_endpoint_error("private endpoint detail", dns_timeout);
+            assert_eq!(error.class, expected);
+            assert_eq!(error.phase, TransportPhase::Connect);
+            assert!(!error.response_committed);
+        }
+
+        let body_error = protocol_body_error("invalid response body");
+        assert_eq!(body_error.phase, TransportPhase::Body);
+        assert_eq!(body_error.class, AttemptFailureClass::Protocol);
+    }
+
+    #[test]
+    fn source_extension_keys_are_json_pointer_escaped() {
+        let extensions = source_extensions(
+            Surface::Gemini,
+            BTreeMap::from([
+                ("plain".to_owned(), json!(1)),
+                ("a~/b".to_owned(), json!(2)),
+            ]),
+        );
+
+        assert_eq!(extensions.source, Some(Surface::Gemini));
+        assert_eq!(
+            extensions.values,
+            BTreeMap::from([
+                ("/a~0~1b".to_owned(), json!(2)),
+                ("/plain".to_owned(), json!(1))
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn inline_media_reading_validates_handle_spool_metadata_and_stream_bounds() {
+        let marker = inline_media_marker(&MediaHandle::new("media"));
+        let unavailable = ReadSpool {
+            content_length: Some(1),
+            chunks: vec![],
+            open_error: Some(MediaSpoolError::NotFound),
+        };
+        let unknown_length = ReadSpool {
+            content_length: None,
+            chunks: vec![],
+            open_error: None,
+        };
+        let advertised_oversize = ReadSpool {
+            content_length: Some(MAX_INLINE_MEDIA_BYTES as u64 + 1),
+            chunks: vec![],
+            open_error: None,
+        };
+        let failed_stream = ReadSpool {
+            content_length: Some(1),
+            chunks: vec![Err(MediaSpoolError::Unavailable)],
+            open_error: None,
+        };
+        let streamed_oversize = ReadSpool {
+            content_length: Some(1),
+            chunks: vec![Ok(Bytes::from(vec![0; MAX_INLINE_MEDIA_BYTES + 1]))],
+            open_error: None,
+        };
+
+        let failures: Vec<(&str, Option<Arc<dyn MediaSpool>>)> = vec![
+            ("not-a-marker", None),
+            (&marker, None),
+            (&marker, Some(Arc::new(unavailable))),
+            (&marker, Some(Arc::new(unknown_length))),
+            (&marker, Some(Arc::new(advertised_oversize))),
+            (&marker, Some(Arc::new(failed_stream))),
+            (&marker, Some(Arc::new(streamed_oversize))),
+        ];
+        for (value, spool) in failures {
+            let error = read_inline_media(value, spool.as_ref()).await.unwrap_err();
+            assert_eq!(error.class, AttemptFailureClass::Protocol);
+        }
+
+        let spool = ReadSpool::bytes(Bytes::from_static(b"abc"));
+        assert_eq!(
+            read_inline_media(&marker, Some(&spool)).await.unwrap(),
+            "YWJj"
+        );
+    }
+}

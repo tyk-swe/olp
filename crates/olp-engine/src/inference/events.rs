@@ -89,20 +89,136 @@ pub fn collected_event_bytes(
 mod tests {
     use std::time::Duration;
 
-    use crate::domain::{CanonicalEvent, CanonicalEventKind, ProviderEventStream};
-    use futures::stream;
+    use crate::domain::{
+        AttemptFailureClass, CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass,
+        ProviderEventStream, TransportError, TransportPhase,
+    };
+    use futures::{StreamExt, stream};
 
-    use super::collect_provider_events_with_observer;
+    use super::{collect_provider_events_with_observer, collected_event_bytes};
 
-    #[tokio::test]
-    async fn unary_event_collection_has_an_aggregate_byte_limit() {
-        let first = CanonicalEvent::new(
+    fn start() -> CanonicalEvent {
+        CanonicalEvent::new(
             0,
             CanonicalEventKind::ResponseStart {
                 response_id: None,
                 provider_model: Some("model".to_owned()),
             },
-        );
+        )
+    }
+
+    fn canonical_error(sequence: u64) -> CanonicalEvent {
+        CanonicalEvent::new(
+            sequence,
+            CanonicalEventKind::Error {
+                error: CanonicalError {
+                    class: ErrorClass::Upstream,
+                    message: "safe failure".to_owned(),
+                    provider_code: Some("rejected".to_owned()),
+                    retryable: false,
+                },
+            },
+        )
+    }
+
+    async fn collect(
+        first: CanonicalEvent,
+        items: Vec<Result<CanonicalEvent, TransportError>>,
+    ) -> Result<Vec<CanonicalEvent>, super::InferenceError> {
+        let mut events: ProviderEventStream = Box::pin(stream::iter(items));
+        collect_provider_events_with_observer(
+            first,
+            &mut events,
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            usize::MAX,
+            &mut |_| {},
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn collection_stops_at_done_and_observes_only_consumed_events() {
+        let done = CanonicalEvent::new(1, CanonicalEventKind::Done);
+        let trailing = CanonicalEvent::new(2, CanonicalEventKind::Done);
+        let mut events: ProviderEventStream =
+            Box::pin(stream::iter([Ok(done.clone()), Ok(trailing.clone())]));
+        let mut observed = Vec::new();
+
+        let collected = collect_provider_events_with_observer(
+            start(),
+            &mut events,
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            usize::MAX,
+            &mut |event| observed.push(event.sequence),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(observed, [0, 1]);
+        assert_eq!(collected, [start(), done]);
+        assert_eq!(events.next().await.unwrap().unwrap(), trailing);
+    }
+
+    #[tokio::test]
+    async fn collection_normalizes_each_terminal_failure() {
+        let transport_error = TransportError {
+            phase: TransportPhase::Body,
+            class: AttemptFailureClass::UpstreamServer,
+            response_committed: true,
+            message: "safe upstream failure".to_owned(),
+        };
+        let cases = [
+            (
+                collect(canonical_error(0), vec![]).await.unwrap_err(),
+                "upstream_error",
+                "safe failure",
+            ),
+            (
+                collect(start(), vec![Ok(canonical_error(1))])
+                    .await
+                    .unwrap_err(),
+                "upstream_error",
+                "safe failure",
+            ),
+            (
+                collect(start(), vec![Err(transport_error)])
+                    .await
+                    .unwrap_err(),
+                "upstream_unavailable",
+                "safe upstream failure",
+            ),
+            (
+                collect(start(), vec![]).await.unwrap_err(),
+                "provider_protocol_error",
+                "The provider response ended without a terminal event.",
+            ),
+        ];
+
+        for (error, expected_code, expected_message) in cases {
+            assert_eq!(error.code(), expected_code);
+            assert_eq!(error.message(), expected_message);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn collection_enforces_its_absolute_deadline() {
+        let mut events: ProviderEventStream = Box::pin(stream::pending());
+        let error = collect_provider_events_with_observer(
+            start(),
+            &mut events,
+            tokio::time::Instant::now() + Duration::from_millis(1),
+            usize::MAX,
+            &mut |_| {},
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code(), "gateway_timeout");
+    }
+
+    #[tokio::test]
+    async fn collection_bounds_each_event_and_the_aggregate() {
+        let first = start();
         let maximum = serde_json::to_vec(&first).unwrap().len();
         let mut events: ProviderEventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
             1,
@@ -110,7 +226,7 @@ mod tests {
         ))]));
 
         let error = collect_provider_events_with_observer(
-            first,
+            first.clone(),
             &mut events,
             tokio::time::Instant::now() + Duration::from_secs(1),
             maximum,
@@ -119,5 +235,15 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error.code(), "provider_protocol_error");
+
+        assert_eq!(collected_event_bytes(0, &first, maximum).unwrap(), maximum);
+        for (current, limit) in [(1, maximum), (usize::MAX, usize::MAX)] {
+            assert_eq!(
+                collected_event_bytes(current, &first, limit)
+                    .unwrap_err()
+                    .code(),
+                "provider_protocol_error"
+            );
+        }
     }
 }

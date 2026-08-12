@@ -357,3 +357,30 @@ impl ProtocolStreamEncoder for GeminiHttpStreamEncoder {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_tokens_are_versioned_url_safe_and_round_trip_unicode_routes() {
+        for slug in ["chat", "route-with-dashes", "ümlaut"] {
+            let token = encode_page_token(slug);
+            assert!(!token.contains('='));
+            assert_eq!(decode_page_token(&token).unwrap(), slug);
+        }
+    }
+
+    #[test]
+    fn page_tokens_reject_invalid_encoding_version_utf8_and_empty_cursor() {
+        let invalid_utf8 = URL_SAFE_NO_PAD.encode([0xff, 0xfe]);
+        for token in [
+            "%%%".to_owned(),
+            URL_SAFE_NO_PAD.encode("another-v1:chat"),
+            URL_SAFE_NO_PAD.encode("olp-v1:"),
+            invalid_utf8,
+        ] {
+            assert!(decode_page_token(&token).is_err(), "accepted {token:?}");
+        }
+    }
+}

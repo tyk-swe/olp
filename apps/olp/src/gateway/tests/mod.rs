@@ -49,7 +49,6 @@ use super::{
         RequiredTarget, execute_event_operation_for_surface_inner,
         execute_routed_result_for_surface_inner,
     },
-    media_jobs::{media_job_state, valid_upstream_media_job_id},
     multipart::MultipartFormData,
 };
 use crate::MultipartRequestAdmission;

@@ -13,7 +13,7 @@ nightly Cargo workspace (`fuzz/`).
 |---|---|
 | Broad local gate | `make check-local` (`make check` is an alias) |
 | Format/lint/tests | `make fmt`, `make clippy`, `make test` (locked nextest) |
-| CI Rust gate | `make coverage` (llvm-cov nextest, 51% line floor) |
+| CI Rust gate | `make coverage` (llvm-cov nextest, 62% line floor) |
 | PostgreSQL/Valkey | `make db-test` (see `CONTRIBUTING.md`) |
 | Console | `make console-install`, `make console-verify`, `make console-e2e` |
 | Contracts/generated files | `make openapi`, `make sqlx-prepare`, `make screenshots` |

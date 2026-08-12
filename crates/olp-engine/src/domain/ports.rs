@@ -195,3 +195,84 @@ pub enum AttemptFailureClass {
     Cancelled,
     Ambiguous,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CanonicalEventKind, CanonicalResult, SourceExtensions, TokenCountResult};
+    use futures::stream;
+
+    const PRIVATE_BYTES: &[u8] = b"private-media-payload";
+
+    struct DefaultCapacitySpool;
+
+    impl MediaSpool for DefaultCapacitySpool {
+        fn put(&self, _: MediaUpload) -> BoxFuture<'_, Result<MediaArtifact, MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+
+        fn open<'a>(
+            &'a self,
+            _: &'a MediaHandle,
+        ) -> BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+
+        fn remove<'a>(&'a self, _: &'a MediaHandle) -> BoxFuture<'a, Result<(), MediaSpoolError>> {
+            Box::pin(async { Err(MediaSpoolError::Unavailable) })
+        }
+    }
+
+    fn byte_stream() -> MediaByteStream {
+        Box::pin(stream::iter([Ok(Bytes::from_static(PRIVATE_BYTES))]))
+    }
+
+    #[test]
+    fn media_debug_output_exposes_metadata_but_never_stream_contents() {
+        let upload = MediaUpload {
+            filename: "sample.wav".to_owned(),
+            content_type: Some("audio/wav".to_owned()),
+            maximum_length: 1024,
+            bytes: byte_stream(),
+        };
+        let opened = OpenedMedia {
+            artifact: MediaArtifact {
+                handle: MediaHandle::new("bounded-handle"),
+                content_type: Some("audio/wav".to_owned()),
+                content_length: Some(PRIVATE_BYTES.len() as u64),
+            },
+            filename: "sample.wav".to_owned(),
+            bytes: byte_stream(),
+        };
+
+        for debug in [format!("{upload:?}"), format!("{opened:?}")] {
+            assert!(debug.contains("sample.wav"));
+            assert!(debug.contains("[STREAM]"));
+            assert!(!debug.contains(str::from_utf8(PRIVATE_BYTES).unwrap()));
+        }
+    }
+
+    #[test]
+    fn provider_output_debug_is_variant_only() {
+        let events = ProviderOutput::Events(Box::pin(stream::iter([Ok(CanonicalEvent::new(
+            0,
+            CanonicalEventKind::TextDelta {
+                output_index: 0,
+                text: "private model output".to_owned(),
+            },
+        ))])));
+        let result =
+            ProviderOutput::Result(Box::new(CanonicalResult::TokenCount(TokenCountResult {
+                input_tokens: 42,
+                extensions: SourceExtensions::default(),
+            })));
+
+        assert_eq!(format!("{events:?}"), "ProviderOutput::Events([STREAM])");
+        assert_eq!(format!("{result:?}"), "ProviderOutput::Result([REDACTED])");
+    }
+
+    #[test]
+    fn media_spools_do_not_advertise_capacity_unless_they_own_a_bound() {
+        assert_eq!(DefaultCapacitySpool.capacity_bytes(), None);
+    }
+}

@@ -250,39 +250,7 @@ impl PgStore {
         limit: u16,
     ) -> Result<OperationsPage<RequestMetadataGatewayEpochRecord>, OperationsError> {
         let page_size = limit.clamp(1, 200);
-        let mut query = QueryBuilder::<Postgres>::new(
-            "SELECT gateway_instance, process_epoch, started_at, updated_at, accepted, persisted, \
-                    dropped, abandoned, retrying, writer_closed, gracefully_closed_at, \
-                    stale_detected_at, acknowledged_at, acknowledged_by, \
-                    CASE WHEN stale_detected_at IS NOT NULL \
-                         THEN GREATEST(accepted - persisted - abandoned, 0) ELSE 0 END \
-                      AS uncertain_lower_bound \
-             FROM request_metadata_gateway_epochs WHERE true",
-        );
-        match state {
-            Some(RequestMetadataGatewayEpochState::Open) => {
-                query.push(" AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL");
-            }
-            Some(RequestMetadataGatewayEpochState::GracefullyClosed) => {
-                query.push(" AND gracefully_closed_at IS NOT NULL");
-            }
-            Some(RequestMetadataGatewayEpochState::Unresolved) => {
-                query.push(" AND stale_detected_at IS NOT NULL AND acknowledged_at IS NULL");
-            }
-            Some(RequestMetadataGatewayEpochState::Acknowledged) => {
-                query.push(" AND stale_detected_at IS NOT NULL AND acknowledged_at IS NOT NULL");
-            }
-            None => {}
-        }
-        if let Some(cursor) = cursor {
-            query.push(" AND (updated_at, process_epoch) < (");
-            query.push_bind(cursor.at);
-            query.push(", ");
-            query.push_bind(cursor.id);
-            query.push(")");
-        }
-        query.push(" ORDER BY updated_at DESC, process_epoch DESC LIMIT ");
-        query.push_bind(i64::from(page_size) + 1);
+        let mut query = request_metadata_gateway_epochs_query(state, cursor, page_size);
         let rows = query
             .build_query_as::<RequestMetadataGatewayEpochRow>()
             .fetch_all(self.pool())
@@ -300,6 +268,47 @@ impl PgStore {
         });
         Ok(OperationsPage { items, next_cursor })
     }
+}
+
+fn request_metadata_gateway_epochs_query(
+    state: Option<RequestMetadataGatewayEpochState>,
+    cursor: Option<&TimestampCursor>,
+    page_size: u16,
+) -> QueryBuilder<Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT gateway_instance, process_epoch, started_at, updated_at, accepted, persisted, \
+                    dropped, abandoned, retrying, writer_closed, gracefully_closed_at, \
+                    stale_detected_at, acknowledged_at, acknowledged_by, \
+                    CASE WHEN stale_detected_at IS NOT NULL \
+                         THEN GREATEST(accepted - persisted - abandoned, 0) ELSE 0 END \
+                      AS uncertain_lower_bound \
+             FROM request_metadata_gateway_epochs WHERE true",
+    );
+    match state {
+        Some(RequestMetadataGatewayEpochState::Open) => {
+            query.push(" AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL");
+        }
+        Some(RequestMetadataGatewayEpochState::GracefullyClosed) => {
+            query.push(" AND gracefully_closed_at IS NOT NULL");
+        }
+        Some(RequestMetadataGatewayEpochState::Unresolved) => {
+            query.push(" AND stale_detected_at IS NOT NULL AND acknowledged_at IS NULL");
+        }
+        Some(RequestMetadataGatewayEpochState::Acknowledged) => {
+            query.push(" AND stale_detected_at IS NOT NULL AND acknowledged_at IS NOT NULL");
+        }
+        None => {}
+    }
+    if let Some(cursor) = cursor {
+        query.push(" AND (updated_at, process_epoch) < (");
+        query.push_bind(cursor.at);
+        query.push(", ");
+        query.push_bind(cursor.id);
+        query.push(")");
+    }
+    query.push(" ORDER BY updated_at DESC, process_epoch DESC LIMIT ");
+    query.push_bind(i64::from(page_size) + 1);
+    query
 }
 
 #[derive(Debug, FromRow)]
@@ -358,4 +367,151 @@ fn request_metadata_gateway_epoch_from_row(
         acknowledged_at,
         acknowledged_by: row.acknowledged_by,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+
+    fn epoch_row() -> RequestMetadataGatewayEpochRow {
+        let started_at = "2026-08-01T10:00:00Z".parse().unwrap();
+        RequestMetadataGatewayEpochRow {
+            gateway_instance: "gateway-a".to_owned(),
+            process_epoch: Uuid::now_v7(),
+            started_at,
+            updated_at: started_at + chrono::Duration::seconds(30),
+            accepted: 11,
+            persisted: 7,
+            dropped: 2,
+            abandoned: 1,
+            retrying: true,
+            writer_closed: false,
+            gracefully_closed_at: None,
+            stale_detected_at: None,
+            acknowledged_at: None,
+            acknowledged_by: Some(Uuid::now_v7()),
+            uncertain_lower_bound: 1,
+        }
+    }
+
+    #[test]
+    fn gateway_epoch_rows_classify_lifecycle_state_and_preserve_evidence() {
+        type Mutation = fn(&mut RequestMetadataGatewayEpochRow);
+        let cases: [(Mutation, RequestMetadataGatewayEpochState); 5] = [
+            (|_| {}, RequestMetadataGatewayEpochState::Open),
+            (
+                |row| row.acknowledged_at = Some(row.updated_at),
+                RequestMetadataGatewayEpochState::Open,
+            ),
+            (
+                |row| row.stale_detected_at = Some(row.updated_at),
+                RequestMetadataGatewayEpochState::Unresolved,
+            ),
+            (
+                |row| {
+                    row.stale_detected_at = Some(row.updated_at);
+                    row.acknowledged_at = Some(row.updated_at);
+                },
+                RequestMetadataGatewayEpochState::Acknowledged,
+            ),
+            (
+                |row| {
+                    row.gracefully_closed_at = Some(row.updated_at);
+                    row.stale_detected_at = Some(row.updated_at);
+                    row.acknowledged_at = Some(row.updated_at);
+                },
+                RequestMetadataGatewayEpochState::GracefullyClosed,
+            ),
+        ];
+
+        for (mutate, expected_state) in cases {
+            let mut row = epoch_row();
+            let expected_epoch = row.process_epoch;
+            let expected_updated_at = row.updated_at;
+            mutate(&mut row);
+            let record = request_metadata_gateway_epoch_from_row(row).unwrap();
+
+            assert_eq!(record.state, expected_state);
+            assert_eq!(record.gateway_instance, "gateway-a");
+            assert_eq!(record.process_epoch, expected_epoch);
+            assert_eq!(record.updated_at, expected_updated_at);
+            assert_eq!(
+                (
+                    record.accepted,
+                    record.persisted,
+                    record.dropped,
+                    record.abandoned,
+                    record.uncertain_event_lower_bound,
+                ),
+                (11, 7, 2, 1, 1)
+            );
+            assert!(record.retrying);
+            assert!(!record.writer_closed);
+        }
+    }
+
+    #[test]
+    fn gateway_epoch_rows_reject_every_negative_count() {
+        type Mutation = fn(&mut RequestMetadataGatewayEpochRow);
+        let invalidators: [Mutation; 5] = [
+            |row| row.accepted = -1,
+            |row| row.persisted = -1,
+            |row| row.dropped = -1,
+            |row| row.abandoned = -1,
+            |row| row.uncertain_lower_bound = -1,
+        ];
+
+        for invalidate in invalidators {
+            let mut row = epoch_row();
+            invalidate(&mut row);
+            assert!(matches!(
+                request_metadata_gateway_epoch_from_row(row),
+                Err(OperationsError::Persistence(
+                    PersistenceError::InvalidRequestMetadataGap
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn gateway_epoch_query_applies_each_state_and_cursor_clause() {
+        for (state, clause) in [
+            (
+                RequestMetadataGatewayEpochState::Open,
+                "gracefully_closed_at IS NULL AND stale_detected_at IS NULL",
+            ),
+            (
+                RequestMetadataGatewayEpochState::GracefullyClosed,
+                "gracefully_closed_at IS NOT NULL",
+            ),
+            (
+                RequestMetadataGatewayEpochState::Unresolved,
+                "stale_detected_at IS NOT NULL AND acknowledged_at IS NULL",
+            ),
+            (
+                RequestMetadataGatewayEpochState::Acknowledged,
+                "stale_detected_at IS NOT NULL AND acknowledged_at IS NOT NULL",
+            ),
+        ] {
+            let query = request_metadata_gateway_epochs_query(Some(state), None, 25);
+            let sql = query.sql();
+            assert!(
+                sql.as_str().contains(clause),
+                "missing {clause:?} in {sql:?}"
+            );
+        }
+
+        let cursor = TimestampCursor {
+            at: "2026-08-01T10:00:00Z".parse().unwrap(),
+            id: Uuid::now_v7(),
+        };
+        let query = request_metadata_gateway_epochs_query(None, Some(&cursor), 25);
+        let sql = query.sql();
+        let sql = sql.as_str();
+        assert!(sql.contains("(updated_at, process_epoch) < ("));
+        assert!(sql.contains("ORDER BY updated_at DESC, process_epoch DESC LIMIT"));
+        assert!(!sql.contains("stale_detected_at IS NOT NULL AND acknowledged_at"));
+    }
 }

@@ -147,6 +147,28 @@ pub(crate) fn enforce_provider_revision_diff_limit(
 mod tests {
     use super::*;
 
+    fn capability(operation: &str, surface: &str, mode: &str) -> CapabilityRecord {
+        CapabilityRecord {
+            operation: operation.parse().unwrap(),
+            surface: surface.parse().unwrap(),
+            mode: mode.parse().unwrap(),
+            source: olp_engine::domain::CapabilitySource::Declared,
+            certified_at: None,
+        }
+    }
+
+    fn provider_update() -> UpdateProvider {
+        UpdateProvider {
+            name: "Provider".to_owned(),
+            endpoint: Some("https://api.example.test".to_owned()),
+            cloud_region: None,
+            cloud_project: None,
+            deployment: None,
+            api_version: None,
+            auth_mode: olp_engine::domain::ProviderAuthMode::ApiKey,
+        }
+    }
+
     #[test]
     fn configuration_validators_reject_implicit_capabilities() {
         let model = DiscoveredModelInput {
@@ -172,6 +194,83 @@ mod tests {
     }
 
     #[test]
+    fn provider_and_model_text_limits_are_character_based_and_closed() {
+        let mut update = provider_update();
+        update.name = "é".repeat(100);
+        update.endpoint = Some("é".repeat(2_000));
+        validate_provider_update(&update).unwrap();
+
+        let mutators: [fn(&mut UpdateProvider); 3] = [
+            |update: &mut UpdateProvider| update.name = " ".to_owned(),
+            |update: &mut UpdateProvider| update.name = "x".repeat(101),
+            |update: &mut UpdateProvider| update.cloud_region = Some("x".repeat(2_001)),
+        ];
+        for mutate in mutators {
+            let mut candidate = provider_update();
+            mutate(&mut candidate);
+            assert!(validate_provider_update(&candidate).is_err());
+        }
+
+        let valid = DiscoveredModelInput {
+            upstream_model: "m".repeat(200),
+            display_name: "M".repeat(200),
+            enabled: true,
+            capabilities: vec![capability("generation", "openai", "unary")],
+        };
+        validate_model(&valid).unwrap();
+
+        let mut candidate = valid.clone();
+        candidate.upstream_model = " ".to_owned();
+        assert!(validate_model(&candidate).is_err());
+        let mut candidate = valid.clone();
+        candidate.display_name = "x".repeat(201);
+        assert!(validate_model(&candidate).is_err());
+        let mut candidate = valid;
+        candidate.capabilities =
+            std::iter::repeat_n(capability("generation", "openai", "unary"), 17).collect();
+        assert!(validate_model(&candidate).is_err());
+    }
+
+    #[test]
+    fn route_validation_checks_page_deadline_attempt_and_target_boundaries() {
+        let provider = Uuid::now_v7();
+        let operation = OperationKind::Generation;
+        let valid_target = (provider, 0, 1, 500);
+        validate_route_input("primary", &[operation], 1_000, 1, &[valid_target]).unwrap();
+
+        assert!(
+            validate_route_input("INVALID SLUG", &[operation], 1_000, 1, &[valid_target]).is_err()
+        );
+        assert!(validate_route_input("primary", &[], 1_000, 1, &[valid_target]).is_err());
+        assert!(validate_route_input("primary", &[operation], 1_000, 1, &[]).is_err());
+        for (overall, attempts, targets) in [
+            (0, 1, vec![valid_target]),
+            (1_000, 0, vec![valid_target]),
+            (1_000, 2, vec![valid_target]),
+        ] {
+            assert!(
+                validate_route_input("primary", &[operation], overall, attempts, &targets).is_err()
+            );
+        }
+        for invalid_target in [
+            (provider, -1, 1, 500),
+            (provider, 0, 0, 500),
+            (provider, 0, 1, 0),
+            (provider, 0, 1, 1_001),
+        ] {
+            assert!(
+                validate_route_input("primary", &[operation], 1_000, 1, &[invalid_target]).is_err()
+            );
+        }
+
+        assert_eq!(checked_limit(1).unwrap(), 1);
+        assert_eq!(checked_limit(100).unwrap(), 100);
+        for invalid in [i64::MIN, 0, 101, i64::MAX] {
+            assert!(checked_limit(invalid).is_err());
+        }
+    }
+
+    #[test]
     fn route_drafts_reject_installation_local_model_operations() {
         for operation in ["model_list", "model_get"] {
             let error = validate_route_input(
@@ -190,16 +289,6 @@ mod tests {
 
     #[test]
     fn provider_capability_matrix_allows_shared_canonical_cross_surface_tuples() {
-        fn capability(operation: &str, surface: &str, mode: &str) -> CapabilityRecord {
-            CapabilityRecord {
-                operation: operation.parse().unwrap(),
-                surface: surface.parse().unwrap(),
-                mode: mode.parse().unwrap(),
-                source: olp_engine::domain::CapabilitySource::Declared,
-                certified_at: None,
-            }
-        }
-
         for (kind, operation, surface, mode) in [
             ("openai", "generation", "openai", "streaming"),
             ("openai", "generation", "anthropic", "unary"),

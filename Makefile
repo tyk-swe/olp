@@ -58,10 +58,10 @@ test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d
 # test_support only executes under `make db-test`, which coverage never
 # runs; llvm-cov's defaults already exclude tests/ dirs and src tests.rs
 # modules from the report.
-coverage: ## CI's real Rust test gate: llvm-cov nextest with the 51% line floor
+coverage: ## CI's real Rust test gate: llvm-cov nextest with the 62% line floor
 	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features \
 		--ignore-filename-regex 'src/test_support\.rs' \
-		--lcov --output-path lcov.info --fail-under-lines 51
+		--lcov --output-path lcov.info --fail-under-lines 62
 
 console-install: ## Install locked console dependencies
 	pnpm --dir console install --frozen-lockfile

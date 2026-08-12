@@ -335,3 +335,163 @@ fn mappings_from_json(value: serde_json::Value) -> Result<Vec<OidcRoleMapping>, 
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use olp_engine::domain::Role;
+    use serde_json::json;
+
+    use super::*;
+    use crate::security::EncryptedSecret;
+
+    fn input() -> UpsertOidcConfiguration {
+        UpsertOidcConfiguration {
+            id: Uuid::now_v7(),
+            discovery_url: "https://idp.example/.well-known/openid-configuration".to_owned(),
+            issuer: "https://idp.example".to_owned(),
+            authorization_endpoint: "https://idp.example/authorize".to_owned(),
+            token_endpoint: "https://idp.example/token".to_owned(),
+            jwks_uri: "https://idp.example/jwks".to_owned(),
+            token_endpoint_auth_method: "client_secret_basic".to_owned(),
+            client_id: "openllmproxy".to_owned(),
+            encrypted_client_secret: EncryptedSecret {
+                key_version: 1,
+                nonce: [0; 12],
+                ciphertext: vec![0; 16],
+            },
+            scopes: vec!["openid".to_owned(), "email".to_owned()],
+            email_claim: "email".to_owned(),
+            groups_claim: "realm.groups".to_owned(),
+            default_role: Some(Role::Viewer),
+            email_role_mappings: vec![],
+            group_role_mappings: vec![],
+            enabled: true,
+            actor_user_id: Uuid::now_v7(),
+            expected_etag: None,
+        }
+    }
+
+    fn mapping(value: &str, role: Role) -> OidcRoleMapping {
+        OidcRoleMapping {
+            claim_value: value.to_owned(),
+            role,
+        }
+    }
+
+    type ConfigurationMutation = fn(&mut UpsertOidcConfiguration);
+
+    fn assert_invalid_configurations(cases: &[(&str, ConfigurationMutation)]) {
+        for (name, mutate) in cases {
+            let mut candidate = input();
+            mutate(&mut candidate);
+            assert!(
+                matches!(
+                    validate_configuration(&candidate),
+                    Err(OidcError::Invalid(_))
+                ),
+                "accepted {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn configuration_validation_accepts_both_supported_client_auth_methods() {
+        for method in ["client_secret_basic", "client_secret_post"] {
+            let mut candidate = input();
+            candidate.token_endpoint_auth_method = method.to_owned();
+            validate_configuration(&candidate).unwrap();
+        }
+    }
+
+    #[test]
+    fn configuration_validation_rejects_invalid_client_scope_and_claim_shapes() {
+        assert_invalid_configurations(&[
+            ("empty client ID", |input| input.client_id.clear()),
+            ("oversized client ID", |input| {
+                input.client_id = "a".repeat(513)
+            }),
+            ("control character in client ID", |input| {
+                input.client_id = "client\ncontrol".to_owned()
+            }),
+            ("unsupported client authentication", |input| {
+                input.token_endpoint_auth_method = "private_key_jwt".to_owned()
+            }),
+            ("missing openid scope", |input| {
+                input.scopes = vec!["email".to_owned()]
+            }),
+            ("non-graphic scope", |input| {
+                input.scopes = vec!["openid".to_owned(), "not graphic".to_owned()]
+            }),
+            ("too many scopes", |input| {
+                input.scopes = std::iter::repeat_n("openid".to_owned(), 21).collect()
+            }),
+            ("invalid claim punctuation", |input| {
+                input.email_claim = "email/claim".to_owned()
+            }),
+        ]);
+    }
+
+    #[test]
+    fn role_mapping_validation_normalizes_duplicates_and_bounds_inventory() {
+        for (email_mapping, mappings) in [
+            (
+                true,
+                vec![
+                    mapping(" Owner@Example.test ", Role::Owner),
+                    mapping("owner@example.TEST", Role::Viewer),
+                ],
+            ),
+            (
+                false,
+                vec![
+                    mapping(" operators ", Role::Operator),
+                    mapping("operators", Role::Developer),
+                ],
+            ),
+            (false, vec![mapping("group\nname", Role::Viewer)]),
+        ] {
+            let mut candidate = input();
+            if email_mapping {
+                candidate.email_role_mappings = mappings;
+            } else {
+                candidate.group_role_mappings = mappings;
+            }
+            assert!(validate_configuration(&candidate).is_err());
+        }
+
+        let too_many = (0..=MAX_MAPPINGS)
+            .map(|index| OidcRoleMapping {
+                claim_value: format!("group-{index}"),
+                role: Role::Viewer,
+            })
+            .collect::<Vec<_>>();
+        assert!(validate_mappings(&too_many, false).is_err());
+    }
+
+    #[test]
+    fn stored_role_mappings_are_parsed_strictly() {
+        assert_eq!(
+            mappings_from_json(json!([
+                {"claim_value": "owner@example.test", "role": "owner"},
+                {"claim_value": "developers", "role": "developer"}
+            ]))
+            .unwrap(),
+            vec![
+                mapping("owner@example.test", Role::Owner),
+                mapping("developers", Role::Developer),
+            ]
+        );
+
+        for corrupt in [
+            json!({}),
+            json!([{"role": "owner"}]),
+            json!([{"claim_value": "owner@example.test"}]),
+            json!([{"claim_value": "owner@example.test", "role": "superuser"}]),
+        ] {
+            assert!(matches!(
+                mappings_from_json(corrupt),
+                Err(OidcError::Corrupt)
+            ));
+        }
+    }
+}
