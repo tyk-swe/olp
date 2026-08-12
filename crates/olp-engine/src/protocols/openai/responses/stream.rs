@@ -24,6 +24,7 @@ pub struct OpenAiResponsesStreamDecoder {
     finished_outputs: BTreeSet<u32>,
     incomplete_outputs: BTreeSet<u32>,
     output_kinds: BTreeMap<u32, StreamOutputKind>,
+    function_call_ids: BTreeMap<u32, StreamFunctionCallIds>,
     done: bool,
 }
 
@@ -62,6 +63,7 @@ impl OpenAiResponsesStreamDecoder {
             finished_outputs: BTreeSet::new(),
             incomplete_outputs: BTreeSet::new(),
             output_kinds: BTreeMap::new(),
+            function_call_ids: BTreeMap::new(),
             done: false,
         }
     }
@@ -163,19 +165,18 @@ impl OpenAiResponsesStreamDecoder {
                 self.output_kinds.insert(output_index, output_kind);
                 self.ensure_output_started(output_index, MessageRole::Assistant, events);
                 if output_kind == StreamOutputKind::FunctionCall {
+                    let ids = StreamFunctionCallIds {
+                        item_id: stream_string(item, "id")?,
+                        call_id: stream_string(item, "call_id")?,
+                    };
+                    let call_id = ids.call_id.clone();
+                    self.function_call_ids.insert(output_index, ids);
                     self.emit(
                         events,
                         CanonicalEventKind::ToolCallDelta {
                             output_index,
                             tool_index: 0,
-                            id: Some(
-                                item.get("call_id")
-                                    .and_then(Value::as_str)
-                                    .ok_or_else(|| {
-                                        ResponsesCodecError::InvalidResponse("call_id".into())
-                                    })?
-                                    .to_owned(),
-                            ),
+                            id: Some(call_id),
                             name: Some(
                                 item.get("name")
                                     .and_then(Value::as_str)
@@ -220,15 +221,23 @@ impl OpenAiResponsesStreamDecoder {
             "response.function_call_arguments.delta" => {
                 let output_index = stream_index(value, "output_index")?;
                 self.require_output_open(output_index, StreamOutputKind::FunctionCall)?;
+                let item_id = stream_string(value, "item_id")?;
+                let call_id = {
+                    let ids = self
+                        .function_call_ids
+                        .get(&output_index)
+                        .ok_or(ResponsesCodecError::InvalidStreamState)?;
+                    if item_id != ids.item_id {
+                        return Err(ResponsesCodecError::InvalidStreamState);
+                    }
+                    ids.call_id.clone()
+                };
                 self.emit(
                     events,
                     CanonicalEventKind::ToolCallDelta {
                         output_index,
                         tool_index: 0,
-                        id: value
-                            .get("item_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
+                        id: Some(call_id),
                         name: None,
                         arguments_delta: stream_string(value, "delta")?,
                     },
@@ -562,6 +571,11 @@ enum StreamOutputKind {
     FunctionCall,
 }
 
+struct StreamFunctionCallIds {
+    item_id: String,
+    call_id: String,
+}
+
 fn validate_terminal_output(
     response: &Value,
     output_kinds: &BTreeMap<u32, StreamOutputKind>,
@@ -684,8 +698,8 @@ mod tests {
     fn completed_stream_aggregates_tools_usage_and_raw_output_in_order() {
         let wire = concat!(
             "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"private-model\"}}\n\n",
-            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"status\":\"in_progress\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{\\\"city\\\":\"}}\n\n",
-            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"item_id\":\"call_1\",\"delta\":\"\\\"Paris\\\"}\"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"status\":\"in_progress\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{\\\"city\\\":\"}}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"item_id\":\"fc_1\",\"delta\":\"\\\"Paris\\\"}\"}\n\n",
             "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"status\":\"completed\"}}\n\n",
             "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n",
             "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"opaque\"}}\n\n",
@@ -714,6 +728,14 @@ mod tests {
             })
             .collect::<String>();
         assert_eq!(argument_fragments, "{\"city\":\"Paris\"}");
+        let tool_ids = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                CanonicalEventKind::ToolCallDelta { id, .. } => Some(id.as_deref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tool_ids, vec![Some("call_1"), Some("call_1")]);
         assert_eq!(
             events
                 .iter()
@@ -1269,6 +1291,38 @@ mod tests {
                 Err(ResponsesCodecError::InvalidStreamState)
             ));
         }
+    }
+
+    #[test]
+    fn function_call_argument_delta_rejects_a_different_output_item_id() {
+        let wire = [
+            data(json!({"type": "response.created", "response": {"id": "r"}})),
+            data(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "status": "in_progress",
+                    "call_id": "call_1",
+                    "name": "lookup",
+                    "arguments": ""
+                }
+            })),
+            data(json!({
+                "type": "response.function_call_arguments.delta",
+                "output_index": 0,
+                "item_id": "fc_2",
+                "delta": "{}"
+            })),
+        ]
+        .concat();
+        let mut decoder = OpenAiResponsesStreamDecoder::new();
+
+        assert!(matches!(
+            decoder.push(wire.as_bytes()),
+            Err(ResponsesCodecError::InvalidStreamState)
+        ));
     }
 
     #[test]

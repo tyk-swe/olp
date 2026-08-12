@@ -458,7 +458,6 @@ pub(in crate::inference) fn usage_from_result(result: &CanonicalResult) -> Usage
             result.usage_observation,
             result
                 .usage_duration_seconds
-                .or(result.duration_seconds)
                 .and_then(Decimal::from_f64_retain),
         ),
         CanonicalResult::VideoJob(result) => (
@@ -613,10 +612,11 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
 mod tests {
     use super::{
         FinalAttemptUpdate, RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestOutcome,
-        UsageCapture, split_actual_tokens, update_final_attempt,
+        UsageCapture, split_actual_tokens, update_final_attempt, usage_from_result,
     };
     use crate::domain::{
-        CanonicalEvent, CanonicalEventKind, SourceExtensions, Surface, Usage, UsageObservation,
+        CanonicalEvent, CanonicalEventKind, CanonicalResult, SourceExtensions, Surface,
+        TranscriptionResult, Usage, UsageObservation,
     };
     use chrono::Utc;
     use uuid::Uuid;
@@ -626,6 +626,24 @@ mod tests {
         let outcome = RequestOutcome::success_with_status(201);
         assert_eq!(outcome.status_code, Some(201));
         assert_eq!(outcome.error_class, None);
+    }
+
+    #[test]
+    fn descriptive_transcription_duration_is_not_usage() {
+        let capture = usage_from_result(&CanonicalResult::Transcription(TranscriptionResult {
+            text: "transcript".to_owned(),
+            language: Some("en".to_owned()),
+            duration_seconds: Some(12.5),
+            usage: None,
+            usage_observation: None,
+            usage_duration_seconds: None,
+            segments: Vec::new(),
+            extensions: SourceExtensions::default(),
+        }));
+
+        assert!(!capture.observed);
+        assert!(!capture.complete);
+        assert_eq!(capture.media_units, None);
     }
 
     #[test]
