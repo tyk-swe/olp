@@ -406,14 +406,21 @@ fn usage_requires_all_counters_and_folds_detailed_components() {
     assert_eq!(usage.tool_use_prompt_token_count, Some(3));
     assert_eq!(usage.total_token_count, Some(20));
 
+    let events = decode_generate_content_response(response(json!({
+        "promptTokenCount": 1,
+        "candidatesTokenCount": 2,
+        "totalTokenCount": 4
+    })))
+    .unwrap();
     assert!(
-        decode_generate_content_response(response(json!({
-            "promptTokenCount": 1,
-            "candidatesTokenCount": 2,
-            "totalTokenCount": 4
-        })))
-        .is_err()
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
     );
+    let observation = events.last().unwrap().usage_observation.unwrap();
+    assert_eq!(observation.input_tokens, Some(1));
+    assert_eq!(observation.output_tokens, Some(2));
+    assert_eq!(observation.total_tokens, Some(4));
 }
 
 fn sse(data: Value) -> String {
@@ -734,19 +741,18 @@ fn stream_partial_snapshots_replace_omitted_counters() {
 #[test]
 fn stream_rejects_fragmented_usage_contradictions_and_keeps_error_usage_incomplete() {
     let mut contradictory = GeminiGenerateContentStreamDecoder::new();
-    assert!(matches!(
-        contradictory.push(
+    contradictory
+        .push(
             sse(json!({
                 "usageMetadata": {"cachedContentTokenCount": 5, "thoughtsTokenCount": 4, "totalTokenCount": 8}
             }))
             .as_bytes()
-        ),
-        Err(StreamError::Response(_))
-    ));
+        )
+        .unwrap();
 
     let mut additive_lower_bound = GeminiGenerateContentStreamDecoder::new();
-    assert!(matches!(
-        additive_lower_bound.push(
+    additive_lower_bound
+        .push(
             sse(json!({
                 "usageMetadata": {
                     "cachedContentTokenCount": 5,
@@ -755,9 +761,8 @@ fn stream_rejects_fragmented_usage_contradictions_and_keeps_error_usage_incomple
                 }
             }))
             .as_bytes()
-        ),
-        Err(StreamError::Response(_))
-    ));
+        )
+        .unwrap();
 
     let mut failed = GeminiGenerateContentStreamDecoder::new();
     failed

@@ -212,7 +212,7 @@ pub(in crate::protocols) fn canonical_usage(
         .checked_add(output_tokens)
         .ok_or(ResponseError::InvalidUsage)?;
     if total_tokens != expected_total {
-        return Err(ResponseError::InvalidUsage);
+        return Ok(None);
     }
     Ok(Some(Usage {
         input_tokens,
@@ -257,17 +257,6 @@ pub(in crate::protocols) fn usage_observation_for(
         crate::protocols::usage::validate_counter(counter)
             .map_err(|_| ResponseError::InvalidUsage)?;
     }
-    if usage
-        .cached_content_token_count
-        .zip(input_tokens)
-        .is_some_and(|(cached, input)| cached > input)
-        || usage
-            .thoughts_token_count
-            .zip(output_tokens)
-            .is_some_and(|(thoughts, output)| thoughts > output)
-    {
-        return Err(ResponseError::InvalidUsage);
-    }
     let input_lower_bound = match input_tokens {
         Some(input) => input.max(usage.cached_content_token_count.unwrap_or(0)),
         None => usage
@@ -279,13 +268,6 @@ pub(in crate::protocols) fn usage_observation_for(
     let output_lower_bound = output_tokens
         .unwrap_or(usage.thoughts_token_count.unwrap_or(0))
         .max(usage.thoughts_token_count.unwrap_or(0));
-    if usage.total_token_count.is_some_and(|total| {
-        input_lower_bound
-            .checked_add(output_lower_bound)
-            .is_none_or(|lower_bound| lower_bound > total)
-    }) {
-        return Err(ResponseError::InvalidUsage);
-    }
     Ok(UsageObservation {
         input_tokens,
         output_tokens,

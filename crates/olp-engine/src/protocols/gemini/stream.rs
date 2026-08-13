@@ -269,8 +269,27 @@ impl GeminiGenerateContentStreamDecoder {
     }
 
     fn observe_usage(&mut self, usage: &UsageMetadata) -> Result<(), StreamError> {
-        canonical_usage(usage)?;
-        self.usage = Some(usage.clone());
+        let merged = if let Some(existing) = &self.usage {
+            UsageMetadata {
+                prompt_token_count: usage.prompt_token_count.or(existing.prompt_token_count),
+                candidates_token_count: usage
+                    .candidates_token_count
+                    .or(existing.candidates_token_count),
+                total_token_count: usage.total_token_count.or(existing.total_token_count),
+                cached_content_token_count: usage
+                    .cached_content_token_count
+                    .or(existing.cached_content_token_count),
+                thoughts_token_count: usage.thoughts_token_count.or(existing.thoughts_token_count),
+                tool_use_prompt_token_count: usage
+                    .tool_use_prompt_token_count
+                    .or(existing.tool_use_prompt_token_count),
+                extra: usage.extra.clone(),
+            }
+        } else {
+            usage.clone()
+        };
+        canonical_usage(&merged)?;
+        self.usage = Some(merged);
         Ok(())
     }
 
