@@ -18,9 +18,7 @@ nightly Cargo workspace (`fuzz/`).
 | Console | `make console-install`, `make console-verify`, `make console-e2e` |
 | Contracts/generated files | `make openapi`, `make sqlx-prepare`, `make screenshots` |
 
-Rust compilations use sccache 0.17.0 through `.cargo/config.toml`; install it
-as described in `CONTRIBUTING.md`, or set `RUSTC_WRAPPER=` to bypass it for a
-single command.
+Rust compilations use Cargo's default compiler and linker configuration.
 
 The workspace has zero doctests by policy; restore a `cargo test --doc` gate if
 one is added. CI also runs service, browser, image, HA, upgrade, supply-chain,

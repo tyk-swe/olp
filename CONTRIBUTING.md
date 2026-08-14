@@ -6,23 +6,18 @@ below are the behavioral sources of truth.
 
 ## Development environment
 
-Use Rust 1.97.1, sccache 0.17.0, Node.js 24 or newer, pnpm 11, Clang with LLD,
-ripgrep, PostgreSQL 18, and Valkey 9.1. Rust is pinned by
+Use Rust 1.97.1, Node.js 24 or newer, pnpm 11, ripgrep, PostgreSQL 18, and
+Valkey 9.1. Rust is pinned by
 `rust-toolchain.toml`; the Compose stack supplies PostgreSQL and Valkey for
 local service tests.
 
-The normal local gate needs sccache and `cargo-nextest`:
+The normal local gate needs `cargo-nextest`:
 
 ```sh
-cargo install --locked sccache@0.17.0 --no-default-features
 cargo install --locked cargo-nextest@0.9.140
 make console-install       # first run only
 make check-local            # make check is an alias
 ```
-
-Cargo uses sccache through `.cargo/config.toml`. Run `sccache --show-stats` to
-inspect the local cache. To bypass the wrapper for one command, set it to the
-empty string, for example `RUSTC_WRAPPER= cargo check --locked`.
 
 Additional targets need the matching tools pinned by CI: `cargo-llvm-cov`
 0.8.7 for `make coverage`, `sqlx-cli` 0.9.0 for `make sqlx-prepare`,

@@ -1,15 +1,14 @@
 name: Setup Rust
 description: >-
-  Clang/LLD linker, pinned Rust toolchain, sccache, Cargo registry/tool cache,
-  and optional cargo tools. Keep the action SHAs below in lockstep with
-  scripts/check-supply-chain-pins.sh.
+  Pinned Rust toolchain, Cargo registry/tool cache, and optional cargo tools.
+  Keep the action SHAs below in lockstep with scripts/check-supply-chain-pins.sh.
 
 inputs:
   components:
     description: Comma-separated rustup components
     default: ""
   cache:
-    description: Whether to enable sccache and restore/save the Cargo registry/tool cache
+    description: Whether to restore/save the Cargo registry/tool cache
     default: "true"
   cache-workspaces:
     description: Newline-separated workspaces used to key the Cargo registry/tool cache
@@ -31,29 +30,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install Clang and LLD linker
-      shell: bash
-      run: |
-        if ! command -v clang >/dev/null 2>&1 || ! command -v ld.lld >/dev/null 2>&1; then
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends clang lld
-        fi
     - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
       with:
         toolchain: "1.97.1"
         components: ${{ inputs.components }}
-    - if: ${{ inputs.cache == 'true' }}
-      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      with:
-        version: "v0.17.0"
-    - name: Enable the GitHub Actions sccache backend
-      if: ${{ inputs.cache == 'true' }}
-      shell: bash
-      run: echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-    - name: Disable the repository compiler wrapper
-      if: ${{ inputs.cache != 'true' }}
-      shell: bash
-      run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
     - if: ${{ inputs.cache == 'true' }}
       uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       with:

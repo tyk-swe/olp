@@ -79,9 +79,6 @@ jobs:
         run: scripts/verify-helm-contract.sh deploy/helm
       - name: Enforce dependency bans, licenses, and sources
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
-        env:
-          # This container does not include the repository's compiler wrapper.
-          RUSTC_WRAPPER: ""
         with:
           manifest-path: Cargo.toml
           command: check
@@ -323,7 +320,7 @@ jobs:
           tools: "sqlx-cli@0.9.0,cargo-nextest@0.9.140"
           # Sole writer of the workspace registry/tool cache; the other consumers
           # (sdk-compatibility, console-integration, e2e, ha, upgrade-rehearsal)
-          # restore it read-only. Compiler outputs are shared through sccache.
+          # restore it read-only.
           cache-shared-key: workspace-registry
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
@@ -768,7 +765,7 @@ jobs:
         with:
           cache-workspaces: fuzz
           tools: "cargo-fuzz@0.13.2"
-          # Keep registry/tool state read-only; sccache owns sanitizer artifacts.
+          # Keep registry/tool state read-only.
           cache-shared-key: fuzz-registry-${{ steps.fuzz-toolchain.outputs.toolchain }}
           cache-save: "false"
       - name: Run every seeded fuzz target for two minutes
