@@ -296,6 +296,11 @@ impl DistributedLimitReservation {
         Self { lease: Some(lease) }
     }
 
+    #[cfg(test)]
+    pub(in crate::inference) fn for_test(lease: Arc<dyn LimitLease>) -> Self {
+        Self::new(lease)
+    }
+
     async fn cleanup(mut self, actual_tokens: Option<i64>) {
         let Some(lease) = self.lease.as_ref() else {
             return;

@@ -549,12 +549,93 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use super::{
-        FinalAttemptUpdate, RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestOutcome,
-        UsageCapture, split_actual_tokens, update_final_attempt,
+        FinalAttemptUpdate, LimitCleanup, RequestAttemptMetadata, RequestAttemptUsageMetadata,
+        RequestOutcome, UsageCapture, split_actual_tokens, update_final_attempt,
+    };
+    use crate::{
+        domain::BoxFuture,
+        inference::limits::{
+            DistributedLimitReservation, InferenceReservation, LimitError, LimitLease,
+        },
     };
     use chrono::Utc;
     use uuid::Uuid;
+
+    #[derive(Default)]
+    struct CleanupEffects {
+        reconciled_tokens: Mutex<Vec<i64>>,
+        releases: AtomicUsize,
+    }
+
+    struct RecordingLease {
+        effects: Arc<CleanupEffects>,
+    }
+
+    impl LimitLease for RecordingLease {
+        fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>> {
+            self.effects
+                .reconciled_tokens
+                .lock()
+                .unwrap()
+                .push(actual_tokens);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn release(&self) -> BoxFuture<'_, Result<(), LimitError>> {
+            self.effects.releases.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn recording_lease(effects: &Arc<CleanupEffects>) -> Arc<dyn LimitLease> {
+        Arc::new(RecordingLease {
+            effects: Arc::clone(effects),
+        })
+    }
+
+    async fn assert_cleanup_effects(
+        actual_tokens: Option<i64>,
+        expected_admission_tokens: &[i64],
+        expected_delta_tokens: &[i64],
+    ) {
+        let admission = Arc::new(CleanupEffects::default());
+        let delta = Arc::new(CleanupEffects::default());
+        let admission_reservation = InferenceReservation::distributed(recording_lease(&admission));
+        let repeated_cleanup = admission_reservation.clone();
+        LimitCleanup {
+            delta_lease: Some(DistributedLimitReservation::for_test(recording_lease(
+                &delta,
+            ))),
+            admission_reservation: Some(admission_reservation.clone()),
+            admission_reserved_tokens: Some(100),
+            actual_tokens,
+        }
+        .run()
+        .await;
+
+        if actual_tokens.is_some() {
+            repeated_cleanup.reconcile(i64::MAX).await;
+        }
+        repeated_cleanup.release().await;
+        admission_reservation.release().await;
+
+        assert_eq!(
+            admission.reconciled_tokens.lock().unwrap().as_slice(),
+            expected_admission_tokens
+        );
+        assert_eq!(admission.releases.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            delta.reconciled_tokens.lock().unwrap().as_slice(),
+            expected_delta_tokens
+        );
+        assert_eq!(delta.releases.load(Ordering::Relaxed), 1);
+    }
 
     #[test]
     fn successful_outcome_preserves_the_http_status() {
@@ -575,6 +656,22 @@ mod tests {
         );
         assert_eq!(split_actual_tokens(Some(40), None), (None, Some(40)));
         assert_eq!(split_actual_tokens(None, Some(100)), (None, None));
+    }
+
+    #[tokio::test]
+    async fn cleanup_reconciles_both_reservations_to_final_usage_once() {
+        for (actual, admission, delta) in [
+            (40, vec![40], vec![0]),
+            (100, vec![100], vec![0]),
+            (130, vec![100], vec![30]),
+        ] {
+            assert_cleanup_effects(Some(actual), &admission, &delta).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_without_actual_usage_only_releases_both_reservations() {
+        assert_cleanup_effects(None, &[], &[]).await;
     }
 
     #[test]
