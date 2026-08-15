@@ -103,13 +103,15 @@ fn split_actual_tokens(
     actual_tokens: Option<i64>,
     admission_reserved_tokens: Option<i64>,
 ) -> (Option<i64>, Option<i64>) {
-    match (actual_tokens, admission_reserved_tokens) {
-        (Some(actual), Some(admission_reserved)) => (
-            Some(actual.min(admission_reserved)),
-            Some(actual.saturating_sub(admission_reserved).max(0)),
-        ),
-        (Some(actual), None) => (None, Some(actual)),
-        (None, _) => (None, None),
+    let _ = admission_reserved_tokens;
+
+    // Reconcile the full actual usage against the admission lease.
+    // A separately reserved delta lease reconciles to zero. This
+    // remains correct whether or not a delta lease exists and keeps
+    // overage attached to a real, idempotently reconciled lease.
+    match actual_tokens {
+        Some(actual_tokens) => (Some(actual_tokens), Some(0)),
+        None => (None, None),
     }
 }
 

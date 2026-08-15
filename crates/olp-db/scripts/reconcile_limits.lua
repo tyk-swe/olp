@@ -21,13 +21,35 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(normalized)
 end
 
+
+local function parse_safe_signed_integer(raw)
+  if type(raw) ~= "string" or string.match(raw, "^-?%d+$") == nil then
+    return nil
+  end
+  local negative = string.sub(raw, 1, 1) == "-"
+  local digits = negative and string.sub(raw, 2) or raw
+  local normalized = string.gsub(digits, "^0+", "")
+  if normalized == "" then
+    normalized = "0"
+  end
+  if #normalized > #MAX_SAFE_INTEGER_TEXT
+      or (#normalized == #MAX_SAFE_INTEGER_TEXT and normalized > MAX_SAFE_INTEGER_TEXT) then
+    return nil
+  end
+  local value = tonumber(normalized)
+  if negative and value ~= 0 then
+    return -value
+  end
+  return value
+end
+
 local stored_window = redis.call("HGET", KEYS[1], "window")
 if stored_window == false or stored_window ~= ARGV[1] then
   return 0
 end
 
-local refund = parse_safe_unsigned_integer(ARGV[2])
-if refund == nil or refund <= 0 then
+local adjustment = parse_safe_signed_integer(ARGV[2])
+if adjustment == nil or adjustment == 0 then
   return 0
 end
 
@@ -44,11 +66,11 @@ local current_tpm = parse_safe_unsigned_integer(redis.call("HGET", KEYS[1], "tpm
 if current_tpm == nil then
   return redis.error_reply("invalid token state")
 end
-local updated = current_tpm - refund
+local updated = current_tpm + adjustment
 if updated < 0 then
   updated = 0
 end
 -- Update the token count and idempotence marker in one command. A script
--- runtime error cannot leave a successful refund without its marker.
+-- runtime error cannot leave a successful adjustment without its marker.
 redis.call("HSET", KEYS[1], "tpm", updated, reconciliation_field, 1)
 return 1

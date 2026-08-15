@@ -79,7 +79,7 @@ impl PgStore {
                     last_polled_at = $8,
                     reconciliation_error = NULL,
                     etag = uuidv7()
-                 WHERE id = $1 AND lifecycle_state IN ('creating', 'create_ambiguous')
+                 WHERE id = $1 AND lifecycle_state = 'creating'
                  RETURNING *
              )
              SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,

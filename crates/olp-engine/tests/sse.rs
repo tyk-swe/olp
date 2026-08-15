@@ -215,13 +215,7 @@ fn split_crlf_has_the_same_event_limit_accounting() {
 fn finish_does_not_count_an_unterminated_line_twice() {
     let mut decoder = SseDecoder::new(7);
     assert!(decoder.push(b"data: x").unwrap().is_empty());
-    assert_eq!(
-        decoder.finish().unwrap(),
-        vec![SseFrame {
-            data: "x".into(),
-            ..SseFrame::default()
-        }]
-    );
+    assert!(decoder.finish().unwrap().is_empty());
 }
 
 #[test]

@@ -61,6 +61,52 @@ fn release_used_bytes(used_bytes: &AtomicU64, bytes: u64) {
     }
 }
 
+fn recovered_media_spool_bytes(base: &std::path::Path) -> std::io::Result<u64> {
+    let mut total = 0_u64;
+
+    let entries = match std::fs::read_dir(base) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(0);
+        }
+        Err(error) => return Err(error),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if !file_type.is_dir()
+            || !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("olp-media-")
+        {
+            continue;
+        }
+
+        let mut pending = vec![entry.path()];
+        while let Some(directory) = pending.pop() {
+            for child in std::fs::read_dir(directory)? {
+                let child = child?;
+                let metadata = child.path().symlink_metadata()?;
+
+                if metadata.file_type().is_dir() {
+                    pending.push(child.path());
+                } else if metadata.file_type().is_file() {
+                    total = total.checked_add(metadata.len()).ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "media spool byte accounting overflow",
+                        )
+                    })?;
+                }
+            }
+        }
+    }
+
+    Ok(total)
+}
+
 impl FileMediaSpool {
     #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn create() -> std::io::Result<Arc<Self>> {
@@ -75,6 +121,7 @@ impl FileMediaSpool {
             ));
         }
         std::fs::create_dir_all(base_dir)?;
+        let recovered_spool_bytes = recovered_media_spool_bytes(base_dir.as_ref())?;
         let root = base_dir.join(format!(
             "olp-media-{}-{}",
             std::process::id(),
@@ -84,7 +131,7 @@ impl FileMediaSpool {
         Ok(Arc::new(Self {
             root,
             entries: Arc::new(RwLock::new(BTreeMap::new())),
-            used_bytes: Arc::new(AtomicU64::new(0)),
+            used_bytes: Arc::new(AtomicU64::new(recovered_spool_bytes)),
             janitor: SpoolJanitor::new(),
             capacity_bytes,
         }))

@@ -199,6 +199,135 @@ impl CircuitBreaker {
         states.insert(target, next);
     }
 
+    /// Record a successful outcome only if the permit still owns the
+    /// currently observable circuit generation.
+    pub(in crate::inference) fn record_success_for_permit(
+        &self,
+        target: TargetId,
+        permit: &CircuitPermit,
+    ) {
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+
+        match permit.probe_generation {
+            Some(generation) => {
+                if !matches!(
+                    states.get(&target),
+                    Some(CircuitState::HalfOpen {
+                        generation: current_generation,
+                        ..
+                    }) if *current_generation == generation
+                ) {
+                    return;
+                }
+            }
+            None => {
+                if matches!(
+                    states.get(&target),
+                    Some(CircuitState::Open { .. }) | Some(CircuitState::HalfOpen { .. })
+                ) {
+                    return;
+                }
+            }
+        }
+
+        states.remove(&target);
+    }
+
+    /// Record a failed outcome only if the permit still owns the
+    /// currently observable circuit generation.
+    pub(in crate::inference) fn record_failure_for_permit(
+        &self,
+        target: TargetId,
+        permit: &CircuitPermit,
+        class: AttemptFailureClass,
+    ) {
+        if !counts_toward_circuit(class) {
+            return;
+        }
+        let now = Instant::now();
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+
+        match permit.probe_generation {
+            Some(generation) => {
+                if !matches!(
+                    states.get(&target),
+                    Some(CircuitState::HalfOpen {
+                        generation: current_generation,
+                        ..
+                    }) if *current_generation == generation
+                ) {
+                    return;
+                }
+            }
+            None => {
+                // A normal closed-state attempt must not overwrite
+                // a newer Open or HalfOpen observation.
+                if matches!(
+                    states.get(&target),
+                    Some(CircuitState::Open { .. }) | Some(CircuitState::HalfOpen { .. })
+                ) {
+                    return;
+                }
+            }
+        }
+        let next = match states.get(&target).copied() {
+            Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. }) => CircuitState::Open {
+                until: now + self.open_duration,
+            },
+            Some(CircuitState::Closed {
+                consecutive_failures,
+            }) => {
+                let failures = consecutive_failures.saturating_add(1);
+                if failures >= self.failure_threshold {
+                    CircuitState::Open {
+                        until: now + self.open_duration,
+                    }
+                } else {
+                    CircuitState::Closed {
+                        consecutive_failures: failures,
+                    }
+                }
+            }
+            None => {
+                if self.failure_threshold == 1 {
+                    CircuitState::Open {
+                        until: now + self.open_duration,
+                    }
+                } else {
+                    CircuitState::Closed {
+                        consecutive_failures: 1,
+                    }
+                }
+            }
+        };
+        states.insert(target, next);
+    }
+
+    pub(in crate::inference) fn record_success_for_optional_permit(
+        &self,
+        target: TargetId,
+        permit: Option<&CircuitPermit>,
+    ) {
+        if let Some(permit) = permit {
+            self.record_success_for_permit(target, permit);
+        } else {
+            self.record_success(target);
+        }
+    }
+
+    pub(in crate::inference) fn record_failure_for_optional_permit(
+        &self,
+        target: TargetId,
+        permit: Option<&CircuitPermit>,
+        class: AttemptFailureClass,
+    ) {
+        if let Some(permit) = permit {
+            self.record_failure_for_permit(target, permit, class);
+        } else {
+            self.record_failure(target, class);
+        }
+    }
+
     pub fn open_count(&self) -> usize {
         let now = Instant::now();
         self.inner

@@ -120,15 +120,16 @@ impl DistributedLimiter {
                 "actual_tokens must be a non-negative Lua-safe integer",
             ));
         }
-        let refund = lease.reserved_tokens.saturating_sub(actual_tokens).max(0);
-        if refund == 0 {
+        let adjustment = actual_tokens.saturating_sub(lease.reserved_tokens);
+
+        if adjustment == 0 {
             return Ok(());
         }
         let mut connection = self.connection.clone();
         let _: i64 = Script::new(RECONCILE_SCRIPT)
             .key(&lease.rate_key)
             .arg(lease.rate_window_id)
-            .arg(refund)
+            .arg(adjustment)
             .arg(&lease.lease_id)
             .invoke_async(&mut connection)
             .await

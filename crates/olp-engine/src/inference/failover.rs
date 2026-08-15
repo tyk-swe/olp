@@ -66,6 +66,16 @@ pub fn circuit_accounted_event_stream(
     target: TargetId,
     initial_failure: bool,
 ) -> EventStream {
+    circuit_accounted_event_stream_with_permit(events, circuits, target, initial_failure, None)
+}
+
+fn circuit_accounted_event_stream_with_permit(
+    events: EventStream,
+    circuits: CircuitBreaker,
+    target: TargetId,
+    initial_failure: bool,
+    permit: Option<crate::inference::circuit::CircuitPermit>,
+) -> EventStream {
     Box::pin(stream::unfold(
         (events, circuits, initial_failure),
         move |(mut events, circuits, mut failed)| async move {
@@ -75,11 +85,17 @@ pub fn circuit_accounted_event_stream(
                     match &event.kind {
                         CanonicalEventKind::Error { error } => {
                             if let Some(class) = canonical_error_circuit_class(error.class) {
-                                circuits.record_failure(target, class);
+                                circuits.record_failure_for_optional_permit(
+                                    target,
+                                    permit.as_ref(),
+                                    class,
+                                );
                             }
                             failed = true;
                         }
-                        CanonicalEventKind::Done if !failed => circuits.record_success(target),
+                        CanonicalEventKind::Done if !failed => {
+                            circuits.record_success_for_optional_permit(target, permit.as_ref())
+                        }
                         _ => {}
                     }
                     Ok(event)
@@ -89,7 +105,11 @@ pub fn circuit_accounted_event_stream(
                     // owns it. Terminal transport failures still affect target
                     // health, but must never trigger request failover.
                     error.response_committed = true;
-                    circuits.record_failure(target, error.class);
+                    circuits.record_failure_for_optional_permit(
+                        target,
+                        permit.as_ref(),
+                        error.class,
+                    );
                     failed = true;
                     Err(error)
                 }
@@ -540,7 +560,11 @@ pub fn reclassify_ambiguous_transport_failure(
     if operation_is_side_effecting(operation)
         && matches!(
             error.class,
-            AttemptFailureClass::Connect | AttemptFailureClass::Timeout
+            AttemptFailureClass::Connect
+                | AttemptFailureClass::Timeout
+                | AttemptFailureClass::UpstreamServer
+                | AttemptFailureClass::Protocol
+                | AttemptFailureClass::Cancelled
         )
         && !matches!(error.phase, crate::domain::TransportPhase::Connect)
     {

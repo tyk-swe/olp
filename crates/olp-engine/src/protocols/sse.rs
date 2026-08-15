@@ -87,6 +87,8 @@ fn optional_u64(value: Option<&Value>) -> Option<Option<u64>> {
 }
 
 pub struct SseDecoder {
+    // WHATWG permits one leading UTF-8 BOM, including across chunks.
+    bom_checked: bool,
     buffer: BytesMut,
     trailing_cr: TrailingCr,
     event: Option<String>,
@@ -131,12 +133,39 @@ impl SseDecoder {
             retry_ms: None,
             pending_bytes: 0,
             max_event_bytes: max_event_bytes.max(1),
+            bom_checked: false,
         }
     }
 
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<SseFrame>, SseDecodeError> {
         let mut frames = Vec::new();
         let mut remaining = self.resolve_trailing_cr(chunk, &mut frames)?;
+
+        // WHATWG leading BOM handling must wait until three bytes are
+        // available when the BOM is split across transport chunks.
+        if !self.bom_checked {
+            const UTF8_BOM: [u8; 3] = [0xef, 0xbb, 0xbf];
+            if self.buffer.is_empty() && remaining.is_empty() {
+                return Ok(frames);
+            }
+            while self.buffer.len() < UTF8_BOM.len()
+                && !remaining.is_empty()
+                && self.buffer[..] == UTF8_BOM[..self.buffer.len()]
+            {
+                self.buffer.extend_from_slice(&remaining[..1]);
+                remaining = &remaining[1..];
+            }
+            let prefix_len = self.buffer.len().min(UTF8_BOM.len());
+
+            if prefix_len > 0 && self.buffer[..prefix_len] == UTF8_BOM[..prefix_len] {
+                if self.buffer.len() < UTF8_BOM.len() {
+                    return Ok(Vec::new());
+                }
+                let _ = self.buffer.split_to(UTF8_BOM.len());
+            }
+
+            self.bom_checked = true;
+        }
 
         while let Some(line_end) = remaining
             .iter()
@@ -186,6 +215,8 @@ impl SseDecoder {
     }
 
     pub fn finish(&mut self) -> Result<Vec<SseFrame>, SseDecodeError> {
+        // EOF is not an SSE event delimiter. Discard an
+        // unterminated line and any event awaiting a blank line.
         let mut frames = Vec::new();
         match std::mem::replace(&mut self.trailing_cr, TrailingCr::None) {
             TrailingCr::Processed {
@@ -197,15 +228,8 @@ impl SseDecoder {
                 provisional_lf_byte: false,
             } => {}
         }
-        if !self.buffer.is_empty() {
-            self.check_additional(self.buffer.len())?;
-            self.pending_bytes = self.pending_bytes.saturating_add(self.buffer.len());
-            let line = self.buffer.split().freeze();
-            self.process_line(&line, &mut frames)?;
-        }
-        if let Some(frame) = self.dispatch() {
-            frames.push(frame);
-        }
+        self.buffer.clear();
+        let _ = self.dispatch();
         Ok(frames)
     }
 

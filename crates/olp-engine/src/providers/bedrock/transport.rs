@@ -204,6 +204,10 @@ struct StreamState {
     next_tool_index: u32,
     tool_indices: HashMap<u32, u32>,
     terminal: bool,
+
+    open_content_blocks: std::collections::HashSet<u32>,
+    stopped_content_blocks: std::collections::HashSet<u32>,
+    invalid_event_order: bool,
 }
 
 fn stream_events(
@@ -232,6 +236,9 @@ fn stream_events(
             next_tool_index: 0,
             tool_indices: HashMap::new(),
             terminal: false,
+            open_content_blocks: std::collections::HashSet::new(),
+            stopped_content_blocks: std::collections::HashSet::new(),
+            invalid_event_order: false,
         },
         |mut state| async move {
             loop {
@@ -252,7 +259,10 @@ fn stream_events(
                     Ok(Ok(Some(event))) => event,
                     Ok(Ok(None)) => {
                         state.terminal = true;
-                        if !state.saw_message_stop {
+                        if state.invalid_event_order
+                            || !state.saw_message_stop
+                            || !state.saw_metadata
+                        {
                             return Some((
                                 Err(protocol_body_error(
                                     "Bedrock stream ended before message_stop",
@@ -319,6 +329,12 @@ fn map_stream_event(
         ConverseStreamOutput::ContentBlockStart(start) => {
             require_content_phase(state)?;
             let bedrock_index = content_block_index(start.content_block_index)?;
+            // OLP ContentBlockStart lifecycle validation
+            if state.stopped_content_blocks.contains(&bedrock_index)
+                || !state.open_content_blocks.insert(bedrock_index)
+            {
+                state.invalid_event_order = true;
+            }
             match start.start {
                 None => Ok(Vec::new()),
                 Some(ContentBlockStart::ToolUse(tool)) => {
@@ -346,6 +362,13 @@ fn map_stream_event(
         ConverseStreamOutput::ContentBlockDelta(delta) => {
             require_content_phase(state)?;
             let bedrock_index = content_block_index(delta.content_block_index)?;
+            // OLP ContentBlockDelta lifecycle validation
+            if state.stopped_content_blocks.contains(&bedrock_index) {
+                state.invalid_event_order = true;
+            } else {
+                // Text blocks are permitted to begin with a delta.
+                state.open_content_blocks.insert(bedrock_index);
+            }
             match delta.delta {
                 Some(ContentBlockDelta::Text(text)) => Ok(vec![CanonicalEventKind::TextDelta {
                     output_index: 0,
@@ -374,10 +397,21 @@ fn map_stream_event(
         }
         ConverseStreamOutput::ContentBlockStop(stop) => {
             require_content_phase(state)?;
-            content_block_index(stop.content_block_index)?;
+            let bedrock_index = content_block_index(stop.content_block_index)?;
+            // OLP ContentBlockStop lifecycle validation
+            if !state.open_content_blocks.remove(&bedrock_index) {
+                state.invalid_event_order = true;
+            }
+            if !state.stopped_content_blocks.insert(bedrock_index) {
+                state.invalid_event_order = true;
+            }
             Ok(Vec::new())
         }
         ConverseStreamOutput::MessageStop(stop) => {
+            // OLP MessageStop lifecycle validation
+            if !state.open_content_blocks.is_empty() {
+                state.invalid_event_order = true;
+            }
             if !state.saw_message_start || state.saw_message_stop || state.saw_metadata {
                 return Err(protocol_body_error(
                     "Bedrock stream returned an out-of-order message_stop event",
@@ -395,6 +429,10 @@ fn map_stream_event(
             }])
         }
         ConverseStreamOutput::Metadata(metadata) => {
+            // OLP Metadata lifecycle validation
+            if !state.saw_message_stop {
+                state.invalid_event_order = true;
+            }
             if !state.saw_message_stop || state.saw_metadata {
                 return Err(protocol_body_error(
                     "Bedrock stream returned an out-of-order metadata event",

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, Surface};
+use crate::domain::{CanonicalEvent, CanonicalEventKind, FinishReason, Surface};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -142,6 +142,8 @@ pub struct OpenAiResponsesStreamEncoder {
     emitted_outputs: BTreeSet<u32>,
     tool_outputs: BTreeSet<u32>,
     done: bool,
+
+    incomplete_reason: Option<&'static str>,
 }
 
 impl std::fmt::Debug for OpenAiResponsesStreamEncoder {
@@ -173,6 +175,7 @@ impl OpenAiResponsesStreamEncoder {
             emitted_outputs: BTreeSet::new(),
             tool_outputs: BTreeSet::new(),
             done: false,
+            incomplete_reason: None,
         }
     }
 
@@ -253,7 +256,17 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::Finish { output_index, .. } => {
+            CanonicalEventKind::Finish {
+                output_index,
+                reason,
+            } => {
+                self.incomplete_reason = if matches!(&reason, FinishReason::Length) {
+                    Some("max_output_tokens")
+                } else if matches!(&reason, FinishReason::ContentFilter) {
+                    Some("content_filter")
+                } else {
+                    None
+                };
                 self.ensure_stream_output(
                     *output_index,
                     self.tool_outputs.contains(output_index),
@@ -296,11 +309,26 @@ impl OpenAiResponsesStreamEncoder {
                 )?);
             }
             CanonicalEventKind::Done => {
+                let terminal_reason = self.incomplete_reason.take();
+                let terminal_event_type = if terminal_reason.is_some() {
+                    "response.incomplete"
+                } else {
+                    "response.completed"
+                };
+                let terminal_status = if terminal_reason.is_some() {
+                    "incomplete"
+                } else {
+                    "completed"
+                };
+                let terminal_incomplete_details =
+                    terminal_reason.map(|reason| serde_json::json!({ "reason": reason }));
                 let normalized = self.normalized_events_with(event.clone());
-                let response =
+                let mut response =
                     encode_response_object(&normalized, &self.client_model, &self.fallback_id)?;
+                response.status = terminal_status.to_owned();
+                response.incomplete_details = terminal_incomplete_details;
                 frames.push(response_sse_frame(
-                    "response.completed",
+                    terminal_event_type,
                     json!({"response": response}),
                 )?);
                 self.done = true;

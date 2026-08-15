@@ -88,7 +88,7 @@ impl OpenAiResponsesStreamDecoder {
                 return Err(ResponsesCodecError::DataAfterDone);
             }
             if frame.data.trim() == "[DONE]" {
-                self.finish_open_outputs(&mut events);
+                self.finish_open_outputs(&mut events, FinishReason::Stop);
                 self.emit(&mut events, CanonicalEventKind::Done);
                 self.done = true;
                 continue;
@@ -205,10 +205,21 @@ impl OpenAiResponsesStreamDecoder {
                     );
                 }
             }
-            "response.completed" | "response.incomplete" => {
+            terminal_type @ ("response.completed" | "response.incomplete") => {
                 let response = value.get("response").unwrap_or(value);
                 self.ensure_response_started(response, events);
-                self.finish_open_outputs(events);
+                let finish_reason = if terminal_type == "response.incomplete" {
+                    match response
+                        .pointer("/incomplete_details/reason")
+                        .and_then(|value| value.as_str())
+                    {
+                        Some("content_filter") => FinishReason::ContentFilter,
+                        _ => FinishReason::Length,
+                    }
+                } else {
+                    FinishReason::Stop
+                };
+                self.finish_open_outputs(events, finish_reason);
                 let raw_output = raw_response_output_extensions(response)?;
                 if !raw_output.is_empty() {
                     self.emit(
@@ -260,7 +271,7 @@ impl OpenAiResponsesStreamDecoder {
                         },
                     },
                 );
-                self.finish_open_outputs(events);
+                self.finish_open_outputs(events, FinishReason::Stop);
                 self.emit(events, CanonicalEventKind::Done);
                 self.done = true;
             }
@@ -322,7 +333,11 @@ impl OpenAiResponsesStreamDecoder {
         }
     }
 
-    fn finish_open_outputs(&mut self, events: &mut Vec<CanonicalEvent>) {
+    fn finish_open_outputs(
+        &mut self,
+        events: &mut Vec<CanonicalEvent>,
+        finish_reason: FinishReason,
+    ) {
         let unfinished = self
             .started_outputs
             .difference(&self.finished_outputs)
@@ -334,7 +349,7 @@ impl OpenAiResponsesStreamDecoder {
                 events,
                 CanonicalEventKind::Finish {
                     output_index,
-                    reason: FinishReason::Stop,
+                    reason: finish_reason.clone(),
                 },
             );
         }
