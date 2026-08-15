@@ -207,6 +207,41 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
 }
 
 #[test]
+fn unary_incomplete_response_remains_incomplete_when_streamed_to_the_client() {
+    let response: ResponseObject = serde_json::from_value(json!({
+        "id": "resp_incomplete",
+        "object": "response",
+        "created_at": 1800000000,
+        "status": "incomplete",
+        "model": "gpt-upstream",
+        "output": [{
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "status": "incomplete",
+            "content": [{"type": "output_text", "text": "partial", "annotations": []}]
+        }],
+        "incomplete_details": {"reason": "max_output_tokens"}
+    }))
+    .unwrap();
+    let events = decode_response_object(response).unwrap();
+    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1_800_000_000);
+    let mut frames = Vec::new();
+    for event in events {
+        frames.extend(encoder.push(event).unwrap());
+    }
+
+    let terminal = frames.last().unwrap();
+    assert_eq!(terminal.event.as_deref(), Some("response.incomplete"));
+    let payload: serde_json::Value = serde_json::from_str(&terminal.data).unwrap();
+    assert_eq!(payload["response"]["status"], "incomplete");
+    assert_eq!(
+        payload["response"]["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+}
+
+#[test]
 fn responses_reasoning_output_round_trips_without_becoming_message_content() {
     let response: ResponseObject = serde_json::from_value(json!({
         "id": "resp_reasoning",

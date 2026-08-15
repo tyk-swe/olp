@@ -90,8 +90,12 @@ struct LimitCleanup {
 
 impl LimitCleanup {
     async fn run(self) {
-        let (admission_actual, delta_actual) =
-            split_actual_tokens(self.actual_tokens, self.admission_reserved_tokens);
+        let (admission_actual, delta_actual) = split_actual_tokens(
+            self.actual_tokens,
+            self.admission_reserved_tokens,
+            self.admission_reservation.is_some(),
+            self.delta_lease.is_some(),
+        );
         if let (Some(reservation), Some(actual)) = (self.admission_reservation, admission_actual) {
             reservation.reconcile(actual).await;
         }
@@ -102,16 +106,23 @@ impl LimitCleanup {
 fn split_actual_tokens(
     actual_tokens: Option<i64>,
     admission_reserved_tokens: Option<i64>,
+    has_admission_reservation: bool,
+    has_delta_lease: bool,
 ) -> (Option<i64>, Option<i64>) {
-    let _ = admission_reserved_tokens;
-
-    // Reconcile the full actual usage against the admission lease.
-    // A separately reserved delta lease reconciles to zero. This
-    // remains correct whether or not a delta lease exists and keeps
-    // overage attached to a real, idempotently reconciled lease.
-    match actual_tokens {
-        Some(actual_tokens) => (Some(actual_tokens), Some(0)),
-        None => (None, None),
+    match (
+        actual_tokens,
+        has_admission_reservation,
+        has_delta_lease,
+        admission_reserved_tokens,
+    ) {
+        (Some(actual), true, true, Some(admission_reserved)) => (
+            Some(actual.min(admission_reserved)),
+            Some(actual.saturating_sub(admission_reserved).max(0)),
+        ),
+        (Some(actual), true, true, None) => (Some(actual), Some(0)),
+        (Some(actual), true, false, _) => (Some(actual), None),
+        (Some(actual), false, true, _) => (None, Some(actual)),
+        (Some(_), false, false, _) | (None, _, _, _) => (None, None),
     }
 }
 
@@ -649,15 +660,25 @@ mod tests {
     #[test]
     fn actual_tokens_are_split_across_admission_and_delta_reservations() {
         assert_eq!(
-            split_actual_tokens(Some(40), Some(100)),
+            split_actual_tokens(Some(40), Some(100), true, true),
             (Some(40), Some(0))
         );
         assert_eq!(
-            split_actual_tokens(Some(130), Some(100)),
+            split_actual_tokens(Some(130), Some(100), true, true),
             (Some(100), Some(30))
         );
-        assert_eq!(split_actual_tokens(Some(40), None), (None, Some(40)));
-        assert_eq!(split_actual_tokens(None, Some(100)), (None, None));
+        assert_eq!(
+            split_actual_tokens(Some(40), None, false, true),
+            (None, Some(40))
+        );
+        assert_eq!(
+            split_actual_tokens(Some(130), Some(100), true, false),
+            (Some(130), None)
+        );
+        assert_eq!(
+            split_actual_tokens(None, Some(100), true, true),
+            (None, None)
+        );
     }
 
     #[tokio::test]
@@ -674,6 +695,39 @@ mod tests {
     #[tokio::test]
     async fn cleanup_without_actual_usage_only_releases_both_reservations() {
         assert_cleanup_effects(None, &[], &[]).await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_reconciles_full_usage_against_the_only_existing_reservation() {
+        let admission = Arc::new(CleanupEffects::default());
+        let admission_reservation = InferenceReservation::distributed(recording_lease(&admission));
+        let admission_release = admission_reservation.clone();
+        LimitCleanup {
+            delta_lease: None,
+            admission_reservation: Some(admission_reservation),
+            admission_reserved_tokens: Some(100),
+            actual_tokens: Some(130),
+        }
+        .run()
+        .await;
+        assert_eq!(
+            admission.reconciled_tokens.lock().unwrap().as_slice(),
+            &[130]
+        );
+        admission_release.release().await;
+
+        let delta = Arc::new(CleanupEffects::default());
+        LimitCleanup {
+            delta_lease: Some(DistributedLimitReservation::for_test(recording_lease(
+                &delta,
+            ))),
+            admission_reservation: None,
+            admission_reserved_tokens: None,
+            actual_tokens: Some(40),
+        }
+        .run()
+        .await;
+        assert_eq!(delta.reconciled_tokens.lock().unwrap().as_slice(), &[40]);
     }
 
     #[test]

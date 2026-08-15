@@ -94,10 +94,7 @@ fn recovered_media_spool_bytes(base: &std::path::Path) -> std::io::Result<u64> {
                     pending.push(child.path());
                 } else if metadata.file_type().is_file() {
                     total = total.checked_add(metadata.len()).ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "media spool byte accounting overflow",
-                        )
+                        std::io::Error::other("media spool byte accounting overflow")
                     })?;
                 }
             }
@@ -121,7 +118,7 @@ impl FileMediaSpool {
             ));
         }
         std::fs::create_dir_all(base_dir)?;
-        let recovered_spool_bytes = recovered_media_spool_bytes(base_dir.as_ref())?;
+        let recovered_spool_bytes = recovered_media_spool_bytes(base_dir)?;
         let root = base_dir.join(format!(
             "olp-media-{}-{}",
             std::process::id(),

@@ -151,6 +151,7 @@ impl SseDecoder {
             while self.buffer.len() < UTF8_BOM.len()
                 && !remaining.is_empty()
                 && self.buffer[..] == UTF8_BOM[..self.buffer.len()]
+                && remaining[0] == UTF8_BOM[self.buffer.len()]
             {
                 self.buffer.extend_from_slice(&remaining[..1]);
                 remaining = &remaining[1..];
@@ -158,10 +159,12 @@ impl SseDecoder {
             let prefix_len = self.buffer.len().min(UTF8_BOM.len());
 
             if prefix_len > 0 && self.buffer[..prefix_len] == UTF8_BOM[..prefix_len] {
-                if self.buffer.len() < UTF8_BOM.len() {
+                if self.buffer.len() < UTF8_BOM.len() && remaining.is_empty() {
                     return Ok(Vec::new());
                 }
-                let _ = self.buffer.split_to(UTF8_BOM.len());
+                if self.buffer.len() == UTF8_BOM.len() {
+                    let _ = self.buffer.split_to(UTF8_BOM.len());
+                }
             }
 
             self.bom_checked = true;

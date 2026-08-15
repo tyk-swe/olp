@@ -1,10 +1,11 @@
--- Refund unused tokens from a reservation that still belongs to the active
--- fixed UTC-minute window. Reconciliation is idempotent per lease so callers
--- may safely retry an ambiguous transport failure.
+-- Reconcile actual tokens against a reservation that still belongs to the
+-- active fixed UTC-minute window. Reconciliation is idempotent per lease so
+-- callers may safely retry an ambiguous transport failure.
 -- KEYS: stable rate hash
--- ARGV: reservation window_id, refund_tokens, lease_id
+-- ARGV: reservation window_id, token_adjustment, lease_id
 
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
+local MAX_SAFE_INTEGER = tonumber(MAX_SAFE_INTEGER_TEXT)
 
 local function parse_safe_unsigned_integer(raw)
   if type(raw) ~= "string" or string.match(raw, "^%d+$") == nil then
@@ -66,7 +67,14 @@ local current_tpm = parse_safe_unsigned_integer(redis.call("HGET", KEYS[1], "tpm
 if current_tpm == nil then
   return redis.error_reply("invalid token state")
 end
-local updated = current_tpm + adjustment
+local updated
+if adjustment > 0 and current_tpm > MAX_SAFE_INTEGER - adjustment then
+  -- The configured limit cannot exceed this ceiling, so saturation preserves
+  -- fail-closed enforcement without storing an inexact Lua number.
+  updated = MAX_SAFE_INTEGER
+else
+  updated = current_tpm + adjustment
+end
 if updated < 0 then
   updated = 0
 end

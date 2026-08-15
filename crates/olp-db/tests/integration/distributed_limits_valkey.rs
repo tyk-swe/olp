@@ -662,6 +662,57 @@ async fn counters_retain_exact_behavior_at_lua_safe_maximum() {
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn token_reconciliation_saturates_at_lua_safe_maximum() {
+    let namespace = namespace("reconcile_safe_integer");
+    let lookup_id = "lookup_01";
+    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let mut connection = connection().await;
+    let window = settle_in_minute(&mut connection).await / 60_000;
+    let (rate_key, _) = keys(&namespace, lookup_id);
+    let _: () = redis::pipe()
+        .hset(&rate_key, "window", window)
+        .hset(&rate_key, "rpm", 0)
+        .hset(&rate_key, "tpm", MAX_LUA_INTEGER - 1)
+        .pexpire(&rate_key, 60_000)
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+
+    let final_lease = limiter
+        .reserve(LimitRequest {
+            requests_per_minute: None,
+            tokens_per_minute: Some(MAX_LUA_INTEGER),
+            max_concurrency: None,
+            requested_tokens: 1,
+            ..request(lookup_id)
+        })
+        .await
+        .unwrap();
+
+    limiter.reconcile(&final_lease, 2).await.unwrap();
+    assert_eq!(
+        rate_state(&mut connection, &rate_key).await["tpm"],
+        MAX_LUA_INTEGER
+    );
+    exceeded(
+        limiter
+            .reserve(LimitRequest {
+                requests_per_minute: None,
+                tokens_per_minute: Some(MAX_LUA_INTEGER),
+                max_concurrency: None,
+                requested_tokens: 1,
+                ..request(lookup_id)
+            })
+            .await
+            .unwrap_err(),
+        LimitDimension::Tokens,
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn concurrent_replicas_enforce_one_atomic_limit() {
     for attempt in 0..3 {
         let namespace = namespace(&format!("concurrent_{attempt}"));

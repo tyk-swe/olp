@@ -67,6 +67,35 @@ fn cr_only_line_endings_dispatch_independent_events() {
 }
 
 #[test]
+fn leading_empty_lines_remain_visible_while_probing_for_a_bom() {
+    let expected = vec![SseFrame {
+        data: "x".into(),
+        ..SseFrame::default()
+    }];
+
+    for wire in [
+        b"\ndata: x\n\n".as_slice(),
+        b"\rdata: x\r\r".as_slice(),
+        b"\r\ndata: x\r\n\r\n".as_slice(),
+    ] {
+        assert_eq!(SseDecoder::default().push(wire).unwrap(), expected);
+        assert_eq!(decode_fragmented(wire, &[1], false).unwrap(), expected);
+    }
+}
+
+#[test]
+fn leading_bom_is_ignored_when_fragmented() {
+    let wire = b"\xef\xbb\xbfdata: x\n\n";
+    let expected = vec![SseFrame {
+        data: "x".into(),
+        ..SseFrame::default()
+    }];
+
+    assert_eq!(SseDecoder::default().push(wire).unwrap(), expected);
+    assert_eq!(decode_fragmented(wire, &[1], false).unwrap(), expected);
+}
+
+#[test]
 fn cr_only_event_limit_counts_exact_wire_bytes() {
     const WIRE: &[u8] = b"data: x\r\r";
     let expected = SseFrame {

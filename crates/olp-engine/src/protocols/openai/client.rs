@@ -310,23 +310,18 @@ impl OpenAiResponsesStreamEncoder {
             }
             CanonicalEventKind::Done => {
                 let terminal_reason = self.incomplete_reason.take();
-                let terminal_event_type = if terminal_reason.is_some() {
+                let normalized = self.normalized_events_with(event.clone());
+                let mut response =
+                    encode_response_object(&normalized, &self.client_model, &self.fallback_id)?;
+                if let Some(reason) = terminal_reason {
+                    response.status = "incomplete".to_owned();
+                    response.incomplete_details = Some(serde_json::json!({ "reason": reason }));
+                }
+                let terminal_event_type = if response.status == "incomplete" {
                     "response.incomplete"
                 } else {
                     "response.completed"
                 };
-                let terminal_status = if terminal_reason.is_some() {
-                    "incomplete"
-                } else {
-                    "completed"
-                };
-                let terminal_incomplete_details =
-                    terminal_reason.map(|reason| serde_json::json!({ "reason": reason }));
-                let normalized = self.normalized_events_with(event.clone());
-                let mut response =
-                    encode_response_object(&normalized, &self.client_model, &self.fallback_id)?;
-                response.status = terminal_status.to_owned();
-                response.incomplete_details = terminal_incomplete_details;
                 frames.push(response_sse_frame(
                     terminal_event_type,
                     json!({"response": response}),
