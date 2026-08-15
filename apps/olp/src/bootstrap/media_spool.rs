@@ -73,8 +73,16 @@ fn recovered_media_spool_bytes(base: &std::path::Path) -> std::io::Result<u64> {
     };
 
     for entry in entries {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
         if !file_type.is_dir()
             || !entry
                 .file_name()
@@ -86,9 +94,22 @@ fn recovered_media_spool_bytes(base: &std::path::Path) -> std::io::Result<u64> {
 
         let mut pending = vec![entry.path()];
         while let Some(directory) = pending.pop() {
-            for child in std::fs::read_dir(directory)? {
-                let child = child?;
-                let metadata = child.path().symlink_metadata()?;
+            let children = match std::fs::read_dir(directory) {
+                Ok(children) => children,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            for child in children {
+                let child = match child {
+                    Ok(child) => child,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error),
+                };
+                let metadata = match child.path().symlink_metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error),
+                };
 
                 if metadata.file_type().is_dir() {
                     pending.push(child.path());
@@ -107,10 +128,23 @@ fn recovered_media_spool_bytes(base: &std::path::Path) -> std::io::Result<u64> {
 impl FileMediaSpool {
     #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn create() -> std::io::Result<Arc<Self>> {
-        Self::create_at(&std::env::temp_dir(), DEFAULT_CAPACITY_BYTES)
+        Self::create_fresh_at(&std::env::temp_dir(), DEFAULT_CAPACITY_BYTES)
     }
 
     fn create_at(base_dir: &Path, capacity_bytes: u64) -> std::io::Result<Arc<Self>> {
+        Self::create_at_with_recovery(base_dir, capacity_bytes, true)
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    fn create_fresh_at(base_dir: &Path, capacity_bytes: u64) -> std::io::Result<Arc<Self>> {
+        Self::create_at_with_recovery(base_dir, capacity_bytes, false)
+    }
+
+    fn create_at_with_recovery(
+        base_dir: &Path,
+        capacity_bytes: u64,
+        recover_existing: bool,
+    ) -> std::io::Result<Arc<Self>> {
         if capacity_bytes == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -118,7 +152,11 @@ impl FileMediaSpool {
             ));
         }
         std::fs::create_dir_all(base_dir)?;
-        let recovered_spool_bytes = recovered_media_spool_bytes(base_dir)?;
+        let recovered_spool_bytes = if recover_existing {
+            recovered_media_spool_bytes(base_dir)?
+        } else {
+            0
+        };
         let root = base_dir.join(format!(
             "olp-media-{}-{}",
             std::process::id(),
@@ -645,8 +683,8 @@ mod tests {
 
     #[tokio::test]
     async fn atomically_enforces_capacity_and_releases_it_on_remove() {
-        assert!(FileMediaSpool::create_at(&std::env::temp_dir(), 0).is_err());
-        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        assert!(FileMediaSpool::create_fresh_at(&std::env::temp_dir(), 0).is_err());
+        let spool = FileMediaSpool::create_fresh_at(&std::env::temp_dir(), 4).unwrap();
         let first = spool
             .put(MediaUpload {
                 filename: "first.bin".into(),
@@ -680,9 +718,22 @@ mod tests {
         spool.remove(&second.handle).await.unwrap();
     }
 
+    #[test]
+    fn startup_accounts_for_orphaned_spool_bytes() {
+        let base = tempfile::tempdir().unwrap();
+        let orphaned_root = base.path().join("olp-media-orphaned");
+        create_private_directory(&orphaned_root).unwrap();
+        std::fs::write(orphaned_root.join("artifact"), b"old").unwrap();
+
+        let spool = FileMediaSpool::create_at(base.path(), 4).unwrap();
+        assert_eq!(spool.used_bytes.load(Ordering::Acquire), 3);
+        assert!(spool.try_reserve_capacity(1));
+        assert!(!spool.try_reserve_capacity(1));
+    }
+
     #[tokio::test]
     async fn failed_partial_cleanup_keeps_capacity_until_physical_deletion() {
-        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let spool = FileMediaSpool::create_fresh_at(&std::env::temp_dir(), 4).unwrap();
         let blocked_path = spool.root.join("blocked-partial");
         std::fs::create_dir(&blocked_path).unwrap();
         assert!(spool.try_reserve_capacity(4));
@@ -719,7 +770,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_completed_cleanup_is_owned_by_the_janitor() {
-        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let spool = FileMediaSpool::create_fresh_at(&std::env::temp_dir(), 4).unwrap();
         let artifact = spool
             .put(MediaUpload {
                 filename: "first.bin".into(),
@@ -768,7 +819,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_unlink_completes_bookkeeping_after_physical_deletion() {
-        let spool = FileMediaSpool::create_at(&std::env::temp_dir(), 4).unwrap();
+        let spool = FileMediaSpool::create_fresh_at(&std::env::temp_dir(), 4).unwrap();
         let artifact = spool
             .put(MediaUpload {
                 filename: "first.bin".into(),

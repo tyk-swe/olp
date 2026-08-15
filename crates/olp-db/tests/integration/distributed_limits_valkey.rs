@@ -368,7 +368,7 @@ async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
-async fn token_reconciliation_refunds_only_unused_reservation() {
+async fn token_reconciliation_matches_actual_usage_and_is_idempotent() {
     let namespace = namespace("token_refund");
     let lookup_id = "lookup_01";
     let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
@@ -405,9 +405,10 @@ async fn token_reconciliation_refunds_only_unused_reservation() {
         .await
         .unwrap();
     limiter.reconcile(&lease, 7).await.unwrap();
+    limiter.reconcile(&lease, 7).await.unwrap();
     let state = rate_state(&mut connection, &rate_key).await;
     assert_eq!(state["rpm"], 2);
-    assert_eq!(state["tpm"], 7);
+    assert_eq!(state["tpm"], 10);
 }
 
 #[tokio::test]
