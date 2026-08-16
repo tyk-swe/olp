@@ -8,21 +8,28 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    configuration::ApiKeyRecord, configuration::RotateApiKeyInput,
-    idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
+    configuration::resources::ApiKeyRecord, configuration::resources::RotateApiKeyInput,
+    idempotency::Replayable, idempotency::fingerprint,
 };
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        PageQuery, Permission, RuntimeGenerationResponse, WriteOnlySecret,
-        idempotency_http_response, if_match, json_payload, map_configuration, page,
-        require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        error_mapping::map_configuration,
+        idempotency::{idempotency_http_response, require_idempotency_key},
+        json_payload::json_payload,
+        pagination::{PageQuery, page},
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        response_policy::RuntimeGenerationResponse,
+        secrets::WriteOnlySecret,
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
@@ -237,11 +244,11 @@ pub(crate) async fn rotate_api_key(
     require_permission(&principal, Permission::ManageApiKeys)?;
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
-    let request_fingerprint = idempotency_fingerprint(&RotateApiKeyFingerprint {
+    let request_fingerprint = fingerprint(&RotateApiKeyFingerprint {
         api_key_id,
         expected_etag,
     })
-    .map_err(crate::management::map_persistence)?;
+    .map_err(crate::management::error_mapping::map_persistence)?;
     let master_key = state
         .master_key
         .as_deref()
@@ -259,9 +266,9 @@ pub(crate) async fn rotate_api_key(
                 actor: principal.user_id,
                 idempotency_key: &idempotency_key,
             },
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             move |result| {
-                olp_db::idempotency::IdempotencyResponse::json(
+                olp_db::idempotency::Response::json(
                     StatusCode::OK.as_u16(),
                     &RotateApiKeyResponse {
                         id: result.id,

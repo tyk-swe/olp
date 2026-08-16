@@ -7,18 +7,26 @@ use aws_smithy_types::event_stream::{Header, HeaderValue, Message as EventMessag
 use bytes::Bytes;
 use futures::StreamExt as _;
 use olp_engine::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaArtifact, MediaHandle,
-    MediaSource, MediaSpool, MediaSpoolError, MediaUpload, Message, MessageRole, OpenedMedia,
-    Operation, OperationKind, ProviderId, ProviderKind, ProviderOutput, ProviderRequest,
-    ProviderTransport, RequestId, RequestMetadata, ResponseFormat, RouteId, RouteSlug,
-    RuntimeGenerationId, SourceExtensions, Surface, TargetId, ToolChoice, ToolDefinition,
-    TranscriptionRequest, TransportError, TransportMode, TransportPhase, Usage,
-    validate_event_sequence,
+    canonical::{
+        events::{Event, Kind, Usage, validate_event_sequence},
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, MediaHandle, MediaSource,
+            Message, MessageRole, Operation, ResponseFormat, SourceExtensions, ToolChoice,
+            ToolDefinition, TranscriptionRequest,
+        },
+        results::{CanonicalResult, MediaArtifact},
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{
+        AttemptFailureClass, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia, ProviderOutput,
+        ProviderRequest, ProviderTransport, TransportError, TransportPhase,
+    },
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use olp_engine::protocols::sse::DEFAULT_MAX_EVENT_BYTES;
 use olp_engine::providers::{
-    CompatibleCapability,
+    openai::certification::CompatibleCapability,
     test_support::{API_KEY, BEDROCK_ACCESS_KEY, BEDROCK_SECRET_KEY, VERTEX_TOKEN, local_provider},
 };
 use serde_json::{Value, json};
@@ -195,14 +203,14 @@ impl MediaSpool for InlineMediaSpool {
     fn put<'a>(
         &'a self,
         _upload: MediaUpload,
-    ) -> olp_engine::domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+    ) -> olp_engine::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> olp_engine::domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+    ) -> olp_engine::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         let handle = handle.clone();
         let filename = self.filename;
         let content_type = self.content_type;
@@ -225,7 +233,7 @@ impl MediaSpool for InlineMediaSpool {
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> olp_engine::domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
+    ) -> olp_engine::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::Unavailable) })
     }
 }
@@ -282,7 +290,7 @@ fn generation_request(
         route: RouteSlug::parse("conformance").unwrap(),
         messages: vec![Message {
             role: MessageRole::User,
-            content: vec![olp_engine::domain::ContentPart::Text {
+            content: vec![olp_engine::domain::canonical::requests::ContentPart::Text {
                 text: "say hello".to_owned(),
             }],
             name: None,
@@ -331,7 +339,7 @@ fn provider_request(
     }
 }
 
-async fn collect_events(output: ProviderOutput) -> Result<Vec<CanonicalEvent>, TransportError> {
+async fn collect_events(output: ProviderOutput) -> Result<Vec<Event>, TransportError> {
     let ProviderOutput::Events(mut stream) = output else {
         panic!("expected canonical event stream");
     };
@@ -632,7 +640,7 @@ async fn all_connectors_execute_unary_generation_with_reviewed_endpoint_and_auth
         assert!(
             events.iter().any(|event| matches!(
                 &event.kind,
-                CanonicalEventKind::TextDelta { text, .. } if text == "hello back"
+                Kind::TextDelta { text, .. } if text == "hello back"
             )),
             "{kind:?}"
         );
@@ -652,11 +660,11 @@ async fn all_connectors_execute_unary_generation_with_reviewed_endpoint_and_auth
     }
 }
 
-fn assert_usage(kind: ProviderKind, events: &[CanonicalEvent]) {
+fn assert_usage(kind: ProviderKind, events: &[Event]) {
     use matrix::{Disposition, row_for};
 
     let usage = events.iter().find_map(|event| match event.kind {
-        CanonicalEventKind::Usage { usage } => Some(usage),
+        Kind::Usage { usage } => Some(usage),
         _ => None,
     });
     let cached_input_tokens = match row_for(kind).cached_usage {
@@ -676,11 +684,11 @@ fn assert_usage(kind: ProviderKind, events: &[CanonicalEvent]) {
     );
 }
 
-fn assert_response_id(kind: ProviderKind, events: &[CanonicalEvent]) {
+fn assert_response_id(kind: ProviderKind, events: &[Event]) {
     use matrix::{Disposition, row_for};
 
     let id = events.iter().find_map(|event| match &event.kind {
-        CanonicalEventKind::ResponseStart { response_id, .. } => response_id.as_deref(),
+        Kind::ResponseStart { response_id, .. } => response_id.as_deref(),
         _ => None,
     });
     assert_eq!(
@@ -778,16 +786,13 @@ async fn all_connectors_stream_valid_terminal_sequences_and_usage() {
         .unwrap();
         validate_event_sequence(&events).unwrap();
         assert!(
-            matches!(
-                events.last().map(|event| &event.kind),
-                Some(CanonicalEventKind::Done)
-            ),
+            matches!(events.last().map(|event| &event.kind), Some(Kind::Done)),
             "{kind:?}"
         );
         assert!(
             events.iter().any(|event| matches!(
                 &event.kind,
-                CanonicalEventKind::TextDelta { text, .. } if text == "hello back"
+                Kind::TextDelta { text, .. } if text == "hello back"
             )),
             "{kind:?}"
         );
@@ -901,7 +906,7 @@ async fn all_connectors_round_trip_advertised_tools() {
         assert!(
             events.iter().any(|event| matches!(
                 &event.kind,
-                CanonicalEventKind::ToolCallDelta {
+                Kind::ToolCallDelta {
                     name: Some(name),
                     arguments_delta,
                     ..
@@ -913,7 +918,7 @@ async fn all_connectors_round_trip_advertised_tools() {
             assert!(
                 events.iter().any(|event| matches!(
                     &event.kind,
-                    CanonicalEventKind::ToolCallDelta { id: Some(id), .. } if id == "call-1"
+                    Kind::ToolCallDelta { id: Some(id), .. } if id == "call-1"
                 )),
                 "{kind:?}: provider tool ID"
             );

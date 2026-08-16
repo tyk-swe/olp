@@ -1,8 +1,8 @@
 use sqlx::{Postgres, Transaction};
 
-use crate::PgStore;
+use crate::store::Store;
 
-use super::IdentityError;
+use super::Error;
 
 const LOCAL_LOGIN_SOURCE_ATTEMPTS_PER_MINUTE: i32 = 60;
 const INVITATION_SOURCE_ATTEMPTS_PER_MINUTE: i32 = 30;
@@ -11,7 +11,7 @@ const SOURCE_TARGET_ATTEMPTS_PER_MINUTE: i32 = 5;
 const PUBLIC_AUTH_RESOURCE_ATTEMPTS_PER_MINUTE: i32 = 10_000;
 const PUBLIC_AUTH_DELETE_BATCH: i64 = 1_000;
 
-impl PgStore {
+impl Store {
     /// Atomically admits an unauthenticated local-login attempt across every
     /// control-plane replica. The caller supplies domain-separated, keyed
     /// digests for the client source and source-plus-submitted-email pair.
@@ -19,7 +19,7 @@ impl PgStore {
         &self,
         source_digest: [u8; 32],
         source_target_digest: [u8; 32],
-    ) -> Result<bool, IdentityError> {
+    ) -> Result<bool, Error> {
         self.admit_public_auth_attempt(
             "local_login",
             source_digest,
@@ -37,7 +37,7 @@ impl PgStore {
         &self,
         source_digest: [u8; 32],
         source_target_digest: [u8; 32],
-    ) -> Result<bool, IdentityError> {
+    ) -> Result<bool, Error> {
         self.admit_public_auth_attempt(
             "invitation_acceptance",
             source_digest,
@@ -49,10 +49,7 @@ impl PgStore {
 
     /// Admits an unauthenticated OIDC login initiation. Login starts need a
     /// source-only budget because no password or invitation target is present.
-    pub async fn admit_oidc_login_attempt(
-        &self,
-        source_digest: [u8; 32],
-    ) -> Result<bool, IdentityError> {
+    pub async fn admit_oidc_login_attempt(&self, source_digest: [u8; 32]) -> Result<bool, Error> {
         self.admit_public_auth_attempt(
             "oidc_login",
             source_digest,
@@ -68,7 +65,7 @@ impl PgStore {
         source_digest: [u8; 32],
         source_target_digest: Option<[u8; 32]>,
         source_limit: i32,
-    ) -> Result<bool, IdentityError> {
+    ) -> Result<bool, Error> {
         let mut transaction = self.pool().begin().await?;
         // This high ceiling is resource admission, not a user-facing policy.
         // It bounds attacker-controlled source rows before they are inserted.

@@ -14,27 +14,31 @@ use std::{
     time::Instant,
 };
 
-use olp_db::{PgStore, security::AuthHmacKey, security::MasterKey};
-use olp_engine::domain::{MediaSpool, ProviderKind};
+use olp_db::{security::envelope::MasterKey, security::key_material::AuthHmacKey, store::Store};
+use olp_engine::domain::{ports::MediaSpool, routing::provider::ProviderKind};
 use olp_engine::inference::{
-    InferenceService, limits::ReloadableLimiter, request_metadata::RequestMetadataEmitter,
-    runtime::RuntimeManager,
+    limits::ReloadableLimiter, request_metadata::Emitter, runtime::Manager, service::Service,
 };
 use thiserror::Error;
 
 use crate::{
-    ApiMode, HealthResponse, Problem, ProcessComposition, PublicOrigin, TransportRegistry,
-    TrustedProxyCidr,
+    bootstrap::state::ApiMode,
+    bootstrap::state::ProcessComposition,
+    bootstrap::state::TransportRegistry,
+    observability::HealthResponse,
     observability::{ObservabilityCache, cached_readiness_from_snapshot},
-    public_http::request_admission::{MultipartAdmissionState, PublicAdmission},
+    public_http::problem::Problem,
+    public_http::proxy::TrustedProxyCidr,
+    public_http::public_origin::PublicOrigin,
+    public_http::request_admission::{multipart::MultipartAdmissionState, public::PublicAdmission},
 };
 
 /// Dependencies used before a request reaches either product surface.
 /// Control-only mode owns this boundary without acquiring gateway handlers.
 #[derive(Clone)]
 pub(crate) struct RequestBoundaryState {
-    pub(crate) store: PgStore,
-    pub(crate) inference: Arc<InferenceService>,
+    pub(crate) store: Store,
+    pub(crate) inference: Arc<Service>,
     pub(crate) auth_hmac_key: Arc<AuthHmacKey>,
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: PublicAdmission,
@@ -45,7 +49,7 @@ pub(crate) struct RequestBoundaryState {
 
 impl RequestBoundaryState {
     #[must_use]
-    pub(crate) const fn store(&self) -> &PgStore {
+    pub(crate) const fn store(&self) -> &Store {
         &self.store
     }
 
@@ -87,8 +91,8 @@ impl GatewayState {
     #[cfg(test)]
     pub(crate) fn new(
         mode: ApiMode,
-        store: Option<PgStore>,
-        runtime: Arc<RuntimeManager>,
+        store: Option<Store>,
+        runtime: Arc<Manager>,
         public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
     ) -> Self {
@@ -106,18 +110,18 @@ impl GatewayState {
     }
 
     #[must_use]
-    pub fn store(&self) -> &PgStore {
+    pub fn store(&self) -> &Store {
         &self.request_boundary.store
     }
 
     #[must_use]
     #[cfg(any(test, feature = "test-util"))]
-    pub fn runtime(&self) -> &RuntimeManager {
+    pub fn runtime(&self) -> &Manager {
         self.inference().runtime()
     }
 
     #[must_use]
-    pub(crate) fn inference(&self) -> &InferenceService {
+    pub(crate) fn inference(&self) -> &Service {
         &self.request_boundary.inference
     }
 
@@ -128,7 +132,7 @@ impl GatewayState {
     }
 
     #[must_use]
-    pub(crate) fn circuits(&self) -> &olp_engine::inference::circuit::CircuitBreaker {
+    pub(crate) fn circuits(&self) -> &olp_engine::inference::circuit::Breaker {
         self.inference().circuits()
     }
 
@@ -168,7 +172,7 @@ impl GatewayState {
     }
 
     #[cfg(test)]
-    pub(crate) fn replace_request_metadata_for_test(&mut self, emitter: RequestMetadataEmitter) {
+    pub(crate) fn replace_request_metadata_for_test(&mut self, emitter: Emitter) {
         Arc::make_mut(&mut self.request_boundary.inference).replace_request_metadata(Some(emitter));
     }
 
@@ -190,7 +194,7 @@ pub struct ManagementState {
     request_boundary: RequestBoundaryState,
     pub(crate) transports: TransportRegistry,
     pub(crate) master_key: Option<Arc<MasterKey>>,
-    certification_probe_connectors: olp_engine::providers::OpenAiConnectorOverrideRegistry,
+    certification_probe_connectors: olp_engine::providers::factory::overrides::Registry,
     pub(crate) public_origin: PublicOrigin,
     pub(crate) console_dir: Arc<PathBuf>,
     pub(crate) session_ttl: chrono::Duration,
@@ -203,8 +207,8 @@ impl ManagementState {
     #[cfg(test)]
     pub(crate) fn new(
         mode: ApiMode,
-        store: Option<PgStore>,
-        runtime: Arc<RuntimeManager>,
+        store: Option<Store>,
+        runtime: Arc<Manager>,
         public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
     ) -> Self {
@@ -222,12 +226,12 @@ impl ManagementState {
     }
 
     #[must_use]
-    pub fn store(&self) -> &PgStore {
+    pub fn store(&self) -> &Store {
         &self.request_boundary.store
     }
 
     #[must_use]
-    pub(crate) fn inference(&self) -> &InferenceService {
+    pub(crate) fn inference(&self) -> &Service {
         &self.request_boundary.inference
     }
 
@@ -249,7 +253,7 @@ impl ManagementState {
         &self,
         provider_id: uuid::Uuid,
         kind: ProviderKind,
-    ) -> Option<olp_engine::providers::ProviderFacade> {
+    ) -> Option<olp_engine::providers::factory::assembly::Facade> {
         self.certification_probe_connectors.get(provider_id, kind)
     }
 
@@ -262,8 +266,8 @@ impl ManagementState {
 /// State installed only on the separately bound private listener.
 #[derive(Clone)]
 pub struct ObservabilityState {
-    store: PgStore,
-    inference: Arc<InferenceService>,
+    store: Store,
+    inference: Arc<Service>,
     pub(crate) public_admission: PublicAdmission,
     media_reconciliation_gaps: Arc<AtomicU64>,
     pub(crate) mode: ApiMode,
@@ -272,12 +276,12 @@ pub struct ObservabilityState {
 
 impl ObservabilityState {
     #[must_use]
-    pub(crate) const fn store(&self) -> &PgStore {
+    pub(crate) const fn store(&self) -> &Store {
         &self.store
     }
 
     #[must_use]
-    pub(crate) fn runtime(&self) -> &RuntimeManager {
+    pub(crate) fn runtime(&self) -> &Manager {
         self.inference.runtime()
     }
 
@@ -287,12 +291,12 @@ impl ObservabilityState {
     }
 
     #[must_use]
-    pub(crate) fn circuits(&self) -> &olp_engine::inference::circuit::CircuitBreaker {
+    pub(crate) fn circuits(&self) -> &olp_engine::inference::circuit::Breaker {
         self.inference.circuits()
     }
 
     #[must_use]
-    pub(crate) fn request_metadata(&self) -> Option<&RequestMetadataEmitter> {
+    pub(crate) fn request_metadata(&self) -> Option<&Emitter> {
         self.inference.request_metadata()
     }
 
@@ -381,7 +385,7 @@ impl ProcessComposition {
             .auth_hmac_key
             .clone()
             .ok_or(ModeDependencyError::MissingAuthHmacKey(self.mode))?;
-        let inference = Arc::new(InferenceService::new(
+        let inference = Arc::new(Service::new(
             Arc::clone(&self.runtime),
             self.limiter.clone(),
             self.request_metadata.clone(),
@@ -489,9 +493,9 @@ fn test_dependencies(state: &ProcessComposition) -> ModeDependencies {
 }
 
 #[cfg(test)]
-fn test_store() -> PgStore {
+fn test_store() -> Store {
     static TEST_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-    static TEST_STORE: std::sync::OnceLock<PgStore> = std::sync::OnceLock::new();
+    static TEST_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
 
     TEST_STORE
         .get_or_init(|| {
@@ -508,7 +512,7 @@ fn test_store() -> PgStore {
                 .acquire_timeout(std::time::Duration::from_millis(10))
                 .connect_lazy("postgres://olp:olp@127.0.0.1/olp")
                 .expect("test PostgreSQL URL is valid");
-            PgStore::from_pool(pool)
+            Store::from_pool(pool)
         })
         .clone()
 }
@@ -524,7 +528,7 @@ mod tests {
         let mut state = ProcessComposition::new(
             mode,
             store,
-            Arc::new(RuntimeManager::empty()),
+            Arc::new(Manager::empty()),
             "https://olp.example.test",
             PathBuf::from("missing-console"),
         );

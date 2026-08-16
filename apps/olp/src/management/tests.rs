@@ -6,19 +6,21 @@ use axum::{
 };
 use chrono::Utc;
 use olp_db::{
-    authentication::SessionPrincipal, configuration::ConfigurationError,
-    idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse, security::SessionMaterial,
+    authentication::SessionPrincipal, configuration::Error, idempotency::Outcome,
+    idempotency::Response, security::session_material::SessionMaterial,
 };
 use olp_engine::domain::{
-    Permission, ProviderAuthMode, ProviderConfiguration, ProviderKind, Role,
-    validate_provider_configuration,
+    auth::{Permission, Role},
+    provider::ProviderAuthMode,
+    provider_configuration::{Configuration, validate},
+    routing::provider::ProviderKind,
 };
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::Manager;
 use utoipa::OpenApi;
 use uuid::Uuid;
 
 use super::{
-    ManagementApiDoc,
+    ApiDoc,
     access::invitations::{
         AcceptInvitationRequest, INVALID_INVITATION_RATE_LIMIT_TARGET, invitation_rate_limit_target,
     },
@@ -33,20 +35,20 @@ use super::{
     cookies::append_session_cookies,
     error_mapping::map_configuration,
     idempotency::{idempotency_http_response, require_idempotency_key},
-    management_openapi,
+    openapi::document,
     permissions::require_permission,
     preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
     sessions::{enforce_origin, session_cookie},
 };
-use crate::ManagementState;
+use crate::bootstrap::mode_dependencies::ManagementState;
 
 fn state() -> ManagementState {
     ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("console"),
     )
@@ -152,7 +154,7 @@ fn native_provider_create_shape_rejects_custom_and_cloud_fields() {
         model: None,
         display_name: None,
     };
-    let errors = validate_provider_configuration(ProviderConfiguration {
+    let errors = validate(Configuration {
         kind: request.kind,
         auth_mode: request.auth_mode.unwrap(),
         endpoint: request.endpoint.as_deref(),
@@ -383,7 +385,7 @@ fn if_match_requires_one_strong_quoted_uuid_etag() {
 
 #[test]
 fn create_draft_openapi_contract_requires_idempotency_and_documents_conflict() {
-    let document = management_openapi();
+    let document = document();
     for path in ["/api/v1/providers", "/api/v1/route-drafts"] {
         let post = &document["paths"][path]["post"];
         let parameters = post["parameters"].as_array().unwrap();
@@ -398,7 +400,7 @@ fn create_draft_openapi_contract_requires_idempotency_and_documents_conflict() {
 
 #[test]
 fn openapi_document_includes_its_public_serving_endpoint() {
-    let document = management_openapi();
+    let document = document();
     let get = &document["paths"]["/api/v1/openapi.json"]["get"];
     assert!(
         get["responses"]["200"]["content"]["application/json"]["schema"].is_object(),
@@ -409,7 +411,7 @@ fn openapi_document_includes_its_public_serving_endpoint() {
 
 #[test]
 fn idempotency_reuse_is_an_rfc9457_conflict() {
-    let response = map_configuration(ConfigurationError::IdempotencyConflict).into_response();
+    let response = map_configuration(Error::IdempotencyConflict).into_response();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -419,8 +421,8 @@ fn idempotency_reuse_is_an_rfc9457_conflict() {
 
 #[test]
 fn replayable_responses_are_never_cacheable() {
-    let response = idempotency_http_response(IdempotencyOutcome::<()>::Replayed(
-        IdempotencyResponse::new(
+    let response = idempotency_http_response(Outcome::<()>::Replayed(
+        Response::new(
             StatusCode::CREATED.as_u16(),
             Some("application/json".to_owned()),
             None,
@@ -453,7 +455,7 @@ fn route_guard_delegates_every_role_permission_pair_to_core() {
 
 #[test]
 fn identity_and_setup_contracts_use_current_names() {
-    let document = serde_json::to_value(ManagementApiDoc::openapi()).unwrap();
+    let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
     let setup = &document["components"]["schemas"]["SetupRequest"]["properties"];
     assert!(setup.get("installation_name").is_some());
     assert!(setup.get("organization_name").is_none());

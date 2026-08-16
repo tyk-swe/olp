@@ -1,33 +1,33 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Surface, Usage,
+use crate::domain::canonical::{
+    events::{Event, FinishReason, Kind, Usage},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde_json::Value;
 
 use super::super::dto::{Candidate, GenerateContentResponse, Part, UsageMetadata};
 use super::errors::ResponseError;
-use super::extensions::collect_extra;
 use crate::protocols::CanonicalEventBuilder as EventBuilder;
+use crate::protocols::extensions::collect_extra;
 
-pub fn decode_generate_content_response(
-    response: GenerateContentResponse,
-) -> Result<Vec<CanonicalEvent>, ResponseError> {
+pub fn decode(response: GenerateContentResponse) -> Result<Vec<Event>, ResponseError> {
     decode_response(response, true)
 }
 
 pub(in crate::protocols) fn decode_generate_content_chunk(
     response: GenerateContentResponse,
-) -> Result<Vec<CanonicalEvent>, ResponseError> {
+) -> Result<Vec<Event>, ResponseError> {
     decode_response(response, false)
 }
 
 fn decode_response(
     response: GenerateContentResponse,
     require_finish: bool,
-) -> Result<Vec<CanonicalEvent>, ResponseError> {
+) -> Result<Vec<Event>, ResponseError> {
     let mut builder = EventBuilder::default();
-    builder.push(CanonicalEventKind::ResponseStart {
+    builder.push(Kind::ResponseStart {
         response_id: response.response_id,
         provider_model: response.model_version,
     });
@@ -65,22 +65,22 @@ fn decode_response(
     }
     if let Some(usage) = response.usage_metadata {
         collect_extra("/usageMetadata", &usage.extra, &mut extensions);
-        builder.push(CanonicalEventKind::Usage {
+        builder.push(Kind::Usage {
             usage: canonical_usage(&usage),
         });
     }
     if !extensions.is_empty() {
-        builder.push(CanonicalEventKind::SourceExtension {
+        builder.push(Kind::SourceExtension {
             extensions: SourceExtensions::new(Surface::Gemini, extensions),
         });
     }
     if prompt_blocked {
-        builder.push(CanonicalEventKind::Finish {
+        builder.push(Kind::Finish {
             output_index: 0,
             reason: FinishReason::ContentFilter,
         });
     }
-    builder.push(CanonicalEventKind::Done);
+    builder.push(Kind::Done);
     Ok(builder.events)
 }
 
@@ -97,7 +97,7 @@ fn decode_candidate(
     );
     let prefix = format!("/candidates/{output_index}");
     collect_extra(&prefix, &candidate.extra, extensions);
-    builder.push(CanonicalEventKind::MessageStart {
+    builder.push(Kind::MessageStart {
         output_index,
         role: MessageRole::Assistant,
     });
@@ -125,7 +125,7 @@ fn decode_candidate(
                             Value::Bool(thought),
                         );
                     }
-                    builder.push(CanonicalEventKind::TextDelta {
+                    builder.push(Kind::TextDelta {
                         output_index,
                         text: part.text,
                     });
@@ -141,7 +141,7 @@ fn decode_candidate(
                         &part.function_call.extra,
                         extensions,
                     );
-                    builder.push(CanonicalEventKind::ToolCallDelta {
+                    builder.push(Kind::ToolCallDelta {
                         output_index,
                         tool_index,
                         id: part.function_call.id,
@@ -168,7 +168,7 @@ fn decode_candidate(
         if !matches!(reason.as_str(), "STOP" | "MAX_TOKENS") {
             extensions.insert(format!("{prefix}/finishReason"), Value::String(reason));
         }
-        builder.push(CanonicalEventKind::Finish {
+        builder.push(Kind::Finish {
             output_index,
             reason: canonical,
         });

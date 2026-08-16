@@ -1,23 +1,27 @@
 use std::sync::Arc;
 
-use crate::domain::{ApiKey, ApiKeyLookupId, GatewayCapability, Surface};
+use crate::domain::{
+    auth::{ApiKey, GatewayCapability},
+    canonical::identity::Surface,
+    ids::ApiKeyLookupId,
+};
 
-use crate::inference::runtime::RuntimeBundle;
+use crate::inference::runtime::Bundle;
 
 /// Authenticated API-key identity pinned to the runtime generation that
 /// performed credential verification.
 #[derive(Clone)]
-pub struct InferencePrincipal {
-    runtime: Arc<RuntimeBundle>,
+pub struct Principal {
+    runtime: Arc<Bundle>,
     lookup_id: ApiKeyLookupId,
     surface: Surface,
     gateway_capability: Option<GatewayCapability>,
 }
 
-impl InferencePrincipal {
+impl Principal {
     #[must_use]
     pub fn new(
-        runtime: Arc<RuntimeBundle>,
+        runtime: Arc<Bundle>,
         lookup_id: ApiKeyLookupId,
         surface: Surface,
         gateway_capability: Option<GatewayCapability>,
@@ -31,7 +35,7 @@ impl InferencePrincipal {
     }
 
     #[must_use]
-    pub fn runtime(&self) -> &Arc<RuntimeBundle> {
+    pub fn runtime(&self) -> &Arc<Bundle> {
         &self.runtime
     }
 

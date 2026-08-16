@@ -15,7 +15,7 @@ use std::{convert::Infallible, sync::LazyLock};
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
 use libfuzzer_sys::fuzz_target;
-use olp_engine::domain::{MediaSpoolError, MediaUpload};
+use olp_engine::domain::ports::{MediaSpoolError, MediaUpload};
 
 const MAXIMUM_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -26,7 +26,7 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 });
 
 async fn drive(payload: Vec<u8>) {
-    let Ok(spool) = olp::test_support::create_bounded_media_spool_for_test() else {
+    let Ok(spool) = olp::bootstrap::media_spool::create_bounded_for_test() else {
         return;
     };
     let source = stream::once(async move { Ok::<Bytes, Infallible>(Bytes::from(payload)) });

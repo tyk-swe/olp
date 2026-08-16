@@ -2,7 +2,7 @@ use super::query_contracts::QueryFixture;
 use super::*;
 
 pub(super) async fn exercise(
-    store: &PgStore,
+    store: &Store,
     provider_id: Uuid,
     api_key_id: Uuid,
     generation_id: Uuid,
@@ -19,7 +19,7 @@ pub(super) async fn exercise(
         .unwrap();
     let archived_request_id = Uuid::now_v7();
     store
-        .persist_request_metadata_event(&RequestMetadataEvent {
+        .persist_request_metadata_event(&Event {
             event_id: Uuid::now_v7(),
             request_id: archived_request_id,
             runtime_generation_id: generation_id,
@@ -260,7 +260,7 @@ pub(super) async fn exercise(
         .unwrap()
         .with_nanosecond(0)
         .unwrap();
-    let archived_filters = UsageFilters {
+    let archived_filters = Filters {
         observed_after: archived_bucket,
         observed_before: archived_bucket + Duration::hours(1),
         route_slug: None,
@@ -320,12 +320,12 @@ pub(super) async fn exercise(
     .unwrap();
     assert_eq!(retained_old_epochs, 0);
     let archived_by_key = store
-        .usage_breakdown(&archived_filters, UsageDimension::ApiKey, 50)
+        .usage_breakdown(&archived_filters, Dimension::ApiKey, 50)
         .await
         .unwrap();
     assert_eq!(archived_by_key.items[0].dimension, api_key_id.to_string());
 
-    let partial_archived_filters = UsageFilters {
+    let partial_archived_filters = Filters {
         observed_after: archived_bucket + Duration::minutes(15),
         observed_before: archived_bucket + Duration::minutes(45),
         route_slug: Some("default".to_owned()),
@@ -354,7 +354,7 @@ pub(super) async fn exercise(
     // aggregate instead of replacing the hour with only the late row. An
     // exact redelivery after that rollup must remain a no-op.
     let late_request_id = Uuid::now_v7();
-    let late_event = RequestMetadataEvent {
+    let late_event = Event {
         event_id: Uuid::now_v7(),
         request_id: late_request_id,
         runtime_generation_id: generation_id,
@@ -488,13 +488,13 @@ pub(super) async fn exercise(
         store
             .persist_request_metadata_event(&conflicting_late_event)
             .await,
-        Err(olp_db::PersistenceError::InvalidRequestMetadataEvent)
+        Err(olp_db::error::Error::InvalidRequestMetadataEvent)
     ));
 
     let media_request_id = Uuid::now_v7();
     let media_started_at = fixture.observed_at + Duration::minutes(1);
     store
-        .persist_request_metadata_event(&RequestMetadataEvent {
+        .persist_request_metadata_event(&Event {
             event_id: Uuid::now_v7(),
             request_id: media_request_id,
             runtime_generation_id: generation_id,
@@ -566,14 +566,14 @@ pub(super) async fn exercise(
             .persist_request_metadata_event(&outside_window_event)
             .await
             .unwrap(),
-        RequestMetadataPersistenceOutcome::RejectedOutsideReplayWindow
+        IngestionOutcome::RejectedOutsideReplayWindow
     );
     assert_eq!(
         store
             .persist_request_metadata_event(&outside_window_event)
             .await
             .unwrap(),
-        RequestMetadataPersistenceOutcome::Duplicate
+        IngestionOutcome::Duplicate
     );
     let application_gap: (i64, i64, String) = sqlx::query_as(
         "SELECT count(*), sum(event_count)::bigint, min(certainty::text) \
@@ -620,7 +620,7 @@ pub(super) async fn exercise(
     assert_eq!(outside_window_gaps, 1);
 
     let poison_detected_at = Utc::now();
-    let poison_gap = || RequestMetadataGap {
+    let poison_gap = || Gap {
         gateway_instance: "request-metadata-consumer".to_owned(),
         event_count: 1,
         reason: "invalid_request_metadata_event".to_owned(),

@@ -7,16 +7,15 @@
 //! connector performs no hidden retries.
 
 mod endpoint;
-mod transport;
+pub mod transport;
 
 use std::fmt;
 
-pub use endpoint::EndpointError;
-pub use transport::{AnthropicConnector, validate_operation};
+use crate::providers::endpoint::Error;
 use zeroize::Zeroizing;
 
-pub use crate::providers::ConnectorTimeouts;
 use crate::providers::anthropic::endpoint::Endpoint;
+use crate::providers::connector::Timeouts;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -26,7 +25,7 @@ pub const DEFAULT_API_VERSION: &str = "2023-06-01";
 pub struct ConnectorConfig {
     endpoint: Endpoint,
     api_version: String,
-    timeouts: ConnectorTimeouts,
+    timeouts: Timeouts,
     max_response_bytes: usize,
     max_event_bytes: usize,
 }
@@ -36,7 +35,7 @@ impl Default for ConnectorConfig {
         Self {
             endpoint: Endpoint::default(),
             api_version: DEFAULT_API_VERSION.to_owned(),
-            timeouts: ConnectorTimeouts::default(),
+            timeouts: Timeouts::default(),
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
         }
@@ -63,10 +62,7 @@ impl ConnectorConfig {
         Ok(self)
     }
 
-    pub fn with_timeouts(
-        mut self,
-        timeouts: ConnectorTimeouts,
-    ) -> Result<Self, ConnectorBuildError> {
+    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Result<Self, ConnectorBuildError> {
         self.timeouts = timeouts
             .validate()
             .map_err(ConnectorBuildError::ZeroTimeout)?;
@@ -87,10 +83,7 @@ impl ConnectorConfig {
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub(in crate::providers) fn for_local_test(
-        base_url: &str,
-        timeouts: ConnectorTimeouts,
-    ) -> Self {
+    pub(in crate::providers) fn for_local_test(base_url: &str, timeouts: Timeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
         endpoint.set_connect_timeout(timeouts.connect);
         Self {
@@ -101,9 +94,9 @@ impl ConnectorConfig {
     }
 }
 
-pub struct AnthropicApiKey(Zeroizing<String>);
+pub struct ApiKey(Zeroizing<String>);
 
-impl AnthropicApiKey {
+impl ApiKey {
     pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
         crate::providers::connector::visible_secret(
             value,
@@ -118,16 +111,16 @@ impl AnthropicApiKey {
     }
 }
 
-impl fmt::Debug for AnthropicApiKey {
+impl fmt::Debug for ApiKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("AnthropicApiKey([REDACTED])")
+        formatter.write_str("ApiKey([REDACTED])")
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorBuildError {
     #[error(transparent)]
-    Endpoint(#[from] EndpointError),
+    Endpoint(#[from] Error),
     #[error("Anthropic API key cannot be empty")]
     EmptyApiKey,
     #[error("Anthropic API key must contain visible ASCII characters only")]
@@ -148,12 +141,12 @@ mod tests {
 
     #[test]
     fn secrets_are_debug_redacted_and_header_injection_is_rejected() {
-        let key = AnthropicApiKey::new("sk-ant-secret").unwrap();
+        let key = ApiKey::new("sk-ant-secret").unwrap();
         let debug = format!("{key:?}");
         assert!(debug.contains("REDACTED"));
         assert!(!debug.contains("sk-ant-secret"));
         assert!(matches!(
-            AnthropicApiKey::new("secret\nheader"),
+            ApiKey::new("secret\nheader"),
             Err(ConnectorBuildError::InvalidApiKey)
         ));
         assert!(matches!(
@@ -165,9 +158,9 @@ mod tests {
     #[test]
     fn rejects_zero_deadlines_and_limits() {
         assert!(matches!(
-            ConnectorConfig::default().with_timeouts(ConnectorTimeouts {
+            ConnectorConfig::default().with_timeouts(Timeouts {
                 idle: Duration::ZERO,
-                ..ConnectorTimeouts::default()
+                ..Timeouts::default()
             }),
             Err(ConnectorBuildError::ZeroTimeout("idle"))
         ));

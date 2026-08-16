@@ -1,17 +1,27 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEventKind, CanonicalResult, ContentPart, DurationMs,
-    EmbeddingInput, EmbeddingsRequest, GenerationParameters, GenerationRequest, Message,
-    MessageRole, ModerationRequest, Operation, OperationKind, ProviderId, ProviderKind,
-    ProviderOutput, ProviderRequest, ProviderTransport as _, RequestId, RequestMetadata, RouteId,
-    RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId, TokenCountRequest,
-    TransportMode, TransportPhase, validate_event_sequence,
+    canonical::{
+        events::{Kind, validate_event_sequence},
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
+            GenerationRequest, Message, MessageRole, ModerationRequest, Operation,
+            SourceExtensions, TokenCountRequest,
+        },
+        results::CanonicalResult,
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{
+        AttemptFailureClass, ProviderOutput, ProviderRequest, ProviderTransport as _,
+        TransportPhase,
+    },
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use futures::StreamExt as _;
 use serde_json::Value;
 
-use crate::providers::openai::OpenAiConnector;
+use crate::providers::openai::transport::Connector;
 
 const PROBE_TIMEOUT_MS: u64 = 10_000;
 const MAX_PROBE_EVENTS: usize = 4_096;
@@ -25,7 +35,7 @@ pub struct CompatibleCapability {
 
 /// Server-owned evidence accepted only for the official native OpenAI
 /// connector. Generic compatible endpoints must continue to use exact live
-/// probes through [`OpenAiConnector::certify_compatible_capability`].
+/// probes through [`Connector::certify_compatible_capability`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeOpenAiCertificationEvidence {
     LiveProbe,
@@ -47,7 +57,7 @@ pub enum CompatibleCapabilityCertificationError {
     ModelNotDiscovered,
 }
 
-impl OpenAiConnector {
+impl Connector {
     /// Executes a bounded, content-minimal request through the same transport
     /// and response codecs used by inference. A tuple is certifiable only when
     /// the compatible endpoint proves the exact operation and transport mode;
@@ -290,17 +300,14 @@ async fn validate_probe_output(
                         phase: error.phase,
                         class: error.class,
                     })?;
-                if matches!(event.kind, CanonicalEventKind::Error { .. }) {
+                if matches!(event.kind, Kind::Error { .. }) {
                     return Err(CompatibleCapabilityCertificationError::InvalidResult);
                 }
                 events.push(event);
             }
             validate_event_sequence(&events)
                 .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
-            if !matches!(
-                events.last().map(|event| &event.kind),
-                Some(CanonicalEventKind::Done)
-            ) {
+            if !matches!(events.last().map(|event| &event.kind), Some(Kind::Done)) {
                 return Err(CompatibleCapabilityCertificationError::InvalidResult);
             }
             Ok(())
@@ -326,7 +333,7 @@ mod tests {
 
     use super::*;
     use crate::providers::mock_server::{MockResponse, response, spawn_mock, spawn_sequence};
-    use crate::providers::openai::{ConnectorConfig, ConnectorTimeouts, OpenAiApiKey};
+    use crate::providers::openai::{ApiKey, ConnectorConfig, Timeouts};
 
     #[tokio::test]
     async fn genuine_unary_generation_probe_uses_inference_codec() {
@@ -679,17 +686,17 @@ mod tests {
         }));
     }
 
-    fn connector(base_url: &str) -> OpenAiConnector {
-        OpenAiConnector::new(
+    fn connector(base_url: &str) -> Connector {
+        Connector::new(
             ConnectorConfig::for_local_test(
                 base_url,
-                ConnectorTimeouts {
+                Timeouts {
                     connect: Duration::from_secs(1),
                     first_byte: Duration::from_secs(1),
                     idle: Duration::from_secs(1),
                 },
             ),
-            OpenAiApiKey::new("upstream-secret").unwrap(),
+            ApiKey::new("upstream-secret").unwrap(),
         )
     }
 

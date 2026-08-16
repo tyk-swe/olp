@@ -3,7 +3,8 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::domain::{
-    AttemptFailureClass, SourceExtensions, Surface, TransportError, TransportPhase,
+    canonical::{identity::Surface, requests::SourceExtensions},
+    ports::{AttemptFailureClass, TransportError, TransportPhase},
 };
 use http::{HeaderValue, StatusCode};
 use zeroize::Zeroizing;
@@ -139,12 +140,12 @@ pub(in crate::providers) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
 /// base64-encoded, shared by every connector that hydrates inline media.
 pub(in crate::providers) async fn read_inline_media(
     marker: &str,
-    spool: Option<&std::sync::Arc<dyn crate::domain::MediaSpool>>,
+    spool: Option<&std::sync::Arc<dyn crate::domain::ports::MediaSpool>>,
 ) -> Result<String, TransportError> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use futures::StreamExt as _;
 
-    let handle = crate::domain::media_handle_from_inline_marker(marker)
+    let handle = crate::domain::canonical::requests::media_handle_from_inline_marker(marker)
         .ok_or_else(|| protocol_error("invalid bounded inline-media handle"))?;
     let spool = spool.ok_or_else(|| protocol_error("bounded inline-media spool is unavailable"))?;
     let opened = spool.open(&handle).await.map_err(|error| {
@@ -184,8 +185,13 @@ mod tests {
 
     use super::*;
     use crate::domain::{
-        BoxFuture, MediaArtifact, MediaByteStream, MediaHandle, MediaSpool, MediaSpoolError,
-        MediaUpload, OpenedMedia, inline_media_marker,
+        canonical::{
+            requests::{MediaHandle, inline_media_marker},
+            results::MediaArtifact,
+        },
+        ports::{
+            BoxFuture, MediaByteStream, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia,
+        },
     };
 
     #[derive(Clone)]

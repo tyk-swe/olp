@@ -13,17 +13,17 @@ use axum::{
     routing::get,
 };
 use olp_db::{
-    request_metadata::RequestMetadataConsumerStatus,
-    request_metadata::RequestMetadataEpochHealth,
-    runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
+    request_metadata::delivery_health::ConsumerStatus,
+    request_metadata::reconciliation::EpochHealth,
+    runtime::outbox::{RuntimeOutboxState, RuntimeOutboxStatus},
     worker_health::{WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary, WorkerTaskState},
 };
-use olp_engine::inference::request_metadata::RequestMetadataEmitter;
+use olp_engine::inference::request_metadata::Emitter;
 use serde::Serialize;
 use tower::ServiceBuilder;
 use utoipa::ToSchema;
 
-use crate::{ObservabilityState, Problem};
+use crate::{bootstrap::mode_dependencies::ObservabilityState, public_http::problem::Problem};
 
 const OBSERVABILITY_CONCURRENCY_LIMIT: usize = 8;
 const OBSERVABILITY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -42,7 +42,7 @@ pub(super) const OBSERVABILITY_SNAPSHOT_STALE_AFTER: Duration = Duration::from_s
 
 /// Builds the private observability router. It exposes no console,
 /// management, or inference routes.
-pub fn observability_router(state: ObservabilityState) -> Router {
+pub fn router(state: ObservabilityState) -> Router {
     Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
@@ -400,7 +400,7 @@ async fn ready(axum::extract::State(state): axum::extract::State<ObservabilitySt
 async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse, Problem> {
     let generation = state.runtime().active_generation_ordinal();
     let now = chrono::Utc::now();
-    let unknown_consumer = RequestMetadataConsumerStatus::from_health(None, now);
+    let unknown_consumer = ConsumerStatus::from_health(None, now);
     let (
         database,
         media_reconciliation,
@@ -433,7 +433,7 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
             "unavailable_lkg",
             None,
             unknown_consumer,
-            RequestMetadataEpochHealth::default(),
+            EpochHealth::default(),
             RuntimeOutboxStatus::unknown(),
             WorkerTaskHealthSummary::unknown(),
             None,
@@ -597,11 +597,11 @@ async fn collect_readiness(state: &ObservabilityState) -> Result<HealthResponse,
     })
 }
 
-fn request_metadata_consumer_is_current(status: RequestMetadataConsumerStatus) -> bool {
+fn request_metadata_consumer_is_current(status: ConsumerStatus) -> bool {
     matches!(
         status.state,
-        olp_db::request_metadata::RequestMetadataConsumerState::Healthy
-            | olp_db::request_metadata::RequestMetadataConsumerState::Backlogged
+        olp_db::request_metadata::delivery_health::ConsumerState::Healthy
+            | olp_db::request_metadata::delivery_health::ConsumerState::Backlogged
     )
 }
 
@@ -623,7 +623,7 @@ fn expected_worker_tasks(state: &ObservabilityState) -> &'static [WorkerTask] {
 fn asynchronous_plane_flags(
     tasks: &WorkerTaskHealthSummary,
     expected_tasks: &[WorkerTask],
-    consumer: RequestMetadataConsumerStatus,
+    consumer: ConsumerStatus,
     outbox: RuntimeOutboxStatus,
 ) -> (bool, bool) {
     let expects_consumer = expected_tasks.contains(&WorkerTask::RequestMetadataConsumer);
@@ -641,7 +641,7 @@ fn asynchronous_plane_state(
     drained: bool,
     tasks: &WorkerTaskHealthSummary,
     expected_tasks: &[WorkerTask],
-    consumer: RequestMetadataConsumerStatus,
+    consumer: ConsumerStatus,
     outbox: RuntimeOutboxStatus,
 ) -> &'static str {
     if current && drained {
@@ -651,7 +651,7 @@ fn asynchronous_plane_state(
     } else if tasks.unknown_tasks_for(expected_tasks) > 0
         || matches!(
             consumer.state,
-            olp_db::request_metadata::RequestMetadataConsumerState::Unknown
+            olp_db::request_metadata::delivery_health::ConsumerState::Unknown
         )
         || outbox.state == RuntimeOutboxState::Unknown
     {
@@ -722,13 +722,11 @@ async fn metrics(
 }
 
 async fn collect_metrics(state: &ObservabilityState) -> String {
-    let request_metadata = state
-        .request_metadata()
-        .map(RequestMetadataEmitter::snapshot);
+    let request_metadata = state.request_metadata().map(Emitter::snapshot);
     let limiter_available = state.limiter().current().is_some();
     let now = chrono::Utc::now();
-    let mut request_metadata_consumer = RequestMetadataConsumerStatus::from_health(None, now);
-    let mut request_metadata_epochs = RequestMetadataEpochHealth::default();
+    let mut request_metadata_consumer = ConsumerStatus::from_health(None, now);
+    let mut request_metadata_epochs = EpochHealth::default();
     let mut provider_health = Vec::new();
     let (consumer, epochs, operations, providers, media, outbox, tasks, counters) = tokio::join!(
         state.store().request_metadata_consumer_status(now),
@@ -833,7 +831,7 @@ async fn collect_metrics(state: &ObservabilityState) -> String {
         u8::from(request_metadata_consumer.complete()),
         u8::from(matches!(
             request_metadata_consumer.state,
-            olp_db::request_metadata::RequestMetadataConsumerState::Stale
+            olp_db::request_metadata::delivery_health::ConsumerState::Stale
         )),
         request_metadata_epochs.open_epochs,
         request_metadata_epochs.unresolved_epochs,
@@ -946,7 +944,7 @@ pub(crate) fn append_async_worker_metrics(
     body: &mut String,
     now: chrono::DateTime<chrono::Utc>,
     consumer_available: bool,
-    consumer: RequestMetadataConsumerStatus,
+    consumer: ConsumerStatus,
     outbox: Option<RuntimeOutboxStatus>,
     tasks: Option<&WorkerTaskHealthSummary>,
     counters: Option<WorkerRecoveryCounters>,
@@ -968,7 +966,7 @@ pub(crate) fn append_async_worker_metrics(
     let consumer = if consumer_available {
         consumer
     } else {
-        RequestMetadataConsumerStatus::from_health(None, now)
+        ConsumerStatus::from_health(None, now)
     };
     let (current, drained) = asynchronous_plane_flags(tasks, &WorkerTask::ALL, consumer, outbox);
     body.push_str(
@@ -1186,22 +1184,22 @@ mod tests {
     use std::{path::PathBuf, sync::Arc};
 
     use olp_db::{
-        request_metadata::{RequestMetadataConsumerHealth, RequestMetadataConsumerStatus},
-        runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
+        request_metadata::delivery_health::{ConsumerHealth, ConsumerStatus},
+        runtime::outbox::{RuntimeOutboxState, RuntimeOutboxStatus},
         worker_health::{WorkerTaskState, WorkerTaskStatus},
     };
-    use olp_engine::inference::runtime::RuntimeManager;
+    use olp_engine::inference::runtime::Manager;
 
     use super::*;
-    use crate::{ApiMode, ProcessComposition};
+    use crate::{bootstrap::state::ApiMode, bootstrap::state::ProcessComposition};
 
     #[test]
     fn http_only_processes_still_check_fleet_worker_summaries() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-08-08T12:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let stale_consumer = RequestMetadataConsumerStatus::from_health(
-            Some(RequestMetadataConsumerHealth {
+        let stale_consumer = ConsumerStatus::from_health(
+            Some(ConsumerHealth {
                 pending_events: 0,
                 lag_events: 0,
                 oldest_pending_at: None,
@@ -1242,7 +1240,7 @@ mod tests {
             let state = ProcessComposition::new(
                 mode,
                 None,
-                Arc::new(RuntimeManager::empty()),
+                Arc::new(Manager::empty()),
                 "https://olp.example.test",
                 PathBuf::from("missing-console"),
             )

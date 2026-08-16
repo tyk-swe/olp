@@ -6,17 +6,18 @@ use axum::{
     response::Response,
 };
 use futures::{StreamExt, stream};
-use olp_engine::domain::{CanonicalEvent, CanonicalEventKind};
-use olp_engine::protocols::sse::{SseEncodeError, SseFrame, encode_frame};
+use olp_engine::domain::canonical::events::{Event, Kind};
+use olp_engine::protocols::sse::{EncodeError, Frame, encode_frame};
 
-use crate::gateway::{InferenceError, RoutedEventExecution};
+use crate::gateway::error::InferenceError;
+use olp_engine::inference::execution::RoutedEvents;
 
-pub(crate) fn encode_sse_frame(frame: &SseFrame) -> Result<Bytes, SseEncodeError> {
+pub(crate) fn encode_sse_frame(frame: &Frame) -> Result<Bytes, EncodeError> {
     encode_frame(frame).map(Bytes::from)
 }
 
 pub(crate) fn encode_protocol_sse_frames<E: Display>(
-    frames: Result<Vec<SseFrame>, E>,
+    frames: Result<Vec<Frame>, E>,
 ) -> Result<Vec<Bytes>, String> {
     frames
         .map_err(|error| error.to_string())?
@@ -26,7 +27,7 @@ pub(crate) fn encode_protocol_sse_frames<E: Display>(
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn encode_server_sse_frame(frame: &SseFrame) -> Bytes {
+pub(crate) fn encode_server_sse_frame(frame: &Frame) -> Bytes {
     encode_sse_frame(frame).expect("server-generated SSE event fields are valid")
 }
 
@@ -215,12 +216,12 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
 }
 
 pub(crate) trait ProtocolStreamEncoder: Send + 'static {
-    fn push(&mut self, event: CanonicalEvent) -> Result<Vec<Bytes>, String>;
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String>;
     fn encode_error(&self, error: &InferenceError) -> Bytes;
 }
 
 pub(crate) fn protocol_streaming_response<E>(
-    mut execution: RoutedEventExecution,
+    mut execution: RoutedEvents,
     mut encoder: E,
 ) -> Response
 where
@@ -242,9 +243,9 @@ where
                 }
             };
             accounting.usage_mut().observe(&event);
-            let is_done = matches!(event.kind, CanonicalEventKind::Done);
+            let is_done = matches!(event.kind, Kind::Done);
             let canonical_failure = match &event.kind {
-                CanonicalEventKind::Error { error } => Some(InferenceError::from_canonical(error)),
+                Kind::Error { error } => Some(InferenceError::from_canonical(error)),
                 _ => None,
             };
             let is_terminal = is_done || canonical_failure.is_some();
@@ -297,7 +298,7 @@ where
         });
         drop(events);
         let outcome = failure.as_ref().map_or_else(
-            olp_engine::inference::RequestOutcome::success,
+            olp_engine::inference::accounting::RequestOutcome::success,
             InferenceError::accounting_outcome,
         );
         accounting.finish(outcome).await;
@@ -322,7 +323,7 @@ mod tests {
 
     #[test]
     fn encode_sse_frame_preserves_event_id_and_data_line_bytes() {
-        let encoded = encode_sse_frame(&olp_engine::protocols::sse::SseFrame {
+        let encoded = encode_sse_frame(&olp_engine::protocols::sse::Frame {
             event: Some("message".to_owned()),
             data: "first\nsecond".to_owned(),
             id: Some("event-7".to_owned()),
@@ -338,7 +339,7 @@ mod tests {
 
     #[test]
     fn encode_sse_frame_includes_retry_and_empty_data() {
-        let encoded = encode_sse_frame(&olp_engine::protocols::sse::SseFrame {
+        let encoded = encode_sse_frame(&olp_engine::protocols::sse::Frame {
             event: None,
             data: String::new(),
             id: Some("event-8".to_owned()),

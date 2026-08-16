@@ -1,20 +1,17 @@
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
-    UsageFilters, UsageRangeCoverage,
+    Coverage, Filters,
     query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
-    PgStore,
-    operations::{
-        OperationsError,
-        cursor::{checked_u64, trimmed_optional},
-    },
-    request_metadata::RequestMetadataConsumerStatus,
+    operations::cursor::{Error, checked_u64, trimmed_optional},
+    request_metadata::delivery_health::ConsumerStatus,
+    store::Store,
 };
 
 #[derive(Clone, Debug)]
-pub struct UsageSummary {
+pub struct Report {
     pub request_count: u64,
     pub input_tokens: String,
     pub output_tokens: String,
@@ -26,8 +23,8 @@ pub struct UsageSummary {
     pub incomplete_count: u64,
     pub request_metadata_gap_events: u64,
     pub uncertain_request_metadata_gap_count: u64,
-    pub coverage: UsageRangeCoverage,
-    pub request_metadata_consumer: RequestMetadataConsumerStatus,
+    pub coverage: Coverage,
+    pub request_metadata_consumer: ConsumerStatus,
     pub complete: bool,
 }
 
@@ -44,11 +41,8 @@ struct UsageSummaryRow {
     currency: Option<String>,
 }
 
-impl PgStore {
-    pub async fn usage_summary(
-        &self,
-        filters: &UsageFilters,
-    ) -> Result<UsageSummary, OperationsError> {
+impl Store {
+    pub async fn usage_summary(&self, filters: &Filters) -> Result<Report, Error> {
         validate_usage_range(filters)?;
         let mut query = QueryBuilder::<Postgres>::new("");
         push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
@@ -79,7 +73,7 @@ impl PgStore {
         let request_metadata_consumer = self
             .request_metadata_consumer_status(chrono::Utc::now())
             .await?;
-        Ok(UsageSummary {
+        Ok(Report {
             request_count: checked_u64(row.request_count, "request count")?,
             input_tokens: row.input_tokens,
             output_tokens: row.output_tokens,

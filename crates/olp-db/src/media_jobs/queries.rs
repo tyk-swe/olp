@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
-use olp_engine::domain::OperationKind;
+use olp_engine::domain::canonical::identity::OperationKind;
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{
-    PgStore,
-    operations::{OperationsPage, TimestampCursor},
+    operations::cursor::{Page, Timestamp},
     split_page,
+    store::Store,
 };
 
 use super::{
@@ -27,7 +27,7 @@ const MEDIA_JOB_SELECT: &str = "SELECT j.id, j.upstream_job_id, j.api_key_id, j.
      FROM async_media_jobs j
      JOIN providers p ON p.id = j.provider_id";
 
-impl PgStore {
+impl Store {
     pub async fn media_job(&self, id: Uuid) -> Result<MediaJobRecord, MediaJobError> {
         let row = sqlx::query_as!(
             MediaJobRow,
@@ -55,9 +55,9 @@ impl PgStore {
     pub async fn media_jobs(
         &self,
         filters: &MediaJobFilters,
-        cursor: Option<&TimestampCursor>,
+        cursor: Option<&Timestamp>,
         limit: u16,
-    ) -> Result<OperationsPage<MediaJobRecord>, MediaJobError> {
+    ) -> Result<Page<MediaJobRecord>, MediaJobError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(MEDIA_JOB_SELECT);
         query.push(" WHERE TRUE");
@@ -82,13 +82,13 @@ impl PgStore {
             .map(media_job_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) = split_page(items, usize::from(limit), |last| {
-            TimestampCursor {
+            Timestamp {
                 at: last.created_at,
                 id: last.id,
             }
             .encode()
         });
-        Ok(OperationsPage { items, next_cursor })
+        Ok(Page { items, next_cursor })
     }
 
     /// Client-facing video pagination uses the last public OLP video ID as its
@@ -99,7 +99,7 @@ impl PgStore {
         after: Option<Uuid>,
         order: MediaJobOrder,
         limit: u16,
-    ) -> Result<OperationsPage<MediaJobRecord>, MediaJobError> {
+    ) -> Result<Page<MediaJobRecord>, MediaJobError> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let position = if let Some(after) = after {
             let row = sqlx::query!(
@@ -113,7 +113,9 @@ impl PgStore {
                 filters.api_key_id,
                 &filters.route_slugs,
                 filters.operation.map(OperationKind::as_str),
-                filters.surface.map(olp_engine::domain::Surface::as_str)
+                filters
+                    .surface
+                    .map(olp_engine::domain::canonical::identity::Surface::as_str)
             )
             .fetch_optional(self.pool())
             .await?
@@ -155,7 +157,7 @@ impl PgStore {
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) =
             split_page(items, usize::from(limit), |last| last.id.to_string());
-        Ok(OperationsPage { items, next_cursor })
+        Ok(Page { items, next_cursor })
     }
 }
 

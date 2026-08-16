@@ -6,7 +6,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{DurationMs, OperationKind, ProviderId, RouteId, RouteSlug, TargetId};
+use crate::domain::{
+    canonical::identity::OperationKind,
+    ids::{DurationMs, ProviderId, RouteId, RouteSlug, TargetId},
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Target {
@@ -35,38 +38,38 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn validate(&self) -> Result<(), RouteValidationError> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.overall_timeout.is_zero() {
-            return Err(RouteValidationError::ZeroOverallTimeout);
+            return Err(Error::ZeroOverallTimeout);
         }
         if self.targets.is_empty() {
-            return Err(RouteValidationError::NoTargets);
+            return Err(Error::NoTargets);
         }
         if usize::from(self.max_attempts.get()) > self.targets.len() {
-            return Err(RouteValidationError::AttemptsExceedTargets);
+            return Err(Error::AttemptsExceedTargets);
         }
 
         let mut target_ids = HashSet::with_capacity(self.targets.len());
         let mut target_routing_ids = HashSet::with_capacity(self.targets.len());
         for target in &self.targets {
             if target.timeout.is_zero() {
-                return Err(RouteValidationError::ZeroTargetTimeout {
+                return Err(Error::ZeroTargetTimeout {
                     target_id: target.id,
                 });
             }
             if target.timeout.get() > self.overall_timeout.get() {
-                return Err(RouteValidationError::TargetTimeoutExceedsRoute {
+                return Err(Error::TargetTimeoutExceedsRoute {
                     target_id: target.id,
                 });
             }
             if !target_ids.insert(target.id) {
-                return Err(RouteValidationError::DuplicateTarget {
+                return Err(Error::DuplicateTarget {
                     target_id: target.id,
                 });
             }
             let routing_id = target.routing_id.unwrap_or(target.id);
             if !target_routing_ids.insert(routing_id) {
-                return Err(RouteValidationError::DuplicateTargetRoutingId { routing_id });
+                return Err(Error::DuplicateTargetRoutingId { routing_id });
             }
         }
 
@@ -75,7 +78,7 @@ impl Route {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum RouteValidationError {
+pub enum Error {
     #[error("route must contain at least one target")]
     NoTargets,
     #[error("route maximum attempts cannot exceed its target count")]

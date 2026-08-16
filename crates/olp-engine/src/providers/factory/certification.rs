@@ -1,20 +1,29 @@
 use std::time::Duration;
 
 use crate::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEventKind, CanonicalResult, ContentPart,
-    EmbeddingInput, EmbeddingsRequest, EventSequenceValidator, GenerationParameters,
-    GenerationRequest, Message, MessageRole, ModerationRequest, Operation, OperationKind,
-    ProviderId, ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, RequestId,
-    RequestMetadata, RouteId, RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId,
-    TokenCountRequest, TransportMode, TransportPhase,
+    canonical::{
+        events::{EventSequenceValidator, Kind},
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
+            GenerationRequest, Message, MessageRole, ModerationRequest, Operation,
+            SourceExtensions, TokenCountRequest,
+        },
+        results::CanonicalResult,
+    },
+    ids::{ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{
+        AttemptFailureClass, ProviderOutput, ProviderRequest, ProviderTransport, TransportPhase,
+    },
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use futures::StreamExt as _;
 
-use crate::providers::openai::{
+use crate::providers::openai::certification::{
     CompatibleCapability, CompatibleCapabilityCertificationError, NativeOpenAiCertificationEvidence,
 };
 
-use super::assembly::{ConcreteConnector, ProviderFacade};
+use super::assembly::{ConcreteConnector, Facade};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityCertificationEvidence {
@@ -37,7 +46,7 @@ impl From<NativeOpenAiCertificationEvidence> for CapabilityCertificationEvidence
 /// a reviewed capability. This is narrower than configuration eligibility: the
 /// management UI must not offer tuples that can never satisfy activation's
 /// certification requirement.
-pub const fn supports_capability_certification(
+pub const fn supports(
     kind: ProviderKind,
     operation: OperationKind,
     surface: Surface,
@@ -78,12 +87,10 @@ pub fn certifiable_capabilities(
     kind: ProviderKind,
 ) -> impl Iterator<Item = (OperationKind, Surface, TransportMode)> {
     kind.supported_capabilities()
-        .filter(move |(operation, surface, mode)| {
-            supports_capability_certification(kind, *operation, *surface, *mode)
-        })
+        .filter(move |(operation, surface, mode)| supports(kind, *operation, *surface, *mode))
 }
 
-impl ProviderFacade {
+impl Facade {
     pub async fn certify_capability(
         &self,
         upstream_model: &str,
@@ -185,7 +192,7 @@ pub(super) async fn execute_native_capability_probe(
             provider_id: ProviderId::new(),
             provider_kind,
             upstream_model: upstream_model.to_owned(),
-            timeout: crate::domain::DurationMs::new(NATIVE_PROBE_TIMEOUT_MS),
+            timeout: crate::domain::ids::DurationMs::new(NATIVE_PROBE_TIMEOUT_MS),
             priority: 0,
         },
         operation,
@@ -313,7 +320,7 @@ async fn validate_native_probe_output(
                         phase: error.phase,
                         class: error.class,
                     })?;
-                if matches!(event.kind, CanonicalEventKind::Error { .. }) {
+                if matches!(event.kind, Kind::Error { .. }) {
                     return Err(CompatibleCapabilityCertificationError::InvalidResult);
                 }
                 validator

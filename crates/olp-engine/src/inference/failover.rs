@@ -1,29 +1,38 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalError, CanonicalEvent, CanonicalEventKind,
-    CanonicalResult, ErrorClass, EventSequenceError, EventSequenceValidator, MediaSpool, Operation,
-    OperationKind, ProviderOutput, ProviderRequest, RequestMetadata, TargetId, TransportError,
+    canonical::{
+        events::{Error, ErrorClass, Event, EventSequenceError, EventSequenceValidator, Kind},
+        identity::{OperationKind, RequestMetadata},
+        requests::Operation,
+        results::CanonicalResult,
+    },
+    ids::TargetId,
+    ports::{
+        AttemptFailureClass, MediaSpool, ProviderOutput, ProviderRequest, TransportError,
+        TransportPhase,
+    },
+    routing::selection::AttemptPlan,
 };
 use crate::inference::{
-    InferenceError,
-    circuit::{CircuitBreaker, CircuitPermit},
+    circuit::{Breaker, CircuitPermit},
+    error::Error as InferenceError,
     request_metadata::{RequestAttemptMetadata, RequestAttemptUsageMetadata},
-    runtime::RuntimeBundle,
+    runtime::Bundle,
     selection::operation_for_provider,
     telemetry::{elapsed_ms, metadata_status_code},
 };
 use chrono::Utc;
 use futures::{StreamExt, stream};
 
-pub type EventStream = crate::domain::ProviderEventStream;
+pub type EventStream = crate::domain::ports::ProviderEventStream;
 
 fn canonical_event_protocol_error(
     error: EventSequenceError,
     response_committed: bool,
 ) -> TransportError {
     TransportError {
-        phase: crate::domain::TransportPhase::Body,
+        phase: TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed,
         message: format!("invalid canonical event stream: {error}"),
@@ -62,7 +71,7 @@ pub fn validated_event_stream(
 
 pub fn circuit_accounted_event_stream(
     events: EventStream,
-    circuits: CircuitBreaker,
+    circuits: Breaker,
     target: TargetId,
     initial_failure: bool,
 ) -> EventStream {
@@ -71,7 +80,7 @@ pub fn circuit_accounted_event_stream(
 
 fn circuit_accounted_event_stream_with_permit(
     events: EventStream,
-    circuits: CircuitBreaker,
+    circuits: Breaker,
     target: TargetId,
     initial_failure: bool,
     permit: Option<crate::inference::circuit::CircuitPermit>,
@@ -83,7 +92,7 @@ fn circuit_accounted_event_stream_with_permit(
             let item = match item {
                 Ok(event) => {
                     match &event.kind {
-                        CanonicalEventKind::Error { error } => {
+                        Kind::Error { error } => {
                             if let Some(class) = canonical_error_circuit_class(error.class) {
                                 circuits.record_failure_for_optional_permit(
                                     target,
@@ -93,7 +102,7 @@ fn circuit_accounted_event_stream_with_permit(
                             }
                             failed = true;
                         }
-                        CanonicalEventKind::Done if !failed => {
+                        Kind::Done if !failed => {
                             circuits.record_success_for_optional_permit(target, permit.as_ref())
                         }
                         _ => {}
@@ -140,10 +149,7 @@ pub struct ExecutionSuccess {
 }
 
 pub enum ExecutionOutput {
-    Events {
-        first: CanonicalEvent,
-        events: EventStream,
-    },
+    Events { first: Event, events: EventStream },
     Result(Box<CanonicalResult>),
 }
 
@@ -164,7 +170,7 @@ impl AttemptRecord<'_> {
     fn finish_failure(
         &self,
         traces: &mut Vec<RequestAttemptMetadata>,
-        circuits: &CircuitBreaker,
+        circuits: &Breaker,
         transport: TransportError,
         terminal: Option<InferenceError>,
     ) -> Result<TransportError, ExecutionFailure> {
@@ -189,7 +195,7 @@ impl AttemptRecord<'_> {
     fn record_failure(
         &self,
         traces: &mut Vec<RequestAttemptMetadata>,
-        circuits: &CircuitBreaker,
+        circuits: &Breaker,
         transport: TransportError,
     ) -> Result<TransportError, ExecutionFailure> {
         self.finish_failure(traces, circuits, transport, None)
@@ -198,7 +204,7 @@ impl AttemptRecord<'_> {
     fn record_terminal_failure(
         &self,
         traces: &mut Vec<RequestAttemptMetadata>,
-        circuits: &CircuitBreaker,
+        circuits: &Breaker,
         transport: TransportError,
         gateway: InferenceError,
     ) -> ExecutionFailure {
@@ -206,7 +212,7 @@ impl AttemptRecord<'_> {
             .expect_err("an explicit gateway failure is terminal")
     }
 
-    fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &CircuitBreaker) {
+    fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &Breaker) {
         circuits.record_success(self.plan.target_id);
         self.record_accepted_output(traces);
     }
@@ -223,10 +229,10 @@ impl AttemptRecord<'_> {
     fn record_deadline_elapsed(
         &self,
         traces: &mut Vec<RequestAttemptMetadata>,
-        circuits: &CircuitBreaker,
+        circuits: &Breaker,
     ) -> ExecutionFailure {
         let timeout = TransportError {
-            phase: crate::domain::TransportPhase::Connect,
+            phase: crate::domain::ports::TransportPhase::Connect,
             class: AttemptFailureClass::Timeout,
             response_committed: false,
             message: "route deadline elapsed before provider execution".to_owned(),
@@ -250,11 +256,11 @@ pub type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &Atte
     + Send
     + 'a;
 
-pub struct FailoverContext<'a> {
-    pub runtime: &'a RuntimeBundle,
+pub struct Context<'a> {
+    pub runtime: &'a Bundle,
     pub overall_timeout: Duration,
     pub media_spool: Arc<dyn MediaSpool>,
-    pub circuits: &'a CircuitBreaker,
+    pub circuits: &'a Breaker,
     pub on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
 }
 
@@ -267,14 +273,14 @@ pub struct FailoverContext<'a> {
 #[derive(Default)]
 struct FailureHistory {
     last_transport: Option<TransportError>,
-    last_canonical: Option<(usize, CanonicalError)>,
+    last_canonical: Option<(usize, Error)>,
 }
 
 impl FailureHistory {
     fn record_retry(
         &mut self,
         transport: TransportError,
-        canonical: Option<CanonicalError>,
+        canonical: Option<Error>,
         completed_attempts: usize,
     ) {
         self.last_transport = Some(transport);
@@ -297,9 +303,9 @@ impl FailureHistory {
 }
 
 struct AttemptExecutionContext<'a> {
-    runtime: &'a RuntimeBundle,
+    runtime: &'a Bundle,
     media_spool: &'a Arc<dyn MediaSpool>,
-    circuits: &'a CircuitBreaker,
+    circuits: &'a Breaker,
     metadata: &'a RequestMetadata,
     operation: &'a Operation,
     route_deadline: tokio::time::Instant,
@@ -309,7 +315,7 @@ struct AttemptExecutionContext<'a> {
 enum AttemptDisposition {
     Retry {
         transport: TransportError,
-        canonical: Option<CanonicalError>,
+        canonical: Option<Error>,
     },
     Success {
         output: ExecutionOutput,
@@ -317,13 +323,13 @@ enum AttemptDisposition {
     },
 }
 
-pub async fn execute_with_failover(
-    context: FailoverContext<'_>,
+pub async fn execute(
+    context: Context<'_>,
     attempts: Vec<AttemptPlan>,
     metadata: RequestMetadata,
     operation: Operation,
 ) -> Result<ExecutionSuccess, ExecutionFailure> {
-    let FailoverContext {
+    let Context {
         runtime,
         overall_timeout,
         media_spool,
@@ -410,7 +416,7 @@ async fn execute_attempt(
     let attempt_deadline = route_deadline.min(record.started + attempt.timeout.as_duration());
     let Some(transport) = runtime.transport(attempt.provider_id) else {
         let error = TransportError {
-            phase: crate::domain::TransportPhase::Connect,
+            phase: crate::domain::ports::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
             message: "provider transport is not loaded".to_owned(),
@@ -442,7 +448,7 @@ async fn execute_attempt(
         Err(_) => {
             let error = reclassify_ambiguous_transport_failure(
                 TransportError {
-                    phase: crate::domain::TransportPhase::FirstByte,
+                    phase: crate::domain::ports::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Timeout,
                     response_committed: false,
                     message: "route deadline elapsed before provider response".to_owned(),
@@ -477,7 +483,7 @@ async fn execute_attempt(
         }
         Ok(None) => {
             let error = TransportError {
-                phase: crate::domain::TransportPhase::FirstByte,
+                phase: crate::domain::ports::TransportPhase::FirstByte,
                 class: AttemptFailureClass::Protocol,
                 response_committed: false,
                 message: "the provider returned an empty response".to_owned(),
@@ -491,7 +497,7 @@ async fn execute_attempt(
         Err(_) => {
             let error = reclassify_ambiguous_transport_failure(
                 TransportError {
-                    phase: crate::domain::TransportPhase::FirstByte,
+                    phase: crate::domain::ports::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Timeout,
                     response_committed: false,
                     message: "route deadline elapsed before a canonical event".to_owned(),
@@ -510,13 +516,13 @@ async fn execute_attempt(
         let gateway = InferenceError::from_transport(error.clone());
         return Err(record.record_terminal_failure(traces, circuits, error, gateway));
     }
-    let initial_failure = if let CanonicalEventKind::Error { error } = &first.kind {
+    let initial_failure = if let Kind::Error { error } = &first.kind {
         if error.retryable
             && can_retry_canonical
             && let Some(class) = canonical_error_circuit_class(error.class)
         {
             let transport_error = TransportError {
-                phase: crate::domain::TransportPhase::FirstByte,
+                phase: crate::domain::ports::TransportPhase::FirstByte,
                 class,
                 response_committed: false,
                 message: error.message.clone(),
@@ -533,7 +539,7 @@ async fn execute_attempt(
     } else {
         false
     };
-    if matches!(first.kind, CanonicalEventKind::Done) && !initial_failure {
+    if matches!(first.kind, Kind::Done) && !initial_failure {
         circuits.record_success(attempt.target_id);
     }
     let events = circuit_accounted_event_stream(
@@ -566,7 +572,7 @@ pub fn reclassify_ambiguous_transport_failure(
                 | AttemptFailureClass::Protocol
                 | AttemptFailureClass::Cancelled
         )
-        && !matches!(error.phase, crate::domain::TransportPhase::Connect)
+        && !matches!(error.phase, crate::domain::ports::TransportPhase::Connect)
     {
         error.class = AttemptFailureClass::Ambiguous;
         error.response_committed = true;
@@ -658,7 +664,7 @@ const fn attempt_billing_is_uncertain(error: &TransportError) -> bool {
                 | AttemptFailureClass::UpstreamServer
                 | AttemptFailureClass::Protocol
                 | AttemptFailureClass::Cancelled
-        ) && !matches!(error.phase, crate::domain::TransportPhase::Connect))
+        ) && !matches!(error.phase, crate::domain::ports::TransportPhase::Connect))
 }
 
 const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
@@ -677,13 +683,15 @@ const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
 #[cfg(test)]
 mod tests {
     use crate::domain::{
-        AttemptFailureClass, AttemptPlan, CanonicalError, DurationMs, ErrorClass, ProviderId,
-        ProviderKind, RouteId, RuntimeGenerationId, TargetId, TransportError, TransportPhase,
+        canonical::events::{Error, ErrorClass},
+        ids::{DurationMs, ProviderId, RouteId, RuntimeGenerationId, TargetId},
+        ports::{AttemptFailureClass, TransportError, TransportPhase},
+        routing::{provider::ProviderKind, selection::AttemptPlan},
     };
     use chrono::Utc;
 
     use super::{AttemptRecord, FailureHistory, attempt_billing_is_uncertain};
-    use crate::inference::{InferenceErrorKind, circuit::CircuitBreaker};
+    use crate::inference::{circuit::Breaker, error::Kind as InferenceErrorKind};
 
     #[test]
     fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
@@ -722,7 +730,7 @@ mod tests {
             timeout: DurationMs::new(1_000),
             priority: 0,
         };
-        let circuits = CircuitBreaker::default();
+        let circuits = Breaker::default();
         let record = AttemptRecord {
             plan: &attempt,
             circuit_permit: circuits
@@ -764,7 +772,7 @@ mod tests {
         let mut failures = FailureHistory::default();
         failures.record_retry(
             failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
-            Some(CanonicalError {
+            Some(Error {
                 class: ErrorClass::RateLimit,
                 message: "provider asked the client to retry".to_owned(),
                 provider_code: Some("busy".to_owned()),
@@ -787,7 +795,7 @@ mod tests {
         let mut failures = FailureHistory::default();
         failures.record_retry(
             failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
-            Some(CanonicalError {
+            Some(Error {
                 class: ErrorClass::RateLimit,
                 message: "first failure".to_owned(),
                 provider_code: None,

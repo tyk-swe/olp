@@ -3,27 +3,27 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::domain::ProviderKind;
+use crate::domain::routing::provider::ProviderKind;
 use uuid::Uuid;
 
-use crate::providers::openai::OpenAiConnector;
+use crate::providers::openai::transport::Connector;
 
-use super::assembly::{ConcreteConnector, ProviderFacade};
+use super::assembly::{ConcreteConnector, Facade};
 
 #[derive(Clone, Default)]
-pub struct OpenAiConnectorOverrideRegistry {
-    inner: Arc<RwLock<BTreeMap<Uuid, Arc<OpenAiConnector>>>>,
+pub struct Registry {
+    inner: Arc<RwLock<BTreeMap<Uuid, Arc<Connector>>>>,
 }
 
-impl OpenAiConnectorOverrideRegistry {
-    pub fn register(&self, provider_id: Uuid, connector: OpenAiConnector) {
+impl Registry {
+    pub fn register(&self, provider_id: Uuid, connector: Connector) {
         self.inner
             .write()
             .expect("certification probe connector registry lock poisoned")
             .insert(provider_id, Arc::new(connector));
     }
 
-    pub fn get(&self, provider_id: Uuid, kind: ProviderKind) -> Option<ProviderFacade> {
+    pub fn get(&self, provider_id: Uuid, kind: ProviderKind) -> Option<Facade> {
         if !matches!(kind, ProviderKind::OpenAi | ProviderKind::OpenAiCompatible) {
             return None;
         }
@@ -32,7 +32,7 @@ impl OpenAiConnectorOverrideRegistry {
             .expect("certification probe connector registry lock poisoned")
             .get(&provider_id)
             .cloned()
-            .map(|connector| ProviderFacade {
+            .map(|connector| Facade {
                 kind,
                 connector: ConcreteConnector::OpenAi(connector),
             })

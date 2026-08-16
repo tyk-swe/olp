@@ -5,22 +5,25 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    request_metadata::RequestMetadataConsumerStatus,
-    request_metadata::RequestMetadataEpochAcknowledgement,
-    request_metadata::RequestMetadataGatewayEpochRecord,
-    request_metadata::RequestMetadataGatewayEpochState,
+    request_metadata::delivery_health::ConsumerStatus,
+    request_metadata::reconciliation::EpochAcknowledgement,
+    request_metadata::reconciliation::GatewayEpochRecord,
+    request_metadata::reconciliation::GatewayEpochState,
 };
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::operations::helpers::{map_operations, not_found, page_limit, timestamp_cursor},
     management::{
-        Permission, map_persistence, require_mutation_session, require_permission,
-        require_read_session,
+        error_mapping::map_persistence,
+        permissions::require_permission,
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -33,8 +36,8 @@ pub(in crate::management::operations) struct RequestMetadataConsumerStatusRespon
     heartbeat_age_seconds: Option<u64>,
 }
 
-impl From<RequestMetadataConsumerStatus> for RequestMetadataConsumerStatusResponse {
-    fn from(consumer: RequestMetadataConsumerStatus) -> Self {
+impl From<ConsumerStatus> for RequestMetadataConsumerStatusResponse {
+    fn from(consumer: ConsumerStatus) -> Self {
         Self {
             state: consumer.state.as_str().to_owned(),
             pending_events: consumer.pending_events,
@@ -78,8 +81,8 @@ pub(in crate::management::operations) struct RequestMetadataGatewayEpochResponse
     acknowledged_by: Option<Uuid>,
 }
 
-impl From<RequestMetadataGatewayEpochRecord> for RequestMetadataGatewayEpochResponse {
-    fn from(value: RequestMetadataGatewayEpochRecord) -> Self {
+impl From<GatewayEpochRecord> for RequestMetadataGatewayEpochResponse {
+    fn from(value: GatewayEpochRecord) -> Self {
         Self {
             gateway_instance: value.gateway_instance,
             process_epoch: value.process_epoch,
@@ -141,14 +144,12 @@ pub(in crate::management::operations) async fn list_request_metadata_gateway_epo
     }))
 }
 
-fn parse_request_metadata_gateway_epoch_state(
-    value: &str,
-) -> Result<RequestMetadataGatewayEpochState, Problem> {
+fn parse_request_metadata_gateway_epoch_state(value: &str) -> Result<GatewayEpochState, Problem> {
     match value {
-        "open" => Ok(RequestMetadataGatewayEpochState::Open),
-        "gracefully_closed" => Ok(RequestMetadataGatewayEpochState::GracefullyClosed),
-        "unresolved" => Ok(RequestMetadataGatewayEpochState::Unresolved),
-        "acknowledged" => Ok(RequestMetadataGatewayEpochState::Acknowledged),
+        "open" => Ok(GatewayEpochState::Open),
+        "gracefully_closed" => Ok(GatewayEpochState::GracefullyClosed),
+        "unresolved" => Ok(GatewayEpochState::Unresolved),
+        "acknowledged" => Ok(GatewayEpochState::Acknowledged),
         _ => Err(Problem::field_validation(
             "state",
             "Use open, gracefully_closed, unresolved, or acknowledged.",
@@ -166,8 +167,8 @@ pub(in crate::management::operations) struct RequestMetadataEpochAcknowledgement
     acknowledged_by: Option<Uuid>,
 }
 
-impl From<RequestMetadataEpochAcknowledgement> for RequestMetadataEpochAcknowledgementResponse {
-    fn from(value: RequestMetadataEpochAcknowledgement) -> Self {
+impl From<EpochAcknowledgement> for RequestMetadataEpochAcknowledgementResponse {
+    fn from(value: EpochAcknowledgement) -> Self {
         Self {
             process_epoch: value.process_epoch,
             gateway_instance: value.gateway_instance,

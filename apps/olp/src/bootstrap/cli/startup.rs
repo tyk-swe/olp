@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use olp_db::request_metadata::run_request_metadata_writer_connecting;
-use olp_engine::inference::request_metadata::RequestMetadataEmitter;
+use olp_db::request_metadata::writer::run_connecting;
+use olp_engine::inference::request_metadata::Emitter;
 use tokio::{
     net::TcpListener,
     sync::{oneshot, watch},
@@ -9,10 +9,12 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::Manager;
 
-use crate::{ApiMode, ProcessComposition, create_media_spool};
 use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
+use crate::{
+    bootstrap::media_spool, bootstrap::state::ApiMode, bootstrap::state::ProcessComposition,
+};
 
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
@@ -54,13 +56,14 @@ pub(super) async fn serve(
         .into());
     }
     let store = connect_store(&args.database).await?;
-    let runtime = Arc::new(RuntimeManager::empty());
+    let runtime = Arc::new(Manager::empty());
     let media_spool_dir = args
         .assets
         .media_spool_dir
         .clone()
         .unwrap_or_else(std::env::temp_dir);
-    let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
+    let media_spool =
+        media_spool::create(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     let mut state = ProcessComposition::new_with_media_spool(
         mode,
         Some(store.clone()),
@@ -180,7 +183,7 @@ pub(super) async fn serve(
             // Install the bounded local emitter even when Valkey is not up yet.
             // Its connection loop exposes retry/pending state and preserves events
             // until the configured bound is reached.
-            let (emitter, receiver) = RequestMetadataEmitter::bounded(8_192);
+            let (emitter, receiver) = Emitter::bounded(8_192);
             state.request_metadata = Some(emitter.clone());
             let gateway_instance = format!(
                 "{}:{}",
@@ -199,7 +202,7 @@ pub(super) async fn serve(
             let (status_sender, status_receiver) = oneshot::channel();
             request_metadata_writer_status = Some(status_receiver);
             background_tasks.push(tokio::spawn(async move {
-                let result: AppResult<()> = run_request_metadata_writer_connecting(
+                let result: AppResult<()> = run_connecting(
                     receiver,
                     &request_metadata_writer_url,
                     &request_metadata_stream,
@@ -247,7 +250,7 @@ pub(super) async fn serve(
             background_shutdown_receiver.clone(),
         )));
     }
-    background_tasks.push(crate::spawn_observability_cache(
+    background_tasks.push(crate::observability::spawn_observability_cache(
         observability_state.clone(),
         background_shutdown_receiver.clone(),
     ));
@@ -265,7 +268,7 @@ pub(super) async fn serve(
     // listener's entire process-level resource budget.
     let observability_server = listener::serve_http(
         observability_listener,
-        crate::observability::observability_router(observability_state),
+        crate::observability::router(observability_state),
         listener::HttpServerConfig::standard(args.http_max_connections.clamp(1, 32)),
         listener_shutdown_receiver,
     );

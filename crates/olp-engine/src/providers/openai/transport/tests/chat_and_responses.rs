@@ -2,9 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn rejects_attempts_for_another_provider_kind_before_transport() {
-    let connector = OpenAiConnector::new(
+    let connector = Connector::new(
         ConnectorConfig::default(),
-        OpenAiApiKey::new("upstream-secret").unwrap(),
+        ApiKey::new("upstream-secret").unwrap(),
     );
     let mut request = fixture_request(false);
     request.attempt.provider_kind = ProviderKind::Anthropic;
@@ -33,30 +33,30 @@ fn rejects_invalid_or_mismatched_modes_before_transport() {
 #[tokio::test]
 async fn same_protocol_inline_audio_and_file_handles_are_rehydrated() {
     let handle = MediaHandle::new("inline-media");
-    let marker = crate::domain::inline_media_marker(&handle);
+    let marker = crate::domain::canonical::requests::inline_media_marker(&handle);
     let spool: Arc<dyn MediaSpool> = Arc::new(FixtureMediaSpool::new(
         "inline.bin",
         "application/octet-stream",
         b"hi",
     ));
-    let mut chat: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
+    let mut chat: CompletionRequest = serde_json::from_value(serde_json::json!({
         "model":"upstream","messages":[{"role":"user","content":[{
             "type":"input_audio","input_audio":{"data":marker,"format":"wav"}
         }]}]
     }))
     .unwrap();
     hydrate_chat_media(&mut chat, Some(&spool)).await.unwrap();
-    let ChatMessageContent::Parts(parts) = chat.messages[0].content.as_ref().unwrap() else {
+    let MessageContent::Parts(parts) = chat.messages[0].content.as_ref().unwrap() else {
         panic!("expected content parts")
     };
-    let ChatContentPart::InputAudio { input_audio, .. } = &parts[0] else {
+    let OpenAiContentPart::InputAudio { input_audio, .. } = &parts[0] else {
         panic!("expected input audio")
     };
     assert_eq!(input_audio.data, "aGk=");
 
     let mut input: ResponseInput = serde_json::from_value(serde_json::json!([{
         "type":"message","role":"user","content":[{
-            "type":"input_file","filename":"brief.pdf","file_data":crate::domain::inline_media_marker(&handle)
+            "type":"input_file","filename":"brief.pdf","file_data":crate::domain::canonical::requests::inline_media_marker(&handle)
         }]
     }]))
     .unwrap();
@@ -79,7 +79,7 @@ async fn model_discovery_is_credentialed_and_bounded() {
         chunks: vec![(Duration::ZERO, http_response("application/json", body))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let models = connector.discover_models().await.unwrap();
     assert_eq!(models[0].id, "gpt-test");
     let request = String::from_utf8(captured.await.unwrap()).unwrap();
@@ -106,7 +106,7 @@ async fn executes_unary_chat_with_provider_model_and_late_bound_credential() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &body))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
 
     let mut events = execute_events(&connector, fixture_request(false)).await;
     let mut collected = Vec::new();
@@ -116,11 +116,11 @@ async fn executes_unary_chat_with_provider_model_and_late_bound_credential() {
 
     assert!(collected.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "hello back"
+        Kind::TextDelta { text, .. } if text == "hello back"
     )));
     assert!(matches!(
         collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     let captured = String::from_utf8(captured.await.unwrap()).unwrap();
     assert!(
@@ -154,11 +154,11 @@ async fn responses_uses_distinct_upstream_endpoint_and_codec() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &body))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut events = execute_events(&connector, responses_request(false)).await;
     let mut text = String::new();
     while let Some(event) = events.next().await {
-        if let CanonicalEventKind::TextDelta { text: delta, .. } = event.unwrap().kind {
+        if let Kind::TextDelta { text: delta, .. } = event.unwrap().kind {
             text.push_str(&delta);
         }
     }
@@ -179,7 +179,7 @@ async fn responses_input_tokens_forwards_full_stateless_multi_item_body() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &body))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) = connector
         .execute(responses_input_tokens_request())
         .await
@@ -211,20 +211,22 @@ async fn responses_input_tokens_rehydrates_bounded_media_before_transport() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &body))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let handle = MediaHandle::new("input-tokens-inline-media");
-    let marker = crate::domain::inline_media_marker(&handle);
-    let wire: crate::protocols::openai::ResponseInputTokensRequest =
+    let marker = crate::domain::canonical::requests::inline_media_marker(&handle);
+    let wire: crate::protocols::openai::responses::token_count::ResponseInputTokensRequest =
         serde_json::from_value(serde_json::json!({
             "model":"count-route",
             "input":[{"type":"message","role":"user","content":[
                 {"type":"input_audio","input_audio":{"data":marker,"format":"wav"}},
                 {"type":"input_file","filename":"brief.pdf",
-                 "file_data":crate::domain::inline_media_marker(&handle)}
+                 "file_data":crate::domain::canonical::requests::inline_media_marker(&handle)}
             ]}]
         }))
         .unwrap();
-    let operation = crate::protocols::openai::decode_response_input_tokens(wire).unwrap();
+    let operation =
+        crate::protocols::openai::responses::token_count::decode_response_input_tokens(wire)
+            .unwrap();
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::TokenCount;
     request.attempt.upstream_model = "gpt-count-upstream".into();
@@ -262,7 +264,7 @@ async fn executes_embeddings_as_a_typed_unary_result() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &body))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
 
     let output = connector.execute(embeddings_request()).await.unwrap();
     let ProviderOutput::Result(result) = output else {
@@ -282,9 +284,9 @@ async fn executes_embeddings_as_a_typed_unary_result() {
 async fn live_provider_discovers_openai_models() {
     let key = std::env::var("OLP_LIVE_OPENAI_API_KEY")
         .expect("set OLP_LIVE_OPENAI_API_KEY for the ignored live test");
-    let connector = OpenAiConnector::new(
+    let connector = Connector::new(
         ConnectorConfig::default(),
-        OpenAiApiKey::new(key).expect("live OpenAI key must be representable"),
+        ApiKey::new(key).expect("live OpenAI key must be representable"),
     );
     assert!(!connector.discover_models().await.unwrap().is_empty());
 }

@@ -1,11 +1,11 @@
 use super::{helpers::audit_in_transaction, *};
 
-impl PgStore {
+impl Store {
     pub async fn list_api_keys(
         &self,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<ApiKeyRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<ApiKeyRecord>, Error> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
             "SELECT id FROM api_keys WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
@@ -23,7 +23,7 @@ impl PgStore {
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_api_key(&self, id: Uuid) -> Result<ApiKeyRecord, ConfigurationError> {
+    pub async fn get_api_key(&self, id: Uuid) -> Result<ApiKeyRecord, Error> {
         let row = sqlx::query!(
             "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
@@ -33,7 +33,7 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         Ok(ApiKeyRecord {
             id: row.id,
             lookup_id: row.lookup_id,
@@ -59,15 +59,15 @@ impl PgStore {
         expected_etag: Uuid,
         input: &UpdateApiKeyInput,
         actor: Uuid,
-    ) -> Result<ApiKeyMutationResult, ConfigurationError> {
+    ) -> Result<ApiKeyMutationResult, Error> {
         let name = input.name.trim();
         if name.is_empty() || name.chars().count() > 100 {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "API-key name must contain 1-100 characters".to_owned(),
             ));
         }
         if input.scopes.is_empty() {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "at least one API-key scope is required".to_owned(),
             ));
         }
@@ -81,7 +81,7 @@ impl PgStore {
                 .iter()
                 .all(|scope| matches!(*scope, "inference" | "models_read"))
         {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "API-key scopes must be unique inference or models_read values".to_owned(),
             ));
         }
@@ -89,13 +89,12 @@ impl PgStore {
             .allowed_routes
             .iter()
             .map(|route| {
-                RouteSlug::parse(route.clone()).map_err(|error| {
-                    ConfigurationError::Invalid(format!("invalid allowlisted route: {error}"))
-                })
+                RouteSlug::parse(route.clone())
+                    .map_err(|error| Error::Invalid(format!("invalid allowlisted route: {error}")))
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
         if allowed_routes.len() != input.allowed_routes.len() {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "allowlisted routes must be unique".to_owned(),
             ));
         }
@@ -103,7 +102,7 @@ impl PgStore {
             .expires_at
             .is_some_and(|expiration| expiration <= Utc::now())
         {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "API-key expiration must be in the future".to_owned(),
             ));
         }
@@ -111,24 +110,22 @@ impl PgStore {
             .requests_per_minute
             .map(i32::try_from)
             .transpose()
-            .map_err(|_| ConfigurationError::Invalid("RPM limit is too large".to_owned()))?;
+            .map_err(|_| Error::Invalid("RPM limit is too large".to_owned()))?;
         let tokens_per_minute = input
             .tokens_per_minute
             .map(i64::try_from)
             .transpose()
-            .map_err(|_| ConfigurationError::Invalid("TPM limit is too large".to_owned()))?;
+            .map_err(|_| Error::Invalid("TPM limit is too large".to_owned()))?;
         let max_concurrency = input
             .max_concurrency
             .map(i32::try_from)
             .transpose()
-            .map_err(|_| {
-                ConfigurationError::Invalid("concurrency limit is too large".to_owned())
-            })?;
+            .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?;
         if requests_per_minute == Some(0)
             || tokens_per_minute == Some(0)
             || max_concurrency == Some(0)
         {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "hard limits must be positive when configured".to_owned(),
             ));
         }
@@ -146,7 +143,7 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             if !exists {
-                return Err(ConfigurationError::Invalid(format!(
+                return Err(Error::Invalid(format!(
                     "allowlisted route {route} is not active"
                 )));
             }
@@ -175,11 +172,11 @@ impl PgStore {
             )
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(ConfigurationError::NotFound)?;
+            .ok_or(Error::NotFound)?;
             if row.etag != expected_etag {
-                return Err(ConfigurationError::PreconditionFailed);
+                return Err(Error::PreconditionFailed);
             }
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "revoked or expired keys cannot be updated".to_owned(),
             ));
         }
@@ -227,11 +224,11 @@ impl PgStore {
     pub async fn rotate_api_key<F>(
         &self,
         input: RotateApiKeyInput<'_>,
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<ApiKeyRotationResult>, ConfigurationError>
+    ) -> Result<Outcome<ApiKeyRotationResult>, Error>
     where
-        F: FnOnce(&ApiKeyRotationResult) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&ApiKeyRotationResult) -> Result<Response, PersistenceError>,
     {
         let RotateApiKeyInput {
             id,
@@ -259,15 +256,15 @@ impl PgStore {
             }
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
         let etag = Uuid::now_v7();
@@ -290,11 +287,11 @@ impl PgStore {
             )
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(ConfigurationError::NotFound)?;
+            .ok_or(Error::NotFound)?;
             if row.etag != expected_etag {
-                return Err(ConfigurationError::PreconditionFailed);
+                return Err(Error::PreconditionFailed);
             }
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "revoked or expired keys cannot be rotated".to_owned(),
             ));
         }
@@ -326,7 +323,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: result,
             response,
         })

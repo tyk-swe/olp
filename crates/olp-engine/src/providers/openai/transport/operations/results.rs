@@ -1,17 +1,21 @@
 use crate::domain::{
-    AttemptFailureClass, CanonicalResult, Operation, ProviderOutput, ProviderRequest,
-    TransportError, TransportPhase,
+    canonical::{requests::Operation, results::CanonicalResult},
+    ports::{AttemptFailureClass, ProviderOutput, ProviderRequest, TransportError, TransportPhase},
 };
 use crate::protocols::openai::{
-    EmbeddingResponse, OpenAiModerationResponse, ResponseInputTokensResponse,
-    decode_embedding_response, decode_moderation_response, decode_response_input_tokens_result,
-    encode_embedding_request, encode_moderation, encode_response_input_tokens,
+    embeddings::{EmbeddingResponse, decode_embedding_response, encode_embedding_request},
+    moderation::{Response, decode_response, encode},
+    responses::token_count::{
+        ResponseInputTokensResponse, decode_response_input_tokens_result,
+        encode_response_input_tokens,
+    },
 };
 
-use super::super::{OpenAiConnector, errors::*, media::hydrate_responses_media};
+use super::super::{Connector, errors::*, media::hydrate_responses_media};
+use crate::providers::transport_common::transport_error;
 
 pub(super) async fn execute(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     let (path, body, result_kind) = match &request.operation {
@@ -35,7 +39,7 @@ pub(super) async fn execute(
             )
         }
         Operation::Moderation(operation) => {
-            let wire = encode_moderation(operation, &request.attempt.upstream_model)
+            let wire = encode(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("moderation", error))?;
             (
                 "moderations",
@@ -69,8 +73,8 @@ pub(super) async fn execute(
             CanonicalResult::TokenCount(decode_response_input_tokens_result(wire))
         }
         ResultKind::Moderation => {
-            let wire: OpenAiModerationResponse = parse_wire("moderation", &response)?;
-            CanonicalResult::Moderation(decode_moderation_response(wire))
+            let wire: Response = parse_wire("moderation", &response)?;
+            CanonicalResult::Moderation(decode_response(wire))
         }
     };
     Ok(ProviderOutput::Result(Box::new(result)))

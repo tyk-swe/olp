@@ -4,13 +4,13 @@ use axum::{
 };
 use utoipa::OpenApi;
 
-use crate::{ManagementState, Problem};
+use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 pub(crate) mod api_keys;
 pub(crate) mod providers;
 mod routes;
 
-pub fn router() -> Router<ManagementState> {
+pub(super) fn router() -> Router<ManagementState> {
     Router::new()
         .route(
             "/api/v1/provider-kinds",
@@ -267,7 +267,7 @@ pub fn router() -> Router<ManagementState> {
         (name = "api-keys")
     )
 )]
-pub struct ConfigurationApiDoc;
+pub(super) struct ConfigurationApiDoc;
 
 #[cfg(test)]
 mod tests;

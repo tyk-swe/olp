@@ -8,7 +8,7 @@ pub(super) struct QueryFixture {
 }
 
 pub(super) async fn exercise(
-    store: &PgStore,
+    store: &Store,
     owner_id: Uuid,
     provider_id: Uuid,
     master_key: &MasterKey,
@@ -23,38 +23,39 @@ pub(super) async fn exercise(
             observed_at - Duration::days(3),
             &[
                 PriceInput {
-                    provider_kind: olp_engine::domain::ProviderKind::OpenAi,
+                    provider_kind: olp_engine::domain::routing::provider::ProviderKind::OpenAi,
                     provider_id: None,
                     model: "mock-model".to_owned(),
-                    operation: olp_engine::domain::OperationKind::Generation,
+                    operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
                     input_per_million: Some("1.000000000000".to_owned()),
                     output_per_million: Some("2.000000000000".to_owned()),
                     unit_price: None,
                     currency: "USD".to_owned(),
                 },
                 PriceInput {
-                    provider_kind: olp_engine::domain::ProviderKind::OpenAi,
+                    provider_kind: olp_engine::domain::routing::provider::ProviderKind::OpenAi,
                     provider_id: Some(provider_id),
                     model: "mock-model".to_owned(),
-                    operation: olp_engine::domain::OperationKind::Generation,
+                    operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
                     input_per_million: Some("3.000000000000".to_owned()),
                     output_per_million: Some("4.000000000000".to_owned()),
                     unit_price: None,
                     currency: "USD".to_owned(),
                 },
                 PriceInput {
-                    provider_kind: olp_engine::domain::ProviderKind::OpenAi,
+                    provider_kind: olp_engine::domain::routing::provider::ProviderKind::OpenAi,
                     provider_id: None,
                     model: "mock-model".to_owned(),
-                    operation: olp_engine::domain::OperationKind::ImageGeneration,
+                    operation:
+                        olp_engine::domain::canonical::identity::OperationKind::ImageGeneration,
                     input_per_million: None,
                     output_per_million: None,
                     unit_price: Some("0.040000000000".to_owned()),
                     currency: "USD".to_owned(),
                 },
             ],
-            ReplayableIdempotency::new([1; 32], master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new([1; 32], master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
@@ -69,11 +70,11 @@ pub(super) async fn exercise(
                 "pricing-operations-001",
                 observed_at,
                 &pricing.prices,
-                ReplayableIdempotency::new([2; 32], master_key),
-                |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+                Replayable::new([2; 32], master_key),
+                |_| Response::new(201, None, None, Vec::new()),
             )
             .await,
-        Err(OperationsError::IdempotencyConflict)
+        Err(Error::IdempotencyConflict)
     ));
     let mut euro_price = pricing.prices[0].clone();
     euro_price.currency = "EUR".to_owned();
@@ -84,17 +85,17 @@ pub(super) async fn exercise(
                 "pricing-operations-eur-001",
                 observed_at,
                 &[euro_price],
-                ReplayableIdempotency::new([3; 32], master_key),
-                |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+                Replayable::new([3; 32], master_key),
+                |_| Response::new(201, None, None, Vec::new()),
             )
             .await,
-        Err(OperationsError::Invalid(_))
+        Err(Error::Invalid(_))
     ));
 
     let request_id = Uuid::now_v7();
     let request_started_at = observed_at - Duration::milliseconds(20);
     store
-        .persist_request_metadata_event(&RequestMetadataEvent {
+        .persist_request_metadata_event(&Event {
             event_id: Uuid::now_v7(),
             request_id,
             runtime_generation_id: generation_id,
@@ -138,7 +139,7 @@ pub(super) async fn exercise(
     assert!(
         store
             .report_request_metadata_gap_once(
-                RequestMetadataGap {
+                Gap {
                     gateway_instance: "integration-gateway".to_owned(),
                     event_count: 3,
                     reason: "injected_test_gap".to_owned(),
@@ -151,7 +152,7 @@ pub(super) async fn exercise(
             .unwrap()
     );
     let loss_at = Utc::now();
-    let loss_snapshot = RequestMetadataBufferSnapshot {
+    let loss_snapshot = Snapshot {
         process_epoch: Uuid::now_v7(),
         started_at: loss_at - Duration::seconds(5),
         accepted: 10,
@@ -180,7 +181,7 @@ pub(super) async fn exercise(
         store
             .report_request_metadata_buffer_loss(
                 "operations-gateway",
-                &RequestMetadataBufferSnapshot {
+                &Snapshot {
                     accepted: 9,
                     ..loss_snapshot
                 },
@@ -188,7 +189,7 @@ pub(super) async fn exercise(
             .await
             .is_err()
     );
-    let restarted_loss = RequestMetadataBufferSnapshot {
+    let restarted_loss = Snapshot {
         process_epoch: Uuid::now_v7(),
         started_at: loss_at,
         accepted: 1,
@@ -217,7 +218,7 @@ pub(super) async fn exercise(
     assert_eq!(superseded_gap, (2, "lower_bound".to_owned()));
 
     let clean_epoch = Uuid::now_v7();
-    let clean_open = RequestMetadataBufferSnapshot {
+    let clean_open = Snapshot {
         process_epoch: clean_epoch,
         started_at: loss_at,
         accepted: 5,
@@ -233,7 +234,7 @@ pub(super) async fn exercise(
         .report_request_metadata_buffer_loss("clean-shutdown-gateway", &clean_open)
         .await
         .unwrap();
-    let clean_closed = RequestMetadataBufferSnapshot {
+    let clean_closed = Snapshot {
         closed: true,
         ..clean_open
     };
@@ -269,7 +270,7 @@ pub(super) async fn exercise(
     store
         .report_request_metadata_buffer_loss(
             "stale-gateway",
-            &RequestMetadataBufferSnapshot {
+            &Snapshot {
                 process_epoch: stale_epoch,
                 started_at: loss_at,
                 accepted: 5,
@@ -319,19 +320,16 @@ pub(super) async fn exercise(
     assert_eq!(epoch_health.historical_uncertain_gap_count, 2);
     assert_eq!(epoch_health.unresolved_event_lower_bound, 5);
     let unresolved_first_page = store
-        .request_metadata_gateway_epochs(
-            Some(RequestMetadataGatewayEpochState::Unresolved),
-            None,
-            1,
-        )
+        .request_metadata_gateway_epochs(Some(GatewayEpochState::Unresolved), None, 1)
         .await
         .unwrap();
     assert_eq!(unresolved_first_page.items.len(), 1);
     let unresolved_cursor = unresolved_first_page.next_cursor.as_deref().unwrap();
-    let unresolved_cursor = olp_db::operations::TimestampCursor::parse(unresolved_cursor).unwrap();
+    let unresolved_cursor =
+        olp_db::operations::cursor::Timestamp::parse(unresolved_cursor).unwrap();
     let unresolved_second_page = store
         .request_metadata_gateway_epochs(
-            Some(RequestMetadataGatewayEpochState::Unresolved),
+            Some(GatewayEpochState::Unresolved),
             Some(&unresolved_cursor),
             1,
         )
@@ -369,11 +367,7 @@ pub(super) async fn exercise(
     assert_eq!(acknowledged_health.historical_uncertain_gap_count, 2);
     assert_eq!(acknowledged_health.unresolved_event_lower_bound, 0);
     let acknowledged_epochs = store
-        .request_metadata_gateway_epochs(
-            Some(RequestMetadataGatewayEpochState::Acknowledged),
-            None,
-            10,
-        )
+        .request_metadata_gateway_epochs(Some(GatewayEpochState::Acknowledged), None, 10)
         .await
         .unwrap();
     assert_eq!(acknowledged_epochs.items.len(), 2);
@@ -417,7 +411,7 @@ pub(super) async fn exercise(
 
     let pre_attempt_request_id = Uuid::now_v7();
     store
-        .persist_request_metadata_event(&RequestMetadataEvent {
+        .persist_request_metadata_event(&Event {
             event_id: Uuid::now_v7(),
             request_id: pre_attempt_request_id,
             runtime_generation_id: generation_id,
@@ -457,7 +451,7 @@ pub(super) async fn exercise(
             .unwrap();
     assert_eq!(pre_attempt_usage, 0);
 
-    let filters = UsageFilters {
+    let filters = Filters {
         observed_after: observed_at - Duration::hours(1),
         observed_before: observed_at + Duration::hours(1),
         route_slug: None,
@@ -471,7 +465,7 @@ pub(super) async fn exercise(
         .await
         .unwrap();
     let series_report = store
-        .usage_series(&filters, UsageGranularity::Hour)
+        .usage_series(&filters, Granularity::Hour)
         .await
         .unwrap();
     assert!(series_report.coverage.range_complete);
@@ -479,7 +473,7 @@ pub(super) async fn exercise(
     assert_eq!(series.len(), 1);
     assert_eq!(series[0].input_tokens, "100");
     let breakdown_report = store
-        .usage_breakdown(&filters, UsageDimension::Provider, 50)
+        .usage_breakdown(&filters, Dimension::Provider, 50)
         .await
         .unwrap();
     assert!(breakdown_report.coverage.range_complete);
@@ -492,7 +486,7 @@ pub(super) async fn exercise(
     assert_eq!(completeness.uncertain_request_metadata_gap_count, 0);
     assert_eq!(
         completeness.request_metadata_consumer.state,
-        RequestMetadataConsumerState::Healthy
+        ConsumerState::Healthy
     );
     assert!(!completeness.complete);
     let summary = store.usage_summary(&filters).await.unwrap();
@@ -505,7 +499,7 @@ pub(super) async fn exercise(
 
     let unpriced_observed_at = Utc::now() - Duration::hours(5);
     store
-        .persist_request_metadata_event(&RequestMetadataEvent {
+        .persist_request_metadata_event(&Event {
             event_id: Uuid::now_v7(),
             request_id: Uuid::now_v7(),
             runtime_generation_id: generation_id,
@@ -546,7 +540,7 @@ pub(super) async fn exercise(
         })
         .await
         .unwrap();
-    let unpriced_filters = UsageFilters {
+    let unpriced_filters = Filters {
         observed_after: unpriced_observed_at - Duration::minutes(10),
         observed_before: unpriced_observed_at + Duration::minutes(10),
         route_slug: None,
@@ -584,7 +578,7 @@ pub(super) async fn exercise(
         store
             .update_setting(&setting.key, "32", setting.etag, owner_id)
             .await,
-        Err(OperationsError::PreconditionFailed)
+        Err(Error::PreconditionFailed)
     ));
 
     let usage_setting = store
@@ -598,7 +592,7 @@ pub(super) async fn exercise(
         store
             .update_setting(&usage_setting.key, "0", usage_setting.etag, owner_id)
             .await,
-        Err(OperationsError::Invalid(_))
+        Err(Error::Invalid(_))
     ));
     let usage_setting = store
         .update_setting(&usage_setting.key, "1", usage_setting.etag, owner_id)

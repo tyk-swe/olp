@@ -1,5 +1,20 @@
-use olp_engine::domain::Operation;
-use olp_engine::protocols::{anthropic, gemini, openai};
+use olp_engine::domain::canonical::requests::Operation;
+use olp_engine::protocols::{
+    anthropic::{
+        dto::MessagesRequest,
+        translate::{
+            decode::request as decode_anthropic_request,
+            encode::request as encode_anthropic_request,
+        },
+    },
+    gemini::{
+        dto::GenerateContentRequest,
+        translate::{
+            decode::request as decode_gemini_request, encode::request as encode_gemini_request,
+        },
+    },
+    openai::chat::{CompletionRequest, decode_chat_completion, encode_chat_completion},
+};
 use proptest::prelude::*;
 use serde_json::{Map, Value, json};
 
@@ -43,11 +58,11 @@ proptest! {
             "model": "public-route",
             "messages": [{"role": "user", "content": "hello"}]
         }), &name, value.clone());
-        let request: openai::ChatCompletionRequest = serde_json::from_value(request).unwrap();
-        let Operation::Generation(canonical) = openai::decode_chat_completion(request).unwrap() else {
+        let request: CompletionRequest = serde_json::from_value(request).unwrap();
+        let Operation::Generation(canonical) = decode_chat_completion(request).unwrap() else {
             unreachable!("chat decoding always creates generation")
         };
-        let encoded = openai::encode_chat_completion(&canonical, "provider-model").unwrap();
+        let encoded = encode_chat_completion(&canonical, "provider-model").unwrap();
         let encoded = object(encoded);
         prop_assert_eq!(encoded.get(&name), Some(&value));
     }
@@ -64,11 +79,11 @@ proptest! {
             "max_tokens": 32,
             "messages": [{"role": "user", "content": "hello"}]
         }), &name, value.clone());
-        let request: anthropic::MessagesRequest = serde_json::from_value(request).unwrap();
-        let Operation::Generation(canonical) = anthropic::decode_messages_request(request).unwrap() else {
+        let request: MessagesRequest = serde_json::from_value(request).unwrap();
+        let Operation::Generation(canonical) = decode_anthropic_request(request).unwrap() else {
             unreachable!("message decoding always creates generation")
         };
-        let encoded = anthropic::encode_messages_request(&canonical, "provider-model").unwrap();
+        let encoded = encode_anthropic_request(&canonical, "provider-model").unwrap();
         let encoded = object(encoded);
         prop_assert_eq!(encoded.get(&name), Some(&value));
     }
@@ -84,13 +99,13 @@ proptest! {
         let request = with_extension(json!({
             "contents": [{"role": "user", "parts": [{"text": "hello"}]}]
         }), &name, value.clone());
-        let request: gemini::GenerateContentRequest = serde_json::from_value(request).unwrap();
+        let request: GenerateContentRequest = serde_json::from_value(request).unwrap();
         let Operation::Generation(canonical) =
-            gemini::decode_generate_content_request("public-route", request, false).unwrap()
+            decode_gemini_request("public-route", request, false).unwrap()
         else {
             unreachable!("generateContent decoding always creates generation")
         };
-        let encoded = gemini::encode_generate_content_request(&canonical).unwrap();
+        let encoded = encode_gemini_request(&canonical).unwrap();
         let encoded = object(encoded);
         prop_assert_eq!(encoded.get(&name), Some(&value));
     }

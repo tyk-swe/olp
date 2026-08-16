@@ -1,13 +1,13 @@
 use super::*;
 
-pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKey) -> (Uuid, Uuid) {
+pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey) -> (Uuid, Uuid) {
     let provider_id = Uuid::now_v7();
     let credential_id = Uuid::now_v7();
     let model_id = Uuid::now_v7();
     let encrypted = master_key
         .seal(
             b"provider-secret",
-            &credential_aad(provider_id, credential_id, 1),
+            &credential(provider_id, credential_id, 1),
         )
         .unwrap();
     let provider = store
@@ -92,14 +92,14 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
             operation: "image_generation".parse().unwrap(),
             surface: "gemini".parse().unwrap(),
             mode: "unary".parse().unwrap(),
-            source: olp_engine::domain::CapabilitySource::Declared,
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
             certified_at: None,
         },
         CapabilityRecord {
             operation: "generation".parse().unwrap(),
             surface: "openai".parse().unwrap(),
             mode: "async".parse().unwrap(),
-            source: olp_engine::domain::CapabilitySource::Declared,
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
             certified_at: None,
         },
     ] {
@@ -114,7 +114,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                     actor,
                 )
                 .await,
-            Err(ConfigurationError::Invalid(_))
+            Err(Error::Invalid(_))
         ));
     }
     assert!(matches!(
@@ -126,7 +126,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 "provider-activate-before-fresh-probe-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     let probed_at = store
         .record_provider_probe(
@@ -153,14 +153,14 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                         operation: "generation".parse().unwrap(),
                         surface: "openai".parse().unwrap(),
                         mode: "unary".parse().unwrap(),
-                        source: olp_engine::domain::CapabilitySource::Probed,
+                        source: olp_engine::domain::provider::CapabilitySource::Probed,
                         certified_at: None,
                     },
                     CapabilityRecord {
                         operation: "generation".parse().unwrap(),
                         surface: "openai".parse().unwrap(),
                         mode: "streaming".parse().unwrap(),
-                        source: olp_engine::domain::CapabilitySource::Probed,
+                        source: olp_engine::domain::provider::CapabilitySource::Probed,
                         certified_at: None,
                     },
                 ],
@@ -182,7 +182,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 actor,
             )
             .await,
-        Err(ConfigurationError::PreconditionFailed)
+        Err(Error::PreconditionFailed)
     ));
     let after_stale_probe = store.get_provider(provider_id).await.unwrap();
     assert!(after_stale_probe.last_probe_at.is_none());
@@ -196,7 +196,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 "provider-activate-after-stale-probe-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     certify_all_capabilities(store, provider_id).await;
     store
@@ -228,10 +228,9 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 "provider-activate-openai-01",
             )
             .await,
-        Err(olp_db::configuration::ConfigurationError::IdempotencyConflict)
+        Err(olp_db::configuration::Error::IdempotencyConflict)
     ));
-    let initial_runtime: RuntimeSnapshot =
-        serde_json::from_slice(&activated.release.payload).unwrap();
+    let initial_runtime: Snapshot = serde_json::from_slice(&activated.release.payload).unwrap();
     let initial_secrets = store
         .runtime_provider_configurations(&initial_runtime)
         .await
@@ -247,7 +246,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
     let rotated_encrypted = master_key
         .seal(
             b"rotated-provider-secret",
-            &credential_aad(provider_id, rotated_credential_id, next_version),
+            &credential(provider_id, rotated_credential_id, next_version),
         )
         .unwrap();
     let rotation = store
@@ -299,10 +298,9 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
         store
             .runtime_provider_configurations(&initial_runtime)
             .await,
-        Err(ConfigurationError::InvalidCredential)
+        Err(Error::InvalidCredential)
     ));
-    let rotated_runtime: RuntimeSnapshot =
-        serde_json::from_slice(&rotation_release.payload).unwrap();
+    let rotated_runtime: Snapshot = serde_json::from_slice(&rotation_release.payload).unwrap();
     let rotated_secrets = store
         .runtime_provider_configurations(&rotated_runtime)
         .await
@@ -321,7 +319,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
         store
             .runtime_provider_configurations(&impossible_future_runtime)
             .await,
-        Err(ConfigurationError::InvalidCredential)
+        Err(Error::InvalidCredential)
     ));
     assert!(
         store
@@ -452,7 +450,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
     );
     assert_eq!(
         restored.operations,
-        vec![olp_engine::domain::OperationKind::Generation]
+        vec![olp_engine::domain::canonical::identity::OperationKind::Generation]
     );
     assert_eq!(restored.overall_timeout_ms, 30_000);
     assert_eq!(restored.max_attempts, 1);
@@ -490,7 +488,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 actor,
             )
             .await,
-        Err(ConfigurationError::Invalid(message)) if message.contains("stable slug")
+        Err(Error::Invalid(message)) if message.contains("stable slug")
     ));
     assert_eq!(
         store.get_route_draft(restored.id).await.unwrap().slug,
@@ -499,7 +497,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
 
     let auth_hmac_key = AuthHmacKey::new([9; 32]);
     let material = auth_hmac_key.generate_api_key();
-    let key_fingerprint = idempotency_fingerprint(&"api-key-configuration-create-01").unwrap();
+    let key_fingerprint = fingerprint(&"api-key-configuration-create-01").unwrap();
     let key = store
         .create_api_key_record(
             &NewApiKeyRecord {
@@ -512,12 +510,12 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 actor,
                 idempotency_key: "api-key-configuration-create-01".to_owned(),
             },
-            ReplayableIdempotency::new(key_fingerprint, master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new(key_fingerprint, master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed { value: key, .. } = key else {
+    let Outcome::Executed { value: key, .. } = key else {
         panic!("new API-key request must execute");
     };
     assert_eq!(key.release.sequence, 5);
@@ -540,7 +538,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 actor,
             )
             .await,
-        Err(olp_db::configuration::ConfigurationError::Invalid(_))
+        Err(olp_db::configuration::Error::Invalid(_))
     ));
     let key_update = store
         .update_api_key(
@@ -568,8 +566,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
     assert_eq!(key_record.tokens_per_minute, Some(10_000));
     assert_eq!(key_record.max_concurrency, Some(4));
     assert_eq!(key_record.etag, key_update.etag);
-    let updated_runtime: RuntimeSnapshot =
-        serde_json::from_slice(&key_update.release.payload).unwrap();
+    let updated_runtime: Snapshot = serde_json::from_slice(&key_update.release.payload).unwrap();
     let updated_runtime_key = updated_runtime
         .api_keys
         .values()
@@ -584,7 +581,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
     );
     assert!(updated_runtime_key.allowed_routes.is_empty());
     let replacement = auth_hmac_key.generate_api_key();
-    let rotation_fingerprint = idempotency_fingerprint(&"api-key-configuration-rotate-01").unwrap();
+    let rotation_fingerprint = fingerprint(&"api-key-configuration-rotate-01").unwrap();
     let key_rotation = store
         .rotate_api_key(
             RotateApiKeyInput {
@@ -594,12 +591,12 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
                 actor,
                 idempotency_key: "api-key-configuration-rotate-01",
             },
-            ReplayableIdempotency::new(rotation_fingerprint, master_key),
-            |_| IdempotencyResponse::new(200, None, None, Vec::new()),
+            Replayable::new(rotation_fingerprint, master_key),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: key_rotation,
         ..
     } = key_rotation
@@ -631,7 +628,7 @@ pub(super) async fn exercise(store: &PgStore, actor: Uuid, master_key: &MasterKe
             .any(|lookup_id| lookup_id.as_str() == key_rotation.lookup_id)
     );
 
-    let mut historical_runtime: RuntimeSnapshot =
+    let mut historical_runtime: Snapshot =
         serde_json::from_slice(&key_creation_release.payload).unwrap();
     assert!(
         historical_runtime

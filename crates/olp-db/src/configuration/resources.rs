@@ -5,30 +5,31 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use olp_engine::domain::{
-    CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind, ProviderState,
-    RouteDraftState, RouteId, RouteSlug, Surface, TargetId, TransportMode,
-    weighted_rendezvous_score,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::{RouteId, RouteSlug, TargetId},
+    provider::{CapabilitySource, ProviderAuthMode, ProviderState, RouteDraftState},
+    routing::{provider::ProviderKind, selection::weighted_rendezvous_score},
 };
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
+    error::Error as PersistenceError,
     idempotency::{
-        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
-        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
-        complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
+        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
     },
     runtime::{
-        PublishedRuntimeRelease, compile_and_publish_runtime_in_transaction,
-        prepare_runtime_mutation,
+        PublishedRuntimeRelease,
+        compiler::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
     },
-    security::{ApiKeyMaterial, EncryptedSecret},
+    security::{envelope::EncryptedSecret, key_material::ApiKey},
     split_page,
+    store::Store,
 };
 
 use super::{
-    ConfigurationError,
+    Error,
     validation::{
         checked_limit, enforce_provider_revision_diff_limit, validate_model,
         validate_provider_capability, validate_provider_update, validate_route_input,
@@ -377,7 +378,7 @@ pub struct UpdateApiKeyInput {
 #[derive(Debug)]
 pub struct RotateApiKeyInput<'a> {
     pub id: Uuid,
-    pub material: &'a ApiKeyMaterial,
+    pub material: &'a ApiKey,
     pub expected_etag: Uuid,
     pub actor: Uuid,
     pub idempotency_key: &'a str,

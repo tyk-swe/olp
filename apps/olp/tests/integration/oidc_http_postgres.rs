@@ -14,9 +14,12 @@ use base64::{
 use chrono::Utc;
 use http_body_util::BodyExt as _;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use olp::test_support::{ApiMode, ProcessComposition, public_router};
-use olp_db::security::MasterKey;
-use olp_engine::inference::runtime::RuntimeManager;
+use olp::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    public_http::router::for_state,
+};
+use olp_db::security::envelope::MasterKey;
+use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::{net::TcpListener, sync::Mutex};
@@ -77,14 +80,14 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     let mut api_state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-oidc-test"),
     );
     api_state.master_key = Some(Arc::new(MasterKey::new(1, [42_u8; 32])));
     configure_bootstrap(&mut api_state, [43_u8; 32]);
     api_state.oidc_allow_insecure_test_endpoints = true;
-    let app = public_router(api_state.mode_dependencies().unwrap().management().unwrap());
+    let app = for_state(api_state.mode_dependencies().unwrap().management().unwrap());
 
     let setup = send_json(
         &app,
@@ -146,13 +149,13 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     let mut oidc_only_state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-oidc-only-test"),
     );
     oidc_only_state.local_login_enabled = false;
     configure_bootstrap(&mut oidc_only_state, [44_u8; 32]);
-    let oidc_only_app = public_router(
+    let oidc_only_app = for_state(
         oidc_only_state
             .mode_dependencies()
             .unwrap()

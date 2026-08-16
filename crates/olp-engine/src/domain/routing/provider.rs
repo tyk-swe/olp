@@ -3,7 +3,10 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{CredentialVersionId, OperationKind, ProviderId, Surface, TransportMode};
+use crate::domain::{
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::{CredentialVersionId, ProviderId},
+};
 
 closed_string_enum! {
     pub enum ProviderKind {

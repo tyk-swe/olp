@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
-use olp_engine::domain::{OperationKind, ProviderKind, Surface, TransportMode};
-use olp_engine::providers::{certifiable_capabilities, supports_capability_certification};
+use olp_engine::domain::{
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    routing::provider::ProviderKind,
+};
+use olp_engine::providers::factory::certification::{certifiable_capabilities, supports};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Contract {
@@ -252,7 +255,7 @@ fn every_certifiable_tuple_is_in_the_shared_certification_contract() {
                 for mode in TransportMode::ALL {
                     assert_eq!(
                         expected.contains(&(operation, surface, mode)),
-                        supports_capability_certification(kind, operation, surface, mode),
+                        supports(kind, operation, surface, mode),
                         "matrix drift for {kind:?} {operation:?} {surface:?} {mode:?}"
                     );
                 }

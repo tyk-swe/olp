@@ -12,7 +12,8 @@ provider networking belongs in `olp_engine::providers`.
 - `public_http/`: listener/router composition and shared admission, proxy,
   cookie, origin, media/body, problem, and response policy.
 - `gateway/`: protocol Axum adapters and the sole endpoint registry,
-  `endpoint_policy.rs`; execution delegates to `InferenceService`.
+  `endpoint_policy.rs`; execution delegates to
+  `olp_engine::inference::service::Service`.
 - `management/`: `/api/v1` auth/session, access, configuration, operations,
   OIDC, playground, and OpenAPI resources.
 - `observability/`: private health/metrics listener and narrow state.
@@ -20,15 +21,18 @@ provider networking belongs in `olp_engine::providers`.
 
 `bootstrap::mode_dependencies` builds complete routed states. Management and
 observability never dereference `GatewayState`; the playground receives only
-its explicit inference capability. `ProcessComposition` is private bootstrap
-machinery except for the `test-util`-gated `olp::test_support` namespace.
+its explicit inference capability. `ProcessComposition` is bootstrap
+machinery; `test-util` fixtures import it and other helpers directly from their
+defining modules, such as `olp::bootstrap::state`, rather than through a test
+support facade.
 
 ## Similar names
 
 - Selection, failover, leases, circuits, snapshots, telemetry, and terminal
   accounting are in `crates/olp-engine/src/inference/`.
 - `gateway/media_jobs.rs` is an HTTP adapter; execution/reconciliation belongs
-  to `InferenceService` and persistence to `crates/olp-db/src/media_jobs/`.
+  to `olp_engine::inference::service::Service` and persistence to
+  `crates/olp-db/src/media_jobs/`.
 - `management/operations/usage/` renders responses; matching SQL is under
   `crates/olp-db/src/usage/`.
 - `gateway/multipart.rs` assembles provider requests; inbound size policing is
@@ -36,4 +40,6 @@ machinery except for the `test-util`-gated `olp::test_support` namespace.
 
 Regenerate `openapi/management.json` with `make openapi`; ignored service suites
 use `make db-test`. Extend the existing endpoint policy; never add a parallel
-registry.
+registry. Delivery APIs follow the same owner-module rule: use entry points
+such as `olp::bootstrap::cli::run` and `olp::management::openapi::document`,
+and do not restore crate-root facades.

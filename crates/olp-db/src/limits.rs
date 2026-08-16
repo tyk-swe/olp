@@ -1,7 +1,7 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 use olp_engine::{
-    domain::BoxFuture,
+    domain::ports::BoxFuture,
     inference::limits::{
         LimitBackend, LimitDimension, LimitError, LimitLease as LimitLeasePort, LimitRequest,
     },

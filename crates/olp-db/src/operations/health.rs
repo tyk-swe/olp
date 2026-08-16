@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
-use olp_engine::domain::{ProviderKind, ProviderState};
+use olp_engine::domain::{provider::ProviderState, routing::provider::ProviderKind};
 use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, OperationsPage, checked_u64},
+    cursor::{Error, Page, checked_u64},
 };
-use crate::{PgStore, split_page};
+use crate::{split_page, store::Store};
 
 #[derive(Clone, Debug)]
 pub struct ProviderHealthRecord {
@@ -39,11 +39,11 @@ pub struct PrometheusOperationsSummary {
     pub p99_latency_ms: Option<f64>,
 }
 
-impl PgStore {
+impl Store {
     pub async fn prometheus_operations_summary(
         &self,
         window_minutes: u16,
-    ) -> Result<PrometheusOperationsSummary, OperationsError> {
+    ) -> Result<PrometheusOperationsSummary, Error> {
         let window_minutes = window_minutes.clamp(1, 60);
         let row = sqlx::query!(
             "WITH recent_requests AS MATERIALIZED (\
@@ -87,7 +87,7 @@ impl PgStore {
         window_minutes: u16,
         cursor: Option<Uuid>,
         limit: u16,
-    ) -> Result<OperationsPage<ProviderHealthRecord>, OperationsError> {
+    ) -> Result<Page<ProviderHealthRecord>, Error> {
         let window_minutes = window_minutes.clamp(1, 1_440);
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query!(
@@ -121,9 +121,10 @@ impl PgStore {
         let items = rows
             .into_iter()
             .map(|row| {
-                let provider_state: ProviderState = row.provider_state.parse().map_err(|_| {
-                    OperationsError::Invalid("stored provider state is invalid".to_owned())
-                })?;
+                let provider_state: ProviderState = row
+                    .provider_state
+                    .parse()
+                    .map_err(|_| Error::Invalid("stored provider state is invalid".to_owned()))?;
                 let last_probe_at: Option<DateTime<Utc>> = row.last_probe_at;
                 let last_probe_status: Option<String> = row.last_probe_status;
                 let last_attempt_at: Option<DateTime<Utc>> = row.last_attempt_at;
@@ -141,7 +142,7 @@ impl PgStore {
                     provider_id: row.provider_id,
                     provider_name: row.provider_name,
                     provider_kind: row.provider_kind.parse().map_err(|_| {
-                        OperationsError::Invalid("stored provider kind is invalid".to_owned())
+                        Error::Invalid("stored provider kind is invalid".to_owned())
                     })?,
                     provider_state,
                     status: status.to_owned(),
@@ -160,11 +161,11 @@ impl PgStore {
                     average_latency_ms: row.average_latency_ms,
                 })
             })
-            .collect::<Result<Vec<_>, OperationsError>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
             item.provider_id.to_string()
         });
-        Ok(OperationsPage { items, next_cursor })
+        Ok(Page { items, next_cursor })
     }
 }
 

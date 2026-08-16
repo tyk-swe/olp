@@ -5,22 +5,33 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_db::{PgStore, configuration::ProviderRecord, configuration::UpdateProvider};
+use olp_db::{
+    configuration::resources::ProviderRecord, configuration::resources::UpdateProvider,
+    store::Store,
+};
 use olp_engine::domain::{
-    ProviderAuthMode, ProviderConfiguration, ProviderKind, validate_provider_configuration,
+    auth::Permission,
+    provider::ProviderAuthMode,
+    provider_configuration::{Configuration, validate},
+    routing::provider::ProviderKind,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    FieldErrors, ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
     management::{
-        PageQuery, Permission, if_match, json_payload, map_configuration, page,
-        require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        error_mapping::map_configuration,
+        idempotency::require_idempotency_key,
+        json_payload::json_payload,
+        pagination::{PageQuery, page},
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::{FieldErrors, Problem},
 };
 
 use super::credentials::ProviderMutationResponse;
@@ -134,7 +145,7 @@ impl From<ProviderRecord> for ProviderDetailResponse {
 }
 
 pub(super) async fn load_provider_detail(
-    store: &PgStore,
+    store: &Store,
     provider_id: Uuid,
 ) -> Result<ProviderDetailResponse, Problem> {
     store
@@ -345,7 +356,7 @@ fn validate_provider_update(
     }
 
     let mut errors = FieldErrors::new();
-    for violation in validate_provider_configuration(ProviderConfiguration {
+    for violation in validate(Configuration {
         kind: provider.kind,
         auth_mode: request.auth_mode,
         endpoint: request.endpoint.as_deref(),
@@ -419,7 +430,7 @@ pub(crate) async fn probe_provider(
         .map_err(map_configuration)?;
     if provider.etag != expected_etag {
         return Err(map_configuration(
-            olp_db::configuration::ConfigurationError::PreconditionFailed,
+            olp_db::configuration::Error::PreconditionFailed,
         ));
     }
     let connector = provider_connector(&state, provider_id).await?;

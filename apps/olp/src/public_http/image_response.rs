@@ -7,11 +7,14 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
-use olp_engine::domain::{ImagesResult, MediaHandle, MediaSpool, OpenedMedia};
-use olp_engine::protocols::openai::{OpenAiImagePayload, encode_image_response};
+use olp_engine::domain::{
+    canonical::{requests::MediaHandle, results::ImagesResult},
+    ports::{MediaSpool, OpenedMedia},
+};
+use olp_engine::protocols::openai::images::{OpenAiImagePayload, encode_image_response};
 use uuid::Uuid;
 
-use crate::gateway::InferenceError;
+use crate::gateway::error::InferenceError;
 
 const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_TEMPLATE_BYTES: usize = 4 * 1024 * 1024;
@@ -245,13 +248,20 @@ mod tests {
     use std::collections::BTreeMap;
 
     use futures::stream;
-    use olp_engine::domain::{ImageArtifact, MediaSource, MediaUpload, SourceExtensions, Surface};
+    use olp_engine::domain::{
+        canonical::{
+            identity::Surface,
+            requests::{MediaSource, SourceExtensions},
+            results::ImageArtifact,
+        },
+        ports::MediaUpload,
+    };
 
     use super::*;
 
     #[tokio::test]
     async fn image_json_is_incremental_valid_and_cleans_the_spool() {
-        let spool = crate::create_bounded_media_spool_for_test().unwrap();
+        let spool = crate::bootstrap::media_spool::create_bounded_for_test().unwrap();
         let raw = vec![0x5a; 2 * 1024 * 1024 + 1];
         let artifact = spool
             .put(MediaUpload {

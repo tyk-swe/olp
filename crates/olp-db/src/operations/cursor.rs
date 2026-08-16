@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::PersistenceError;
+use crate::error::Error as PersistenceError;
 
 #[derive(Debug, Error)]
-pub enum OperationsError {
+pub enum Error {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error("database operation failed")]
@@ -27,20 +27,19 @@ pub enum OperationsError {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct TimestampCursor {
+pub struct Timestamp {
     pub at: DateTime<Utc>,
     pub id: Uuid,
 }
 
-impl TimestampCursor {
-    pub fn parse(value: &str) -> Result<Self, OperationsError> {
+impl Timestamp {
+    pub fn parse(value: &str) -> Result<Self, Error> {
         let bytes = URL_SAFE_NO_PAD
             .decode(value)
-            .map_err(|_| OperationsError::InvalidCursor)?;
-        let cursor: Self =
-            serde_json::from_slice(&bytes).map_err(|_| OperationsError::InvalidCursor)?;
+            .map_err(|_| Error::InvalidCursor)?;
+        let cursor: Self = serde_json::from_slice(&bytes).map_err(|_| Error::InvalidCursor)?;
         if cursor.id.get_version_num() != 7 {
-            return Err(OperationsError::InvalidCursor);
+            return Err(Error::InvalidCursor);
         }
         Ok(cursor)
     }
@@ -53,41 +52,38 @@ impl TimestampCursor {
 }
 
 #[derive(Clone, Debug)]
-pub struct OperationsPage<T> {
+pub struct Page<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<String>,
 }
 
-pub(super) fn checked_u16(value: i16, name: &str) -> Result<u16, OperationsError> {
-    u16::try_from(value).map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
+pub(super) fn checked_u16(value: i16, name: &str) -> Result<u16, Error> {
+    u16::try_from(value).map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
 }
 
-pub(super) fn optional_u16(value: Option<i32>, name: &str) -> Result<Option<u16>, OperationsError> {
+pub(super) fn optional_u16(value: Option<i32>, name: &str) -> Result<Option<u16>, Error> {
     value
         .map(u16::try_from)
         .transpose()
-        .map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
+        .map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
 }
 
-pub(crate) fn checked_u64(value: i64, name: &str) -> Result<u64, OperationsError> {
-    u64::try_from(value).map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
+pub(crate) fn checked_u64(value: i64, name: &str) -> Result<u64, Error> {
+    u64::try_from(value).map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
 }
 
-pub(super) fn optional_u64(value: Option<i64>, name: &str) -> Result<Option<u64>, OperationsError> {
+pub(super) fn optional_u64(value: Option<i64>, name: &str) -> Result<Option<u64>, Error> {
     value
         .map(u64::try_from)
         .transpose()
-        .map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
+        .map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
 }
 
-pub(super) fn optional_i32_u64(
-    value: Option<i32>,
-    name: &str,
-) -> Result<Option<u64>, OperationsError> {
+pub(super) fn optional_i32_u64(value: Option<i32>, name: &str) -> Result<Option<u64>, Error> {
     value
         .map(u64::try_from)
         .transpose()
-        .map_err(|_| OperationsError::Invalid(format!("stored {name} is invalid")))
+        .map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
 }
 
 pub(crate) fn trimmed_optional(value: Option<String>) -> Option<String> {

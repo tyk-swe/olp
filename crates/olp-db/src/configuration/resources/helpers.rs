@@ -9,9 +9,7 @@ pub(super) struct CapabilityRow {
     pub(super) certified_at: Option<DateTime<Utc>>,
 }
 
-pub(super) fn capability_from_row(
-    row: CapabilityRow,
-) -> Result<CapabilityRecord, ConfigurationError> {
+pub(super) fn capability_from_row(row: CapabilityRow) -> Result<CapabilityRecord, Error> {
     Ok(CapabilityRecord {
         operation: row
             .operation
@@ -33,12 +31,9 @@ pub(super) fn capability_from_row(
     })
 }
 
-pub(super) fn checked_configuration_count(
-    value: i64,
-    column: &str,
-) -> Result<u64, ConfigurationError> {
+pub(super) fn checked_configuration_count(value: i64, column: &str) -> Result<u64, Error> {
     u64::try_from(value).map_err(|_| {
-        ConfigurationError::Invalid(format!(
+        Error::Invalid(format!(
             "stored provider {column} is outside the supported range"
         ))
     })
@@ -51,7 +46,7 @@ pub(super) async fn audit_in_transaction(
     resource_type: &str,
     resource_id: Uuid,
     outcome: &str,
-) -> Result<(), ConfigurationError> {
+) -> Result<(), Error> {
     sqlx::query!(
         "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome) \
          VALUES ($1, $2, $3, $4, $5, $6)",

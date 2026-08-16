@@ -3,18 +3,20 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
 };
-use olp_db::usage::UsageCompleteness;
+use olp_db::usage::completeness::Report;
 use serde::Serialize;
 use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::operations::{
         helpers::map_operations, request_metadata::RequestMetadataConsumerStatusResponse,
     },
-    management::{Permission, require_permission, require_read_session},
+    management::{permissions::require_permission, sessions::require_read_session},
+    public_http::problem::Problem,
 };
+use olp_engine::domain::auth::Permission;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageCompletenessResponse {
@@ -31,8 +33,8 @@ pub(in crate::management::operations) struct UsageCompletenessResponse {
     complete: bool,
 }
 
-impl From<UsageCompleteness> for UsageCompletenessResponse {
-    fn from(summary: UsageCompleteness) -> Self {
+impl From<Report> for UsageCompletenessResponse {
+    fn from(summary: Report) -> Self {
         Self {
             request_count: summary.request_count,
             priced_count: summary.priced_count,

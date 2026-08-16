@@ -6,12 +6,14 @@ use std::{
 };
 
 use crate::domain::{
-    MediaArtifact, MediaSpool, MediaSpoolError, MediaUpload, ProviderRequest, TransportError,
-    media_handle_from_inline_marker,
+    canonical::{requests::media_handle_from_inline_marker, results::MediaArtifact},
+    ports::{MediaSpool, MediaSpoolError, MediaUpload, ProviderRequest, TransportError},
 };
 use crate::protocols::openai::{
-    BoundedMediaPart, ChatCompletionRequest, ChatContentPart, ChatMessageContent,
-    OpenAiImageResponse, ResponseInput, decode_image_response,
+    chat::{CompletionRequest, ContentPart, MessageContent},
+    images::{OpenAiImageResponse, decode_image_response},
+    media::BoundedMediaPart,
+    responses::request::ResponseInput,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytes::Bytes;
@@ -19,20 +21,21 @@ use futures::{StreamExt, stream};
 use reqwest::multipart;
 use serde_json::Value;
 
-use super::{OpenAiConnector, errors::*, streams::*};
+use super::{Connector, errors::*, streams::*};
+use crate::providers::transport_common::protocol_body_error;
 
 const MAX_INLINE_REQUEST_MEDIA_BYTES: usize = 1024 * 1024;
 
 pub(super) async fn hydrate_chat_media(
-    request: &mut ChatCompletionRequest,
+    request: &mut CompletionRequest,
     spool: Option<&Arc<dyn MediaSpool>>,
 ) -> Result<(), TransportError> {
     for message in &mut request.messages {
-        let Some(ChatMessageContent::Parts(parts)) = &mut message.content else {
+        let Some(MessageContent::Parts(parts)) = &mut message.content else {
             continue;
         };
         for part in parts {
-            let ChatContentPart::InputAudio { input_audio, .. } = part else {
+            let ContentPart::InputAudio { input_audio, .. } = part else {
                 continue;
             };
             if media_handle_from_inline_marker(&input_audio.data).is_some() {
@@ -129,12 +132,12 @@ async fn read_inline_request_media(
     Ok(STANDARD.encode(bytes))
 }
 
-impl OpenAiConnector {
+impl Connector {
     pub(super) async fn decode_image_result(
         &self,
         request: &ProviderRequest,
         mut wire: OpenAiImageResponse,
-    ) -> Result<crate::domain::ImagesResult, TransportError> {
+    ) -> Result<crate::domain::canonical::results::ImagesResult, TransportError> {
         let mut handles = VecDeque::new();
         let mut staged = Vec::new();
         let decoded = async {
@@ -169,7 +172,7 @@ impl OpenAiConnector {
             }
             decode_image_response(wire, |_| {
                 handles.pop_front().ok_or_else(|| {
-                    crate::protocols::openai::ImageCodecError::Staging(
+                    crate::protocols::openai::images::ImageCodecError::Staging(
                         "image spool handle was unavailable".into(),
                     )
                 })
@@ -189,8 +192,8 @@ impl OpenAiConnector {
 }
 
 pub(super) async fn bounded_part(
-    spool: &dyn crate::domain::MediaSpool,
-    handle: &crate::domain::MediaHandle,
+    spool: &dyn crate::domain::ports::MediaSpool,
+    handle: &crate::domain::canonical::requests::MediaHandle,
     maximum: u64,
 ) -> Result<BoundedMediaPart, TransportError> {
     let opened = spool.open(handle).await.map_err(map_spool_error)?;
@@ -208,7 +211,7 @@ pub(super) async fn bounded_part(
 }
 
 pub(super) fn multipart_part(
-    opened: crate::domain::OpenedMedia,
+    opened: crate::domain::ports::OpenedMedia,
 ) -> Result<multipart::Part, TransportError> {
     let length = opened.artifact.content_length.ok_or_else(|| {
         protocol_body_error("bounded media spool omitted the admitted content length")
@@ -264,7 +267,7 @@ pub(super) fn add_extra_fields(
 
 pub(super) fn add_image_edit_fields(
     mut form: multipart::Form,
-    wire: &crate::protocols::openai::OpenAiImageEditRequest,
+    wire: &crate::protocols::openai::images::OpenAiImageEditRequest,
 ) -> multipart::Form {
     form = add_optional_text(form, "n", wire.n.map(|value| value.to_string()));
     form = add_optional_text(form, "size", wire.size.clone());

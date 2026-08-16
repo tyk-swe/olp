@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::PgStore;
+use crate::store::Store;
 
 use super::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
@@ -8,7 +8,7 @@ use super::{
     queries::{MediaJobRow, media_job_from_row},
 };
 
-impl PgStore {
+impl Store {
     /// Persists the public OLP job ID and exact selected target before a
     /// non-idempotent upstream create is attempted. No prompt or file metadata
     /// is accepted by this API.
@@ -317,7 +317,7 @@ fn validate_reservation(input: &NewMediaJobReservation) -> Result<(), MediaJobEr
 }
 
 async fn update_reconciliation_lifecycle(
-    store: &PgStore,
+    store: &Store,
     id: Uuid,
     lifecycle: MediaJobLifecycle,
     upstream_job_id: Option<&str>,

@@ -1,14 +1,11 @@
 use super::{helpers::audit_in_transaction, *};
 
-impl PgStore {
+impl Store {
     /// Returns the next candidate version without enforcing an HTTP
     /// precondition. The transactional rotation still checks both the ETag and
     /// candidate version after claiming idempotency; this allows an identical
     /// retry with the original ETag to reach its persisted replay response.
-    pub async fn next_credential_version_candidate(
-        &self,
-        provider_id: Uuid,
-    ) -> Result<u32, ConfigurationError> {
+    pub async fn next_credential_version_candidate(&self, provider_id: Uuid) -> Result<u32, Error> {
         let next_version: i32 = sqlx::query_scalar!(
             "SELECT COALESCE(max(cv.version), 0) + 1 AS \"value!\" \
              FROM providers p LEFT JOIN provider_credential_versions cv ON cv.provider_id = p.id \
@@ -17,20 +14,20 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         u32::try_from(next_version)
-            .map_err(|_| ConfigurationError::Invalid("credential version overflow".to_owned()))
+            .map_err(|_| Error::Invalid("credential version overflow".to_owned()))
     }
 
     pub async fn rotate_provider_credential<F>(
         &self,
         provider_id: Uuid,
         input: RotateCredentialInput,
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<ProviderMutationResult>, ConfigurationError>
+    ) -> Result<Outcome<ProviderMutationResult>, Error>
     where
-        F: FnOnce(&ProviderMutationResult) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&ProviderMutationResult) -> Result<Response, PersistenceError>,
     {
         let mut transaction = self
             .pool()
@@ -51,29 +48,25 @@ impl PgStore {
             }
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
         let database_version = i32::try_from(input.version)
             .ok()
             .filter(|value| *value > 0)
-            .ok_or_else(|| {
-                ConfigurationError::Invalid("credential version is invalid".to_owned())
-            })?;
+            .ok_or_else(|| Error::Invalid("credential version is invalid".to_owned()))?;
         let key_version = i32::try_from(input.encrypted.key_version)
             .ok()
             .filter(|value| *value > 0)
-            .ok_or_else(|| {
-                ConfigurationError::Invalid("master-key version is invalid".to_owned())
-            })?;
+            .ok_or_else(|| Error::Invalid("master-key version is invalid".to_owned()))?;
         let provider = sqlx::query!(
             "SELECT etag, state::text AS \"state!\", COALESCE((SELECT max(version) FROM \
              provider_credential_versions WHERE provider_id = $1), 0) + 1 AS \"next_version!\" \
@@ -82,15 +75,15 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if provider.etag != input.expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.state == "disabled" {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         if provider.next_version != database_version {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         sqlx::query!(
             "INSERT INTO provider_credential_versions \
@@ -151,7 +144,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: result,
             response,
         })
@@ -162,7 +155,7 @@ impl PgStore {
         provider_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<CredentialVersionRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<CredentialVersionRecord>, Error> {
         let limit = checked_limit(limit)?;
         let exists: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM providers WHERE id = $1) AS \"value!\"",
@@ -171,7 +164,7 @@ impl PgStore {
         .fetch_one(self.pool())
         .await?;
         if !exists {
-            return Err(ConfigurationError::NotFound);
+            return Err(Error::NotFound);
         }
         let before_version: Option<i32> = match cursor {
             Some(cursor) => Some(
@@ -184,9 +177,7 @@ impl PgStore {
                 .fetch_optional(self.pool())
                 .await?
                 .ok_or_else(|| {
-                    ConfigurationError::Invalid(
-                        "credential pagination cursor is invalid".to_owned(),
-                    )
+                    Error::Invalid("credential pagination cursor is invalid".to_owned())
                 })?,
             ),
             None => None,
@@ -225,7 +216,7 @@ impl PgStore {
     pub async fn active_provider_credential_secret(
         &self,
         provider_id: Uuid,
-    ) -> Result<StoredCredentialSecret, ConfigurationError> {
+    ) -> Result<StoredCredentialSecret, Error> {
         let row = sqlx::query!(
             "SELECT cv.id, cv.version, cv.ciphertext, cv.nonce, cv.master_key_version \
              FROM providers p JOIN provider_credential_versions cv \
@@ -235,17 +226,15 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         let nonce: Vec<u8> = row.nonce;
-        let nonce: [u8; 12] = nonce.try_into().map_err(|_| {
-            ConfigurationError::Invalid("stored credential nonce is invalid".to_owned())
-        })?;
-        let version = u32::try_from(row.version).map_err(|_| {
-            ConfigurationError::Invalid("stored credential version is invalid".to_owned())
-        })?;
-        let key_version = u32::try_from(row.master_key_version).map_err(|_| {
-            ConfigurationError::Invalid("stored master-key version is invalid".to_owned())
-        })?;
+        let nonce: [u8; 12] = nonce
+            .try_into()
+            .map_err(|_| Error::Invalid("stored credential nonce is invalid".to_owned()))?;
+        let version = u32::try_from(row.version)
+            .map_err(|_| Error::Invalid("stored credential version is invalid".to_owned()))?;
+        let key_version = u32::try_from(row.master_key_version)
+            .map_err(|_| Error::Invalid("stored master-key version is invalid".to_owned()))?;
         Ok(StoredCredentialSecret {
             id: row.id,
             version,
@@ -264,7 +253,7 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<Uuid, ConfigurationError> {
+    ) -> Result<Uuid, Error> {
         let mut transaction = self.pool().begin().await?;
         if !claim_idempotency(
             &mut transaction,
@@ -274,7 +263,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let provider = sqlx::query!(
             "SELECT p.etag, p.active_credential_version_id, \
@@ -285,14 +274,14 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.active_credential_version_id == Some(credential_id)
             || provider.activated_credential_version_id == Some(credential_id)
         {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         // Historic jobs carry their immutable provider revision. Even an
         // otherwise inactive credential remains lifecycle authority until
@@ -310,7 +299,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if used_by_live_media_job {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let result = sqlx::query!(
             "UPDATE provider_credential_versions SET revoked_at = COALESCE(revoked_at, now()) \
@@ -321,7 +310,7 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?;
         if result.rows_affected() != 1 {
-            return Err(ConfigurationError::NotFound);
+            return Err(Error::NotFound);
         }
         let etag = Uuid::now_v7();
         sqlx::query!(

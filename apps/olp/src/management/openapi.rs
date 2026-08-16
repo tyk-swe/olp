@@ -1,7 +1,18 @@
 use super::sessions::CSRF_HEADER;
 use crate::public_http::request_cookies::SESSION_COOKIE;
+use utoipa::OpenApi as _;
 
-pub(super) fn complete_openapi_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
+#[must_use]
+pub fn document() -> serde_json::Value {
+    let mut document = super::ApiDoc::openapi();
+    document.merge(super::oidc::openapi());
+    document.merge(super::operations::OperationsApiDoc::openapi());
+    document.merge(super::configuration::ConfigurationApiDoc::openapi());
+    document.merge(super::playground::PlaygroundApiDoc::openapi());
+    complete_contract(document)
+}
+
+fn complete_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
     let mut value = serde_json::to_value(document).expect("generated OpenAPI is serializable");
     let components = value
         .get_mut("components")

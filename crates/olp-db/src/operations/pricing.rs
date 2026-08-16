@@ -1,21 +1,22 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
-use olp_engine::domain::{OperationKind, ProviderKind};
+use olp_engine::domain::{canonical::identity::OperationKind, routing::provider::ProviderKind};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, OperationsPage},
+    cursor::{Error, Page},
 };
 use crate::{
-    PersistenceError, PgStore,
+    error::Error as PersistenceError,
     idempotency::{
-        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
-        claim_replayable_idempotency, complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
+        complete_replayable_idempotency,
     },
     split_page,
+    store::Store,
 };
 
 const PRICING_LOCK_ID: i64 = 0x4f4c_505f_5052; // "OLP_PR"
@@ -33,7 +34,7 @@ pub struct PriceInput {
 }
 
 #[derive(Clone, Debug)]
-pub struct PricingRevisionRecord {
+pub struct RevisionRecord {
     pub id: Uuid,
     pub revision: u32,
     pub effective_at: DateTime<Utc>,
@@ -42,18 +43,18 @@ pub struct PricingRevisionRecord {
     pub prices: Vec<PriceInput>,
 }
 
-impl PgStore {
+impl Store {
     pub async fn create_pricing_revision<F>(
         &self,
         actor: Uuid,
         idempotency_key: &str,
         effective_at: DateTime<Utc>,
         prices: &[PriceInput],
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<PricingRevisionRecord>, OperationsError>
+    ) -> Result<Outcome<RevisionRecord>, Error>
     where
-        F: FnOnce(&PricingRevisionRecord) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&RevisionRecord) -> Result<Response, PersistenceError>,
     {
         let mut transaction = self.pool().begin().await?;
         match claim_replayable_idempotency(
@@ -69,15 +70,15 @@ impl PgStore {
             ReplayableIdempotencyClaim::Execute => {}
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(OperationsError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(OperationsError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
         validate_prices(prices)?;
@@ -86,7 +87,7 @@ impl PgStore {
             .await?;
         let requested_currency = prices
             .first()
-            .ok_or_else(|| OperationsError::Invalid("pricing revision is empty".to_owned()))?
+            .ok_or_else(|| Error::Invalid("pricing revision is empty".to_owned()))?
             .currency
             .trim()
             .to_uppercase();
@@ -99,7 +100,7 @@ impl PgStore {
             .as_deref()
             .is_some_and(|currency| currency.trim() != requested_currency)
         {
-            return Err(OperationsError::Invalid(format!(
+            return Err(Error::Invalid(format!(
                 "pricing currency must match the installation currency {}",
                 configured_currency
                     .as_deref()
@@ -135,7 +136,7 @@ impl PgStore {
                         .fetch_optional(&mut *transaction)
                         .await?;
                 if provider_kind.as_deref() != Some(price.provider_kind.as_str()) {
-                    return Err(OperationsError::Invalid(
+                    return Err(Error::Invalid(
                         "a pricing override must reference a provider of the declared kind"
                             .to_owned(),
                     ));
@@ -170,10 +171,10 @@ impl PgStore {
         )
         .execute(&mut *transaction)
         .await?;
-        let record = PricingRevisionRecord {
+        let record = RevisionRecord {
             id,
             revision: u32::try_from(revision)
-                .map_err(|_| OperationsError::Invalid("revision overflow".to_owned()))?,
+                .map_err(|_| Error::Invalid("revision overflow".to_owned()))?,
             effective_at,
             created_by: actor,
             created_at: now,
@@ -191,7 +192,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: record,
             response,
         })
@@ -201,11 +202,11 @@ impl PgStore {
         &self,
         before_revision: Option<u32>,
         limit: u16,
-    ) -> Result<OperationsPage<PricingRevisionRecord>, OperationsError> {
+    ) -> Result<Page<RevisionRecord>, Error> {
         let before_revision = before_revision
             .map(i32::try_from)
             .transpose()
-            .map_err(|_| OperationsError::InvalidCursor)?;
+            .map_err(|_| Error::InvalidCursor)?;
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query!(
             "SELECT r.id, r.revision, r.effective_at, r.created_by, r.created_at, \
@@ -225,14 +226,14 @@ impl PgStore {
         )
         .fetch_all(self.pool())
         .await?;
-        let mut revisions = Vec::<PricingRevisionRecord>::new();
+        let mut revisions = Vec::<RevisionRecord>::new();
         for row in rows {
             let id: Uuid = row.id;
             if revisions.last().is_none_or(|revision| revision.id != id) {
-                revisions.push(PricingRevisionRecord {
+                revisions.push(RevisionRecord {
                     id,
                     revision: u32::try_from(row.revision).map_err(|_| {
-                        OperationsError::Invalid("stored pricing revision is invalid".to_owned())
+                        Error::Invalid("stored pricing revision is invalid".to_owned())
                     })?,
                     effective_at: row.effective_at,
                     created_by: row.created_by,
@@ -243,13 +244,11 @@ impl PgStore {
             let provider_kind: Option<String> = row.provider_kind;
             if let Some(provider_kind) = provider_kind {
                 let revision = revisions.last_mut().ok_or_else(|| {
-                    OperationsError::Invalid("pricing revision grouping is invalid".to_owned())
+                    Error::Invalid("pricing revision grouping is invalid".to_owned())
                 })?;
                 revision.prices.push(PriceInput {
                     provider_kind: provider_kind.parse().map_err(|_| {
-                        OperationsError::Invalid(
-                            "stored pricing provider kind is invalid".to_owned(),
-                        )
+                        Error::Invalid("stored pricing provider kind is invalid".to_owned())
                     })?,
                     provider_id: row.provider_id,
                     model: row
@@ -260,9 +259,7 @@ impl PgStore {
                         .ok_or(PersistenceError::InvalidStoredValue("pricing operation"))?
                         .parse()
                         .map_err(|_| {
-                            OperationsError::Invalid(
-                                "stored pricing operation is invalid".to_owned(),
-                            )
+                            Error::Invalid("stored pricing operation is invalid".to_owned())
                         })?,
                     input_per_million: row.input_per_million,
                     output_per_million: row.output_per_million,
@@ -278,16 +275,16 @@ impl PgStore {
         let (revisions, next_cursor) = split_page(revisions, usize::from(page_size), |revision| {
             revision.revision.to_string()
         });
-        Ok(OperationsPage {
+        Ok(Page {
             items: revisions,
             next_cursor,
         })
     }
 }
 
-pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsError> {
+pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), Error> {
     if prices.is_empty() || prices.len() > 10_000 {
-        return Err(OperationsError::Invalid(
+        return Err(Error::Invalid(
             "a pricing revision must contain 1-10000 entries".to_owned(),
         ));
     }
@@ -302,7 +299,7 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsErr
                 && price.output_per_million.is_none()
                 && price.unit_price.is_none())
         {
-            return Err(OperationsError::Invalid(
+            return Err(Error::Invalid(
                 "pricing entries require dimensions, ISO currency, and at least one price"
                     .to_owned(),
             ));
@@ -312,7 +309,7 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsErr
             .as_ref()
             .is_some_and(|expected| expected != &normalized_currency)
         {
-            return Err(OperationsError::Invalid(
+            return Err(Error::Invalid(
                 "a pricing revision cannot mix currencies".to_owned(),
             ));
         }
@@ -323,7 +320,7 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsErr
             price.model.trim(),
             price.operation,
         )) {
-            return Err(OperationsError::Invalid(
+            return Err(Error::Invalid(
                 "pricing revision contains duplicate scoped dimensions".to_owned(),
             ));
         }
@@ -341,7 +338,7 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), OperationsErr
     Ok(())
 }
 
-pub(super) fn validate_decimal(value: &str) -> Result<(), OperationsError> {
+pub(super) fn validate_decimal(value: &str) -> Result<(), Error> {
     let value = value.trim();
     let mut parts = value.split('.');
     let integer = parts.next().unwrap_or_default();
@@ -356,18 +353,18 @@ pub(super) fn validate_decimal(value: &str) -> Result<(), OperationsError> {
         })
         || integer.len() > 12
     {
-        return Err(OperationsError::Invalid(
+        return Err(Error::Invalid(
             "prices must be non-negative decimals with at most 12 fractional digits".to_owned(),
         ));
     }
     Ok(())
 }
 
-fn parse_optional_decimal(value: Option<&str>) -> Result<Option<Decimal>, OperationsError> {
+fn parse_optional_decimal(value: Option<&str>) -> Result<Option<Decimal>, Error> {
     value
         .map(|value| {
             value.trim().parse().map_err(|_| {
-                OperationsError::Invalid("price is outside the supported numeric range".to_owned())
+                Error::Invalid("price is outside the supported numeric range".to_owned())
             })
         })
         .transpose()

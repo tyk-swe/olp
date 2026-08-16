@@ -1,23 +1,19 @@
 use std::{fmt, time::Duration};
 
-use crate::domain::{AttemptFailureClass, MediaSpoolError, TransportError, TransportPhase};
+use crate::domain::ports::{AttemptFailureClass, MediaSpoolError, TransportError, TransportPhase};
 use http::{HeaderValue, StatusCode};
 use tokio::time::Instant;
 use zeroize::Zeroizing;
 
+use crate::providers::transport_common::transport_error;
 use crate::providers::{
-    openai::{OpenAiApiKey, endpoint::EndpointError},
+    openai::{ApiKey, endpoint::Error},
     transport_common,
     transport_io::ProviderResponseIo,
 };
 
 const PROVIDER: &str = "OpenAI";
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new(PROVIDER);
-
-pub(super) use crate::providers::{
-    transport_common::{protocol_body_error, transport_error},
-    transport_io::bounded_duration,
-};
 
 pub(super) fn serialize_wire<T: serde::Serialize>(
     operation: &'static str,
@@ -66,7 +62,7 @@ pub(super) fn map_spool_error(error: MediaSpoolError) -> TransportError {
     )
 }
 
-pub(super) fn bearer_header(api_key: &OpenAiApiKey) -> Result<HeaderValue, TransportError> {
+pub(super) fn bearer_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
     let mut value = Zeroizing::new(Vec::with_capacity(7 + api_key.expose().len()));
     value.extend_from_slice(b"Bearer ");
     value.extend_from_slice(api_key.expose().as_bytes());
@@ -80,7 +76,7 @@ pub(super) fn bearer_header(api_key: &OpenAiApiKey) -> Result<HeaderValue, Trans
     })
 }
 
-pub(super) fn raw_api_key_header(api_key: &OpenAiApiKey) -> Result<HeaderValue, TransportError> {
+pub(super) fn raw_api_key_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
     HeaderValue::from_bytes(api_key.expose().as_bytes()).map_err(|_| {
         transport_error(
             TransportPhase::Connect,
@@ -124,10 +120,10 @@ pub(super) fn remaining_until(
         .checked_duration_since(Instant::now())
 }
 
-pub(super) fn map_endpoint_error(error: EndpointError) -> TransportError {
+pub(super) fn map_endpoint_error(error: Error) -> TransportError {
     let dns_timeout = matches!(
         error,
-        EndpointError::Common(crate::providers::CommonEndpointError::DnsTimeout { .. })
+        Error::Common(crate::providers::endpoint::Error::DnsTimeout { .. })
     );
     transport_common::map_endpoint_error(error, dns_timeout)
 }

@@ -4,16 +4,18 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_db::{usage::UsageGranularity, usage::UsagePoint};
+use olp_db::{usage::Granularity, usage::series::Point};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::operations::helpers::map_operations,
-    management::{Permission, require_permission, require_read_session},
+    management::{permissions::require_permission, sessions::require_read_session},
+    public_http::problem::Problem,
 };
+use olp_engine::domain::auth::Permission;
 
 #[derive(Debug, Deserialize)]
 pub(in crate::management::operations) struct UsageSeriesQuery {
@@ -36,8 +38,8 @@ pub(in crate::management::operations) struct UsagePointResponse {
     incomplete_count: u64,
 }
 
-impl From<UsagePoint> for UsagePointResponse {
-    fn from(point: UsagePoint) -> Self {
+impl From<Point> for UsagePointResponse {
+    fn from(point: Point) -> Self {
         Self {
             bucket: point.bucket,
             request_count: point.request_count,
@@ -78,8 +80,8 @@ pub(in crate::management::operations) async fn usage_time_series(
     require_permission(&principal, Permission::ReadOperations)?;
     query.usage.validate()?;
     let granularity = match query.granularity.as_deref().unwrap_or("hour") {
-        "hour" => UsageGranularity::Hour,
-        "day" => UsageGranularity::Day,
+        "hour" => Granularity::Hour,
+        "day" => Granularity::Day,
         _ => {
             return Err(Problem::bad_request(
                 "invalid_granularity",

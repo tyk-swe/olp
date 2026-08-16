@@ -1,24 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, FinishReason, Surface};
+use crate::domain::canonical::{
+    events::{Event, FinishReason, Kind},
+    identity::Surface,
+};
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::protocols::client::{AggregateError, aggregate_generation};
-use crate::protocols::sse::SseFrame;
+use crate::protocols::sse::Frame;
 
 use super::extensions::apply_pointer_extensions;
 use super::responses::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
-use super::{
-    ResponseErrorBody, ResponseInputTokenDetails, ResponseObject, ResponseOutputTokenDetails,
-    ResponseUsage,
-};
+use super::responses::response::{ErrorBody, InputTokenDetails, Object, OutputTokenDetails, Usage};
 
 pub fn encode_response_object(
-    events: &[CanonicalEvent],
+    events: &[Event],
     client_model: &str,
     fallback_id: &str,
-) -> Result<ResponseObject, OpenAiClientEncodeError> {
+) -> Result<Object, OpenAiClientEncodeError> {
     let mut aggregate = aggregate_generation(events, Surface::OpenAi)?;
     let raw_output = take_raw_response_output(&mut aggregate.extensions)?;
     let mut output = Vec::new();
@@ -96,26 +96,26 @@ pub fn encode_response_object(
     let status = take_string_extension(&mut aggregate.extensions, "/status")
         .unwrap_or_else(|| "completed".into());
     let incomplete_details = aggregate.extensions.remove("/incomplete_details");
-    let usage = aggregate.usage.map(|usage| ResponseUsage {
+    let usage = aggregate.usage.map(|usage| Usage {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         total_tokens: usage.total_tokens,
-        input_tokens_details: usage.cached_input_tokens.map(|cached_tokens| {
-            ResponseInputTokenDetails {
+        input_tokens_details: usage
+            .cached_input_tokens
+            .map(|cached_tokens| InputTokenDetails {
                 cached_tokens,
                 extra: BTreeMap::new(),
-            }
-        }),
-        output_tokens_details: usage.reasoning_tokens.map(|reasoning_tokens| {
-            ResponseOutputTokenDetails {
+            }),
+        output_tokens_details: usage
+            .reasoning_tokens
+            .map(|reasoning_tokens| OutputTokenDetails {
                 reasoning_tokens,
                 extra: BTreeMap::new(),
-            }
-        }),
+            }),
         extra: BTreeMap::new(),
     });
     apply_pointer_extensions(
-        ResponseObject {
+        Object {
             id: aggregate.response_id.unwrap_or_else(|| fallback_id.into()),
             object: "response".into(),
             created_at,
@@ -123,7 +123,7 @@ pub fn encode_response_object(
             model: client_model.into(),
             output,
             usage,
-            error: None::<ResponseErrorBody>,
+            error: None::<ErrorBody>,
             incomplete_details,
             extra: BTreeMap::new(),
         },
@@ -132,12 +132,12 @@ pub fn encode_response_object(
     .map_err(OpenAiClientEncodeError::InvalidExtension)
 }
 
-pub struct OpenAiResponsesStreamEncoder {
+pub struct Encoder {
     client_model: String,
     fallback_id: String,
     created_at: i64,
     next_sequence: u64,
-    events: Vec<CanonicalEvent>,
+    events: Vec<Event>,
     collected_event_bytes: usize,
     emitted_outputs: BTreeSet<u32>,
     tool_outputs: BTreeSet<u32>,
@@ -146,10 +146,10 @@ pub struct OpenAiResponsesStreamEncoder {
     incomplete_reason: Option<&'static str>,
 }
 
-impl std::fmt::Debug for OpenAiResponsesStreamEncoder {
+impl std::fmt::Debug for Encoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("OpenAiResponsesStreamEncoder")
+            .debug_struct("Encoder")
             .field("next_sequence", &self.next_sequence)
             .field("collected_event_bytes", &self.collected_event_bytes)
             .field("emitted_output_count", &self.emitted_outputs.len())
@@ -158,7 +158,7 @@ impl std::fmt::Debug for OpenAiResponsesStreamEncoder {
     }
 }
 
-impl OpenAiResponsesStreamEncoder {
+impl Encoder {
     #[must_use]
     pub fn new(
         client_model: impl Into<String>,
@@ -179,10 +179,7 @@ impl OpenAiResponsesStreamEncoder {
         }
     }
 
-    pub fn push(
-        &mut self,
-        event: CanonicalEvent,
-    ) -> Result<Vec<SseFrame>, OpenAiClientEncodeError> {
+    pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, OpenAiClientEncodeError> {
         if self.done {
             return Err(OpenAiClientEncodeError::DataAfterDone);
         }
@@ -204,7 +201,7 @@ impl OpenAiResponsesStreamEncoder {
         self.next_sequence = self.next_sequence.saturating_add(1);
         let mut frames = Vec::new();
         match &event.kind {
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id,
                 provider_model: _,
             } => {
@@ -223,22 +220,22 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::MessageStart { .. } => {}
-            CanonicalEventKind::TextDelta { output_index, text } => {
+            Kind::MessageStart { .. } => {}
+            Kind::TextDelta { output_index, text } => {
                 self.ensure_stream_output(*output_index, false, &mut frames)?;
                 frames.push(response_sse_frame(
                     "response.output_text.delta",
                     json!({"output_index": output_index, "content_index": 0, "delta": text}),
                 )?);
             }
-            CanonicalEventKind::RefusalDelta { output_index, text } => {
+            Kind::RefusalDelta { output_index, text } => {
                 self.ensure_stream_output(*output_index, false, &mut frames)?;
                 frames.push(response_sse_frame(
                     "response.refusal.delta",
                     json!({"output_index": output_index, "content_index": 0, "delta": text}),
                 )?);
             }
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 id,
                 name,
@@ -256,7 +253,7 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index,
                 reason,
             } => {
@@ -280,8 +277,8 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::Usage { .. } => {}
-            CanonicalEventKind::SourceExtension { extensions } => {
+            Kind::Usage { .. } => {}
+            Kind::SourceExtension { extensions } => {
                 if extensions.source != Some(Surface::OpenAi) {
                     return Err(OpenAiClientEncodeError::CrossProtocolExtensions);
                 }
@@ -294,7 +291,7 @@ impl OpenAiResponsesStreamEncoder {
                     }
                 }
             }
-            CanonicalEventKind::Error { error } => {
+            Kind::Error { error } => {
                 frames.push(response_sse_frame(
                     "response.failed",
                     json!({
@@ -308,7 +305,7 @@ impl OpenAiResponsesStreamEncoder {
                     }),
                 )?);
             }
-            CanonicalEventKind::Done => {
+            Kind::Done => {
                 let terminal_reason = self.incomplete_reason.take();
                 let normalized = self.normalized_events_with(event.clone());
                 let mut response =
@@ -337,7 +334,7 @@ impl OpenAiResponsesStreamEncoder {
         &mut self,
         output_index: u32,
         tool: bool,
-        frames: &mut Vec<SseFrame>,
+        frames: &mut Vec<Frame>,
     ) -> Result<(), OpenAiClientEncodeError> {
         if tool {
             self.tool_outputs.insert(output_index);
@@ -356,31 +353,31 @@ impl OpenAiResponsesStreamEncoder {
         Ok(())
     }
 
-    fn normalized_events_with(&self, terminal: CanonicalEvent) -> Vec<CanonicalEvent> {
+    fn normalized_events_with(&self, terminal: Event) -> Vec<Event> {
         self.events
             .iter()
             .chain(std::iter::once(&terminal))
             .filter(|event| {
                 !matches!(
                     &event.kind,
-                    CanonicalEventKind::SourceExtension { extensions }
+                    Kind::SourceExtension { extensions }
                         if extensions.values.keys().all(|path| path.starts_with("/stream/"))
                 )
             })
             .enumerate()
             .map(|(sequence, event)| {
-                CanonicalEvent::new(sequence.try_into().unwrap_or(u64::MAX), event.kind.clone())
+                Event::new(sequence.try_into().unwrap_or(u64::MAX), event.kind.clone())
             })
             .collect()
     }
 }
 
-fn response_sse_frame(kind: &str, mut payload: Value) -> Result<SseFrame, OpenAiClientEncodeError> {
+fn response_sse_frame(kind: &str, mut payload: Value) -> Result<Frame, OpenAiClientEncodeError> {
     let Value::Object(object) = &mut payload else {
         return Err(OpenAiClientEncodeError::InvalidStreamPayload);
     };
     object.insert("type".into(), Value::String(kind.into()));
-    Ok(SseFrame {
+    Ok(Frame {
         event: Some(kind.into()),
         data: serde_json::to_string(&payload)?,
         id: None,
@@ -454,10 +451,10 @@ mod tests {
 
     #[test]
     fn responses_stream_encoder_rejects_oversized_event_history() {
-        let mut encoder = OpenAiResponsesStreamEncoder::new("route", "response", 0);
-        let event = CanonicalEvent::new(
+        let mut encoder = Encoder::new("route", "response", 0);
+        let event = Event::new(
             0,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "x".repeat(16 * 1024 * 1024),
             },

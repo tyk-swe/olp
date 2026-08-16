@@ -9,7 +9,7 @@ use rand::RngCore;
 use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::SecurityError;
+use super::Error;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -29,12 +29,12 @@ impl AuthHmacKey {
         Self(bytes)
     }
 
-    pub fn from_base64(encoded: &str) -> Result<Self, SecurityError> {
+    pub fn from_base64(encoded: &str) -> Result<Self, Error> {
         Ok(Self(decode_key(encoded)?))
     }
 
     #[must_use]
-    pub fn generate_api_key(&self) -> ApiKeyMaterial {
+    pub fn generate_api_key(&self) -> ApiKey {
         let mut lookup = [0_u8; LOOKUP_BYTES];
         let mut secret = [0_u8; SECRET_BYTES];
         rand::rng().fill_bytes(&mut lookup);
@@ -46,7 +46,7 @@ impl AuthHmacKey {
         let digest = self.digest(&lookup_id, &secret);
         secret.zeroize();
 
-        ApiKeyMaterial {
+        ApiKey {
             lookup_id,
             digest,
             plaintext,
@@ -57,15 +57,15 @@ impl AuthHmacKey {
         &self,
         plaintext: &str,
         expected_digest: &[u8],
-    ) -> Result<ParsedApiKey, SecurityError> {
+    ) -> Result<ParsedApiKey, Error> {
         let (lookup_id, encoded_secret) = split_api_key(plaintext)?;
         let mut secret = Zeroizing::new(
             URL_SAFE_NO_PAD
                 .decode(encoded_secret)
-                .map_err(|_| SecurityError::InvalidSecretFormat)?,
+                .map_err(|_| Error::InvalidSecretFormat)?,
         );
         if secret.len() != SECRET_BYTES {
-            return Err(SecurityError::InvalidSecretFormat);
+            return Err(Error::InvalidSecretFormat);
         }
         let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.0)
             .expect("HMAC accepts keys of every size");
@@ -73,7 +73,7 @@ impl AuthHmacKey {
         mac.update(lookup_id.as_bytes());
         mac.update(&secret);
         mac.verify_slice(expected_digest)
-            .map_err(|_| SecurityError::InvalidSecretFormat)?;
+            .map_err(|_| Error::InvalidSecretFormat)?;
         secret.zeroize();
         Ok(ParsedApiKey {
             lookup_id: lookup_id.to_owned(),
@@ -82,7 +82,7 @@ impl AuthHmacKey {
 
     /// Extracts only the public lookup component. Authentication must still
     /// call `parse_and_verify` with the digest loaded from the pinned snapshot.
-    pub fn lookup_id<'a>(&self, plaintext: &'a str) -> Result<&'a str, SecurityError> {
+    pub fn lookup_id<'a>(&self, plaintext: &'a str) -> Result<&'a str, Error> {
         split_api_key(plaintext).map(|(lookup_id, _)| lookup_id)
     }
 
@@ -108,10 +108,7 @@ impl AuthHmacKey {
 
     /// Returns a non-reversible bootstrap-token digest. The token file and
     /// request header use standard base64 for a precisely 32-byte token.
-    pub fn bootstrap_token_digest_from_base64(
-        &self,
-        encoded: &str,
-    ) -> Result<[u8; 32], SecurityError> {
+    pub fn bootstrap_token_digest_from_base64(&self, encoded: &str) -> Result<[u8; 32], Error> {
         let token = Self::decode_bootstrap_token(encoded)?;
         Ok(self.scoped_digest(BOOTSTRAP_TOKEN_DOMAIN, &[&token]))
     }
@@ -128,14 +125,14 @@ impl AuthHmacKey {
             .is_ok()
     }
 
-    fn decode_bootstrap_token(encoded: &str) -> Result<Zeroizing<Vec<u8>>, SecurityError> {
+    fn decode_bootstrap_token(encoded: &str) -> Result<Zeroizing<Vec<u8>>, Error> {
         let token = Zeroizing::new(
             STANDARD
                 .decode(encoded.trim())
-                .map_err(|_| SecurityError::InvalidSecretFormat)?,
+                .map_err(|_| Error::InvalidSecretFormat)?,
         );
         if token.len() != SECRET_BYTES {
-            return Err(SecurityError::InvalidSecretFormat);
+            return Err(Error::InvalidSecretFormat);
         }
         Ok(token)
     }
@@ -180,13 +177,13 @@ impl Drop for AuthHmacKey {
     }
 }
 
-pub struct ApiKeyMaterial {
+pub struct ApiKey {
     pub lookup_id: String,
     pub digest: [u8; 32],
     plaintext: Zeroizing<String>,
 }
 
-impl ApiKeyMaterial {
+impl ApiKey {
     /// The plaintext is returned only to the key-creation response. It is never
     /// serialized by a repository or included in Debug output.
     #[must_use]
@@ -195,10 +192,10 @@ impl ApiKeyMaterial {
     }
 }
 
-impl fmt::Debug for ApiKeyMaterial {
+impl fmt::Debug for ApiKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ApiKeyMaterial")
+            .debug_struct("ApiKey")
             .field("lookup_id", &self.lookup_id)
             .field("digest", &"[REDACTED]")
             .field("plaintext", &"[REDACTED]")
@@ -211,31 +208,29 @@ pub struct ParsedApiKey {
     pub lookup_id: String,
 }
 
-pub(super) fn decode_key(encoded: &str) -> Result<[u8; 32], SecurityError> {
+pub(super) fn decode_key(encoded: &str) -> Result<[u8; 32], Error> {
     let trimmed = encoded.trim();
     let decoded = URL_SAFE_NO_PAD
         .decode(trimmed)
         .or_else(|_| URL_SAFE.decode(trimmed))
         .or_else(|_| STANDARD.decode(trimmed))
-        .map_err(|_| SecurityError::InvalidMasterKey)?;
+        .map_err(|_| Error::InvalidMasterKey)?;
     let decoded = Zeroizing::new(decoded);
     decoded
         .as_slice()
         .try_into()
-        .map_err(|_| SecurityError::InvalidMasterKey)
+        .map_err(|_| Error::InvalidMasterKey)
 }
 
-fn split_api_key(plaintext: &str) -> Result<(&str, &str), SecurityError> {
+fn split_api_key(plaintext: &str) -> Result<(&str, &str), Error> {
     let value = plaintext
         .strip_prefix(API_KEY_PREFIX)
-        .ok_or(SecurityError::InvalidSecretFormat)?;
-    let (lookup_id, encoded_secret) = value
-        .split_once('_')
-        .ok_or(SecurityError::InvalidSecretFormat)?;
+        .ok_or(Error::InvalidSecretFormat)?;
+    let (lookup_id, encoded_secret) = value.split_once('_').ok_or(Error::InvalidSecretFormat)?;
     if lookup_id.len() != LOOKUP_BYTES * 2
         || !lookup_id.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        return Err(SecurityError::InvalidSecretFormat);
+        return Err(Error::InvalidSecretFormat);
     }
     Ok((lookup_id, encoded_secret))
 }

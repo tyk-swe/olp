@@ -18,12 +18,12 @@ const BODY_TOTAL_TIMEOUT: Duration = Duration::from_secs(10);
 const BODY_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug)]
-pub struct OidcNetworkPolicy {
+pub struct Policy {
     pub allow_insecure_test_endpoints: bool,
 }
 
 #[derive(Debug, Error)]
-pub enum OidcNetworkError {
+pub enum Error {
     #[error("the OIDC endpoint URL is invalid")]
     InvalidUrl,
     #[error("OIDC endpoints must use HTTPS")]
@@ -48,8 +48,8 @@ pub enum OidcNetworkError {
     InvalidDocument,
 }
 
-impl OidcNetworkPolicy {
-    pub async fn validate_url(&self, value: &str) -> Result<Url, OidcNetworkError> {
+impl Policy {
+    pub async fn validate_url(&self, value: &str) -> Result<Url, Error> {
         let url = parse_url(value, self.allow_insecure_test_endpoints)?;
         let _ = self.client_for(&url).await?;
         Ok(url)
@@ -59,13 +59,13 @@ impl OidcNetworkPolicy {
         &self,
         value: &str,
         maximum_bytes: usize,
-    ) -> Result<T, OidcNetworkError> {
+    ) -> Result<T, Error> {
         let url = parse_url(value, self.allow_insecure_test_endpoints)?;
         let client = self.client_for(&url).await?;
         let response = timeout(REQUEST_TIMEOUT, client.get(url).send())
             .await
-            .map_err(|_| OidcNetworkError::Request)?
-            .map_err(|_| OidcNetworkError::Request)?;
+            .map_err(|_| Error::Request)?
+            .map_err(|_| Error::Request)?;
         decode_json(response, maximum_bytes).await
     }
 
@@ -75,7 +75,7 @@ impl OidcNetworkPolicy {
         form: &[(String, String)],
         basic_auth: Option<(&str, &str)>,
         maximum_bytes: usize,
-    ) -> Result<T, OidcNetworkError> {
+    ) -> Result<T, Error> {
         let url = parse_url(value, self.allow_insecure_test_endpoints)?;
         let client = self.client_for(&url).await?;
         let mut request = client.post(url).form(form);
@@ -84,12 +84,12 @@ impl OidcNetworkPolicy {
         }
         let response = timeout(REQUEST_TIMEOUT, request.send())
             .await
-            .map_err(|_| OidcNetworkError::Request)?
-            .map_err(|_| OidcNetworkError::Request)?;
+            .map_err(|_| Error::Request)?
+            .map_err(|_| Error::Request)?;
         decode_json(response, maximum_bytes).await
     }
 
-    async fn client_for(&self, url: &Url) -> Result<Client, OidcNetworkError> {
+    async fn client_for(&self, url: &Url) -> Result<Client, Error> {
         one_shot_client(
             url,
             CONNECT_TIMEOUT,
@@ -106,43 +106,41 @@ impl OidcNetworkPolicy {
     }
 }
 
-fn map_pinned_client_error(error: PinnedClientError) -> OidcNetworkError {
+fn map_pinned_client_error(error: PinnedClientError) -> Error {
     match error {
-        PinnedClientError::MissingHost | PinnedClientError::MissingPort => {
-            OidcNetworkError::InvalidUrl
-        }
+        PinnedClientError::MissingHost | PinnedClientError::MissingPort => Error::InvalidUrl,
         PinnedClientError::DnsTimeout
         | PinnedClientError::DnsResolution(_)
-        | PinnedClientError::NoAddresses => OidcNetworkError::Resolution,
-        PinnedClientError::ForbiddenAddress(_) => OidcNetworkError::ForbiddenAddress,
-        PinnedClientError::ClientBuild(_) => OidcNetworkError::Request,
+        | PinnedClientError::NoAddresses => Error::Resolution,
+        PinnedClientError::ForbiddenAddress(_) => Error::ForbiddenAddress,
+        PinnedClientError::ClientBuild(_) => Error::Request,
     }
 }
 
-fn parse_url(value: &str, allow_insecure: bool) -> Result<Url, OidcNetworkError> {
-    let url = Url::parse(value).map_err(|_| OidcNetworkError::InvalidUrl)?;
+fn parse_url(value: &str, allow_insecure: bool) -> Result<Url, Error> {
+    let url = Url::parse(value).map_err(|_| Error::InvalidUrl)?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(OidcNetworkError::InvalidUrl);
+        return Err(Error::InvalidUrl);
     }
     if !allow_insecure && url.scheme() != "https" {
-        return Err(OidcNetworkError::HttpsRequired);
+        return Err(Error::HttpsRequired);
     }
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
-        return Err(OidcNetworkError::UnsafeUrl);
+        return Err(Error::UnsafeUrl);
     }
-    let host = url.host_str().ok_or(OidcNetworkError::InvalidUrl)?;
+    let host = url.host_str().ok_or(Error::InvalidUrl)?;
     if !allow_insecure
         && (host.eq_ignore_ascii_case("localhost")
             || host.ends_with(".localhost")
             || url.port() == Some(0))
     {
-        return Err(OidcNetworkError::ForbiddenAddress);
+        return Err(Error::ForbiddenAddress);
     }
     if let Some(ip) = literal_ip(&url)
         && !allow_insecure
         && !is_public_ip(ip)
     {
-        return Err(OidcNetworkError::ForbiddenAddress);
+        return Err(Error::ForbiddenAddress);
     }
     Ok(url)
 }
@@ -150,9 +148,9 @@ fn parse_url(value: &str, allow_insecure: bool) -> Result<Url, OidcNetworkError>
 async fn decode_json<T: DeserializeOwned>(
     response: Response,
     maximum_bytes: usize,
-) -> Result<T, OidcNetworkError> {
+) -> Result<T, Error> {
     if !response.status().is_success() {
-        return Err(OidcNetworkError::Status);
+        return Err(Error::Status);
     }
     let content_type = response
         .headers()
@@ -163,13 +161,13 @@ async fn decode_json<T: DeserializeOwned>(
     if !content_type.starts_with("application/json")
         && !content_type.starts_with("application/jwk-set+json")
     {
-        return Err(OidcNetworkError::ContentType);
+        return Err(Error::ContentType);
     }
     if response
         .content_length()
         .is_some_and(|length| length > maximum_bytes as u64)
     {
-        return Err(OidcNetworkError::ResponseTooLarge);
+        return Err(Error::ResponseTooLarge);
     }
     let body = read_bounded_body(
         response.bytes_stream(),
@@ -178,7 +176,7 @@ async fn decode_json<T: DeserializeOwned>(
         BODY_IDLE_TIMEOUT,
     )
     .await?;
-    serde_json::from_slice(&body).map_err(|_| OidcNetworkError::InvalidDocument)
+    serde_json::from_slice(&body).map_err(|_| Error::InvalidDocument)
 }
 
 async fn read_bounded_body<S, E>(
@@ -186,7 +184,7 @@ async fn read_bounded_body<S, E>(
     maximum_bytes: usize,
     total_deadline: Duration,
     idle_deadline: Duration,
-) -> Result<Zeroizing<Vec<u8>>, OidcNetworkError>
+) -> Result<Zeroizing<Vec<u8>>, Error>
 where
     S: Stream<Item = Result<Bytes, E>>,
 {
@@ -196,20 +194,20 @@ where
         loop {
             let next = timeout(idle_deadline, stream.next())
                 .await
-                .map_err(|_| OidcNetworkError::ResponseTimeout)?;
+                .map_err(|_| Error::ResponseTimeout)?;
             let Some(chunk) = next else {
                 break;
             };
-            let chunk = chunk.map_err(|_| OidcNetworkError::Request)?;
+            let chunk = chunk.map_err(|_| Error::Request)?;
             if body.len().saturating_add(chunk.len()) > maximum_bytes {
-                return Err(OidcNetworkError::ResponseTooLarge);
+                return Err(Error::ResponseTooLarge);
             }
             body.extend_from_slice(&chunk);
         }
         Ok(body)
     })
     .await
-    .map_err(|_| OidcNetworkError::ResponseTimeout)?
+    .map_err(|_| Error::ResponseTimeout)?
 }
 
 #[cfg(test)]
@@ -232,7 +230,7 @@ mod tests {
         }
         assert!(matches!(
             parse_url("http://idp.example.test/discovery", false),
-            Err(OidcNetworkError::HttpsRequired)
+            Err(Error::HttpsRequired)
         ));
     }
 
@@ -251,7 +249,7 @@ mod tests {
             Duration::from_millis(5),
         )
         .await;
-        assert!(matches!(result, Err(OidcNetworkError::ResponseTimeout)));
+        assert!(matches!(result, Err(Error::ResponseTimeout)));
     }
 
     #[tokio::test]
@@ -267,6 +265,6 @@ mod tests {
             Duration::from_millis(10),
         )
         .await;
-        assert!(matches!(result, Err(OidcNetworkError::ResponseTimeout)));
+        assert!(matches!(result, Err(Error::ResponseTimeout)));
     }
 }

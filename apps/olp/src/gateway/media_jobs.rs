@@ -7,24 +7,30 @@ use olp_db::{
     media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::MediaReconciliationPass,
 };
 use olp_engine::domain::{
-    ApiKey, CanonicalResult, GatewayCapability, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION,
-    Operation, OperationKind, RouteSlug, Surface, TransportMode, authorize_api_key,
-    gateway_capability_for_operation,
+    auth::{ApiKey, GatewayCapability, authorize_api_key, gateway_capability_for_operation},
+    canonical::{
+        identity::{OperationKind, Surface, TransportMode},
+        requests::{MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation},
+        results::CanonicalResult,
+    },
+    ids::RouteSlug,
 };
+use olp_engine::inference::execution::RequiredTarget;
+use olp_engine::inference::principal::Principal;
 use olp_engine::inference::selection::select_representable_attempts_filtered;
 use serde_json::Value;
 use tracing::{error, warn};
 
-use crate::{GatewayState, InferencePrincipal};
+use crate::bootstrap::mode_dependencies::GatewayState;
 
 use super::{
     error::InferenceError,
-    execution::{RequiredTarget, authorize_principal, execute_routed_result},
+    execution::{authorize_principal, execute_routed_result},
 };
 
 pub(super) fn select_video_create_target(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: &Operation,
     local_job_id: uuid::Uuid,
 ) -> Result<(ApiKey, RouteSlug, RequiredTarget), InferenceError> {
@@ -84,7 +90,7 @@ pub(super) async fn attach_media_job_with_retry(
 }
 
 pub(super) async fn media_job_deletion_finalized(
-    store: &olp_db::PgStore,
+    store: &olp_db::store::Store,
     id: uuid::Uuid,
 ) -> Result<bool, MediaJobError> {
     if store.finalize_media_job_deletion(id).await? {
@@ -96,7 +102,9 @@ pub(super) async fn media_job_deletion_finalized(
 pub(super) fn mark_missing_delete_as_success(
     operation: &mut Operation,
 ) -> Result<(), InferenceError> {
-    let Operation::Video(olp_engine::domain::VideoOperation::Delete(request)) = operation else {
+    let Operation::Video(olp_engine::domain::canonical::requests::VideoOperation::Delete(request)) =
+        operation
+    else {
         return Err(InferenceError::unavailable("media_job_operation_invalid"));
     };
     request.extensions.source = Some(Surface::OpenAi);
@@ -245,7 +253,7 @@ async fn reconcile_media_job_operation(
         .filter(|value| valid_upstream_media_job_id(value))
         .ok_or("media_job_upstream_id_unavailable")?;
     if record.lifecycle == MediaJobLifecycle::Active {
-        let mut operation = olp_engine::protocols::openai::decode_video_get(upstream_id);
+        let mut operation = olp_engine::protocols::openai::video::decode_video_get(upstream_id);
         set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
         let result = execute_media_reconciliation_result(state, record, operation).await?;
         let CanonicalResult::VideoJob(result) = result.as_ref() else {
@@ -259,7 +267,7 @@ async fn reconcile_media_job_operation(
         return Ok(());
     }
 
-    let mut operation = olp_engine::protocols::openai::decode_video_delete(upstream_id);
+    let mut operation = olp_engine::protocols::openai::video::decode_video_delete(upstream_id);
     set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
     mark_missing_delete_as_success(&mut operation).map_err(|error| error.code())?;
     let result = execute_media_reconciliation_result(state, record, operation).await?;
@@ -302,7 +310,7 @@ async fn execute_media_reconciliation_result(
 
 pub(super) async fn refresh_video_list_record(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     record: MediaJobRecord,
 ) -> MediaJobRecord {
     if !matches!(record.state, MediaJobState::Queued | MediaJobState::Running) {
@@ -311,7 +319,7 @@ pub(super) async fn refresh_video_list_record(
     let Some(upstream_id) = record.upstream_job_id.clone() else {
         return record;
     };
-    let mut operation = olp_engine::protocols::openai::decode_video_get(upstream_id);
+    let mut operation = olp_engine::protocols::openai::video::decode_video_get(upstream_id);
     if set_video_route(&mut operation, &record.route_slug).is_err() {
         return record;
     }
@@ -354,7 +362,7 @@ pub(super) async fn refresh_video_list_record(
 
 pub(super) async fn owned_media_job(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     video_id: &str,
     operation: OperationKind,
 ) -> Result<(ApiKey, MediaJobRecord), InferenceError> {
@@ -400,9 +408,11 @@ pub(super) fn set_video_route(
         return Err(InferenceError::unavailable("media_job_operation_invalid"));
     };
     match operation {
-        olp_engine::domain::VideoOperation::Get(request)
-        | olp_engine::domain::VideoOperation::Content(request)
-        | olp_engine::domain::VideoOperation::Delete(request) => request.route = Some(route),
+        olp_engine::domain::canonical::requests::VideoOperation::Get(request)
+        | olp_engine::domain::canonical::requests::VideoOperation::Content(request)
+        | olp_engine::domain::canonical::requests::VideoOperation::Delete(request) => {
+            request.route = Some(route);
+        }
         _ => return Err(InferenceError::unavailable("media_job_operation_invalid")),
     }
     Ok(())
@@ -423,28 +433,37 @@ pub(super) fn media_job_error(error: MediaJobError) -> InferenceError {
 }
 
 pub(super) fn media_job_state(
-    status: &olp_engine::domain::VideoStatus,
+    status: &olp_engine::domain::canonical::results::VideoStatus,
 ) -> Result<MediaJobState, InferenceError> {
     match status {
-        olp_engine::domain::VideoStatus::Queued => Ok(MediaJobState::Queued),
-        olp_engine::domain::VideoStatus::InProgress => Ok(MediaJobState::Running),
-        olp_engine::domain::VideoStatus::Completed => Ok(MediaJobState::Succeeded),
-        olp_engine::domain::VideoStatus::Failed => Ok(MediaJobState::Failed),
-        olp_engine::domain::VideoStatus::Other(status) => Err(InferenceError::bad_gateway(
-            "provider_protocol_error",
-            format!("The provider returned an unsupported video status: {status}."),
-        )),
+        olp_engine::domain::canonical::results::VideoStatus::Queued => Ok(MediaJobState::Queued),
+        olp_engine::domain::canonical::results::VideoStatus::InProgress => {
+            Ok(MediaJobState::Running)
+        }
+        olp_engine::domain::canonical::results::VideoStatus::Completed => {
+            Ok(MediaJobState::Succeeded)
+        }
+        olp_engine::domain::canonical::results::VideoStatus::Failed => Ok(MediaJobState::Failed),
+        olp_engine::domain::canonical::results::VideoStatus::Other(status) => {
+            Err(InferenceError::bad_gateway(
+                "provider_protocol_error",
+                format!("The provider returned an unsupported video status: {status}."),
+            ))
+        }
     }
 }
 
 pub(super) fn media_job_update(
-    result: &olp_engine::domain::VideoJobResult,
+    result: &olp_engine::domain::canonical::results::VideoJobResult,
     state: MediaJobState,
 ) -> MediaJobUpdate {
     MediaJobUpdate {
         state,
         progress_percent: result.progress_percent,
-        content_available: matches!(result.status, olp_engine::domain::VideoStatus::Completed),
+        content_available: matches!(
+            result.status,
+            olp_engine::domain::canonical::results::VideoStatus::Completed
+        ),
         expires_at: result
             .expires_at
             .and_then(chrono::DateTime::from_timestamp_secs),
@@ -456,15 +475,19 @@ pub(super) fn media_job_update(
     }
 }
 
-pub(super) fn media_job_result(record: &MediaJobRecord) -> olp_engine::domain::VideoJobResult {
+pub(super) fn media_job_result(
+    record: &MediaJobRecord,
+) -> olp_engine::domain::canonical::results::VideoJobResult {
     let status = match record.state {
-        MediaJobState::Queued => olp_engine::domain::VideoStatus::Queued,
-        MediaJobState::Running => olp_engine::domain::VideoStatus::InProgress,
-        MediaJobState::Succeeded => olp_engine::domain::VideoStatus::Completed,
-        MediaJobState::Failed => olp_engine::domain::VideoStatus::Failed,
-        MediaJobState::Cancelled => olp_engine::domain::VideoStatus::Other("cancelled".into()),
+        MediaJobState::Queued => olp_engine::domain::canonical::results::VideoStatus::Queued,
+        MediaJobState::Running => olp_engine::domain::canonical::results::VideoStatus::InProgress,
+        MediaJobState::Succeeded => olp_engine::domain::canonical::results::VideoStatus::Completed,
+        MediaJobState::Failed => olp_engine::domain::canonical::results::VideoStatus::Failed,
+        MediaJobState::Cancelled => {
+            olp_engine::domain::canonical::results::VideoStatus::Other("cancelled".into())
+        }
     };
-    olp_engine::domain::VideoJobResult {
+    olp_engine::domain::canonical::results::VideoJobResult {
         id: record.id.to_string(),
         model: Some(record.route_slug.clone()),
         status,
@@ -476,14 +499,20 @@ pub(super) fn media_job_result(record: &MediaJobRecord) -> olp_engine::domain::V
         seconds: None,
         size: None,
         error: None,
-        extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+            Surface::OpenAi,
+            BTreeMap::new(),
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone as _;
-    use olp_engine::domain::{CanonicalError, ErrorClass, VideoJobResult, VideoStatus};
+    use olp_engine::domain::canonical::{
+        events::{Error, ErrorClass},
+        results::{VideoJobResult, VideoStatus},
+    };
 
     use super::*;
 
@@ -539,17 +568,21 @@ mod tests {
     #[test]
     fn route_and_delete_metadata_are_applied_only_to_supported_video_operations() {
         for mut operation in [
-            olp_engine::protocols::openai::decode_video_get("upstream".to_owned()),
-            olp_engine::protocols::openai::decode_video_content("upstream".to_owned()),
-            olp_engine::protocols::openai::decode_video_delete("upstream".to_owned()),
+            olp_engine::protocols::openai::video::decode_video_get("upstream".to_owned()),
+            olp_engine::protocols::openai::video::decode_video_content("upstream".to_owned()),
+            olp_engine::protocols::openai::video::decode_video_delete("upstream".to_owned()),
         ] {
             set_video_route(&mut operation, "video-route").unwrap();
             assert_eq!(operation.route().unwrap().as_str(), "video-route");
         }
 
-        let mut delete = olp_engine::protocols::openai::decode_video_delete("upstream".to_owned());
+        let mut delete =
+            olp_engine::protocols::openai::video::decode_video_delete("upstream".to_owned());
         mark_missing_delete_as_success(&mut delete).unwrap();
-        let Operation::Video(olp_engine::domain::VideoOperation::Delete(request)) = delete else {
+        let Operation::Video(olp_engine::domain::canonical::requests::VideoOperation::Delete(
+            request,
+        )) = delete
+        else {
             panic!("expected video delete")
         };
         assert_eq!(request.extensions.source, Some(Surface::OpenAi));
@@ -561,8 +594,8 @@ mod tests {
             Some(&Value::Bool(true))
         );
 
-        let mut list = olp_engine::protocols::openai::decode_video_list(
-            olp_engine::protocols::openai::OpenAiVideoListQuery {
+        let mut list = olp_engine::protocols::openai::video::decode_video_list(
+            olp_engine::protocols::openai::video::OpenAiVideoListQuery {
                 after: None,
                 limit: None,
                 order: None,
@@ -576,7 +609,8 @@ mod tests {
                 .code(),
             "media_job_operation_invalid"
         );
-        let mut invalid = olp_engine::protocols::openai::decode_video_get("upstream".to_owned());
+        let mut invalid =
+            olp_engine::protocols::openai::video::decode_video_get("upstream".to_owned());
         assert_eq!(
             set_video_route(&mut invalid, "Invalid Route")
                 .unwrap_err()
@@ -645,7 +679,7 @@ mod tests {
             prompt: None,
             seconds: None,
             size: None,
-            error: Some(CanonicalError {
+            error: Some(Error {
                 class: ErrorClass::RateLimit,
                 message: "busy".to_owned(),
                 provider_code: None,

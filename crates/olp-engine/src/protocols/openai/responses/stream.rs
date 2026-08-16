@@ -1,19 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{
-    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
-    SourceExtensions, Surface,
+use crate::domain::canonical::{
+    events::{Error, ErrorClass, Event, FinishReason, Kind},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde_json::Value;
 
-use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecoder, SseFrame};
+use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, Decoder as SseDecoder, Frame};
 
 use super::super::extensions::escape_json_pointer;
 use super::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::errors::ResponsesCodecError;
-use super::response::{ResponseUsage, canonical_response_usage};
+use super::response::{Usage, canonical_response_usage};
 
-pub struct OpenAiResponsesStreamDecoder {
+pub struct Decoder {
     sse: SseDecoder,
     sequence: u64,
     response_started: bool,
@@ -22,10 +23,10 @@ pub struct OpenAiResponsesStreamDecoder {
     done: bool,
 }
 
-impl std::fmt::Debug for OpenAiResponsesStreamDecoder {
+impl std::fmt::Debug for Decoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("OpenAiResponsesStreamDecoder")
+            .debug_struct("Decoder")
             .field("next_sequence", &self.sequence)
             .field("response_started", &self.response_started)
             .field("started_output_count", &self.started_outputs.len())
@@ -35,13 +36,13 @@ impl std::fmt::Debug for OpenAiResponsesStreamDecoder {
     }
 }
 
-impl Default for OpenAiResponsesStreamDecoder {
+impl Default for Decoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OpenAiResponsesStreamDecoder {
+impl Decoder {
     #[must_use]
     pub fn new() -> Self {
         Self::with_max_event_bytes(DEFAULT_MAX_EVENT_BYTES)
@@ -59,12 +60,12 @@ impl OpenAiResponsesStreamDecoder {
         }
     }
 
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, ResponsesCodecError> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, ResponsesCodecError> {
         let frames = self.sse.push(bytes)?;
         self.decode_frames(frames)
     }
 
-    pub fn finish(&mut self) -> Result<Vec<CanonicalEvent>, ResponsesCodecError> {
+    pub fn finish(&mut self) -> Result<Vec<Event>, ResponsesCodecError> {
         let frames = self.sse.finish()?;
         let events = self.decode_frames(frames)?;
         if !self.done {
@@ -78,10 +79,7 @@ impl OpenAiResponsesStreamDecoder {
         self.done
     }
 
-    fn decode_frames(
-        &mut self,
-        frames: Vec<SseFrame>,
-    ) -> Result<Vec<CanonicalEvent>, ResponsesCodecError> {
+    fn decode_frames(&mut self, frames: Vec<Frame>) -> Result<Vec<Event>, ResponsesCodecError> {
         let mut events = Vec::new();
         for frame in frames {
             if self.done {
@@ -89,7 +87,7 @@ impl OpenAiResponsesStreamDecoder {
             }
             if frame.data.trim() == "[DONE]" {
                 self.finish_open_outputs(&mut events, FinishReason::Stop);
-                self.emit(&mut events, CanonicalEventKind::Done);
+                self.emit(&mut events, Kind::Done);
                 self.done = true;
                 continue;
             }
@@ -109,7 +107,7 @@ impl OpenAiResponsesStreamDecoder {
         &mut self,
         kind: &str,
         value: &mut Value,
-        events: &mut Vec<CanonicalEvent>,
+        events: &mut Vec<Event>,
     ) -> Result<(), ResponsesCodecError> {
         match kind {
             "response.created" | "response.in_progress" => {
@@ -126,7 +124,7 @@ impl OpenAiResponsesStreamDecoder {
                 if item.get("type").and_then(Value::as_str) == Some("function_call") {
                     self.emit(
                         events,
-                        CanonicalEventKind::ToolCallDelta {
+                        Kind::ToolCallDelta {
                             output_index,
                             tool_index: 0,
                             id: item
@@ -149,7 +147,7 @@ impl OpenAiResponsesStreamDecoder {
                 self.ensure_output_started(output_index, MessageRole::Assistant, events);
                 self.emit(
                     events,
-                    CanonicalEventKind::TextDelta {
+                    Kind::TextDelta {
                         output_index,
                         text: stream_string(value, "delta")?,
                     },
@@ -160,7 +158,7 @@ impl OpenAiResponsesStreamDecoder {
                 self.ensure_output_started(output_index, MessageRole::Assistant, events);
                 self.emit(
                     events,
-                    CanonicalEventKind::RefusalDelta {
+                    Kind::RefusalDelta {
                         output_index,
                         text: stream_string(value, "delta")?,
                     },
@@ -171,7 +169,7 @@ impl OpenAiResponsesStreamDecoder {
                 self.ensure_output_started(output_index, MessageRole::Assistant, events);
                 self.emit(
                     events,
-                    CanonicalEventKind::ToolCallDelta {
+                    Kind::ToolCallDelta {
                         output_index,
                         tool_index: 0,
                         id: value
@@ -198,7 +196,7 @@ impl OpenAiResponsesStreamDecoder {
                     };
                     self.emit(
                         events,
-                        CanonicalEventKind::Finish {
+                        Kind::Finish {
                             output_index,
                             reason,
                         },
@@ -224,21 +222,21 @@ impl OpenAiResponsesStreamDecoder {
                 if !raw_output.is_empty() {
                     self.emit(
                         events,
-                        CanonicalEventKind::SourceExtension {
+                        Kind::SourceExtension {
                             extensions: SourceExtensions::new(Surface::OpenAi, raw_output),
                         },
                     );
                 }
                 if let Some(usage) = response.get("usage") {
-                    let usage: ResponseUsage = serde_json::from_value(usage.clone())?;
+                    let usage: Usage = serde_json::from_value(usage.clone())?;
                     self.emit(
                         events,
-                        CanonicalEventKind::Usage {
+                        Kind::Usage {
                             usage: canonical_response_usage(&usage),
                         },
                     );
                 }
-                self.emit(events, CanonicalEventKind::Done);
+                self.emit(events, Kind::Done);
                 self.done = true;
             }
             "response.failed" | "error" => {
@@ -254,8 +252,8 @@ impl OpenAiResponsesStreamDecoder {
                 );
                 self.emit(
                     events,
-                    CanonicalEventKind::Error {
-                        error: CanonicalError {
+                    Kind::Error {
+                        error: Error {
                             class: if retryable {
                                 ErrorClass::RateLimit
                             } else {
@@ -272,7 +270,7 @@ impl OpenAiResponsesStreamDecoder {
                     },
                 );
                 self.finish_open_outputs(events, FinishReason::Stop);
-                self.emit(events, CanonicalEventKind::Done);
+                self.emit(events, Kind::Done);
                 self.done = true;
             }
             // Lifecycle events that contain no new semantic payload.
@@ -283,7 +281,7 @@ impl OpenAiResponsesStreamDecoder {
             _ => {
                 self.emit(
                     events,
-                    CanonicalEventKind::SourceExtension {
+                    Kind::SourceExtension {
                         extensions: SourceExtensions::new(
                             Surface::OpenAi,
                             BTreeMap::from([(
@@ -298,14 +296,14 @@ impl OpenAiResponsesStreamDecoder {
         Ok(())
     }
 
-    fn ensure_response_started(&mut self, value: &Value, events: &mut Vec<CanonicalEvent>) {
+    fn ensure_response_started(&mut self, value: &Value, events: &mut Vec<Event>) {
         if self.response_started {
             return;
         }
         let response = value.get("response").unwrap_or(value);
         self.emit(
             events,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: response
                     .get("id")
                     .and_then(Value::as_str)
@@ -323,21 +321,14 @@ impl OpenAiResponsesStreamDecoder {
         &mut self,
         output_index: u32,
         role: MessageRole,
-        events: &mut Vec<CanonicalEvent>,
+        events: &mut Vec<Event>,
     ) {
         if self.started_outputs.insert(output_index) {
-            self.emit(
-                events,
-                CanonicalEventKind::MessageStart { output_index, role },
-            );
+            self.emit(events, Kind::MessageStart { output_index, role });
         }
     }
 
-    fn finish_open_outputs(
-        &mut self,
-        events: &mut Vec<CanonicalEvent>,
-        finish_reason: FinishReason,
-    ) {
+    fn finish_open_outputs(&mut self, events: &mut Vec<Event>, finish_reason: FinishReason) {
         let unfinished = self
             .started_outputs
             .difference(&self.finished_outputs)
@@ -347,7 +338,7 @@ impl OpenAiResponsesStreamDecoder {
             self.finished_outputs.insert(output_index);
             self.emit(
                 events,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index,
                     reason: finish_reason.clone(),
                 },
@@ -355,8 +346,8 @@ impl OpenAiResponsesStreamDecoder {
         }
     }
 
-    fn emit(&mut self, events: &mut Vec<CanonicalEvent>, kind: CanonicalEventKind) {
-        events.push(CanonicalEvent::new(self.sequence, kind));
+    fn emit(&mut self, events: &mut Vec<Event>, kind: Kind) {
+        events.push(Event::new(self.sequence, kind));
         self.sequence = self.sequence.saturating_add(1);
     }
 }
@@ -401,7 +392,7 @@ fn stream_string(value: &Value, field: &'static str) -> Result<String, Responses
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::validate_event_sequence;
+    use crate::domain::canonical::events::validate_event_sequence;
     use serde_json::json;
 
     use super::*;
@@ -412,7 +403,7 @@ mod tests {
 
     #[test]
     fn streamed_rate_limit_error_is_retryable() {
-        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let mut decoder = Decoder::new();
         let events = decoder
             .push(
                 concat!(
@@ -428,7 +419,7 @@ mod tests {
         let error = events
             .iter()
             .find_map(|event| match &event.kind {
-                CanonicalEventKind::Error { error } => Some(error),
+                Kind::Error { error } => Some(error),
                 _ => None,
             })
             .expect("failed response event must emit a canonical error");
@@ -446,14 +437,14 @@ mod tests {
             "data: {\"type\":\"future/event~name\",\"vendor\":{\"retained\":true}}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\"},{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":3},\"output_tokens_details\":{\"reasoning_tokens\":1}}}}\n\n"
         );
-        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let mut decoder = Decoder::new();
         let events = decoder.push(wire.as_bytes()).unwrap();
 
         validate_event_sequence(&events).unwrap();
         assert!(decoder.is_done());
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some(id),
                 provider_model: Some(model),
             } if id == "resp_1" && model == "private-model"
@@ -461,7 +452,7 @@ mod tests {
         let argument_fragments = events
             .iter()
             .filter_map(|event| match &event.kind {
-                CanonicalEventKind::ToolCallDelta {
+                Kind::ToolCallDelta {
                     arguments_delta, ..
                 } => Some(arguments_delta.as_str()),
                 _ => None,
@@ -471,31 +462,31 @@ mod tests {
         assert_eq!(
             events
                 .iter()
-                .filter(|event| matches!(event.kind, CanonicalEventKind::MessageStart { .. }))
+                .filter(|event| matches!(event.kind, Kind::MessageStart { .. }))
                 .count(),
             1
         );
         assert!(events.iter().any(|event| matches!(
             event.kind,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 reason: FinishReason::ToolCalls,
                 ..
             }
         )));
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::Usage { usage }
+            Kind::Usage { usage }
                 if usage.cached_input_tokens == Some(3)
                     && usage.reasoning_tokens == Some(1)
         )));
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::SourceExtension { extensions }
+            Kind::SourceExtension { extensions }
                 if extensions.values.contains_key("/stream/future~1event~0name")
         )));
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::SourceExtension { extensions }
+            Kind::SourceExtension { extensions }
                 if extensions.values.contains_key(&format!(
                     "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/1"
                 ))
@@ -512,17 +503,17 @@ mod tests {
             "\"delta\":\"cannot\"}\n\n",
             "data: [DONE]\n\n"
         );
-        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let mut decoder = Decoder::new();
         let events = decoder.push(wire.as_bytes()).unwrap();
 
         validate_event_sequence(&events).unwrap();
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::RefusalDelta { output_index: 2, text } if text == "cannot"
+            Kind::RefusalDelta { output_index: 2, text } if text == "cannot"
         )));
         assert!(events.iter().any(|event| matches!(
             event.kind,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 2,
                 reason: FinishReason::Stop,
             }
@@ -544,14 +535,14 @@ mod tests {
             data(json!({"type": "error"})),
         ]
         .concat();
-        let mut decoder = OpenAiResponsesStreamDecoder::new();
+        let mut decoder = Decoder::new();
         let events = decoder.push(wire.as_bytes()).unwrap();
 
         validate_event_sequence(&events).unwrap();
         let error = events
             .iter()
             .find_map(|event| match &event.kind {
-                CanonicalEventKind::Error { error } => Some(error),
+                Kind::Error { error } => Some(error),
                 _ => None,
             })
             .unwrap();
@@ -561,15 +552,12 @@ mod tests {
         assert!(!error.retryable);
         assert!(events.iter().any(|event| matches!(
             event.kind,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 1,
                 ..
             }
         )));
-        assert!(matches!(
-            events.last().unwrap().kind,
-            CanonicalEventKind::Done
-        ));
+        assert!(matches!(events.last().unwrap().kind, Kind::Done));
     }
 
     #[test]
@@ -583,14 +571,14 @@ mod tests {
                 "response": {"output": [{"vendor": true}]}
             }),
         ] {
-            let mut decoder = OpenAiResponsesStreamDecoder::new();
+            let mut decoder = Decoder::new();
             assert!(matches!(
                 decoder.push(data(value).as_bytes()),
                 Err(ResponsesCodecError::InvalidResponse(_))
             ));
         }
 
-        let mut truncated = OpenAiResponsesStreamDecoder::new();
+        let mut truncated = Decoder::new();
         truncated
             .push(data(json!({"type": "response.created"})).as_bytes())
             .unwrap();

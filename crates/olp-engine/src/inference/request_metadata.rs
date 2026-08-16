@@ -16,12 +16,12 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::domain::{OperationKind, Surface};
+use crate::domain::canonical::identity::{OperationKind, Surface};
 
 /// Metadata-only request envelope. Content-bearing fields do not exist in this
 /// type, making accidental prompt/output persistence structurally impossible.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestMetadataEvent {
+pub struct Event {
     pub event_id: Uuid,
     pub request_id: Uuid,
     pub runtime_generation_id: Uuid,
@@ -87,14 +87,14 @@ pub struct RequestAttemptUsageMetadata {
 }
 
 #[derive(Clone)]
-pub struct RequestMetadataEmitter {
-    sender: mpsc::Sender<RequestMetadataEvent>,
+pub struct Emitter {
+    sender: mpsc::Sender<Event>,
     health: Arc<RequestMetadataBufferHealth>,
 }
 
-impl RequestMetadataEmitter {
+impl Emitter {
     #[must_use]
-    pub fn bounded(capacity: usize) -> (Self, RequestMetadataReceiver) {
+    pub fn bounded(capacity: usize) -> (Self, Receiver) {
         let (sender, receiver) = mpsc::channel(capacity.max(1));
         let health = Arc::new(RequestMetadataBufferHealth::default());
         (
@@ -102,13 +102,13 @@ impl RequestMetadataEmitter {
                 sender,
                 health: Arc::clone(&health),
             },
-            RequestMetadataReceiver { receiver, health },
+            Receiver { receiver, health },
         )
     }
 
     /// Never blocks the inference response path. Overflow is counted and made
     /// visible; callers must include this counter in readiness and metrics.
-    pub fn emit(&self, event: RequestMetadataEvent) -> Result<(), RequestMetadataEmitError> {
+    pub fn emit(&self, event: Event) -> Result<(), Error> {
         match self.sender.try_reserve() {
             Ok(permit) => {
                 // Account for the event before publishing it. Receiver
@@ -120,17 +120,17 @@ impl RequestMetadataEmitter {
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 self.health.record_dropped(1);
-                Err(RequestMetadataEmitError::Full)
+                Err(Error::Full)
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 self.health.record_dropped(1);
-                Err(RequestMetadataEmitError::Closed)
+                Err(Error::Closed)
             }
         }
     }
 
     #[must_use]
-    pub fn snapshot(&self) -> RequestMetadataBufferSnapshot {
+    pub fn snapshot(&self) -> Snapshot {
         let mut snapshot = self.health.snapshot();
         snapshot.closed = self.sender.is_closed();
         snapshot
@@ -138,7 +138,7 @@ impl RequestMetadataEmitter {
 }
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
-pub enum RequestMetadataEmitError {
+pub enum Error {
     #[error("the bounded request metadata buffer is full")]
     Full,
     #[error("the request metadata persistence worker is not running")]
@@ -149,15 +149,15 @@ pub enum RequestMetadataEmitError {
 ///
 /// Bookkeeping stays encapsulated here so adapters cannot mutate counters or
 /// atomics directly.
-pub struct RequestMetadataReceiver {
-    receiver: mpsc::Receiver<RequestMetadataEvent>,
+pub struct Receiver {
+    receiver: mpsc::Receiver<Event>,
     health: Arc<RequestMetadataBufferHealth>,
 }
 
-impl RequestMetadataReceiver {
+impl Receiver {
     /// Receives one buffered event without exposing prompts or response bodies,
-    /// which are absent from [`RequestMetadataEvent`].
-    pub async fn recv_next(&mut self) -> Option<RequestMetadataEvent> {
+    /// which are absent from [`Event`].
+    pub async fn recv_next(&mut self) -> Option<Event> {
         self.receiver.recv().await
     }
 
@@ -235,7 +235,7 @@ impl RequestMetadataBufferHealth {
         self.last_loss_at_ms.store(now, Ordering::Relaxed);
     }
 
-    fn snapshot(&self) -> RequestMetadataBufferSnapshot {
+    fn snapshot(&self) -> Snapshot {
         // Downstream counts can never precede acceptance, but retain the lower
         // bound as a fail-closed guard against impossible durable checkpoints.
         let persisted = self.persisted.load(Ordering::SeqCst);
@@ -244,7 +244,7 @@ impl RequestMetadataBufferHealth {
             .accepted
             .load(Ordering::SeqCst)
             .max(persisted.saturating_add(abandoned));
-        RequestMetadataBufferSnapshot {
+        Snapshot {
             process_epoch: self.process_epoch,
             started_at: timestamp_millis(self.started_at_ms).unwrap_or_else(Utc::now),
             accepted,
@@ -260,7 +260,7 @@ impl RequestMetadataBufferHealth {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RequestMetadataBufferSnapshot {
+pub struct Snapshot {
     /// Distinguishes counter resets after a gateway process restart.
     pub process_epoch: Uuid,
     pub started_at: DateTime<Utc>,
@@ -277,7 +277,7 @@ pub struct RequestMetadataBufferSnapshot {
     pub last_loss_at: Option<DateTime<Utc>>,
 }
 
-impl RequestMetadataBufferSnapshot {
+impl Snapshot {
     #[must_use]
     pub fn complete(&self) -> bool {
         self.dropped == 0 && self.abandoned == 0 && !self.retrying && !self.closed
@@ -312,10 +312,10 @@ mod tests {
 
     use super::*;
 
-    fn event() -> RequestMetadataEvent {
+    fn event() -> Event {
         let observed_at = Utc::now();
         let provider_id = Uuid::now_v7();
-        RequestMetadataEvent {
+        Event {
             event_id: Uuid::now_v7(),
             request_id: Uuid::now_v7(),
             runtime_generation_id: Uuid::now_v7(),
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn overflow_is_counted_instead_of_silently_swallowed() {
-        let (emitter, _receiver) = RequestMetadataEmitter::bounded(1);
+        let (emitter, _receiver) = Emitter::bounded(1);
         assert!(emitter.emit(event()).is_ok());
         assert!(emitter.emit(event()).is_err());
         let snapshot = emitter.snapshot();
@@ -373,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_accounts_for_every_accepted_but_unpersisted_event() {
-        let (emitter, mut receiver) = RequestMetadataEmitter::bounded(2);
+        let (emitter, mut receiver) = Emitter::bounded(2);
         emitter.emit(event()).unwrap();
         emitter.emit(event()).unwrap();
 
@@ -386,16 +386,13 @@ mod tests {
         assert_eq!(snapshot.pending(), 0);
         assert_eq!(snapshot.lost(), 2);
         assert!(!snapshot.complete());
-        assert!(matches!(
-            emitter.emit(event()),
-            Err(RequestMetadataEmitError::Closed)
-        ));
+        assert!(matches!(emitter.emit(event()), Err(Error::Closed)));
     }
 
     #[tokio::test]
     async fn concurrent_enqueue_and_shutdown_leave_no_unaccounted_reservation() {
         for _ in 0..128 {
-            let (emitter, mut receiver) = RequestMetadataEmitter::bounded(1);
+            let (emitter, mut receiver) = Emitter::bounded(1);
             let concurrent = emitter.clone();
             let barrier = Arc::new(tokio::sync::Barrier::new(2));
             let concurrent_barrier = Arc::clone(&barrier);
@@ -415,7 +412,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_waits_for_an_outstanding_send_permit() {
-        let (emitter, mut receiver) = RequestMetadataEmitter::bounded(1);
+        let (emitter, mut receiver) = Emitter::bounded(1);
         let permit = emitter.sender.clone().try_reserve_owned().unwrap();
         emitter.health.accepted.fetch_add(1, Ordering::SeqCst);
 
@@ -435,7 +432,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_updates_health_without_exposing_counters() {
-        let (emitter, mut receiver) = RequestMetadataEmitter::bounded(1);
+        let (emitter, mut receiver) = Emitter::bounded(1);
         emitter.emit(event()).unwrap();
         assert!(receiver.recv_next().await.is_some());
         receiver.set_retrying(true);
@@ -453,7 +450,7 @@ mod tests {
     #[test]
     fn retries_make_completeness_degraded_without_treating_backlog_as_loss() {
         let now = Utc::now();
-        let snapshot = RequestMetadataBufferSnapshot {
+        let snapshot = Snapshot {
             process_epoch: Uuid::now_v7(),
             started_at: now,
             accepted: 2,
@@ -473,7 +470,7 @@ mod tests {
     #[test]
     fn graceful_epoch_close_requires_writer_completion_and_full_accounting() {
         let now = Utc::now();
-        let drained = RequestMetadataBufferSnapshot {
+        let drained = Snapshot {
             process_epoch: Uuid::now_v7(),
             started_at: now,
             accepted: 2,
@@ -487,14 +484,14 @@ mod tests {
         };
         assert!(drained.gracefully_drained());
         assert!(
-            !RequestMetadataBufferSnapshot {
+            !Snapshot {
                 closed: false,
                 ..drained
             }
             .gracefully_drained()
         );
         assert!(
-            !RequestMetadataBufferSnapshot {
+            !Snapshot {
                 accepted: 3,
                 ..drained
             }
@@ -533,7 +530,7 @@ mod tests {
     fn event_serialized_before_attempt_usage_deserializes_safely() {
         let value = serde_json::to_value(event()).unwrap();
         assert!(value["attempts"][0].get("usage").is_none());
-        let decoded: RequestMetadataEvent = serde_json::from_value(value).unwrap();
+        let decoded: Event = serde_json::from_value(value).unwrap();
         assert_eq!(decoded.attempts.len(), 1);
         assert!(decoded.attempts[0].usage.is_none());
     }

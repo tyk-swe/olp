@@ -7,20 +7,15 @@
 //! Provider credentials are attached only after endpoint validation and
 //! request translation have completed and are never stored in the client.
 
-mod certification;
+pub mod certification;
 mod endpoint;
-mod transport;
+pub mod transport;
 
 use std::fmt;
 
-pub use certification::{
-    CompatibleCapability, CompatibleCapabilityCertificationError, NativeOpenAiCertificationEvidence,
-};
-pub use endpoint::EndpointError;
-pub use transport::OpenAiConnector;
 use zeroize::Zeroizing;
 
-pub use crate::providers::ConnectorTimeouts;
+use crate::providers::connector::Timeouts;
 use crate::providers::openai::endpoint::Endpoint;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -29,7 +24,7 @@ pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct ConnectorConfig {
     endpoint: Endpoint,
-    timeouts: ConnectorTimeouts,
+    timeouts: Timeouts,
     max_response_bytes: usize,
     max_event_bytes: usize,
 }
@@ -38,7 +33,7 @@ impl Default for ConnectorConfig {
     fn default() -> Self {
         Self {
             endpoint: Endpoint::default(),
-            timeouts: ConnectorTimeouts::default(),
+            timeouts: Timeouts::default(),
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
         }
@@ -63,10 +58,7 @@ impl ConnectorConfig {
         })
     }
 
-    pub fn with_timeouts(
-        mut self,
-        timeouts: ConnectorTimeouts,
-    ) -> Result<Self, ConnectorBuildError> {
+    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Result<Self, ConnectorBuildError> {
         self.timeouts = timeouts
             .validate()
             .map_err(ConnectorBuildError::ZeroTimeout)?;
@@ -95,7 +87,7 @@ impl ConnectorConfig {
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub fn for_local_test(base_url: &str, timeouts: ConnectorTimeouts) -> Self {
+    pub fn for_local_test(base_url: &str, timeouts: Timeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
         endpoint.set_connect_timeout(timeouts.connect);
         Self {
@@ -107,9 +99,9 @@ impl ConnectorConfig {
     }
 }
 
-pub struct OpenAiApiKey(Zeroizing<String>);
+pub struct ApiKey(Zeroizing<String>);
 
-impl OpenAiApiKey {
+impl ApiKey {
     pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
         crate::providers::connector::visible_secret(
             value,
@@ -124,16 +116,16 @@ impl OpenAiApiKey {
     }
 }
 
-impl fmt::Debug for OpenAiApiKey {
+impl fmt::Debug for ApiKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("OpenAiApiKey([REDACTED])")
+        formatter.write_str("ApiKey([REDACTED])")
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorBuildError {
     #[error(transparent)]
-    Endpoint(#[from] EndpointError),
+    Endpoint(#[from] endpoint::Error),
     #[error("OpenAI API key cannot be empty")]
     EmptyApiKey,
     #[error("OpenAI API key must contain visible ASCII characters only")]
@@ -152,12 +144,12 @@ mod tests {
 
     #[test]
     fn api_key_debug_is_redacted() {
-        let key = OpenAiApiKey::new("sk-super-secret").unwrap();
+        let key = ApiKey::new("sk-super-secret").unwrap();
         let debug = format!("{key:?}");
         assert!(debug.contains("REDACTED"));
         assert!(!debug.contains("super-secret"));
         assert!(matches!(
-            OpenAiApiKey::new("sk-key\nheader-injection"),
+            ApiKey::new("sk-key\nheader-injection"),
             Err(ConnectorBuildError::InvalidApiKey)
         ));
     }
@@ -165,9 +157,9 @@ mod tests {
     #[test]
     fn rejects_zero_deadlines_and_limits() {
         assert!(matches!(
-            ConnectorConfig::default().with_timeouts(ConnectorTimeouts {
+            ConnectorConfig::default().with_timeouts(Timeouts {
                 connect: Duration::ZERO,
-                ..ConnectorTimeouts::default()
+                ..Timeouts::default()
             }),
             Err(ConnectorBuildError::ZeroTimeout("connect"))
         ));

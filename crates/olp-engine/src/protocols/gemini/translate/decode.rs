@@ -1,17 +1,24 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message as CanonicalMessage,
-    MessageRole, Operation, ResponseFormat, RouteSlug, SourceExtensions, Surface, ToolCall,
-    ToolChoice as CanonicalToolChoice, ToolDefinition, media_handle_from_inline_marker,
+    canonical::{
+        identity::Surface,
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, MediaSource,
+            Message as CanonicalMessage, MessageRole, Operation, ResponseFormat, SourceExtensions,
+            ToolCall, ToolChoice as CanonicalToolChoice, ToolDefinition,
+            media_handle_from_inline_marker,
+        },
+    },
+    ids::RouteSlug,
 };
 use serde_json::Value;
 
 use super::super::dto::{Content, GenerateContentRequest, GenerationConfig, Part, ToolConfig};
 use super::errors::DecodeError;
-use super::extensions::collect_extra;
+use crate::protocols::extensions::collect_extra;
 
-pub fn decode_generate_content_request(
+pub fn request(
     route_model: &str,
     request: GenerateContentRequest,
     stream: bool,

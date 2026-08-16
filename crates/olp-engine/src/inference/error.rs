@@ -1,12 +1,15 @@
 use std::{fmt, time::Duration};
 
-use crate::domain::{AttemptFailureClass, CanonicalError, ErrorClass, TransportError};
+use crate::domain::{
+    canonical::events::{Error as CanonicalError, ErrorClass},
+    ports::{AttemptFailureClass, TransportError},
+};
 use crate::inference::limits::LimitDimension;
 
 /// Transport-neutral classification used by delivery adapters to select a
 /// public status and vendor error envelope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InferenceErrorKind {
+pub enum Kind {
     Authentication,
     Permission,
     InvalidRequest,
@@ -22,17 +25,17 @@ pub enum InferenceErrorKind {
     Canonical(ErrorClass),
 }
 
-pub struct InferenceError {
-    kind: InferenceErrorKind,
+pub struct Error {
+    kind: Kind,
     code: &'static str,
     message: String,
     retry_after: Option<Duration>,
 }
 
-impl fmt::Debug for InferenceError {
+impl fmt::Debug for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("InferenceError")
+            .debug_struct("Error")
             .field("kind", &self.kind)
             .field("code", &self.code)
             .field("message", &"[REDACTED]")
@@ -41,10 +44,10 @@ impl fmt::Debug for InferenceError {
     }
 }
 
-impl InferenceError {
+impl Error {
     #[must_use]
     pub fn new(
-        kind: InferenceErrorKind,
+        kind: Kind,
         code: &'static str,
         message: impl Into<String>,
         retry_after: Option<Duration>,
@@ -60,7 +63,7 @@ impl InferenceError {
     #[must_use]
     pub fn unauthorized() -> Self {
         Self::new(
-            InferenceErrorKind::Authentication,
+            Kind::Authentication,
             "invalid_api_key",
             "The API key is invalid or unavailable.",
             None,
@@ -69,28 +72,18 @@ impl InferenceError {
 
     #[must_use]
     pub fn forbidden(message: impl Into<String>) -> Self {
-        Self::new(
-            InferenceErrorKind::Permission,
-            "permission_denied",
-            message,
-            None,
-        )
+        Self::new(Kind::Permission, "permission_denied", message, None)
     }
 
     #[must_use]
     pub fn invalid_request(message: impl Into<String>) -> Self {
-        Self::new(
-            InferenceErrorKind::InvalidRequest,
-            "invalid_request",
-            message,
-            None,
-        )
+        Self::new(Kind::InvalidRequest, "invalid_request", message, None)
     }
 
     #[must_use]
     pub fn payload_too_large(code: &'static str) -> Self {
         Self::new(
-            InferenceErrorKind::PayloadTooLarge,
+            Kind::PayloadTooLarge,
             code,
             "The uploaded media exceeds the configured limit.",
             None,
@@ -99,18 +92,13 @@ impl InferenceError {
 
     #[must_use]
     pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new(
-            InferenceErrorKind::NotFound,
-            "route_not_found",
-            message,
-            None,
-        )
+        Self::new(Kind::NotFound, "route_not_found", message, None)
     }
 
     #[must_use]
     pub fn resource_not_found(code: &'static str) -> Self {
         Self::new(
-            InferenceErrorKind::NotFound,
+            Kind::NotFound,
             code,
             "The requested resource was not found.",
             None,
@@ -119,7 +107,7 @@ impl InferenceError {
 
     #[must_use]
     pub fn conflict(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(InferenceErrorKind::Conflict, code, message, None)
+        Self::new(Kind::Conflict, code, message, None)
     }
 
     #[must_use]
@@ -131,7 +119,7 @@ impl InferenceError {
             LimitDimension::Unknown => "configured",
         };
         Self::new(
-            InferenceErrorKind::RateLimit,
+            Kind::RateLimit,
             "rate_limit_exceeded",
             format!("The API key {name} limit was exceeded."),
             Some(retry_after),
@@ -141,7 +129,7 @@ impl InferenceError {
     #[must_use]
     pub fn unavailable(code: &'static str) -> Self {
         Self::new(
-            InferenceErrorKind::Unavailable,
+            Kind::Unavailable,
             code,
             "The gateway is temporarily unavailable.",
             None,
@@ -151,7 +139,7 @@ impl InferenceError {
     #[must_use]
     pub fn overloaded() -> Self {
         Self::new(
-            InferenceErrorKind::Unavailable,
+            Kind::Unavailable,
             "request_admission_overloaded",
             "The gateway is temporarily overloaded.",
             Some(Duration::from_secs(1)),
@@ -161,7 +149,7 @@ impl InferenceError {
     #[must_use]
     pub fn multipart_parser_timeout() -> Self {
         Self::new(
-            InferenceErrorKind::RequestTimeout,
+            Kind::RequestTimeout,
             "multipart_parser_timeout",
             "The multipart upload exceeded its parser deadline.",
             None,
@@ -171,7 +159,7 @@ impl InferenceError {
     #[must_use]
     pub fn timeout() -> Self {
         Self::new(
-            InferenceErrorKind::GatewayTimeout,
+            Kind::GatewayTimeout,
             "gateway_timeout",
             "The route deadline elapsed.",
             None,
@@ -180,13 +168,13 @@ impl InferenceError {
 
     #[must_use]
     pub fn bad_gateway(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(InferenceErrorKind::Upstream, code, message, None)
+        Self::new(Kind::Upstream, code, message, None)
     }
 
     #[must_use]
     pub fn client_cancelled() -> Self {
         Self::new(
-            InferenceErrorKind::Cancelled,
+            Kind::Cancelled,
             "client_cancelled",
             "The client disconnected.",
             None,
@@ -194,7 +182,7 @@ impl InferenceError {
     }
 
     #[must_use]
-    pub const fn kind(&self) -> InferenceErrorKind {
+    pub const fn kind(&self) -> Kind {
         self.kind
     }
 
@@ -216,12 +204,9 @@ impl InferenceError {
     #[must_use]
     pub fn from_transport(error: TransportError) -> Self {
         match error.class {
-            AttemptFailureClass::RateLimit => Self::new(
-                InferenceErrorKind::RateLimit,
-                "upstream_rate_limit",
-                error.message,
-                None,
-            ),
+            AttemptFailureClass::RateLimit => {
+                Self::new(Kind::RateLimit, "upstream_rate_limit", error.message, None)
+            }
             AttemptFailureClass::Timeout => Self::timeout(),
             AttemptFailureClass::UpstreamClient => {
                 Self::bad_gateway("upstream_rejected", error.message)
@@ -244,7 +229,7 @@ impl InferenceError {
     #[must_use]
     pub fn from_canonical(error: &CanonicalError) -> Self {
         Self::new(
-            InferenceErrorKind::Canonical(error.class),
+            Kind::Canonical(error.class),
             "upstream_error",
             error.message.clone(),
             None,
@@ -257,11 +242,12 @@ mod tests {
     use std::time::Duration;
 
     use crate::domain::{
-        AttemptFailureClass, CanonicalError, ErrorClass, TransportError, TransportPhase,
+        canonical::events::{Error as CanonicalError, ErrorClass},
+        ports::{AttemptFailureClass, TransportError, TransportPhase},
     };
     use crate::inference::limits::LimitDimension;
 
-    use super::{InferenceError, InferenceErrorKind};
+    use super::{Error, Kind};
 
     #[test]
     fn rate_limit_messages_identify_every_dimension() {
@@ -272,8 +258,8 @@ mod tests {
             (LimitDimension::Concurrency, "concurrency"),
             (LimitDimension::Unknown, "configured"),
         ] {
-            let error = InferenceError::rate_limited(dimension, retry_after);
-            assert_eq!(error.kind(), InferenceErrorKind::RateLimit);
+            let error = Error::rate_limited(dimension, retry_after);
+            assert_eq!(error.kind(), Kind::RateLimit);
             assert_eq!(error.code(), "rate_limit_exceeded");
             assert_eq!(
                 error.message(),
@@ -286,7 +272,7 @@ mod tests {
     #[test]
     fn every_transport_failure_class_has_an_explicit_public_mapping() {
         use AttemptFailureClass as AFC;
-        use InferenceErrorKind as IEK;
+        use Kind as IEK;
 
         let cases = [
             (
@@ -340,7 +326,7 @@ mod tests {
         ];
 
         for (class, kind, code, message) in cases {
-            let error = InferenceError::from_transport(TransportError {
+            let error = Error::from_transport(TransportError {
                 phase: TransportPhase::FirstByte,
                 class,
                 response_committed: false,
@@ -360,12 +346,9 @@ mod tests {
             provider_code: Some("private-code".to_owned()),
             retryable: false,
         };
-        let error = InferenceError::from_canonical(&canonical);
+        let error = Error::from_canonical(&canonical);
 
-        assert_eq!(
-            error.kind(),
-            InferenceErrorKind::Canonical(ErrorClass::Authorization)
-        );
+        assert_eq!(error.kind(), Kind::Canonical(ErrorClass::Authorization));
         assert_eq!(error.code(), "upstream_error");
         assert_eq!(error.message(), canonical.message);
         let debug = format!("{error:?}");

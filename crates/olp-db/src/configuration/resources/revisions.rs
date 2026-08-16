@@ -5,13 +5,13 @@ use super::{
     *,
 };
 
-impl PgStore {
+impl Store {
     pub async fn list_provider_revisions(
         &self,
         provider_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<ProviderRevisionRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<ProviderRevisionRecord>, Error> {
         let limit = checked_limit(limit)?;
         let exists: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM providers WHERE id = $1) AS \"value!\"",
@@ -20,7 +20,7 @@ impl PgStore {
         .fetch_one(self.pool())
         .await?;
         if !exists {
-            return Err(ConfigurationError::NotFound);
+            return Err(Error::NotFound);
         }
         let before_revision: Option<i32> = match cursor {
             Some(cursor) => Some(
@@ -32,9 +32,7 @@ impl PgStore {
                 .fetch_optional(self.pool())
                 .await?
                 .ok_or_else(|| {
-                    ConfigurationError::Invalid(
-                        "provider-revision pagination cursor is invalid".to_owned(),
-                    )
+                    Error::Invalid("provider-revision pagination cursor is invalid".to_owned())
                 })?,
             ),
             None => None,
@@ -88,7 +86,7 @@ impl PgStore {
         &self,
         provider_id: Uuid,
         revision_id: Uuid,
-    ) -> Result<ProviderRevisionRecord, ConfigurationError> {
+    ) -> Result<ProviderRevisionRecord, Error> {
         let row = sqlx::query_as!(
             ProviderRevisionRow,
             "SELECT pr.id, pr.provider_id, pr.revision, pr.name, pr.kind, pr.endpoint, \
@@ -120,7 +118,7 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         provider_revision_from_row(row)
     }
 
@@ -130,7 +128,7 @@ impl PgStore {
         revision_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<ProviderModelRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<ProviderModelRecord>, Error> {
         let limit = checked_limit(limit)?;
         ensure_provider_revision_exists(self, provider_id, revision_id).await?;
         let rows = sqlx::query_as!(
@@ -154,7 +152,7 @@ impl PgStore {
         &self,
         rows: Vec<ProviderRevisionModelRow>,
         capability_limit: Option<usize>,
-    ) -> Result<Vec<ProviderModelRecord>, ConfigurationError> {
+    ) -> Result<Vec<ProviderModelRecord>, Error> {
         let revision_model_ids = rows
             .iter()
             .map(|row| row.revision_model_id)
@@ -217,7 +215,7 @@ impl PgStore {
     async fn all_provider_revision_models(
         &self,
         revision_id: Uuid,
-    ) -> Result<Vec<ProviderModelRecord>, ConfigurationError> {
+    ) -> Result<Vec<ProviderModelRecord>, Error> {
         let rows = sqlx::query_as!(
             ProviderRevisionModelRow,
             "SELECT id AS revision_model_id, source_provider_model_id, upstream_model, \
@@ -242,7 +240,7 @@ impl PgStore {
         provider_id: Uuid,
         from_id: Uuid,
         to_id: Uuid,
-    ) -> Result<ProviderRevisionDiff, ConfigurationError> {
+    ) -> Result<ProviderRevisionDiff, Error> {
         let from = self.get_provider_revision(provider_id, from_id).await?;
         let to = self.get_provider_revision(provider_id, to_id).await?;
         for revision in [&from, &to] {
@@ -316,7 +314,7 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ProviderRecord, ConfigurationError> {
+    ) -> Result<ProviderRecord, Error> {
         let revision = self.get_provider_revision(provider_id, revision_id).await?;
         let mut transaction = self.pool().begin().await?;
         if !claim_idempotency(
@@ -327,7 +325,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let provider = sqlx::query!(
             "SELECT etag, kind, active_credential_version_id \
@@ -336,12 +334,12 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.kind != revision.kind.as_str() {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "a historical revision cannot change the provider connector kind".to_owned(),
             ));
         }
@@ -502,9 +500,7 @@ impl RevisionCapabilityRow {
     }
 }
 
-fn provider_revision_from_row(
-    row: ProviderRevisionRow,
-) -> Result<ProviderRevisionRecord, ConfigurationError> {
+fn provider_revision_from_row(row: ProviderRevisionRow) -> Result<ProviderRevisionRecord, Error> {
     Ok(ProviderRevisionRecord {
         id: row.id,
         provider_id: row.provider_id,
@@ -542,10 +538,10 @@ fn provider_revision_from_row(
 }
 
 async fn ensure_provider_revision_exists(
-    store: &PgStore,
+    store: &Store,
     provider_id: Uuid,
     revision_id: Uuid,
-) -> Result<(), ConfigurationError> {
+) -> Result<(), Error> {
     let exists: bool = sqlx::query_scalar!(
         "SELECT EXISTS (SELECT 1 FROM provider_revisions \
          WHERE provider_id = $1 AND id = $2) AS \"value!\"",
@@ -554,7 +550,7 @@ async fn ensure_provider_revision_exists(
     )
     .fetch_one(store.pool())
     .await?;
-    exists.then_some(()).ok_or(ConfigurationError::NotFound)
+    exists.then_some(()).ok_or(Error::NotFound)
 }
 
 fn provider_revision_model_map(

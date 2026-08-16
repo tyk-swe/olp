@@ -1,4 +1,4 @@
-use crate::domain::RouteSlugError;
+use crate::domain::ids::RouteSlugError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -43,7 +43,7 @@ pub enum DecodeError {
 #[derive(Debug, Error)]
 pub enum EncodeError {
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("Gemini tool configuration cannot represent parallel_tool_calls")]
     ParallelToolCallsUnsupported,
     #[error("system or developer messages cannot appear after conversation content")]

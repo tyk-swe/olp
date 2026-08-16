@@ -3,8 +3,9 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::{Args, Parser, Subcommand};
 
 use crate::{
-    PublicOrigin, TrustedProxyCidr,
-    public_http::request_admission::{
+    public_http::proxy::TrustedProxyCidr,
+    public_http::public_origin::PublicOrigin,
+    public_http::request_admission::public::{
         DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS, DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
         MAX_ADMISSION_CAPACITY,
     },
@@ -234,7 +235,7 @@ impl std::ops::Deref for TrustedProxyCidrs {
 }
 
 impl std::str::FromStr for TrustedProxyCidrs {
-    type Err = crate::TrustedProxyCidrParseError;
+    type Err = crate::public_http::proxy::TrustedProxyCidrParseError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         value

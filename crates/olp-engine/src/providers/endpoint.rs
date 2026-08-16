@@ -27,28 +27,28 @@ impl EndpointCore {
         value: &str,
         provider: &'static str,
         allow_unsafe_target: bool,
-    ) -> Result<Self, EndpointError> {
-        let mut base_url = Url::parse(value).map_err(|error| EndpointError::InvalidUrl {
+    ) -> Result<Self, Error> {
+        let mut base_url = Url::parse(value).map_err(|error| Error::InvalidUrl {
             provider,
             message: error.to_string(),
         })?;
         if base_url.scheme() != "https" && !allow_unsafe_target {
-            return Err(EndpointError::HttpsRequired { provider });
+            return Err(Error::HttpsRequired { provider });
         }
         if !matches!(base_url.scheme(), "http" | "https") {
-            return Err(EndpointError::UnsupportedScheme { provider });
+            return Err(Error::UnsupportedScheme { provider });
         }
         if !base_url.username().is_empty() || base_url.password().is_some() {
-            return Err(EndpointError::UserInfoForbidden { provider });
+            return Err(Error::UserInfoForbidden { provider });
         }
         if base_url.host().is_none() {
-            return Err(EndpointError::MissingHost { provider });
+            return Err(Error::MissingHost { provider });
         }
         if base_url.port() == Some(0) {
-            return Err(EndpointError::InvalidPort { provider });
+            return Err(Error::InvalidPort { provider });
         }
         if base_url.query().is_some() || base_url.fragment().is_some() {
-            return Err(EndpointError::QueryOrFragmentForbidden { provider });
+            return Err(Error::QueryOrFragmentForbidden { provider });
         }
         if !base_url.path().ends_with('/') {
             base_url.set_path(&format!("{}/", base_url.path()));
@@ -57,7 +57,7 @@ impl EndpointCore {
             && !allow_unsafe_target
             && !is_public_ip(address)
         {
-            return Err(EndpointError::ForbiddenAddress { provider, address });
+            return Err(Error::ForbiddenAddress { provider, address });
         }
         Ok(Self {
             base_url,
@@ -73,13 +73,11 @@ impl EndpointCore {
         &self.base_url
     }
 
-    pub(in crate::providers) fn join(&self, path: &str) -> Result<Url, EndpointError> {
-        self.base_url
-            .join(path)
-            .map_err(|error| EndpointError::InvalidUrl {
-                provider: self.provider,
-                message: error.to_string(),
-            })
+    pub(in crate::providers) fn join(&self, path: &str) -> Result<Url, Error> {
+        self.base_url.join(path).map_err(|error| Error::InvalidUrl {
+            provider: self.provider,
+            message: error.to_string(),
+        })
     }
 
     pub(in crate::providers) fn set_connect_timeout(&mut self, value: Duration) {
@@ -89,7 +87,7 @@ impl EndpointCore {
     pub(in crate::providers) async fn pinned_client(
         &self,
         connect_timeout: Duration,
-    ) -> Result<Client, EndpointError> {
+    ) -> Result<Client, Error> {
         #[cfg(any(test, feature = "test-util"))]
         let allow_unsafe_target = self.allow_unsafe_test_target;
         #[cfg(not(any(test, feature = "test-util")))]
@@ -107,7 +105,7 @@ impl EndpointCore {
                 },
             )
             .await
-            .map_err(|error| EndpointError::from_pinned(self.provider, error))
+            .map_err(|error| Error::from_pinned(self.provider, error))
     }
 }
 
@@ -126,7 +124,7 @@ impl fmt::Debug for EndpointCore {
 /// Error shared by all HTTP provider endpoints. The provider label keeps the
 /// existing diagnostics vendor-specific without duplicating endpoint policy.
 #[derive(Debug, Error)]
-pub enum EndpointError {
+pub enum Error {
     #[error("custom {provider} endpoints must use HTTPS")]
     HttpsRequired { provider: &'static str },
     #[error("custom {provider} endpoint scheme must be HTTP or HTTPS")]
@@ -169,7 +167,7 @@ pub enum EndpointError {
     },
 }
 
-impl EndpointError {
+impl Error {
     fn from_pinned(provider: &'static str, error: PinnedClientError) -> Self {
         match error {
             PinnedClientError::MissingHost => Self::MissingHost { provider },

@@ -1,11 +1,11 @@
 use axum::http::StatusCode;
 use olp_db::{
-    PersistenceError, access::AccessError, configuration::ConfigurationError,
-    identity::IdentityError,
+    access::Error as AccessError, configuration::Error as ConfigurationError,
+    error::Error as PersistenceError, identity::Error as IdentityError,
 };
 use tracing::error;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 use super::sessions::reauthentication_required;
 

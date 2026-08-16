@@ -7,9 +7,12 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_engine::domain::{ApiKey, GatewayCapability, RouteSlug, authorize_api_key};
+use olp_engine::domain::{
+    auth::{ApiKey, GatewayCapability, authorize_api_key},
+    ids::RouteSlug,
+};
 
-use crate::{Problem, gateway};
+use crate::{gateway, public_http::problem::Problem};
 
 /// The route information authenticated before a multipart body is read. A
 /// route-restricted key must either supply the header it was pre-authorized
@@ -181,14 +184,14 @@ pub(super) fn preauthorize_multipart(
     key: &ApiKey,
     capability: GatewayCapability,
     reservation_bytes: u64,
-) -> Result<(MultipartRouteAdmission, u64), gateway::InferenceError> {
+) -> Result<(MultipartRouteAdmission, u64), gateway::error::InferenceError> {
     authorize_api_key(key, None, Some(capability), capability, chrono::Utc::now())
-        .map_err(|error| gateway::InferenceError::forbidden(error.to_string()))?;
+        .map_err(|error| gateway::error::InferenceError::forbidden(error.to_string()))?;
 
     let route_header = HeaderName::from_static("x-olp-route");
     let values = headers.get_all(&route_header);
     if values.iter().count() > 1 {
-        return Err(gateway::InferenceError::invalid_request(
+        return Err(gateway::error::InferenceError::invalid_request(
             "X-OLP-Route must appear at most once.",
         ));
     }
@@ -196,17 +199,18 @@ pub(super) fn preauthorize_multipart(
         .iter()
         .next()
         .map(|value| {
-            value
-                .to_str()
-                .map_err(|_| gateway::InferenceError::invalid_request("X-OLP-Route is invalid."))
+            value.to_str().map_err(|_| {
+                gateway::error::InferenceError::invalid_request("X-OLP-Route is invalid.")
+            })
         })
         .transpose()?;
     if key.allowed_routes.is_empty() {
         return Ok((MultipartRouteAdmission::Unrestricted, reservation_bytes));
     }
     if let Some(supplied) = supplied {
-        let route = RouteSlug::parse(supplied)
-            .map_err(|_| gateway::InferenceError::invalid_request("X-OLP-Route is invalid."))?;
+        let route = RouteSlug::parse(supplied).map_err(|_| {
+            gateway::error::InferenceError::invalid_request("X-OLP-Route is invalid.")
+        })?;
         authorize_api_key(
             key,
             Some(&route),
@@ -214,7 +218,7 @@ pub(super) fn preauthorize_multipart(
             capability,
             chrono::Utc::now(),
         )
-        .map_err(|error| gateway::InferenceError::forbidden(error.to_string()))?;
+        .map_err(|error| gateway::error::InferenceError::forbidden(error.to_string()))?;
         Ok((MultipartRouteAdmission::Expected(route), reservation_bytes))
     } else {
         Ok((

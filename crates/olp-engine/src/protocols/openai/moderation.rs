@@ -1,8 +1,15 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ContentPart, MediaSource, ModerationItem, ModerationRequest as CanonicalModerationRequest,
-    ModerationResult, Operation, RouteSlug, RouteSlugError, SourceExtensions, Surface,
+    canonical::{
+        identity::Surface,
+        requests::{
+            ContentPart, MediaSource, ModerationRequest as CanonicalModerationRequest, Operation,
+            SourceExtensions,
+        },
+        results::{ModerationItem, ModerationResult},
+    },
+    ids::{RouteSlug, RouteSlugError},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -11,16 +18,14 @@ use thiserror::Error;
 use super::extensions::{apply_pointer_extensions, collect_extra, escape_json_pointer};
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiModerationRequest {
+pub struct Request {
     pub model: String,
     pub input: Value,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_moderation(
-    request: OpenAiModerationRequest,
-) -> Result<Operation, ModerationCodecError> {
+pub fn decode(request: Request) -> Result<Operation, Error> {
     let route = RouteSlug::parse(request.model)?;
     let mut extensions = BTreeMap::new();
     collect_extra("", &request.extra, &mut extensions);
@@ -29,7 +34,7 @@ pub fn decode_moderation(
         value => vec![value],
     };
     if values.is_empty() {
-        return Err(ModerationCodecError::EmptyInput);
+        return Err(Error::EmptyInput);
     }
     let input = values
         .into_iter()
@@ -47,10 +52,10 @@ fn decode_moderation_input(
     index: usize,
     value: Value,
     extensions: &mut BTreeMap<String, Value>,
-) -> Result<ContentPart, ModerationCodecError> {
+) -> Result<ContentPart, Error> {
     match value {
         Value::String(text) if !text.is_empty() => Ok(ContentPart::Text { text }),
-        Value::String(_) => Err(ModerationCodecError::EmptyInputItem(index)),
+        Value::String(_) => Err(Error::EmptyInputItem(index)),
         Value::Object(mut object) => {
             let kind = take_string(&mut object, "type", index)?;
             let part = match kind.as_str() {
@@ -61,7 +66,7 @@ fn decode_moderation_input(
                     let image = object
                         .remove("image_url")
                         .and_then(|value| value.as_object().cloned())
-                        .ok_or(ModerationCodecError::InvalidInputItem(index))?;
+                        .ok_or(Error::InvalidInputItem(index))?;
                     let mut image = image;
                     let url = take_string(&mut image, "url", index)?;
                     collect_object_extra(&format!("/input/{index}/image_url"), image, extensions);
@@ -70,19 +75,19 @@ fn decode_moderation_input(
                         detail: None,
                     }
                 }
-                _ => return Err(ModerationCodecError::UnsupportedInputType(kind)),
+                _ => return Err(Error::UnsupportedInputType(kind)),
             };
             collect_object_extra(&format!("/input/{index}"), object, extensions);
             Ok(part)
         }
-        _ => Err(ModerationCodecError::InvalidInputItem(index)),
+        _ => Err(Error::InvalidInputItem(index)),
     }
 }
 
-pub fn encode_moderation(
+pub fn encode(
     request: &CanonicalModerationRequest,
     upstream_model: &str,
-) -> Result<OpenAiModerationRequest, ModerationCodecError> {
+) -> Result<Request, Error> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
@@ -104,31 +109,31 @@ pub fn encode_moderation(
             }
             | ContentPart::InputAudio { .. }
             | ContentPart::InputFile { .. }
-            | ContentPart::Refusal { .. } => Err(ModerationCodecError::UnrepresentableInput),
+            | ContentPart::Refusal { .. } => Err(Error::UnrepresentableInput),
         })
         .collect::<Result<Vec<_>, _>>()?;
     apply_pointer_extensions(
-        OpenAiModerationRequest {
+        Request {
             model: upstream_model.into(),
             input: Value::Array(input),
             extra: BTreeMap::new(),
         },
         &request.extensions.values,
     )
-    .map_err(ModerationCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiModerationResponse {
+pub struct Response {
     pub id: String,
     pub model: String,
-    pub results: Vec<OpenAiModerationResult>,
+    pub results: Vec<Item>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiModerationResult {
+pub struct Item {
     pub flagged: bool,
     pub categories: BTreeMap<String, bool>,
     pub category_scores: BTreeMap<String, f64>,
@@ -138,7 +143,7 @@ pub struct OpenAiModerationResult {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_moderation_response(response: OpenAiModerationResponse) -> ModerationResult {
+pub fn decode_response(response: Response) -> ModerationResult {
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
     let results = response
@@ -168,16 +173,16 @@ pub fn decode_moderation_response(response: OpenAiModerationResponse) -> Moderat
     }
 }
 
-pub fn encode_moderation_response(
+pub fn encode_response(
     result: &ModerationResult,
     client_model: &str,
     fallback_id: &str,
-) -> Result<OpenAiModerationResponse, ModerationCodecError> {
+) -> Result<Response, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     let results = result
         .results
         .iter()
-        .map(|item| OpenAiModerationResult {
+        .map(|item| Item {
             flagged: item.flagged,
             categories: item.categories.clone(),
             category_scores: item.category_scores.clone(),
@@ -186,7 +191,7 @@ pub fn encode_moderation_response(
         })
         .collect();
     apply_pointer_extensions(
-        OpenAiModerationResponse {
+        Response {
             id: result.id.clone().unwrap_or_else(|| fallback_id.into()),
             // Client-facing model identifiers are always public route slugs;
             // never leak the selected provider model into the response.
@@ -196,18 +201,18 @@ pub fn encode_moderation_response(
         },
         &result.extensions.values,
     )
-    .map_err(ModerationCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 fn take_string(
     object: &mut Map<String, Value>,
     field: &'static str,
     index: usize,
-) -> Result<String, ModerationCodecError> {
+) -> Result<String, Error> {
     object
         .remove(field)
         .and_then(|value| value.as_str().map(str::to_owned))
-        .ok_or(ModerationCodecError::InvalidInputItem(index))
+        .ok_or(Error::InvalidInputItem(index))
 }
 
 fn collect_object_extra(
@@ -221,11 +226,11 @@ fn collect_object_extra(
 }
 
 #[derive(Debug, Error)]
-pub enum ModerationCodecError {
+pub enum Error {
     #[error(transparent)]
     InvalidRoute(#[from] RouteSlugError),
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("moderation input cannot be empty")]
     EmptyInput,
     #[error("moderation input item {0} cannot be empty")]

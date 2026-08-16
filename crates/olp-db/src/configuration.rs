@@ -1,33 +1,26 @@
 use chrono::{DateTime, Utc};
 use olp_engine::domain::{
-    OperationKind, ProviderAuthMode, ProviderId, ProviderKind, RouteSlug, Surface,
+    canonical::identity::{OperationKind, Surface},
+    ids::{ProviderId, RouteSlug},
+    provider::ProviderAuthMode,
+    routing::provider::ProviderKind,
 };
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError,
-    runtime::{PublishedRuntimeRelease, RuntimeCompileError},
-    security::EncryptedSecret,
+    error::Error as PersistenceError,
+    runtime::{PublishedRuntimeRelease, compiler::RuntimeCompileError},
+    security::envelope::EncryptedSecret,
 };
 
 mod provider_lifecycle;
-mod resources;
+pub mod resources;
 mod route_lifecycle;
 mod validation;
 
-pub use resources::{
-    ApiKeyMutationResult, ApiKeyRecord, ApiKeyRotationResult, CapabilityCertificationApplied,
-    CapabilityCertificationOutcome, CapabilityRecord, ConfigurationPage, CredentialVersionRecord,
-    DiscoveredModelInput, ProviderModelInventoryRecord, ProviderModelRecord,
-    ProviderMutationResult, ProviderRecord, ProviderRevisionDiff, ProviderRevisionRecord,
-    ReplaceRouteDraftInput, RotateApiKeyInput, RotateCredentialInput, RouteDraftRecord,
-    RouteRecord, RouteRevisionDiff, RouteRevisionRecord, RouteSimulation, RouteSimulationTarget,
-    RouteTargetRecord, StoredCredentialSecret, UpdateApiKeyInput, UpdateProvider,
-};
-
 #[derive(Debug, Error)]
-pub enum ConfigurationError {
+pub enum Error {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error("stored encrypted credential is malformed")]
@@ -63,7 +56,7 @@ pub enum ConfigurationError {
     IdempotencyInProgress,
 }
 
-impl From<sqlx::Error> for ConfigurationError {
+impl From<sqlx::Error> for Error {
     fn from(error: sqlx::Error) -> Self {
         Self::Persistence(PersistenceError::Database(error))
     }
@@ -108,7 +101,7 @@ pub struct ProviderActivated {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuntimeProviderConfiguration {
+pub struct RuntimeProvider {
     pub provider_id: ProviderId,
     pub kind: ProviderKind,
     pub endpoint: Option<String>,

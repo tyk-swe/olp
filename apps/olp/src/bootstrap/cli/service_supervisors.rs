@@ -1,14 +1,14 @@
 use std::time::Duration;
 
-use olp_db::{PgStore, limits::DistributedLimiter};
-use olp_engine::inference::{limits::ReloadableLimiter, request_metadata::RequestMetadataEmitter};
+use olp_db::{limits::DistributedLimiter, store::Store};
+use olp_engine::inference::{limits::ReloadableLimiter, request_metadata::Emitter};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
-use crate::reconcile_media_jobs_once;
+use crate::gateway::media_jobs::reconcile_media_jobs_once;
 
 pub(super) async fn media_reconciliation_supervisor(
-    state: crate::GatewayState,
+    state: crate::bootstrap::mode_dependencies::GatewayState,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
@@ -39,8 +39,8 @@ pub(super) async fn media_reconciliation_supervisor(
 }
 
 pub(super) async fn request_metadata_loss_reporter(
-    store: PgStore,
-    emitter: RequestMetadataEmitter,
+    store: Store,
+    emitter: Emitter,
     gateway_instance: String,
     mut shutdown: watch::Receiver<bool>,
 ) {

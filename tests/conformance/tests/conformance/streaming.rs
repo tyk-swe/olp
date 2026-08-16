@@ -1,10 +1,10 @@
 use olp_conformance::{read_fixture, read_json};
-use olp_engine::domain::{CanonicalEvent, CanonicalEventKind, validate_event_sequence};
+use olp_engine::domain::canonical::events::{Event, Kind, validate_event_sequence};
 use olp_engine::protocols::{
-    anthropic::AnthropicMessagesStreamDecoder,
-    gemini::GeminiGenerateContentStreamDecoder,
-    openai::OpenAiChatStreamDecoder,
-    sse::{SseDecoder, SseFrame},
+    anthropic::stream::Decoder as AnthropicDecoder,
+    gemini::stream::Decoder as GeminiDecoder,
+    openai::response::Decoder as OpenAiDecoder,
+    sse::{Decoder as SseDecoder, Frame},
 };
 use serde::Deserialize;
 
@@ -36,12 +36,12 @@ fn chunks(input: &[u8], size: usize) -> impl Iterator<Item = &[u8]> {
     input.chunks(size)
 }
 
-fn assert_protocol_events(events: &[CanonicalEvent], expected: &ProtocolExpected) {
+fn assert_protocol_events(events: &[Event], expected: &ProtocolExpected) {
     validate_event_sequence(events).expect("fixture must produce a valid canonical event sequence");
     let text = events
         .iter()
         .filter_map(|event| match &event.kind {
-            CanonicalEventKind::TextDelta { text, .. } => Some(text.as_str()),
+            Kind::TextDelta { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect::<String>();
@@ -50,7 +50,7 @@ fn assert_protocol_events(events: &[CanonicalEvent], expected: &ProtocolExpected
         events
             .iter()
             .find_map(|event| match event.kind {
-                CanonicalEventKind::Usage { usage } => Some(usage.total_tokens),
+                Kind::Usage { usage } => Some(usage.total_tokens),
                 _ => None,
             })
             .unwrap_or_default(),
@@ -59,7 +59,7 @@ fn assert_protocol_events(events: &[CanonicalEvent], expected: &ProtocolExpected
     assert_eq!(
         events
             .last()
-            .is_some_and(|event| matches!(event.kind, CanonicalEventKind::Done)),
+            .is_some_and(|event| matches!(event.kind, Kind::Done)),
         expected.done
     );
 }
@@ -78,7 +78,7 @@ fn generic_sse_survives_multiline_and_utf8_fragmentation() {
     let expected = expected
         .frames
         .into_iter()
-        .map(|frame| SseFrame {
+        .map(|frame| Frame {
             event: frame.event,
             data: frame.data,
             id: frame.id,
@@ -102,7 +102,7 @@ fn vendor_streams_survive_one_byte_fragmentation() {
         let mut events = Vec::new();
         match stem {
             "openai-chat" => {
-                let mut decoder = OpenAiChatStreamDecoder::new();
+                let mut decoder = OpenAiDecoder::new();
                 for chunk in chunks(&wire, expected.fragment_bytes) {
                     events.extend(decoder.push(chunk).expect("OpenAI fixture must decode"));
                 }
@@ -110,7 +110,7 @@ fn vendor_streams_survive_one_byte_fragmentation() {
                 assert_eq!(decoder.is_done(), expected.done);
             }
             "anthropic-messages" => {
-                let mut decoder = AnthropicMessagesStreamDecoder::new();
+                let mut decoder = AnthropicDecoder::new();
                 for chunk in chunks(&wire, expected.fragment_bytes) {
                     events.extend(decoder.push(chunk).expect("Anthropic fixture must decode"));
                 }
@@ -118,7 +118,7 @@ fn vendor_streams_survive_one_byte_fragmentation() {
                 assert_eq!(decoder.is_done(), expected.done);
             }
             "gemini-generate-content" => {
-                let mut decoder = GeminiGenerateContentStreamDecoder::new();
+                let mut decoder = GeminiDecoder::new();
                 for chunk in chunks(&wire, expected.fragment_bytes) {
                     events.extend(decoder.push(chunk).expect("Gemini fixture must decode"));
                 }

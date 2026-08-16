@@ -5,19 +5,28 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_db::{configuration::ProviderRevisionDiff, configuration::ProviderRevisionRecord};
-use olp_engine::domain::{ProviderAuthMode, ProviderKind};
+use olp_db::{
+    configuration::resources::ProviderRevisionDiff,
+    configuration::resources::ProviderRevisionRecord,
+};
+use olp_engine::domain::{
+    auth::Permission, provider::ProviderAuthMode, routing::provider::ProviderKind,
+};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        DiffQuery, PageQuery, Permission, if_match, map_configuration, page,
-        require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        error_mapping::map_configuration,
+        idempotency::require_idempotency_key,
+        pagination::{DiffQuery, PageQuery, page},
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 use super::{manage::ProviderDetailResponse, models::ProviderModelListResponse};

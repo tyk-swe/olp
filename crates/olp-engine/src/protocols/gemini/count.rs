@@ -1,15 +1,17 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    ContentPart, Operation, SourceExtensions, Surface, TokenCountRequest, TokenCountResult,
+use crate::domain::canonical::{
+    identity::Surface,
+    requests::{ContentPart, Operation, SourceExtensions, TokenCountRequest},
+    results::TokenCountResult,
 };
 use thiserror::Error;
 
 use crate::protocols::extensions::insert_flat_extension;
 
 use super::{
-    CountTokensRequest, CountTokensResponse, GenerateContentRequest, Part,
-    decode_generate_content_request, validate_count_tokens_request,
+    dto::{CountTokensRequest, CountTokensResponse, GenerateContentRequest, Part},
+    translate::{decode::request as decode_request, validation::validate_count_tokens_request},
 };
 
 /// Source-scoped exact Gemini body retained because canonical token counting
@@ -18,11 +20,11 @@ use super::{
 pub const GEMINI_COUNT_REQUEST_EXTENSION: &str = "/__olp/gemini_count_tokens_request";
 
 #[derive(Debug, Error)]
-pub enum CountDecodeError {
+pub enum DecodeError {
     #[error("Gemini countTokens request is invalid: {0}")]
-    Count(#[from] super::CountTokensError),
+    Count(#[from] super::translate::errors::CountTokensError),
     #[error("Gemini countTokens generation input is invalid: {0}")]
-    Generation(#[from] super::DecodeError),
+    Generation(#[from] super::translate::errors::DecodeError),
     #[error("Gemini countTokens request could not be preserved")]
     Json(#[from] serde_json::Error),
     #[error("Gemini countTokens request contains no countable input")]
@@ -30,7 +32,7 @@ pub enum CountDecodeError {
 }
 
 #[derive(Debug, Error)]
-pub enum CountEncodeError {
+pub enum EncodeError {
     #[error("countTokens response extensions came from a different protocol")]
     CrossProtocol,
     #[error("countTokens response contains an invalid or colliding extension path")]
@@ -42,7 +44,7 @@ pub enum CountEncodeError {
 pub fn decode_count_tokens_request(
     route_model: &str,
     request: CountTokensRequest,
-) -> Result<Operation, CountDecodeError> {
+) -> Result<Operation, DecodeError> {
     validate_count_tokens_request(&request)?;
     let plain_text = is_plain_text_request(&request);
     let preserved = serde_json::to_value(&request)?;
@@ -55,9 +57,7 @@ pub fn decode_count_tokens_request(
         },
     };
     // The generateContent decoder's public contract always produces generation.
-    let Operation::Generation(generation) =
-        decode_generate_content_request(route_model, generation, false)?
-    else {
+    let Operation::Generation(generation) = decode_request(route_model, generation, false)? else {
         unreachable!("Gemini generation decoding always returns generation")
     };
     let input = generation
@@ -66,7 +66,7 @@ pub fn decode_count_tokens_request(
         .flat_map(|message| message.content)
         .collect::<Vec<ContentPart>>();
     if input.is_empty() && generation.tools.is_empty() {
-        return Err(CountDecodeError::Empty);
+        return Err(DecodeError::Empty);
     }
     let extensions = if plain_text && generation.extensions.values.is_empty() {
         SourceExtensions::new(Surface::Gemini, BTreeMap::new())
@@ -104,14 +104,14 @@ fn is_plain_text_request(request: &CountTokensRequest) -> bool {
 
 pub fn encode_count_tokens_result(
     result: &TokenCountResult,
-) -> Result<CountTokensResponse, CountEncodeError> {
+) -> Result<CountTokensResponse, EncodeError> {
     if !result.extensions.values.is_empty() && result.extensions.source != Some(Surface::Gemini) {
-        return Err(CountEncodeError::CrossProtocol);
+        return Err(EncodeError::CrossProtocol);
     }
     let mut value = serde_json::json!({ "totalTokens": result.input_tokens });
     for (pointer, extension) in &result.extensions.values {
         insert_flat_extension(&mut value, pointer, extension.clone())
-            .map_err(|_| CountEncodeError::Extension)?;
+            .map_err(|_| EncodeError::Extension)?;
     }
-    serde_json::from_value(value).map_err(CountEncodeError::Json)
+    serde_json::from_value(value).map_err(EncodeError::Json)
 }

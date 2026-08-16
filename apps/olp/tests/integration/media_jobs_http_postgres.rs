@@ -11,20 +11,39 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt as _;
-use olp::test_support::{ApiMode, ProcessComposition, public_router, reconcile_media_jobs_once};
+use olp::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    gateway::media_jobs::reconcile_media_jobs_once,
+    public_http::router::for_state,
+};
 use olp_db::{
     media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
-    security::AuthHmacKey,
+    security::key_material::AuthHmacKey,
 };
 use olp_engine::domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    BoxFuture, CanonicalResult, Capability, DurationMs, MediaSpool, MediaUpload, Operation,
-    OperationKind, Provider, ProviderId, ProviderKind, ProviderOutput, ProviderRequest,
-    ProviderTransport, Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId,
-    RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode,
-    VideoContentResult, VideoDeleteResult, VideoJobResult, VideoOperation, VideoStatus,
+    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    canonical::{
+        identity::{OperationKind, Surface, TransportMode},
+        requests::{Operation, SourceExtensions, VideoOperation},
+        results::{
+            CanonicalResult, VideoContentResult, VideoDeleteResult, VideoJobResult, VideoStatus,
+        },
+    },
+    ids::{
+        ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
+        TargetId,
+    },
+    ports::{
+        BoxFuture, MediaSpool, MediaUpload, ProviderOutput, ProviderRequest, ProviderTransport,
+        TransportError,
+    },
+    routing::{
+        provider::{Capability, Provider, ProviderKind},
+        route::{Route, Target},
+        snapshot::{RuntimeGeneration, Snapshot},
+    },
 };
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -89,7 +108,9 @@ impl ProviderTransport for VideoLifecycleTransport {
                         operation
                             .extensions
                             .values
-                            .get(olp_engine::domain::MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION),
+                            .get(
+                                olp_engine::domain::canonical::requests::MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION,
+                            ),
                         Some(&serde_json::Value::Bool(true))
                     );
                     self.delete_calls.fetch_add(1, Ordering::AcqRel);
@@ -97,8 +118,8 @@ impl ProviderTransport for VideoLifecycleTransport {
                         && operation.job_id != "upstream-video-created"
                     {
                         return Err(TransportError {
-                            phase: olp_engine::domain::TransportPhase::FirstByte,
-                            class: olp_engine::domain::AttemptFailureClass::Ambiguous,
+                            phase: olp_engine::domain::ports::TransportPhase::FirstByte,
+                            class: olp_engine::domain::ports::AttemptFailureClass::Ambiguous,
                             response_committed: true,
                             message: "injected cleanup ambiguity".to_owned(),
                         });
@@ -144,12 +165,12 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-media-job-test"),
     );
     configure_bootstrap(&mut state, [18; 32]);
-    let app = public_router(state.mode_dependencies().unwrap().management().unwrap());
+    let app = for_state(state.mode_dependencies().unwrap().management().unwrap());
 
     let mut setup_request = Request::post("/api/v1/setup")
         .header(header::CONTENT_TYPE, "application/json")
@@ -325,7 +346,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
             TransportMode::Unary,
         ),
     ]);
-    let runtime = Arc::new(RuntimeManager::empty());
+    let runtime = Arc::new(Manager::empty());
     let mut gateway_state = ProcessComposition::new(
         ApiMode::Gateway,
         Some(store.clone()),
@@ -345,7 +366,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     });
     runtime
         .install(
-            RuntimeSnapshot {
+            Snapshot {
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 1,
@@ -400,7 +421,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         )
         .unwrap();
     let reconciliation_state = gateway_state.clone();
-    let gateway = public_router(
+    let gateway = for_state(
         gateway_state
             .mode_dependencies()
             .unwrap()
@@ -675,7 +696,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let current = runtime.pin();
     runtime
         .install(
-            RuntimeSnapshot {
+            Snapshot {
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 2,

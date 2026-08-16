@@ -10,31 +10,36 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
-use olp_engine::domain::{ApiKey, GatewayCapability, Operation, TransportMode};
+use olp_engine::domain::{
+    auth::{ApiKey, GatewayCapability},
+    canonical::{identity::TransportMode, requests::Operation},
+};
 use olp_engine::inference::{
-    RequestAdmission, RoutedUnaryFinalizer, limits::DistributedLimitReservation,
-    runtime::RuntimeBundle,
+    execution::{RequestAdmission, RoutedUnaryFinalizer},
+    limits::DistributedLimitReservation,
+    runtime::Bundle,
 };
 
-use crate::{GatewayState, InferencePrincipal};
+use crate::bootstrap::mode_dependencies::GatewayState;
+use olp_engine::inference::principal::Principal;
 
 use super::error::InferenceError;
 
-pub(crate) use olp_engine::inference::{RequiredTarget, RoutedEventExecution, RoutedUnaryResult};
+use olp_engine::inference::execution::{RequiredTarget, RoutedEvents, RoutedUnaryResult};
 
 fn admitted_request() -> RequestAdmission {
     RequestAdmission::new(
-        crate::http_inference_reservation(),
-        crate::http_inference_reserved_tokens(),
-        crate::http_inference_metadata_claim(),
+        crate::public_http::request_admission::http_inference_reservation(),
+        crate::public_http::request_admission::http_inference_reserved_tokens(),
+        crate::public_http::request_admission::http_inference_metadata_claim(),
     )
 }
 
 pub(super) fn authorize_principal<'a>(
     state: &GatewayState,
-    principal: &'a InferencePrincipal,
+    principal: &'a Principal,
     capability: GatewayCapability,
-    route: Option<&olp_engine::domain::RouteSlug>,
+    route: Option<&olp_engine::domain::ids::RouteSlug>,
 ) -> Result<&'a ApiKey, InferenceError> {
     state
         .inference()
@@ -51,19 +56,19 @@ pub(super) fn incompatible_result(operation: &'static str) -> InferenceError {
 
 pub(super) async fn execute_event_operation(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
     mode: TransportMode,
-) -> Result<RoutedEventExecution, InferenceError> {
+) -> Result<RoutedEvents, InferenceError> {
     execute_event_operation_for_surface(state, principal, operation, mode).await
 }
 
 pub(crate) async fn execute_event_operation_for_surface(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
     mode: TransportMode,
-) -> Result<RoutedEventExecution, InferenceError> {
+) -> Result<RoutedEvents, InferenceError> {
     state
         .inference()
         .execute_event(principal, operation, mode, admitted_request())
@@ -74,10 +79,10 @@ pub(crate) async fn execute_event_operation_for_surface(
 #[cfg(test)]
 pub(super) async fn execute_event_operation_for_surface_inner(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
     mode: TransportMode,
-) -> Result<RoutedEventExecution, InferenceError> {
+) -> Result<RoutedEvents, InferenceError> {
     state
         .inference()
         .execute_event(principal, operation, mode, RequestAdmission::default())
@@ -87,7 +92,7 @@ pub(super) async fn execute_event_operation_for_surface_inner(
 
 pub(super) async fn execute_unary_result(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
 ) -> Result<RoutedUnaryResult, InferenceError> {
     execute_routed_result(state, principal, operation, TransportMode::Unary, None).await
@@ -95,7 +100,7 @@ pub(super) async fn execute_unary_result(
 
 pub(super) async fn execute_routed_result(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
@@ -105,7 +110,7 @@ pub(super) async fn execute_routed_result(
 
 pub(crate) async fn execute_routed_result_for_surface(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
@@ -126,7 +131,7 @@ pub(crate) async fn execute_routed_result_for_surface(
 #[cfg(test)]
 pub(super) async fn execute_routed_result_for_surface_inner(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     operation: Operation,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
@@ -146,8 +151,8 @@ pub(super) async fn execute_routed_result_for_surface_inner(
 
 pub(crate) fn authorize_model_access<'a>(
     state: &GatewayState,
-    principal: &'a InferencePrincipal,
-) -> Result<(&'a RuntimeBundle, &'a ApiKey), InferenceError> {
+    principal: &'a Principal,
+) -> Result<(&'a Bundle, &'a ApiKey), InferenceError> {
     state
         .inference()
         .authorize_model_access(principal)
@@ -156,11 +161,14 @@ pub(crate) fn authorize_model_access<'a>(
 
 pub(crate) async fn reserve_model_limits(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
 ) -> Result<Option<DistributedLimitReservation>, InferenceError> {
     state
         .inference()
-        .reserve_model_limits(principal, crate::http_inference_reserved_tokens())
+        .reserve_model_limits(
+            principal,
+            crate::public_http::request_admission::http_inference_reserved_tokens(),
+        )
         .await
         .map_err(Into::into)
 }

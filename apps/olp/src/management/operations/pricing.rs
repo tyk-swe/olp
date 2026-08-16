@@ -6,23 +6,26 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint, operations::PriceInput,
-    operations::PricingRevisionRecord,
+    idempotency::Replayable, idempotency::Response as IdempotencyResponse,
+    idempotency::fingerprint, operations::pricing::PriceInput, operations::pricing::RevisionRecord,
 };
-use olp_engine::domain::{OperationKind, ProviderKind};
+use olp_engine::domain::auth::Permission;
+use olp_engine::domain::{canonical::identity::OperationKind, routing::provider::ProviderKind};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::helpers::{PageQuery, map_operations, page_limit};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        Permission, idempotency_http_response, json_payload, map_persistence,
-        require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session,
+        error_mapping::map_persistence,
+        idempotency::{idempotency_http_response, require_idempotency_key},
+        json_payload::json_payload,
+        permissions::require_permission,
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
@@ -143,8 +146,8 @@ pub(super) struct PricingRevisionResponse {
     prices: Vec<PriceResponse>,
 }
 
-impl From<PricingRevisionRecord> for PricingRevisionResponse {
-    fn from(revision: PricingRevisionRecord) -> Self {
+impl From<RevisionRecord> for PricingRevisionResponse {
+    fn from(revision: RevisionRecord) -> Self {
         Self {
             id: revision.id,
             revision: revision.revision,
@@ -215,7 +218,7 @@ pub(super) async fn create_pricing_revision(
     require_permission(&principal, Permission::ManagePricing)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
+    let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
     let master_key = state
         .master_key
         .as_deref()
@@ -232,7 +235,7 @@ pub(super) async fn create_pricing_revision(
             &idempotency_key,
             request.effective_at,
             &prices,
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             |revision| {
                 IdempotencyResponse::json(
                     StatusCode::CREATED.as_u16(),

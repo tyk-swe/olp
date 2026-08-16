@@ -1,6 +1,5 @@
-use super::*;
 use chrono::{DateTime, Utc};
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use uuid::Uuid;
 
 use super::helpers::{
@@ -8,7 +7,10 @@ use super::helpers::{
     normalize_display_name, normalize_email, required_string, role_rank, valid_claim_name,
     validate_subject,
 };
-use crate::security::EncryptedSecret;
+use super::types::{
+    OidcConfiguration, OidcError, OidcFlowMaterial, OidcFlowPurpose, OidcRoleMapping,
+};
+use crate::security::envelope::EncryptedSecret;
 
 fn mapping(value: &str, role: Role) -> OidcRoleMapping {
     OidcRoleMapping {

@@ -1,11 +1,17 @@
-use olp_engine::domain::{
-    CanonicalEventKind, FinishReason, MessageRole, Operation, Surface, validate_event_sequence,
+use olp_engine::domain::canonical::{
+    events::{FinishReason, Kind, validate_event_sequence},
+    identity::Surface,
+    requests::{MessageRole, Operation},
 };
 use olp_engine::protocols::anthropic::{
-    AnthropicMessagesClientStreamEncoder, AnthropicMessagesStreamDecoder, CountTokensRequest,
-    CountTokensResponse, MessagesRequest, MessagesResponse, StreamError,
-    decode_count_tokens_request, decode_messages_request, decode_messages_response,
-    encode_count_tokens_result, encode_messages_request,
+    client_stream::Encoder,
+    count::{decode_count_tokens_request, encode_count_tokens_result},
+    dto::{CountTokensRequest, CountTokensResponse, MessagesRequest, MessagesResponse},
+    stream::{Decoder, Error as StreamError},
+    translate::{
+        decode::request as decode_request, encode::request as encode_request,
+        response::decode as decode_response,
+    },
 };
 use serde_json::{Value, json};
 
@@ -35,7 +41,7 @@ fn request_translation_round_trips_tools_results_and_source_extensions() {
         "metadata": {"user_id": "opaque-user"}
     });
     let dto: MessagesRequest = serde_json::from_value(wire).unwrap();
-    let Operation::Generation(canonical) = decode_messages_request(dto).unwrap() else {
+    let Operation::Generation(canonical) = decode_request(dto).unwrap() else {
         panic!("wrong operation");
     };
 
@@ -71,7 +77,7 @@ fn request_translation_round_trips_tools_results_and_source_extensions() {
         true
     );
 
-    let encoded = encode_messages_request(&canonical, "claude-upstream").unwrap();
+    let encoded = encode_request(&canonical, "claude-upstream").unwrap();
     let encoded = serde_json::to_value(encoded).unwrap();
     assert_eq!(encoded["model"], "claude-upstream");
     assert_eq!(encoded["system"][0]["cache_control"]["type"], "ephemeral");
@@ -95,7 +101,7 @@ fn inline_media_and_cross_protocol_loss_are_rejected() {
         }]}]
     }))
     .unwrap();
-    assert!(decode_messages_request(inline).is_err());
+    assert!(decode_request(inline).is_err());
 
     let request: MessagesRequest = serde_json::from_value(json!({
         "model": "default",
@@ -104,11 +110,11 @@ fn inline_media_and_cross_protocol_loss_are_rejected() {
         "thinking": {"type": "adaptive"}
     }))
     .unwrap();
-    let Operation::Generation(mut canonical) = decode_messages_request(request).unwrap() else {
+    let Operation::Generation(mut canonical) = decode_request(request).unwrap() else {
         unreachable!();
     };
     canonical.extensions.source = Some(Surface::Gemini);
-    assert!(encode_messages_request(&canonical, "claude-upstream").is_err());
+    assert!(encode_request(&canonical, "claude-upstream").is_err());
 }
 
 #[test]
@@ -128,33 +134,33 @@ fn unary_response_preserves_thinking_and_maps_tools_usage_and_finish() {
         "usage": {"input_tokens": 20, "output_tokens": 8, "cache_read_input_tokens": 4}
     }))
     .unwrap();
-    let events = decode_messages_response(response).unwrap();
+    let events = decode_response(response).unwrap();
     validate_event_sequence(&events).unwrap();
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "Calling a tool"
+        Kind::TextDelta { text, .. } if text == "Calling a tool"
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "weather" && arguments_delta.contains("Paris")
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::SourceExtension { extensions }
+        Kind::SourceExtension { extensions }
             if extensions.values.contains_key("/content/0")
                 && extensions.values.contains_key("/content/1/citations")
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Finish {
+        Kind::Finish {
             reason: FinishReason::ToolCalls,
             ..
         }
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Usage { usage } if usage.input_tokens == 24
+        Kind::Usage { usage } if usage.input_tokens == 24
             && usage.total_tokens == 32
             && usage.cached_input_tokens == Some(4)
     )));
@@ -252,7 +258,7 @@ fn fragmented_stream_maps_text_thinking_tool_usage_unknown_events_and_done() {
     ));
     wire.push_str(&sse("message_stop", json!({"type": "message_stop"})));
 
-    let mut decoder = AnthropicMessagesStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut events = Vec::new();
     for byte in wire.as_bytes() {
         events.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
@@ -262,12 +268,12 @@ fn fragmented_stream_maps_text_thinking_tool_usage_unknown_events_and_done() {
     assert!(decoder.is_done());
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "héllo 🌍"
+        Kind::TextDelta { text, .. } if text == "héllo 🌍"
     )));
     let arguments = events
         .iter()
         .filter_map(|event| match &event.kind {
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 arguments_delta, ..
             } => Some(arguments_delta.as_str()),
             _ => None,
@@ -276,19 +282,16 @@ fn fragmented_stream_maps_text_thinking_tool_usage_unknown_events_and_done() {
     assert_eq!(arguments, "{\"city\":\"Paris\"}");
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Usage { usage } if usage.input_tokens == 15
+        Kind::Usage { usage } if usage.input_tokens == 15
             && usage.output_tokens == 17 && usage.cached_input_tokens == Some(3)
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::SourceExtension { extensions }
+        Kind::SourceExtension { extensions }
             if extensions.values.keys().any(|path| path.contains("thinking"))
                 || extensions.values.contains_key("/events/future_event")
     )));
-    assert!(matches!(
-        events.last().unwrap().kind,
-        CanonicalEventKind::Done
-    ));
+    assert!(matches!(events.last().unwrap().kind, Kind::Done));
 }
 
 #[test]
@@ -299,14 +302,14 @@ fn stream_errors_are_terminal_and_truncation_is_not_success() {
             "type": "error", "error": {"type": "overloaded_error", "message": "busy"}
         }),
     );
-    let mut decoder = AnthropicMessagesStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let events = decoder.push(error_wire.as_bytes()).unwrap();
     assert!(decoder.is_done());
     assert!(matches!(
         &events[0].kind,
-        CanonicalEventKind::Error { error } if error.retryable
+        Kind::Error { error } if error.retryable
     ));
-    assert!(matches!(events[1].kind, CanonicalEventKind::Done));
+    assert!(matches!(events[1].kind, Kind::Done));
 
     let start = sse(
         "message_start",
@@ -319,7 +322,7 @@ fn stream_errors_are_terminal_and_truncation_is_not_success() {
             }
         }),
     );
-    let mut truncated = AnthropicMessagesStreamDecoder::new();
+    let mut truncated = Decoder::new();
     truncated.push(start.as_bytes()).unwrap();
     assert!(matches!(
         truncated.finish(),
@@ -361,18 +364,19 @@ fn count_tokens_preserves_full_anthropic_semantics_and_encodes_native_result() {
     assert_eq!(canonical.route.as_str(), "team-claude");
     assert_eq!(canonical.extensions.source, Some(Surface::Anthropic));
     let preserved = &canonical.extensions.values
-        [olp_engine::protocols::anthropic::ANTHROPIC_COUNT_REQUEST_EXTENSION];
+        [olp_engine::protocols::anthropic::count::ANTHROPIC_COUNT_REQUEST_EXTENSION];
     assert_eq!(preserved["metadata"]["tenant"], "source-only");
     assert_eq!(preserved["tools"][0]["name"], "lookup");
 
-    let response = encode_count_tokens_result(&olp_engine::domain::TokenCountResult {
-        input_tokens: 17,
-        extensions: olp_engine::domain::SourceExtensions::new(
-            Surface::Anthropic,
-            [("/vendor_usage".into(), Value::Bool(true))].into(),
-        ),
-    })
-    .unwrap();
+    let response =
+        encode_count_tokens_result(&olp_engine::domain::canonical::results::TokenCountResult {
+            input_tokens: 17,
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::Anthropic,
+                [("/vendor_usage".into(), Value::Bool(true))].into(),
+            ),
+        })
+        .unwrap();
     assert_eq!(response.input_tokens, 17);
     assert_eq!(response.extra["vendor_usage"], true);
 }
@@ -398,24 +402,24 @@ fn count_tokens_plain_user_text_is_cross_protocol_representable() {
 #[test]
 fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_extensions() {
     let canonical = vec![
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("msg-client".into()),
                 provider_model: Some("private".into()),
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             2,
-            CanonicalEventKind::Usage {
-                usage: olp_engine::domain::Usage {
+            Kind::Usage {
+                usage: olp_engine::domain::canonical::events::Usage {
                     input_tokens: 4,
                     output_tokens: 0,
                     total_tokens: 4,
@@ -424,17 +428,17 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
                 },
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             3,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "héllo".into(),
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             4,
-            CanonicalEventKind::Usage {
-                usage: olp_engine::domain::Usage {
+            Kind::Usage {
+                usage: olp_engine::domain::canonical::events::Usage {
                     input_tokens: 4,
                     output_tokens: 2,
                     total_tokens: 6,
@@ -443,16 +447,16 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
                 },
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             5,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::Stop,
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(6, CanonicalEventKind::Done),
+        olp_engine::domain::canonical::events::Event::new(6, Kind::Done),
     ];
-    let mut encoder = AnthropicMessagesClientStreamEncoder::new("public-route", "fallback");
+    let mut encoder = Encoder::new("public-route", "fallback");
     let mut wire = String::new();
     for event in canonical {
         for frame in encoder.push(event).unwrap() {
@@ -464,7 +468,7 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
         }
     }
     assert!(wire.contains("\"model\":\"public-route\""));
-    let mut decoder = AnthropicMessagesStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut decoded = Vec::new();
     for chunk in wire.as_bytes().chunks(2) {
         decoded.extend(decoder.push(chunk).unwrap());
@@ -472,16 +476,16 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
     decoded.extend(decoder.finish().unwrap());
     assert!(decoded.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "héllo"
+        Kind::TextDelta { text, .. } if text == "héllo"
     )));
 
-    let mut encoder = AnthropicMessagesClientStreamEncoder::new("route", "fallback");
+    let mut encoder = Encoder::new("route", "fallback");
     assert!(
         encoder
-            .push(olp_engine::domain::CanonicalEvent::new(
+            .push(olp_engine::domain::canonical::events::Event::new(
                 0,
-                CanonicalEventKind::SourceExtension {
-                    extensions: olp_engine::domain::SourceExtensions::new(
+                Kind::SourceExtension {
+                    extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
                         Surface::Gemini,
                         [("/safety".into(), json!({}))].into(),
                     ),
@@ -538,13 +542,12 @@ fn native_anthropic_stream_losslessly_preserves_thinking_cache_and_unknown_event
         sse("message_stop", json!({"type": "message_stop"})),
     ]
     .concat();
-    let mut decoder =
-        AnthropicMessagesStreamDecoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
     let mut events = decoder.push(wire.as_bytes()).unwrap();
     events.extend(decoder.finish().unwrap());
     validate_event_sequence(&events).unwrap();
 
-    let mut encoder = AnthropicMessagesClientStreamEncoder::new("public-route", "fallback");
+    let mut encoder = Encoder::new("public-route", "fallback");
     let frames = events
         .into_iter()
         .flat_map(|event| encoder.push(event).unwrap())

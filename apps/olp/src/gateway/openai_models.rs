@@ -4,21 +4,26 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_engine::domain::{OperationKind, RouteSlug, Surface};
+use olp_engine::domain::{
+    canonical::identity::{OperationKind, Surface},
+    ids::RouteSlug,
+};
 use serde::Serialize;
 
-use olp_engine::inference::runtime::RuntimeBundle;
+use olp_engine::inference::{principal::Principal, runtime::Bundle};
 
 use crate::{
-    GatewayState, InferencePrincipal,
-    gateway::{InferenceError, authorize_model_access, release_model_limits, reserve_model_limits},
+    bootstrap::mode_dependencies::GatewayState,
+    gateway::{
+        authorize_model_access, error::InferenceError, release_model_limits, reserve_model_limits,
+    },
 };
 
 use super::error::openai_error_response;
 
 pub(super) async fn list_models(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
 ) -> Result<Json<ModelList>, OpenAiModelError> {
     let (runtime, key) =
         authorize_model_access(&state, &principal).map_err(OpenAiModelError::from_inference)?;
@@ -45,7 +50,7 @@ pub(super) async fn list_models(
 
 pub(super) async fn get_model(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(model_id): Path<String>,
 ) -> Result<Json<ModelObject>, OpenAiModelError> {
     let (runtime, key) =
@@ -73,7 +78,7 @@ pub(super) async fn get_model(
     result
 }
 
-fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug) -> bool {
+fn route_is_visible(runtime: &Bundle, slug: &RouteSlug) -> bool {
     let Some(route) = runtime.routes.get(slug) else {
         return false;
     };
@@ -180,12 +185,23 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use futures::stream;
     use http_body_util::BodyExt;
-    use olp_db::security::AuthHmacKey;
+    use olp_db::security::key_material::AuthHmacKey;
     use olp_engine::domain::{
-        ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-        BoxFuture, Capability, DurationMs, Provider, ProviderEventStream, ProviderId, ProviderKind,
-        ProviderOutput, ProviderRequest, ProviderTransport, Route, RouteId, RuntimeGeneration,
-        RuntimeGenerationId, RuntimeSnapshot, Target, TargetId, TransportError, TransportMode,
+        auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+        canonical::identity::TransportMode,
+        ids::{
+            ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RuntimeGenerationId,
+            TargetId,
+        },
+        ports::{
+            BoxFuture, ProviderEventStream, ProviderOutput, ProviderRequest, ProviderTransport,
+            TransportError,
+        },
+        routing::{
+            provider::{Capability, Provider, ProviderKind},
+            route::{Route, Target},
+            snapshot::{RuntimeGeneration, Snapshot},
+        },
     };
     use serde_json::Value;
     use tower::ServiceExt;
@@ -239,7 +255,7 @@ mod tests {
                 },
             )
         };
-        let snapshot = RuntimeSnapshot {
+        let snapshot = Snapshot {
             generation: RuntimeGeneration {
                 id: RuntimeGenerationId::new(),
                 ordinal: 7,
@@ -288,13 +304,13 @@ mod tests {
                 },
             )]),
         };
-        let runtime = Arc::new(olp_engine::inference::runtime::RuntimeManager::empty());
+        let runtime = Arc::new(olp_engine::inference::runtime::Manager::empty());
         let transport: Arc<dyn ProviderTransport> = Arc::new(UnusedTransport);
         runtime
             .install(snapshot, BTreeMap::from([(provider_id, transport)]))
             .unwrap();
         let mut state = GatewayState::new(
-            crate::ApiMode::Gateway,
+            crate::bootstrap::state::ApiMode::Gateway,
             None,
             runtime,
             "https://olp.test",

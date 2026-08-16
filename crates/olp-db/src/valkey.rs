@@ -1,23 +1,17 @@
 //! Typed Valkey adapters for runtime hints and durable request metadata delivery.
 //!
 //! Redis protocol details stay inside storage; process orchestration only sees
-//! runtime-hint notifications and a worker operation over [`PgStore`].
+//! runtime-hint notifications and a worker operation over [`Store`].
 
 use futures::StreamExt as _;
 use redis::aio::{ConnectionManager, PubSubStream};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{PersistenceError, PgStore};
+use crate::{error::Error as PersistenceError, store::Store};
+use request_metadata::LEGACY_REQUEST_METADATA_STREAM;
 
-mod request_metadata;
-
-#[cfg(all(feature = "test-util", debug_assertions))]
-pub use request_metadata::test_support as request_metadata_test_support;
-pub use request_metadata::{
-    LEGACY_REQUEST_METADATA_STREAM, REQUEST_METADATA_RECLAIM_IDLE,
-    REQUEST_METADATA_RECOVERY_INTERVAL, run_request_metadata_consumer,
-};
+pub mod request_metadata;
 
 const KEYSPACE_VERSION: &str = "olp:v3";
 const INSTALLATION_IDENTITY_MIGRATION_VERSION: i64 = 32;
@@ -26,11 +20,11 @@ const LEGACY_REQUEST_METADATA_STREAM_CLAIM_KEY: &str = "olp:v2:request-metadata:
 /// Installation-scoped Valkey resource names derived from PostgreSQL's durable
 /// identity. Restoring PostgreSQL therefore restores the same Valkey namespace.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ValkeyKeyspace {
+pub struct Keyspace {
     prefix: String,
 }
 
-impl ValkeyKeyspace {
+impl Keyspace {
     #[must_use]
     pub fn from_installation_id(id: Uuid) -> Self {
         Self {
@@ -59,7 +53,7 @@ impl ValkeyKeyspace {
     }
 }
 
-impl PgStore {
+impl Store {
     /// Returns true only when the pre-migration database history proves this is
     /// an upgrade from a schema that predates installation-scoped Valkey names.
     pub async fn should_claim_legacy_request_metadata_stream(
@@ -83,16 +77,16 @@ impl PgStore {
             .is_some_and(|version| version < INSTALLATION_IDENTITY_MIGRATION_VERSION))
     }
 
-    pub async fn valkey_keyspace(&self) -> Result<ValkeyKeyspace, PersistenceError> {
+    pub async fn valkey_keyspace(&self) -> Result<Keyspace, PersistenceError> {
         let id = sqlx::query_scalar!("SELECT id FROM installation_identity WHERE singleton")
             .fetch_one(self.pool())
             .await?;
-        Ok(ValkeyKeyspace::from_installation_id(id))
+        Ok(Keyspace::from_installation_id(id))
     }
 }
 
 #[derive(Debug, Error)]
-pub enum ValkeyAdapterError {
+pub enum Error {
     #[error("Valkey operation failed")]
     Service(#[from] redis::RedisError),
     #[error("storage operation failed")]
@@ -108,7 +102,7 @@ pub struct RuntimeHintSubscriber {
 }
 
 impl RuntimeHintSubscriber {
-    pub async fn connect(url: &str, channel: &str) -> Result<Self, ValkeyAdapterError> {
+    pub async fn connect(url: &str, channel: &str) -> Result<Self, Error> {
         let client = redis::Client::open(url)?;
         let mut pubsub = client.get_async_pubsub().await?;
         pubsub.subscribe(channel).await?;
@@ -117,14 +111,12 @@ impl RuntimeHintSubscriber {
         })
     }
 
-    pub async fn recv(&mut self) -> Result<(), ValkeyAdapterError> {
+    pub async fn recv(&mut self) -> Result<(), Error> {
         self.messages
             .next()
             .await
             .map(|_| ())
-            .ok_or(ValkeyAdapterError::InvalidState(
-                "runtime hint subscription ended",
-            ))
+            .ok_or(Error::InvalidState("runtime hint subscription ended"))
     }
 }
 
@@ -135,21 +127,20 @@ pub struct RuntimeHintPublisher {
 }
 
 impl RuntimeHintPublisher {
-    pub async fn connect(url: &str, channel: &str) -> Result<Self, ValkeyAdapterError> {
+    pub async fn connect(url: &str, channel: &str) -> Result<Self, Error> {
         Ok(Self {
             connection: valkey_connection(url).await?,
             channel: channel.to_owned(),
         })
     }
 
-    pub async fn publish(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+    pub async fn publish(&mut self, payload: &[u8]) -> Result<u64, Error> {
         let subscribers: i64 = redis::cmd("PUBLISH")
             .arg(&self.channel)
             .arg(payload)
             .query_async(&mut self.connection)
             .await?;
-        u64::try_from(subscribers)
-            .map_err(|_| ValkeyAdapterError::InvalidState("negative subscriber count"))
+        u64::try_from(subscribers).map_err(|_| Error::InvalidState("negative subscriber count"))
     }
 }
 
@@ -158,7 +149,7 @@ impl RuntimeHintPublisher {
 pub async fn mark_legacy_request_metadata_stream_claim(
     url: &str,
     claim_token: &str,
-) -> Result<bool, ValkeyAdapterError> {
+) -> Result<bool, Error> {
     let mut connection = valkey_connection(url).await?;
     let script = redis::Script::new(
         "local legacy = redis.call('EXISTS', KEYS[1])\n\
@@ -189,7 +180,7 @@ pub async fn migrate_claimed_legacy_request_metadata_stream(
     url: &str,
     target_stream: &str,
     claim_token: &str,
-) -> Result<bool, ValkeyAdapterError> {
+) -> Result<bool, Error> {
     let mut connection = valkey_connection(url).await?;
     let script = redis::Script::new(
         "local legacy = redis.call('EXISTS', KEYS[1])\n\
@@ -220,14 +211,14 @@ pub async fn migrate_claimed_legacy_request_metadata_stream(
 }
 
 /// Verifies that migration has removed the only pre-namespace Valkey resource.
-pub async fn verify_request_metadata_stream_upgrade(url: &str) -> Result<(), ValkeyAdapterError> {
+pub async fn verify_request_metadata_stream_upgrade(url: &str) -> Result<(), Error> {
     let mut connection = valkey_connection(url).await?;
     let legacy_exists: bool = redis::cmd("EXISTS")
         .arg(LEGACY_REQUEST_METADATA_STREAM)
         .query_async(&mut connection)
         .await?;
     if legacy_exists {
-        return Err(ValkeyAdapterError::InvalidState(
+        return Err(Error::InvalidState(
             "legacy request metadata stream still exists; stop N-1 processes and use only the pre-0032 database that owns that stream to claim it",
         ));
     }
@@ -241,14 +232,14 @@ pub(super) async fn valkey_connection(url: &str) -> Result<ConnectionManager, re
 
 #[cfg(test)]
 mod tests {
-    use super::ValkeyKeyspace;
+    use super::Keyspace;
 
     #[test]
     fn installation_keyspaces_are_disjoint_and_stable() {
-        let first = ValkeyKeyspace::from_installation_id(
+        let first = Keyspace::from_installation_id(
             uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
         );
-        let second = ValkeyKeyspace::from_installation_id(
+        let second = Keyspace::from_installation_id(
             uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
         );
         assert_eq!(

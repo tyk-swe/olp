@@ -1,14 +1,18 @@
 use chrono::Utc;
-use olp_engine::domain::{RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot};
+use olp_engine::domain::{
+    ids::RuntimeGenerationId,
+    routing::snapshot::{RuntimeGeneration, Snapshot},
+};
 use uuid::Uuid;
 
 use super::{
-    OutboxRecord, PublishedRuntimeRelease, RuntimeOutboxState, RuntimeOutboxStatus,
+    OutboxRecord, PublishedRuntimeRelease,
+    outbox::{RuntimeOutboxState, RuntimeOutboxStatus},
     releases::verify_release_envelope,
 };
 
-fn snapshot() -> RuntimeSnapshot {
-    RuntimeSnapshot {
+fn snapshot() -> Snapshot {
+    Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 7,

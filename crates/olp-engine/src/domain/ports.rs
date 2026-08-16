@@ -6,13 +6,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{
-    AttemptPlan, CanonicalEvent, CanonicalResult, MediaArtifact, MediaHandle, Operation,
-    RequestMetadata,
+    canonical::{
+        events::Event,
+        identity::RequestMetadata,
+        requests::{MediaHandle, Operation},
+        results::{CanonicalResult, MediaArtifact},
+    },
+    routing::selection::AttemptPlan,
 };
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type ProviderEventStream =
-    Pin<Box<dyn Stream<Item = Result<CanonicalEvent, TransportError>> + Send + 'static>>;
+    Pin<Box<dyn Stream<Item = Result<Event, TransportError>> + Send + 'static>>;
 pub type MediaByteStream =
     Pin<Box<dyn Stream<Item = Result<Bytes, MediaSpoolError>> + Send + 'static>>;
 
@@ -199,7 +204,11 @@ pub enum AttemptFailureClass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{CanonicalEventKind, CanonicalResult, SourceExtensions, TokenCountResult};
+    use crate::domain::canonical::{
+        events::Kind,
+        requests::SourceExtensions,
+        results::{CanonicalResult, TokenCountResult},
+    };
     use futures::stream;
 
     const PRIVATE_BYTES: &[u8] = b"private-media-payload";
@@ -254,9 +263,9 @@ mod tests {
 
     #[test]
     fn provider_output_debug_is_variant_only() {
-        let events = ProviderOutput::Events(Box::pin(stream::iter([Ok(CanonicalEvent::new(
+        let events = ProviderOutput::Events(Box::pin(stream::iter([Ok(Event::new(
             0,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "private model output".to_owned(),
             },

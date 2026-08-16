@@ -2,17 +2,17 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::{
-    PgStore,
     request_metadata::{
         REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES, REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
     },
+    store::Store,
 };
 
 pub const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
 const REQUEST_METADATA_RECEIPT_DELETE_BATCH: i64 = 250_000;
 
 #[derive(Debug, Error)]
-pub enum MaintenanceError {
+pub enum Error {
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
     #[error("retention setting {key} is invalid")]
@@ -22,7 +22,7 @@ pub enum MaintenanceError {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MaintenanceReport {
+pub struct Report {
     pub lock_acquired: bool,
     pub rollup_rows: u64,
     pub request_metadata_gap_rollup_rows: u64,
@@ -40,14 +40,11 @@ pub struct MaintenanceReport {
     pub media_job_rows: u64,
 }
 
-impl PgStore {
+impl Store {
     /// Rebuilds completed hourly aggregates before enforcing independent
     /// metadata, usage, and audit retention. One PostgreSQL advisory lock keeps
     /// multiple worker replicas from overlapping the same maintenance pass.
-    pub async fn run_maintenance(
-        &self,
-        now: DateTime<Utc>,
-    ) -> Result<MaintenanceReport, MaintenanceError> {
+    pub async fn run_maintenance(&self, now: DateTime<Utc>) -> Result<Report, Error> {
         let mut transaction = self.pool().begin().await?;
         sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
             .fetch_one(&mut *transaction)
@@ -59,7 +56,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if !locked {
-            return Ok(MaintenanceReport::default());
+            return Ok(Report::default());
         }
 
         let rows = sqlx::query!(
@@ -78,7 +75,7 @@ impl PgStore {
                 .parse::<i64>()
                 .ok()
                 .filter(|days| (1..=3_650).contains(days))
-                .ok_or_else(|| MaintenanceError::InvalidSetting { key: key.clone() })?;
+                .ok_or_else(|| Error::InvalidSetting { key: key.clone() })?;
             match key.as_str() {
                 "retention.requests_days" => requests_days = parsed,
                 "retention.usage_days" => usage_days = parsed,
@@ -393,7 +390,7 @@ impl PgStore {
         .rows_affected();
 
         transaction.commit().await?;
-        Ok(MaintenanceReport {
+        Ok(Report {
             lock_acquired: true,
             rollup_rows: rollups,
             request_metadata_gap_rollup_rows,
@@ -413,6 +410,6 @@ impl PgStore {
     }
 }
 
-fn checked_count(value: i64, name: &'static str) -> Result<u64, MaintenanceError> {
-    u64::try_from(value).map_err(|_| MaintenanceError::InvalidCount { name })
+fn checked_count(value: i64, name: &'static str) -> Result<u64, Error> {
+    u64::try_from(value).map_err(|_| Error::InvalidCount { name })
 }

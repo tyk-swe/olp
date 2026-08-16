@@ -4,7 +4,7 @@ use zeroize::Zeroizing;
 
 /// Deadlines shared by every provider connector.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ConnectorTimeouts {
+pub struct Timeouts {
     /// DNS, TCP, and TLS connection deadline.
     pub connect: Duration,
     /// Deadline for receiving the first response byte.
@@ -13,7 +13,7 @@ pub struct ConnectorTimeouts {
     pub idle: Duration,
 }
 
-impl Default for ConnectorTimeouts {
+impl Default for Timeouts {
     fn default() -> Self {
         Self {
             connect: Duration::from_secs(5),
@@ -23,7 +23,7 @@ impl Default for ConnectorTimeouts {
     }
 }
 
-impl ConnectorTimeouts {
+impl Timeouts {
     pub(in crate::providers) fn validate(self) -> Result<Self, &'static str> {
         [
             ("connect", self.connect),

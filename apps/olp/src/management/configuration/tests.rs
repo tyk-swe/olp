@@ -1,11 +1,16 @@
 use axum::http::StatusCode;
-use olp_db::{configuration::CapabilityRecord, configuration::ConfigurationError};
+use olp_db::{configuration::Error, configuration::resources::CapabilityRecord};
 use olp_engine::providers::{
-    CapabilityCertificationEvidence, CompatibleCapabilityCertificationError,
+    factory::certification::CapabilityCertificationEvidence,
+    openai::certification::CompatibleCapabilityCertificationError,
 };
 use utoipa::OpenApi;
 
-use crate::management::{PageQuery, WriteOnlySecret, map_configuration, page};
+use crate::management::{
+    error_mapping::map_configuration,
+    pagination::{PageQuery, page},
+    secrets::WriteOnlySecret,
+};
 
 use super::{ConfigurationApiDoc, providers::models::certification_item};
 
@@ -67,7 +72,7 @@ fn compatible_certification_contract_requires_etag_and_reports_evidence() {
             operation: "image_generation".parse().unwrap(),
             surface: "openai".parse().unwrap(),
             mode: "unary".parse().unwrap(),
-            source: olp_engine::domain::CapabilitySource::Declared,
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
             certified_at: None,
         },
         Err(CompatibleCapabilityCertificationError::Unsupported),
@@ -83,7 +88,7 @@ fn compatible_certification_contract_requires_etag_and_reports_evidence() {
             operation: "image_generation".parse().unwrap(),
             surface: "openai".parse().unwrap(),
             mode: "streaming".parse().unwrap(),
-            source: olp_engine::domain::CapabilitySource::Declared,
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
             certified_at: None,
         },
         Ok(CapabilityCertificationEvidence::NativeOpenAiModelDiscoveryAndConnectorContract),
@@ -199,7 +204,7 @@ fn provider_revision_diff_contract_documents_hard_response_ceilings() {
         assert_eq!(properties[field]["maxItems"], 32_000);
     }
 
-    let problem = map_configuration(ConfigurationError::ProviderRevisionDiffTooLarge {
+    let problem = map_configuration(Error::ProviderRevisionDiffTooLarge {
         dimension: "models",
         maximum: 2_000,
     });

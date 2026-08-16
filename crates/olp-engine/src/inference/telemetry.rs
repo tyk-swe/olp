@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::inference::{InferenceError, InferenceErrorKind};
+use crate::inference::error::{Error as InferenceError, Kind as InferenceErrorKind};
 
 pub(in crate::inference) const fn metadata_status_code(error: &InferenceError) -> u16 {
     match error.kind() {
@@ -16,14 +16,14 @@ pub(in crate::inference) const fn metadata_status_code(error: &InferenceError) -
         InferenceErrorKind::GatewayTimeout => 504,
         InferenceErrorKind::Upstream | InferenceErrorKind::Cancelled => 502,
         InferenceErrorKind::Canonical(class) => match class {
-            crate::domain::ErrorClass::RateLimit => 429,
-            crate::domain::ErrorClass::Timeout => 504,
-            crate::domain::ErrorClass::Authentication
-            | crate::domain::ErrorClass::Authorization
-            | crate::domain::ErrorClass::InvalidRequest
-            | crate::domain::ErrorClass::Transport
-            | crate::domain::ErrorClass::Upstream
-            | crate::domain::ErrorClass::Internal => 502,
+            crate::domain::canonical::events::ErrorClass::RateLimit => 429,
+            crate::domain::canonical::events::ErrorClass::Timeout => 504,
+            crate::domain::canonical::events::ErrorClass::Authentication
+            | crate::domain::canonical::events::ErrorClass::Authorization
+            | crate::domain::canonical::events::ErrorClass::InvalidRequest
+            | crate::domain::canonical::events::ErrorClass::Transport
+            | crate::domain::canonical::events::ErrorClass::Upstream
+            | crate::domain::canonical::events::ErrorClass::Internal => 502,
         },
     }
 }
@@ -36,8 +36,8 @@ pub(in crate::inference) fn elapsed_ms(duration: Duration) -> u64 {
 mod tests {
     use std::time::Duration;
 
-    use crate::domain::ErrorClass;
-    use crate::inference::{InferenceError, InferenceErrorKind};
+    use crate::domain::canonical::events::ErrorClass;
+    use crate::inference::error::{Error as InferenceError, Kind as InferenceErrorKind};
 
     use super::{elapsed_ms, metadata_status_code};
 

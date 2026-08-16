@@ -16,42 +16,59 @@ use axum::{
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use http_body_util::BodyExt;
-use olp_db::security::AuthHmacKey;
+use olp_db::security::key_material::AuthHmacKey;
 use olp_engine::domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    AttemptFailureClass, BoxFuture, CanonicalError, CanonicalEvent, CanonicalEventKind,
-    CanonicalResult, Capability, CredentialVersionId, DurationMs, ErrorClass,
-    EventSequenceValidator, FinishReason, ImageGenerationRequest, ImageOperation, MediaHandle,
-    MediaSpool, MessageRole, Operation, OperationKind, Provider, ProviderEventStream, ProviderId,
-    ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, RequestId, RequestMetadata,
-    Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot,
-    SourceExtensions, Surface, Target, TargetId, TransportError, TransportMode, select_attempts,
+    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    canonical::{
+        events::{Error, ErrorClass, Event, EventSequenceValidator, FinishReason, Kind},
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ImageGenerationRequest, ImageOperation, MediaHandle, MessageRole, Operation,
+            SourceExtensions,
+        },
+        results::CanonicalResult,
+    },
+    ids::{
+        ApiKeyId, ApiKeyLookupId, CredentialVersionId, DurationMs, ProviderId, RequestId, RouteId,
+        RouteSlug, RuntimeGenerationId, TargetId,
+    },
+    ports::{
+        AttemptFailureClass, BoxFuture, MediaSpool, ProviderEventStream, ProviderOutput,
+        ProviderRequest, ProviderTransport, TransportError,
+    },
+    routing::{
+        provider::{Capability, Provider, ProviderKind},
+        route::{Route, Target},
+        selection::select_attempts,
+        snapshot::{RuntimeGeneration, Snapshot},
+    },
 };
 use olp_engine::inference::{
-    circuit::CircuitBreaker,
+    circuit::Breaker,
+    execution::RequiredTarget,
     failover::{
-        EventStream, FailoverContext, circuit_accounted_event_stream, execute_with_failover,
+        Context, EventStream, circuit_accounted_event_stream, execute,
         reclassify_ambiguous_transport_failure, validated_event_stream,
     },
-    limits::reserve_limits,
-    runtime::{RuntimeBundle, RuntimeManager},
+    limits::reserve,
+    runtime::{Bundle, Manager},
 };
 use olp_engine::protocols::openai::{
-    ChatCompletionRequest, ResponseInputTokensRequest, decode_chat_completion,
-    decode_response_input_tokens,
+    chat::{CompletionRequest, decode_chat_completion},
+    responses::token_count::{ResponseInputTokensRequest, decode_response_input_tokens},
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::*;
 use super::{
+    error::InferenceError,
     execution::{
-        RequiredTarget, execute_event_operation_for_surface_inner,
-        execute_routed_result_for_surface_inner,
+        execute_event_operation_for_surface_inner, execute_routed_result_for_surface_inner,
     },
     multipart::MultipartFormData,
 };
-use crate::MultipartRequestAdmission;
+use crate::public_http::request_admission::multipart::MultipartRequestAdmission;
 
 mod cancellation;
 mod failover;
@@ -61,12 +78,12 @@ mod unary;
 
 #[derive(Clone)]
 struct StaticTransport {
-    events: Vec<CanonicalEvent>,
+    events: Vec<Event>,
 }
 
 #[derive(Clone)]
 struct FiniteStaticTransport {
-    events: Vec<CanonicalEvent>,
+    events: Vec<Event>,
 }
 
 #[derive(Clone)]
@@ -155,7 +172,7 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
             timeout: DurationMs::new(4_000),
         }],
     };
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 1,
@@ -177,45 +194,45 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
             },
         )]),
     };
-    let runtime = Arc::new(RuntimeManager::empty());
+    let runtime = Arc::new(Manager::empty());
     let transport: Arc<dyn ProviderTransport> = Arc::new(StaticTransport {
         events: vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: Some("chatcmpl-upstream".to_owned()),
                     provider_model: Some("upstream-model".to_owned()),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 1,
-                CanonicalEventKind::MessageStart {
+                Kind::MessageStart {
                     output_index: 0,
                     role: MessageRole::Assistant,
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 2,
-                CanonicalEventKind::TextDelta {
+                Kind::TextDelta {
                     output_index: 0,
                     text: "hello from OLP".to_owned(),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 3,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index: 0,
                     reason: FinishReason::Stop,
                 },
             ),
-            CanonicalEvent::new(4, CanonicalEventKind::Done),
+            Event::new(4, Kind::Done),
         ],
     });
     runtime
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
     let mut state = GatewayState::new(
-        crate::ApiMode::Gateway,
+        crate::bootstrap::state::ApiMode::Gateway,
         None,
         runtime,
         "https://olp.test",
@@ -225,20 +242,23 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
     (state, plaintext)
 }
 
-fn test_principal(state: &GatewayState, surface: Surface) -> crate::InferencePrincipal {
+fn test_principal(
+    state: &GatewayState,
+    surface: Surface,
+) -> olp_engine::inference::principal::Principal {
     let runtime = state.runtime().pin();
     let (lookup_id, _) = runtime.api_keys.iter().next().unwrap();
-    crate::InferencePrincipal::new(
+    olp_engine::inference::principal::Principal::new(
         Arc::clone(&runtime),
         lookup_id.clone(),
         surface,
-        Some(olp_engine::domain::GatewayCapability::Inference),
+        Some(olp_engine::domain::auth::GatewayCapability::Inference),
     )
 }
 
 fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
     let pinned = state.runtime().pin();
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -271,7 +291,7 @@ fn install_result(state: &GatewayState, operation: OperationKind, result: Canoni
         .get_mut(&RouteSlug::parse("default").unwrap())
         .unwrap();
     route.operations = BTreeSet::from([operation]);
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -291,7 +311,7 @@ fn install_result(state: &GatewayState, operation: OperationKind, result: Canoni
 fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>) {
     let pinned = state.runtime().pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -307,40 +327,40 @@ fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>
         .unwrap();
 }
 
-fn generation_stream_events(text: &str) -> Vec<CanonicalEvent> {
+fn generation_stream_events(text: &str) -> Vec<Event> {
     vec![
-        CanonicalEvent::new(
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("response-upstream".into()),
                 provider_model: Some("upstream-model".into()),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             2,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: text.to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             3,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::Stop,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             4,
-            CanonicalEventKind::Usage {
-                usage: olp_engine::domain::Usage {
+            Kind::Usage {
+                usage: olp_engine::domain::canonical::events::Usage {
                     input_tokens: 7,
                     output_tokens: 3,
                     total_tokens: 10,
@@ -349,7 +369,7 @@ fn generation_stream_events(text: &str) -> Vec<CanonicalEvent> {
                 },
             },
         ),
-        CanonicalEvent::new(5, CanonicalEventKind::Done),
+        Event::new(5, Kind::Done),
     ]
 }
 

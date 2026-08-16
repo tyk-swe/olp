@@ -8,8 +8,8 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    access::NewApiKeyRecord, idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint,
+    access::NewApiKeyRecord, idempotency::Replayable, idempotency::Response as IdempotencyResponse,
+    idempotency::fingerprint,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -25,7 +25,7 @@ use crate::management::{
     secrets::WriteOnlySecret,
     sessions::require_mutation_session,
 };
-use crate::{ManagementState, Problem};
+use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
 
@@ -92,7 +92,7 @@ pub(crate) async fn create_api_key(
     require_key_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
+    let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
     let policy = normalize_api_key_policy(
         RawApiKeyPolicy::from(&request),
         ExpirationValidation::DeferredToStorage,
@@ -118,7 +118,7 @@ pub(crate) async fn create_api_key(
         .store()
         .create_api_key_record(
             &record,
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             move |created| {
                 IdempotencyResponse::json(
                     StatusCode::CREATED.as_u16(),

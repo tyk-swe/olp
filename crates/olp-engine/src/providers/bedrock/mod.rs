@@ -5,19 +5,17 @@
 //! framing. Model discovery uses the official Bedrock control-plane SDK.
 
 mod translate;
-mod transport;
+pub(in crate::providers) mod transport;
 
 use std::fmt;
 
-use crate::domain::{Operation, TransportError};
+use crate::domain::{canonical::requests::Operation, ports::TransportError};
+use crate::providers::connector::Timeouts;
 use aws_config::{BehaviorVersion, Region, retry::RetryConfig, timeout::TimeoutConfig};
-use aws_credential_types::Credentials;
+use aws_credential_types::Credentials as AwsCredentials;
 use serde::Deserialize;
 use thiserror::Error;
 use zeroize::Zeroize;
-
-pub use crate::providers::ConnectorTimeouts;
-pub use transport::BedrockConnector;
 
 /// Validates that a canonical operation can be encoded by Bedrock without
 /// making an AWS request or loading credentials. The gateway uses this before
@@ -27,9 +25,9 @@ pub fn validate_operation(operation: &Operation) -> Result<(), TransportError> {
     match operation {
         Operation::Generation(request) => translate::encode_generation(request).map(|_| ()),
         Operation::TokenCount(request) => translate::encode_token_count(request).map(|_| ()),
-        _ => Err(crate::domain::TransportError {
-            phase: crate::domain::TransportPhase::Connect,
-            class: crate::domain::AttemptFailureClass::Protocol,
+        _ => Err(crate::domain::ports::TransportError {
+            phase: crate::domain::ports::TransportPhase::Connect,
+            class: crate::domain::ports::AttemptFailureClass::Protocol,
             response_committed: false,
             message: "Bedrock does not represent this canonical operation".to_owned(),
         }),
@@ -41,7 +39,7 @@ const MAX_STATIC_CREDENTIAL_DOCUMENT_BYTES: usize = 16 * 1_024;
 #[derive(Clone, Debug)]
 pub struct ConnectorConfig {
     region: String,
-    timeouts: ConnectorTimeouts,
+    timeouts: Timeouts,
     endpoint_url: Option<String>,
 }
 
@@ -51,13 +49,13 @@ impl ConnectorConfig {
         validate_region(&region)?;
         Ok(Self {
             region,
-            timeouts: ConnectorTimeouts::default(),
+            timeouts: Timeouts::default(),
             endpoint_url: None,
         })
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub fn with_timeouts(mut self, timeouts: ConnectorTimeouts) -> Result<Self, ConfigError> {
+    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Result<Self, ConfigError> {
         validate_timeouts(timeouts)?;
         self.timeouts = timeouts;
         Ok(self)
@@ -104,7 +102,7 @@ impl Drop for StaticCredentialDocument {
 }
 
 /// Credential selection for an installed Bedrock provider.
-pub enum BedrockCredentials {
+pub enum Credentials {
     /// AWS environment/shared-profile/web-identity/container/instance chain.
     DefaultChain,
     /// An encrypted-at-rest JSON document decoded only while installing the
@@ -112,11 +110,11 @@ pub enum BedrockCredentials {
     Static(StaticCredentials),
 }
 
-impl fmt::Debug for BedrockCredentials {
+impl fmt::Debug for Credentials {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DefaultChain => formatter.write_str("BedrockCredentials::DefaultChain"),
-            Self::Static(_) => formatter.write_str("BedrockCredentials::Static([REDACTED])"),
+            Self::DefaultChain => formatter.write_str("Credentials::DefaultChain"),
+            Self::Static(_) => formatter.write_str("Credentials::Static([REDACTED])"),
         }
     }
 }
@@ -147,8 +145,8 @@ impl StaticCredentials {
         })
     }
 
-    fn into_sdk(self) -> Credentials {
-        Credentials::new(
+    fn into_sdk(self) -> AwsCredentials {
+        AwsCredentials::new(
             self.access_key_id.clone(),
             self.secret_access_key.clone(),
             self.session_token.clone(),
@@ -207,7 +205,7 @@ fn validate_region(region: &str) -> Result<(), ConfigError> {
 }
 
 #[cfg(any(test, feature = "test-util"))]
-fn validate_timeouts(timeouts: ConnectorTimeouts) -> Result<(), ConfigError> {
+fn validate_timeouts(timeouts: Timeouts) -> Result<(), ConfigError> {
     timeouts
         .validate()
         .map(|_| ())
@@ -229,10 +227,7 @@ fn validate_static_component(
     Ok(())
 }
 
-async fn sdk_config(
-    config: &ConnectorConfig,
-    credentials: BedrockCredentials,
-) -> aws_config::SdkConfig {
+async fn sdk_config(config: &ConnectorConfig, credentials: Credentials) -> aws_config::SdkConfig {
     let retry = RetryConfig::standard().with_max_attempts(1);
     let timeout = TimeoutConfig::builder()
         .connect_timeout(config.timeouts.connect)
@@ -243,8 +238,8 @@ async fn sdk_config(
         .retry_config(retry)
         .timeout_config(timeout);
     match credentials {
-        BedrockCredentials::DefaultChain => loader.load().await,
-        BedrockCredentials::Static(credentials) => {
+        Credentials::DefaultChain => loader.load().await,
+        Credentials::Static(credentials) => {
             loader
                 .credentials_provider(credentials.into_sdk())
                 .load()
@@ -286,9 +281,9 @@ mod tests {
         assert!(
             ConnectorConfig::new("us-east-1")
                 .unwrap()
-                .with_timeouts(ConnectorTimeouts {
+                .with_timeouts(Timeouts {
                     connect: Duration::ZERO,
-                    ..ConnectorTimeouts::default()
+                    ..Timeouts::default()
                 })
                 .is_err()
         );

@@ -9,9 +9,9 @@ use sqlx::{Connection as _, Row as _, postgres::PgConnection};
 
 /// A table and column pair whose rendered row text contained the needle.
 #[derive(Debug)]
-pub struct Sighting {
-    pub table: String,
-    pub sample: String,
+pub(crate) struct Sighting {
+    pub(crate) table: String,
+    pub(crate) sample: String,
 }
 
 /// Every base table in the `public` schema, partitions included.
@@ -40,7 +40,10 @@ async fn tables(connection: &mut PgConnection) -> Result<Vec<String>, String> {
 /// backslashes in plaintext. A needle stored in `bytea` or encrypted data still
 /// will not match; both are acceptable exclusions because the invariant is
 /// specifically about plaintext leaking into durable records.
-pub async fn rows_containing(database_url: &str, needle: &str) -> Result<Vec<Sighting>, String> {
+pub(crate) async fn rows_containing(
+    database_url: &str,
+    needle: &str,
+) -> Result<Vec<Sighting>, String> {
     let mut connection = PgConnection::connect(database_url)
         .await
         .map_err(|error| format!("failed to connect to the run database: {error}"))?;
@@ -75,7 +78,7 @@ pub async fn rows_containing(database_url: &str, needle: &str) -> Result<Vec<Sig
 }
 
 /// Renders sightings for a failure message.
-pub fn describe(sightings: &[Sighting]) -> String {
+pub(crate) fn describe(sightings: &[Sighting]) -> String {
     sightings
         .iter()
         .map(|sighting| format!("  {}: {}", sighting.table, sighting.sample))

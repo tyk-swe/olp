@@ -3,24 +3,15 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use olp_engine::inference::runtime::RuntimeReleaseCandidate;
+use olp_engine::inference::runtime::ReleaseCandidate;
 use uuid::Uuid;
 
-mod compiler;
-mod outbox;
+pub mod compiler;
+pub mod outbox;
 mod releases;
 
-pub use compiler::RuntimeCompileError;
-pub(crate) use compiler::{
-    compile_and_publish_runtime_in_transaction, lock_runtime_publication, prepare_runtime_mutation,
-};
-pub use outbox::{
-    RUNTIME_OUTBOX_STALE_AFTER_SECONDS, RuntimeOutboxLeader, RuntimeOutboxLeaderContender,
-    RuntimeOutboxLeadershipProbe, RuntimeOutboxState, RuntimeOutboxStatus,
-};
-
 /// A durable runtime publication envelope. Hash and creation metadata remain
-/// database concerns; the engine receives only [`RuntimeReleaseCandidate`].
+/// database concerns; the engine receives only [`ReleaseCandidate`].
 #[derive(Clone)]
 pub struct PublishedRuntimeRelease {
     pub generation_id: Uuid,
@@ -32,8 +23,8 @@ pub struct PublishedRuntimeRelease {
 
 impl PublishedRuntimeRelease {
     #[must_use]
-    pub fn activation_candidate(&self) -> RuntimeReleaseCandidate<'_> {
-        RuntimeReleaseCandidate {
+    pub fn activation_candidate(&self) -> ReleaseCandidate<'_> {
+        ReleaseCandidate {
             generation_id: self.generation_id,
             sequence: self.sequence,
             payload: &self.payload,

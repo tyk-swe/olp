@@ -3,18 +3,20 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
 };
-use olp_db::usage::UsageSummary;
+use olp_db::usage::summary::Report;
 use serde::Serialize;
 use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::operations::{
         helpers::map_operations, request_metadata::RequestMetadataConsumerStatusResponse,
     },
-    management::{Permission, require_permission, require_read_session},
+    management::{permissions::require_permission, sessions::require_read_session},
+    public_http::problem::Problem,
 };
+use olp_engine::domain::auth::Permission;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageSummaryResponse {
@@ -37,8 +39,8 @@ pub(in crate::management::operations) struct UsageSummaryResponse {
     complete: bool,
 }
 
-impl From<UsageSummary> for UsageSummaryResponse {
-    fn from(summary: UsageSummary) -> Self {
+impl From<Report> for UsageSummaryResponse {
+    fn from(summary: Report) -> Self {
         Self {
             request_count: summary.request_count,
             input_tokens: summary.input_tokens,

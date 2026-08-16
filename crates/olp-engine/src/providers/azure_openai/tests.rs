@@ -2,14 +2,20 @@ use std::{collections::BTreeMap, time::Duration};
 
 use super::*;
 use crate::domain::{
-    AttemptPlan, ContentPart, DurationMs, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
-    GenerationRequest, Message, MessageRole, Operation, ProviderId, ProviderKind, ProviderOutput,
-    ProviderRequest, RequestId, RequestMetadata, RouteId, RouteSlug, RuntimeGenerationId,
-    SourceExtensions, Surface, TargetId, TransportMode,
+    canonical::{
+        identity::{RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
+            GenerationRequest, Message, MessageRole, Operation, SourceExtensions,
+        },
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{ProviderOutput, ProviderRequest},
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use crate::providers::{
+    connector::Timeouts,
     mock_server::{MockResponse, response, spawn_mock, spawn_sequence, status_response},
-    openai::ConnectorTimeouts,
 };
 use futures::StreamExt;
 
@@ -84,19 +90,19 @@ fn envelope(operation: Operation, mode: TransportMode) -> ProviderRequest {
     }
 }
 
-fn connector(origin: &str) -> AzureOpenAiConnector {
-    AzureOpenAiConnector::new(
+fn connector(origin: &str) -> Connector {
+    Connector::new(
         ConnectorConfig::for_local_test(
             origin,
             "team-chat",
             "2024-10-21",
-            ConnectorTimeouts {
+            Timeouts {
                 connect: Duration::from_secs(1),
                 first_byte: Duration::from_secs(1),
                 idle: Duration::from_secs(1),
             },
         ),
-        AzureOpenAiApiKey::new("azure-secret").unwrap(),
+        ApiKey::new("azure-secret").unwrap(),
     )
 }
 
@@ -161,7 +167,7 @@ async fn returns_typed_embedding_result_on_azure_path() {
     };
     assert!(matches!(
         *result,
-        crate::domain::CanonicalResult::Embeddings(_)
+        crate::domain::canonical::results::CanonicalResult::Embeddings(_)
     ));
     let request = String::from_utf8(captured.await.unwrap()).unwrap();
     assert!(request.starts_with(
@@ -280,7 +286,7 @@ fn rejects_unsafe_configuration_and_redacts_key() {
         ConnectorConfig::new("https://resource.openai.azure.com", "../chat", "2024-10-21").is_err()
     );
     assert!(ConnectorConfig::new("https://resource.openai.azure.com", "chat", "latest").is_err());
-    let key = AzureOpenAiApiKey::new("do-not-print").unwrap();
+    let key = ApiKey::new("do-not-print").unwrap();
     assert!(!format!("{key:?}").contains("do-not-print"));
 }
 
@@ -291,9 +297,9 @@ async fn live_provider_azure_chat_smoke() {
     let deployment = std::env::var("OLP_AZURE_OPENAI_LIVE_DEPLOYMENT").unwrap();
     let api_version = std::env::var("OLP_AZURE_OPENAI_LIVE_API_VERSION").unwrap();
     let key = std::env::var("OLP_AZURE_OPENAI_LIVE_API_KEY").unwrap();
-    let connector = AzureOpenAiConnector::new(
+    let connector = Connector::new(
         ConnectorConfig::new(&endpoint, deployment, api_version).unwrap(),
-        AzureOpenAiApiKey::new(key).unwrap(),
+        ApiKey::new(key).unwrap(),
     );
     let operation = Operation::Generation(GenerationRequest {
         route: RouteSlug::parse("chat").unwrap(),

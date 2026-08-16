@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 
 use axum::body::Bytes;
-use olp_engine::domain::{
-    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
-    SourceExtensions, Surface, Usage, validate_event_sequence,
+use olp_engine::domain::canonical::{
+    events::{Error, ErrorClass, Event, FinishReason, Kind, Usage, validate_event_sequence},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
-use olp_engine::protocols::openai::{OpenAiChatStreamDecoder, OpenAiStreamError};
+use olp_engine::protocols::openai::response::{Decoder, OpenAiStreamError};
 use serde_json::{Value, json};
 
 use super::{
@@ -63,9 +64,9 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
     let after = unix_seconds();
     assert!(
         encoder
-            .encode(CanonicalEvent::new(
+            .encode(Event::new(
                 0,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: None,
                     provider_model: Some("upstream-model".to_owned()),
                 },
@@ -76,9 +77,9 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
 
     let message_start = only_frame(
         encoder
-            .encode(CanonicalEvent::new(
+            .encode(Event::new(
                 1,
-                CanonicalEventKind::MessageStart {
+                Kind::MessageStart {
                     output_index: 0,
                     role: MessageRole::Assistant,
                 },
@@ -103,9 +104,9 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
 
     let text_delta = only_frame(
         encoder
-            .encode(CanonicalEvent::new(
+            .encode(Event::new(
                 2,
-                CanonicalEventKind::TextDelta {
+                Kind::TextDelta {
                     output_index: 0,
                     text: "hello".to_owned(),
                 },
@@ -133,9 +134,9 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
 
     let finish = only_frame(
         encoder
-            .encode(CanonicalEvent::new(
+            .encode(Event::new(
                 3,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index: 0,
                     reason: FinishReason::Stop,
                 },
@@ -161,14 +162,10 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
         created
     );
 
-    let done = only_frame(
-        encoder
-            .encode(CanonicalEvent::new(4, CanonicalEventKind::Done))
-            .unwrap(),
-    );
+    let done = only_frame(encoder.encode(Event::new(4, Kind::Done)).unwrap());
     assert_eq!(done, Bytes::from_static(b"data: [DONE]\n\n"));
 
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut decoded = decoder
         .push(&join_sse_frames(&[message_start, text_delta, finish, done]))
         .unwrap();
@@ -177,35 +174,35 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
     assert_eq!(
         decoded,
         vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: Some("chatcmpl-12345678-1234-5678-1234-567812345678".to_owned(),),
                     provider_model: Some("route-model".to_owned()),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 1,
-                CanonicalEventKind::MessageStart {
+                Kind::MessageStart {
                     output_index: 0,
                     role: MessageRole::Assistant,
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 2,
-                CanonicalEventKind::TextDelta {
+                Kind::TextDelta {
                     output_index: 0,
                     text: "hello".to_owned(),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 3,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index: 0,
                     reason: FinishReason::Stop,
                 },
             ),
-            CanonicalEvent::new(4, CanonicalEventKind::Done),
+            Event::new(4, Kind::Done),
         ]
     );
 }
@@ -220,9 +217,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
     let after = unix_seconds();
     assert!(
         encoder
-            .encode(CanonicalEvent::new(
+            .encode(Event::new(
                 0,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: Some("chatcmpl-upstream".to_owned()),
                     provider_model: Some("upstream-model".to_owned()),
                 },
@@ -233,9 +230,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
 
     let fixtures = [
         (
-            CanonicalEvent::new(
+            Event::new(
                 1,
-                CanonicalEventKind::MessageStart {
+                Kind::MessageStart {
                     output_index: 0,
                     role: MessageRole::Assistant,
                 },
@@ -252,9 +249,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             }),
         ),
         (
-            CanonicalEvent::new(
+            Event::new(
                 2,
-                CanonicalEventKind::ToolCallDelta {
+                Kind::ToolCallDelta {
                     output_index: 0,
                     tool_index: 0,
                     id: Some("call_weather".to_owned()),
@@ -279,9 +276,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             }),
         ),
         (
-            CanonicalEvent::new(
+            Event::new(
                 3,
-                CanonicalEventKind::ToolCallDelta {
+                Kind::ToolCallDelta {
                     output_index: 0,
                     tool_index: 0,
                     id: None,
@@ -306,9 +303,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             }),
         ),
         (
-            CanonicalEvent::new(
+            Event::new(
                 4,
-                CanonicalEventKind::ToolCallDelta {
+                Kind::ToolCallDelta {
                     output_index: 0,
                     tool_index: 1,
                     id: Some("call_lookup".to_owned()),
@@ -333,9 +330,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             }),
         ),
         (
-            CanonicalEvent::new(
+            Event::new(
                 5,
-                CanonicalEventKind::Usage {
+                Kind::Usage {
                     usage: Usage {
                         input_tokens: 21,
                         output_tokens: 8,
@@ -360,9 +357,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
             }),
         ),
         (
-            CanonicalEvent::new(
+            Event::new(
                 6,
-                CanonicalEventKind::SourceExtension {
+                Kind::SourceExtension {
                     extensions: SourceExtensions::new(
                         Surface::OpenAi,
                         BTreeMap::from([("/system_fingerprint".to_owned(), json!("fp_fixture"))]),
@@ -399,9 +396,9 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
     ] {
         let frame = only_frame(
             encoder
-                .encode(CanonicalEvent::new(
+                .encode(Event::new(
                     7 + u64::from(output_index),
-                    CanonicalEventKind::Finish {
+                    Kind::Finish {
                         output_index,
                         reason,
                     },
@@ -426,30 +423,23 @@ fn stream_encoder_preserves_tool_usage_finish_extension_and_done_frames() {
         frames.push(frame);
     }
 
-    let done = only_frame(
-        encoder
-            .encode(CanonicalEvent::new(13, CanonicalEventKind::Done))
-            .unwrap(),
-    );
+    let done = only_frame(encoder.encode(Event::new(13, Kind::Done)).unwrap());
     assert_eq!(done, Bytes::from_static(b"data: [DONE]\n\n"));
     frames.push(done);
 
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut decoded = decoder.push(&join_sse_frames(&frames)).unwrap();
     decoded.extend(decoder.finish().unwrap());
     validate_event_sequence(&decoded).unwrap();
     assert!(decoder.is_done());
     assert!(matches!(
         &decoded[0].kind,
-        CanonicalEventKind::ResponseStart {
+        Kind::ResponseStart {
             response_id: Some(response_id),
             provider_model: Some(model),
         } if response_id == "chatcmpl-upstream" && model == "route-model"
     ));
-    assert!(matches!(
-        &decoded.last().unwrap().kind,
-        CanonicalEventKind::Done
-    ));
+    assert!(matches!(&decoded.last().unwrap().kind, Kind::Done));
 }
 
 #[test]
@@ -460,10 +450,10 @@ fn stream_encoder_error_frame_is_terminal() {
     );
     let error_frame = only_frame(
         encoder
-            .encode(CanonicalEvent::new(
+            .encode(Event::new(
                 0,
-                CanonicalEventKind::Error {
-                    error: CanonicalError {
+                Kind::Error {
+                    error: Error {
                         class: ErrorClass::RateLimit,
                         message: "provider throttled".to_owned(),
                         provider_code: Some("rate_limited".to_owned()),
@@ -484,15 +474,15 @@ fn stream_encoder_error_frame_is_terminal() {
         })
     );
 
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let events = decoder.push(&join_sse_frames(&[error_frame])).unwrap();
     assert_eq!(
         events,
         vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::Error {
-                    error: CanonicalError {
+                Kind::Error {
+                    error: Error {
                         class: ErrorClass::RateLimit,
                         message: "provider throttled".to_owned(),
                         provider_code: Some("rate_limited".to_owned()),
@@ -500,7 +490,7 @@ fn stream_encoder_error_frame_is_terminal() {
                     },
                 },
             ),
-            CanonicalEvent::new(1, CanonicalEventKind::Done),
+            Event::new(1, Kind::Done),
         ]
     );
     assert!(decoder.is_done());
@@ -514,44 +504,44 @@ fn stream_encoder_error_frame_is_terminal() {
 #[test]
 fn unary_aggregation_preserves_openai_json() {
     let events = vec![
-        CanonicalEvent::new(
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("chatcmpl-upstream".to_owned()),
                 provider_model: Some("upstream-model".to_owned()),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             2,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "hello ".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             3,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "world".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             4,
-            CanonicalEventKind::RefusalDelta {
+            Kind::RefusalDelta {
                 output_index: 0,
                 text: "not refused".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             5,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 0,
                 tool_index: 0,
                 id: Some("call_123".to_owned()),
@@ -559,16 +549,16 @@ fn unary_aggregation_preserves_openai_json() {
                 arguments_delta: "{\"city\":\"Paris\"}".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             6,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::ToolCalls,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             7,
-            CanonicalEventKind::Usage {
+            Kind::Usage {
                 usage: Usage {
                     input_tokens: 8,
                     output_tokens: 5,
@@ -578,9 +568,9 @@ fn unary_aggregation_preserves_openai_json() {
                 },
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             8,
-            CanonicalEventKind::SourceExtension {
+            Kind::SourceExtension {
                 extensions: SourceExtensions::new(
                     Surface::OpenAi,
                     BTreeMap::from([(
@@ -590,7 +580,7 @@ fn unary_aggregation_preserves_openai_json() {
                 ),
             },
         ),
-        CanonicalEvent::new(9, CanonicalEventKind::Done),
+        Event::new(9, Kind::Done),
     ];
 
     let before = unix_seconds();
@@ -637,51 +627,51 @@ fn unary_aggregation_preserves_openai_json() {
 #[test]
 fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
     let events = vec![
-        CanonicalEvent::new(
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: None,
                 provider_model: Some("upstream-model".to_owned()),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 1,
                 role: MessageRole::Assistant,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             2,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             3,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 1,
                 text: "second choice".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             4,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "first ".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             5,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "choice".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             6,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 0,
                 tool_index: 1,
                 id: Some("call_lookup".to_owned()),
@@ -689,9 +679,9 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
                 arguments_delta: "{\"query\":\"rust\"}".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             7,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 0,
                 tool_index: 0,
                 id: Some("call_weather".to_owned()),
@@ -699,9 +689,9 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
                 arguments_delta: "{\"city\":".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             8,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 0,
                 tool_index: 0,
                 id: None,
@@ -709,9 +699,9 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
                 arguments_delta: "\"Paris\"}".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             9,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 1,
                 tool_index: 0,
                 id: Some("call_search".to_owned()),
@@ -719,23 +709,23 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
                 arguments_delta: "{\"q\":\"fixtures\"}".to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             10,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::ToolCalls,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             11,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 1,
                 reason: FinishReason::Length,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             12,
-            CanonicalEventKind::Usage {
+            Kind::Usage {
                 usage: Usage {
                     input_tokens: 34,
                     output_tokens: 13,
@@ -745,9 +735,9 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
                 },
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             13,
-            CanonicalEventKind::SourceExtension {
+            Kind::SourceExtension {
                 extensions: SourceExtensions::new(
                     Surface::OpenAi,
                     BTreeMap::from([
@@ -761,7 +751,7 @@ fn unary_aggregation_preserves_multiple_choices_and_tool_calls() {
                 ),
             },
         ),
-        CanonicalEvent::new(14, CanonicalEventKind::Done),
+        Event::new(14, Kind::Done),
     ];
 
     let request_id = uuid::Uuid::from_u128(0x1234_5678_1234_5678_1234_5678_1234_5678);

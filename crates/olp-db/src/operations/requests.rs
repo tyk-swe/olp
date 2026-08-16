@@ -1,16 +1,16 @@
 use chrono::{DateTime, Utc};
-use olp_engine::domain::{OperationKind, Surface};
+use olp_engine::domain::canonical::identity::{OperationKind, Surface};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
     cursor::{
-        OperationsError, OperationsPage, TimestampCursor, checked_u16, optional_i32_u64,
-        optional_u16, optional_u64, trimmed_optional,
+        Error, Page, Timestamp, checked_u16, optional_i32_u64, optional_u16, optional_u64,
+        trimmed_optional,
     },
 };
-use crate::{PersistenceError, PgStore, split_page};
+use crate::{error::Error as PersistenceError, split_page, store::Store};
 
 #[derive(Clone, Debug, Default)]
 pub struct RequestFilters {
@@ -95,13 +95,13 @@ struct RequestRow {
     usage_complete: Option<bool>,
 }
 
-impl PgStore {
+impl Store {
     pub async fn requests(
         &self,
         filters: &RequestFilters,
-        cursor: Option<&TimestampCursor>,
+        cursor: Option<&Timestamp>,
         limit: u16,
-    ) -> Result<OperationsPage<RequestRecord>, OperationsError> {
+    ) -> Result<Page<RequestRecord>, Error> {
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(
             "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
@@ -141,16 +141,16 @@ impl PgStore {
             .map(request_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
-            TimestampCursor {
+            Timestamp {
                 at: item.started_at,
                 id: item.id,
             }
             .encode()
         });
-        Ok(OperationsPage { items, next_cursor })
+        Ok(Page { items, next_cursor })
     }
 
-    pub async fn request_detail(&self, id: Uuid) -> Result<RequestDetail, OperationsError> {
+    pub async fn request_detail(&self, id: Uuid) -> Result<RequestDetail, Error> {
         let row = sqlx::query_as!(
             RequestRow,
             "SELECT r.id, r.runtime_generation_id, r.api_key_id, r.route_slug, r.operation, \
@@ -179,7 +179,7 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(OperationsError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         let request = request_from_row(row)?;
         let rows = sqlx::query!(
             "SELECT a.id, a.ordinal, a.provider_id, p.name AS provider_name, a.upstream_model, \
@@ -210,7 +210,7 @@ impl PgStore {
                     first_byte_ms: optional_i32_u64(row.first_byte_ms, "attempt first byte")?,
                 })
             })
-            .collect::<Result<Vec<_>, OperationsError>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(RequestDetail { request, attempts })
     }
 }
@@ -259,7 +259,7 @@ fn push_request_filters(query: &mut QueryBuilder<Postgres>, filters: &RequestFil
     }
 }
 
-fn request_from_row(row: RequestRow) -> Result<RequestRecord, OperationsError> {
+fn request_from_row(row: RequestRow) -> Result<RequestRecord, Error> {
     Ok(RequestRecord {
         id: row.id,
         runtime_generation_id: row.runtime_generation_id,

@@ -8,31 +8,43 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, stream};
-use olp_engine::domain::{
-    CanonicalEvent, CanonicalEventKind, CanonicalResult, MediaHandle, Surface, TransportMode,
+use olp_engine::domain::canonical::{
+    events::{Event, Kind},
+    identity::{Surface, TransportMode},
+    requests::MediaHandle,
+    results::CanonicalResult,
 };
-use olp_engine::inference::CleanupMediaStream;
+use olp_engine::inference::{
+    execution::{RoutedEvents, RoutedUnaryResult},
+    media_lifecycle::CleanupMediaStream,
+    principal::Principal,
+};
 use olp_engine::protocols::openai::{
-    EmbeddingRequest, OpenAiImageEditRequest, OpenAiImageGenerationRequest,
-    OpenAiImageVariationRequest, OpenAiModerationRequest, OpenAiSpeechRequest,
-    OpenAiTranscriptionRequest, decode_embedding_request, decode_image_edit,
-    decode_image_generation, decode_image_variation, decode_moderation, decode_speech,
-    decode_transcription, encode_embedding_response, encode_moderation_response,
-    encode_speech_body, encode_transcription_response,
+    audio::{
+        SpeechRequest, TranscriptionRequest, decode_speech, decode_transcription,
+        encode_speech_body, encode_transcription_response,
+    },
+    embeddings::{EmbeddingRequest, decode_embedding_request, encode_embedding_response},
+    images::{
+        OpenAiImageEditRequest, OpenAiImageGenerationRequest, OpenAiImageVariationRequest,
+        decode_image_edit, decode_image_generation, decode_image_variation,
+    },
+    moderation::{Request, decode, encode_response},
 };
 use tracing::warn;
 
 use crate::{
-    GatewayState, InferencePrincipal, MultipartRequestAdmission,
+    bootstrap::mode_dependencies::GatewayState,
     public_http::image_response::streaming_image_json_response,
+    public_http::request_admission::multipart::MultipartRequestAdmission,
     public_http::streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
 };
 
 use super::{
     error::{InferenceError, valid_json},
     execution::{
-        RoutedEventExecution, RoutedUnaryResult, defer_unary_outcome_to_body,
-        execute_event_operation, execute_unary_result, incompatible_result, mark_unary_outcome,
+        defer_unary_outcome_to_body, execute_event_operation, execute_unary_result,
+        incompatible_result, mark_unary_outcome,
     },
     multipart::{media_spool_error, parse_multipart},
     openai_http::error_sse as openai_error_sse,
@@ -40,7 +52,7 @@ use super::{
 
 pub(super) async fn embeddings(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     payload: Result<Json<EmbeddingRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -65,18 +77,18 @@ pub(super) async fn embeddings(
 
 pub(super) async fn moderations(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
-    payload: Result<Json<OpenAiModerationRequest>, JsonRejection>,
+    Extension(principal): Extension<Principal>,
+    payload: Result<Json<Request>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
-    let operation = decode_moderation(request)
-        .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
+    let operation =
+        decode(request).map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     let mut executed = execute_unary_result(&state, &principal, operation).await?;
     let CanonicalResult::Moderation(result) = executed.result.as_ref() else {
         executed.mark_provider_protocol_failure();
         return Err(incompatible_result("moderation"));
     };
-    let response = encode_moderation_response(
+    let response = encode_response(
         result,
         executed.route_slug.as_str(),
         &format!("modr-{}", executed.request_id),
@@ -89,7 +101,7 @@ pub(super) async fn moderations(
 
 pub(super) async fn image_generations(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     payload: Result<Json<OpenAiImageGenerationRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -113,7 +125,7 @@ pub(super) async fn image_generations(
 
 pub(super) async fn image_edits(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -157,7 +169,7 @@ pub(super) async fn image_edits(
 
 pub(super) async fn image_variations(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -198,8 +210,8 @@ async fn encode_executed_images(
 
 pub(super) async fn speech(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
-    payload: Result<Json<OpenAiSpeechRequest>, JsonRejection>,
+    Extension(principal): Extension<Principal>,
+    payload: Result<Json<SpeechRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
     let streaming = request.stream_format.as_deref() == Some("sse");
@@ -233,7 +245,7 @@ pub(super) async fn speech(
 
 pub(super) async fn transcriptions(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -272,7 +284,7 @@ pub(super) async fn transcriptions(
             })?,
         );
     }
-    let request = OpenAiTranscriptionRequest {
+    let request = TranscriptionRequest {
         model,
         file,
         language,
@@ -322,7 +334,7 @@ pub(super) async fn transcriptions(
     outcome
 }
 
-fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response {
+fn raw_media_streaming_response(mut execution: RoutedEvents) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut accounting = execution.take_accounting();
@@ -379,7 +391,7 @@ fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response
             TerminalFrames::one(openai_error_sse(error))
         });
         let outcome = failure.as_ref().map_or_else(
-            olp_engine::inference::RequestOutcome::success,
+            olp_engine::inference::accounting::RequestOutcome::success,
             InferenceError::accounting_outcome,
         );
         accounting.finish(outcome).await;
@@ -387,11 +399,9 @@ fn raw_media_streaming_response(mut execution: RoutedEventExecution) -> Response
     response
 }
 
-pub(super) fn raw_media_event_bytes(
-    event: CanonicalEvent,
-) -> Result<Option<Bytes>, InferenceError> {
+pub(super) fn raw_media_event_bytes(event: Event) -> Result<Option<Bytes>, InferenceError> {
     match event.kind {
-        CanonicalEventKind::SourceExtension { mut extensions } => {
+        Kind::SourceExtension { mut extensions } => {
             if extensions.source != Some(Surface::OpenAi) {
                 return Err(InferenceError::bad_gateway(
                     "provider_protocol_error",
@@ -417,7 +427,7 @@ pub(super) fn raw_media_event_bytes(
                     "A media stream event contained unrepresentable extensions.",
                 ));
             }
-            encode_sse_frame(&olp_engine::protocols::sse::SseFrame {
+            encode_sse_frame(&olp_engine::protocols::sse::Frame {
                 event: event_name,
                 data: serde_json::to_string(&data).map_err(|_| {
                     InferenceError::bad_gateway(
@@ -436,8 +446,8 @@ pub(super) fn raw_media_event_bytes(
                 )
             })
         }
-        CanonicalEventKind::Error { error } => Err(InferenceError::from_canonical(&error)),
-        CanonicalEventKind::Done => Ok(None),
+        Kind::Error { error } => Err(InferenceError::from_canonical(&error)),
+        Kind::Done => Ok(None),
         _ => Err(InferenceError::bad_gateway(
             "provider_protocol_error",
             "A provider emitted a generation event in a media stream.",
@@ -448,13 +458,13 @@ pub(super) fn raw_media_event_bytes(
 pub(super) async fn open_response_media(
     state: &GatewayState,
     handle: &MediaHandle,
-) -> Result<olp_engine::domain::OpenedMedia, InferenceError> {
+) -> Result<olp_engine::domain::ports::OpenedMedia, InferenceError> {
     match state.media_spool().open(handle).await {
         Ok(opened) => Ok(opened),
         Err(error) => {
             let mapped = media_spool_error(error);
             if let Err(cleanup_error) = state.media_spool().remove(handle).await
-                && cleanup_error != olp_engine::domain::MediaSpoolError::NotFound
+                && cleanup_error != olp_engine::domain::ports::MediaSpoolError::NotFound
             {
                 warn!(%cleanup_error, "failed to remove unreadable response media");
             }
@@ -466,8 +476,8 @@ pub(super) async fn open_response_media(
 /// Converts bounded spooled media into an HTTP response that removes the
 /// artifact when the body is exhausted or dropped.
 pub(super) fn response_from_opened_media(
-    opened: olp_engine::domain::OpenedMedia,
-    spool: Arc<dyn olp_engine::domain::MediaSpool>,
+    opened: olp_engine::domain::ports::OpenedMedia,
+    spool: Arc<dyn olp_engine::domain::ports::MediaSpool>,
     invalid_content_type_message: &'static str,
     invalid_content_length_message: &'static str,
 ) -> Result<Response, InferenceError> {

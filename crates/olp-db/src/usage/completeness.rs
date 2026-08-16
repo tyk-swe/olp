@@ -1,20 +1,17 @@
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
-    UsageFilters, UsageRangeCoverage,
+    Coverage, Filters,
     query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
-    PgStore,
-    operations::{
-        OperationsError,
-        cursor::{checked_u64, trimmed_optional},
-    },
-    request_metadata::RequestMetadataConsumerStatus,
+    operations::cursor::{Error, checked_u64, trimmed_optional},
+    request_metadata::delivery_health::ConsumerStatus,
+    store::Store,
 };
 
 #[derive(Clone, Debug)]
-pub struct UsageCompleteness {
+pub struct Report {
     pub request_count: u64,
     pub priced_count: u64,
     pub unpriced_count: u64,
@@ -25,8 +22,8 @@ pub struct UsageCompleteness {
     pub uncertain_request_metadata_gap_count: u64,
     pub estimated_cost: Option<String>,
     pub currency: Option<String>,
-    pub coverage: UsageRangeCoverage,
-    pub request_metadata_consumer: RequestMetadataConsumerStatus,
+    pub coverage: Coverage,
+    pub request_metadata_consumer: ConsumerStatus,
     pub complete: bool,
 }
 
@@ -46,11 +43,8 @@ pub(super) struct RequestMetadataGapEvidence {
     pub(super) uncertain_gap_count: i64,
 }
 
-impl PgStore {
-    pub async fn usage_completeness(
-        &self,
-        filters: &UsageFilters,
-    ) -> Result<UsageCompleteness, OperationsError> {
+impl Store {
+    pub async fn usage_completeness(&self, filters: &Filters) -> Result<Report, Error> {
         validate_usage_range(filters)?;
         let mut query = QueryBuilder::<Postgres>::new("");
         push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
@@ -78,7 +72,7 @@ impl PgStore {
         let request_metadata_consumer = self
             .request_metadata_consumer_status(chrono::Utc::now())
             .await?;
-        Ok(UsageCompleteness {
+        Ok(Report {
             request_count: checked_u64(row.request_count, "request count")?,
             priced_count: checked_u64(row.priced_count, "priced count")?,
             unpriced_count,
@@ -100,8 +94,8 @@ impl PgStore {
 
     pub(super) async fn request_metadata_gap_evidence(
         &self,
-        filters: &UsageFilters,
-    ) -> Result<RequestMetadataGapEvidence, OperationsError> {
+        filters: &Filters,
+    ) -> Result<RequestMetadataGapEvidence, Error> {
         let row = sqlx::query!(
             "SELECT COALESCE(SUM(event_count), 0)::bigint AS \"event_count!\", \
                     COALESCE(SUM(uncertain_gap_count), 0)::bigint AS \"uncertain_gap_count!\" \

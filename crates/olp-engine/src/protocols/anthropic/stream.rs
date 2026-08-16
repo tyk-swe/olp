@@ -1,22 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{
-    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, SourceExtensions,
-    Surface, Usage as CanonicalUsage,
+use crate::domain::canonical::{
+    events::{Error as CanonicalError, ErrorClass, Event, Kind, Usage as CanonicalUsage},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
 use super::{
-    ContentBlock, MessagesResponse, Role,
-    translate::{anthropic_finish_reason, collect_extra},
+    dto::{ContentBlock, MessagesResponse, Role},
+    translate::response::anthropic_finish_reason,
 };
+use crate::protocols::extensions::collect_extra;
 use crate::protocols::sse::{
-    DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame, raw_sse_frame_event,
+    DEFAULT_MAX_EVENT_BYTES, DecodeError, Decoder as SseDecoder, Frame, raw_sse_frame_event,
 };
 
-pub struct AnthropicMessagesStreamDecoder {
+pub struct Decoder {
     sse: SseDecoder,
     sequence: u64,
     response_started: bool,
@@ -32,10 +34,10 @@ pub struct AnthropicMessagesStreamDecoder {
     preserve_raw_frames: bool,
 }
 
-impl std::fmt::Debug for AnthropicMessagesStreamDecoder {
+impl std::fmt::Debug for Decoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("AnthropicMessagesStreamDecoder")
+            .debug_struct("Decoder")
             .field("next_sequence", &self.sequence)
             .field("response_started", &self.response_started)
             .field("open_block_count", &self.blocks.len())
@@ -45,13 +47,13 @@ impl std::fmt::Debug for AnthropicMessagesStreamDecoder {
     }
 }
 
-impl Default for AnthropicMessagesStreamDecoder {
+impl Default for Decoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AnthropicMessagesStreamDecoder {
+impl Decoder {
     #[must_use]
     pub fn new() -> Self {
         Self::with_max_event_bytes(DEFAULT_MAX_EVENT_BYTES)
@@ -84,16 +86,16 @@ impl AnthropicMessagesStreamDecoder {
         }
     }
 
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, StreamError> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Error> {
         let frames = self.sse.push(bytes)?;
         self.decode_frames(frames)
     }
 
-    pub fn finish(&mut self) -> Result<Vec<CanonicalEvent>, StreamError> {
+    pub fn finish(&mut self) -> Result<Vec<Event>, Error> {
         let frames = self.sse.finish()?;
         let events = self.decode_frames(frames)?;
         if !self.done {
-            return Err(StreamError::UnexpectedEof);
+            return Err(Error::UnexpectedEof);
         }
         Ok(events)
     }
@@ -103,11 +105,11 @@ impl AnthropicMessagesStreamDecoder {
         self.done
     }
 
-    fn decode_frames(&mut self, frames: Vec<SseFrame>) -> Result<Vec<CanonicalEvent>, StreamError> {
+    fn decode_frames(&mut self, frames: Vec<Frame>) -> Result<Vec<Event>, Error> {
         let mut events = Vec::new();
         for frame in frames {
             if self.done {
-                return Err(StreamError::DataAfterDone);
+                return Err(Error::DataAfterDone);
             }
             let raw_frame = self.preserve_raw_frames.then(|| frame.clone());
             let event_start = events.len();
@@ -116,11 +118,11 @@ impl AnthropicMessagesStreamDecoder {
             let data_type = value
                 .get("type")
                 .and_then(Value::as_str)
-                .ok_or(StreamError::MissingEventType)?
+                .ok_or(Error::MissingEventType)?
                 .to_owned();
             let event_type = frame.event.as_deref().unwrap_or(&data_type);
             if event_type != data_type {
-                return Err(StreamError::EventTypeMismatch {
+                return Err(Error::EventTypeMismatch {
                     event: event_type.to_owned(),
                     data: data_type,
                 });
@@ -162,26 +164,22 @@ impl AnthropicMessagesStreamDecoder {
         Ok(events)
     }
 
-    fn message_start(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn message_start(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         if self.response_started {
-            return Err(StreamError::DuplicateMessageStart);
+            return Err(Error::DuplicateMessageStart);
         }
         let event: MessageStart = serde_json::from_value(value)?;
         if event.message.kind != "message" {
-            return Err(StreamError::UnexpectedMessageType(event.message.kind));
+            return Err(Error::UnexpectedMessageType(event.message.kind));
         }
         if event.message.role != Role::Assistant {
-            return Err(StreamError::UnexpectedMessageRole);
+            return Err(Error::UnexpectedMessageRole);
         }
         if !event.message.content.is_empty()
             || event.message.stop_reason.is_some()
             || event.message.stop_sequence.is_some()
         {
-            return Err(StreamError::InvalidMessageStartState);
+            return Err(Error::InvalidMessageStartState);
         }
         self.input_tokens = event.message.usage.input_tokens;
         self.output_tokens = event.message.usage.output_tokens;
@@ -190,14 +188,14 @@ impl AnthropicMessagesStreamDecoder {
         self.cached_input_tokens = event.message.usage.cache_read_input_tokens;
         self.emit(
             events,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some(event.message.id),
                 provider_model: Some(event.message.model),
             },
         );
         self.emit(
             events,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
@@ -223,16 +221,12 @@ impl AnthropicMessagesStreamDecoder {
         Ok(())
     }
 
-    fn content_block_start(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn content_block_start(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         self.require_started()?;
         self.require_not_finished()?;
         let event: ContentBlockStart = serde_json::from_value(value)?;
         if self.blocks.contains_key(&event.index) {
-            return Err(StreamError::DuplicateContentBlock(event.index));
+            return Err(Error::DuplicateContentBlock(event.index));
         }
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
@@ -246,7 +240,7 @@ impl AnthropicMessagesStreamDecoder {
                 if !block.text.is_empty() {
                     self.emit(
                         events,
-                        CanonicalEventKind::TextDelta {
+                        Kind::TextDelta {
                             output_index: 0,
                             text: block.text,
                         },
@@ -259,7 +253,7 @@ impl AnthropicMessagesStreamDecoder {
                 self.next_tool_index = self
                     .next_tool_index
                     .checked_add(1)
-                    .ok_or(StreamError::TooManyToolCalls)?;
+                    .ok_or(Error::TooManyToolCalls)?;
                 collect_extra(
                     &format!("/content/{}", event.index),
                     &block.extra,
@@ -276,7 +270,7 @@ impl AnthropicMessagesStreamDecoder {
                 };
                 self.emit(
                     events,
-                    CanonicalEventKind::ToolCallDelta {
+                    Kind::ToolCallDelta {
                         output_index: 0,
                         tool_index,
                         id: Some(block.id),
@@ -297,24 +291,20 @@ impl AnthropicMessagesStreamDecoder {
         Ok(())
     }
 
-    fn content_block_delta(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn content_block_delta(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         self.require_started()?;
         self.require_not_finished()?;
         let event: ContentBlockDelta = serde_json::from_value(value)?;
         let block = self
             .blocks
             .get(&event.index)
-            .ok_or(StreamError::UnknownContentBlock(event.index))?
+            .ok_or(Error::UnknownContentBlock(event.index))?
             .clone();
         let delta_type = event
             .delta
             .get("type")
             .and_then(Value::as_str)
-            .ok_or(StreamError::MissingDeltaType)?;
+            .ok_or(Error::MissingDeltaType)?;
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
         match (delta_type, block) {
@@ -323,10 +313,10 @@ impl AnthropicMessagesStreamDecoder {
                     .delta
                     .get("text")
                     .and_then(Value::as_str)
-                    .ok_or(StreamError::MissingDeltaField("text"))?;
+                    .ok_or(Error::MissingDeltaField("text"))?;
                 self.emit(
                     events,
-                    CanonicalEventKind::TextDelta {
+                    Kind::TextDelta {
                         output_index: 0,
                         text: text.to_owned(),
                     },
@@ -343,10 +333,10 @@ impl AnthropicMessagesStreamDecoder {
                     .delta
                     .get("partial_json")
                     .and_then(Value::as_str)
-                    .ok_or(StreamError::MissingDeltaField("partial_json"))?;
+                    .ok_or(Error::MissingDeltaField("partial_json"))?;
                 self.emit(
                     events,
-                    CanonicalEventKind::ToolCallDelta {
+                    Kind::ToolCallDelta {
                         output_index: 0,
                         tool_index,
                         id: None,
@@ -368,7 +358,7 @@ impl AnthropicMessagesStreamDecoder {
                 );
             }
             _ => {
-                return Err(StreamError::DeltaBlockMismatch {
+                return Err(Error::DeltaBlockMismatch {
                     index: event.index,
                     delta: delta_type.to_owned(),
                 });
@@ -378,15 +368,11 @@ impl AnthropicMessagesStreamDecoder {
         Ok(())
     }
 
-    fn content_block_stop(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn content_block_stop(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         self.require_not_finished()?;
         let event: ContentBlockStop = serde_json::from_value(value)?;
         if self.blocks.remove(&event.index).is_none() {
-            return Err(StreamError::UnknownContentBlock(event.index));
+            return Err(Error::UnknownContentBlock(event.index));
         }
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
@@ -394,11 +380,7 @@ impl AnthropicMessagesStreamDecoder {
         Ok(())
     }
 
-    fn message_delta(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn message_delta(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         self.require_started()?;
         let event: MessageDelta = serde_json::from_value(value)?;
         if let Some(input_tokens) = event.usage.input_tokens {
@@ -429,7 +411,7 @@ impl AnthropicMessagesStreamDecoder {
         self.emit_extensions(events, extensions);
         self.emit(
             events,
-            CanonicalEventKind::Usage {
+            Kind::Usage {
                 usage: CanonicalUsage {
                     input_tokens: self
                         .input_tokens
@@ -448,11 +430,11 @@ impl AnthropicMessagesStreamDecoder {
         );
         if let Some(reason) = event.delta.stop_reason {
             if self.finished {
-                return Err(StreamError::DuplicateFinishReason);
+                return Err(Error::DuplicateFinishReason);
             }
             self.emit(
                 events,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index: 0,
                     reason: anthropic_finish_reason(&reason),
                 },
@@ -462,17 +444,13 @@ impl AnthropicMessagesStreamDecoder {
         Ok(())
     }
 
-    fn message_stop(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn message_stop(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         self.require_started()?;
         if !self.finished {
-            return Err(StreamError::MessageStoppedWithoutFinishReason);
+            return Err(Error::MessageStoppedWithoutFinishReason);
         }
         if !self.blocks.is_empty() {
-            return Err(StreamError::MessageStoppedWithOpenBlocks(
+            return Err(Error::MessageStoppedWithOpenBlocks(
                 self.blocks.keys().copied().collect(),
             ));
         }
@@ -480,12 +458,12 @@ impl AnthropicMessagesStreamDecoder {
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
         self.emit_extensions(events, extensions);
-        self.emit(events, CanonicalEventKind::Done);
+        self.emit(events, Kind::Done);
         self.done = true;
         Ok(())
     }
 
-    fn ping(&mut self, value: Value, events: &mut Vec<CanonicalEvent>) -> Result<(), StreamError> {
+    fn ping(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         let event: SimpleEvent = serde_json::from_value(value)?;
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
@@ -493,7 +471,7 @@ impl AnthropicMessagesStreamDecoder {
         Ok(())
     }
 
-    fn error(&mut self, value: Value, events: &mut Vec<CanonicalEvent>) -> Result<(), StreamError> {
+    fn error(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         let event: ErrorEvent = serde_json::from_value(value)?;
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
@@ -508,7 +486,7 @@ impl AnthropicMessagesStreamDecoder {
         };
         self.emit(
             events,
-            CanonicalEventKind::Error {
+            Kind::Error {
                 error: CanonicalError {
                     class,
                     message: event.error.message,
@@ -517,48 +495,44 @@ impl AnthropicMessagesStreamDecoder {
                 },
             },
         );
-        self.emit(events, CanonicalEventKind::Done);
+        self.emit(events, Kind::Done);
         self.done = true;
         Ok(())
     }
 
-    fn unknown_event(&mut self, kind: &str, value: Value, events: &mut Vec<CanonicalEvent>) {
+    fn unknown_event(&mut self, kind: &str, value: Value, events: &mut Vec<Event>) {
         self.emit_extensions(events, BTreeMap::from([(format!("/events/{kind}"), value)]));
     }
 
-    fn require_started(&self) -> Result<(), StreamError> {
+    fn require_started(&self) -> Result<(), Error> {
         if self.response_started && self.message_started {
             Ok(())
         } else {
-            Err(StreamError::EventBeforeMessageStart)
+            Err(Error::EventBeforeMessageStart)
         }
     }
 
-    fn require_not_finished(&self) -> Result<(), StreamError> {
+    fn require_not_finished(&self) -> Result<(), Error> {
         if self.finished {
-            Err(StreamError::ContentAfterFinish)
+            Err(Error::ContentAfterFinish)
         } else {
             Ok(())
         }
     }
 
-    fn emit_extensions(
-        &mut self,
-        events: &mut Vec<CanonicalEvent>,
-        extensions: BTreeMap<String, Value>,
-    ) {
+    fn emit_extensions(&mut self, events: &mut Vec<Event>, extensions: BTreeMap<String, Value>) {
         if !extensions.is_empty() {
             self.emit(
                 events,
-                CanonicalEventKind::SourceExtension {
+                Kind::SourceExtension {
                     extensions: SourceExtensions::new(Surface::Anthropic, extensions),
                 },
             );
         }
     }
 
-    fn emit(&mut self, events: &mut Vec<CanonicalEvent>, kind: CanonicalEventKind) {
-        events.push(CanonicalEvent::new(self.sequence, kind));
+    fn emit(&mut self, events: &mut Vec<Event>, kind: Kind) {
+        events.push(Event::new(self.sequence, kind));
         self.sequence = self.sequence.saturating_add(1);
     }
 }
@@ -687,9 +661,9 @@ fn collect_unknown_delta_fields(
 }
 
 #[derive(Debug, Error)]
-pub enum StreamError {
+pub enum Error {
     #[error(transparent)]
-    Sse(#[from] SseDecodeError),
+    Sse(#[from] DecodeError),
     #[error("Anthropic stream frame is not valid JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("Anthropic stream event is missing type")]

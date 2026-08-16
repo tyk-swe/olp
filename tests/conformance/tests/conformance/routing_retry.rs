@@ -1,13 +1,18 @@
 use olp_conformance::read_json;
 use olp_engine::domain::{
-    AttemptFailureClass, OperationKind, RouteSlug, RoutingError, RuntimeSnapshot, Surface,
-    TransportError, TransportMode, TransportPhase, select_attempts,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::RouteSlug,
+    ports::{AttemptFailureClass, TransportError, TransportPhase},
+    routing::{
+        selection::{RoutingError, select_attempts},
+        snapshot::Snapshot,
+    },
 };
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct RoutingFixture {
-    snapshot: RuntimeSnapshot,
+    snapshot: Snapshot,
     cases: Vec<RoutingCase>,
 }
 

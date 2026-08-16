@@ -10,7 +10,7 @@ impl MediaSpool for TrackingMediaSpool {
     fn put<'a>(
         &'a self,
         upload: MediaUpload,
-    ) -> crate::domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
         let index = self.puts.fetch_add(1, Ordering::AcqRel);
         Box::pin(async move {
             Ok(MediaArtifact {
@@ -24,14 +24,14 @@ impl MediaSpool for TrackingMediaSpool {
     fn open<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::NotFound) })
     }
 
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
         self.removes.fetch_add(1, Ordering::AcqRel);
         Box::pin(async { Ok(()) })
     }
@@ -51,7 +51,7 @@ async fn image_generation_and_video_creation_use_current_paths() {
         )],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let output = connector.execute(image_request(false)).await.unwrap();
     assert!(matches!(
         output,
@@ -78,7 +78,7 @@ async fn image_generation_and_video_creation_use_current_paths() {
         )],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let output = connector.execute(video_create_request()).await.unwrap();
     assert!(matches!(
         output,
@@ -111,7 +111,7 @@ async fn image_edit_and_variation_forward_bounded_multipart_parts() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) = connector.execute(image_edit_request()).await.unwrap()
     else {
         panic!("image edit returned a stream")
@@ -148,7 +148,7 @@ async fn image_edit_and_variation_forward_bounded_multipart_parts() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) =
         connector.execute(image_variation_request()).await.unwrap()
     else {
@@ -187,7 +187,7 @@ async fn moderation_posts_json_and_returns_dynamic_typed_categories() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) = connector.execute(moderation_request()).await.unwrap()
     else {
         panic!("moderation returned a stream")
@@ -227,7 +227,7 @@ async fn video_get_content_and_delete_use_current_lifecycle_paths() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) = connector
         .execute(video_job_request(OperationKind::VideoGet))
         .await
@@ -255,7 +255,7 @@ async fn video_get_content_and_delete_use_current_lifecycle_paths() {
         chunks: vec![(Duration::ZERO, http_response("video/mp4", b"video-bytes"))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut request = video_job_request(OperationKind::VideoContent);
     request.media = Some(spool.clone());
     let ProviderOutput::Result(result) = connector.execute(request).await.unwrap() else {
@@ -290,7 +290,7 @@ async fn video_get_content_and_delete_use_current_lifecycle_paths() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) = connector
         .execute(video_job_request(OperationKind::VideoDelete))
         .await
@@ -326,7 +326,7 @@ async fn video_delete_missing_is_success_only_for_durable_reconciliation() {
         chunks: vec![(Duration::ZERO, response.clone())],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let failure = execute_error(&connector, video_job_request(OperationKind::VideoDelete)).await;
     assert_eq!(failure.class, AttemptFailureClass::UpstreamClient);
 
@@ -334,7 +334,7 @@ async fn video_delete_missing_is_success_only_for_durable_reconciliation() {
         chunks: vec![(Duration::ZERO, response)],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut request = video_job_request(OperationKind::VideoDelete);
     let Operation::Video(VideoOperation::Delete(operation)) = &mut request.operation else {
         unreachable!()
@@ -356,7 +356,7 @@ async fn video_delete_missing_is_success_only_for_durable_reconciliation() {
 
 #[tokio::test]
 async fn media_bounds_fail_closed_before_dispatch_and_during_response_staging() {
-    let connector = test_connector("http://127.0.0.1:1/v1/", ConnectorTimeouts::default());
+    let connector = test_connector("http://127.0.0.1:1/v1/", Timeouts::default());
     let mut request = image_edit_request();
     request.media = Some(Arc::new(
         FixtureMediaSpool::new("source.png", "image/png", b"tiny")
@@ -372,10 +372,10 @@ async fn media_bounds_fail_closed_before_dispatch_and_during_response_staging() 
         chunks: vec![(Duration::ZERO, http_response("audio/mpeg", b"four"))],
     })
     .await;
-    let config = ConnectorConfig::for_local_test(&base_url, ConnectorTimeouts::default())
+    let config = ConnectorConfig::for_local_test(&base_url, Timeouts::default())
         .with_response_limits(3, DEFAULT_MAX_EVENT_BYTES)
         .unwrap();
-    let connector = OpenAiConnector::new(config, OpenAiApiKey::new("upstream-secret").unwrap());
+    let connector = Connector::new(config, ApiKey::new("upstream-secret").unwrap());
     let mut request = speech_request(false);
     request.media = Some(spool.clone());
     let failure = execute_error(&connector, request).await;
@@ -391,7 +391,7 @@ async fn media_bounds_fail_closed_before_dispatch_and_during_response_staging() 
 
 #[tokio::test]
 async fn image_decode_failure_removes_already_staged_response_media() {
-    let connector = test_connector("http://127.0.0.1:1/v1/", ConnectorTimeouts::default());
+    let connector = test_connector("http://127.0.0.1:1/v1/", Timeouts::default());
     let spool = Arc::new(TrackingMediaSpool::default());
     let mut request = image_request(false);
     request.media = Some(spool.clone());

@@ -1,11 +1,15 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use axum::body::Bytes;
-use olp_engine::domain::{CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, Surface};
+use olp_engine::domain::canonical::{
+    events::{Event, FinishReason, Kind},
+    identity::Surface,
+    requests::MessageRole,
+};
 use serde_json::{Value, json};
 
 use super::{
-    InferenceError,
+    error::InferenceError,
     openai_http::{error_type, sse_json, unix_seconds},
 };
 
@@ -24,27 +28,27 @@ impl OpenAiChatCompletionStreamEncoder {
         }
     }
 
-    pub(crate) fn encode(&mut self, event: CanonicalEvent) -> Result<Vec<Bytes>, InferenceError> {
+    pub(crate) fn encode(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError> {
         let value = match event.kind {
-            CanonicalEventKind::ResponseStart { response_id, .. } => {
+            Kind::ResponseStart { response_id, .. } => {
                 if let Some(response_id) = response_id {
                     self.response_id = response_id;
                 }
                 return Ok(Vec::new());
             }
-            CanonicalEventKind::MessageStart { output_index, role } => self.chunk(
+            Kind::MessageStart { output_index, role } => self.chunk(
                 vec![json!({ "index": output_index, "delta": { "role": role_name(role) }, "finish_reason": null })],
                 None,
             ),
-            CanonicalEventKind::TextDelta { output_index, text } => self.chunk(
+            Kind::TextDelta { output_index, text } => self.chunk(
                 vec![json!({ "index": output_index, "delta": { "content": text }, "finish_reason": null })],
                 None,
             ),
-            CanonicalEventKind::RefusalDelta { output_index, text } => self.chunk(
+            Kind::RefusalDelta { output_index, text } => self.chunk(
                 vec![json!({ "index": output_index, "delta": { "refusal": text }, "finish_reason": null })],
                 None,
             ),
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
@@ -63,14 +67,14 @@ impl OpenAiChatCompletionStreamEncoder {
                 })],
                 None,
             ),
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index,
                 reason,
             } => self.chunk(
                 vec![json!({ "index": output_index, "delta": {}, "finish_reason": finish_name(reason) })],
                 None,
             ),
-            CanonicalEventKind::Usage { usage } => self.chunk(
+            Kind::Usage { usage } => self.chunk(
                 Vec::new(),
                 Some(json!({
                     "prompt_tokens": usage.input_tokens,
@@ -80,7 +84,7 @@ impl OpenAiChatCompletionStreamEncoder {
                     "completion_tokens_details": { "reasoning_tokens": usage.reasoning_tokens }
                 })),
             ),
-            CanonicalEventKind::SourceExtension { extensions } => {
+            Kind::SourceExtension { extensions } => {
                 if extensions.source != Some(Surface::OpenAi) {
                     return Err(InferenceError::bad_gateway(
                         "provider_protocol_error",
@@ -98,7 +102,7 @@ impl OpenAiChatCompletionStreamEncoder {
                 }
                 value
             }
-            CanonicalEventKind::Error { error } => {
+            Kind::Error { error } => {
                 return Ok(vec![sse_json(&json!({
                     "error": {
                         "message": error.message,
@@ -107,7 +111,7 @@ impl OpenAiChatCompletionStreamEncoder {
                     }
                 }))]);
             }
-            CanonicalEventKind::Done => {
+            Kind::Done => {
                 return Ok(vec![Bytes::from_static(b"data: [DONE]\n\n")]);
             }
         };
@@ -147,7 +151,7 @@ struct UnaryTool {
 pub(crate) fn aggregate_chat_completion_response(
     request_id: uuid::Uuid,
     model: &str,
-    events: &[CanonicalEvent],
+    events: &[Event],
 ) -> Result<Value, InferenceError> {
     let mut id = format!("chatcmpl-{request_id}");
     let mut choices: BTreeMap<u32, UnaryChoice> = BTreeMap::new();
@@ -155,29 +159,29 @@ pub(crate) fn aggregate_chat_completion_response(
     let mut extensions = Vec::new();
     for event in events {
         match &event.kind {
-            CanonicalEventKind::ResponseStart { response_id, .. } => {
+            Kind::ResponseStart { response_id, .. } => {
                 if let Some(response_id) = response_id {
                     id.clone_from(response_id);
                 }
             }
-            CanonicalEventKind::MessageStart { output_index, .. } => {
+            Kind::MessageStart { output_index, .. } => {
                 choices.entry(*output_index).or_default();
             }
-            CanonicalEventKind::TextDelta { output_index, text } => {
+            Kind::TextDelta { output_index, text } => {
                 choices
                     .entry(*output_index)
                     .or_default()
                     .content
                     .push_str(text);
             }
-            CanonicalEventKind::RefusalDelta { output_index, text } => {
+            Kind::RefusalDelta { output_index, text } => {
                 choices
                     .entry(*output_index)
                     .or_default()
                     .refusal
                     .push_str(text);
             }
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
@@ -198,14 +202,14 @@ pub(crate) fn aggregate_chat_completion_response(
                 }
                 tool.arguments.push_str(arguments_delta);
             }
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index,
                 reason,
             } => {
                 choices.entry(*output_index).or_default().finish_reason =
                     Some(finish_name(reason.clone()).into_owned());
             }
-            CanonicalEventKind::Usage { usage: value } => {
+            Kind::Usage { usage: value } => {
                 usage = Some(json!({
                     "prompt_tokens": value.input_tokens,
                     "completion_tokens": value.output_tokens,
@@ -214,7 +218,7 @@ pub(crate) fn aggregate_chat_completion_response(
                     "completion_tokens_details": { "reasoning_tokens": value.reasoning_tokens }
                 }));
             }
-            CanonicalEventKind::SourceExtension { extensions: values } => {
+            Kind::SourceExtension { extensions: values } => {
                 if values.source != Some(Surface::OpenAi) {
                     return Err(InferenceError::bad_gateway(
                         "provider_protocol_error",
@@ -228,10 +232,10 @@ pub(crate) fn aggregate_chat_completion_response(
                         .map(|(key, value)| (key.clone(), value.clone())),
                 );
             }
-            CanonicalEventKind::Error { error } => {
+            Kind::Error { error } => {
                 return Err(InferenceError::from_canonical(error));
             }
-            CanonicalEventKind::Done => {}
+            Kind::Done => {}
         }
     }
     let choices = choices

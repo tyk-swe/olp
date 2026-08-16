@@ -1,15 +1,27 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::domain::{
-    AttemptFailureClass, CanonicalResult, ContentPart, DiscoveredProviderModel, MediaSource,
-    Operation, ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, Surface,
-    TokenCountResult, TransportError, TransportMode, TransportPhase,
+    canonical::{
+        identity::{Surface, TransportMode},
+        requests::{ContentPart, MediaSource, Operation},
+        results::{CanonicalResult, TokenCountResult},
+    },
+    ports::{
+        AttemptFailureClass, DiscoveredProviderModel, ProviderOutput, ProviderRequest,
+        ProviderTransport, TransportError, TransportPhase,
+    },
+    routing::provider::ProviderKind,
 };
 use crate::protocols::gemini::{
-    Content, CountTokensRequest, CountTokensResponse, FileData, FileDataPart,
-    GEMINI_COUNT_REQUEST_EXTENSION, GenerateContentResponse, Part, TextPart,
-    decode_generate_content_response, encode_generate_content_request,
-    validate_count_tokens_request,
+    count::GEMINI_COUNT_REQUEST_EXTENSION,
+    dto::{
+        Content, CountTokensRequest, CountTokensResponse, FileData, FileDataPart,
+        GenerateContentResponse, Part, TextPart,
+    },
+    translate::{
+        encode::request as encode_request, response::decode,
+        validation::validate_count_tokens_request,
+    },
 };
 use futures::stream;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -18,8 +30,9 @@ use tokio::time::{Instant, timeout};
 
 use super::errors::*;
 use super::media::hydrate_gemini_contents;
-use crate::providers::gemini::{
-    BearerTokenProvider, ConnectorConfig, ConnectorCredential, GeminiApiKey,
+use crate::providers::gemini::{ApiKey, BearerTokenProvider, ConnectorConfig, ConnectorCredential};
+use crate::providers::transport_common::{
+    protocol_body_error, protocol_error, source_extensions, transport_error,
 };
 use crate::providers::transport_io::{ProviderResponseIo, bounded_duration};
 
@@ -34,7 +47,7 @@ pub fn validate_operation(
     upstream_model: &str,
 ) -> Result<(), TransportError> {
     match operation {
-        Operation::Generation(generation) => encode_generate_content_request(generation)
+        Operation::Generation(generation) => encode_request(generation)
             .map(|_| ())
             .map_err(|error| protocol_error(error.to_string())),
         Operation::TokenCount(count) => encode_count_tokens(count, upstream_model).map(|_| ()),
@@ -51,15 +64,15 @@ enum ResponseKind {
     TokenCount,
 }
 
-pub struct GeminiConnector {
+pub struct Connector {
     pub(super) config: ConnectorConfig,
     pub(super) credential: ConnectorCredential,
     pub(super) provider_kind: ProviderKind,
 }
 
-impl GeminiConnector {
+impl Connector {
     #[must_use]
-    pub fn new(config: ConnectorConfig, api_key: GeminiApiKey) -> Self {
+    pub fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
         Self {
             config,
             credential: ConnectorCredential::ApiKey(api_key),
@@ -334,7 +347,7 @@ impl GeminiConnector {
                         "canonical stream flag does not match the selected transport mode",
                     ));
                 }
-                let mut wire = encode_generate_content_request(generation).map_err(|error| {
+                let mut wire = encode_request(generation).map_err(|error| {
                     protocol_error(format!("cannot encode Gemini generation request: {error}"))
                 })?;
                 hydrate_gemini_contents(&mut wire.contents, request.media.as_ref()).await?;
@@ -412,7 +425,7 @@ impl GeminiConnector {
                     serde_json::from_slice(&body).map_err(|error| {
                         protocol_body_error(format!("Gemini response is not valid JSON: {error}"))
                     })?;
-                let events = decode_generate_content_response(response).map_err(|error| {
+                let events = decode(response).map_err(|error| {
                     protocol_body_error(format!("Gemini response is invalid: {error}"))
                 })?;
                 Ok(ProviderOutput::Events(Box::pin(stream::iter(
@@ -507,10 +520,10 @@ impl GeminiConnector {
     }
 }
 
-impl fmt::Debug for GeminiConnector {
+impl fmt::Debug for Connector {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("GeminiConnector")
+            .debug_struct("Connector")
             .field("config", &self.config)
             .field("credential", &"[REDACTED]")
             .field("provider_kind", &self.provider_kind)
@@ -518,11 +531,11 @@ impl fmt::Debug for GeminiConnector {
     }
 }
 
-impl ProviderTransport for GeminiConnector {
+impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(async move { self.execute_request(request).await })
     }
 }
@@ -550,7 +563,7 @@ fn validate_request_envelope(
 }
 
 pub(super) fn encode_count_tokens(
-    request: &crate::domain::TokenCountRequest,
+    request: &crate::domain::canonical::requests::TokenCountRequest,
     upstream_model: &str,
 ) -> Result<CountTokensRequest, TransportError> {
     request

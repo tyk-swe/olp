@@ -2,8 +2,11 @@ use std::num::NonZeroU32;
 
 use uuid::Uuid;
 
-use super::{ProviderKind, weighted_rendezvous_score};
-use crate::domain::{OperationKind, RouteId, Surface, TargetId, TransportMode};
+use super::{provider::ProviderKind, selection::weighted_rendezvous_score};
+use crate::domain::{
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::{RouteId, TargetId},
+};
 
 #[test]
 fn weighted_rendezvous_score_is_deterministic_and_weighted() {

@@ -6,12 +6,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, stream};
-use olp_engine::domain::{CanonicalEventKind, TransportMode};
-use olp_engine::inference::{RequestOutcome, RoutedEventExecution};
-use olp_engine::protocols::openai::{ChatCompletionRequest, decode_chat_completion};
+use olp_engine::domain::canonical::{events::Kind, identity::TransportMode};
+use olp_engine::inference::{
+    accounting::RequestOutcome, execution::RoutedEvents, principal::Principal,
+};
+use olp_engine::protocols::openai::chat::{CompletionRequest, decode_chat_completion};
 
 use crate::{
-    GatewayState, InferencePrincipal,
+    bootstrap::mode_dependencies::GatewayState,
     public_http::json_media::{admit_openai_chat, cleanup_admitted},
     public_http::streaming_response::{TerminalFrames, sse_stream},
 };
@@ -25,8 +27,8 @@ use super::{
 
 pub(super) async fn chat_completions(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
-    payload: Result<Json<ChatCompletionRequest>, JsonRejection>,
+    Extension(principal): Extension<Principal>,
+    payload: Result<Json<CompletionRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(mut wire_request) = match payload {
         Ok(payload) => payload,
@@ -58,7 +60,7 @@ pub(super) async fn chat_completions(
     }
 }
 
-fn streaming_response(mut execution: RoutedEventExecution) -> Response {
+fn streaming_response(mut execution: RoutedEvents) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut accounting = execution.take_accounting();
@@ -73,12 +75,10 @@ fn streaming_response(mut execution: RoutedEventExecution) -> Response {
         'provider: while let Some(item) = next {
             match item {
                 Ok(event) => {
-                    let is_done = matches!(event.kind, CanonicalEventKind::Done);
+                    let is_done = matches!(event.kind, Kind::Done);
                     accounting.usage_mut().observe(&event);
                     let canonical_failure = match &event.kind {
-                        CanonicalEventKind::Error { error } => {
-                            Some(InferenceError::from_canonical(error))
-                        }
+                        Kind::Error { error } => Some(InferenceError::from_canonical(error)),
                         _ => None,
                     };
                     let is_terminal = is_done || canonical_failure.is_some();
@@ -143,7 +143,7 @@ fn streaming_response(mut execution: RoutedEventExecution) -> Response {
     response
 }
 
-async fn unary_response(execution: RoutedEventExecution) -> Result<Response, InferenceError> {
+async fn unary_response(execution: RoutedEvents) -> Result<Response, InferenceError> {
     let mut completed = execution.collect().await.map_err(InferenceError::from)?;
     let response = aggregate_chat_completion_response(
         completed.request_id,

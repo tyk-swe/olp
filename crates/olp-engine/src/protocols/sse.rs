@@ -2,7 +2,11 @@ use std::{fmt, str};
 
 use std::collections::BTreeMap;
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, SourceExtensions, Surface};
+use crate::domain::canonical::{
+    events::{Event, Kind},
+    identity::Surface,
+    requests::SourceExtensions,
+};
 use bytes::BytesMut;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -10,7 +14,7 @@ use thiserror::Error;
 pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SseFrame {
+pub struct Frame {
     pub event: Option<String>,
     pub data: String,
     pub id: Option<String>,
@@ -29,12 +33,12 @@ enum TrailingCr {
 pub(in crate::protocols) fn raw_sse_frame_event(
     sequence: u64,
     surface: Surface,
-    frame: &SseFrame,
+    frame: &Frame,
     semantic_events: usize,
-) -> CanonicalEvent {
-    CanonicalEvent::new(
+) -> Event {
+    Event::new(
         sequence,
-        CanonicalEventKind::SourceExtension {
+        Kind::SourceExtension {
             extensions: SourceExtensions::new(
                 surface,
                 BTreeMap::from([(
@@ -52,7 +56,7 @@ pub(in crate::protocols) fn raw_sse_frame_event(
     )
 }
 
-pub(in crate::protocols) fn decode_raw_sse_frame(value: &Value) -> Option<(SseFrame, usize)> {
+pub(in crate::protocols) fn decode_raw_sse_frame(value: &Value) -> Option<(Frame, usize)> {
     let object = value.as_object()?;
     let data = object.get("data")?.as_str()?.to_owned();
     let event = optional_string(object.get("event"))?;
@@ -60,7 +64,7 @@ pub(in crate::protocols) fn decode_raw_sse_frame(value: &Value) -> Option<(SseFr
     let retry_ms = optional_u64(object.get("retry_ms"))?;
     let semantic_events = object.get("semantic_events")?.as_u64()?.try_into().ok()?;
     Some((
-        SseFrame {
+        Frame {
             event,
             data,
             id,
@@ -86,7 +90,7 @@ fn optional_u64(value: Option<&Value>) -> Option<Option<u64>> {
     }
 }
 
-pub struct SseDecoder {
+pub struct Decoder {
     // WHATWG permits one leading UTF-8 BOM, including across chunks.
     bom_checked: bool,
     buffer: BytesMut,
@@ -100,10 +104,10 @@ pub struct SseDecoder {
     max_event_bytes: usize,
 }
 
-impl fmt::Debug for SseDecoder {
+impl fmt::Debug for Decoder {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("SseDecoder")
+            .debug_struct("Decoder")
             .field("buffered_bytes", &self.buffer.len())
             .field("data_line_count", &self.data_lines.len())
             .field("has_data", &self.has_data)
@@ -114,13 +118,13 @@ impl fmt::Debug for SseDecoder {
     }
 }
 
-impl Default for SseDecoder {
+impl Default for Decoder {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_EVENT_BYTES)
     }
 }
 
-impl SseDecoder {
+impl Decoder {
     #[must_use]
     pub fn new(max_event_bytes: usize) -> Self {
         Self {
@@ -137,7 +141,7 @@ impl SseDecoder {
         }
     }
 
-    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<SseFrame>, SseDecodeError> {
+    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<Frame>, DecodeError> {
         let mut frames = Vec::new();
         let mut remaining = self.resolve_trailing_cr(chunk, &mut frames)?;
 
@@ -217,7 +221,7 @@ impl SseDecoder {
         Ok(frames)
     }
 
-    pub fn finish(&mut self) -> Result<Vec<SseFrame>, SseDecodeError> {
+    pub fn finish(&mut self) -> Result<Vec<Frame>, DecodeError> {
         // EOF is not an SSE event delimiter. Discard an
         // unterminated line and any event awaiting a blank line.
         let mut frames = Vec::new();
@@ -239,8 +243,8 @@ impl SseDecoder {
     fn resolve_trailing_cr<'a>(
         &mut self,
         chunk: &'a [u8],
-        frames: &mut Vec<SseFrame>,
-    ) -> Result<&'a [u8], SseDecodeError> {
+        frames: &mut Vec<Frame>,
+    ) -> Result<&'a [u8], DecodeError> {
         if chunk.is_empty() {
             return Ok(chunk);
         }
@@ -271,8 +275,8 @@ impl SseDecoder {
     fn process_buffered_line(
         &mut self,
         terminator_size: usize,
-        frames: &mut Vec<SseFrame>,
-    ) -> Result<(), SseDecodeError> {
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), DecodeError> {
         let accounted_size = self.buffer.len().saturating_add(terminator_size);
         self.check_additional(accounted_size)?;
         self.pending_bytes = self.pending_bytes.saturating_add(accounted_size);
@@ -280,11 +284,7 @@ impl SseDecoder {
         self.process_line(&line, frames)
     }
 
-    fn process_line(
-        &mut self,
-        line: &[u8],
-        frames: &mut Vec<SseFrame>,
-    ) -> Result<(), SseDecodeError> {
+    fn process_line(&mut self, line: &[u8], frames: &mut Vec<Frame>) -> Result<(), DecodeError> {
         if line.is_empty() {
             if let Some(frame) = self.dispatch() {
                 frames.push(frame);
@@ -295,7 +295,7 @@ impl SseDecoder {
             return Ok(());
         }
 
-        let line = str::from_utf8(line).map_err(SseDecodeError::InvalidUtf8)?;
+        let line = str::from_utf8(line).map_err(DecodeError::InvalidUtf8)?;
         let (field, mut value) = line.split_once(':').unwrap_or((line, ""));
         if let Some(without_space) = value.strip_prefix(' ') {
             value = without_space;
@@ -316,7 +316,7 @@ impl SseDecoder {
         Ok(())
     }
 
-    fn dispatch(&mut self) -> Option<SseFrame> {
+    fn dispatch(&mut self) -> Option<Frame> {
         self.pending_bytes = 0;
         let event = self.event.take();
         let retry_ms = self.retry_ms.take();
@@ -326,7 +326,7 @@ impl SseDecoder {
         }
 
         self.has_data = false;
-        Some(SseFrame {
+        Some(Frame {
             event,
             data: self.data_lines.drain(..).collect::<Vec<_>>().join("\n"),
             id: self.last_event_id.clone(),
@@ -334,10 +334,10 @@ impl SseDecoder {
         })
     }
 
-    fn check_additional(&self, additional: usize) -> Result<(), SseDecodeError> {
+    fn check_additional(&self, additional: usize) -> Result<(), DecodeError> {
         let actual = self.pending_bytes.saturating_add(additional);
         if actual > self.max_event_bytes {
-            return Err(SseDecodeError::EventTooLarge {
+            return Err(DecodeError::EventTooLarge {
                 maximum: self.max_event_bytes,
                 actual,
             });
@@ -346,7 +346,7 @@ impl SseDecoder {
     }
 }
 
-pub fn encode_frame(frame: &SseFrame) -> Result<Vec<u8>, SseEncodeError> {
+pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, EncodeError> {
     let mut encoded = Vec::new();
     if let Some(event) = &frame.event {
         validate_single_line("event", event)?;
@@ -357,7 +357,7 @@ pub fn encode_frame(frame: &SseFrame) -> Result<Vec<u8>, SseEncodeError> {
     if let Some(id) = &frame.id {
         validate_single_line("id", id)?;
         if id.contains('\0') {
-            return Err(SseEncodeError::NullId);
+            return Err(EncodeError::NullId);
         }
         encoded.extend_from_slice(b"id: ");
         encoded.extend_from_slice(id.as_bytes());
@@ -379,15 +379,15 @@ pub fn encode_frame(frame: &SseFrame) -> Result<Vec<u8>, SseEncodeError> {
     Ok(encoded)
 }
 
-fn validate_single_line(field: &'static str, value: &str) -> Result<(), SseEncodeError> {
+fn validate_single_line(field: &'static str, value: &str) -> Result<(), EncodeError> {
     if value.contains(['\r', '\n']) {
-        return Err(SseEncodeError::MultilineField { field });
+        return Err(EncodeError::MultilineField { field });
     }
     Ok(())
 }
 
 #[derive(Debug, Error)]
-pub enum SseDecodeError {
+pub enum DecodeError {
     #[error("SSE event exceeds {maximum} byte limit ({actual} bytes buffered)")]
     EventTooLarge { maximum: usize, actual: usize },
     #[error("SSE line is not valid UTF-8")]
@@ -395,7 +395,7 @@ pub enum SseDecodeError {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum SseEncodeError {
+pub enum EncodeError {
     #[error("SSE {field} field must fit on one line")]
     MultilineField { field: &'static str },
     #[error("SSE event ID cannot contain a null character")]

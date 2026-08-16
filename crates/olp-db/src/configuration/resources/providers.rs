@@ -3,12 +3,12 @@ use super::{
     *,
 };
 
-impl PgStore {
+impl Store {
     pub async fn list_providers(
         &self,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<ProviderRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<ProviderRecord>, Error> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query_as!(
             ProviderRow,
@@ -63,10 +63,7 @@ impl PgStore {
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_provider(
-        &self,
-        provider_id: Uuid,
-    ) -> Result<ProviderRecord, ConfigurationError> {
+    pub async fn get_provider(&self, provider_id: Uuid) -> Result<ProviderRecord, Error> {
         let row = sqlx::query_as!(
             ProviderRow,
             "SELECT p.id, p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
@@ -110,7 +107,7 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         provider_from_row(row)
     }
 
@@ -120,7 +117,7 @@ impl PgStore {
         expected_etag: Uuid,
         update: &UpdateProvider,
         actor: Uuid,
-    ) -> Result<Uuid, ConfigurationError> {
+    ) -> Result<Uuid, Error> {
         validate_provider_update(update)?;
         let etag = Uuid::now_v7();
         let mut transaction = self.pool().begin().await?;
@@ -153,11 +150,11 @@ impl PgStore {
             )
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(ConfigurationError::NotFound)?;
+            .ok_or(Error::NotFound)?;
             return Err(if current.etag != expected_etag {
-                ConfigurationError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                ConfigurationError::InUse
+                Error::InUse
             });
         }
         sqlx::query!(
@@ -187,14 +184,14 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ProviderMutationResult, ConfigurationError> {
+    ) -> Result<ProviderMutationResult, Error> {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
         if !claim_idempotency(&mut transaction, actor, "provider.disable", idempotency_key).await? {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         // Serialize against the short reservation INSERT so the decision and
         // runtime publication cannot race a newly committed upstream job.
@@ -209,7 +206,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if has_live_media_jobs {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let referenced: bool = sqlx::query_scalar!(
             "SELECT EXISTS ( \
@@ -225,7 +222,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if referenced {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(
@@ -243,11 +240,11 @@ impl PgStore {
             let row = sqlx::query!("SELECT etag FROM providers WHERE id = $1", provider_id)
                 .fetch_optional(&mut *transaction)
                 .await?
-                .ok_or(ConfigurationError::NotFound)?;
+                .ok_or(Error::NotFound)?;
             return Err(if row.etag != expected_etag {
-                ConfigurationError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                ConfigurationError::InUse
+                Error::InUse
             });
         }
         audit_in_transaction(
@@ -281,7 +278,7 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<Uuid, ConfigurationError> {
+    ) -> Result<Uuid, Error> {
         let mut transaction = self.pool().begin().await?;
         if !claim_idempotency(
             &mut transaction,
@@ -291,7 +288,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(
@@ -308,11 +305,11 @@ impl PgStore {
             let row = sqlx::query!("SELECT etag FROM providers WHERE id = $1", provider_id)
                 .fetch_optional(&mut *transaction)
                 .await?
-                .ok_or(ConfigurationError::NotFound)?;
+                .ok_or(Error::NotFound)?;
             return Err(if row.etag != expected_etag {
-                ConfigurationError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                ConfigurationError::InUse
+                Error::InUse
             });
         }
         sqlx::query!(
@@ -350,10 +347,10 @@ impl PgStore {
         succeeded: bool,
         detail: &str,
         actor: Uuid,
-    ) -> Result<DateTime<Utc>, ConfigurationError> {
+    ) -> Result<DateTime<Utc>, Error> {
         let detail = detail.trim();
         if detail.chars().count() > 500 {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "probe detail exceeds 500 characters".to_owned(),
             ));
         }
@@ -376,9 +373,9 @@ impl PgStore {
                     .fetch_optional(&mut *transaction)
                     .await?;
             return Err(if current_etag.is_some() {
-                ConfigurationError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                ConfigurationError::NotFound
+                Error::NotFound
             });
         }
         audit_in_transaction(
@@ -427,12 +424,12 @@ struct ProviderRow {
     probe_model: Option<String>,
 }
 
-fn provider_from_row(row: ProviderRow) -> Result<ProviderRecord, ConfigurationError> {
+fn provider_from_row(row: ProviderRow) -> Result<ProviderRecord, Error> {
     let active_revision = row
         .active_revision
         .map(u32::try_from)
         .transpose()
-        .map_err(|_| ConfigurationError::Invalid("provider revision is invalid".to_owned()))?;
+        .map_err(|_| Error::Invalid("provider revision is invalid".to_owned()))?;
     Ok(ProviderRecord {
         id: row.id,
         name: row.name,

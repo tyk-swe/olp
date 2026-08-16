@@ -11,8 +11,8 @@ fn prometheus_labels_escape_control_syntax() {
 #[test]
 fn replicated_worker_metrics_declare_types_and_render_durable_values() {
     use olp_db::{
-        request_metadata::RequestMetadataConsumerStatus,
-        runtime::{RuntimeOutboxState, RuntimeOutboxStatus},
+        request_metadata::delivery_health::ConsumerStatus,
+        runtime::outbox::{RuntimeOutboxState, RuntimeOutboxStatus},
         worker_health::{
             WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary, WorkerTaskState,
             WorkerTaskStatus,
@@ -24,8 +24,8 @@ fn replicated_worker_metrics_declare_types_and_render_durable_values() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-08T12:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    let consumer = RequestMetadataConsumerStatus::from_health(
-        Some(olp_db::request_metadata::RequestMetadataConsumerHealth {
+    let consumer = ConsumerStatus::from_health(
+        Some(olp_db::request_metadata::delivery_health::ConsumerHealth {
             pending_events: 2,
             lag_events: 3,
             oldest_pending_at: Some(now - chrono::Duration::seconds(30)),
@@ -226,11 +226,11 @@ async fn public_router_serves_console_health_and_hides_observability_paths() {
     let state = ProcessComposition::new(
         ApiMode::Control,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         console_dir.clone(),
     );
-    let app = public_router(state.management_state_for_test());
+    let app = for_state(state.management_state_for_test());
 
     let health = app
         .clone()
@@ -379,7 +379,7 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
                 HeaderValue::from_static("session=secret"),
             );
             response.headers_mut().insert(
-                HeaderName::from_static(management::CSRF_HEADER),
+                HeaderName::from_static(management::sessions::CSRF_HEADER),
                 HeaderValue::from_static("csrf-secret"),
             );
             Ok::<_, Infallible>(response)
@@ -395,11 +395,11 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
         HeaderValue::from_static("session=secret"),
     );
     request.headers_mut().insert(
-        HeaderName::from_static(management::CSRF_HEADER),
+        HeaderName::from_static(management::sessions::CSRF_HEADER),
         HeaderValue::from_static("csrf-secret"),
     );
     request.headers_mut().insert(
-        HeaderName::from_static(management::SETUP_TOKEN_HEADER),
+        HeaderName::from_static(management::sessions::SETUP_TOKEN_HEADER),
         HeaderValue::from_static("bootstrap-secret"),
     );
     request.headers_mut().insert(
@@ -422,7 +422,7 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
     assert!(
         response
             .headers()
-            .get(HeaderName::from_static(management::CSRF_HEADER))
+            .get(HeaderName::from_static(management::sessions::CSRF_HEADER))
             .unwrap()
             .is_sensitive(),
         "TraceLayer must observe rotated CSRF credentials only after they are marked sensitive"
@@ -444,11 +444,11 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
         "<!doctype html><title>OLP</title>",
     )
     .unwrap();
-    let app = public_router(
+    let app = for_state(
         ProcessComposition::new(
             ApiMode::Control,
             None,
-            Arc::new(RuntimeManager::empty()),
+            Arc::new(Manager::empty()),
             "https://olp.example.test",
             &console_dir,
         )
@@ -476,11 +476,11 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
 
 #[tokio::test]
 async fn management_extractor_rejections_are_rfc9457_without_query_reflection() {
-    let app = public_router(
+    let app = for_state(
         ProcessComposition::new(
             ApiMode::Control,
             None,
-            Arc::new(RuntimeManager::empty()),
+            Arc::new(Manager::empty()),
             "https://olp.example.test",
             PathBuf::from("missing-console"),
         )

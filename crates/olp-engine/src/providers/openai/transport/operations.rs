@@ -6,15 +6,15 @@ mod results;
 mod video;
 
 use crate::domain::{
-    AttemptFailureClass, Operation, ProviderKind, ProviderOutput, ProviderRequest, TransportError,
-    TransportMode, TransportPhase,
+    canonical::{identity::TransportMode, requests::Operation},
+    ports::{AttemptFailureClass, ProviderOutput, ProviderRequest, TransportError, TransportPhase},
+    routing::provider::ProviderKind,
 };
 
-use super::{AuthStyle, OpenAiConnector, errors::transport_error};
+use super::{AuthStyle, Connector};
+use crate::providers::transport_common::transport_error;
 
-pub(super) use super::streams::require_content_type;
-
-impl OpenAiConnector {
+impl Connector {
     pub(super) async fn execute_request(
         &self,
         request: ProviderRequest,
@@ -81,15 +81,17 @@ pub(super) fn validate_transport_mode(request: &ProviderRequest) -> Result<(), T
             matches!(mode, TransportMode::Unary | TransportMode::Streaming)
                 && operation.parameters.stream == streaming
         }
-        Operation::Images(crate::domain::ImageOperation::Generation(operation)) => {
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Generation(
+            operation,
+        )) => {
             matches!(mode, TransportMode::Unary | TransportMode::Streaming)
                 && operation.stream == streaming
         }
-        Operation::Images(crate::domain::ImageOperation::Edit(operation)) => {
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Edit(operation)) => {
             matches!(mode, TransportMode::Unary | TransportMode::Streaming)
                 && operation.stream == streaming
         }
-        Operation::Images(crate::domain::ImageOperation::Variation(_)) => {
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Variation(_)) => {
             mode == TransportMode::Unary
         }
         Operation::Speech(operation) => {
@@ -100,12 +102,14 @@ pub(super) fn validate_transport_mode(request: &ProviderRequest) -> Result<(), T
             matches!(mode, TransportMode::Unary | TransportMode::Streaming)
                 && operation.stream == streaming
         }
-        Operation::Video(crate::domain::VideoOperation::Create(_)) => mode == TransportMode::Async,
+        Operation::Video(crate::domain::canonical::requests::VideoOperation::Create(_)) => {
+            mode == TransportMode::Async
+        }
         Operation::Video(
-            crate::domain::VideoOperation::List(_)
-            | crate::domain::VideoOperation::Get(_)
-            | crate::domain::VideoOperation::Content(_)
-            | crate::domain::VideoOperation::Delete(_),
+            crate::domain::canonical::requests::VideoOperation::List(_)
+            | crate::domain::canonical::requests::VideoOperation::Get(_)
+            | crate::domain::canonical::requests::VideoOperation::Content(_)
+            | crate::domain::canonical::requests::VideoOperation::Delete(_),
         )
         | Operation::Embeddings(_)
         | Operation::TokenCount(_)

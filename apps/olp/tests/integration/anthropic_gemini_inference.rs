@@ -16,18 +16,37 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use futures::{Stream, stream};
 use http_body_util::BodyExt;
-use olp::test_support::{ApiMode, GatewayState, ProcessComposition, public_router};
-use olp_db::{PgStore, security::AuthHmacKey};
-use olp_engine::domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    Capability, DurationMs, FinishReason, MessageRole, OperationKind, Provider,
-    ProviderEventStream, ProviderId, ProviderKind, ProviderOutput, ProviderRequest,
-    ProviderTransport, Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId,
-    RuntimeSnapshot, SourceExtensions, Surface, Target, TargetId, TokenCountResult, TransportError,
-    TransportMode, TransportPhase, Usage,
+use olp::{
+    bootstrap::{
+        mode_dependencies::GatewayState,
+        state::{ApiMode, ProcessComposition},
+    },
+    public_http::router::for_state,
 };
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_db::{security::key_material::AuthHmacKey, store::Store};
+use olp_engine::domain::{
+    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    canonical::{
+        events::{Event, FinishReason, Kind, Usage},
+        identity::{OperationKind, Surface, TransportMode},
+        requests::{MessageRole, SourceExtensions},
+        results::{CanonicalResult, TokenCountResult},
+    },
+    ids::{
+        ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
+        TargetId,
+    },
+    ports::{
+        AttemptFailureClass, BoxFuture, ProviderEventStream, ProviderOutput, ProviderRequest,
+        ProviderTransport, TransportError, TransportPhase,
+    },
+    routing::{
+        provider::{Capability, Provider, ProviderKind},
+        route::{Route, Target},
+        snapshot::{RuntimeGeneration, Snapshot},
+    },
+};
+use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -84,32 +103,32 @@ impl ProviderTransport for MockTransport {
     }
 }
 
-fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
+fn generation_events(text: &str, upstream_model: &str) -> Vec<Event> {
     vec![
-        CanonicalEvent::new(
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("provider-response".into()),
                 provider_model: Some(upstream_model.into()),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             2,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: text.into(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             3,
-            CanonicalEventKind::Usage {
+            Kind::Usage {
                 usage: Usage {
                     input_tokens: 3,
                     output_tokens: 2,
@@ -119,14 +138,14 @@ fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
                 },
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             4,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::Stop,
             },
         ),
-        CanonicalEvent::new(5, CanonicalEventKind::Done),
+        Event::new(5, Kind::Done),
     ]
 }
 
@@ -199,7 +218,7 @@ fn test_gateway() -> TestGateway {
             },
         ],
     };
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 9,
@@ -265,11 +284,11 @@ fn test_gateway() -> TestGateway {
             }) as Arc<dyn ProviderTransport>,
         ),
     ]);
-    let runtime = Arc::new(RuntimeManager::empty());
+    let runtime = Arc::new(Manager::empty());
     runtime.install(snapshot, transports).unwrap();
     let mut state = ProcessComposition::new(
         ApiMode::Gateway,
-        Some(PgStore::from_pool(
+        Some(Store::from_pool(
             sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
                 .acquire_timeout(Duration::from_millis(10))
@@ -307,7 +326,7 @@ fn post_json(path: &str, header: (&str, &str), body: Value) -> Request<Body> {
 #[tokio::test]
 async fn anthropic_unary_count_models_and_native_errors_use_the_shared_pipeline() {
     let fixture = test_gateway();
-    let app = public_router(fixture.state.clone());
+    let app = for_state(fixture.state.clone());
     let response = app
         .clone()
         .oneshot(post_json(
@@ -441,7 +460,7 @@ async fn anthropic_unary_count_models_and_native_errors_use_the_shared_pipeline(
 #[tokio::test]
 async fn both_gemini_versions_support_unary_sdk_sse_count_and_models() {
     let fixture = test_gateway();
-    let app = public_router(fixture.state.clone());
+    let app = for_state(fixture.state.clone());
     for version in ["v1", "v1beta"] {
         let response = app
             .clone()
@@ -565,7 +584,7 @@ async fn both_gemini_versions_support_unary_sdk_sse_count_and_models() {
 #[tokio::test]
 async fn inline_media_is_admitted_for_same_protocol_and_rejected_when_malformed_or_oversized() {
     let fixture = test_gateway();
-    let app = public_router(fixture.state.clone());
+    let app = for_state(fixture.state.clone());
     let response = app
         .clone()
         .oneshot(post_json(
@@ -623,7 +642,7 @@ async fn inline_media_is_admitted_for_same_protocol_and_rejected_when_malformed_
 async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_loss() {
     let fixture = test_gateway();
     let pinned = fixture.state.runtime().pin();
-    let mut snapshot = RuntimeSnapshot {
+    let mut snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -670,7 +689,7 @@ async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_lo
             )]),
         )
         .unwrap();
-    let app = public_router(fixture.state.clone());
+    let app = for_state(fixture.state.clone());
 
     let response = app
         .clone()
@@ -773,9 +792,9 @@ impl ProviderTransport for PostCommitFailureTransport {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async {
             let events = vec![
-                Ok(CanonicalEvent::new(
+                Ok(Event::new(
                     0,
-                    CanonicalEventKind::ResponseStart {
+                    Kind::ResponseStart {
                         response_id: Some("committed".into()),
                         provider_model: Some("primary".into()),
                     },
@@ -815,7 +834,7 @@ impl ProviderTransport for NeverCalledTransport {
 async fn streaming_never_fails_over_after_the_first_canonical_event() {
     let fixture = test_gateway();
     let snapshot = fixture.state.runtime().pin();
-    let mut snapshot = RuntimeSnapshot {
+    let mut snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: snapshot.generation.ordinal + 1,
@@ -862,7 +881,7 @@ async fn streaming_never_fails_over_after_the_first_canonical_event() {
         .runtime()
         .install(snapshot, transports)
         .unwrap();
-    let response = public_router(fixture.state)
+    let response = for_state(fixture.state)
         .oneshot(post_json(
             "/anthropic/v1/messages",
             ("x-api-key", &fixture.key),
@@ -886,12 +905,12 @@ async fn streaming_never_fails_over_after_the_first_canonical_event() {
 }
 
 struct DropAwareStream {
-    first: Option<CanonicalEvent>,
+    first: Option<Event>,
     dropped: Arc<AtomicBool>,
 }
 
 impl Stream for DropAwareStream {
-    type Item = Result<CanonicalEvent, TransportError>;
+    type Item = Result<Event, TransportError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -921,9 +940,9 @@ impl ProviderTransport for DropAwareTransport {
         let dropped = self.0.clone();
         Box::pin(async move {
             Ok(ProviderOutput::Events(Box::pin(DropAwareStream {
-                first: Some(CanonicalEvent::new(
+                first: Some(Event::new(
                     0,
-                    CanonicalEventKind::ResponseStart {
+                    Kind::ResponseStart {
                         response_id: Some("cancel".into()),
                         provider_model: Some("private".into()),
                     },
@@ -939,7 +958,7 @@ impl ProviderTransport for DropAwareTransport {
 async fn client_disconnect_drops_the_upstream_stream() {
     let fixture = test_gateway();
     let snapshot = fixture.state.runtime().pin();
-    let mut snapshot = RuntimeSnapshot {
+    let mut snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: snapshot.generation.ordinal + 1,
@@ -977,7 +996,7 @@ async fn client_disconnect_drops_the_upstream_stream() {
             )]),
         )
         .unwrap();
-    let response = public_router(fixture.state)
+    let response = for_state(fixture.state)
         .oneshot(post_json(
             "/anthropic/v1/messages",
             ("x-api-key", &fixture.key),

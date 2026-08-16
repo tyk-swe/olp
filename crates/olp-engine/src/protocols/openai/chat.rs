@@ -1,9 +1,17 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message, MessageRole,
-    Operation, ResponseFormat, RouteSlug, RouteSlugError, SourceExtensions, Surface, ToolCall,
-    ToolChoice, ToolDefinition, inline_media_marker, media_handle_from_inline_marker,
+    canonical::{
+        identity::Surface,
+        requests::{
+            ContentPart as CanonicalContentPart, GenerationParameters, GenerationRequest,
+            MediaSource, Message as CanonicalMessage, MessageRole, Operation,
+            ResponseFormat as CanonicalResponseFormat, SourceExtensions,
+            ToolCall as CanonicalToolCall, ToolChoice as CanonicalToolChoice, ToolDefinition,
+            inline_media_marker, media_handle_from_inline_marker,
+        },
+    },
+    ids::{RouteSlug, RouteSlugError},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,9 +20,9 @@ use thiserror::Error;
 use super::extensions::{collect_extra, unescape_json_pointer};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatCompletionRequest {
+pub struct CompletionRequest {
     pub model: String,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_completion_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,11 +42,11 @@ pub struct ChatCompletionRequest {
     #[serde(default, skip_serializing_if = "is_false")]
     pub stream: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<ChatTool>,
+    pub tools: Vec<Tool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ChatToolChoice>,
+    pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_format: Option<ChatResponseFormat>,
+    pub response_format: Option<ResponseFormat>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -48,23 +56,23 @@ const fn is_false(value: &bool) -> bool {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatMessage {
-    pub role: ChatRole,
+pub struct Message {
+    pub role: Role,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<ChatMessageContent>,
+    pub content: Option<MessageContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<ChatToolCall>,
+    pub tool_calls: Vec<ToolCall>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ChatRole {
+pub enum Role {
     System,
     Developer,
     User,
@@ -74,26 +82,26 @@ pub enum ChatRole {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
-pub enum ChatMessageContent {
+pub enum MessageContent {
     Text(String),
-    Parts(Vec<ChatContentPart>),
+    Parts(Vec<ContentPart>),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ChatContentPart {
+pub enum ContentPart {
     Text {
         text: String,
         #[serde(flatten)]
         extra: BTreeMap<String, Value>,
     },
     ImageUrl {
-        image_url: ChatImageUrl,
+        image_url: ImageUrl,
         #[serde(flatten)]
         extra: BTreeMap<String, Value>,
     },
     InputAudio {
-        input_audio: ChatInputAudio,
+        input_audio: InputAudio,
         #[serde(flatten)]
         extra: BTreeMap<String, Value>,
     },
@@ -104,7 +112,7 @@ pub enum ChatContentPart {
     },
 }
 
-impl ChatContentPart {
+impl ContentPart {
     fn extra(&self) -> &BTreeMap<String, Value> {
         match self {
             Self::Text { extra, .. }
@@ -125,7 +133,7 @@ impl ChatContentPart {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatImageUrl {
+pub struct ImageUrl {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -134,7 +142,7 @@ pub struct ChatImageUrl {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatInputAudio {
+pub struct InputAudio {
     pub data: String,
     pub format: String,
     #[serde(flatten)]
@@ -142,17 +150,17 @@ pub struct ChatInputAudio {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatToolCall {
+pub struct ToolCall {
     pub id: String,
     #[serde(rename = "type")]
     pub kind: String,
-    pub function: ChatFunctionCall,
+    pub function: FunctionCall,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatFunctionCall {
+pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
     #[serde(flatten)]
@@ -160,16 +168,16 @@ pub struct ChatFunctionCall {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatTool {
+pub struct Tool {
     #[serde(rename = "type")]
     pub kind: String,
-    pub function: ChatFunctionDefinition,
+    pub function: FunctionDefinition,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatFunctionDefinition {
+pub struct FunctionDefinition {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -185,39 +193,39 @@ fn empty_object() -> Value {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
-pub enum ChatToolChoice {
+pub enum ToolChoice {
     Mode(String),
-    Named(ChatNamedToolChoice),
+    Named(NamedToolChoice),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatNamedToolChoice {
+pub struct NamedToolChoice {
     #[serde(rename = "type")]
     pub kind: String,
-    pub function: ChatNamedFunction,
+    pub function: NamedFunction,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatNamedFunction {
+pub struct NamedFunction {
     pub name: String,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatResponseFormat {
+pub struct ResponseFormat {
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub json_schema: Option<ChatJsonSchema>,
+    pub json_schema: Option<JsonSchema>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatJsonSchema {
+pub struct JsonSchema {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -252,9 +260,7 @@ impl StopSequences {
     }
 }
 
-pub fn decode_chat_completion(
-    request: ChatCompletionRequest,
-) -> Result<Operation, OpenAiDecodeError> {
+pub fn decode_chat_completion(request: CompletionRequest) -> Result<Operation, OpenAiDecodeError> {
     validate_request_parameters(&request)?;
     let route = RouteSlug::parse(request.model.clone())?;
     let mut extension_values = BTreeMap::new();
@@ -308,7 +314,7 @@ pub fn decode_chat_completion(
     }))
 }
 
-fn validate_request_parameters(request: &ChatCompletionRequest) -> Result<(), OpenAiDecodeError> {
+fn validate_request_parameters(request: &CompletionRequest) -> Result<(), OpenAiDecodeError> {
     if request.max_completion_tokens.is_some() && request.max_tokens.is_some() {
         return Err(OpenAiDecodeError::ConflictingTokenLimits);
     }
@@ -341,18 +347,18 @@ fn validate_request_parameters(request: &ChatCompletionRequest) -> Result<(), Op
 
 fn decode_message(
     index: usize,
-    message: ChatMessage,
+    message: Message,
     extensions: &mut BTreeMap<String, Value>,
-) -> Result<Message, OpenAiDecodeError> {
+) -> Result<CanonicalMessage, OpenAiDecodeError> {
     let prefix = format!("/messages/{index}");
     collect_extra(&prefix, &message.extra, extensions);
 
     let role = match message.role {
-        ChatRole::System => MessageRole::System,
-        ChatRole::Developer => MessageRole::Developer,
-        ChatRole::User => MessageRole::User,
-        ChatRole::Assistant => MessageRole::Assistant,
-        ChatRole::Tool => MessageRole::Tool,
+        Role::System => MessageRole::System,
+        Role::Developer => MessageRole::Developer,
+        Role::User => MessageRole::User,
+        Role::Assistant => MessageRole::Assistant,
+        Role::Tool => MessageRole::Tool,
     };
     if role == MessageRole::Tool && message.tool_call_id.is_none() {
         return Err(OpenAiDecodeError::MissingToolCallId {
@@ -361,8 +367,8 @@ fn decode_message(
     }
 
     let content = match message.content {
-        Some(ChatMessageContent::Text(text)) => vec![ContentPart::Text { text }],
-        Some(ChatMessageContent::Parts(parts)) => parts
+        Some(MessageContent::Text(text)) => vec![CanonicalContentPart::Text { text }],
+        Some(MessageContent::Parts(parts)) => parts
             .into_iter()
             .enumerate()
             .map(|(part_index, part)| decode_content_part(index, part_index, part, extensions))
@@ -385,7 +391,7 @@ fn decode_message(
             if call.kind != "function" {
                 return Err(OpenAiDecodeError::UnsupportedToolType(call.kind));
             }
-            Ok(ToolCall {
+            Ok(CanonicalToolCall {
                 id: call.id,
                 name: call.function.name,
                 arguments: call.function.arguments,
@@ -399,7 +405,7 @@ fn decode_message(
         });
     }
 
-    Ok(Message {
+    Ok(CanonicalMessage {
         role,
         content,
         name: message.name,
@@ -411,21 +417,21 @@ fn decode_message(
 fn decode_content_part(
     message_index: usize,
     part_index: usize,
-    part: ChatContentPart,
+    part: ContentPart,
     extensions: &mut BTreeMap<String, Value>,
-) -> Result<ContentPart, OpenAiDecodeError> {
+) -> Result<CanonicalContentPart, OpenAiDecodeError> {
     let prefix = format!("/messages/{message_index}/content/{part_index}");
     collect_extra(&prefix, part.extra(), extensions);
     match part {
-        ChatContentPart::Text { text, .. } => Ok(ContentPart::Text { text }),
-        ChatContentPart::ImageUrl { image_url, .. } => {
+        ContentPart::Text { text, .. } => Ok(CanonicalContentPart::Text { text }),
+        ContentPart::ImageUrl { image_url, .. } => {
             collect_extra(&format!("{prefix}/image_url"), &image_url.extra, extensions);
-            Ok(ContentPart::Image {
+            Ok(CanonicalContentPart::Image {
                 source: MediaSource::Uri(image_url.url),
                 detail: image_url.detail,
             })
         }
-        ChatContentPart::InputAudio { input_audio, .. } => {
+        ContentPart::InputAudio { input_audio, .. } => {
             collect_extra(
                 &format!("{prefix}/input_audio"),
                 &input_audio.extra,
@@ -433,18 +439,18 @@ fn decode_content_part(
             );
             let media = media_handle_from_inline_marker(&input_audio.data)
                 .ok_or(OpenAiDecodeError::InlineMediaRequiresBoundedHandle)?;
-            Ok(ContentPart::InputAudio {
+            Ok(CanonicalContentPart::InputAudio {
                 media,
                 format: input_audio.format,
             })
         }
-        ChatContentPart::Refusal { refusal, .. } => Ok(ContentPart::Refusal { text: refusal }),
+        ContentPart::Refusal { refusal, .. } => Ok(CanonicalContentPart::Refusal { text: refusal }),
     }
 }
 
 fn decode_tool(
     index: usize,
-    tool: ChatTool,
+    tool: Tool,
     extensions: &mut BTreeMap<String, Value>,
 ) -> Result<ToolDefinition, OpenAiDecodeError> {
     if tool.kind != "function" {
@@ -465,41 +471,41 @@ fn decode_tool(
 }
 
 fn decode_tool_choice(
-    choice: ChatToolChoice,
+    choice: ToolChoice,
     extensions: &mut BTreeMap<String, Value>,
-) -> Result<ToolChoice, OpenAiDecodeError> {
+) -> Result<CanonicalToolChoice, OpenAiDecodeError> {
     match choice {
-        ChatToolChoice::Mode(mode) => match mode.as_str() {
-            "auto" => Ok(ToolChoice::Auto),
-            "none" => Ok(ToolChoice::None),
-            "required" => Ok(ToolChoice::Required),
+        ToolChoice::Mode(mode) => match mode.as_str() {
+            "auto" => Ok(CanonicalToolChoice::Auto),
+            "none" => Ok(CanonicalToolChoice::None),
+            "required" => Ok(CanonicalToolChoice::Required),
             _ => Err(OpenAiDecodeError::UnsupportedToolChoice(mode)),
         },
-        ChatToolChoice::Named(named) => {
+        ToolChoice::Named(named) => {
             if named.kind != "function" {
                 return Err(OpenAiDecodeError::UnsupportedToolType(named.kind));
             }
             collect_extra("/tool_choice", &named.extra, extensions);
             collect_extra("/tool_choice/function", &named.function.extra, extensions);
-            Ok(ToolChoice::Named(named.function.name))
+            Ok(CanonicalToolChoice::Named(named.function.name))
         }
     }
 }
 
 fn decode_response_format(
-    format: ChatResponseFormat,
+    format: ResponseFormat,
     extensions: &mut BTreeMap<String, Value>,
-) -> Result<ResponseFormat, OpenAiDecodeError> {
+) -> Result<CanonicalResponseFormat, OpenAiDecodeError> {
     collect_extra("/response_format", &format.extra, extensions);
     match format.kind.as_str() {
-        "text" => Ok(ResponseFormat::Text),
-        "json_object" => Ok(ResponseFormat::JsonObject),
+        "text" => Ok(CanonicalResponseFormat::Text),
+        "json_object" => Ok(CanonicalResponseFormat::JsonObject),
         "json_schema" => {
             let schema = format
                 .json_schema
                 .ok_or(OpenAiDecodeError::MissingJsonSchema)?;
             collect_extra("/response_format/json_schema", &schema.extra, extensions);
-            Ok(ResponseFormat::JsonSchema {
+            Ok(CanonicalResponseFormat::JsonSchema {
                 name: schema.name,
                 description: schema.description,
                 schema: schema.schema,
@@ -515,7 +521,7 @@ fn decode_response_format(
 pub fn encode_chat_completion(
     request: &GenerationRequest,
     upstream_model: &str,
-) -> Result<ChatCompletionRequest, OpenAiEncodeError> {
+) -> Result<CompletionRequest, OpenAiEncodeError> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
@@ -536,9 +542,9 @@ pub fn encode_chat_completion(
     let tools = request
         .tools
         .iter()
-        .map(|tool| ChatTool {
+        .map(|tool| Tool {
             kind: "function".into(),
-            function: ChatFunctionDefinition {
+            function: FunctionDefinition {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
                 parameters: tool.input_schema.clone(),
@@ -548,12 +554,12 @@ pub fn encode_chat_completion(
         })
         .collect();
     let tool_choice = request.tool_choice.as_ref().map(|choice| match choice {
-        ToolChoice::Auto => ChatToolChoice::Mode("auto".into()),
-        ToolChoice::None => ChatToolChoice::Mode("none".into()),
-        ToolChoice::Required => ChatToolChoice::Mode("required".into()),
-        ToolChoice::Named(name) => ChatToolChoice::Named(ChatNamedToolChoice {
+        CanonicalToolChoice::Auto => ToolChoice::Mode("auto".into()),
+        CanonicalToolChoice::None => ToolChoice::Mode("none".into()),
+        CanonicalToolChoice::Required => ToolChoice::Mode("required".into()),
+        CanonicalToolChoice::Named(name) => ToolChoice::Named(NamedToolChoice {
             kind: "function".into(),
-            function: ChatNamedFunction {
+            function: NamedFunction {
                 name: name.clone(),
                 extra: BTreeMap::new(),
             },
@@ -561,24 +567,24 @@ pub fn encode_chat_completion(
         }),
     });
     let response_format = request.response_format.as_ref().map(|format| match format {
-        ResponseFormat::Text => ChatResponseFormat {
+        CanonicalResponseFormat::Text => ResponseFormat {
             kind: "text".into(),
             json_schema: None,
             extra: BTreeMap::new(),
         },
-        ResponseFormat::JsonObject => ChatResponseFormat {
+        CanonicalResponseFormat::JsonObject => ResponseFormat {
             kind: "json_object".into(),
             json_schema: None,
             extra: BTreeMap::new(),
         },
-        ResponseFormat::JsonSchema {
+        CanonicalResponseFormat::JsonSchema {
             name,
             description,
             schema,
             strict,
-        } => ChatResponseFormat {
+        } => ResponseFormat {
             kind: "json_schema".into(),
-            json_schema: Some(ChatJsonSchema {
+            json_schema: Some(JsonSchema {
                 name: name.clone(),
                 description: description.clone(),
                 schema: schema.clone(),
@@ -589,7 +595,7 @@ pub fn encode_chat_completion(
         },
     });
 
-    let mut encoded = ChatCompletionRequest {
+    let mut encoded = CompletionRequest {
         model: upstream_model.to_owned(),
         messages,
         max_completion_tokens: request.parameters.max_output_tokens,
@@ -611,29 +617,29 @@ pub fn encode_chat_completion(
 }
 
 fn encode_message(
-    message: &Message,
+    message: &CanonicalMessage,
     force_content_parts: bool,
-) -> Result<ChatMessage, OpenAiEncodeError> {
+) -> Result<Message, OpenAiEncodeError> {
     let role = match message.role {
-        MessageRole::System => ChatRole::System,
-        MessageRole::Developer => ChatRole::Developer,
-        MessageRole::User => ChatRole::User,
-        MessageRole::Assistant => ChatRole::Assistant,
-        MessageRole::Tool => ChatRole::Tool,
+        MessageRole::System => Role::System,
+        MessageRole::Developer => Role::Developer,
+        MessageRole::User => Role::User,
+        MessageRole::Assistant => Role::Assistant,
+        MessageRole::Tool => Role::Tool,
     };
     let mut parts = Vec::with_capacity(message.content.len());
     for part in &message.content {
         parts.push(match part {
-            ContentPart::Text { text } => ChatContentPart::Text {
+            CanonicalContentPart::Text { text } => ContentPart::Text {
                 text: text.clone(),
                 extra: BTreeMap::new(),
             },
-            ContentPart::Image { source, detail } => {
+            CanonicalContentPart::Image { source, detail } => {
                 let MediaSource::Uri(url) = source else {
                     return Err(OpenAiEncodeError::MediaHandleCannotBeEncoded);
                 };
-                ChatContentPart::ImageUrl {
-                    image_url: ChatImageUrl {
+                ContentPart::ImageUrl {
+                    image_url: ImageUrl {
                         url: url.clone(),
                         detail: detail.clone(),
                         extra: BTreeMap::new(),
@@ -641,16 +647,16 @@ fn encode_message(
                     extra: BTreeMap::new(),
                 }
             }
-            ContentPart::Refusal { text } => ChatContentPart::Refusal {
+            CanonicalContentPart::Refusal { text } => ContentPart::Refusal {
                 refusal: text.clone(),
                 extra: BTreeMap::new(),
             },
-            ContentPart::InputAudio { media, format } => {
+            CanonicalContentPart::InputAudio { media, format } => {
                 if !matches!(format.as_str(), "wav" | "mp3") {
                     return Err(OpenAiEncodeError::InvalidInputAudioFormat);
                 }
-                ChatContentPart::InputAudio {
-                    input_audio: ChatInputAudio {
+                ContentPart::InputAudio {
+                    input_audio: InputAudio {
                         data: inline_media_marker(media),
                         format: format.clone(),
                         extra: BTreeMap::new(),
@@ -658,17 +664,19 @@ fn encode_message(
                     extra: BTreeMap::new(),
                 }
             }
-            ContentPart::InputFile { .. } => return Err(OpenAiEncodeError::InputFileUnsupported),
+            CanonicalContentPart::InputFile { .. } => {
+                return Err(OpenAiEncodeError::InputFileUnsupported);
+            }
         });
     }
     let content = match parts.as_slice() {
         [] => None,
-        [ChatContentPart::Text { text, extra }] if extra.is_empty() && !force_content_parts => {
-            Some(ChatMessageContent::Text(text.clone()))
+        [ContentPart::Text { text, extra }] if extra.is_empty() && !force_content_parts => {
+            Some(MessageContent::Text(text.clone()))
         }
-        _ => Some(ChatMessageContent::Parts(parts)),
+        _ => Some(MessageContent::Parts(parts)),
     };
-    Ok(ChatMessage {
+    Ok(Message {
         role,
         content,
         name: message.name.clone(),
@@ -676,10 +684,10 @@ fn encode_message(
         tool_calls: message
             .tool_calls
             .iter()
-            .map(|call| ChatToolCall {
+            .map(|call| ToolCall {
                 id: call.id.clone(),
                 kind: "function".into(),
-                function: ChatFunctionCall {
+                function: FunctionCall {
                     name: call.name.clone(),
                     arguments: call.arguments.clone(),
                     extra: BTreeMap::new(),
@@ -692,7 +700,7 @@ fn encode_message(
 }
 
 fn apply_extensions(
-    request: &mut ChatCompletionRequest,
+    request: &mut CompletionRequest,
     extensions: &BTreeMap<String, Value>,
 ) -> Result<(), OpenAiEncodeError> {
     for (pointer, value) in extensions {
@@ -725,7 +733,7 @@ fn apply_extensions(
                 field,
             ] if messages == "messages" && content == "content" && image_url == "image_url" => {
                 let part = content_part_mut(request, message_index, part_index, pointer)?;
-                let ChatContentPart::ImageUrl { image_url, .. } = part else {
+                let ContentPart::ImageUrl { image_url, .. } = part else {
                     return Err(OpenAiEncodeError::InvalidExtensionPath(pointer.clone()));
                 };
                 image_url.extra.insert(field.clone(), value.clone());
@@ -756,13 +764,13 @@ fn apply_extensions(
                 tool.function.extra.insert(field.clone(), value.clone());
             }
             [choice, field] if choice == "tool_choice" => {
-                let Some(ChatToolChoice::Named(choice)) = &mut request.tool_choice else {
+                let Some(ToolChoice::Named(choice)) = &mut request.tool_choice else {
                     return Err(OpenAiEncodeError::InvalidExtensionPath(pointer.clone()));
                 };
                 choice.extra.insert(field.clone(), value.clone());
             }
             [choice, function, field] if choice == "tool_choice" && function == "function" => {
-                let Some(ChatToolChoice::Named(choice)) = &mut request.tool_choice else {
+                let Some(ToolChoice::Named(choice)) = &mut request.tool_choice else {
                     return Err(OpenAiEncodeError::InvalidExtensionPath(pointer.clone()));
                 };
                 choice.function.extra.insert(field.clone(), value.clone());
@@ -774,7 +782,7 @@ fn apply_extensions(
                 format.extra.insert(field.clone(), value.clone());
             }
             [format, schema, field] if format == "response_format" && schema == "json_schema" => {
-                let Some(ChatResponseFormat {
+                let Some(ResponseFormat {
                     json_schema: Some(schema),
                     ..
                 }) = &mut request.response_format
@@ -790,32 +798,32 @@ fn apply_extensions(
 }
 
 fn message_mut<'a>(
-    request: &'a mut ChatCompletionRequest,
+    request: &'a mut CompletionRequest,
     index: &str,
     pointer: &str,
-) -> Result<&'a mut ChatMessage, OpenAiEncodeError> {
+) -> Result<&'a mut Message, OpenAiEncodeError> {
     indexed_mut(&mut request.messages, index, pointer)
 }
 
 fn content_part_mut<'a>(
-    request: &'a mut ChatCompletionRequest,
+    request: &'a mut CompletionRequest,
     message_index: &str,
     part_index: &str,
     pointer: &str,
-) -> Result<&'a mut ChatContentPart, OpenAiEncodeError> {
+) -> Result<&'a mut ContentPart, OpenAiEncodeError> {
     let message = message_mut(request, message_index, pointer)?;
-    let Some(ChatMessageContent::Parts(parts)) = &mut message.content else {
+    let Some(MessageContent::Parts(parts)) = &mut message.content else {
         return Err(OpenAiEncodeError::InvalidExtensionPath(pointer.to_owned()));
     };
     indexed_mut(parts, part_index, pointer)
 }
 
 fn tool_call_mut<'a>(
-    request: &'a mut ChatCompletionRequest,
+    request: &'a mut CompletionRequest,
     message_index: &str,
     tool_index: &str,
     pointer: &str,
-) -> Result<&'a mut ChatToolCall, OpenAiEncodeError> {
+) -> Result<&'a mut ToolCall, OpenAiEncodeError> {
     let message = message_mut(request, message_index, pointer)?;
     indexed_mut(&mut message.tool_calls, tool_index, pointer)
 }
@@ -864,7 +872,7 @@ pub enum OpenAiDecodeError {
 #[derive(Debug, Error)]
 pub enum OpenAiEncodeError {
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("a media handle cannot be encoded as an OpenAI image URL")]
     MediaHandleCannotBeEncoded,
     #[error("canonical input file is not supported by Chat Completions")]

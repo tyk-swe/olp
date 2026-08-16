@@ -3,7 +3,8 @@ use sqlx::{Connection as _, PgConnection};
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
+    error::Error,
+    store::Store,
     worker_health::{
         WorkerCounterDeltas, WorkerTask, WorkerTaskCheckpointOutcome, checkpoint_worker_task_on,
         increment_worker_counters_on,
@@ -100,10 +101,8 @@ pub enum RuntimeOutboxLeadershipProbe {
     Pending(RuntimeOutboxLeaderContender),
 }
 
-impl PgStore {
-    pub async fn acquire_runtime_outbox_leader(
-        &self,
-    ) -> Result<RuntimeOutboxLeader, PersistenceError> {
+impl Store {
+    pub async fn acquire_runtime_outbox_leader(&self) -> Result<RuntimeOutboxLeader, Error> {
         let mut connection = self.pool().acquire().await?.detach();
         // Contenders wait in PostgreSQL instead of opening and closing a new
         // session on every poll. The raw connection cannot return to the pool,
@@ -121,7 +120,7 @@ impl PgStore {
     /// holds the PostgreSQL advisory lock.
     pub async fn try_acquire_runtime_outbox_leader(
         &self,
-    ) -> Result<Option<RuntimeOutboxLeader>, PersistenceError> {
+    ) -> Result<Option<RuntimeOutboxLeader>, Error> {
         let contender = self.runtime_outbox_leader_contender().await?;
         match contender.try_acquire(self).await? {
             RuntimeOutboxLeadershipProbe::Acquired(leader) => Ok(Some(leader)),
@@ -134,13 +133,13 @@ impl PgStore {
 
     pub async fn runtime_outbox_leader_contender(
         &self,
-    ) -> Result<RuntimeOutboxLeaderContender, PersistenceError> {
+    ) -> Result<RuntimeOutboxLeaderContender, Error> {
         Ok(RuntimeOutboxLeaderContender {
             connection: self.pool().acquire().await?.detach(),
         })
     }
 
-    async fn report_runtime_outbox_contention(&self) -> Result<(), PersistenceError> {
+    async fn report_runtime_outbox_contention(&self) -> Result<(), Error> {
         let mut transaction = self.pool().begin().await?;
         sqlx::query!(
             "UPDATE async_worker_counters SET \
@@ -169,15 +168,15 @@ impl PgStore {
     pub async fn runtime_outbox_status(
         &self,
         _now: DateTime<Utc>,
-    ) -> Result<RuntimeOutboxStatus, PersistenceError> {
+    ) -> Result<RuntimeOutboxStatus, Error> {
         let backlog = sqlx::query!(
             "SELECT count(*) AS \"pending_rows!\", min(created_at) AS oldest_pending_at \
              FROM transactional_outbox WHERE published_at IS NULL"
         )
         .fetch_one(self.pool())
         .await?;
-        let pending_rows = u64::try_from(backlog.pending_rows)
-            .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
+        let pending_rows =
+            u64::try_from(backlog.pending_rows).map_err(|_| Error::InvalidWorkerHealth)?;
         let health = sqlx::query!(
             "SELECT owner_active, claimed_rows, checked_at, last_progress_at, \
                     GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint \
@@ -202,15 +201,15 @@ impl PgStore {
                 last_progress_age_seconds: None,
             });
         };
-        let heartbeat_age_seconds = u64::try_from(health.heartbeat_age_seconds)
-            .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
+        let heartbeat_age_seconds =
+            u64::try_from(health.heartbeat_age_seconds).map_err(|_| Error::InvalidWorkerHealth)?;
         let last_progress_age_seconds = health
             .last_progress_age_seconds
             .map(u64::try_from)
             .transpose()
-            .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
-        let claimed_rows = u64::try_from(health.claimed_rows)
-            .map_err(|_| PersistenceError::InvalidWorkerHealth)?;
+            .map_err(|_| Error::InvalidWorkerHealth)?;
+        let claimed_rows =
+            u64::try_from(health.claimed_rows).map_err(|_| Error::InvalidWorkerHealth)?;
         let state = if heartbeat_age_seconds
             > u64::try_from(RUNTIME_OUTBOX_STALE_AFTER_SECONDS).unwrap_or(0)
         {
@@ -237,8 +236,8 @@ impl PgStore {
 impl RuntimeOutboxLeaderContender {
     pub async fn try_acquire(
         mut self,
-        store: &PgStore,
-    ) -> Result<RuntimeOutboxLeadershipProbe, PersistenceError> {
+        store: &Store,
+    ) -> Result<RuntimeOutboxLeadershipProbe, Error> {
         let acquired: bool = sqlx::query_scalar!(
             "SELECT pg_try_advisory_lock($1) AS \"acquired!\"",
             OUTBOX_LEADER_LOCK_ID
@@ -256,14 +255,14 @@ impl RuntimeOutboxLeaderContender {
         Ok(RuntimeOutboxLeadershipProbe::Acquired(leader))
     }
 
-    pub async fn close(self) -> Result<(), PersistenceError> {
+    pub async fn close(self) -> Result<(), Error> {
         self.connection.close().await?;
         Ok(())
     }
 }
 
 impl RuntimeOutboxLeader {
-    async fn record_acquired(&mut self) -> Result<(), PersistenceError> {
+    async fn record_acquired(&mut self) -> Result<(), Error> {
         let mut transaction = self.connection.begin().await?;
         let previous = sqlx::query!(
             "SELECT owner_active, claimed_rows FROM runtime_outbox_health \
@@ -276,7 +275,7 @@ impl RuntimeOutboxLeader {
             .filter(|row| row.owner_active)
             .map_or(0_i64, |row| row.claimed_rows);
         let abandoned_claims =
-            u64::try_from(abandoned_claims).map_err(|_| PersistenceError::InvalidWorkerHealth)?;
+            u64::try_from(abandoned_claims).map_err(|_| Error::InvalidWorkerHealth)?;
         increment_worker_counters_on(
             &mut transaction,
             WorkerCounterDeltas {
@@ -311,7 +310,7 @@ impl RuntimeOutboxLeader {
         Ok(())
     }
 
-    pub async fn heartbeat(&mut self) -> Result<(), PersistenceError> {
+    pub async fn heartbeat(&mut self) -> Result<(), Error> {
         let mut transaction = self.connection.begin().await?;
         let result = sqlx::query!(
             "UPDATE runtime_outbox_health SET owner_active = true, checked_at = clock_timestamp() \
@@ -320,7 +319,7 @@ impl RuntimeOutboxLeader {
         .execute(&mut *transaction)
         .await?;
         if result.rows_affected() != 1 {
-            return Err(PersistenceError::InvalidWorkerHealth);
+            return Err(Error::InvalidWorkerHealth);
         }
         checkpoint_worker_task_on(
             &mut transaction,
@@ -333,7 +332,7 @@ impl RuntimeOutboxLeader {
         Ok(())
     }
 
-    pub async fn pending(&mut self, limit: u16) -> Result<Vec<OutboxRecord>, PersistenceError> {
+    pub async fn pending(&mut self, limit: u16) -> Result<Vec<OutboxRecord>, Error> {
         let rows = sqlx::query!(
             "SELECT id, topic, aggregate_id, payload, created_at \
              FROM transactional_outbox WHERE published_at IS NULL \
@@ -356,7 +355,7 @@ impl RuntimeOutboxLeader {
 
     /// Marks the row as actively claimed and durably increments its attempt
     /// count before any ambiguous Valkey side effect can occur.
-    pub async fn begin_publication(&mut self, id: Uuid) -> Result<Option<u64>, PersistenceError> {
+    pub async fn begin_publication(&mut self, id: Uuid) -> Result<Option<u64>, Error> {
         let mut transaction = self.connection.begin().await?;
         let attempt = sqlx::query_scalar!(
             "UPDATE transactional_outbox \
@@ -371,7 +370,7 @@ impl RuntimeOutboxLeader {
             transaction.commit().await?;
             return Ok(None);
         };
-        let attempt = u64::try_from(attempt).map_err(|_| PersistenceError::InvalidWorkerHealth)?;
+        let attempt = u64::try_from(attempt).map_err(|_| Error::InvalidWorkerHealth)?;
         sqlx::query!(
             "UPDATE runtime_outbox_health \
              SET owner_active = true, claimed_rows = 1, checked_at = clock_timestamp() \
@@ -401,7 +400,7 @@ impl RuntimeOutboxLeader {
 
     /// Records an ambiguous or failed side effect while leaving the durable
     /// outbox row pending for the next attempt.
-    pub async fn record_publication_retry(&mut self) -> Result<(), PersistenceError> {
+    pub async fn record_publication_retry(&mut self) -> Result<(), Error> {
         let mut transaction = self.connection.begin().await?;
         sqlx::query!(
             "UPDATE runtime_outbox_health SET owner_active = true, claimed_rows = 0, \
@@ -432,7 +431,7 @@ impl RuntimeOutboxLeader {
     /// advisory lock. SQLx PostgreSQL connections do not reconnect in place:
     /// once that session is lost, this completion cannot reach PostgreSQL and
     /// a replacement leader may safely retry the still-unpublished row.
-    pub async fn mark_published(&mut self, id: Uuid) -> Result<bool, PersistenceError> {
+    pub async fn mark_published(&mut self, id: Uuid) -> Result<bool, Error> {
         let mut transaction = self.connection.begin().await?;
         let result = sqlx::query!(
             "UPDATE transactional_outbox SET published_at = clock_timestamp() \
@@ -475,7 +474,7 @@ impl RuntimeOutboxLeader {
 
     /// Releases leadership on clean shutdown and closes the physical session.
     /// Error and panic paths drop the detached connection and close its socket.
-    pub async fn release(mut self) -> Result<(), PersistenceError> {
+    pub async fn release(mut self) -> Result<(), Error> {
         let mut transaction = self.connection.begin().await?;
         sqlx::query!(
             "UPDATE runtime_outbox_health SET owner_active = false, claimed_rows = 0, \
@@ -497,7 +496,7 @@ impl RuntimeOutboxLeader {
         .fetch_one(&mut *transaction)
         .await?;
         if !released {
-            return Err(PersistenceError::RuntimeOutboxLeadershipLost);
+            return Err(Error::RuntimeOutboxLeadershipLost);
         }
         // The successor can acquire the session lock as soon as the statement
         // above completes, but its summary update waits on this transaction's
@@ -510,7 +509,7 @@ impl RuntimeOutboxLeader {
     }
 
     #[cfg(feature = "test-util")]
-    pub async fn backend_pid(&mut self) -> Result<i32, PersistenceError> {
+    pub async fn backend_pid(&mut self) -> Result<i32, Error> {
         Ok(sqlx::query_scalar!("SELECT pg_backend_pid() AS \"pid!\"")
             .fetch_one(&mut self.connection)
             .await?)

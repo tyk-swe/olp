@@ -70,7 +70,7 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
@@ -166,12 +166,12 @@ async fn malformed_trusted_proxy_chain_precedes_all_public_auth_json_handling() 
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
     state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
-    let app = public_router(state.management_state_for_test());
+    let app = for_state(state.management_state_for_test());
 
     for (path, requires_origin) in [("/api/v1/sessions", false), ("/api/v1/oidc/login", true)] {
         let mut request = Request::post(path)
@@ -234,7 +234,7 @@ fn local_metadata_detection_is_method_and_surface_exact() {
 
 #[tokio::test]
 async fn local_metadata_event_is_content_free_and_reconcilable() {
-    let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(1);
+    let (request_metadata, mut receiver) = Emitter::bounded(1);
     let generation_id = uuid::Uuid::now_v7();
     let api_key_id = uuid::Uuid::now_v7();
     LocalRequestMetadata {
@@ -325,11 +325,11 @@ async fn json_body_read_has_its_own_deadline_outside_route_layers() {
 
 #[tokio::test]
 async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
-    let app = public_router(
+    let app = for_state(
         ProcessComposition::new(
             ApiMode::Gateway,
             None,
-            Arc::new(RuntimeManager::empty()),
+            Arc::new(Manager::empty()),
             "https://olp.example.test",
             PathBuf::from("missing-console"),
         )
@@ -402,7 +402,7 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
 #[tokio::test]
 async fn authenticated_multipart_routes_reject_non_multipart_content_types() {
     let (state, key) = inference_state(false);
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     for content_type in [None, Some("application/json")] {
         let mut request = Request::post("/openai/v1/images/edits")
             .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"));

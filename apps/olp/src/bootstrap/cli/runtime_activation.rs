@@ -1,11 +1,11 @@
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-use olp_db::{PgStore, security::MasterKey, valkey::RuntimeHintSubscriber};
-use olp_engine::inference::{circuit::CircuitBreaker, runtime::RuntimeManager};
+use olp_db::{security::envelope::MasterKey, store::Store, valkey::RuntimeHintSubscriber};
+use olp_engine::inference::{circuit::Breaker, runtime::Manager};
 use tokio::{sync::watch, task::JoinHandle};
 use tracing::{error, info, warn};
 
-use crate::{TransportRegistry, bootstrap::connectors::load_runtime_transports};
+use crate::{bootstrap::connectors::load_runtime_transports, bootstrap::state::TransportRegistry};
 
 use super::AppResult;
 
@@ -15,10 +15,10 @@ pub(super) struct RuntimeHintSource {
 }
 
 pub(super) async fn runtime_hint_supervisor(
-    runtime: Arc<RuntimeManager>,
-    store: PgStore,
+    runtime: Arc<Manager>,
+    store: Store,
     transports: TransportRegistry,
-    circuits: CircuitBreaker,
+    circuits: Breaker,
     master_key: Option<Arc<MasterKey>>,
     source: RuntimeHintSource,
     mut shutdown: watch::Receiver<bool>,
@@ -81,10 +81,10 @@ pub(super) async fn runtime_hint_supervisor(
 }
 
 pub(super) fn spawn_runtime_poller(
-    runtime: Arc<RuntimeManager>,
-    store: PgStore,
+    runtime: Arc<Manager>,
+    store: Store,
     transports: TransportRegistry,
-    circuits: CircuitBreaker,
+    circuits: Breaker,
     master_key: Option<Arc<MasterKey>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
@@ -128,10 +128,10 @@ pub(super) fn spawn_runtime_poller(
 }
 
 pub(super) async fn activate_latest_runtime(
-    runtime: &RuntimeManager,
-    store: &PgStore,
+    runtime: &Manager,
+    store: &Store,
     transports: &TransportRegistry,
-    circuits: &CircuitBreaker,
+    circuits: &Breaker,
     master_key: Option<&MasterKey>,
 ) -> AppResult<bool> {
     let releases = store

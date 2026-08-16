@@ -8,7 +8,7 @@ struct FirstEventPendingTransport {
 #[derive(Clone)]
 struct CountingFiniteTransport {
     calls: Arc<AtomicUsize>,
-    events: Vec<CanonicalEvent>,
+    events: Vec<Event>,
 }
 
 impl ProviderTransport for FirstEventPendingTransport {
@@ -58,7 +58,10 @@ fn install_two_target_streams(
     operation: OperationKind,
     first: Arc<dyn ProviderTransport>,
     second: Arc<dyn ProviderTransport>,
-) -> (Arc<RuntimeBundle>, Vec<olp_engine::domain::AttemptPlan>) {
+) -> (
+    Arc<Bundle>,
+    Vec<olp_engine::domain::routing::selection::AttemptPlan>,
+) {
     let pinned = state.runtime().pin();
     let first_provider_id = *pinned.providers.keys().next().unwrap();
     let second_provider_id = ProviderId::new();
@@ -91,7 +94,7 @@ fn install_two_target_streams(
         weight: NonZeroU32::new(1).unwrap(),
         timeout: DurationMs::new(100),
     });
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -122,7 +125,7 @@ fn install_two_target_streams(
 }
 
 fn streaming_generation_operation() -> Operation {
-    let request: ChatCompletionRequest = serde_json::from_value(json!({
+    let request: CompletionRequest = serde_json::from_value(json!({
         "model": "default",
         "messages": [{"role": "user", "content": "hello"}],
         "stream": true
@@ -167,12 +170,12 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
             events: Vec::new(),
         }),
     );
-    let failure = match execute_with_failover(
-        FailoverContext {
+    let failure = match execute(
+        Context {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
             media_spool: media_state.media_spool().clone(),
-            circuits: &CircuitBreaker::default(),
+            circuits: &Breaker::default(),
             on_attempt_started: None,
         },
         attempts,
@@ -203,12 +206,12 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
             events: generation_stream_events("retried"),
         }),
     );
-    let success = match execute_with_failover(
-        FailoverContext {
+    let success = match execute(
+        Context {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
             media_spool: generation_state.media_spool().clone(),
-            circuits: &CircuitBreaker::default(),
+            circuits: &Breaker::default(),
             on_attempt_started: None,
         },
         attempts,
@@ -229,7 +232,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
 #[test]
 fn post_connect_failure_obeys_media_ambiguity_policy() {
     let failure = TransportError {
-        phase: olp_engine::domain::TransportPhase::FirstByte,
+        phase: olp_engine::domain::ports::TransportPhase::FirstByte,
         class: AttemptFailureClass::Connect,
         response_committed: false,
         message: "connection closed before response headers".to_owned(),
@@ -248,7 +251,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
 
     let connect = reclassify_ambiguous_transport_failure(
         TransportError {
-            phase: olp_engine::domain::TransportPhase::Connect,
+            phase: olp_engine::domain::ports::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
             message: "connection failed".to_owned(),
@@ -270,10 +273,10 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
         Arc::new(CountingFiniteTransport {
             calls: Arc::new(AtomicUsize::new(0)),
             events: vec![
-                CanonicalEvent::new(
+                Event::new(
                     0,
-                    CanonicalEventKind::Error {
-                        error: CanonicalError {
+                    Kind::Error {
+                        error: Error {
                             class: ErrorClass::RateLimit,
                             message: "provider throttled the request".to_owned(),
                             provider_code: Some("rate_limit".to_owned()),
@@ -281,7 +284,7 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
                         },
                     },
                 ),
-                CanonicalEvent::new(1, CanonicalEventKind::Done),
+                Event::new(1, Kind::Done),
             ],
         }),
         Arc::new(CountingFiniteTransport {
@@ -289,12 +292,12 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
             events: generation_stream_events("recovered"),
         }),
     );
-    let success = match execute_with_failover(
-        FailoverContext {
+    let success = match execute(
+        Context {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
             media_spool: state.media_spool().clone(),
-            circuits: &CircuitBreaker::default(),
+            circuits: &Breaker::default(),
             on_attempt_started: None,
         },
         attempts,
@@ -319,7 +322,7 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
 async fn direct_executor_reserves_hard_limits_before_route_selection() {
     let (state, _) = test_state(false);
     install_hard_limits(&state);
-    let request: ChatCompletionRequest = serde_json::from_value(json!({
+    let request: CompletionRequest = serde_json::from_value(json!({
         "model": "route-does-not-exist",
         "messages": [{"role": "user", "content": "hello"}]
     }))
@@ -347,9 +350,12 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
     install_result(
         &state,
         OperationKind::TokenCount,
-        CanonicalResult::TokenCount(olp_engine::domain::TokenCountResult {
+        CanonicalResult::TokenCount(olp_engine::domain::canonical::results::TokenCountResult {
             input_tokens: 1,
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
     let request: ResponseInputTokensRequest = serde_json::from_value(json!({
@@ -395,10 +401,10 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
         .unwrap(),
     )
     .unwrap();
-    let lease = crate::HTTP_INFERENCE_LIMITS_RESERVED
+    let lease = crate::public_http::request_admission::HTTP_INFERENCE_LIMITS_RESERVED
         .scope(
             10_000,
-            reserve_limits(
+            reserve(
                 state.limiter(),
                 api_key,
                 &operation,
@@ -427,20 +433,22 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
     let snapshot = state.runtime().pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
     let lookup = state.auth_hmac_key().as_ref().lookup_id(&key).unwrap();
-    let operation = Operation::Images(olp_engine::domain::ImageOperation::Edit(
-        olp_engine::domain::ImageEditRequest {
-            route: RouteSlug::parse("default").unwrap(),
-            images: vec![MediaHandle::new("bounded-image")],
-            mask: None,
-            prompt: "x".repeat(8_500),
-            stream: false,
-            extensions: olp_engine::domain::SourceExtensions::default(),
-        },
-    ));
-    let error = crate::HTTP_INFERENCE_LIMITS_RESERVED
+    let operation = Operation::Images(
+        olp_engine::domain::canonical::requests::ImageOperation::Edit(
+            olp_engine::domain::canonical::requests::ImageEditRequest {
+                route: RouteSlug::parse("default").unwrap(),
+                images: vec![MediaHandle::new("bounded-image")],
+                mask: None,
+                prompt: "x".repeat(8_500),
+                stream: false,
+                extensions: olp_engine::domain::canonical::requests::SourceExtensions::default(),
+            },
+        ),
+    );
+    let error = crate::public_http::request_admission::HTTP_INFERENCE_LIMITS_RESERVED
         .scope(
             2_000,
-            reserve_limits(
+            reserve(
                 state.limiter(),
                 api_key,
                 &operation,

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
-    SourceExtensions, Surface, Usage,
+use crate::domain::canonical::{
+    events::{Error, ErrorClass, Event, FinishReason, Kind, Usage as CanonicalUsage},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -14,7 +15,7 @@ use super::helpers::collect_object_extra;
 use crate::protocols::CanonicalEventBuilder as ResponsesEventBuilder;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct ResponseObject {
+pub struct Object {
     pub id: String,
     pub object: String,
     pub created_at: i64,
@@ -23,9 +24,9 @@ pub struct ResponseObject {
     #[serde(default)]
     pub output: Vec<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<ResponseUsage>,
+    pub usage: Option<Usage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<ResponseErrorBody>,
+    pub error: Option<ErrorBody>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete_details: Option<Value>,
     #[serde(flatten)]
@@ -33,20 +34,20 @@ pub struct ResponseObject {
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct ResponseUsage {
+pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_tokens_details: Option<ResponseInputTokenDetails>,
+    pub input_tokens_details: Option<InputTokenDetails>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens_details: Option<ResponseOutputTokenDetails>,
+    pub output_tokens_details: Option<OutputTokenDetails>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct ResponseInputTokenDetails {
+pub struct InputTokenDetails {
     #[serde(default)]
     pub cached_tokens: u64,
     #[serde(flatten)]
@@ -54,7 +55,7 @@ pub struct ResponseInputTokenDetails {
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct ResponseOutputTokenDetails {
+pub struct OutputTokenDetails {
     #[serde(default)]
     pub reasoning_tokens: u64,
     #[serde(flatten)]
@@ -62,21 +63,19 @@ pub struct ResponseOutputTokenDetails {
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct ResponseErrorBody {
+pub struct ErrorBody {
     pub code: String,
     pub message: String,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_response_object(
-    response: ResponseObject,
-) -> Result<Vec<CanonicalEvent>, ResponsesCodecError> {
+pub fn decode_response_object(response: Object) -> Result<Vec<Event>, ResponsesCodecError> {
     if response.object != "response" {
         return Err(ResponsesCodecError::InvalidResponse(response.object));
     }
     let mut builder = ResponsesEventBuilder::default();
-    builder.push(CanonicalEventKind::ResponseStart {
+    builder.push(Kind::ResponseStart {
         response_id: Some(response.id),
         provider_model: Some(response.model),
     });
@@ -100,7 +99,7 @@ pub fn decode_response_object(
     }
     if let Some(usage) = response.usage {
         collect_response_usage_extensions(&usage, &mut extensions);
-        builder.push(CanonicalEventKind::Usage {
+        builder.push(Kind::Usage {
             usage: canonical_response_usage(&usage),
         });
     }
@@ -110,8 +109,8 @@ pub fn decode_response_object(
             Some(&error.code),
             error.extra.get("type").and_then(Value::as_str),
         );
-        builder.push(CanonicalEventKind::Error {
-            error: CanonicalError {
+        builder.push(Kind::Error {
+            error: Error {
                 class: if retryable {
                     ErrorClass::RateLimit
                 } else {
@@ -124,11 +123,11 @@ pub fn decode_response_object(
         });
     }
     if !extensions.is_empty() {
-        builder.push(CanonicalEventKind::SourceExtension {
+        builder.push(Kind::SourceExtension {
             extensions: SourceExtensions::new(Surface::OpenAi, extensions),
         });
     }
-    builder.push(CanonicalEventKind::Done);
+    builder.push(Kind::Done);
     Ok(builder.events)
 }
 
@@ -154,7 +153,7 @@ fn decode_response_output_item(
                 .remove("content")
                 .and_then(|value| value.as_array().cloned())
                 .ok_or_else(|| ResponsesCodecError::InvalidResponse("message content".into()))?;
-            builder.push(CanonicalEventKind::MessageStart { output_index, role });
+            builder.push(Kind::MessageStart { output_index, role });
             for (part_index, part) in content.into_iter().enumerate() {
                 let Value::Object(mut part) = part else {
                     return Err(ResponsesCodecError::InvalidResponse(
@@ -163,11 +162,11 @@ fn decode_response_output_item(
                 };
                 let part_kind = take_required_output_string(&mut part, "type")?;
                 match part_kind.as_str() {
-                    "output_text" => builder.push(CanonicalEventKind::TextDelta {
+                    "output_text" => builder.push(Kind::TextDelta {
                         output_index,
                         text: take_required_output_string(&mut part, "text")?,
                     }),
-                    "refusal" => builder.push(CanonicalEventKind::RefusalDelta {
+                    "refusal" => builder.push(Kind::RefusalDelta {
                         output_index,
                         text: take_required_output_string(&mut part, "refusal")?,
                     }),
@@ -180,7 +179,7 @@ fn decode_response_output_item(
                 );
             }
             collect_object_extra(&format!("/output/{output_index}"), object, extensions);
-            builder.push(CanonicalEventKind::Finish {
+            builder.push(Kind::Finish {
                 output_index,
                 reason: FinishReason::Stop,
             });
@@ -192,11 +191,11 @@ fn decode_response_output_item(
                 .and_then(|value| value.as_str().map(str::to_owned));
             let name = Some(take_required_output_string(&mut object, "name")?);
             let arguments_delta = take_required_output_string(&mut object, "arguments")?;
-            builder.push(CanonicalEventKind::MessageStart {
+            builder.push(Kind::MessageStart {
                 output_index,
                 role: MessageRole::Assistant,
             });
-            builder.push(CanonicalEventKind::ToolCallDelta {
+            builder.push(Kind::ToolCallDelta {
                 output_index,
                 tool_index: 0,
                 id,
@@ -204,7 +203,7 @@ fn decode_response_output_item(
                 arguments_delta,
             });
             collect_object_extra(&format!("/output/{output_index}"), object, extensions);
-            builder.push(CanonicalEventKind::Finish {
+            builder.push(Kind::Finish {
                 output_index,
                 reason: FinishReason::ToolCalls,
             });
@@ -230,8 +229,8 @@ fn take_required_output_string(
         .ok_or_else(|| ResponsesCodecError::InvalidResponse(field.into()))
 }
 
-pub(super) fn canonical_response_usage(usage: &ResponseUsage) -> Usage {
-    Usage {
+pub(super) fn canonical_response_usage(usage: &Usage) -> CanonicalUsage {
+    CanonicalUsage {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         total_tokens: usage.total_tokens,
@@ -246,10 +245,7 @@ pub(super) fn canonical_response_usage(usage: &ResponseUsage) -> Usage {
     }
 }
 
-fn collect_response_usage_extensions(
-    usage: &ResponseUsage,
-    extensions: &mut BTreeMap<String, Value>,
-) {
+fn collect_response_usage_extensions(usage: &Usage, extensions: &mut BTreeMap<String, Value>) {
     collect_extra("/usage", &usage.extra, extensions);
     if let Some(details) = &usage.input_tokens_details {
         collect_extra("/usage/input_tokens_details", &details.extra, extensions);
@@ -265,7 +261,7 @@ mod tests {
 
     #[test]
     fn response_rate_limit_error_is_retryable() {
-        let events = decode_response_object(ResponseObject {
+        let events = decode_response_object(Object {
             id: "resp_test".to_owned(),
             object: "response".to_owned(),
             created_at: 1,
@@ -273,7 +269,7 @@ mod tests {
             model: "gpt-test".to_owned(),
             output: Vec::new(),
             usage: None,
-            error: Some(ResponseErrorBody {
+            error: Some(ErrorBody {
                 code: "rate_limit_exceeded".to_owned(),
                 message: "slow down".to_owned(),
                 extra: BTreeMap::new(),
@@ -286,7 +282,7 @@ mod tests {
         let error = events
             .iter()
             .find_map(|event| match &event.kind {
-                CanonicalEventKind::Error { error } => Some(error),
+                Kind::Error { error } => Some(error),
                 _ => None,
             })
             .expect("failed response must emit a canonical error");

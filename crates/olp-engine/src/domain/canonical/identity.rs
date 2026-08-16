@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::RequestId;
+use crate::domain::ids::RequestId;
 
 closed_string_enum! {
     pub enum Surface {

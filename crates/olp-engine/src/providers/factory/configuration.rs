@@ -1,18 +1,26 @@
 use std::fmt;
 
-use crate::domain::{CredentialRequirement, ProviderAuthMode, ProviderKind, provider_kind_spec};
+use crate::domain::{
+    provider::ProviderAuthMode,
+    provider_configuration::{CredentialRequirement, provider_kind_spec},
+    routing::provider::ProviderKind,
+};
 use zeroize::Zeroizing;
 
-use crate::providers::anthropic::{AnthropicApiKey, ConnectorConfig as AnthropicConnectorConfig};
+use crate::providers::anthropic::{
+    ApiKey as AnthropicApiKey, ConnectorConfig as AnthropicConnectorConfig,
+};
 use crate::providers::azure_openai::{
-    AzureOpenAiApiKey, ConnectorConfig as AzureOpenAiConnectorConfig,
+    ApiKey as AzureOpenAiApiKey, ConnectorConfig as AzureOpenAiConnectorConfig,
 };
 use crate::providers::bedrock::{
     ConnectorConfig as BedrockConnectorConfig, StaticCredentials as BedrockStaticCredentials,
 };
-use crate::providers::gemini::{ConnectorConfig as GeminiConnectorConfig, GeminiApiKey};
-use crate::providers::openai::{ConnectorConfig as OpenAiConnectorConfig, OpenAiApiKey};
-use crate::providers::vertex::{ConnectorConfig as VertexConnectorConfig, VertexConnector};
+use crate::providers::gemini::{ApiKey as GeminiApiKey, ConnectorConfig as GeminiConnectorConfig};
+use crate::providers::openai::{ApiKey as OpenAiApiKey, ConnectorConfig as OpenAiConnectorConfig};
+use crate::providers::vertex::{
+    Connector as VertexConnector, ConnectorConfig as VertexConnectorConfig,
+};
 
 /// Non-secret provider fields required to assemble a connector.
 #[derive(Clone, Copy, Debug)]
@@ -56,14 +64,14 @@ pub(super) enum RawCredentialKind {
 /// Connector assembly failures are deliberately string-only so callers can map
 /// them to their own HTTP or process error contracts without exposing secrets.
 #[derive(Debug, thiserror::Error)]
-pub enum ProviderError {
+pub enum Error {
     #[error("{0}")]
     Configuration(String),
     #[error("{0}")]
     Credential(String),
 }
 
-impl ProviderError {
+impl Error {
     pub(super) fn configuration(error: impl ToString) -> Self {
         Self::Configuration(error.to_string())
     }
@@ -75,7 +83,7 @@ impl ProviderError {
 
 /// Provider-specific, non-secret connector configuration.
 #[derive(Clone, Debug)]
-pub enum ProviderConfig {
+pub enum Config {
     OpenAi {
         endpoint: Option<String>,
     },
@@ -106,7 +114,7 @@ pub enum ProviderConfig {
     },
 }
 
-impl ProviderConfig {
+impl Config {
     #[must_use]
     pub const fn kind(&self) -> ProviderKind {
         match self {
@@ -209,22 +217,22 @@ impl ProviderConfig {
 }
 
 /// Secret material is named by semantics and zeroized on drop.
-pub enum ProviderCredential {
+pub enum Credential {
     None,
     ApiKey(Zeroizing<String>),
     ServiceAccountJson(Zeroizing<String>),
     AwsStatic(Zeroizing<Vec<u8>>),
 }
 
-impl fmt::Debug for ProviderCredential {
+impl fmt::Debug for Credential {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::None => formatter.write_str("ProviderCredential::None"),
-            Self::ApiKey(_) => formatter.write_str("ProviderCredential::ApiKey([REDACTED])"),
+            Self::None => formatter.write_str("Credential::None"),
+            Self::ApiKey(_) => formatter.write_str("Credential::ApiKey([REDACTED])"),
             Self::ServiceAccountJson(_) => {
-                formatter.write_str("ProviderCredential::ServiceAccountJson([REDACTED])")
+                formatter.write_str("Credential::ServiceAccountJson([REDACTED])")
             }
-            Self::AwsStatic(_) => formatter.write_str("ProviderCredential::AwsStatic([REDACTED])"),
+            Self::AwsStatic(_) => formatter.write_str("Credential::AwsStatic([REDACTED])"),
         }
     }
 }
@@ -239,13 +247,11 @@ pub enum CredentialKind {
 
 /// Returns the expected secret representation without reading or retaining it.
 #[doc(hidden)]
-pub(super) fn raw_credential_kind(
-    spec: ConnectorSpec<'_>,
-) -> Result<RawCredentialKind, ProviderError> {
+pub(super) fn raw_credential_kind(spec: ConnectorSpec<'_>) -> Result<RawCredentialKind, Error> {
     let auth = provider_kind_spec(spec.kind)
         .auth_mode(spec.auth_mode)
         .ok_or_else(|| {
-            ProviderError::configuration(format!(
+            Error::configuration(format!(
                 "Unsupported {} authentication mode {}",
                 spec.kind, spec.auth_mode
             ))
@@ -259,11 +265,11 @@ pub(super) fn raw_credential_kind(
     }
 }
 
-pub(super) fn credential_kind(config: &ProviderConfig) -> Result<CredentialKind, ProviderError> {
+pub(super) fn credential_kind(config: &Config) -> Result<CredentialKind, Error> {
     let kind = match raw_credential_kind(config.spec())? {
         RawCredentialKind::None => CredentialKind::None,
         RawCredentialKind::Text => match config {
-            ProviderConfig::VertexAi {
+            Config::VertexAi {
                 auth_mode: ProviderAuthMode::ServiceAccount,
                 ..
             } => CredentialKind::ServiceAccountJson,
@@ -275,27 +281,27 @@ pub(super) fn credential_kind(config: &ProviderConfig) -> Result<CredentialKind,
 }
 
 pub(super) fn validate_provider_credential(
-    config: &ProviderConfig,
-    credential: &ProviderCredential,
-) -> Result<(), ProviderError> {
+    config: &Config,
+    credential: &Credential,
+) -> Result<(), Error> {
     let expected = credential_kind(config)?;
     let (supplied, borrowed) = match credential {
-        ProviderCredential::None => (CredentialKind::None, BorrowedCredential::None),
-        ProviderCredential::ApiKey(value) => (
+        Credential::None => (CredentialKind::None, BorrowedCredential::None),
+        Credential::ApiKey(value) => (
             CredentialKind::ApiKey,
             BorrowedCredential::Text(value.as_str()),
         ),
-        ProviderCredential::ServiceAccountJson(value) => (
+        Credential::ServiceAccountJson(value) => (
             CredentialKind::ServiceAccountJson,
             BorrowedCredential::Text(value.as_str()),
         ),
-        ProviderCredential::AwsStatic(value) => (
+        Credential::AwsStatic(value) => (
             CredentialKind::AwsStatic,
             BorrowedCredential::Bytes(value.as_slice()),
         ),
     };
     if expected != supplied {
-        return Err(ProviderError::credential(
+        return Err(Error::credential(
             "provider credential does not match its authentication mode",
         ));
     }
@@ -304,9 +310,7 @@ pub(super) fn validate_provider_credential(
 
 /// Validates connector configuration without acquiring default credentials or
 /// issuing network I/O.
-pub(super) fn validate_connector_configuration(
-    spec: ConnectorSpec<'_>,
-) -> Result<(), ProviderError> {
+pub(super) fn validate_connector_configuration(spec: ConnectorSpec<'_>) -> Result<(), Error> {
     connector_configuration(spec).map(|_| ())
 }
 
@@ -314,7 +318,7 @@ pub(super) fn validate_connector_configuration(
 pub(super) fn validate_connector_configuration_with_policy(
     spec: ConnectorSpec<'_>,
     allow_unsafe_test_targets: bool,
-) -> Result<(), ProviderError> {
+) -> Result<(), Error> {
     connector_configuration_with_policy(spec, allow_unsafe_test_targets).map(|_| ())
 }
 
@@ -323,23 +327,23 @@ pub(super) fn validate_connector_configuration_with_policy(
 pub(super) fn validate_connector_credential(
     spec: ConnectorSpec<'_>,
     credential: BorrowedCredential<'_>,
-) -> Result<(), ProviderError> {
+) -> Result<(), Error> {
     match spec.kind {
         ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => OpenAiApiKey::new(
             text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
-        .map_err(ProviderError::credential),
+        .map_err(Error::credential),
         ProviderKind::Anthropic => AnthropicApiKey::new(
             text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
-        .map_err(ProviderError::credential),
+        .map_err(Error::credential),
         ProviderKind::Gemini => GeminiApiKey::new(
             text_credential(credential, "Gemini provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
-        .map_err(ProviderError::credential),
+        .map_err(Error::credential),
         ProviderKind::VertexAi if spec.auth_mode == ProviderAuthMode::ServiceAccount => {
             VertexConnector::with_service_account_json(
                 vertex_configuration(spec)?,
@@ -349,9 +353,9 @@ pub(super) fn validate_connector_credential(
                 )?,
             )
             .map(|_| ())
-            .map_err(ProviderError::credential)
+            .map_err(Error::credential)
         }
-        ProviderKind::VertexAi => Err(ProviderError::credential(
+        ProviderKind::VertexAi => Err(Error::credential(
             "ADC providers do not accept stored credentials",
         )),
         ProviderKind::Bedrock if spec.auth_mode == ProviderAuthMode::Static => {
@@ -360,16 +364,16 @@ pub(super) fn validate_connector_credential(
                 "Bedrock static credential is missing",
             )?)
             .map(|_| ())
-            .map_err(ProviderError::credential)
+            .map_err(Error::credential)
         }
-        ProviderKind::Bedrock => Err(ProviderError::credential(
+        ProviderKind::Bedrock => Err(Error::credential(
             "default-chain providers do not accept stored credentials",
         )),
         ProviderKind::AzureOpenAi => AzureOpenAiApiKey::new(
             text_credential(credential, "Azure OpenAI credential is missing")?.to_owned(),
         )
         .map(|_| ())
-        .map_err(ProviderError::credential),
+        .map_err(Error::credential),
     }
 }
 
@@ -400,32 +404,32 @@ pub(super) enum BedrockAuthMode {
 
 pub(super) fn connector_configuration(
     spec: ConnectorSpec<'_>,
-) -> Result<ConnectorConfiguration, ProviderError> {
+) -> Result<ConnectorConfiguration, Error> {
     connector_configuration_with_policy(spec, false)
 }
 
 pub(super) fn connector_configuration_with_policy(
     spec: ConnectorSpec<'_>,
     allow_unsafe_test_targets: bool,
-) -> Result<ConnectorConfiguration, ProviderError> {
+) -> Result<ConnectorConfiguration, Error> {
     match spec.kind {
         ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => spec
             .endpoint
             .map(|endpoint| open_ai_configuration(endpoint, allow_unsafe_test_targets))
             .transpose()
             .map(|configuration| ConnectorConfiguration::OpenAi(configuration.unwrap_or_default()))
-            .map_err(ProviderError::configuration),
+            .map_err(Error::configuration),
         ProviderKind::Anthropic => {
             let mut configuration = spec
                 .endpoint
                 .map(|endpoint| anthropic_configuration(endpoint, allow_unsafe_test_targets))
                 .transpose()
-                .map_err(ProviderError::configuration)?
+                .map_err(Error::configuration)?
                 .unwrap_or_default();
             if let Some(version) = spec.api_version {
                 configuration = configuration
                     .with_api_version(version.to_owned())
-                    .map_err(ProviderError::configuration)?;
+                    .map_err(Error::configuration)?;
             }
             Ok(ConnectorConfiguration::Anthropic(configuration))
         }
@@ -434,14 +438,14 @@ pub(super) fn connector_configuration_with_policy(
             .map(|endpoint| gemini_configuration(endpoint, allow_unsafe_test_targets))
             .transpose()
             .map(|configuration| ConnectorConfiguration::Gemini(configuration.unwrap_or_default()))
-            .map_err(ProviderError::configuration),
+            .map_err(Error::configuration),
         ProviderKind::VertexAi => {
             let configuration = vertex_configuration(spec)?;
             let auth_mode = match spec.auth_mode {
                 ProviderAuthMode::ApplicationDefault => VertexAuthMode::ApplicationDefault,
                 ProviderAuthMode::ServiceAccount => VertexAuthMode::ServiceAccount,
                 mode => {
-                    return Err(ProviderError::configuration(format!(
+                    return Err(Error::configuration(format!(
                         "Unsupported Vertex AI authentication mode {mode}"
                     )));
                 }
@@ -456,12 +460,12 @@ pub(super) fn connector_configuration_with_policy(
                 spec.cloud_region,
                 "Bedrock AWS region is missing",
             )?)
-            .map_err(ProviderError::configuration)?;
+            .map_err(Error::configuration)?;
             let auth_mode = match spec.auth_mode {
                 ProviderAuthMode::DefaultChain => BedrockAuthMode::DefaultChain,
                 ProviderAuthMode::Static => BedrockAuthMode::Static,
                 mode => {
-                    return Err(ProviderError::configuration(format!(
+                    return Err(Error::configuration(format!(
                         "Unsupported Bedrock authentication mode {mode}"
                     )));
                 }
@@ -485,7 +489,7 @@ pub(super) fn connector_configuration_with_policy(
                 "Azure OpenAI API version is missing",
             )?;
             if spec.auth_mode != ProviderAuthMode::ApiKey {
-                return Err(ProviderError::configuration(format!(
+                return Err(Error::configuration(format!(
                     "Unsupported Azure OpenAI authentication mode {}",
                     spec.auth_mode
                 )));
@@ -497,7 +501,7 @@ pub(super) fn connector_configuration_with_policy(
                     api_version,
                     allow_unsafe_test_targets,
                 )
-                .map_err(ProviderError::configuration)?,
+                .map_err(Error::configuration)?,
             )))
         }
     }
@@ -526,7 +530,7 @@ fn anthropic_configuration(
     if allow_unsafe_test_targets {
         return Ok(AnthropicConnectorConfig::for_local_test(
             endpoint,
-            crate::providers::anthropic::ConnectorTimeouts::default(),
+            crate::providers::connector::Timeouts::default(),
         ));
     }
     #[cfg(not(any(test, feature = "test-util")))]
@@ -542,7 +546,7 @@ fn gemini_configuration(
     if allow_unsafe_test_targets {
         return Ok(GeminiConnectorConfig::for_local_test(
             endpoint,
-            crate::providers::gemini::ConnectorTimeouts::default(),
+            crate::providers::connector::Timeouts::default(),
         ));
     }
     #[cfg(not(any(test, feature = "test-util")))]
@@ -569,51 +573,51 @@ fn azure_open_ai_configuration(
     AzureOpenAiConnectorConfig::new(endpoint, deployment.to_owned(), api_version.to_owned())
 }
 
-fn vertex_configuration(spec: ConnectorSpec<'_>) -> Result<VertexConnectorConfig, ProviderError> {
+fn vertex_configuration(spec: ConnectorSpec<'_>) -> Result<VertexConnectorConfig, Error> {
     VertexConnectorConfig::new(
         required_configuration_field(spec.cloud_project, "Vertex AI cloud project is missing")?,
         required_configuration_field(spec.cloud_region, "Vertex AI cloud location is missing")?,
         required_configuration_field(spec.probe_model, "Vertex AI probe model is missing")?,
     )
-    .map_err(ProviderError::configuration)
+    .map_err(Error::configuration)
 }
 
 fn required_configuration_field<'a>(
     value: Option<&'a str>,
     message: &'static str,
-) -> Result<&'a str, ProviderError> {
-    value.ok_or_else(|| ProviderError::configuration(message))
+) -> Result<&'a str, Error> {
+    value.ok_or_else(|| Error::configuration(message))
 }
 
 pub(super) fn text_credential<'a>(
     credential: BorrowedCredential<'a>,
     missing: &'static str,
-) -> Result<&'a str, ProviderError> {
+) -> Result<&'a str, Error> {
     match credential {
         BorrowedCredential::Text(value) => Ok(value),
-        BorrowedCredential::Bytes(_) => Err(ProviderError::credential(
-            "provider credential is not valid UTF-8",
-        )),
-        BorrowedCredential::None => Err(ProviderError::credential(missing)),
+        BorrowedCredential::Bytes(_) => {
+            Err(Error::credential("provider credential is not valid UTF-8"))
+        }
+        BorrowedCredential::None => Err(Error::credential(missing)),
     }
 }
 
 pub(super) fn bytes_credential<'a>(
     credential: BorrowedCredential<'a>,
     missing: &'static str,
-) -> Result<&'a [u8], ProviderError> {
+) -> Result<&'a [u8], Error> {
     match credential {
         BorrowedCredential::Text(value) => Ok(value.as_bytes()),
         BorrowedCredential::Bytes(value) => Ok(value),
-        BorrowedCredential::None => Err(ProviderError::credential(missing)),
+        BorrowedCredential::None => Err(Error::credential(missing)),
     }
 }
 
 pub(super) fn no_credential(
     credential: BorrowedCredential<'_>,
     message: &'static str,
-) -> Result<(), ProviderError> {
+) -> Result<(), Error> {
     matches!(credential, BorrowedCredential::None)
         .then_some(())
-        .ok_or_else(|| ProviderError::credential(message))
+        .ok_or_else(|| Error::credential(message))
 }

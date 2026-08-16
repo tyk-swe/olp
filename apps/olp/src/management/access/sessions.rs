@@ -4,7 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use olp_engine::domain::Permission;
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -16,7 +16,7 @@ use crate::management::{
     permissions::require_permission,
     sessions::{require_mutation_session, require_read_session},
 };
-use crate::{ManagementState, Problem};
+use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 #[derive(Debug, Deserialize)]
 pub(in crate::management) struct SessionPageQuery {

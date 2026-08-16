@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CanonicalError, MediaHandle, MediaSource, SourceExtensions, Usage};
+use super::{
+    events::{Error, Usage},
+    requests::{MediaHandle, MediaSource, SourceExtensions},
+};
 
 /// A provider-neutral result from an embeddings operation.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -116,7 +119,7 @@ pub struct VideoJobResult {
     pub prompt: Option<String>,
     pub seconds: Option<String>,
     pub size: Option<String>,
-    pub error: Option<CanonicalError>,
+    pub error: Option<Error>,
     #[serde(default)]
     pub extensions: SourceExtensions,
 }

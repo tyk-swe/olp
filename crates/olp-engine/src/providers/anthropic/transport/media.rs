@@ -1,5 +1,8 @@
-use crate::domain::{MediaSpool, TransportError, media_handle_from_inline_marker};
-use crate::protocols::anthropic::{ContentBlock, Message, MessageContent};
+use crate::domain::{
+    canonical::requests::media_handle_from_inline_marker,
+    ports::{MediaSpool, TransportError},
+};
+use crate::protocols::anthropic::dto::{ContentBlock, Message, MessageContent};
 
 use crate::providers::transport_common::{protocol_error, read_inline_media};
 
@@ -32,7 +35,7 @@ async fn hydrate_anthropic_block(
             }
         }
         ContentBlock::ToolResult(result) => {
-            if let Some(crate::protocols::anthropic::ToolResultContent::Blocks(blocks)) =
+            if let Some(crate::protocols::anthropic::dto::ToolResultContent::Blocks(blocks)) =
                 &mut result.content
             {
                 for block in blocks {

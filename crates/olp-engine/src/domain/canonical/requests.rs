@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::domain::RouteSlug;
+use crate::domain::ids::RouteSlug;
 
-use super::{OperationKind, Surface};
+use super::identity::{OperationKind, Surface};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "operation", content = "request", rename_all = "snake_case")]

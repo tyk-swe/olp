@@ -5,10 +5,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{
-    ApiKey, ApiKeyLookupId, OperationKind, ProviderId, RouteSlug, RuntimeGenerationId, TargetId,
+    auth::ApiKey,
+    canonical::identity::OperationKind,
+    ids::{ApiKeyLookupId, ProviderId, RouteSlug, RuntimeGenerationId, TargetId},
 };
 
-use super::{Provider, Route, RouteValidationError};
+use super::{
+    provider::Provider,
+    route::{Error as RouteError, Route},
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RuntimeGeneration {
@@ -18,7 +23,7 @@ pub struct RuntimeGeneration {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RuntimeSnapshot {
+pub struct Snapshot {
     pub generation: RuntimeGeneration,
     #[serde(default)]
     pub providers: BTreeMap<ProviderId, Provider>,
@@ -28,15 +33,15 @@ pub struct RuntimeSnapshot {
     pub api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
 }
 
-impl RuntimeSnapshot {
+impl Snapshot {
     pub fn from_persisted_slice(payload: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(payload)
     }
 
-    pub fn validate(&self) -> Result<(), SnapshotValidationError> {
+    pub fn validate(&self) -> Result<(), Error> {
         for (provider_id, provider) in &self.providers {
             if *provider_id != provider.id {
-                return Err(SnapshotValidationError::ProviderKeyMismatch {
+                return Err(Error::ProviderKeyMismatch {
                     map_key: *provider_id,
                     provider_id: provider.id,
                 });
@@ -44,7 +49,7 @@ impl RuntimeSnapshot {
         }
         for (lookup_id, api_key) in &self.api_keys {
             if lookup_id != &api_key.lookup_id {
-                return Err(SnapshotValidationError::ApiKeyLookupMismatch {
+                return Err(Error::ApiKeyLookupMismatch {
                     map_key: lookup_id.clone(),
                     key_lookup_id: api_key.lookup_id.clone(),
                 });
@@ -53,20 +58,18 @@ impl RuntimeSnapshot {
 
         for (slug, route) in &self.routes {
             if slug != &route.slug {
-                return Err(SnapshotValidationError::RouteKeyMismatch {
+                return Err(Error::RouteKeyMismatch {
                     map_key: slug.clone(),
                     route_slug: route.slug.clone(),
                 });
             }
-            route
-                .validate()
-                .map_err(|source| SnapshotValidationError::InvalidRoute {
-                    slug: slug.clone(),
-                    source,
-                })?;
+            route.validate().map_err(|source| Error::InvalidRoute {
+                slug: slug.clone(),
+                source,
+            })?;
             for target in &route.targets {
                 if !self.providers.contains_key(&target.provider_id) {
-                    return Err(SnapshotValidationError::UnknownProvider {
+                    return Err(Error::UnknownProvider {
                         slug: slug.clone(),
                         target_id: target.id,
                         provider_id: target.provider_id,
@@ -86,7 +89,7 @@ impl RuntimeSnapshot {
                         })
                 });
                 if !has_eligible_target {
-                    return Err(SnapshotValidationError::NoEligibleTarget {
+                    return Err(Error::NoEligibleTarget {
                         slug: slug.clone(),
                         operation: *operation,
                     });
@@ -99,7 +102,7 @@ impl RuntimeSnapshot {
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum SnapshotValidationError {
+pub enum Error {
     #[error("provider map key {map_key} does not match provider ID {provider_id}")]
     ProviderKeyMismatch {
         map_key: ProviderId,
@@ -116,10 +119,7 @@ pub enum SnapshotValidationError {
         route_slug: RouteSlug,
     },
     #[error("route {slug} is invalid: {source}")]
-    InvalidRoute {
-        slug: RouteSlug,
-        source: RouteValidationError,
-    },
+    InvalidRoute { slug: RouteSlug, source: RouteError },
     #[error("route {slug} target {target_id} refers to unknown provider {provider_id}")]
     UnknownProvider {
         slug: RouteSlug,

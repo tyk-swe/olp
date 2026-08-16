@@ -32,7 +32,7 @@ fn inference_error_debug_redacts_client_message() {
 async fn unary_openai_route_authenticates_routes_and_encodes() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(4);
+        olp_engine::inference::request_metadata::Emitter::bounded(4);
     state.replace_request_metadata_for_test(emitter);
     let response = tokio::time::timeout(
         Duration::from_millis(250),
@@ -219,20 +219,23 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
     install_result(
         &state,
         OperationKind::Embeddings,
-        CanonicalResult::Embeddings(olp_engine::domain::EmbeddingsResult {
+        CanonicalResult::Embeddings(olp_engine::domain::canonical::results::EmbeddingsResult {
             model: Some("upstream-model".into()),
-            data: vec![olp_engine::domain::EmbeddingVector {
+            data: vec![olp_engine::domain::canonical::results::EmbeddingVector {
                 index: 0,
                 values: vec![0.25, -0.5],
             }],
-            usage: Some(olp_engine::domain::Usage {
+            usage: Some(olp_engine::domain::canonical::events::Usage {
                 input_tokens: 1,
                 output_tokens: 0,
                 total_tokens: 1,
                 cached_input_tokens: None,
                 reasoning_tokens: None,
             }),
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
     let response = crate::public_http::router::gateway_router_for_test(state)
@@ -257,14 +260,17 @@ async fn embeddings_surface_routes_and_encodes_typed_result() {
 async fn incompatible_unary_result_is_finalized_as_protocol_failure() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     install_result(
         &state,
         OperationKind::TokenCount,
-        CanonicalResult::ModelList(olp_engine::domain::ModelListResult {
+        CanonicalResult::ModelList(olp_engine::domain::canonical::results::ModelListResult {
             models: Vec::new(),
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
 
@@ -293,9 +299,12 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
     install_result(
         &state,
         OperationKind::TokenCount,
-        CanonicalResult::TokenCount(olp_engine::domain::TokenCountResult {
+        CanonicalResult::TokenCount(olp_engine::domain::canonical::results::TokenCountResult {
             input_tokens: 9,
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
     let response = post_json(
@@ -313,15 +322,18 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
     install_result(
         &state,
         OperationKind::Moderation,
-        CanonicalResult::Moderation(olp_engine::domain::ModerationResult {
+        CanonicalResult::Moderation(olp_engine::domain::canonical::results::ModerationResult {
             id: Some("modr-upstream".to_owned()),
             model: Some("omni-moderation-latest".to_owned()),
-            results: vec![olp_engine::domain::ModerationItem {
+            results: vec![olp_engine::domain::canonical::results::ModerationItem {
                 flagged: true,
                 categories: BTreeMap::from([("violence".to_owned(), true)]),
                 category_scores: BTreeMap::from([("violence".to_owned(), 0.9)]),
             }],
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
     let response = post_json(
@@ -338,16 +350,19 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
     assert_eq!(body["results"][0]["flagged"], true);
 
     let image_result = || {
-        CanonicalResult::Images(olp_engine::domain::ImagesResult {
+        CanonicalResult::Images(olp_engine::domain::canonical::results::ImagesResult {
             created_at: Some(1_800_000_000),
-            images: vec![olp_engine::domain::ImageArtifact {
-                source: olp_engine::domain::MediaSource::Uri(
+            images: vec![olp_engine::domain::canonical::results::ImageArtifact {
+                source: olp_engine::domain::canonical::requests::MediaSource::Uri(
                     "https://images.example/result.png".into(),
                 ),
                 revised_prompt: Some("revised".into()),
             }],
             usage: None,
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         })
     };
     install_result(&state, OperationKind::ImageGeneration, image_result());
@@ -390,13 +405,18 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
     install_result(
         &state,
         OperationKind::Transcription,
-        CanonicalResult::Transcription(olp_engine::domain::TranscriptionResult {
-            text: "transcribed".to_owned(),
-            language: Some("en".to_owned()),
-            duration_seconds: Some(1.0),
-            segments: Vec::new(),
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-        }),
+        CanonicalResult::Transcription(
+            olp_engine::domain::canonical::results::TranscriptionResult {
+                text: "transcribed".to_owned(),
+                language: Some("en".to_owned()),
+                duration_seconds: Some(1.0),
+                segments: Vec::new(),
+                extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                    Surface::OpenAi,
+                    BTreeMap::new(),
+                ),
+            },
+        ),
     );
     let response = post_multipart(
         &state,
@@ -415,11 +435,11 @@ async fn selected_openai_unary_surfaces_route_and_encode_native_results() {
 async fn speech_surface_streams_bounded_spooled_result() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     let artifact = state
         .media_spool()
-        .put(olp_engine::domain::MediaUpload {
+        .put(olp_engine::domain::ports::MediaUpload {
             filename: "speech.mp3".into(),
             content_type: Some("audio/mpeg".into()),
             maximum_length: 32,
@@ -432,9 +452,12 @@ async fn speech_surface_streams_bounded_spooled_result() {
     install_result(
         &state,
         OperationKind::Speech,
-        CanonicalResult::Speech(olp_engine::domain::SpeechResult {
+        CanonicalResult::Speech(olp_engine::domain::canonical::results::SpeechResult {
             audio: artifact,
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
     let response = post_json(
@@ -468,11 +491,11 @@ async fn speech_surface_streams_bounded_spooled_result() {
 async fn dropping_lazy_speech_body_records_client_cancellation() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     let artifact = state
         .media_spool()
-        .put(olp_engine::domain::MediaUpload {
+        .put(olp_engine::domain::ports::MediaUpload {
             filename: "speech.mp3".into(),
             content_type: Some("audio/mpeg".into()),
             maximum_length: 32,
@@ -485,9 +508,12 @@ async fn dropping_lazy_speech_body_records_client_cancellation() {
     install_result(
         &state,
         OperationKind::Speech,
-        CanonicalResult::Speech(olp_engine::domain::SpeechResult {
+        CanonicalResult::Speech(olp_engine::domain::canonical::results::SpeechResult {
             audio: artifact,
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::OpenAi,
+                BTreeMap::new(),
+            ),
         }),
     );
 

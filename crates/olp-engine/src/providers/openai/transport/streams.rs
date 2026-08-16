@@ -6,23 +6,31 @@ use std::{
 };
 
 use crate::domain::{
-    AttemptFailureClass, CanonicalEvent, CanonicalEventKind, ProviderEventStream, Surface,
-    TransportError, TransportPhase,
+    canonical::{
+        events::{Event, Kind},
+        identity::Surface,
+    },
+    ports::{AttemptFailureClass, ProviderEventStream, TransportError, TransportPhase},
 };
 use crate::protocols::{
     openai::{
-        ChatCompletionResponse, OpenAiChatStreamDecoder, OpenAiResponsesStreamDecoder,
-        ResponseObject, decode_chat_completion_response, decode_response_object,
+        response::{Completion, Decoder as ChatDecoder, decode},
+        responses::{
+            response::{Object, decode_response_object},
+            stream::Decoder as ResponsesDecoder,
+        },
     },
-    sse::{SseDecoder, SseFrame},
+    sse::{Decoder, Frame},
 };
 use futures::{Stream, stream};
 use reqwest::Response;
 use tokio::time::Instant;
 
-use super::{OpenAiConnector, errors::*};
+use super::{Connector, errors::*};
+use crate::providers::transport_common::transport_error;
 use crate::providers::transport_io::{
-    CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream, ProviderResponseIo,
+    ProviderResponseIo,
+    event_stream::{CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream},
 };
 
 pub(super) const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("OpenAI");
@@ -62,7 +70,7 @@ pub(in crate::providers::openai::transport) fn require_content_type(
     RESPONSE_IO.require_content_type(response, expected)
 }
 
-impl OpenAiConnector {
+impl Connector {
     pub(super) fn raw_sse_response(&self, response: DeadlineResponse) -> ProviderEventStream {
         let bytes = RESPONSE_IO.response_stream(
             response.response,
@@ -91,13 +99,12 @@ impl OpenAiConnector {
             )
             .await?;
         let events = if responses_endpoint {
-            let response: ResponseObject = parse_wire("Responses", &body)?;
+            let response: Object = parse_wire("Responses", &body)?;
             decode_response_object(response)
                 .map_err(|error| protocol_decode_error("Responses", error))?
         } else {
-            let response: ChatCompletionResponse = parse_wire("chat", &body)?;
-            decode_chat_completion_response(response)
-                .map_err(|error| protocol_decode_error("chat", error))?
+            let response: Completion = parse_wire("chat", &body)?;
+            decode(response).map_err(|error| protocol_decode_error("chat", error))?
         };
         Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
     }
@@ -117,11 +124,11 @@ impl OpenAiConnector {
             attempt_deadline,
         );
         let decoder = if responses_endpoint {
-            OpenAiEventDecoder::Responses(OpenAiResponsesStreamDecoder::with_max_event_bytes(
+            OpenAiEventDecoder::Responses(ResponsesDecoder::with_max_event_bytes(
                 self.config.max_event_bytes,
             ))
         } else {
-            OpenAiEventDecoder::Chat(OpenAiChatStreamDecoder::with_max_event_bytes(
+            OpenAiEventDecoder::Chat(ChatDecoder::with_max_event_bytes(
                 self.config.max_event_bytes,
             ))
         };
@@ -168,21 +175,21 @@ pub(super) async fn read_deadline_body(
 }
 
 pub(super) enum OpenAiEventDecoder {
-    Chat(OpenAiChatStreamDecoder),
-    Responses(OpenAiResponsesStreamDecoder),
+    Chat(ChatDecoder),
+    Responses(ResponsesDecoder),
 }
 
 impl CanonicalEventDecoder for OpenAiEventDecoder {
     type Error = String;
 
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, String> {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, String> {
         match self {
             Self::Chat(decoder) => decoder.push(bytes).map_err(|error| error.to_string()),
             Self::Responses(decoder) => decoder.push(bytes).map_err(|error| error.to_string()),
         }
     }
 
-    fn finish(&mut self) -> Result<Vec<CanonicalEvent>, String> {
+    fn finish(&mut self) -> Result<Vec<Event>, String> {
         match self {
             Self::Chat(decoder) => decoder.finish().map_err(|error| error.to_string()),
             Self::Responses(decoder) => decoder.finish().map_err(|error| error.to_string()),
@@ -192,8 +199,8 @@ impl CanonicalEventDecoder for OpenAiEventDecoder {
 
 pub(super) struct RawSseEventStream {
     bytes: DeadlineByteStream,
-    decoder: SseDecoder,
-    queued: VecDeque<CanonicalEvent>,
+    decoder: Decoder,
+    queued: VecDeque<Event>,
     sequence: u64,
     committed: bool,
     terminal: bool,
@@ -203,7 +210,7 @@ impl RawSseEventStream {
     pub(super) fn new(bytes: DeadlineByteStream, maximum_event_bytes: usize) -> Self {
         Self {
             bytes,
-            decoder: SseDecoder::new(maximum_event_bytes),
+            decoder: Decoder::new(maximum_event_bytes),
             queued: VecDeque::new(),
             sequence: 0,
             committed: false,
@@ -211,13 +218,13 @@ impl RawSseEventStream {
         }
     }
 
-    fn queue_frames(&mut self, frames: Vec<SseFrame>) -> Result<(), TransportError> {
+    fn queue_frames(&mut self, frames: Vec<Frame>) -> Result<(), TransportError> {
         for frame in frames {
             if self.terminal {
                 return Err(self.protocol_error("OpenAI sent media events after completion"));
             }
             if frame.data.trim() == "[DONE]" {
-                self.push(CanonicalEventKind::Done);
+                self.push(Kind::Done);
                 self.terminal = true;
                 continue;
             }
@@ -230,7 +237,7 @@ impl RawSseEventStream {
                 .or(frame.event.as_deref())
                 .unwrap_or("message")
                 .to_owned();
-            let extensions = crate::domain::SourceExtensions::new(
+            let extensions = crate::domain::canonical::requests::SourceExtensions::new(
                 Surface::OpenAi,
                 std::collections::BTreeMap::from([
                     ("/__olp/raw_sse/data".into(), value),
@@ -240,18 +247,17 @@ impl RawSseEventStream {
                     ),
                 ]),
             );
-            self.push(CanonicalEventKind::SourceExtension { extensions });
+            self.push(Kind::SourceExtension { extensions });
             if is_raw_media_terminal(&kind) {
-                self.push(CanonicalEventKind::Done);
+                self.push(Kind::Done);
                 self.terminal = true;
             }
         }
         Ok(())
     }
 
-    fn push(&mut self, kind: crate::domain::CanonicalEventKind) {
-        self.queued
-            .push_back(CanonicalEvent::new(self.sequence, kind));
+    fn push(&mut self, kind: crate::domain::canonical::events::Kind) {
+        self.queued.push_back(Event::new(self.sequence, kind));
         self.sequence = self.sequence.saturating_add(1);
     }
 
@@ -266,7 +272,7 @@ impl RawSseEventStream {
 }
 
 impl Stream for RawSseEventStream {
-    type Item = Result<CanonicalEvent, TransportError>;
+    type Item = Result<Event, TransportError>;
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {

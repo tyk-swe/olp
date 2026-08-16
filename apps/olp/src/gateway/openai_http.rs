@@ -1,11 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
-use olp_engine::domain::ErrorClass;
-use olp_engine::protocols::sse::{SseFrame, encode_frame};
+use olp_engine::domain::canonical::events::ErrorClass;
+use olp_engine::protocols::sse::{Frame, encode_frame};
 use serde_json::{Value, json};
 
-use super::InferenceError;
+use super::error::InferenceError;
 
 pub(super) fn error_sse(error: &InferenceError) -> Bytes {
     sse_json(&json!({ "error": {
@@ -30,7 +30,7 @@ pub(super) fn error_type(class: ErrorClass) -> &'static str {
 
 pub(super) fn sse_json(value: &Value) -> Bytes {
     Bytes::from(
-        encode_frame(&SseFrame {
+        encode_frame(&Frame {
             event: None,
             data: value.to_string(),
             id: None,

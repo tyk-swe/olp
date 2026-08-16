@@ -6,18 +6,20 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::domain::{BoxFuture, ProviderKind};
+use crate::domain::{ports::BoxFuture, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
 
 use crate::providers::{
-    ProviderFacade, ProviderFactory,
     bedrock::{
-        BedrockConnector, BedrockCredentials, ConnectorConfig as BedrockConnectorConfig,
-        StaticCredentials,
+        ConnectorConfig as BedrockConnectorConfig, Credentials, StaticCredentials,
+        transport::Connector as BedrockConnector,
     },
-    factory::{ProviderConfig, ProviderCredential},
+    factory::{
+        assembly::{Facade, Factory},
+        configuration::{Config, Credential},
+    },
     gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken},
-    vertex::{ConnectorConfig as VertexConnectorConfig, VertexConnector},
+    vertex::{Connector as VertexConnector, ConnectorConfig as VertexConnectorConfig},
 };
 
 pub const API_KEY: &str = "olp-conformance-secret";
@@ -36,7 +38,7 @@ impl BearerTokenProvider for StaticToken {
 
 /// Builds a real connector against one loopback emulator origin.
 ///
-/// HTTP API-key connectors pass through [`ProviderFactory`]. Vertex and
+/// HTTP API-key connectors pass through [`Factory`]. Vertex and
 /// Bedrock use their existing cloud-emulator seams because their production
 /// configuration deliberately has no user-selectable endpoint field.
 pub async fn local_provider(
@@ -45,32 +47,32 @@ pub async fn local_provider(
 ) -> Result<LocalProvider, LocalProviderError> {
     let facade = match kind {
         ProviderKind::OpenAi => {
-            factory_provider(ProviderConfig::OpenAi {
+            factory_provider(Config::OpenAi {
                 endpoint: Some(format!("{origin}/v1")),
             })
             .await?
         }
         ProviderKind::OpenAiCompatible => {
-            factory_provider(ProviderConfig::OpenAiCompatible {
+            factory_provider(Config::OpenAiCompatible {
                 endpoint: format!("{origin}/v1"),
             })
             .await?
         }
         ProviderKind::Anthropic => {
-            factory_provider(ProviderConfig::Anthropic {
+            factory_provider(Config::Anthropic {
                 endpoint: Some(format!("{origin}/v1/")),
                 api_version: None,
             })
             .await?
         }
         ProviderKind::Gemini => {
-            factory_provider(ProviderConfig::Gemini {
+            factory_provider(Config::Gemini {
                 endpoint: Some(format!("{origin}/v1beta/")),
             })
             .await?
         }
         ProviderKind::AzureOpenAi => {
-            factory_provider(ProviderConfig::AzureOpenAi {
+            factory_provider(Config::AzureOpenAi {
                 endpoint: origin.to_owned(),
                 deployment: "conformance-deployment".to_owned(),
                 api_version: "2024-10-21".to_owned(),
@@ -86,9 +88,9 @@ pub async fn local_provider(
                 "us-central1",
                 "conformance-model",
                 &base,
-                crate::providers::gemini::ConnectorTimeouts::default(),
+                crate::providers::connector::Timeouts::default(),
             );
-            ProviderFacade::from_local_vertex(VertexConnector::with_token_provider(
+            Facade::from_local_vertex(VertexConnector::with_token_provider(
                 config,
                 Arc::new(StaticToken),
             ))
@@ -96,7 +98,7 @@ pub async fn local_provider(
         ProviderKind::Bedrock => {
             let config = BedrockConnectorConfig::new("us-east-1")
                 .and_then(|config| {
-                    config.with_timeouts(crate::providers::bedrock::ConnectorTimeouts::default())
+                    config.with_timeouts(crate::providers::connector::Timeouts::default())
                 })
                 .and_then(|config| config.with_endpoint_url(origin))
                 .map_err(|error| LocalProviderError(error.to_string()))?;
@@ -105,33 +107,33 @@ pub async fn local_provider(
             );
             let credentials = StaticCredentials::from_json(document)
                 .map_err(|error| LocalProviderError(error.to_string()))?;
-            ProviderFacade::from_local_bedrock(
-                BedrockConnector::new(config, BedrockCredentials::Static(credentials)).await,
+            Facade::from_local_bedrock(
+                BedrockConnector::new(config, Credentials::Static(credentials)).await,
             )
         }
     };
     Ok(LocalProvider(facade))
 }
 
-async fn factory_provider(config: ProviderConfig) -> Result<ProviderFacade, LocalProviderError> {
-    ProviderFactory::create_with_unsafe_test_endpoints(
+async fn factory_provider(config: Config) -> Result<Facade, LocalProviderError> {
+    Factory::create_with_unsafe_test_endpoints(
         config,
-        ProviderCredential::ApiKey(Zeroizing::new(API_KEY.to_owned())),
+        Credential::ApiKey(Zeroizing::new(API_KEY.to_owned())),
     )
     .await
     .map_err(|error| LocalProviderError(error.to_string()))
 }
 
-pub struct LocalProvider(ProviderFacade);
+pub struct LocalProvider(Facade);
 
 impl LocalProvider {
     #[must_use]
-    pub const fn facade(&self) -> &ProviderFacade {
+    pub const fn facade(&self) -> &Facade {
         &self.0
     }
 
     #[must_use]
-    pub fn into_transport(self) -> Arc<dyn crate::domain::ProviderTransport> {
+    pub fn into_transport(self) -> Arc<dyn crate::domain::ports::ProviderTransport> {
         self.0.into_transport()
     }
 }

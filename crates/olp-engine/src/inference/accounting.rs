@@ -1,5 +1,10 @@
 use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, CanonicalResult, OperationKind, RouteSlug, Surface,
+    canonical::{
+        events::{Event, Kind},
+        identity::{OperationKind, Surface},
+        results::CanonicalResult,
+    },
+    ids::RouteSlug,
 };
 use chrono::Utc;
 use rust_decimal::{Decimal, prelude::FromPrimitive as _};
@@ -7,9 +12,12 @@ use serde_json::Value;
 use tracing::error;
 
 use crate::inference::{
-    InferenceError, InferenceService,
-    limits::{DistributedLimitReservation, InferenceReservation, release_limits},
-    request_metadata::{RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestMetadataEvent},
+    error::Error as InferenceError,
+    limits::{DistributedLimitReservation, Reservation, release},
+    request_metadata::{
+        Event as MetadataEvent, RequestAttemptMetadata, RequestAttemptUsageMetadata,
+    },
+    service::Service,
     telemetry::{elapsed_ms, metadata_status_code},
 };
 
@@ -83,7 +91,7 @@ struct ActiveRequestAttempt {
 
 struct LimitCleanup {
     delta_lease: Option<DistributedLimitReservation>,
-    admission_reservation: Option<InferenceReservation>,
+    admission_reservation: Option<Reservation>,
     admission_reserved_tokens: Option<i64>,
     actual_tokens: Option<i64>,
 }
@@ -99,7 +107,7 @@ impl LimitCleanup {
         if let (Some(reservation), Some(actual)) = (self.admission_reservation, admission_actual) {
             reservation.reconcile(actual).await;
         }
-        release_limits(self.delta_lease, delta_actual).await;
+        release(self.delta_lease, delta_actual).await;
     }
 }
 
@@ -129,7 +137,7 @@ fn split_actual_tokens(
 /// Cancellation-safe request accounting and limit cleanup owned by an active
 /// inference execution.
 pub struct RequestAccountingGuard {
-    service: InferenceService,
+    service: Service,
     generation_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
@@ -144,7 +152,7 @@ pub struct RequestAccountingGuard {
     surface: Surface,
     operation: OperationKind,
     lease: Option<DistributedLimitReservation>,
-    admission_reservation: Option<InferenceReservation>,
+    admission_reservation: Option<Reservation>,
     admission_reserved_tokens: Option<i64>,
     active_attempt: Option<ActiveRequestAttempt>,
     armed: bool,
@@ -152,10 +160,10 @@ pub struct RequestAccountingGuard {
 
 impl RequestAccountingGuard {
     pub(in crate::inference) fn new(
-        service: InferenceService,
+        service: Service,
         input: RequestAccountingInput,
         lease: Option<DistributedLimitReservation>,
-        admission_reservation: Option<InferenceReservation>,
+        admission_reservation: Option<Reservation>,
         admission_reserved_tokens: Option<i64>,
     ) -> Self {
         Self {
@@ -223,7 +231,7 @@ impl RequestAccountingGuard {
         self.usage = usage;
     }
 
-    pub async fn release_limits(&mut self) {
+    pub async fn release(&mut self) {
         let Some(cleanup) = self.take_limit_cleanup() else {
             return;
         };
@@ -234,7 +242,7 @@ impl RequestAccountingGuard {
     }
 
     pub async fn finish(mut self, outcome: RequestOutcome) {
-        self.release_limits().await;
+        self.release().await;
         self.emit(&outcome, true);
         self.armed = false;
     }
@@ -348,8 +356,8 @@ impl UsageCapture {
         self.input_tokens?.checked_add(self.output_tokens?)
     }
 
-    pub fn observe(&mut self, event: &CanonicalEvent) {
-        let CanonicalEventKind::Usage { usage } = &event.kind else {
+    pub fn observe(&mut self, event: &Event) {
+        let Kind::Usage { usage } = &event.kind else {
             return;
         };
         self.observed = true;
@@ -363,8 +371,8 @@ impl UsageCapture {
             && (usage.cached_input_tokens.is_none() || self.cached_input_tokens.is_some());
     }
 
-    pub fn observe_openai_media_event(&mut self, event: &CanonicalEvent) {
-        let CanonicalEventKind::SourceExtension { extensions } = &event.kind else {
+    pub fn observe_openai_media_event(&mut self, event: &Event) {
+        let Kind::SourceExtension { extensions } = &event.kind else {
             return;
         };
         if extensions.source != Some(Surface::OpenAi) {
@@ -420,7 +428,7 @@ pub(in crate::inference) fn usage_from_result(result: &CanonicalResult) -> Usage
                 .and_then(|value| value.parse::<Decimal>().ok()),
         ),
         CanonicalResult::TokenCount(result) => (
-            Some(crate::domain::Usage {
+            Some(crate::domain::canonical::events::Usage {
                 input_tokens: result.input_tokens,
                 output_tokens: 0,
                 total_tokens: result.input_tokens,
@@ -504,7 +512,7 @@ fn update_final_attempt(attempt: &mut RequestAttemptMetadata, update: FinalAttem
     }
 }
 
-fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadataInput<'_>) {
+fn emit_request_metadata_event(service: &Service, input: RequestMetadataInput<'_>) {
     let Some(emitter) = service.request_metadata() else {
         return;
     };
@@ -529,7 +537,7 @@ fn emit_request_metadata_event(service: &InferenceService, input: RequestMetadat
     let upstream_model = attempts
         .last()
         .map(|attempt| attempt.upstream_model.clone());
-    let result = emitter.emit(RequestMetadataEvent {
+    let result = emitter.emit(MetadataEvent {
         event_id: uuid::Uuid::now_v7(),
         request_id: input.request_id,
         runtime_generation_id: input.generation_id,
@@ -572,10 +580,8 @@ mod tests {
         RequestOutcome, UsageCapture, split_actual_tokens, update_final_attempt,
     };
     use crate::{
-        domain::BoxFuture,
-        inference::limits::{
-            DistributedLimitReservation, InferenceReservation, LimitError, LimitLease,
-        },
+        domain::ports::BoxFuture,
+        inference::limits::{DistributedLimitReservation, LimitError, LimitLease, Reservation},
     };
     use chrono::Utc;
     use uuid::Uuid;
@@ -619,7 +625,7 @@ mod tests {
     ) {
         let admission = Arc::new(CleanupEffects::default());
         let delta = Arc::new(CleanupEffects::default());
-        let admission_reservation = InferenceReservation::distributed(recording_lease(&admission));
+        let admission_reservation = Reservation::distributed(recording_lease(&admission));
         let repeated_cleanup = admission_reservation.clone();
         LimitCleanup {
             delta_lease: Some(DistributedLimitReservation::for_test(recording_lease(
@@ -700,7 +706,7 @@ mod tests {
     #[tokio::test]
     async fn cleanup_reconciles_full_usage_against_the_only_existing_reservation() {
         let admission = Arc::new(CleanupEffects::default());
-        let admission_reservation = InferenceReservation::distributed(recording_lease(&admission));
+        let admission_reservation = Reservation::distributed(recording_lease(&admission));
         let admission_release = admission_reservation.clone();
         LimitCleanup {
             delta_lease: None,

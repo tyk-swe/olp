@@ -2,17 +2,19 @@ use axum::{
     http::{HeaderValue, header},
     response::Response,
 };
-use olp_db::{security::RecentAuthMaterial, security::SessionMaterial};
+use olp_db::{
+    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
+};
 use tracing::error;
 
 use crate::{
-    Problem,
+    public_http::problem::Problem,
     public_http::request_cookies::{CSRF_COOKIE, SESSION_COOKIE},
 };
 
 use super::{response_policy::prevent_sensitive_response_caching, sessions::CSRF_HEADER};
 
-pub(crate) use crate::public_http::request_cookies::RECENT_AUTH_COOKIE;
+use crate::public_http::request_cookies::RECENT_AUTH_COOKIE;
 
 pub(crate) fn append_session_cookies(
     response: &mut Response,

@@ -3,12 +3,12 @@ use jsonwebtoken::{
     Algorithm, DecodingKey, Validation, decode, decode_header,
     jwk::{Jwk, JwkSet, KeyOperations, PublicKeyUse},
 };
-use olp_db::{oidc::OidcConfiguration, security::SessionMaterial};
+use olp_db::{oidc::types::OidcConfiguration, security::session_material::SessionMaterial};
 use serde_json::Value;
 
 use super::error::invalid_id_token;
 use super::session::FLOW_TTL;
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 #[derive(Debug)]
 pub(super) struct ValidatedIdentity {

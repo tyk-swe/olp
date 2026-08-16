@@ -1,10 +1,11 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Duration;
 use olp_db::{
-    PgStore, identity::InstallationSetupInput, security::EncryptedSecret, security::MasterKey,
-    security::ReencryptionError, security::SessionMaterial, security::credential_aad,
-    security::hash_password, security::idempotency_replay_aad, security::oidc_client_secret_aad,
-    security::oidc_flow_payload_aad,
+    identity::InstallationSetupInput, security::aad::credential, security::aad::idempotency_replay,
+    security::aad::oidc_client_secret, security::aad::oidc_flow_payload,
+    security::envelope::EncryptedSecret, security::envelope::MasterKey, security::password::hash,
+    security::rotation::ReencryptionError, security::session_material::SessionMaterial,
+    store::Store,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -21,7 +22,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
                 installation_name: "Master-key integration".to_owned(),
                 email: "owner@example.test".to_owned(),
                 display_name: "Owner".to_owned(),
-                password_hash: hash_password("correct horse battery staple").unwrap(),
+                password_hash: hash("correct horse battery staple").unwrap(),
             },
             &owner_session,
             Duration::hours(1),
@@ -45,10 +46,10 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     let provider_id = Uuid::now_v7();
     let credential_id = Uuid::now_v7();
     let credential_plaintext = b"provider-secret";
-    let credential = old_key
+    let encrypted_credential = old_key
         .seal(
             credential_plaintext,
-            &credential_aad(provider_id, credential_id, 1),
+            &credential(provider_id, credential_id, 1),
         )
         .unwrap();
     sqlx::query(
@@ -68,9 +69,9 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     )
     .bind(credential_id)
     .bind(provider_id)
-    .bind(&credential.ciphertext)
-    .bind(credential.nonce.as_slice())
-    .bind(i32::try_from(credential.key_version).unwrap())
+    .bind(&encrypted_credential.ciphertext)
+    .bind(encrypted_credential.nonce.as_slice())
+    .bind(i32::try_from(encrypted_credential.key_version).unwrap())
     .bind(owner.user_id)
     .execute(store.pool())
     .await
@@ -80,7 +81,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     let configuration_etag = Uuid::now_v7();
     let oidc_plaintext = b"oidc-client-secret";
     let oidc_secret = old_key
-        .seal(oidc_plaintext, &oidc_client_secret_aad(configuration_id))
+        .seal(oidc_plaintext, &oidc_client_secret(configuration_id))
         .unwrap();
     sqlx::query(
         "INSERT INTO oidc_configurations \
@@ -101,7 +102,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     let flow_id = Uuid::now_v7();
     let flow_plaintext = br#"{"nonce":"opaque","pkce":"opaque"}"#;
     let flow_secret = old_key
-        .seal(flow_plaintext, &oidc_flow_payload_aad(flow_id))
+        .seal(flow_plaintext, &oidc_flow_payload(flow_id))
         .unwrap();
     sqlx::query(
         "INSERT INTO oidc_authorization_flows \
@@ -132,7 +133,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     let replay_secret = old_key
         .seal(
             replay_plaintext,
-            &idempotency_replay_aad(owner.user_id, operation, idempotency_key),
+            &idempotency_replay(owner.user_id, operation, idempotency_key),
         )
         .unwrap();
     sqlx::query(
@@ -169,7 +170,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     ));
 
     // Authentication happens before any update in a table transaction.
-    let mut tampered = credential.ciphertext.clone();
+    let mut tampered = encrypted_credential.ciphertext.clone();
     tampered[0] ^= 0x80;
     sqlx::query("UPDATE provider_credential_versions SET ciphertext = $1 WHERE id = $2")
         .bind(&tampered)
@@ -190,7 +191,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     .unwrap();
     assert_eq!(version_after_failure, 1);
     sqlx::query("UPDATE provider_credential_versions SET ciphertext = $1 WHERE id = $2")
-        .bind(&credential.ciphertext)
+        .bind(&encrypted_credential.ciphertext)
         .bind(credential_id)
         .execute(store.pool())
         .await
@@ -241,7 +242,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         "SELECT master_key_version AS key_version, nonce, ciphertext AS encrypted \
          FROM provider_credential_versions WHERE id = $1",
         credential_id,
-        &credential_aad(provider_id, credential_id, 1),
+        &credential(provider_id, credential_id, 1),
         credential_plaintext,
     )
     .await;
@@ -251,7 +252,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         "SELECT secret_key_version AS key_version, secret_nonce AS nonce, \
                 encrypted_client_secret AS encrypted FROM oidc_configurations WHERE id = $1",
         configuration_id,
-        &oidc_client_secret_aad(configuration_id),
+        &oidc_client_secret(configuration_id),
         oidc_plaintext,
     )
     .await;
@@ -261,7 +262,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         "SELECT payload_key_version AS key_version, payload_nonce AS nonce, \
                 encrypted_payload AS encrypted FROM oidc_authorization_flows WHERE id = $1",
         flow_id,
-        &oidc_flow_payload_aad(flow_id),
+        &oidc_flow_payload(flow_id),
         flow_plaintext,
     )
     .await;
@@ -271,14 +272,14 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
         "SELECT replay_key_version AS key_version, replay_nonce AS nonce, \
                 replay_ciphertext AS encrypted FROM idempotency_records WHERE id = $1",
         idempotency_id,
-        &idempotency_replay_aad(owner.user_id, operation, idempotency_key),
+        &idempotency_replay(owner.user_id, operation, idempotency_key),
         replay_plaintext,
     )
     .await;
 }
 
 async fn assert_envelope_plaintext(
-    store: &PgStore,
+    store: &Store,
     master_key: &MasterKey,
     query: &'static str,
     row_id: Uuid,

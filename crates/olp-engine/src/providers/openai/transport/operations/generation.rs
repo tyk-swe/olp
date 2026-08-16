@@ -1,17 +1,22 @@
 use crate::domain::{
-    AttemptFailureClass, Operation, ProviderOutput, ProviderRequest, Surface, TransportError,
-    TransportMode, TransportPhase,
+    canonical::{
+        identity::{Surface, TransportMode},
+        requests::Operation,
+    },
+    ports::{AttemptFailureClass, ProviderOutput, ProviderRequest, TransportError, TransportPhase},
 };
 use crate::protocols::openai::{
-    ChatCompletionRequest, encode_chat_completion, encode_response_create,
+    chat::{CompletionRequest, encode_chat_completion},
+    responses::request::encode_response_create,
 };
 use http::{HeaderMap, HeaderValue, header};
 use tokio::time::{Instant, timeout};
 
-use super::super::{OpenAiConnector, errors::*, media::*};
+use super::super::{Connector, errors::*, media::*};
+use crate::providers::{transport_common::transport_error, transport_io::bounded_duration};
 
 pub(super) async fn execute(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only generation requests here.
@@ -140,7 +145,7 @@ pub(super) async fn execute(
     Ok(ProviderOutput::Events(events))
 }
 
-fn require_stream_usage(request: &mut ChatCompletionRequest) -> Result<(), TransportError> {
+fn require_stream_usage(request: &mut CompletionRequest) -> Result<(), TransportError> {
     let options = request
         .extra
         .entry("stream_options".to_owned())

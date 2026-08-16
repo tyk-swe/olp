@@ -7,28 +7,38 @@ use axum::{
 use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, stream};
 use olp_db::{
-    configuration::CapabilityCertificationOutcome, configuration::CapabilityRecord,
-    configuration::ConfigurationError, configuration::DiscoveredModelInput,
-    configuration::ProviderModelInventoryRecord, configuration::ProviderModelRecord,
+    configuration::Error, configuration::resources::CapabilityCertificationOutcome,
+    configuration::resources::CapabilityRecord, configuration::resources::DiscoveredModelInput,
+    configuration::resources::ProviderModelInventoryRecord,
+    configuration::resources::ProviderModelRecord,
 };
 use olp_engine::domain::{
-    CredentialRequirement, ProviderAuthMode, ProviderConfigurationField, ProviderKind,
-    ProviderKindSpec, ProviderPresetSpec, provider_kind_specs,
+    auth::Permission,
+    provider::ProviderAuthMode,
+    provider_configuration::{
+        CredentialRequirement, Field, ProviderKindSpec, ProviderPresetSpec, provider_kind_specs,
+    },
+    routing::provider::ProviderKind,
 };
 use olp_engine::providers::{
-    CapabilityCertificationEvidence, CompatibleCapability, CompatibleCapabilityCertificationError,
-    certifiable_capabilities,
+    factory::certification::{CapabilityCertificationEvidence, certifiable_capabilities},
+    openai::certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        PageQuery, Permission, if_match, json_payload, map_configuration, page,
-        require_mutation_session, require_permission, require_read_session, with_etag,
+        error_mapping::map_configuration,
+        json_payload::json_payload,
+        pagination::{PageQuery, page},
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 use super::manage::{ProviderDetailResponse, load_provider_detail};
@@ -89,7 +99,7 @@ pub(crate) struct ProviderAuthCapabilityResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderFieldCapabilityResponse {
-    pub field: ProviderConfigurationField,
+    pub field: Field,
     pub label: String,
     pub required: bool,
 }
@@ -409,7 +419,7 @@ fn capability_record(input: CapabilityInput) -> Result<CapabilityRecord, Problem
         mode: input.mode.parse().map_err(|_| {
             Problem::field_validation("capabilities", "A reviewed mode is invalid.")
         })?,
-        source: olp_engine::domain::CapabilitySource::Declared,
+        source: olp_engine::domain::provider::CapabilitySource::Declared,
         certified_at: None,
     })
 }
@@ -580,10 +590,10 @@ pub(crate) async fn certify_provider_model(
         .await
         .map_err(map_configuration)?;
     if provider.etag != expected_etag {
-        return Err(map_configuration(ConfigurationError::PreconditionFailed));
+        return Err(map_configuration(Error::PreconditionFailed));
     }
-    if provider.state != olp_engine::domain::ProviderState::Draft {
-        return Err(map_configuration(ConfigurationError::InUse));
+    if provider.state != olp_engine::domain::provider::ProviderState::Draft {
+        return Err(map_configuration(Error::InUse));
     }
     let model = store
         .get_provider_model(provider_id, model_id)
@@ -711,16 +721,18 @@ pub(crate) fn certification_item(
     }
 }
 
-const fn transport_failure_code(class: olp_engine::domain::AttemptFailureClass) -> &'static str {
+const fn transport_failure_code(
+    class: olp_engine::domain::ports::AttemptFailureClass,
+) -> &'static str {
     match class {
-        olp_engine::domain::AttemptFailureClass::Connect => "connect_failed",
-        olp_engine::domain::AttemptFailureClass::Timeout => "timeout",
-        olp_engine::domain::AttemptFailureClass::RateLimit => "rate_limited",
-        olp_engine::domain::AttemptFailureClass::UpstreamServer => "upstream_server_error",
-        olp_engine::domain::AttemptFailureClass::UpstreamClient => "upstream_rejected_probe",
-        olp_engine::domain::AttemptFailureClass::Protocol => "protocol_mismatch",
-        olp_engine::domain::AttemptFailureClass::Cancelled => "cancelled",
-        olp_engine::domain::AttemptFailureClass::Ambiguous => "ambiguous_result",
+        olp_engine::domain::ports::AttemptFailureClass::Connect => "connect_failed",
+        olp_engine::domain::ports::AttemptFailureClass::Timeout => "timeout",
+        olp_engine::domain::ports::AttemptFailureClass::RateLimit => "rate_limited",
+        olp_engine::domain::ports::AttemptFailureClass::UpstreamServer => "upstream_server_error",
+        olp_engine::domain::ports::AttemptFailureClass::UpstreamClient => "upstream_rejected_probe",
+        olp_engine::domain::ports::AttemptFailureClass::Protocol => "protocol_mismatch",
+        olp_engine::domain::ports::AttemptFailureClass::Cancelled => "cancelled",
+        olp_engine::domain::ports::AttemptFailureClass::Ambiguous => "ambiguous_result",
     }
 }
 
@@ -728,8 +740,9 @@ const fn transport_failure_code(class: olp_engine::domain::AttemptFailureClass) 
 mod model_tests {
     use chrono::Utc;
     use olp_engine::domain::{
-        AttemptFailureClass, CapabilitySource, OperationKind, Surface, TransportMode,
-        TransportPhase,
+        canonical::identity::{OperationKind, Surface, TransportMode},
+        ports::{AttemptFailureClass, TransportPhase},
+        provider::CapabilitySource,
     };
 
     use super::*;

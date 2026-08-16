@@ -1,4 +1,37 @@
-use super::*;
+use uuid::Uuid;
+use zeroize::Zeroizing;
+
+use crate::{
+    domain::{
+        canonical::{
+            identity::{OperationKind, Surface, TransportMode},
+            requests::SourceExtensions,
+            results::CanonicalResult,
+        },
+        ports::{ProviderOutput, ProviderRequest, ProviderTransport},
+        provider::ProviderAuthMode,
+        routing::provider::ProviderKind,
+    },
+    providers::{
+        factory::{
+            assembly::Factory,
+            certification::{
+                certifiable_capabilities, execute_native_capability_probe, native_probe_operation,
+                supports,
+            },
+            configuration::{
+                BorrowedCredential, Config, ConnectorSpec, Credential, CredentialKind,
+                RawCredentialKind, raw_credential_kind, validate_connector_credential,
+            },
+            overrides::Registry,
+        },
+        openai::{
+            ApiKey, ConnectorConfig as OpenAiConnectorConfig,
+            certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
+            transport::Connector,
+        },
+    },
+};
 
 fn spec(kind: ProviderKind, auth_mode: ProviderAuthMode) -> ConnectorSpec<'static> {
     ConnectorSpec {
@@ -48,29 +81,23 @@ fn credential_kind_keeps_text_and_byte_authentication_distinct() {
 #[test]
 fn public_factory_covers_every_provider_authentication_pairing() {
     let cases = [
+        (Config::OpenAi { endpoint: None }, CredentialKind::ApiKey),
         (
-            ProviderConfig::OpenAi { endpoint: None },
-            CredentialKind::ApiKey,
-        ),
-        (
-            ProviderConfig::OpenAiCompatible {
+            Config::OpenAiCompatible {
                 endpoint: "https://provider.example.test/v1".to_owned(),
             },
             CredentialKind::ApiKey,
         ),
         (
-            ProviderConfig::Anthropic {
+            Config::Anthropic {
                 endpoint: None,
                 api_version: None,
             },
             CredentialKind::ApiKey,
         ),
+        (Config::Gemini { endpoint: None }, CredentialKind::ApiKey),
         (
-            ProviderConfig::Gemini { endpoint: None },
-            CredentialKind::ApiKey,
-        ),
-        (
-            ProviderConfig::VertexAi {
+            Config::VertexAi {
                 project: "project".to_owned(),
                 location: "us-central1".to_owned(),
                 probe_model: "model".to_owned(),
@@ -79,7 +106,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
             CredentialKind::None,
         ),
         (
-            ProviderConfig::VertexAi {
+            Config::VertexAi {
                 project: "project".to_owned(),
                 location: "us-central1".to_owned(),
                 probe_model: "model".to_owned(),
@@ -88,21 +115,21 @@ fn public_factory_covers_every_provider_authentication_pairing() {
             CredentialKind::ServiceAccountJson,
         ),
         (
-            ProviderConfig::Bedrock {
+            Config::Bedrock {
                 region: "us-east-1".to_owned(),
                 auth_mode: ProviderAuthMode::DefaultChain,
             },
             CredentialKind::None,
         ),
         (
-            ProviderConfig::Bedrock {
+            Config::Bedrock {
                 region: "us-east-1".to_owned(),
                 auth_mode: ProviderAuthMode::Static,
             },
             CredentialKind::AwsStatic,
         ),
         (
-            ProviderConfig::AzureOpenAi {
+            Config::AzureOpenAi {
                 endpoint: "https://resource.openai.azure.com".to_owned(),
                 deployment: "deployment".to_owned(),
                 api_version: "2025-04-01-preview".to_owned(),
@@ -112,22 +139,22 @@ fn public_factory_covers_every_provider_authentication_pairing() {
     ];
 
     for (config, expected) in cases {
-        assert_eq!(ProviderFactory::credential_kind(&config).unwrap(), expected);
+        assert_eq!(Factory::credential_kind(&config).unwrap(), expected);
     }
 }
 
 #[test]
 fn semantic_credentials_are_redacted_and_mismatches_are_rejected() {
-    let credential = ProviderCredential::ApiKey(Zeroizing::new("very-secret".to_owned()));
+    let credential = Credential::ApiKey(Zeroizing::new("very-secret".to_owned()));
     let debug = format!("{credential:?}");
     assert!(debug.contains("[REDACTED]"));
     assert!(!debug.contains("very-secret"));
 
-    let config = ProviderConfig::Bedrock {
+    let config = Config::Bedrock {
         region: "us-east-1".to_owned(),
         auth_mode: ProviderAuthMode::Static,
     };
-    let error = ProviderFactory::validate_credential(&config, &credential).unwrap_err();
+    let error = Factory::validate_credential(&config, &credential).unwrap_err();
     assert_eq!(
         error.to_string(),
         "provider credential does not match its authentication mode"
@@ -137,31 +164,31 @@ fn semantic_credentials_are_redacted_and_mismatches_are_rejected() {
 
 #[test]
 fn certification_matrix_excludes_unprovable_compatible_tuples() {
-    assert!(supports_capability_certification(
+    assert!(supports(
         ProviderKind::OpenAiCompatible,
         OperationKind::Generation,
         Surface::OpenAi,
         TransportMode::Streaming,
     ));
-    assert!(supports_capability_certification(
+    assert!(supports(
         ProviderKind::OpenAiCompatible,
         OperationKind::Moderation,
         Surface::OpenAi,
         TransportMode::Unary,
     ));
-    assert!(!supports_capability_certification(
+    assert!(!supports(
         ProviderKind::OpenAiCompatible,
         OperationKind::Generation,
         Surface::Anthropic,
         TransportMode::Unary,
     ));
-    assert!(!supports_capability_certification(
+    assert!(!supports(
         ProviderKind::OpenAiCompatible,
         OperationKind::ImageGeneration,
         Surface::OpenAi,
         TransportMode::Unary,
     ));
-    assert!(!supports_capability_certification(
+    assert!(!supports(
         ProviderKind::AzureOpenAi,
         OperationKind::ImageGeneration,
         Surface::OpenAi,
@@ -182,21 +209,23 @@ fn certifiable_capability_options_are_closed_per_provider_kind() {
     ] {
         let capabilities = certifiable_capabilities(kind).collect::<Vec<_>>();
         assert_eq!(capabilities.len(), expected_count, "{kind:?}");
-        assert!(capabilities.iter().all(|(operation, surface, mode)| {
-            supports_capability_certification(kind, *operation, *surface, *mode)
-        }));
+        assert!(
+            capabilities
+                .iter()
+                .all(|(operation, surface, mode)| { supports(kind, *operation, *surface, *mode) })
+        );
     }
 }
 
 #[test]
 fn certification_probe_override_is_available_for_native_and_compatible_providers() {
-    let registry = OpenAiConnectorOverrideRegistry::default();
+    let registry = Registry::default();
     let provider_id = Uuid::from_u128(1);
     registry.register(
         provider_id,
-        OpenAiConnector::new(
+        Connector::new(
             OpenAiConnectorConfig::default(),
-            OpenAiApiKey::new("sk-test-key").unwrap(),
+            ApiKey::new("sk-test-key").unwrap(),
         ),
     );
 
@@ -238,7 +267,10 @@ impl ProviderTransport for ExactNativeProbeTransport {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, crate::domain::TransportError>> {
+    ) -> crate::domain::ports::BoxFuture<
+        'a,
+        Result<ProviderOutput, crate::domain::ports::TransportError>,
+    > {
         assert_eq!(request.attempt.upstream_model, self.expected_model);
         assert_eq!(request.attempt.provider_kind, self.expected_kind);
         assert_eq!(request.metadata.surface, Surface::Gemini);
@@ -246,7 +278,7 @@ impl ProviderTransport for ExactNativeProbeTransport {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Box::pin(async {
             Ok(ProviderOutput::Result(Box::new(
-                CanonicalResult::TokenCount(crate::domain::TokenCountResult {
+                CanonicalResult::TokenCount(crate::domain::canonical::results::TokenCountResult {
                     input_tokens: 3,
                     extensions: SourceExtensions::default(),
                 }),
@@ -291,47 +323,47 @@ async fn native_certification_executes_the_exact_model_and_tuple() {
 
 #[test]
 fn strict_factory_rejects_loopback_endpoints_that_unsafe_test_variants_accept() {
-    let compat = ProviderConfig::OpenAiCompatible {
+    let compat = Config::OpenAiCompatible {
         endpoint: "http://127.0.0.1:9/v1".to_owned(),
     };
-    assert!(ProviderFactory::validate(&compat).is_err());
-    ProviderFactory::validate_with_unsafe_test_endpoints(&compat).unwrap();
+    assert!(Factory::validate(&compat).is_err());
+    Factory::validate_with_unsafe_test_endpoints(&compat).unwrap();
 
-    let azure = ProviderConfig::AzureOpenAi {
+    let azure = Config::AzureOpenAi {
         endpoint: "http://127.0.0.1:9".to_owned(),
         deployment: "deployment".to_owned(),
         api_version: "2024-10-21".to_owned(),
     };
-    assert!(ProviderFactory::validate(&azure).is_err());
-    ProviderFactory::validate_with_unsafe_test_endpoints(&azure).unwrap();
+    assert!(Factory::validate(&azure).is_err());
+    Factory::validate_with_unsafe_test_endpoints(&azure).unwrap();
 }
 
 #[tokio::test]
 async fn unsafe_test_variants_assemble_loopback_transports_without_network_io() {
-    let compat = ProviderConfig::OpenAiCompatible {
+    let compat = Config::OpenAiCompatible {
         endpoint: "http://127.0.0.1:9/v1".to_owned(),
     };
-    let credential = ProviderCredential::ApiKey(Zeroizing::new("sk-test".to_owned()));
+    let credential = Credential::ApiKey(Zeroizing::new("sk-test".to_owned()));
     assert!(
-        ProviderFactory::create(
+        Factory::create(
             compat.clone(),
-            ProviderCredential::ApiKey(Zeroizing::new("sk-test".to_owned()))
+            Credential::ApiKey(Zeroizing::new("sk-test".to_owned()))
         )
         .await
         .is_err()
     );
-    ProviderFactory::transport_with_unsafe_test_endpoints(compat, credential)
+    Factory::transport_with_unsafe_test_endpoints(compat, credential)
         .await
         .unwrap();
 
-    let azure = ProviderConfig::AzureOpenAi {
+    let azure = Config::AzureOpenAi {
         endpoint: "http://127.0.0.1:9".to_owned(),
         deployment: "deployment".to_owned(),
         api_version: "2024-10-21".to_owned(),
     };
-    ProviderFactory::transport_with_unsafe_test_endpoints(
+    Factory::transport_with_unsafe_test_endpoints(
         azure,
-        ProviderCredential::ApiKey(Zeroizing::new("azure-secret".to_owned())),
+        Credential::ApiKey(Zeroizing::new("azure-secret".to_owned())),
     )
     .await
     .unwrap();

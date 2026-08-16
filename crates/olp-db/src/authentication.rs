@@ -5,13 +5,12 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
-    security::{RecentAuthMaterial, SessionMaterial},
+    error::Error,
+    security::session_material::{RecentAuthMaterial, SessionMaterial},
+    store::Store,
 };
 
-mod sessions;
-
-pub(crate) use sessions::checked_session_expiry;
+pub(crate) mod sessions;
 
 #[derive(Clone)]
 pub struct SessionPrincipal {
@@ -111,7 +110,7 @@ impl RecentAuthPurpose {
     }
 }
 
-impl PgStore {
+impl Store {
     /// Installs one short-lived recent-authentication grant on an exact active
     /// session. Issuing another grant replaces the previous one; consumption
     /// atomically clears all grant fields.
@@ -122,17 +121,17 @@ impl PgStore {
         resource_id: Option<Uuid>,
         material: &RecentAuthMaterial,
         ttl: Duration,
-    ) -> Result<bool, PersistenceError> {
+    ) -> Result<bool, Error> {
         if resource_id.is_some() != purpose.requires_resource()
             || ttl <= Duration::zero()
             || ttl > Duration::minutes(15)
         {
-            return Err(PersistenceError::InvalidRecentAuthentication);
+            return Err(Error::InvalidRecentAuthentication);
         }
         let now = Utc::now();
         let expires_at = now
             .checked_add_signed(ttl)
-            .ok_or(PersistenceError::InvalidRecentAuthentication)?;
+            .ok_or(Error::InvalidRecentAuthentication)?;
         let mut transaction = self.pool().begin().await?;
         let installed = install_recent_authentication(
             &mut transaction,
@@ -152,10 +151,7 @@ impl PgStore {
         Ok(installed)
     }
 
-    pub async fn user_has_local_password(
-        &self,
-        user_id: Uuid,
-    ) -> Result<Option<bool>, PersistenceError> {
+    pub async fn user_has_local_password(&self, user_id: Uuid) -> Result<Option<bool>, Error> {
         sqlx::query_scalar!(
             "SELECT password_hash IS NOT NULL AS \"value!\" FROM users WHERE id = $1 AND active",
             user_id

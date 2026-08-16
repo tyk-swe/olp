@@ -1,36 +1,44 @@
-use super::cursor::{
-    checked_u16, checked_u64, optional_i32_u64, optional_u16, optional_u64, trimmed_optional,
+use chrono::{DateTime, Utc};
+use olp_engine::domain::{
+    canonical::identity::OperationKind, provider::ProviderState, routing::provider::ProviderKind,
 };
-use super::*;
+use uuid::Uuid;
 
-fn assert_invalid<T: std::fmt::Debug>(result: Result<T, OperationsError>, expected: &str) {
+use super::cursor::{
+    Error, Timestamp, checked_u16, checked_u64, optional_i32_u64, optional_u16, optional_u64,
+    trimmed_optional,
+};
+use super::{
+    health::provider_health_status,
+    pricing::{PriceInput, validate_decimal, validate_prices},
+};
+use crate::usage::query::{ceil_usage_hour, floor_usage_hour};
+
+fn assert_invalid<T: std::fmt::Debug>(result: Result<T, Error>, expected: &str) {
     match result {
-        Err(OperationsError::Invalid(message)) => assert_eq!(message, expected),
+        Err(Error::Invalid(message)) => assert_eq!(message, expected),
         other => panic!("unexpected result: {other:?}"),
     }
 }
 
 #[test]
 fn timestamp_cursor_round_trips_and_rejects_malformed_or_non_v7_values() {
-    let cursor = TimestampCursor {
+    let cursor = Timestamp {
         at: "2025-02-03T04:05:06Z".parse().unwrap(),
         id: Uuid::now_v7(),
     };
-    assert_eq!(TimestampCursor::parse(&cursor.encode()).unwrap(), cursor);
+    assert_eq!(Timestamp::parse(&cursor.encode()).unwrap(), cursor);
     for invalid in [
         "not-base64".to_owned(),
         "bm90IGpzb24".to_owned(),
-        TimestampCursor {
+        Timestamp {
             at: cursor.at,
             id: Uuid::nil(),
         }
         .encode(),
     ] {
         assert!(
-            matches!(
-                TimestampCursor::parse(&invalid),
-                Err(OperationsError::InvalidCursor)
-            ),
+            matches!(Timestamp::parse(&invalid), Err(Error::InvalidCursor)),
             "accepted {invalid}"
         );
     }
@@ -106,7 +114,7 @@ fn rejects_duplicate_pricing_dimensions_within_a_scope() {
     };
     assert!(matches!(
         validate_prices(&[price.clone(), price]),
-        Err(OperationsError::Invalid(message))
+        Err(Error::Invalid(message))
             if message.contains("duplicate scoped dimensions")
     ));
 }

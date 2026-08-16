@@ -2,22 +2,19 @@ use std::time::Duration;
 
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
-use crate::PersistenceError;
+use crate::error::Error;
 
 /// Concrete PostgreSQL handle shared by storage subsystems.
 ///
 /// Feature-specific queries are implemented in their owning modules; this
 /// module owns only pool construction, access, migration, and liveness.
 #[derive(Clone)]
-pub struct PgStore {
+pub struct Store {
     pool: PgPool,
 }
 
-impl PgStore {
-    pub async fn connect(
-        database_url: &str,
-        max_connections: u32,
-    ) -> Result<Self, PersistenceError> {
+impl Store {
+    pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, Error> {
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
             .acquire_timeout(Duration::from_secs(5))
@@ -36,12 +33,12 @@ impl PgStore {
         &self.pool
     }
 
-    pub async fn migrate(&self) -> Result<(), PersistenceError> {
+    pub async fn migrate(&self) -> Result<(), Error> {
         crate::MIGRATOR.run(&self.pool).await?;
         Ok(())
     }
 
-    pub async fn ping(&self) -> Result<(), PersistenceError> {
+    pub async fn ping(&self) -> Result<(), Error> {
         sqlx::query_scalar!("SELECT 1::int AS \"value!\"")
             .fetch_one(&self.pool)
             .await?;

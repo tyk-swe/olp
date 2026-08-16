@@ -1,17 +1,20 @@
 //! Canonical event collection shared by HTTP adapters and control-plane use cases.
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, ProviderEventStream};
+use crate::domain::{
+    canonical::events::{Event, Kind},
+    ports::ProviderEventStream,
+};
 use futures::StreamExt;
 
-use crate::inference::InferenceError;
+use crate::inference::error::Error as InferenceError;
 
 pub const MAX_COLLECTED_CANONICAL_EVENT_BYTES: usize = 16 * 1024 * 1024;
 
-pub async fn collect_provider_events(
-    first: CanonicalEvent,
+pub async fn collect(
+    first: Event,
     events: &mut ProviderEventStream,
     deadline: tokio::time::Instant,
-) -> Result<Vec<CanonicalEvent>, InferenceError> {
+) -> Result<Vec<Event>, InferenceError> {
     collect_provider_events_with_observer(
         first,
         events,
@@ -23,29 +26,26 @@ pub async fn collect_provider_events(
 }
 
 pub async fn collect_provider_events_with_observer(
-    first: CanonicalEvent,
+    first: Event,
     events: &mut ProviderEventStream,
     deadline: tokio::time::Instant,
     maximum_bytes: usize,
-    observe: &mut (dyn FnMut(&CanonicalEvent) + Send),
-) -> Result<Vec<CanonicalEvent>, InferenceError> {
+    observe: &mut (dyn FnMut(&Event) + Send),
+) -> Result<Vec<Event>, InferenceError> {
     observe(&first);
-    if let CanonicalEventKind::Error { error } = &first.kind {
+    if let Kind::Error { error } = &first.kind {
         return Err(InferenceError::from_canonical(error));
     }
     let mut collected_bytes = collected_event_bytes(0, &first, maximum_bytes)?;
     let mut collected = vec![first];
-    while !matches!(
-        collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
-    ) {
+    while !matches!(collected.last().map(|event| &event.kind), Some(Kind::Done)) {
         let next = tokio::time::timeout_at(deadline, events.next())
             .await
             .map_err(|_| InferenceError::timeout())?;
         match next {
             Some(Ok(event)) => {
                 observe(&event);
-                if let CanonicalEventKind::Error { error } = &event.kind {
+                if let Kind::Error { error } = &event.kind {
                     return Err(InferenceError::from_canonical(error));
                 }
                 collected_bytes = collected_event_bytes(collected_bytes, &event, maximum_bytes)?;
@@ -65,7 +65,7 @@ pub async fn collect_provider_events_with_observer(
 
 pub fn collected_event_bytes(
     current: usize,
-    event: &CanonicalEvent,
+    event: &Event,
     maximum: usize,
 ) -> Result<usize, InferenceError> {
     let event_bytes = serde_json::to_vec(event).map_err(|_| {
@@ -90,28 +90,28 @@ mod tests {
     use std::time::Duration;
 
     use crate::domain::{
-        AttemptFailureClass, CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass,
-        ProviderEventStream, TransportError, TransportPhase,
+        canonical::events::{Error, ErrorClass, Event, Kind},
+        ports::{AttemptFailureClass, ProviderEventStream, TransportError, TransportPhase},
     };
     use futures::{StreamExt, stream};
 
     use super::{collect_provider_events_with_observer, collected_event_bytes};
 
-    fn start() -> CanonicalEvent {
-        CanonicalEvent::new(
+    fn start() -> Event {
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: None,
                 provider_model: Some("model".to_owned()),
             },
         )
     }
 
-    fn canonical_error(sequence: u64) -> CanonicalEvent {
-        CanonicalEvent::new(
+    fn canonical_error(sequence: u64) -> Event {
+        Event::new(
             sequence,
-            CanonicalEventKind::Error {
-                error: CanonicalError {
+            Kind::Error {
+                error: Error {
                     class: ErrorClass::Upstream,
                     message: "safe failure".to_owned(),
                     provider_code: Some("rejected".to_owned()),
@@ -122,9 +122,9 @@ mod tests {
     }
 
     async fn collect(
-        first: CanonicalEvent,
-        items: Vec<Result<CanonicalEvent, TransportError>>,
-    ) -> Result<Vec<CanonicalEvent>, super::InferenceError> {
+        first: Event,
+        items: Vec<Result<Event, TransportError>>,
+    ) -> Result<Vec<Event>, super::InferenceError> {
         let mut events: ProviderEventStream = Box::pin(stream::iter(items));
         collect_provider_events_with_observer(
             first,
@@ -138,8 +138,8 @@ mod tests {
 
     #[tokio::test]
     async fn collection_stops_at_done_and_observes_only_consumed_events() {
-        let done = CanonicalEvent::new(1, CanonicalEventKind::Done);
-        let trailing = CanonicalEvent::new(2, CanonicalEventKind::Done);
+        let done = Event::new(1, Kind::Done);
+        let trailing = Event::new(2, Kind::Done);
         let mut events: ProviderEventStream =
             Box::pin(stream::iter([Ok(done.clone()), Ok(trailing.clone())]));
         let mut observed = Vec::new();
@@ -220,10 +220,8 @@ mod tests {
     async fn collection_bounds_each_event_and_the_aggregate() {
         let first = start();
         let maximum = serde_json::to_vec(&first).unwrap().len();
-        let mut events: ProviderEventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
-            1,
-            CanonicalEventKind::Done,
-        ))]));
+        let mut events: ProviderEventStream =
+            Box::pin(stream::iter([Ok(Event::new(1, Kind::Done))]));
 
         let error = collect_provider_events_with_observer(
             first.clone(),

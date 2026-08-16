@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 
-use crate::{PersistenceError, PgStore};
+use crate::{error::Error, store::Store};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkerTask {
@@ -44,7 +44,7 @@ impl WorkerTask {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, PersistenceError> {
+    fn parse(value: &str) -> Result<Self, Error> {
         match value {
             "runtime_outbox" => Ok(Self::RuntimeOutbox),
             "request_metadata_consumer" => Ok(Self::RequestMetadataConsumer),
@@ -52,7 +52,7 @@ impl WorkerTask {
             "request_metadata_gateway_epoch_detection" => {
                 Ok(Self::RequestMetadataGatewayEpochDetection)
             }
-            _ => Err(PersistenceError::InvalidStoredValue("worker task")),
+            _ => Err(Error::InvalidStoredValue("worker task")),
         }
     }
 }
@@ -231,9 +231,8 @@ pub(crate) struct WorkerCounterDeltas {
 }
 
 impl WorkerCounterDeltas {
-    fn checked(self) -> Result<[i64; 12], PersistenceError> {
-        let checked =
-            |value| i64::try_from(value).map_err(|_| PersistenceError::InvalidWorkerHealth);
+    fn checked(self) -> Result<[i64; 12], Error> {
+        let checked = |value| i64::try_from(value).map_err(|_| Error::InvalidWorkerHealth);
         Ok([
             checked(self.request_metadata_reclaimed)?,
             checked(self.request_metadata_recovered)?,
@@ -254,7 +253,7 @@ impl WorkerCounterDeltas {
 pub(crate) async fn increment_worker_counters_on(
     connection: &mut PgConnection,
     deltas: WorkerCounterDeltas,
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     let [
         metadata_reclaimed,
         metadata_recovered,
@@ -310,7 +309,7 @@ pub(crate) async fn checkpoint_worker_task_on(
     task: WorkerTask,
     outcome: WorkerTaskCheckpointOutcome,
     progress: bool,
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     let (success, successes, failures, skipped) = worker_task_checkpoint_values(outcome);
     // Callers that also touch outbox health or counters must keep the order:
     // runtime_outbox_health, async_worker_counters, then worker_task_health.
@@ -344,13 +343,13 @@ pub(crate) async fn checkpoint_worker_task_on(
     Ok(())
 }
 
-impl PgStore {
+impl Store {
     pub async fn report_worker_task_checkpoint(
         &self,
         task: WorkerTask,
         outcome: WorkerTaskCheckpointOutcome,
         progress: bool,
-    ) -> Result<(), PersistenceError> {
+    ) -> Result<(), Error> {
         let mut transaction = self.pool().begin().await?;
         checkpoint_worker_task_on(&mut transaction, task, outcome, progress).await?;
         transaction.commit().await?;
@@ -360,7 +359,7 @@ impl PgStore {
     pub async fn report_request_metadata_consumer_activity(
         &self,
         activity: RequestMetadataConsumerActivity,
-    ) -> Result<(), PersistenceError> {
+    ) -> Result<(), Error> {
         if activity.is_empty() {
             return Ok(());
         }
@@ -387,9 +386,7 @@ impl PgStore {
         Ok(())
     }
 
-    pub async fn worker_recovery_counters(
-        &self,
-    ) -> Result<WorkerRecoveryCounters, PersistenceError> {
+    pub async fn worker_recovery_counters(&self) -> Result<WorkerRecoveryCounters, Error> {
         let row = sqlx::query!(
             "SELECT request_metadata_reclaimed_total, request_metadata_recovered_total, \
                     request_metadata_duplicates_total, request_metadata_processed_total, \
@@ -402,8 +399,7 @@ impl PgStore {
         )
         .fetch_one(self.pool())
         .await?;
-        let checked =
-            |value| u64::try_from(value).map_err(|_| PersistenceError::InvalidWorkerHealth);
+        let checked = |value| u64::try_from(value).map_err(|_| Error::InvalidWorkerHealth);
         Ok(WorkerRecoveryCounters {
             request_metadata_reclaimed: checked(row.request_metadata_reclaimed_total)?,
             request_metadata_recovered: checked(row.request_metadata_recovered_total)?,
@@ -427,7 +423,7 @@ impl PgStore {
     pub async fn worker_task_health(
         &self,
         now: DateTime<Utc>,
-    ) -> Result<WorkerTaskHealthSummary, PersistenceError> {
+    ) -> Result<WorkerTaskHealthSummary, Error> {
         let rows = sqlx::query!(
             "SELECT task, checked_at, last_success_at, last_progress_at, \
                     successes_total, failures_total, skipped_total \
@@ -466,11 +462,11 @@ impl PgStore {
                 heartbeat_age_seconds: Some(heartbeat_age_seconds),
                 last_success_age_seconds,
                 successes_total: u64::try_from(row.successes_total)
-                    .map_err(|_| PersistenceError::InvalidWorkerHealth)?,
+                    .map_err(|_| Error::InvalidWorkerHealth)?,
                 failures_total: u64::try_from(row.failures_total)
-                    .map_err(|_| PersistenceError::InvalidWorkerHealth)?,
+                    .map_err(|_| Error::InvalidWorkerHealth)?,
                 skipped_total: u64::try_from(row.skipped_total)
-                    .map_err(|_| PersistenceError::InvalidWorkerHealth)?,
+                    .map_err(|_| Error::InvalidWorkerHealth)?,
             });
         }
         Ok(WorkerTaskHealthSummary { tasks })
@@ -673,10 +669,7 @@ mod tests {
         for invalidate in invalidators {
             let mut value = WorkerCounterDeltas::default();
             invalidate(&mut value);
-            assert!(matches!(
-                value.checked(),
-                Err(PersistenceError::InvalidWorkerHealth)
-            ));
+            assert!(matches!(value.checked(), Err(Error::InvalidWorkerHealth)));
         }
     }
 

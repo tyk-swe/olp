@@ -6,8 +6,8 @@ use axum::{
 };
 use chrono::Utc;
 use olp_db::{
-    oidc::OidcIdentityRecord, oidc::UnlinkOidcIdentity, security::RecentAuthMaterial,
-    security::SessionMaterial,
+    oidc::types::OidcIdentityRecord, oidc::types::UnlinkOidcIdentity,
+    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
 };
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -15,22 +15,25 @@ use uuid::Uuid;
 
 use super::error::map_oidc;
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        RECENT_AUTH_COOKIE, append_security_transition_cookies, cookie, map_persistence,
-        reauthentication_required, require_mutation_session, require_read_session,
-        validate_session_cookie_ttl,
+        cookies::{append_security_transition_cookies, validate_session_cookie_ttl},
+        error_mapping::map_persistence,
+        sessions::{
+            cookie, reauthentication_required, require_mutation_session, require_read_session,
+        },
     },
+    public_http::{problem::Problem, request_cookies::RECENT_AUTH_COOKIE},
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct OidcIdentityResponse {
-    pub id: Uuid,
-    pub issuer: String,
-    pub email_at_link: Option<String>,
-    pub last_login_at: Option<chrono::DateTime<Utc>>,
-    pub created_at: chrono::DateTime<Utc>,
-    pub can_unlink: bool,
+pub(super) struct OidcIdentityResponse {
+    pub(super) id: Uuid,
+    pub(super) issuer: String,
+    pub(super) email_at_link: Option<String>,
+    pub(super) last_login_at: Option<chrono::DateTime<Utc>>,
+    pub(super) created_at: chrono::DateTime<Utc>,
+    pub(super) can_unlink: bool,
 }
 
 impl From<OidcIdentityRecord> for OidcIdentityResponse {
@@ -47,10 +50,10 @@ impl From<OidcIdentityRecord> for OidcIdentityResponse {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct OidcIdentityListResponse {
-    pub data: Vec<OidcIdentityResponse>,
-    pub linking_available: bool,
-    pub has_local_password: bool,
+pub(super) struct OidcIdentityListResponse {
+    pub(super) data: Vec<OidcIdentityResponse>,
+    pub(super) linking_available: bool,
+    pub(super) has_local_password: bool,
 }
 
 #[utoipa::path(

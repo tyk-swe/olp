@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    ContentPart, GenerationRequest, MediaSource, Message as CanonicalMessage, MessageRole,
-    ResponseFormat, Surface, ToolChoice as CanonicalToolChoice, inline_media_marker,
+use crate::domain::canonical::{
+    identity::Surface,
+    requests::{
+        ContentPart, GenerationRequest, MediaSource, Message as CanonicalMessage, MessageRole,
+        ResponseFormat, ToolChoice as CanonicalToolChoice, inline_media_marker,
+    },
 };
 use serde_json::{Value, json};
 
@@ -14,9 +17,7 @@ use super::super::dto::{
 use super::errors::EncodeError;
 use super::extensions::apply_extensions;
 
-pub fn encode_generate_content_request(
-    request: &GenerationRequest,
-) -> Result<GenerateContentRequest, EncodeError> {
+pub fn request(request: &GenerationRequest) -> Result<GenerateContentRequest, EncodeError> {
     request
         .extensions
         .ensure_representable_on(Surface::Gemini)?;

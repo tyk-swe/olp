@@ -13,7 +13,7 @@ type AttemptFact = (
 );
 
 pub(super) async fn exercise(
-    store: &PgStore,
+    store: &Store,
     owner_id: Uuid,
     first_provider_id: Uuid,
     api_key_id: Uuid,
@@ -81,7 +81,7 @@ pub(super) async fn exercise(
     );
     assert_eq!(
         store.persist_request_metadata_event(&first).await.unwrap(),
-        RequestMetadataPersistenceOutcome::Persisted
+        IngestionOutcome::Persisted
     );
 
     let uncertain_request_id = Uuid::now_v7();
@@ -125,14 +125,14 @@ pub(super) async fn exercise(
             .persist_request_metadata_event(&uncertain)
             .await
             .unwrap(),
-        RequestMetadataPersistenceOutcome::Persisted
+        IngestionOutcome::Persisted
     );
     assert_eq!(
         store
             .persist_request_metadata_event(&uncertain)
             .await
             .unwrap(),
-        RequestMetadataPersistenceOutcome::Duplicate
+        IngestionOutcome::Duplicate
     );
 
     let partial_request_id = Uuid::now_v7();
@@ -278,7 +278,7 @@ pub(super) async fn exercise(
         "two potentially billable targets cannot be represented by one compatibility attribution"
     );
 
-    let filters = UsageFilters {
+    let filters = Filters {
         observed_after: observed_at - Duration::seconds(1),
         observed_before: observed_at + Duration::minutes(1),
         route_slug: Some(route_slug.to_owned()),
@@ -296,7 +296,7 @@ pub(super) async fn exercise(
     assert_eq!(summary.incomplete_count, 3);
 
     let providers = store
-        .usage_breakdown(&filters, UsageDimension::Provider, 10)
+        .usage_breakdown(&filters, Dimension::Provider, 10)
         .await
         .unwrap()
         .items;
@@ -358,7 +358,7 @@ pub(super) async fn exercise(
 }
 
 async fn assert_legacy_fact_mirrors_all_attempts(
-    store: &PgStore,
+    store: &Store,
     generation_id: Uuid,
     api_key_id: Uuid,
     first_provider_id: Uuid,
@@ -504,11 +504,11 @@ fn event(
     output_tokens: Option<i64>,
     usage_complete: bool,
     attempts: Vec<RequestAttemptMetadata>,
-) -> RequestMetadataEvent {
+) -> Event {
     let request_started_at = attempts
         .first()
         .map_or(observed_at, |attempt| attempt.started_at);
-    RequestMetadataEvent {
+    Event {
         event_id: Uuid::now_v7(),
         request_id,
         runtime_generation_id,
@@ -516,7 +516,7 @@ fn event(
         provider_id: Some(final_provider_id),
         route_slug: route_slug.to_owned(),
         upstream_model: Some(final_model.to_owned()),
-        operation: olp_engine::domain::OperationKind::Generation,
+        operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
         surface: Surface::OpenAi,
         request_started_at,
         request_completed_at: observed_at,

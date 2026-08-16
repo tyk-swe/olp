@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::PgStore;
+use crate::store::Store;
 
 use super::{
     MediaJobError, MediaJobRecord, MediaReconciliationSummary,
     queries::{MediaJobRow, media_job_from_row},
 };
 
-impl PgStore {
+impl Store {
     pub async fn pending_media_reconciliation_jobs(
         &self,
         api_key_id: Uuid,

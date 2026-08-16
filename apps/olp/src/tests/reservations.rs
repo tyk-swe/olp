@@ -2,14 +2,14 @@ use super::*;
 
 async fn activate_runtime_inside_handler(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
 ) -> String {
     let pinned_before_activation = principal.runtime();
     let pinned_generation = pinned_before_activation.generation.id;
     state
         .runtime()
         .install(
-            RuntimeSnapshot {
+            Snapshot {
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: pinned_before_activation.generation.ordinal + 1,
@@ -74,7 +74,7 @@ async fn response_completion_and_drop_release_the_http_concurrency_reservation()
         let release_signal = released.clone();
         let body = Body::new(ReleaseReservationBody {
             inner: Body::from("response"),
-            reservation: InferenceReservation::for_test(async move {
+            reservation: Reservation::for_test(async move {
                 release_signal.store(true, Ordering::Release);
             }),
         });
@@ -95,11 +95,11 @@ async fn response_completion_and_drop_release_the_http_concurrency_reservation()
 async fn rejection_finalization_awaits_one_release_and_emits_metadata_once() {
     let release_count = Arc::new(AtomicUsize::new(0));
     let released = Arc::clone(&release_count);
-    let reservation = InferenceReservation::for_test(async move {
+    let reservation = Reservation::for_test(async move {
         tokio::task::yield_now().await;
         released.fetch_add(1, Ordering::AcqRel);
     });
-    let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(2);
+    let (request_metadata, mut receiver) = Emitter::bounded(2);
     let metadata = LocalRequestMetadata {
         request_metadata: Some(request_metadata),
         request_started_at: chrono::Utc::now(),
@@ -126,7 +126,7 @@ async fn rejection_finalization_awaits_one_release_and_emits_metadata_once() {
 async fn concurrent_final_reservation_drops_release_once() {
     let released = Arc::new(AtomicBool::new(false));
     let release_signal = Arc::clone(&released);
-    let reservation = InferenceReservation::for_test(async move {
+    let reservation = Reservation::for_test(async move {
         release_signal.store(true, Ordering::Release);
     });
     let left = reservation.clone();
@@ -159,7 +159,7 @@ async fn concurrent_final_reservation_drops_release_once() {
 async fn detached_inference_task_holds_the_http_reservation_after_request_cancellation() {
     let released = Arc::new(AtomicBool::new(false));
     let release_signal = Arc::clone(&released);
-    let reservation = InferenceReservation::for_test(async move {
+    let reservation = Reservation::for_test(async move {
         release_signal.store(true, Ordering::Release);
     });
     let started = Arc::new(tokio::sync::Notify::new());
@@ -209,16 +209,16 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     let state = state.gateway_state_for_test();
     let pinned = state.runtime().pin();
     let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
-    let principal = InferencePrincipal::new(
+    let principal = Principal::new(
         Arc::clone(&pinned),
         lookup_id.clone(),
         Surface::OpenAi,
-        Some(olp_engine::domain::GatewayCapability::Inference),
+        Some(olp_engine::domain::auth::GatewayCapability::Inference),
     );
     state
         .runtime()
         .install(
-            RuntimeSnapshot {
+            Snapshot {
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: pinned.generation.ordinal + 1,
@@ -232,7 +232,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
         )
         .unwrap();
     let metadata_claimed = Arc::new(AtomicBool::new(false));
-    let reservation = InferenceReservation::for_test(async {});
+    let reservation = Reservation::for_test(async {});
     let (
         principal_generation,
         principal_surface,
@@ -269,7 +269,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     assert_eq!(principal_surface, Surface::OpenAi);
     assert_eq!(
         principal_capability,
-        Some(olp_engine::domain::GatewayCapability::Inference)
+        Some(olp_engine::domain::auth::GatewayCapability::Inference)
     );
     assert_ne!(state.runtime().pin().generation.id, pinned.generation.id);
     assert_eq!(reserved_tokens, Some(2_000));

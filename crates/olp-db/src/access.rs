@@ -1,26 +1,32 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use olp_engine::domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
+use olp_engine::domain::{
+    auth::{ApiKeyLimits, ApiKeyScope},
+    ids::RouteSlug,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
+    error::Error as PersistenceError,
     idempotency::{
-        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
-        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
-        complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
+        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
     },
     runtime::{
-        PublishedRuntimeRelease, RuntimeCompileError, compile_and_publish_runtime_in_transaction,
-        prepare_runtime_mutation,
+        PublishedRuntimeRelease,
+        compiler::{
+            RuntimeCompileError, compile_and_publish_runtime_in_transaction,
+            prepare_runtime_mutation,
+        },
     },
-    security::ApiKeyMaterial,
+    security::key_material::ApiKey,
+    store::Store,
 };
 
 #[derive(Debug, Error)]
-pub enum AccessError {
+pub enum Error {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
@@ -37,7 +43,7 @@ pub enum AccessError {
     IdempotencyInProgress,
 }
 
-impl From<sqlx::Error> for AccessError {
+impl From<sqlx::Error> for Error {
     fn from(error: sqlx::Error) -> Self {
         Self::Persistence(PersistenceError::Database(error))
     }
@@ -46,7 +52,7 @@ impl From<sqlx::Error> for AccessError {
 #[derive(Debug)]
 pub struct NewApiKeyRecord {
     pub name: String,
-    pub material: ApiKeyMaterial,
+    pub material: ApiKey,
     pub scopes: Vec<ApiKeyScope>,
     pub allowed_routes: Vec<RouteSlug>,
     pub limits: ApiKeyLimits,
@@ -69,30 +75,26 @@ pub struct ApiKeyRevoked {
     pub release: PublishedRuntimeRelease,
 }
 
-impl PgStore {
+impl Store {
     pub async fn create_api_key_record<F>(
         &self,
         key: &NewApiKeyRecord,
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<ApiKeyCreated>, AccessError>
+    ) -> Result<Outcome<ApiKeyCreated>, Error>
     where
-        F: FnOnce(&ApiKeyCreated) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&ApiKeyCreated) -> Result<Response, PersistenceError>,
     {
         if key.name.trim().is_empty() || key.name.chars().count() > 100 {
-            return Err(AccessError::Invalid(
+            return Err(Error::Invalid(
                 "name must contain 1-100 characters".to_owned(),
             ));
         }
         if key.scopes.is_empty() {
-            return Err(AccessError::Invalid(
-                "at least one scope is required".to_owned(),
-            ));
+            return Err(Error::Invalid("at least one scope is required".to_owned()));
         }
         if key.scopes.iter().copied().collect::<BTreeSet<_>>().len() != key.scopes.len() {
-            return Err(AccessError::Invalid(
-                "scope entries must be unique".to_owned(),
-            ));
+            return Err(Error::Invalid("scope entries must be unique".to_owned()));
         }
         if key
             .allowed_routes
@@ -102,7 +104,7 @@ impl PgStore {
             .len()
             != key.allowed_routes.len()
         {
-            return Err(AccessError::Invalid(
+            return Err(Error::Invalid(
                 "route allowlist entries must be unique".to_owned(),
             ));
         }
@@ -127,22 +129,22 @@ impl PgStore {
             }
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(AccessError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(AccessError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
         if key
             .expires_at
             .is_some_and(|expiration| expiration <= Utc::now())
         {
-            return Err(AccessError::Invalid(
+            return Err(Error::Invalid(
                 "expiration must be in the future".to_owned(),
             ));
         }
@@ -161,17 +163,17 @@ impl PgStore {
                 .requests_per_minute
                 .map(|value| i32::try_from(value.get()))
                 .transpose()
-                .map_err(|_| AccessError::Invalid("RPM limit is too large".to_owned()))?,
+                .map_err(|_| Error::Invalid("RPM limit is too large".to_owned()))?,
             key.limits
                 .tokens_per_minute
                 .map(|value| i64::try_from(value.get()))
                 .transpose()
-                .map_err(|_| AccessError::Invalid("TPM limit is too large".to_owned()))?,
+                .map_err(|_| Error::Invalid("TPM limit is too large".to_owned()))?,
             key.limits
                 .concurrency
                 .map(|value| i32::try_from(value.get()))
                 .transpose()
-                .map_err(|_| AccessError::Invalid("concurrency limit is too large".to_owned()))?,
+                .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?,
             etag
         )
         .execute(&mut *transaction)
@@ -193,7 +195,7 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             if !exists {
-                return Err(AccessError::Invalid(format!(
+                return Err(Error::Invalid(format!(
                     "allowlisted route {route} is not active"
                 )));
             }
@@ -235,7 +237,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: created,
             response,
         })
@@ -247,14 +249,14 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ApiKeyRevoked, AccessError> {
+    ) -> Result<ApiKeyRevoked, Error> {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
         if !claim_idempotency(&mut transaction, actor, "api_key.revoke", idempotency_key).await? {
-            return Err(AccessError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let result = sqlx::query!(
             "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() \
@@ -269,9 +271,9 @@ impl PgStore {
                 .fetch_optional(&mut *transaction)
                 .await?;
             return Err(if row.is_some() {
-                AccessError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                AccessError::NotFound
+                Error::NotFound
             });
         };
         complete_idempotency(

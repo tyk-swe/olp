@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration as StdDuration};
 use chrono::{Duration, Utc};
 use olp_db::{
     maintenance::MAINTENANCE_LOCK_ID,
-    request_metadata::RequestMetadataConsumerState,
+    request_metadata::delivery_health::ConsumerState,
     test_support::TestDb,
     worker_health::{RequestMetadataConsumerActivity, WorkerTask, WorkerTaskState},
 };
@@ -67,7 +67,7 @@ async fn three_workers_add_recovery_counters_monotonically_and_stale_as_a_fleet(
         .request_metadata_consumer_status(stale_at)
         .await
         .unwrap();
-    assert_eq!(stale_consumer.state, RequestMetadataConsumerState::Stale);
+    assert_eq!(stale_consumer.state, ConsumerState::Stale);
     let stale = store.worker_task_health(stale_at).await.unwrap();
     assert_eq!(
         stale
@@ -200,9 +200,9 @@ async fn three_epoch_detectors_record_each_stale_epoch_once() {
 }
 
 async fn run_three_epoch_detectors(
-    store: &olp_db::PgStore,
+    store: &olp_db::store::Store,
     now: chrono::DateTime<Utc>,
-) -> Vec<olp_db::request_metadata::RequestMetadataEpochDetection> {
+) -> Vec<olp_db::request_metadata::reconciliation::EpochDetection> {
     let barrier = Arc::new(Barrier::new(4));
     let mut workers = tokio::task::JoinSet::new();
     for _ in 0..3 {

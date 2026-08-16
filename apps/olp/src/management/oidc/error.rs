@@ -1,11 +1,11 @@
 use axum::http::StatusCode;
-use olp_db::oidc::OidcError;
-use olp_engine::providers::OidcNetworkError;
+use olp_db::oidc::types::OidcError;
+use olp_engine::providers::oidc::Error;
 use tracing::{error, warn};
 
 use crate::{
-    Problem,
-    management::{map_persistence, reauthentication_required},
+    management::{error_mapping::map_persistence, sessions::reauthentication_required},
+    public_http::problem::Problem,
 };
 
 pub(super) fn invalid_login_flow_cookie() -> Problem {
@@ -131,7 +131,7 @@ pub(super) fn map_oidc_flow_completion(error: OidcError) -> Problem {
     }
 }
 
-pub(super) fn map_discovery_network(error: OidcNetworkError) -> Problem {
+pub(super) fn map_discovery_network(error: Error) -> Problem {
     warn!(%error, "OIDC discovery validation failed");
     field_problem(
         "discovery_url",
@@ -139,7 +139,7 @@ pub(super) fn map_discovery_network(error: OidcNetworkError) -> Problem {
     )
 }
 
-pub(super) fn map_token_network(error: OidcNetworkError) -> Problem {
+pub(super) fn map_token_network(error: Error) -> Problem {
     warn!(%error, "OIDC provider request failed");
     Problem::service_unavailable("oidc_provider_unavailable")
 }
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn network_failures_expose_only_generic_client_details() {
-        let discovery_error = OidcNetworkError::ForbiddenAddress;
+        let discovery_error = Error::ForbiddenAddress;
         let discovery_private_detail = discovery_error.to_string();
         let discovery = map_discovery_network(discovery_error);
         assert_eq!(discovery.status, 422);
@@ -253,7 +253,7 @@ mod tests {
                 .contains(&discovery_private_detail)
         );
 
-        let token_error = OidcNetworkError::ResponseTimeout;
+        let token_error = Error::ResponseTimeout;
         let token_private_detail = token_error.to_string();
         let token = map_token_network(token_error);
         assert_eq!(token.status, 503);

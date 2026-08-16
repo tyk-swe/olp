@@ -2,27 +2,31 @@ mod authorization;
 mod callback;
 mod claims;
 mod configuration;
-mod error;
+pub(crate) mod error;
 mod helpers;
 mod identities;
 mod session;
 
-pub use authorization::{OidcAuthorizationResponse, OidcLoginRequest, OidcReauthenticationRequest};
-use authorization::{begin_link, begin_login, begin_login_post, begin_reauthentication};
+use authorization::{
+    OidcAuthorizationResponse, OidcLoginRequest, OidcReauthenticationRequest, begin_link,
+    begin_login, begin_login_post, begin_reauthentication,
+};
 use axum::{Router, routing::get, routing::post};
 use callback::callback;
-pub use configuration::{
+use configuration::{
     OidcConfigurationRequest, OidcConfigurationResponse, OidcRoleMappingRequest,
     OidcRoleMappingResponse,
 };
 use configuration::{get_configuration, put_configuration};
-pub use identities::{OidcIdentityListResponse, OidcIdentityResponse};
-use identities::{list_identities, unlink_identity};
+use identities::{
+    OidcIdentityListResponse, OidcIdentityResponse, list_identities, unlink_identity,
+};
 use utoipa::OpenApi;
 
-use crate::{ManagementState, Problem, public_http::public_auth_routes::PublicAuthRoute};
-
-pub(crate) use error::map_oidc;
+use crate::{
+    bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem,
+    public_http::public_auth_routes::PublicAuthRoute,
+};
 
 pub(crate) fn router() -> Router<ManagementState> {
     Router::new()

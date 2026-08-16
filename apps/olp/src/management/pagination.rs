@@ -2,7 +2,7 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct PageQuery {

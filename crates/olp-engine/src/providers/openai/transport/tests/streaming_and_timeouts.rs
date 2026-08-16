@@ -47,7 +47,7 @@ async fn raw_media_stream_is_bounded_ordered_and_terminal() {
         )],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut events = execute_events(&connector, image_request(true)).await;
     let mut collected = Vec::new();
     while let Some(event) = events.next().await {
@@ -56,7 +56,7 @@ async fn raw_media_stream_is_bounded_ordered_and_terminal() {
     assert_eq!(collected.len(), 3);
     assert!(matches!(
         collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     assert!(
         collected
@@ -91,7 +91,7 @@ async fn decodes_fragmented_streaming_chat_and_usage() {
         ],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
 
     let mut events = execute_events(&connector, fixture_request(true)).await;
     let mut collected = Vec::new();
@@ -101,15 +101,15 @@ async fn decodes_fragmented_streaming_chat_and_usage() {
 
     assert!(collected.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "snow ☃"
+        Kind::TextDelta { text, .. } if text == "snow ☃"
     )));
     assert!(collected.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::Usage { usage } if usage.total_tokens == 4
+        Kind::Usage { usage } if usage.total_tokens == 4
     )));
     assert!(matches!(
         collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     assert!(
         collected
@@ -137,9 +137,9 @@ async fn idle_timeout_after_commit_is_not_failover_eligible() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             idle: Duration::from_millis(25),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
 
@@ -166,9 +166,9 @@ async fn first_byte_timeout_is_classified_before_commit() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             first_byte: Duration::from_millis(25),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
 
@@ -187,9 +187,9 @@ async fn raw_media_delayed_headers_use_the_bounded_header_wait() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             first_byte: Duration::from_millis(25),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
 
@@ -211,10 +211,10 @@ async fn binary_media_has_a_distinct_first_body_deadline_after_headers() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             first_byte: Duration::from_millis(25),
             idle: Duration::from_secs(1),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
     let mut request = speech_request(false);
@@ -245,10 +245,10 @@ async fn raw_sse_resets_idle_after_each_body_chunk() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             first_byte: Duration::from_secs(1),
             idle: Duration::from_millis(25),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
 
@@ -271,9 +271,9 @@ async fn multipart_first_byte_timeout_is_ambiguous_and_terminal() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             first_byte: Duration::from_millis(25),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
 
@@ -299,9 +299,9 @@ async fn speech_binary_body_enforces_idle_deadline() {
     .await;
     let connector = test_connector(
         &base_url,
-        ConnectorTimeouts {
+        Timeouts {
             idle: Duration::from_millis(25),
-            ..ConnectorTimeouts::default()
+            ..Timeouts::default()
         },
     );
     let mut request = speech_request(false);
@@ -322,7 +322,7 @@ async fn redirects_are_returned_as_errors_and_never_followed() {
         chunks: vec![(Duration::ZERO, response.to_vec())],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
 
     let failure = execute_error(&connector, fixture_request(false)).await;
     assert_eq!(failure.class, AttemptFailureClass::UpstreamClient);

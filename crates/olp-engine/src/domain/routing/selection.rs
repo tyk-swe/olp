@@ -4,11 +4,15 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::domain::{
-    DurationMs, OperationKind, ProviderId, RouteId, RouteSlug, RuntimeGenerationId, Surface,
-    TargetId, TransportMode,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::{DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
 };
 
-use super::{Provider, ProviderKind, RuntimeSnapshot, Target};
+use super::{
+    provider::{Provider, ProviderKind},
+    route::Target,
+    snapshot::Snapshot,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttemptPlan {
@@ -23,7 +27,7 @@ pub struct AttemptPlan {
 }
 
 pub fn select_attempts(
-    snapshot: &RuntimeSnapshot,
+    snapshot: &Snapshot,
     route_slug: &RouteSlug,
     operation: OperationKind,
     surface: Surface,
@@ -46,7 +50,7 @@ pub fn select_attempts(
 /// and `max_attempts`, so an unrepresentable high-ranked target cannot hide a
 /// representable lower-ranked target.
 pub fn select_attempts_filtered(
-    snapshot: &RuntimeSnapshot,
+    snapshot: &Snapshot,
     route_slug: &RouteSlug,
     operation: OperationKind,
     surface: Surface,

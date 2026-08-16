@@ -5,10 +5,10 @@ use axum::{
     response::Response,
 };
 use olp_db::{
-    configuration::NewRouteDraft, configuration::NewRouteTarget, idempotency::IdempotencyResponse,
-    idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
+    configuration::NewRouteDraft, configuration::NewRouteTarget, idempotency::Replayable,
+    idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
 };
-use olp_engine::domain::OperationKind;
+use olp_engine::domain::canonical::identity::OperationKind;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -22,7 +22,7 @@ use crate::management::{
     response_policy::RuntimeGenerationResponse,
     sessions::require_mutation_session,
 };
-use crate::{ManagementState, Problem};
+use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct CreateRouteDraftRequest {
@@ -91,7 +91,7 @@ pub(crate) async fn create_route_draft(
     require_route_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
+    let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
     let master_key = state
         .master_key
         .as_deref()
@@ -134,7 +134,7 @@ pub(crate) async fn create_route_draft(
                 actor: principal.user_id,
                 idempotency_key,
             },
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             |created| {
                 IdempotencyResponse::json(
                     StatusCode::CREATED.as_u16(),

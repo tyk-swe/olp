@@ -1,8 +1,12 @@
 use crate::domain::{
-    CanonicalResult, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, ProviderOutput,
-    ProviderRequest, Surface, TransportError,
+    canonical::{
+        identity::Surface,
+        requests::{MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation},
+        results::CanonicalResult,
+    },
+    ports::{ProviderOutput, ProviderRequest, TransportError},
 };
-use crate::protocols::openai::{
+use crate::protocols::openai::video::{
     OpenAiVideoDeleteResponse, OpenAiVideoListResponse, OpenAiVideoObject,
     decode_video_content_body, decode_video_delete_response, decode_video_list_response,
     decode_video_object, encode_video_create, encode_video_list,
@@ -10,13 +14,16 @@ use crate::protocols::openai::{
 use http::{StatusCode, header};
 use reqwest::{Method, multipart};
 
-use super::{
-    super::{OpenAiConnector, errors::*, media::*, streams::read_deadline_body},
-    require_content_type,
+use super::super::{
+    Connector,
+    errors::*,
+    media::*,
+    streams::{read_deadline_body, require_content_type},
 };
+use crate::providers::transport_common::protocol_body_error;
 
 pub(super) async fn execute(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only video requests here.
@@ -24,7 +31,7 @@ pub(super) async fn execute(
         unreachable!("checked by caller")
     };
     match operation {
-        crate::domain::VideoOperation::Create(operation) => {
+        crate::domain::canonical::requests::VideoOperation::Create(operation) => {
             let reference = if let Some(handle) = operation.input.as_ref() {
                 let spool = request.media.as_ref().ok_or_else(|| {
                     protocol_body_error("OpenAI video input requires a bounded media spool")
@@ -33,7 +40,7 @@ pub(super) async fn execute(
                     bounded_part(
                         spool.as_ref(),
                         handle,
-                        crate::protocols::openai::DEFAULT_VIDEO_REFERENCE_LIMIT,
+                        crate::protocols::openai::video::DEFAULT_VIDEO_REFERENCE_LIMIT,
                     )
                     .await?,
                 )
@@ -43,7 +50,7 @@ pub(super) async fn execute(
             let mut reference_metadata = reference.clone();
             let wire = encode_video_create(operation, &request.attempt.upstream_model, |_| {
                 reference_metadata.take().ok_or_else(|| {
-                    crate::protocols::openai::VideoCodecError::Staging(
+                    crate::protocols::openai::video::Error::Staging(
                         "video input spool metadata was unavailable".into(),
                     )
                 })
@@ -79,7 +86,7 @@ pub(super) async fn execute(
                 result,
             ))))
         }
-        crate::domain::VideoOperation::List(operation) => {
+        crate::domain::canonical::requests::VideoOperation::List(operation) => {
             let wire = encode_video_list(operation)
                 .map_err(|error| protocol_encode_error("video list", error))?;
             let mut path = "videos".to_owned();
@@ -113,7 +120,7 @@ pub(super) async fn execute(
                 CanonicalResult::VideoList(result),
             )))
         }
-        crate::domain::VideoOperation::Get(operation) => {
+        crate::domain::canonical::requests::VideoOperation::Get(operation) => {
             let path = video_job_path(&operation.job_id, None)?;
             let bytes = connector
                 .request_json(&request, Method::GET, &path, None)
@@ -125,7 +132,7 @@ pub(super) async fn execute(
                 result,
             ))))
         }
-        crate::domain::VideoOperation::Content(operation) => {
+        crate::domain::canonical::requests::VideoOperation::Content(operation) => {
             let variant = operation
                 .extensions
                 .values
@@ -164,11 +171,11 @@ pub(super) async fn execute(
             .await?;
             Ok(ProviderOutput::Result(Box::new(
                 CanonicalResult::VideoContent(decode_video_content_body(
-                    crate::protocols::openai::BinaryMediaBody { media: artifact },
+                    crate::protocols::openai::media::BinaryMediaBody { media: artifact },
                 )),
             )))
         }
-        crate::domain::VideoOperation::Delete(operation) => {
+        crate::domain::canonical::requests::VideoOperation::Delete(operation) => {
             let path = video_job_path(&operation.job_id, None)?;
             let reconcile_missing = operation
                 .extensions
@@ -181,14 +188,16 @@ pub(super) async fn execute(
                 .await?;
             if response.status() == StatusCode::NOT_FOUND && reconcile_missing {
                 return Ok(ProviderOutput::Result(Box::new(
-                    CanonicalResult::VideoDelete(crate::domain::VideoDeleteResult {
-                        id: operation.job_id.clone(),
-                        deleted: true,
-                        extensions: crate::domain::SourceExtensions::new(
-                            Surface::OpenAi,
-                            std::collections::BTreeMap::new(),
-                        ),
-                    }),
+                    CanonicalResult::VideoDelete(
+                        crate::domain::canonical::results::VideoDeleteResult {
+                            id: operation.job_id.clone(),
+                            deleted: true,
+                            extensions: crate::domain::canonical::requests::SourceExtensions::new(
+                                Surface::OpenAi,
+                                std::collections::BTreeMap::new(),
+                            ),
+                        },
+                    ),
                 )));
             }
             if !response.status().is_success() {

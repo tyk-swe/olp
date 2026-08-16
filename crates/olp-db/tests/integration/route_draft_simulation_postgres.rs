@@ -1,10 +1,12 @@
 use crate::support::route_fixtures::{DraftFixture, insert_provider};
 use olp_db::{
-    configuration::ReplaceRouteDraftInput, identity::InstallationSetupInput,
-    security::SessionMaterial,
+    configuration::resources::ReplaceRouteDraftInput, identity::InstallationSetupInput,
+    security::session_material::SessionMaterial,
 };
 use olp_engine::domain::{
-    OperationKind, RouteSlug, RuntimeSnapshot, Surface, TransportMode, select_attempts,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::RouteSlug,
+    routing::{selection::select_attempts, snapshot::Snapshot},
 };
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -168,7 +170,7 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     ));
 
     let compiled = store.compile_and_publish_runtime(actor).await.unwrap();
-    let runtime: RuntimeSnapshot = serde_json::from_slice(&compiled.payload).unwrap();
+    let runtime: Snapshot = serde_json::from_slice(&compiled.payload).unwrap();
     let route_slug = RouteSlug::parse("simulation").unwrap();
     let route = runtime.routes.get(&route_slug).unwrap();
     assert_eq!(route.id.as_uuid(), second_activation.route_id);

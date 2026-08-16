@@ -1,28 +1,28 @@
-use olp_engine::domain::RouteSlug;
+use olp_engine::domain::ids::RouteSlug;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
+    error::Error as PersistenceError,
     idempotency::{
-        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
-        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
-        complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
+        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
     },
-    runtime::{compile_and_publish_runtime_in_transaction, lock_runtime_publication},
+    runtime::compiler::{compile_and_publish_runtime_in_transaction, lock_runtime_publication},
+    store::Store,
 };
 
-use super::{ConfigurationError, NewRouteDraft, RouteActivated, RouteDraftCreated};
+use super::{Error, NewRouteDraft, RouteActivated, RouteDraftCreated};
 
-impl PgStore {
+impl Store {
     pub async fn create_route_draft<F>(
         &self,
         route: NewRouteDraft,
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<RouteDraftCreated>, ConfigurationError>
+    ) -> Result<Outcome<RouteDraftCreated>, Error>
     where
-        F: FnOnce(&RouteDraftCreated) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&RouteDraftCreated) -> Result<Response, PersistenceError>,
     {
         let mut transaction = self.pool().begin().await?;
         match claim_replayable_idempotency(
@@ -38,39 +38,38 @@ impl PgStore {
             ReplayableIdempotencyClaim::Execute => {}
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
-        let slug = RouteSlug::parse(route.slug)
-            .map_err(|error| ConfigurationError::InvalidRoute(error.to_string()))?;
+        let slug =
+            RouteSlug::parse(route.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
         if route.operations.is_empty() {
-            return Err(ConfigurationError::InvalidRoute(
+            return Err(Error::InvalidRoute(
                 "at least one operation is required".to_owned(),
             ));
         }
         if route.targets.is_empty() {
-            return Err(ConfigurationError::InvalidRoute(
+            return Err(Error::InvalidRoute(
                 "at least one target is required".to_owned(),
             ));
         }
         if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
-            return Err(ConfigurationError::InvalidRoute(
+            return Err(Error::InvalidRoute(
                 "max_attempts must be between one and the target count".to_owned(),
             ));
         }
-        let overall_timeout_ms = i32::try_from(route.overall_timeout_ms).map_err(|_| {
-            ConfigurationError::InvalidRoute("overall timeout is too large".to_owned())
-        })?;
+        let overall_timeout_ms = i32::try_from(route.overall_timeout_ms)
+            .map_err(|_| Error::InvalidRoute("overall timeout is too large".to_owned()))?;
         if overall_timeout_ms <= 0 {
-            return Err(ConfigurationError::InvalidRoute(
+            return Err(Error::InvalidRoute(
                 "overall timeout must be positive".to_owned(),
             ));
         }
@@ -83,7 +82,7 @@ impl PgStore {
              (id, routing_id, slug, state, overall_timeout_ms, max_attempts, etag, created_by, created_at, updated_at) \
              VALUES ($1, $2, $3, 'draft'::route_draft_state, $4, $5, $6, $7, $8, $8)",
         id, routing_id, slug.as_str(), overall_timeout_ms, i16::try_from(route.max_attempts).map_err(|_| {
-            ConfigurationError::InvalidRoute("max attempts is too large".to_owned())
+            Error::InvalidRoute("max attempts is too large".to_owned())
         })?, etag, route.actor, now)
         .execute(&mut *transaction)
         .await?;
@@ -101,7 +100,7 @@ impl PgStore {
                 || target.timeout_ms == 0
                 || target.timeout_ms > route.overall_timeout_ms
             {
-                return Err(ConfigurationError::InvalidRoute(
+                return Err(Error::InvalidRoute(
                     "target weight/timeout is invalid".to_owned(),
                 ));
             }
@@ -115,7 +114,7 @@ impl PgStore {
             .fetch_optional(&mut *transaction)
             .await?;
             let provider_model_id = provider_model_id.ok_or_else(|| {
-                ConfigurationError::InvalidRoute(format!(
+                Error::InvalidRoute(format!(
                     "target provider/model {}/{} is not active",
                     target.provider_id, target.upstream_model
                 ))
@@ -125,11 +124,11 @@ impl PgStore {
                  (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             Uuid::now_v7(), Uuid::now_v7(), id, provider_model_id, i32::from(target.priority), i32::try_from(target.weight).map_err(|_| {
-                ConfigurationError::InvalidRoute("target weight is too large".to_owned())
+                Error::InvalidRoute("target weight is too large".to_owned())
             })?, i32::try_from(target.timeout_ms).map_err(|_| {
-                ConfigurationError::InvalidRoute("target timeout is too large".to_owned())
+                Error::InvalidRoute("target timeout is too large".to_owned())
             })?, i32::try_from(position)
-                    .map_err(|_| ConfigurationError::InvalidRoute("too many targets".to_owned()))?,)
+                    .map_err(|_| Error::InvalidRoute("too many targets".to_owned()))?,)
             .execute(&mut *transaction)
             .await?;
         }
@@ -162,7 +161,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: created,
             response,
         })
@@ -173,7 +172,7 @@ impl PgStore {
         draft_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
-    ) -> Result<(Uuid, RouteSlug), ConfigurationError> {
+    ) -> Result<(Uuid, RouteSlug), Error> {
         let mut transaction = self.pool().begin().await?;
         let row = sqlx::query!(
             "SELECT etag, slug FROM route_drafts WHERE id = $1",
@@ -182,10 +181,10 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(row) = row else {
-            return Err(ConfigurationError::RouteNotFound);
+            return Err(Error::RouteNotFound);
         };
         if row.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         revalidate_route_draft(&mut transaction, draft_id).await?;
         let etag = Uuid::now_v7();
@@ -196,10 +195,10 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?;
         if updated.rows_affected() != 1 {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
-        let slug = RouteSlug::parse(row.slug)
-            .map_err(|error| ConfigurationError::InvalidRoute(error.to_string()))?;
+        let slug =
+            RouteSlug::parse(row.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
         sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
@@ -220,7 +219,7 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<RouteActivated, ConfigurationError> {
+    ) -> Result<RouteActivated, Error> {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -232,7 +231,7 @@ impl PgStore {
         // active revisions that won the lock immediately before this draft.
         lock_runtime_publication(&mut transaction).await?;
         if !claim_idempotency(&mut transaction, actor, "route.activate", idempotency_key).await? {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         sqlx::query!(
             "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
@@ -249,12 +248,12 @@ impl PgStore {
         draft_id)
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::RouteNotFound)?;
+        .ok_or(Error::RouteNotFound)?;
         if draft.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if draft.state != "validated" {
-            return Err(ConfigurationError::RouteNotValidated);
+            return Err(Error::RouteNotValidated);
         }
         // Media reservations are not runtime-publication mutations. Block
         // their short INSERT/UPDATE transactions while checking and
@@ -269,7 +268,7 @@ impl PgStore {
         let based_slug: Option<String> = draft.based_slug;
         let route_id = if let Some(route_id) = based_route_id {
             if based_slug.as_deref() != Some(slug.as_str()) {
-                return Err(ConfigurationError::InvalidRoute(
+                return Err(Error::InvalidRoute(
                     "a restored route draft must retain its original stable slug".to_owned(),
                 ));
             }
@@ -355,7 +354,7 @@ impl PgStore {
 async fn revalidate_route_draft(
     transaction: &mut Transaction<'_, Postgres>,
     draft_id: Uuid,
-) -> Result<(), ConfigurationError> {
+) -> Result<(), Error> {
     let target_count: i64 = sqlx::query_scalar!(
         "SELECT count(*)::bigint AS \"value!\" FROM route_draft_targets WHERE route_draft_id = $1",
         draft_id
@@ -363,7 +362,7 @@ async fn revalidate_route_draft(
     .fetch_one(&mut **transaction)
     .await?;
     if target_count == 0 {
-        return Err(ConfigurationError::InvalidRoute(
+        return Err(Error::InvalidRoute(
             "the draft must contain at least one target".to_owned(),
         ));
     }
@@ -384,7 +383,7 @@ async fn revalidate_route_draft(
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(unavailable) = unavailable {
-        return Err(ConfigurationError::InvalidRoute(format!(
+        return Err(Error::InvalidRoute(format!(
             "target provider/model is not in an activated provider revision: {unavailable}"
         )));
     }
@@ -409,7 +408,7 @@ async fn revalidate_route_draft(
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(operation) = uncovered_operation {
-        return Err(ConfigurationError::InvalidRoute(format!(
+        return Err(Error::InvalidRoute(format!(
             "no activated target has a certified capability for route operation {operation}"
         )));
     }
@@ -429,7 +428,7 @@ async fn revalidate_route_draft(
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(job_id) = media_job_without_target {
-        return Err(ConfigurationError::InvalidRoute(format!(
+        return Err(Error::InvalidRoute(format!(
             "active media job {job_id} requires its exact provider/model target"
         )));
     }
@@ -466,7 +465,7 @@ async fn revalidate_route_draft(
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(requirement) = media_job_without_lifecycle {
-        return Err(ConfigurationError::InvalidRoute(format!(
+        return Err(Error::InvalidRoute(format!(
             "active media job requires an exact certified lifecycle capability: {requirement}"
         )));
     }

@@ -26,9 +26,13 @@ use tokio::{
 use tower::ServiceExt as _;
 
 use super::*;
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_engine::inference::runtime::Manager;
 
-use crate::{ApiMode, ProcessComposition, observability_router, public_http::listener};
+use crate::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    observability::router as observability_router,
+    public_http::listener,
+};
 
 fn app<F>(admission: PublicAdmission, make_body: F) -> Router
 where
@@ -363,7 +367,7 @@ async fn observability_is_independent_while_both_public_pools_are_saturated() {
     let mut state = ProcessComposition::new(
         ApiMode::All,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );

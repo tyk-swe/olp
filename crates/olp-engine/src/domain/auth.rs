@@ -8,7 +8,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{ApiKeyId, ApiKeyLookupId, OperationKind, RouteSlug};
+use crate::domain::{
+    canonical::identity::OperationKind,
+    ids::{ApiKeyId, ApiKeyLookupId, RouteSlug},
+};
 
 closed_string_enum! {
     pub enum Role {

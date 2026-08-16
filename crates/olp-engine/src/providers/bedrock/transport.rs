@@ -4,10 +4,17 @@ use std::{
 };
 
 use crate::domain::{
-    AttemptFailureClass, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    DiscoveredProviderModel, MessageRole, Operation, ProviderEventStream, ProviderKind,
-    ProviderOutput, ProviderRequest, ProviderTransport, TokenCountResult, TransportError,
-    TransportMode, TransportPhase,
+    canonical::{
+        events::{Event, Kind},
+        identity::TransportMode,
+        requests::{MessageRole, Operation},
+        results::{CanonicalResult, TokenCountResult},
+    },
+    ports::{
+        AttemptFailureClass, DiscoveredProviderModel, ProviderEventStream, ProviderOutput,
+        ProviderRequest, ProviderTransport, TransportError, TransportPhase,
+    },
+    routing::provider::ProviderKind,
 };
 use aws_sdk_bedrock::types::ModelModality;
 use aws_sdk_bedrockruntime::{
@@ -21,21 +28,24 @@ use futures::stream;
 use tokio::time::{Instant, timeout};
 
 use crate::providers::bedrock::{
-    BedrockCredentials, ConnectorConfig, sdk_config,
+    ConnectorConfig, Credentials, sdk_config,
     translate::{
         decode_converse, decode_stop_reason, decode_usage, encode_generation, encode_token_count,
         protocol_body_error, protocol_error,
     },
 };
 
-pub struct BedrockConnector {
+pub(in crate::providers) struct Connector {
     runtime: aws_sdk_bedrockruntime::Client,
     control: aws_sdk_bedrock::Client,
-    timeouts: crate::providers::bedrock::ConnectorTimeouts,
+    timeouts: crate::providers::connector::Timeouts,
 }
 
-impl BedrockConnector {
-    pub async fn new(config: ConnectorConfig, credentials: BedrockCredentials) -> Self {
+impl Connector {
+    pub(in crate::providers) async fn new(
+        config: ConnectorConfig,
+        credentials: Credentials,
+    ) -> Self {
         let shared = sdk_config(&config, credentials).await;
         let mut runtime_config = aws_sdk_bedrockruntime::config::Builder::from(&shared);
         let mut control_config = aws_sdk_bedrock::config::Builder::from(&shared);
@@ -53,7 +63,9 @@ impl BedrockConnector {
     /// Discovers text-output foundation model IDs using the official Bedrock
     /// control-plane SDK. The returned model ID is preserved byte-for-byte for
     /// route target configuration.
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+    pub(in crate::providers) async fn discover_models(
+        &self,
+    ) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         let response = timeout(
             self.timeouts.first_byte,
             self.control
@@ -171,7 +183,7 @@ impl BedrockConnector {
                 Ok(ProviderOutput::Result(Box::new(
                     CanonicalResult::TokenCount(TokenCountResult {
                         input_tokens,
-                        extensions: crate::domain::SourceExtensions::default(),
+                        extensions: crate::domain::canonical::requests::SourceExtensions::default(),
                     }),
                 )))
             }
@@ -183,18 +195,18 @@ impl BedrockConnector {
     }
 }
 
-impl ProviderTransport for BedrockConnector {
+impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(self.execute_request(request))
     }
 }
 
 struct StreamState {
     response: ConverseStreamResponse,
-    pending: VecDeque<Result<CanonicalEvent, TransportError>>,
+    pending: VecDeque<Result<Event, TransportError>>,
     sequence: u64,
     attempt_deadline: Instant,
     idle_timeout: Duration,
@@ -216,9 +228,9 @@ fn stream_events(
     attempt_deadline: Instant,
     idle_timeout: Duration,
 ) -> ProviderEventStream {
-    let pending = VecDeque::from([Ok(CanonicalEvent::new(
+    let pending = VecDeque::from([Ok(Event::new(
         0,
-        CanonicalEventKind::ResponseStart {
+        Kind::ResponseStart {
             response_id: None,
             provider_model: Some(upstream_model),
         },
@@ -270,7 +282,7 @@ fn stream_events(
                                 state,
                             ));
                         }
-                        let done = CanonicalEvent::new(state.sequence, CanonicalEventKind::Done);
+                        let done = Event::new(state.sequence, Kind::Done);
                         return Some((Ok(done), state));
                     }
                     Ok(Err(error)) => {
@@ -290,7 +302,7 @@ fn stream_events(
                         for kind in kinds {
                             state
                                 .pending
-                                .push_back(Ok(CanonicalEvent::new(state.sequence, kind)));
+                                .push_back(Ok(Event::new(state.sequence, kind)));
                             state.sequence = state.sequence.saturating_add(1);
                         }
                     }
@@ -307,7 +319,7 @@ fn stream_events(
 fn map_stream_event(
     event: ConverseStreamOutput,
     state: &mut StreamState,
-) -> Result<Vec<CanonicalEventKind>, TransportError> {
+) -> Result<Vec<Kind>, TransportError> {
     match event {
         ConverseStreamOutput::MessageStart(start) => {
             if state.saw_message_start || state.saw_message_stop || state.saw_metadata {
@@ -321,7 +333,7 @@ fn map_stream_event(
                 ));
             }
             state.saw_message_start = true;
-            Ok(vec![CanonicalEventKind::MessageStart {
+            Ok(vec![Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             }])
@@ -346,7 +358,7 @@ fn map_stream_event(
                     let tool_index = state.next_tool_index;
                     state.next_tool_index = state.next_tool_index.saturating_add(1);
                     state.tool_indices.insert(bedrock_index, tool_index);
-                    Ok(vec![CanonicalEventKind::ToolCallDelta {
+                    Ok(vec![Kind::ToolCallDelta {
                         output_index: 0,
                         tool_index,
                         id: Some(tool.tool_use_id),
@@ -370,23 +382,21 @@ fn map_stream_event(
                 state.open_content_blocks.insert(bedrock_index);
             }
             match delta.delta {
-                Some(ContentBlockDelta::Text(text)) => Ok(vec![CanonicalEventKind::TextDelta {
+                Some(ContentBlockDelta::Text(text)) => Ok(vec![Kind::TextDelta {
                     output_index: 0,
                     text,
                 }]),
-                Some(ContentBlockDelta::ToolUse(tool)) => {
-                    Ok(vec![CanonicalEventKind::ToolCallDelta {
-                        output_index: 0,
-                        tool_index: *state.tool_indices.get(&bedrock_index).ok_or_else(|| {
-                            protocol_body_error(
-                                "Bedrock stream returned a tool delta before its block start",
-                            )
-                        })?,
-                        id: None,
-                        name: None,
-                        arguments_delta: tool.input,
-                    }])
-                }
+                Some(ContentBlockDelta::ToolUse(tool)) => Ok(vec![Kind::ToolCallDelta {
+                    output_index: 0,
+                    tool_index: *state.tool_indices.get(&bedrock_index).ok_or_else(|| {
+                        protocol_body_error(
+                            "Bedrock stream returned a tool delta before its block start",
+                        )
+                    })?,
+                    id: None,
+                    name: None,
+                    arguments_delta: tool.input,
+                }]),
                 Some(_) => Err(protocol_body_error(
                     "Bedrock stream returned a delta that cannot be represented canonically",
                 )),
@@ -423,7 +433,7 @@ fn map_stream_event(
                 ));
             }
             state.saw_message_stop = true;
-            Ok(vec![CanonicalEventKind::Finish {
+            Ok(vec![Kind::Finish {
                 output_index: 0,
                 reason: decode_stop_reason(&stop.stop_reason),
             }])
@@ -451,7 +461,7 @@ fn map_stream_event(
                 .transpose()
                 .map(|usage| {
                     usage
-                        .map(|usage| vec![CanonicalEventKind::Usage { usage }])
+                        .map(|usage| vec![Kind::Usage { usage }])
                         .unwrap_or_default()
                 })
         }
@@ -627,9 +637,17 @@ mod tests {
     use std::time::Duration;
 
     use crate::domain::{
-        AttemptPlan, DurationMs, GenerationParameters, GenerationRequest, Message, OperationKind,
-        ProviderId, RequestId, RequestMetadata, RouteId, RouteSlug, RuntimeGenerationId,
-        SourceExtensions, Surface, TargetId, TokenCountRequest,
+        canonical::{
+            identity::{OperationKind, RequestMetadata, Surface},
+            requests::{
+                GenerationParameters, GenerationRequest, Message, SourceExtensions,
+                TokenCountRequest,
+            },
+        },
+        ids::{
+            DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId,
+        },
+        routing::selection::AttemptPlan,
     };
     use aws_smithy_eventstream::frame::write_message_to;
     use aws_smithy_types::event_stream::{Header, HeaderValue, Message as EventMessage};
@@ -640,7 +658,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::providers::bedrock::{BedrockCredentials, ConnectorTimeouts, StaticCredentials};
+    use crate::providers::{
+        bedrock::{Credentials, StaticCredentials},
+        connector::Timeouts,
+    };
 
     fn provider_request() -> ProviderRequest {
         ProviderRequest {
@@ -664,7 +685,7 @@ mod tests {
                 route: RouteSlug::parse("chat").unwrap(),
                 messages: vec![Message {
                     role: MessageRole::User,
-                    content: vec![crate::domain::ContentPart::Text {
+                    content: vec![crate::domain::canonical::requests::ContentPart::Text {
                         text: "hello".to_owned(),
                     }],
                     name: None,
@@ -696,7 +717,7 @@ mod tests {
         request.metadata.operation = OperationKind::TokenCount;
         request.operation = Operation::TokenCount(TokenCountRequest {
             route: RouteSlug::parse("chat").unwrap(),
-            input: vec![crate::domain::ContentPart::Text {
+            input: vec![crate::domain::canonical::requests::ContentPart::Text {
                 text: "count this".to_owned(),
             }],
             extensions: SourceExtensions::default(),
@@ -852,10 +873,10 @@ mod tests {
         (format!("http://{address}"), task)
     }
 
-    async fn mock_connector(endpoint: &str) -> BedrockConnector {
+    async fn mock_connector(endpoint: &str) -> Connector {
         let config = ConnectorConfig::new("us-east-1")
             .unwrap()
-            .with_timeouts(ConnectorTimeouts {
+            .with_timeouts(Timeouts {
                 connect: Duration::from_secs(1),
                 first_byte: Duration::from_secs(1),
                 idle: Duration::from_secs(1),
@@ -867,7 +888,7 @@ mod tests {
             br#"{"access_key_id":"AKIAEXAMPLEVALUE","secret_access_key":"secret-secret-secret"}"#,
         )
         .unwrap();
-        BedrockConnector::new(config, BedrockCredentials::Static(credentials)).await
+        Connector::new(config, Credentials::Static(credentials)).await
     }
 
     #[tokio::test]
@@ -911,11 +932,11 @@ mod tests {
             .unwrap();
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::TextDelta { text, .. } if text == "hello"
+            Kind::TextDelta { text, .. } if text == "hello"
         )));
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 id: Some(id),
                 name: Some(name),
                 ..
@@ -923,7 +944,7 @@ mod tests {
         )));
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 arguments_delta,
                 ..
             } if arguments_delta == "{\"city\":\"Paris\"}"
@@ -931,7 +952,7 @@ mod tests {
         let tool_indexes = events
             .iter()
             .filter_map(|event| match event.kind {
-                CanonicalEventKind::ToolCallDelta { tool_index, .. } => Some(tool_index),
+                Kind::ToolCallDelta { tool_index, .. } => Some(tool_index),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -939,12 +960,9 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|event| matches!(event.kind, CanonicalEventKind::Usage { .. }))
+                .any(|event| matches!(event.kind, Kind::Usage { .. }))
         );
-        assert!(matches!(
-            events.last().unwrap().kind,
-            CanonicalEventKind::Done
-        ));
+        assert!(matches!(events.last().unwrap().kind, Kind::Done));
         let request = server.await.unwrap().to_ascii_lowercase();
         assert!(request.starts_with("post /model/anthropic.claude-test-v1%3a0/converse-stream"));
         assert!(request.contains("authorization: aws4-hmac-sha256"));
@@ -1049,7 +1067,7 @@ mod tests {
         });
         let config = ConnectorConfig::new("us-east-1")
             .unwrap()
-            .with_timeouts(ConnectorTimeouts {
+            .with_timeouts(Timeouts {
                 connect: Duration::from_secs(1),
                 first_byte: Duration::from_secs(1),
                 idle: Duration::from_millis(25),
@@ -1061,8 +1079,7 @@ mod tests {
             br#"{"access_key_id":"AKIAEXAMPLEVALUE","secret_access_key":"secret-secret-secret"}"#,
         )
         .unwrap();
-        let connector =
-            BedrockConnector::new(config, BedrockCredentials::Static(credentials)).await;
+        let connector = Connector::new(config, Credentials::Static(credentials)).await;
         let ProviderOutput::Events(mut events) =
             connector.execute(streaming_request()).await.unwrap()
         else {
@@ -1149,9 +1166,9 @@ mod tests {
     async fn live_provider_discovers_models_with_default_chain() {
         let region = std::env::var("OLP_BEDROCK_LIVE_REGION")
             .expect("set OLP_BEDROCK_LIVE_REGION for the ignored live test");
-        let connector = BedrockConnector::new(
+        let connector = Connector::new(
             ConnectorConfig::new(region).unwrap(),
-            BedrockCredentials::DefaultChain,
+            Credentials::DefaultChain,
         )
         .await;
         assert!(!connector.discover_models().await.unwrap().is_empty());
@@ -1164,9 +1181,9 @@ mod tests {
             .expect("set OLP_BEDROCK_LIVE_REGION for the ignored live test");
         let model = std::env::var("OLP_BEDROCK_LIVE_MODEL")
             .expect("set OLP_BEDROCK_LIVE_MODEL for the ignored live test");
-        let connector = BedrockConnector::new(
+        let connector = Connector::new(
             ConnectorConfig::new(region).unwrap(),
-            BedrockCredentials::DefaultChain,
+            Credentials::DefaultChain,
         )
         .await;
         let mut request = provider_request();

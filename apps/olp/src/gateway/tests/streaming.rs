@@ -2,19 +2,16 @@ use super::*;
 
 #[tokio::test]
 async fn canonical_event_stream_wrapper_rejects_gaps_and_missing_done() {
-    let first = CanonicalEvent::new(
+    let first = Event::new(
         0,
-        CanonicalEventKind::ResponseStart {
+        Kind::ResponseStart {
             response_id: None,
             provider_model: None,
         },
     );
     let mut validator = EventSequenceValidator::new();
     validator.push(&first).unwrap();
-    let events: EventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
-        2,
-        CanonicalEventKind::Done,
-    ))]));
+    let events: EventStream = Box::pin(stream::iter([Ok(Event::new(2, Kind::Done))]));
     let error = match validated_event_stream(events, validator).next().await {
         Some(Err(error)) => error,
         _ => panic!("sequence gap must become a protocol error"),
@@ -39,15 +36,12 @@ async fn canonical_event_stream_wrapper_rejects_gaps_and_missing_done() {
 
     let mut validator = EventSequenceValidator::new();
     validator.push(&first).unwrap();
-    let events: EventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
-        1,
-        CanonicalEventKind::Done,
-    ))]));
+    let events: EventStream = Box::pin(stream::iter([Ok(Event::new(1, Kind::Done))]));
     let mut events = validated_event_stream(events, validator);
     assert!(matches!(
         events.next().await,
-        Some(Ok(CanonicalEvent {
-            kind: CanonicalEventKind::Done,
+        Some(Ok(Event {
+            kind: Kind::Done,
             ..
         }))
     ));
@@ -56,11 +50,11 @@ async fn canonical_event_stream_wrapper_rejects_gaps_and_missing_done() {
 
 #[tokio::test]
 async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting() {
-    let circuits = CircuitBreaker::default();
+    let circuits = Breaker::default();
     let target = TargetId::new();
-    let first = CanonicalEvent::new(
+    let first = Event::new(
         0,
-        CanonicalEventKind::ResponseStart {
+        Kind::ResponseStart {
             response_id: None,
             provider_model: None,
         },
@@ -71,7 +65,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
         let mut validator = EventSequenceValidator::new();
         validator.push(&first).unwrap();
         let provider: EventStream = Box::pin(stream::iter([Err(TransportError {
-            phase: olp_engine::domain::TransportPhase::Body,
+            phase: olp_engine::domain::ports::TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: false,
             message: "stream failed after its first event".to_owned(),
@@ -91,10 +85,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     circuits.record_failure(recovered_target, AttemptFailureClass::UpstreamServer);
     let mut validator = EventSequenceValidator::new();
     validator.push(&first).unwrap();
-    let provider: EventStream = Box::pin(stream::iter([Ok(CanonicalEvent::new(
-        1,
-        CanonicalEventKind::Done,
-    ))]));
+    let provider: EventStream = Box::pin(stream::iter([Ok(Event::new(1, Kind::Done))]));
     let mut events = circuit_accounted_event_stream(
         validated_event_stream(provider, validator),
         circuits.clone(),
@@ -103,8 +94,8 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
     );
     assert!(matches!(
         events.next().await,
-        Some(Ok(CanonicalEvent {
-            kind: CanonicalEventKind::Done,
+        Some(Ok(Event {
+            kind: Kind::Done,
             ..
         }))
     ));
@@ -115,12 +106,12 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
 }
 
 struct DropAwareStream {
-    first: Option<CanonicalEvent>,
+    first: Option<Event>,
     dropped: Arc<AtomicBool>,
 }
 
 impl futures::Stream for DropAwareStream {
-    type Item = Result<CanonicalEvent, TransportError>;
+    type Item = Result<Event, TransportError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -151,9 +142,9 @@ impl ProviderTransport for DropAwareTransport {
         let dropped = self.dropped.clone();
         Box::pin(async move {
             Ok(ProviderOutput::Events(Box::pin(DropAwareStream {
-                first: Some(CanonicalEvent::new(
+                first: Some(Event::new(
                     0,
-                    CanonicalEventKind::TextDelta {
+                    Kind::TextDelta {
                         output_index: 0,
                         text: "first".into(),
                     },
@@ -167,7 +158,7 @@ impl ProviderTransport for DropAwareTransport {
 fn install_event_stream(
     state: &GatewayState,
     operation: OperationKind,
-    events: Vec<CanonicalEvent>,
+    events: Vec<Event>,
     finite: bool,
 ) {
     let pinned = state.runtime().pin();
@@ -184,7 +175,7 @@ fn install_event_stream(
         .get_mut(&RouteSlug::parse("default").unwrap())
         .unwrap()
         .operations = BTreeSet::from([operation]);
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -205,11 +196,11 @@ fn install_event_stream(
         .unwrap();
 }
 
-fn raw_media_event(sequence: u64, event: &str, data: Value) -> CanonicalEvent {
-    CanonicalEvent::new(
+fn raw_media_event(sequence: u64, event: &str, data: Value) -> Event {
+    Event::new(
         sequence,
-        CanonicalEventKind::SourceExtension {
-            extensions: olp_engine::domain::SourceExtensions::new(
+        Kind::SourceExtension {
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
                 Surface::OpenAi,
                 BTreeMap::from([
                     ("/__olp/raw_sse/event".into(), Value::String(event.into())),
@@ -224,7 +215,7 @@ fn raw_media_event(sequence: u64, event: &str, data: Value) -> CanonicalEvent {
 async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     let (mut state, key) = test_state(true);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(8);
+        olp_engine::inference::request_metadata::Emitter::bounded(8);
     state.replace_request_metadata_for_test(emitter);
 
     install_event_stream(
@@ -286,16 +277,16 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
 async fn canonical_stream_error_is_not_persisted_as_success() {
     let (mut state, key) = test_state(true);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     install_event_stream(
         &state,
         OperationKind::Generation,
         vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::Error {
-                    error: CanonicalError {
+                Kind::Error {
+                    error: Error {
                         class: ErrorClass::RateLimit,
                         message: "provider throttled the request".to_owned(),
                         provider_code: Some("rate_limit".to_owned()),
@@ -303,7 +294,7 @@ async fn canonical_stream_error_is_not_persisted_as_success() {
                     },
                 },
             ),
-            CanonicalEvent::new(1, CanonicalEventKind::Done),
+            Event::new(1, Kind::Done),
         ],
         true,
     );
@@ -386,7 +377,7 @@ async fn real_router_generation_streams_report_truncation_in_native_envelopes() 
 async fn image_speech_and_transcription_stream_native_sse_and_usage_through_router() {
     let (mut state, key) = test_state(true);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(8);
+        olp_engine::inference::request_metadata::Emitter::bounded(8);
     state.replace_request_metadata_for_test(emitter);
 
     install_event_stream(
@@ -403,7 +394,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
                 "image_generation.completed",
                 json!({"type":"image_generation.completed","usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}),
             ),
-            CanonicalEvent::new(2, CanonicalEventKind::Done),
+            Event::new(2, Kind::Done),
         ],
         false,
     );
@@ -436,7 +427,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
                 "speech.audio.done",
                 json!({"type":"speech.audio.done","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}),
             ),
-            CanonicalEvent::new(2, CanonicalEventKind::Done),
+            Event::new(2, Kind::Done),
         ],
         false,
     );
@@ -470,7 +461,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
                 "transcript.text.done",
                 json!({"type":"transcript.text.done","text":"hello","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}),
             ),
-            CanonicalEvent::new(2, CanonicalEventKind::Done),
+            Event::new(2, Kind::Done),
         ],
         false,
     );

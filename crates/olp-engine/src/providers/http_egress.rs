@@ -6,7 +6,7 @@ pub(in crate::providers) mod pinned;
 
 /// Returns whether an IP address is safe to use as a public egress target.
 #[must_use]
-pub fn is_public_ip(address: IpAddr) -> bool {
+pub(in crate::providers) fn is_public_ip(address: IpAddr) -> bool {
     !is_blocked_ip(address)
 }
 

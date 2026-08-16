@@ -8,7 +8,7 @@ use rand::RngCore;
 use serde::Deserialize;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::{SecurityError, key_material::decode_key};
+use super::{Error, key_material::decode_key};
 
 const NONCE_BYTES: usize = 12;
 
@@ -30,23 +30,23 @@ impl MasterKey {
     /// Loads either the legacy single-key base64 format (version 1) or a
     /// versioned JSON keyring. The active key encrypts new values; retained
     /// versions are decrypt-only and allow zero-downtime rotation.
-    pub fn from_file_contents(contents: &str) -> Result<Self, SecurityError> {
+    pub fn from_file_contents(contents: &str) -> Result<Self, Error> {
         let trimmed = contents.trim();
         if !trimmed.starts_with('{') {
             return Ok(Self::new(1, decode_key(trimmed)?));
         }
         let mut document: MasterKeyFile =
-            serde_json::from_str(trimmed).map_err(|_| SecurityError::InvalidMasterKeyFile)?;
+            serde_json::from_str(trimmed).map_err(|_| Error::InvalidMasterKeyFile)?;
         if document.active_version == 0 || document.keys.is_empty() || document.keys.len() > 32 {
             document.zeroize();
-            return Err(SecurityError::InvalidMasterKeyFile);
+            return Err(Error::InvalidMasterKeyFile);
         }
         let mut keys = BTreeMap::new();
         for entry in &mut document.keys {
             if entry.version == 0 || keys.contains_key(&entry.version) {
                 document.zeroize();
                 zeroize_key_map(&mut keys);
-                return Err(SecurityError::InvalidMasterKeyVersion);
+                return Err(Error::InvalidMasterKeyVersion);
             }
             let decoded = match decode_key(&entry.key) {
                 Ok(decoded) => decoded,
@@ -61,7 +61,7 @@ impl MasterKey {
         if !keys.contains_key(&document.active_version) {
             document.zeroize();
             zeroize_key_map(&mut keys);
-            return Err(SecurityError::MissingActiveMasterKey);
+            return Err(Error::MissingActiveMasterKey);
         }
         let active_version = document.active_version;
         document.zeroize();
@@ -85,13 +85,12 @@ impl MasterKey {
         self.keys.contains_key(&version)
     }
 
-    pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<EncryptedSecret, SecurityError> {
+    pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<EncryptedSecret, Error> {
         let bytes = self
             .keys
             .get(&self.active_version)
-            .ok_or(SecurityError::MissingActiveMasterKey)?;
-        let cipher =
-            Aes256Gcm::new_from_slice(bytes).map_err(|_| SecurityError::InvalidMasterKey)?;
+            .ok_or(Error::MissingActiveMasterKey)?;
+        let cipher = Aes256Gcm::new_from_slice(bytes).map_err(|_| Error::InvalidMasterKey)?;
         let mut nonce = [0_u8; NONCE_BYTES];
         rand::rng().fill_bytes(&mut nonce);
         let ciphertext = cipher
@@ -102,7 +101,7 @@ impl MasterKey {
                     aad,
                 },
             )
-            .map_err(|_| SecurityError::Encryption)?;
+            .map_err(|_| Error::Encryption)?;
 
         Ok(EncryptedSecret {
             key_version: self.active_version,
@@ -115,13 +114,12 @@ impl MasterKey {
         &self,
         encrypted: &EncryptedSecret,
         aad: &[u8],
-    ) -> Result<Zeroizing<Vec<u8>>, SecurityError> {
+    ) -> Result<Zeroizing<Vec<u8>>, Error> {
         let bytes = self
             .keys
             .get(&encrypted.key_version)
-            .ok_or(SecurityError::Decryption)?;
-        let cipher =
-            Aes256Gcm::new_from_slice(bytes).map_err(|_| SecurityError::InvalidMasterKey)?;
+            .ok_or(Error::Decryption)?;
+        let cipher = Aes256Gcm::new_from_slice(bytes).map_err(|_| Error::InvalidMasterKey)?;
         let plaintext = cipher
             .decrypt(
                 &Nonce::from(encrypted.nonce),
@@ -130,7 +128,7 @@ impl MasterKey {
                     aad,
                 },
             )
-            .map_err(|_| SecurityError::Decryption)?;
+            .map_err(|_| Error::Decryption)?;
         Ok(Zeroizing::new(plaintext))
     }
 
@@ -141,7 +139,7 @@ impl MasterKey {
         &self,
         encrypted: &EncryptedSecret,
         aad: &[u8],
-    ) -> Result<EncryptedSecret, SecurityError> {
+    ) -> Result<EncryptedSecret, Error> {
         let plaintext = self.open(encrypted, aad)?;
         self.seal(&plaintext, aad)
     }

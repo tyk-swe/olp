@@ -6,7 +6,7 @@
 pub mod access;
 pub mod authentication;
 pub mod configuration;
-mod error;
+pub mod error;
 pub mod idempotency;
 pub mod identity;
 pub mod limits;
@@ -17,15 +17,12 @@ pub mod operations;
 pub mod request_metadata;
 pub mod runtime;
 pub mod security;
-mod store;
+pub mod store;
 #[cfg(feature = "test-util")]
 pub mod test_support;
 pub mod usage;
 pub mod valkey;
 pub mod worker_health;
-
-pub use error::PersistenceError;
-pub use store::PgStore;
 
 /// Truncates a query result fetched with `limit + 1` and derives the cursor
 /// from the last visible item only when another page exists.

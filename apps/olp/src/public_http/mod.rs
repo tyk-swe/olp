@@ -11,5 +11,8 @@ pub(crate) mod public_origin;
 pub(crate) mod relative_url;
 pub(crate) mod request_admission;
 pub(crate) mod request_cookies;
+#[cfg(feature = "test-util")]
+pub mod router;
+#[cfg(not(feature = "test-util"))]
 pub(crate) mod router;
 pub(crate) mod streaming_response;

@@ -4,7 +4,7 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 pub(crate) fn if_match(headers: &HeaderMap) -> Result<Uuid, Problem> {
     optional_if_match(headers)?.ok_or_else(|| {

@@ -7,19 +7,21 @@ use axum::{
 };
 use chrono::{Duration, SecondsFormat, Timelike, Utc};
 use http_body_util::BodyExt as _;
-use olp::test_support::{
-    ApiMode, ProcessComposition, observability_router, public_router, refresh_observability_cache,
+use olp::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    observability::{refresh_observability_cache, router as observability_router},
+    public_http::router::for_state,
 };
 use olp_db::{
-    request_metadata::RequestMetadataGap,
-    security::MasterKey,
+    request_metadata::reconciliation::Gap,
+    security::envelope::MasterKey,
     worker_health::{RequestMetadataConsumerActivity, WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use olp_engine::{
-    domain::Surface,
+    domain::canonical::identity::Surface,
     inference::{
-        request_metadata::{RequestAttemptMetadata, RequestMetadataEvent},
-        runtime::RuntimeManager,
+        request_metadata::{Event, RequestAttemptMetadata},
+        runtime::Manager,
     },
 };
 use serde_json::{Value, json};
@@ -38,7 +40,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-operations-test"),
     );
@@ -47,7 +49,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     configure_bootstrap(&mut state, [32; 32]);
     let dependencies = state.mode_dependencies().unwrap();
     let observability_state = dependencies.observability();
-    let app = public_router(dependencies.management().unwrap());
+    let app = for_state(dependencies.management().unwrap());
     let observability = observability_router(observability_state.clone());
 
     let setup = send(
@@ -223,7 +225,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     let request_id = Uuid::now_v7();
     let started_at = observed_at - Duration::milliseconds(25);
     store
-        .persist_request_metadata_event(&RequestMetadataEvent {
+        .persist_request_metadata_event(&Event {
             event_id: Uuid::now_v7(),
             request_id,
             runtime_generation_id: generation_id,
@@ -266,7 +268,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .unwrap();
     store
         .report_request_metadata_gap_once(
-            RequestMetadataGap {
+            Gap {
                 gateway_instance: "http-integration".to_owned(),
                 event_count: 2,
                 reason: "injected_http_gap".to_owned(),

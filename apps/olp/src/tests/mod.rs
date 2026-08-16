@@ -11,8 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use olp_db::security::AuthHmacKey;
-use olp_engine::inference::request_metadata::RequestMetadataEmitter;
+use olp_db::security::key_material::AuthHmacKey;
+use olp_engine::inference::request_metadata::Emitter;
 
 use axum::{
     Router,
@@ -25,10 +25,12 @@ use axum::{
 use base64::Engine as _;
 use http_body_util::BodyExt as _;
 use olp_engine::domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    OperationKind, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface,
+    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    canonical::identity::{OperationKind, Surface},
+    ids::{ApiKeyId, ApiKeyLookupId, RuntimeGenerationId},
+    routing::snapshot::{RuntimeGeneration, Snapshot},
 };
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_engine::inference::{limits::Reservation, principal::Principal, runtime::Manager};
 use tower::{ServiceBuilder, ServiceExt, service_fn};
 use tower_http::{
     sensitive_headers::{SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer},
@@ -38,18 +40,28 @@ use uuid::Uuid;
 
 use super::*;
 use super::{
-    gateway::{InferenceEndpoint, TokenEstimate},
-    observability::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label},
+    bootstrap::mode_dependencies::GatewayState,
+    bootstrap::state::{ApiMode, MAX_JSON_BODY_BYTES, ProcessComposition},
+    gateway::endpoint_policy::{InferenceEndpoint, TokenEstimate},
+    observability::{
+        OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label, refresh_observability_cache,
+        router as observability_router,
+    },
+    public_http::problem::Problem,
+    public_http::proxy::public_auth_source,
     public_http::public_auth_routes::PublicAuthRoute,
     public_http::request_admission::{
         HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,
-        HTTP_INFERENCE_RESERVATION_HOLD, InferenceReservation, JsonBodyReadError,
-        LocalRequestMetadata, MultipartAdmissionState, ReleaseReservationBody, RequestFinalization,
-        enforce_request_limits, estimate_http_json_request_tokens, http_inference_principal,
-        read_json_body, validate_json_depth, validate_multipart_boundary,
+        HTTP_INFERENCE_RESERVATION_HOLD, LocalRequestMetadata, RequestFinalization,
+        claim_http_inference_metadata, enforce_request_limits, http_inference_principal,
+        http_inference_reserved_tokens,
+        limits::{ReleaseReservationBody, estimate_http_json_request_tokens},
+        multipart::{MultipartAdmissionState, validate_multipart_boundary},
+        spawn_http_inference_task,
+        validation::{JsonBodyReadError, read_json_body, validate_json_depth},
     },
     public_http::router::{
-        http_request_span, request_trace_path, sensitive_request_headers,
+        for_state, http_request_span, request_trace_path, sensitive_request_headers,
         sensitive_response_headers,
     },
 };
@@ -64,10 +76,10 @@ fn inference_state(limited: bool) -> (ProcessComposition, String) {
     let material = auth_hmac_key.generate_api_key();
     let plaintext = material.expose_once().to_owned();
     let lookup_id = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
-    let runtime = Arc::new(RuntimeManager::empty());
+    let runtime = Arc::new(Manager::empty());
     runtime
         .install(
-            RuntimeSnapshot {
+            Snapshot {
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 1,

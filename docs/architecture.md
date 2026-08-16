@@ -40,6 +40,12 @@ subsystem namespaces rather than a flat persistence API. The role checker
 validates semantic package-role edges, the engine's module ordering, and
 infrastructure ownership.
 
+Rust APIs likewise follow ownership rather than layers: public items are
+imported from the leaf module that defines them, with no crate-root or
+layer-level re-export facades. Examples include
+`olp_engine::domain::canonical::requests::GenerationRequest`,
+`olp_engine::inference::service::Service`, and `olp_db::store::Store`.
+
 ## Typed HTTP composition
 
 Startup completes mode-specific dependencies before it builds routers. Gateway,
@@ -48,13 +54,13 @@ emitters, and runtime services as non-optional fields. Axum `FromRef` exposes
 only narrower capabilities. Management and observability state never
 dereference gateway state; playground access receives only its explicit
 inference capability. The optional `ProcessComposition` assembly input is
-private bootstrap machinery and is exposed to fixtures only through the
-`test-util`-gated `olp::test_support` namespace.
+bootstrap machinery and is exposed to fixtures only through its defining
+`olp::bootstrap::state` module when `test-util` is enabled.
 
 ## Transport-neutral inference service
 
 Gateway adapters and the authenticated playground call the same cloneable
-`olp_engine::inference::InferenceService`. It pins one runtime generation
+`olp_engine::inference::service::Service`. It pins one runtime generation
 before selection, retains its transports and credential revision for the
 request, releases distributed leases on cancellation, and finalizes exactly
 one terminal request/attempt metadata envelope. Axum extraction, admission,

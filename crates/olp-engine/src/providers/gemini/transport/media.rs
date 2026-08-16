@@ -1,5 +1,8 @@
-use crate::domain::{MediaSpool, TransportError, media_handle_from_inline_marker};
-use crate::protocols::gemini::{Content, Part};
+use crate::domain::{
+    canonical::requests::media_handle_from_inline_marker,
+    ports::{MediaSpool, TransportError},
+};
+use crate::protocols::gemini::dto::{Content, Part};
 
 use crate::providers::transport_common::read_inline_media;
 

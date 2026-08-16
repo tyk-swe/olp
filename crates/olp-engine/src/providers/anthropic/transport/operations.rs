@@ -1,14 +1,25 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::domain::{
-    AttemptFailureClass, CanonicalResult, ContentPart, DiscoveredProviderModel, MediaSource,
-    Operation, ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, Surface,
-    TokenCountResult, TransportError, TransportMode, TransportPhase,
+    canonical::{
+        identity::{Surface, TransportMode},
+        requests::{ContentPart, MediaSource, Operation},
+        results::{CanonicalResult, TokenCountResult},
+    },
+    ports::{
+        AttemptFailureClass, DiscoveredProviderModel, ProviderOutput, ProviderRequest,
+        ProviderTransport, TransportError, TransportPhase,
+    },
+    routing::provider::ProviderKind,
 };
 use crate::protocols::anthropic::{
-    ANTHROPIC_COUNT_REQUEST_EXTENSION, ContentBlock, CountTokensRequest, CountTokensResponse,
-    ImageBlock, MediaSource as AnthropicMediaSource, Message, MessageContent, MessagesResponse,
-    Role, TextBlock, decode_messages_response, encode_messages_request,
+    count::ANTHROPIC_COUNT_REQUEST_EXTENSION,
+    dto::{
+        ContentBlock, CountTokensRequest, CountTokensResponse, ImageBlock,
+        MediaSource as AnthropicMediaSource, Message, MessageContent, MessagesResponse, Role,
+        TextBlock,
+    },
+    translate::{encode::request as encode_request, response::decode},
 };
 use futures::stream;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -17,7 +28,10 @@ use tokio::time::{Instant, timeout};
 
 use super::errors::*;
 use super::media::hydrate_anthropic_messages;
-use crate::providers::anthropic::{AnthropicApiKey, ConnectorConfig};
+use crate::providers::anthropic::{ApiKey, ConnectorConfig};
+use crate::providers::transport_common::{
+    protocol_body_error, protocol_error, source_extensions, transport_error,
+};
 use crate::providers::transport_io::{ProviderResponseIo, bounded_duration};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
@@ -31,7 +45,7 @@ pub fn validate_operation(
     upstream_model: &str,
 ) -> Result<(), TransportError> {
     match operation {
-        Operation::Generation(generation) => encode_messages_request(generation, upstream_model)
+        Operation::Generation(generation) => encode_request(generation, upstream_model)
             .map(|_| ())
             .map_err(|error| protocol_error(error.to_string())),
         Operation::TokenCount(count) => encode_count_tokens(count, upstream_model).map(|_| ()),
@@ -48,14 +62,14 @@ enum ResponseKind {
     TokenCount,
 }
 
-pub struct AnthropicConnector {
+pub struct Connector {
     pub(super) config: ConnectorConfig,
-    pub(super) api_key: AnthropicApiKey,
+    pub(super) api_key: ApiKey,
 }
 
-impl AnthropicConnector {
+impl Connector {
     #[must_use]
-    pub fn new(config: ConnectorConfig, api_key: AnthropicApiKey) -> Self {
+    pub fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
         Self { config, api_key }
     }
 
@@ -260,7 +274,7 @@ impl AnthropicConnector {
                         "canonical stream flag does not match the selected transport mode",
                     ));
                 }
-                let mut wire = encode_messages_request(generation, &request.attempt.upstream_model)
+                let mut wire = encode_request(generation, &request.attempt.upstream_model)
                     .map_err(|error| {
                         protocol_error(format!("cannot encode Anthropic messages request: {error}"))
                     })?;
@@ -334,7 +348,7 @@ impl AnthropicConnector {
                             "Anthropic response is not valid JSON: {error}"
                         ))
                     })?;
-                let events = decode_messages_response(response).map_err(|error| {
+                let events = decode(response).map_err(|error| {
                     protocol_body_error(format!("Anthropic response is invalid: {error}"))
                 })?;
                 Ok(ProviderOutput::Events(Box::pin(stream::iter(
@@ -391,21 +405,21 @@ impl AnthropicConnector {
     }
 }
 
-impl fmt::Debug for AnthropicConnector {
+impl fmt::Debug for Connector {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("AnthropicConnector")
+            .debug_struct("Connector")
             .field("config", &self.config)
             .field("api_key", &"[REDACTED]")
             .finish()
     }
 }
 
-impl ProviderTransport for AnthropicConnector {
+impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(async move { self.execute_request(request).await })
     }
 }
@@ -430,7 +444,7 @@ fn validate_request_envelope(request: &ProviderRequest) -> Result<(), TransportE
 }
 
 pub(super) fn encode_count_tokens(
-    request: &crate::domain::TokenCountRequest,
+    request: &crate::domain::canonical::requests::TokenCountRequest,
     upstream_model: &str,
 ) -> Result<CountTokensRequest, TransportError> {
     request

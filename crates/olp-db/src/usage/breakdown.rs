@@ -1,16 +1,16 @@
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
-    UsageDimension, UsageFilters, UsageRangeCoverage,
+    Coverage, Dimension, Filters,
     query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
-    PgStore,
-    operations::{MAX_PAGE_SIZE, OperationsError},
+    operations::{MAX_PAGE_SIZE, cursor::Error},
+    store::Store,
 };
 
 #[derive(Clone, Debug)]
-pub struct UsageBreakdown {
+pub struct Item {
     pub dimension: String,
     pub request_count: u64,
     pub input_tokens: String,
@@ -24,9 +24,9 @@ pub struct UsageBreakdown {
 }
 
 #[derive(Clone, Debug)]
-pub struct UsageBreakdownReport {
-    pub items: Vec<UsageBreakdown>,
-    pub coverage: UsageRangeCoverage,
+pub struct Report {
+    pub items: Vec<Item>,
+    pub coverage: Coverage,
 }
 
 #[derive(Debug, FromRow)]
@@ -43,28 +43,26 @@ struct UsageBreakdownRow {
     currency: Option<String>,
 }
 
-impl PgStore {
+impl Store {
     pub async fn usage_breakdown(
         &self,
-        filters: &UsageFilters,
-        dimension: UsageDimension,
+        filters: &Filters,
+        dimension: Dimension,
         limit: u16,
-    ) -> Result<UsageBreakdownReport, OperationsError> {
+    ) -> Result<Report, Error> {
         validate_usage_range(filters)?;
         let expression = match dimension {
-            UsageDimension::Route => "route_slug",
-            UsageDimension::Provider => "provider_id::text",
-            UsageDimension::Model => "upstream_model",
-            UsageDimension::ApiKey => "COALESCE(api_key_id::text, 'unknown')",
-            UsageDimension::Operation => "operation",
+            Dimension::Route => "route_slug",
+            Dimension::Provider => "provider_id::text",
+            Dimension::Model => "upstream_model",
+            Dimension::ApiKey => "COALESCE(api_key_id::text, 'unknown')",
+            Dimension::Operation => "operation",
         };
         let count_scope = match dimension {
-            UsageDimension::Provider if filters.upstream_model.is_none() => {
-                UsageCountScope::Provider
-            }
-            UsageDimension::Model if filters.provider_id.is_none() => UsageCountScope::Model,
-            UsageDimension::Provider | UsageDimension::Model => UsageCountScope::Target,
-            UsageDimension::Route | UsageDimension::ApiKey | UsageDimension::Operation => {
+            Dimension::Provider if filters.upstream_model.is_none() => UsageCountScope::Provider,
+            Dimension::Model if filters.provider_id.is_none() => UsageCountScope::Model,
+            Dimension::Provider | Dimension::Model => UsageCountScope::Target,
+            Dimension::Route | Dimension::ApiKey | Dimension::Operation => {
                 UsageCountScope::for_filters(filters)
             }
         };
@@ -94,7 +92,7 @@ impl PgStore {
         let items = rows
             .into_iter()
             .map(|row| {
-                Ok(UsageBreakdown {
+                Ok(Item {
                     dimension: row.dimension,
                     request_count: crate::operations::cursor::checked_u64(
                         row.request_count,
@@ -116,8 +114,8 @@ impl PgStore {
                     )?,
                 })
             })
-            .collect::<Result<Vec<_>, OperationsError>>()?;
-        Ok(UsageBreakdownReport {
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(Report {
             items,
             coverage: self.usage_range_coverage(filters).await?,
         })

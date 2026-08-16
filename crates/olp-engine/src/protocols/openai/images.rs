@@ -1,10 +1,18 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ImageArtifact, ImageEditRequest as CanonicalImageEditRequest,
-    ImageGenerationRequest as CanonicalImageGenerationRequest, ImageOperation,
-    ImageVariationRequest as CanonicalImageVariationRequest, ImagesResult, MediaHandle,
-    MediaSource, Operation, RouteSlug, RouteSlugError, SourceExtensions, Surface, Usage,
+    canonical::{
+        events::Usage,
+        identity::Surface,
+        requests::{
+            ImageEditRequest as CanonicalImageEditRequest,
+            ImageGenerationRequest as CanonicalImageGenerationRequest, ImageOperation,
+            ImageVariationRequest as CanonicalImageVariationRequest, MediaHandle, MediaSource,
+            Operation, SourceExtensions,
+        },
+        results::{ImageArtifact, ImagesResult},
+    },
+    ids::{RouteSlug, RouteSlugError},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -582,7 +590,7 @@ pub enum ImageCodecError {
     #[error(transparent)]
     InvalidRoute(#[from] RouteSlugError),
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("image prompt cannot be empty")]
     EmptyPrompt,
     #[error("image count must be greater than zero")]

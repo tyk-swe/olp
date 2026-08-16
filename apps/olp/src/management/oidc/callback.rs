@@ -7,10 +7,11 @@ use axum::{
 };
 use jsonwebtoken::jwk::JwkSet;
 use olp_db::{
-    authentication::SessionPrincipal, oidc::CompleteOidcLink, oidc::CompleteOidcLogin,
-    oidc::CompleteOidcReauthentication, oidc::OidcFlowPurpose, security::RecentAuthMaterial,
-    security::SessionMaterial, security::oidc_client_secret_aad as client_secret_aad,
-    security::oidc_flow_payload_aad as flow_payload_aad,
+    authentication::SessionPrincipal, oidc::types::CompleteOidcLink,
+    oidc::types::CompleteOidcLogin, oidc::types::CompleteOidcReauthentication,
+    oidc::types::OidcFlowPurpose, security::aad::oidc_client_secret as client_secret_aad,
+    security::aad::oidc_flow_payload as flow_payload_aad,
+    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
 };
 use serde::Deserialize;
 use tracing::error;
@@ -29,9 +30,9 @@ use super::session::{
     consume_login_flow_cookie, reauthenticated_redirect,
 };
 use crate::{
-    ManagementState, Problem,
-    management::{require_read_session, validate_session_cookie_ttl},
-    public_http::request_cookies::RequestCookies,
+    bootstrap::mode_dependencies::ManagementState,
+    management::{cookies::validate_session_cookie_ttl, sessions::require_read_session},
+    public_http::{problem::Problem, request_cookies::RequestCookies},
 };
 
 const TOKEN_RESPONSE_LIMIT: usize = 256 * 1024;

@@ -1,21 +1,21 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub const LIFECYCLE_OPERATIONS: [&str; 4] =
+pub(crate) const LIFECYCLE_OPERATIONS: [&str; 4] =
     ["video_create", "video_get", "video_content", "video_delete"];
 
 #[derive(Clone, Copy)]
-pub struct ProviderFixture {
-    pub provider_id: Uuid,
-    pub model_id: Uuid,
+pub(crate) struct ProviderFixture {
+    pub(crate) provider_id: Uuid,
+    pub(crate) model_id: Uuid,
 }
 
-pub struct DraftFixture {
-    pub id: Uuid,
-    pub etag: Uuid,
+pub(crate) struct DraftFixture {
+    pub(crate) id: Uuid,
+    pub(crate) etag: Uuid,
 }
 
-pub async fn insert_provider(pool: &PgPool, actor: Uuid, name: &str) -> ProviderFixture {
+pub(crate) async fn insert_provider(pool: &PgPool, actor: Uuid, name: &str) -> ProviderFixture {
     let provider = ProviderFixture {
         provider_id: Uuid::now_v7(),
         model_id: Uuid::now_v7(),
@@ -56,7 +56,7 @@ pub async fn insert_provider(pool: &PgPool, actor: Uuid, name: &str) -> Provider
     provider
 }
 
-pub async fn insert_provider_revision(
+pub(crate) async fn insert_provider_revision(
     pool: &PgPool,
     actor: Uuid,
     provider: ProviderFixture,

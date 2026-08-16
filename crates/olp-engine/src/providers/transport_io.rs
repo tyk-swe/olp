@@ -8,18 +8,17 @@
 
 use std::{future::ready, pin::Pin, time::Duration};
 
-use crate::domain::{AttemptFailureClass, ProviderEventStream, TransportError, TransportPhase};
+use crate::domain::ports::{
+    AttemptFailureClass, ProviderEventStream, TransportError, TransportPhase,
+};
 use bytes::Bytes;
 use futures::{Stream, StreamExt as _, stream};
 use http::header;
 use reqwest::Response;
 use tokio::time::{Instant, timeout};
 
-mod event_stream;
-
-pub(in crate::providers) use event_stream::{
-    CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream,
-};
+pub(in crate::providers) mod event_stream;
+use self::event_stream::{CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream};
 
 pub(in crate::providers) type ReqwestByteStream =
     Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>>;

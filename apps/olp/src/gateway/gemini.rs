@@ -6,19 +6,30 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use olp_engine::domain::{
-    ApiKey, CanonicalResult, OperationKind, RouteSlug, Surface, TransportMode,
+    auth::ApiKey,
+    canonical::{
+        identity::{OperationKind, Surface, TransportMode},
+        results::CanonicalResult,
+    },
+    ids::RouteSlug,
 };
 use olp_engine::protocols::gemini::{
-    CountTokensRequest, GeminiGenerateContentClientStreamEncoder, GenerateContentRequest,
-    decode_count_tokens_request, decode_generate_content_request, encode_count_tokens_result,
-    encode_generate_content_response,
+    client::encode_generate_content_response,
+    client_stream::Encoder,
+    count::{decode_count_tokens_request, encode_count_tokens_result},
+    dto::{CountTokensRequest, GenerateContentRequest},
+    translate::decode::request as decode_request,
 };
 use serde::{Deserialize, Serialize};
 
-use olp_engine::inference::{CompletedEventExecution, runtime::RuntimeBundle};
+use olp_engine::inference::{
+    execution::{CompletedEvents, RoutedUnaryResult},
+    principal::Principal,
+    runtime::Bundle,
+};
 
 use crate::{
-    GatewayState, InferencePrincipal,
+    bootstrap::mode_dependencies::GatewayState,
     public_http::json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
@@ -27,8 +38,9 @@ use crate::{
 };
 
 use super::{
-    InferenceError, RoutedUnaryResult, authorize_model_access, execute_event_operation_for_surface,
-    execute_routed_result_for_surface,
+    authorize_model_access,
+    error::InferenceError,
+    execute_event_operation_for_surface, execute_routed_result_for_surface,
     native_models::{after_cursor_start, supported_operations, visible_route, visible_routes},
     protocol_error::{ProtocolError, gemini_error_body, valid_json},
     release_model_limits, reserve_model_limits,
@@ -36,7 +48,7 @@ use super::{
 
 pub(super) async fn action(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(resource): Path<String>,
     Query(query): Query<ActionQuery>,
     payload: Result<Json<serde_json::Value>, JsonRejection>,
@@ -50,7 +62,7 @@ pub(super) async fn action(
         let admitted = admit_gemini_generate(&state, &mut request)
             .await
             .map_err(ProtocolError::gemini)?;
-        let operation = match decode_generate_content_request(model, request, false) {
+        let operation = match decode_request(model, request, false) {
             Ok(operation) => operation,
             Err(error) => {
                 cleanup_admitted(&state, admitted).await;
@@ -89,7 +101,7 @@ pub(super) async fn action(
         let admitted = admit_gemini_generate(&state, &mut request)
             .await
             .map_err(ProtocolError::gemini)?;
-        let operation = match decode_generate_content_request(model, request, true) {
+        let operation = match decode_request(model, request, true) {
             Ok(operation) => operation,
             Err(error) => {
                 cleanup_admitted(&state, admitted).await;
@@ -107,7 +119,7 @@ pub(super) async fn action(
         )
         .await
         .map_err(ProtocolError::gemini)?;
-        let encoder = GeminiHttpStreamEncoder(GeminiGenerateContentClientStreamEncoder::new(
+        let encoder = GeminiHttpStreamEncoder(Encoder::new(
             execution.route_slug.as_str(),
             execution.request_id.to_string(),
         ));
@@ -147,7 +159,7 @@ pub(super) async fn action(
     ))
 }
 
-fn unary_response(mut completed: CompletedEventExecution) -> Result<Response, ProtocolError> {
+fn unary_response(mut completed: CompletedEvents) -> Result<Response, ProtocolError> {
     let response = encode_generate_content_response(
         &completed.events,
         completed.route_slug.as_str(),
@@ -219,7 +231,7 @@ struct Model {
 
 pub(super) async fn models(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =
@@ -233,7 +245,7 @@ pub(super) async fn models(
 }
 
 fn models_response(
-    runtime: &RuntimeBundle,
+    runtime: &Bundle,
     key: &ApiKey,
     query: ModelsQuery,
 ) -> Result<Response, ProtocolError> {
@@ -282,7 +294,7 @@ fn models_response(
 
 pub(super) async fn model(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(resource): Path<String>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =
@@ -303,7 +315,7 @@ pub(super) async fn model(
     result
 }
 
-fn model_object(runtime: &RuntimeBundle, slug: &RouteSlug) -> Model {
+fn model_object(runtime: &Bundle, slug: &RouteSlug) -> Model {
     Model {
         name: format!("models/{slug}"),
         base_model_id: slug.to_string(),
@@ -338,18 +350,18 @@ fn decode_page_token(token: &str) -> Result<String, ProtocolError> {
         .ok_or_else(|| ProtocolError::invalid(Surface::Gemini, "The pageToken is invalid."))
 }
 
-struct GeminiHttpStreamEncoder(GeminiGenerateContentClientStreamEncoder);
+struct GeminiHttpStreamEncoder(Encoder);
 
 impl ProtocolStreamEncoder for GeminiHttpStreamEncoder {
     fn push(
         &mut self,
-        event: olp_engine::domain::CanonicalEvent,
+        event: olp_engine::domain::canonical::events::Event,
     ) -> Result<Vec<bytes::Bytes>, String> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
-        encode_server_sse_frame(&olp_engine::protocols::sse::SseFrame {
+        encode_server_sse_frame(&olp_engine::protocols::sse::Frame {
             event: None,
             data: gemini_error_body(error).to_string(),
             id: None,

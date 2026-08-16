@@ -1,4 +1,4 @@
-use crate::domain::{MediaArtifact, MediaHandle};
+use crate::domain::canonical::{requests::MediaHandle, results::MediaArtifact};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -23,16 +23,16 @@ impl BoundedMediaPart {
         content_type: Option<String>,
         content_length: u64,
         maximum_length: u64,
-    ) -> Result<Self, MediaPartError> {
+    ) -> Result<Self, Error> {
         let filename = filename.into();
         if filename.trim().is_empty() {
-            return Err(MediaPartError::EmptyFilename);
+            return Err(Error::EmptyFilename);
         }
         if maximum_length == 0 {
-            return Err(MediaPartError::ZeroLimit);
+            return Err(Error::ZeroLimit);
         }
         if content_length > maximum_length {
-            return Err(MediaPartError::TooLarge {
+            return Err(Error::TooLarge {
                 actual: content_length,
                 maximum: maximum_length,
             });
@@ -57,7 +57,7 @@ impl BoundedMediaPart {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum MediaPartError {
+pub enum Error {
     #[error("multipart file name cannot be empty")]
     EmptyFilename,
     #[error("multipart file limit must be greater than zero")]

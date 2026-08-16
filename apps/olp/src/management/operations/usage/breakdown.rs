@@ -3,16 +3,18 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
 };
-use olp_db::{usage::UsageBreakdown, usage::UsageDimension};
+use olp_db::{usage::Dimension, usage::breakdown::Item};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::operations::helpers::{map_operations, page_limit},
-    management::{Permission, require_permission, require_read_session},
+    management::{permissions::require_permission, sessions::require_read_session},
+    public_http::problem::Problem,
 };
+use olp_engine::domain::auth::Permission;
 
 #[derive(Debug, Deserialize)]
 pub(in crate::management::operations) struct UsageBreakdownQuery {
@@ -36,8 +38,8 @@ pub(in crate::management::operations) struct UsageBreakdownItem {
     incomplete_count: u64,
 }
 
-impl From<UsageBreakdown> for UsageBreakdownItem {
-    fn from(item: UsageBreakdown) -> Self {
+impl From<Item> for UsageBreakdownItem {
+    fn from(item: Item) -> Self {
         Self {
             dimension: item.dimension,
             request_count: item.request_count,
@@ -79,11 +81,11 @@ pub(in crate::management::operations) async fn usage_breakdown(
     require_permission(&principal, Permission::ReadOperations)?;
     query.usage.validate()?;
     let dimension = match query.dimension.as_str() {
-        "route" => UsageDimension::Route,
-        "provider" => UsageDimension::Provider,
-        "model" => UsageDimension::Model,
-        "api_key" => UsageDimension::ApiKey,
-        "operation" => UsageDimension::Operation,
+        "route" => Dimension::Route,
+        "provider" => Dimension::Provider,
+        "model" => Dimension::Model,
+        "api_key" => Dimension::ApiKey,
+        "operation" => Dimension::Operation,
         _ => {
             return Err(Problem::bad_request(
                 "invalid_dimension",

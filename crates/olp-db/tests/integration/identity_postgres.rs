@@ -1,12 +1,11 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse,
-    idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
-    identity::AcceptInvitation, identity::IdentityError, identity::InstallationSetupInput,
-    identity::NewInvitation, security::MasterKey, security::SessionMaterial,
-    security::hash_password,
+    idempotency::Outcome, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
+    identity::AcceptInvitation, identity::Error, identity::InstallationSetupInput,
+    identity::NewInvitation, security::envelope::MasterKey, security::password::hash,
+    security::session_material::SessionMaterial,
 };
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -22,7 +21,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
                 installation_name: "Identity integration".to_owned(),
                 email: "owner@example.test".to_owned(),
                 display_name: "Owner".to_owned(),
-                password_hash: hash_password("correct horse battery staple").unwrap(),
+                password_hash: hash("correct horse battery staple").unwrap(),
             },
             &owner_session,
             Duration::hours(12),
@@ -94,10 +93,10 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
                 owner.user_id,
             )
             .await,
-        Err(IdentityError::LastOwner)
+        Err(Error::LastOwner)
     ));
 
-    let operator_fingerprint = idempotency_fingerprint(&"invite-operator-001").unwrap();
+    let operator_fingerprint = fingerprint(&"invite-operator-001").unwrap();
     let operator_invitation = store
         .create_invitation(
             NewInvitation {
@@ -107,12 +106,12 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
                 actor: owner.user_id,
                 idempotency_key: "invite-operator-001".to_owned(),
             },
-            ReplayableIdempotency::new(operator_fingerprint, &master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new(operator_fingerprint, &master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: operator_invitation,
         ..
     } = operator_invitation
@@ -125,7 +124,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
             AcceptInvitation {
                 token: operator_invitation.material.token().to_owned(),
                 display_name: "Operator".to_owned(),
-                password_hash: hash_password("another correct local password").unwrap(),
+                password_hash: hash("another correct local password").unwrap(),
             },
             &invited_session,
             Duration::hours(12),
@@ -139,7 +138,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
                 AcceptInvitation {
                     token: operator_invitation.material.token().to_owned(),
                     display_name: "Replay".to_owned(),
-                    password_hash: hash_password("another correct local password").unwrap(),
+                    password_hash: hash("another correct local password").unwrap(),
                 },
                 &SessionMaterial::generate(),
                 Duration::hours(12),
@@ -167,7 +166,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
             .is_empty()
     );
 
-    let viewer_fingerprint = idempotency_fingerprint(&"invite-viewer-0001").unwrap();
+    let viewer_fingerprint = fingerprint(&"invite-viewer-0001").unwrap();
     let viewer_invitation = store
         .create_invitation(
             NewInvitation {
@@ -177,12 +176,12 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
                 actor: owner.user_id,
                 idempotency_key: "invite-viewer-0001".to_owned(),
             },
-            ReplayableIdempotency::new(viewer_fingerprint, &master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new(viewer_fingerprint, &master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: viewer_invitation,
         ..
     } = viewer_invitation
@@ -204,7 +203,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
                 AcceptInvitation {
                     token: viewer_invitation.material.token().to_owned(),
                     display_name: "Viewer".to_owned(),
-                    password_hash: hash_password("a third correct local password").unwrap(),
+                    password_hash: hash("a third correct local password").unwrap(),
                 },
                 &SessionMaterial::generate(),
                 Duration::hours(12),

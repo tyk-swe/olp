@@ -4,11 +4,12 @@ use sqlx::FromRow;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::PgStore;
+use crate::store::Store;
 
 use super::{
-    EncryptedSecret, MasterKey, SecurityError, credential_aad, idempotency_replay_aad,
-    oidc_client_secret_aad, oidc_flow_payload_aad,
+    Error as SecurityError,
+    aad::{credential, idempotency_replay, oidc_client_secret, oidc_flow_payload},
+    envelope::{EncryptedSecret, MasterKey},
 };
 
 const MAX_BATCH_SIZE: u16 = 1_000;
@@ -121,7 +122,7 @@ pub enum ReencryptionError {
     InvalidDatabaseKeyVersion(u32),
 }
 
-impl PgStore {
+impl Store {
     pub async fn master_key_encryption_status(
         &self,
         active_version: u32,
@@ -309,7 +310,7 @@ impl PgStore {
                 EncryptedTable::ProviderCredentialVersions,
                 id,
                 &encrypted,
-                &credential_aad(provider_id, id, credential_version),
+                &credential(provider_id, id, credential_version),
             )?;
             update_envelope(
                 &mut transaction,
@@ -358,7 +359,7 @@ impl PgStore {
                 EncryptedTable::OidcConfigurations,
                 id,
                 &encrypted,
-                &oidc_client_secret_aad(id),
+                &oidc_client_secret(id),
             )?;
             update_envelope(
                 &mut transaction,
@@ -403,7 +404,7 @@ impl PgStore {
                 EncryptedTable::OidcAuthorizationFlows,
                 id,
                 &encrypted,
-                &oidc_flow_payload_aad(id),
+                &oidc_flow_payload(id),
             )?;
             update_envelope(
                 &mut transaction,
@@ -456,7 +457,7 @@ impl PgStore {
                 EncryptedTable::IdempotencyRecords,
                 id,
                 &encrypted,
-                &idempotency_replay_aad(actor, &operation, &key),
+                &idempotency_replay(actor, &operation, &key),
             )?;
             update_envelope(
                 &mut transaction,
@@ -558,11 +559,11 @@ impl PgStore {
                         let provider_id = row.provider_id.ok_or_else(|| corrupt(table, id))?;
                         let version = u32::try_from(row.version.ok_or_else(|| corrupt(table, id))?)
                             .map_err(|_| corrupt(table, id))?;
-                        credential_aad(provider_id, id, version)
+                        credential(provider_id, id, version)
                     }
-                    EncryptedTable::OidcConfigurations => oidc_client_secret_aad(id),
-                    EncryptedTable::OidcAuthorizationFlows => oidc_flow_payload_aad(id),
-                    EncryptedTable::IdempotencyRecords => idempotency_replay_aad(
+                    EncryptedTable::OidcConfigurations => oidc_client_secret(id),
+                    EncryptedTable::OidcAuthorizationFlows => oidc_flow_payload(id),
+                    EncryptedTable::IdempotencyRecords => idempotency_replay(
                         row.actor_user_id.ok_or_else(|| corrupt(table, id))?,
                         row.operation.as_deref().ok_or_else(|| corrupt(table, id))?,
                         row.idempotency_key

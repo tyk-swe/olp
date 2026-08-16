@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::domain::{AttemptFailureClass, TargetId};
+use crate::domain::{ids::TargetId, ports::AttemptFailureClass};
 
 const DEFAULT_FAILURE_THRESHOLD: u32 = 5;
 const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
@@ -18,7 +18,7 @@ const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
 /// this deliberately small, process-local overlay only suppresses targets that
 /// are repeatedly failing. A half-open target admits exactly one probe.
 #[derive(Clone)]
-pub struct CircuitBreaker {
+pub struct Breaker {
     inner: Arc<Mutex<BTreeMap<TargetId, CircuitState>>>,
     next_probe_generation: Arc<AtomicU64>,
     failure_threshold: u32,
@@ -45,13 +45,13 @@ enum CircuitState {
     },
 }
 
-impl Default for CircuitBreaker {
+impl Default for Breaker {
     fn default() -> Self {
         Self::new(DEFAULT_FAILURE_THRESHOLD, DEFAULT_OPEN_DURATION)
     }
 }
 
-impl CircuitBreaker {
+impl Breaker {
     fn new(failure_threshold: u32, open_duration: Duration) -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn opens_half_opens_and_recovers() {
-        let breaker = CircuitBreaker::new(2, Duration::from_millis(5));
+        let breaker = Breaker::new(2, Duration::from_millis(5));
         let target = TargetId::new();
         assert!(breaker.try_acquire(target));
         breaker.record_failure(target, AttemptFailureClass::Connect);
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn client_protocol_and_ambiguous_failures_do_not_trip_circuit() {
-        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let breaker = Breaker::new(1, Duration::from_secs(1));
         let target = TargetId::new();
         for class in [
             AttemptFailureClass::UpstreamClient,
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn abandoned_half_open_probe_is_immediately_reclaimable() {
-        let breaker = CircuitBreaker::default();
+        let breaker = Breaker::default();
         let target = TargetId::new();
         breaker
             .inner
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn stale_probe_cannot_abandon_a_newer_lease() {
-        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let breaker = Breaker::new(1, Duration::from_secs(1));
         let target = TargetId::new();
         breaker
             .inner
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn removes_state_for_targets_absent_from_the_installed_generation() {
-        let breaker = CircuitBreaker::new(1, Duration::from_secs(1));
+        let breaker = Breaker::new(1, Duration::from_secs(1));
         let retained = TargetId::new();
         let removed = TargetId::new();
         breaker.record_failure(retained, AttemptFailureClass::Connect);

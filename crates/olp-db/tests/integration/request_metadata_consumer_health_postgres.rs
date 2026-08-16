@@ -1,7 +1,7 @@
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Utc};
-use olp_db::{PersistenceError, request_metadata::RequestMetadataConsumerState};
+use olp_db::{error::Error, request_metadata::delivery_health::ConsumerState};
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
@@ -36,14 +36,14 @@ async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
         .request_metadata_consumer_status(Utc::now())
         .await
         .unwrap();
-    assert_eq!(backlogged.state, RequestMetadataConsumerState::Backlogged);
+    assert_eq!(backlogged.state, ConsumerState::Backlogged);
     assert!(!backlogged.complete());
 
     assert!(matches!(
         store
             .report_request_metadata_consumer_health(0, 1, Some(oldest))
             .await,
-        Err(PersistenceError::InvalidRequestMetadataGap)
+        Err(Error::InvalidRequestMetadataGap)
     ));
     for invalid in [
         store
@@ -59,10 +59,7 @@ async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
             .report_request_metadata_consumer_health(1, 0, Some(Utc::now() + Duration::minutes(10)))
             .await,
     ] {
-        assert!(matches!(
-            invalid,
-            Err(PersistenceError::InvalidRequestMetadataGap)
-        ));
+        assert!(matches!(invalid, Err(Error::InvalidRequestMetadataGap)));
     }
     let drained = store
         .report_request_metadata_consumer_health(0, 0, None)
@@ -74,7 +71,7 @@ async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
         .request_metadata_consumer_status(Utc::now())
         .await
         .unwrap();
-    assert_eq!(healthy.state, RequestMetadataConsumerState::Healthy);
+    assert_eq!(healthy.state, ConsumerState::Healthy);
     assert!(healthy.complete());
 
     sqlx::query(
@@ -87,7 +84,7 @@ async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
         .request_metadata_consumer_status(Utc::now())
         .await
         .unwrap();
-    assert_eq!(stale.state, RequestMetadataConsumerState::Stale);
+    assert_eq!(stale.state, ConsumerState::Stale);
     assert!(!stale.complete());
 }
 

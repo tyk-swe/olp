@@ -1,18 +1,18 @@
-use olp_engine::domain::RuntimeSnapshot;
+use olp_engine::domain::routing::snapshot::Snapshot;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{PersistenceError, PgStore};
+use crate::{error::Error, store::Store};
 
 use super::PublishedRuntimeRelease;
 
-impl PgStore {
+impl Store {
     /// Returns newest verified releases, skipping and visibly logging corrupt
     /// envelopes so a replacement gateway can try its previous durable LKG.
     pub async fn recent_valid_runtime_releases(
         &self,
         limit: u16,
-    ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
+    ) -> Result<Vec<PublishedRuntimeRelease>, Error> {
         self.recent_valid_runtime_releases_after(limit, None).await
     }
 
@@ -22,11 +22,11 @@ impl PgStore {
         &self,
         limit: u16,
         installed_sequence: Option<u64>,
-    ) -> Result<Vec<PublishedRuntimeRelease>, PersistenceError> {
+    ) -> Result<Vec<PublishedRuntimeRelease>, Error> {
         let installed_sequence = installed_sequence
             .map(i64::try_from)
             .transpose()
-            .map_err(|_| PersistenceError::CorruptRelease)?;
+            .map_err(|_| Error::CorruptRelease)?;
         let rows = sqlx::query!(
             "SELECT id, sequence, compiled_release, release_sha256, created_at \
              FROM runtime_generations \
@@ -70,18 +70,17 @@ pub(super) fn verify_release_envelope(
     payload: &[u8],
     generation_id: Uuid,
     sequence: i64,
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     if generation_id.get_version_num() != 7 {
-        return Err(PersistenceError::CorruptRelease);
+        return Err(Error::CorruptRelease);
     }
-    let ordinal = u64::try_from(sequence).map_err(|_| PersistenceError::CorruptRelease)?;
-    let snapshot = RuntimeSnapshot::from_persisted_slice(payload)
-        .map_err(|_| PersistenceError::CorruptRelease)?;
+    let ordinal = u64::try_from(sequence).map_err(|_| Error::CorruptRelease)?;
+    let snapshot = Snapshot::from_persisted_slice(payload).map_err(|_| Error::CorruptRelease)?;
     if snapshot.generation.id.as_uuid() != generation_id
         || snapshot.generation.ordinal != ordinal
         || snapshot.validate().is_err()
     {
-        return Err(PersistenceError::CorruptRelease);
+        return Err(Error::CorruptRelease);
     }
     Ok(())
 }

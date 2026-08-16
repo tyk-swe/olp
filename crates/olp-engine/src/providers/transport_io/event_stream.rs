@@ -6,7 +6,10 @@ use std::{
     time::Duration,
 };
 
-use crate::domain::{CanonicalEvent, TransportError, TransportPhase};
+use crate::domain::{
+    canonical::events::Event,
+    ports::{TransportError, TransportPhase},
+};
 use bytes::Bytes;
 use futures::Stream;
 use tokio::time::{Instant, Sleep};
@@ -18,8 +21,8 @@ pub(in crate::providers) trait CanonicalEventDecoder:
 {
     type Error: fmt::Display;
 
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, Self::Error>;
-    fn finish(&mut self) -> Result<Vec<CanonicalEvent>, Self::Error>;
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Self::Error>;
+    fn finish(&mut self) -> Result<Vec<Event>, Self::Error>;
 }
 
 pub(in crate::providers) struct DeadlineByteStream {
@@ -119,7 +122,7 @@ pub(in crate::providers) struct DecodedEventStream<D> {
     bytes: DeadlineByteStream,
     decoder: D,
     io: ProviderResponseIo,
-    queued: VecDeque<CanonicalEvent>,
+    queued: VecDeque<Event>,
     committed: bool,
     terminal: bool,
 }
@@ -146,7 +149,7 @@ impl<D> Stream for DecodedEventStream<D>
 where
     D: CanonicalEventDecoder,
 {
-    type Item = Result<CanonicalEvent, TransportError>;
+    type Item = Result<Event, TransportError>;
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {

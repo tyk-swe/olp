@@ -17,7 +17,7 @@ use axum::{
 use http_body::{Frame, SizeHint};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::{Problem, gateway};
+use crate::{gateway, public_http::problem::Problem};
 
 pub(crate) const DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS: usize = 256;
 pub(crate) const DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS: usize = 32;
@@ -231,7 +231,12 @@ pub(crate) async fn admit_public_request(
 ) -> Response {
     let endpoint = state
         .inference_enabled
-        .then(|| gateway::InferenceEndpoint::classify(request.method(), request.uri().path()))
+        .then(|| {
+            gateway::endpoint_policy::InferenceEndpoint::classify(
+                request.method(),
+                request.uri().path(),
+            )
+        })
         .flatten();
     let surface = if endpoint.is_some() {
         AdmissionSurface::Inference
@@ -250,14 +255,16 @@ pub(crate) async fn admit_public_request(
 
 fn overload_response(
     admission_surface: AdmissionSurface,
-    endpoint: Option<gateway::InferenceEndpoint>,
+    endpoint: Option<gateway::endpoint_policy::InferenceEndpoint>,
     uri: &axum::http::Uri,
 ) -> Response {
     let mut response = match (admission_surface, endpoint) {
-        (AdmissionSurface::Inference, Some(endpoint)) => gateway::inference_error_response(
-            endpoint.surface(),
-            gateway::InferenceError::overloaded(),
-        ),
+        (AdmissionSurface::Inference, Some(endpoint)) => {
+            gateway::protocol_error::inference_error_response(
+                endpoint.surface(),
+                gateway::error::InferenceError::overloaded(),
+            )
+        }
         (AdmissionSurface::Management, _) => Problem::new(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "request_admission_overloaded",

@@ -1,11 +1,11 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use olp_db::operations::{OperationsError, TimestampCursor};
+use olp_db::operations::cursor::{Error, Timestamp};
 use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;
 
-use crate::{Problem, management::map_persistence};
+use crate::{management::error_mapping::map_persistence, public_http::problem::Problem};
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -25,9 +25,9 @@ pub(super) fn page_limit(value: Option<u16>) -> Result<u16, Problem> {
     ))
 }
 
-pub(super) fn timestamp_cursor(value: Option<&str>) -> Result<Option<TimestampCursor>, Problem> {
+pub(super) fn timestamp_cursor(value: Option<&str>) -> Result<Option<Timestamp>, Problem> {
     value
-        .map(TimestampCursor::parse)
+        .map(Timestamp::parse)
         .transpose()
         .map_err(map_operations)
 }
@@ -56,31 +56,31 @@ pub(super) fn not_found() -> Problem {
     )
 }
 
-pub(super) fn map_operations(error: OperationsError) -> Problem {
+pub(super) fn map_operations(error: Error) -> Problem {
     match error {
-        OperationsError::InvalidCursor => {
+        Error::InvalidCursor => {
             Problem::bad_request("invalid_cursor", "The cursor is invalid or expired.")
         }
-        OperationsError::NotFound => not_found(),
-        OperationsError::PreconditionFailed => Problem::new(
+        Error::NotFound => not_found(),
+        Error::PreconditionFailed => Problem::new(
             StatusCode::PRECONDITION_FAILED,
             "etag_mismatch",
             "Precondition failed",
             "The resource changed; refresh it and retry with the current ETag.",
         ),
-        OperationsError::IdempotencyConflict => Problem::conflict(
+        Error::IdempotencyConflict => Problem::conflict(
             "idempotency_key_reused",
             "The Idempotency-Key has already been used for this operation.",
         ),
-        OperationsError::IdempotencyInProgress => Problem::conflict(
+        Error::IdempotencyInProgress => Problem::conflict(
             "idempotency_in_progress",
             "An operation with this Idempotency-Key is still in progress.",
         ),
-        OperationsError::Invalid(message) => Problem::field_validation("request", message),
-        OperationsError::Database(error) => {
+        Error::Invalid(message) => Problem::field_validation("request", message),
+        Error::Database(error) => {
             error!(%error, "operations persistence query failed");
             Problem::internal()
         }
-        OperationsError::Persistence(error) => map_persistence(error),
+        Error::Persistence(error) => map_persistence(error),
     }
 }

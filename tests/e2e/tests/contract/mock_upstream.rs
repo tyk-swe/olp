@@ -17,49 +17,49 @@ use axum::{
 };
 use serde_json::{Value, json};
 
-pub const MODEL: &str = "e2e-model";
-pub const DEPLOYMENT: &str = "e2e-deploy";
-pub const API_VERSION: &str = "2024-10-21";
-pub const COMPAT_CREDENTIAL: &str = "sk-e2e-compat";
-pub const AZURE_CREDENTIAL: &str = "azure-e2e-secret";
+pub(crate) const MODEL: &str = "e2e-model";
+pub(crate) const DEPLOYMENT: &str = "e2e-deploy";
+pub(crate) const API_VERSION: &str = "2024-10-21";
+pub(crate) const COMPAT_CREDENTIAL: &str = "sk-e2e-compat";
+pub(crate) const AZURE_CREDENTIAL: &str = "azure-e2e-secret";
 /// Marker in the user text that switches the mock to the CR-fidelity reply.
-pub const CR_MARKER: &str = "CR_FIDELITY";
+pub(crate) const CR_MARKER: &str = "CR_FIDELITY";
 /// Marker that makes the upstream answer 200 with no `usage` object at all —
 /// the "missing upstream usage" case `docs/architecture.md` pins.
-pub const NO_USAGE_MARKER: &str = "OMIT_USAGE";
+pub(crate) const NO_USAGE_MARKER: &str = "OMIT_USAGE";
 /// Marker that makes the upstream answer 429 with a `Retry-After`, so the
 /// gateway's own translation of that status can be observed.
-pub const RATE_LIMITED_MARKER: &str = "UPSTREAM_429";
+pub(crate) const RATE_LIMITED_MARKER: &str = "UPSTREAM_429";
 /// `Retry-After` seconds the mock sends with its 429.
-pub const RETRY_AFTER_SECONDS: &str = "37";
+pub(crate) const RETRY_AFTER_SECONDS: &str = "37";
 /// Reply text for ordinary calls.
-pub const PLAIN_TEXT: &str = "Hello, world";
-pub const PLAIN_DELTAS: [&str; 3] = ["Hello", ", ", "world"];
+pub(crate) const PLAIN_TEXT: &str = "Hello, world";
+pub(crate) const PLAIN_DELTAS: [&str; 3] = ["Hello", ", ", "world"];
 /// Reply text containing a raw CR+LF inside a delta — exercises byte fidelity
 /// through the product's SSE encode/decode path.
-pub const CR_TEXT: &str = "line1\r\nline2 tail";
-pub const CR_DELTAS: [&str; 2] = ["line1\r\nline2", " tail"];
-pub const PROMPT_TOKENS: u64 = 7;
-pub const COMPLETION_TOKENS: u64 = 5;
-pub const TOTAL_TOKENS: u64 = 12;
+pub(crate) const CR_TEXT: &str = "line1\r\nline2 tail";
+pub(crate) const CR_DELTAS: [&str; 2] = ["line1\r\nline2", " tail"];
+pub(crate) const PROMPT_TOKENS: u64 = 7;
+pub(crate) const COMPLETION_TOKENS: u64 = 5;
+pub(crate) const TOTAL_TOKENS: u64 = 12;
 
 #[derive(Clone, Debug)]
-pub struct RecordedRequest {
-    pub method: String,
-    pub path: String,
-    pub query: Option<String>,
-    pub authorization: Option<String>,
-    pub api_key_header: Option<String>,
+pub(crate) struct RecordedRequest {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) query: Option<String>,
+    pub(crate) authorization: Option<String>,
+    pub(crate) api_key_header: Option<String>,
     /// Every header, lowercased, in arrival order. The two credential fields
     /// above are conveniences over this list, not a filter applied before it:
     /// an assertion about what the product forwards upstream can only be made
     /// against the complete set.
-    pub headers: Vec<(String, String)>,
-    pub body: Value,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) body: Value,
 }
 
 impl RecordedRequest {
-    pub fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         let name = name.to_ascii_lowercase();
         self.headers
             .iter()
@@ -69,19 +69,19 @@ impl RecordedRequest {
 }
 
 #[derive(Clone, Default)]
-pub struct MockState {
-    pub requests: Arc<Mutex<Vec<RecordedRequest>>>,
-    pub unexpected: Arc<Mutex<Vec<String>>>,
+pub(crate) struct MockState {
+    pub(crate) requests: Arc<Mutex<Vec<RecordedRequest>>>,
+    pub(crate) unexpected: Arc<Mutex<Vec<String>>>,
 }
 
-pub struct MockUpstream {
+pub(crate) struct MockUpstream {
     /// `http://127.0.0.1:{port}` — no trailing slash, no path.
-    pub base: String,
-    pub state: MockState,
+    pub(crate) base: String,
+    pub(crate) state: MockState,
 }
 
 impl MockUpstream {
-    pub async fn spawn() -> Self {
+    pub(crate) async fn spawn() -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let state = MockState::default();
@@ -97,7 +97,7 @@ impl MockUpstream {
         }
     }
 
-    pub fn recorded(&self) -> Vec<RecordedRequest> {
+    pub(crate) fn recorded(&self) -> Vec<RecordedRequest> {
         self.state.requests.lock().unwrap().clone()
     }
 
@@ -107,16 +107,16 @@ impl MockUpstream {
     /// call count for its own request without the shared bootstrap traffic —
     /// probes, discovery, certification — inflating the total. `>=` assertions
     /// pass under a duplicate-send bug; these do not.
-    pub fn checkpoint(&self) -> usize {
+    pub(crate) fn checkpoint(&self) -> usize {
         self.state.requests.lock().unwrap().len()
     }
 
     /// Requests recorded after `checkpoint`.
-    pub fn since(&self, checkpoint: usize) -> Vec<RecordedRequest> {
+    pub(crate) fn since(&self, checkpoint: usize) -> Vec<RecordedRequest> {
         self.state.requests.lock().unwrap()[checkpoint..].to_vec()
     }
 
-    pub fn unexpected(&self) -> Vec<String> {
+    pub(crate) fn unexpected(&self) -> Vec<String> {
         self.state.unexpected.lock().unwrap().clone()
     }
 }

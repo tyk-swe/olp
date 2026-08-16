@@ -1,14 +1,18 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, Surface};
+use crate::domain::canonical::{
+    events::{ErrorClass, Event, Kind},
+    identity::Surface,
+    requests::MessageRole,
+};
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use super::finish_reason;
-use crate::protocols::sse::{RAW_SSE_FRAME_EXTENSION, SseFrame, decode_raw_sse_frame};
+use crate::protocols::sse::{Frame, RAW_SSE_FRAME_EXTENSION, decode_raw_sse_frame};
 
 #[derive(Debug, Error)]
-pub enum ClientStreamEncodeError {
+pub enum Error {
     #[error("Gemini stream received events out of order")]
     Sequence,
     #[error("Gemini output role is not model")]
@@ -22,7 +26,7 @@ pub enum ClientStreamEncodeError {
 }
 
 #[derive(Debug)]
-pub struct GeminiGenerateContentClientStreamEncoder {
+pub struct Encoder {
     public_model: String,
     fallback_id: String,
     expected_sequence: u64,
@@ -39,7 +43,7 @@ struct ToolState {
     arguments: String,
 }
 
-impl GeminiGenerateContentClientStreamEncoder {
+impl Encoder {
     #[must_use]
     pub fn new(public_model: impl Into<String>, fallback_id: impl Into<String>) -> Self {
         Self {
@@ -53,32 +57,29 @@ impl GeminiGenerateContentClientStreamEncoder {
         }
     }
 
-    pub fn push(
-        &mut self,
-        event: CanonicalEvent,
-    ) -> Result<Vec<SseFrame>, ClientStreamEncodeError> {
+    pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, Error> {
         if self.done || event.sequence != self.expected_sequence {
-            return Err(ClientStreamEncodeError::Sequence);
+            return Err(Error::Sequence);
         }
         self.expected_sequence = self.expected_sequence.saturating_add(1);
         if self.skip_native_events > 0 {
             self.skip_native_events -= 1;
-            if matches!(event.kind, CanonicalEventKind::Done) {
+            if matches!(event.kind, Kind::Done) {
                 self.done = true;
             }
             return Ok(Vec::new());
         }
         let mut frames = Vec::new();
         match event.kind {
-            CanonicalEventKind::ResponseStart { response_id, .. } => {
+            Kind::ResponseStart { response_id, .. } => {
                 self.response_id = response_id;
             }
-            CanonicalEventKind::MessageStart { role, .. } => {
+            Kind::MessageStart { role, .. } => {
                 if role != MessageRole::Assistant {
-                    return Err(ClientStreamEncodeError::Role);
+                    return Err(Error::Role);
                 }
             }
-            CanonicalEventKind::TextDelta { output_index, text } => {
+            Kind::TextDelta { output_index, text } => {
                 frames.push(self.response_frame(json!({
                     "candidates": [{
                         "index": output_index,
@@ -86,7 +87,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                     }]
                 })));
             }
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
@@ -96,19 +97,19 @@ impl GeminiGenerateContentClientStreamEncoder {
                 let tool = self.tools.entry((output_index, tool_index)).or_default();
                 if let Some(id) = id {
                     if tool.id.as_ref().is_some_and(|existing| existing != &id) {
-                        return Err(ClientStreamEncodeError::Tool);
+                        return Err(Error::Tool);
                     }
                     tool.id = Some(id);
                 }
                 if let Some(name) = name {
                     if tool.name.as_ref().is_some_and(|existing| existing != &name) {
-                        return Err(ClientStreamEncodeError::Tool);
+                        return Err(Error::Tool);
                     }
                     tool.name = Some(name);
                 }
                 tool.arguments.push_str(&arguments_delta);
             }
-            CanonicalEventKind::Usage { usage } => {
+            Kind::Usage { usage } => {
                 frames.push(self.response_frame(json!({
                     "usageMetadata": {
                         "promptTokenCount": usage.input_tokens,
@@ -119,7 +120,7 @@ impl GeminiGenerateContentClientStreamEncoder {
                     }
                 })));
             }
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index,
                 reason,
             } => {
@@ -131,13 +132,10 @@ impl GeminiGenerateContentClientStreamEncoder {
                     .collect::<Vec<_>>();
                 let mut parts = Vec::with_capacity(keys.len());
                 for key in keys {
-                    let tool = self
-                        .tools
-                        .remove(&key)
-                        .ok_or(ClientStreamEncodeError::Tool)?;
-                    let name = tool.name.ok_or(ClientStreamEncodeError::Tool)?;
-                    let args = serde_json::from_str::<Value>(&tool.arguments)
-                        .map_err(|_| ClientStreamEncodeError::Tool)?;
+                    let tool = self.tools.remove(&key).ok_or(Error::Tool)?;
+                    let name = tool.name.ok_or(Error::Tool)?;
+                    let args =
+                        serde_json::from_str::<Value>(&tool.arguments).map_err(|_| Error::Tool)?;
                     parts.push(json!({
                         "functionCall": {"id": tool.id, "name": name, "args": args}
                     }));
@@ -150,8 +148,8 @@ impl GeminiGenerateContentClientStreamEncoder {
                     }]
                 })));
             }
-            CanonicalEventKind::Error { error } => {
-                frames.push(SseFrame {
+            Kind::Error { error } => {
+                frames.push(Frame {
                     event: None,
                     data: json!({
                         "error": {
@@ -165,29 +163,29 @@ impl GeminiGenerateContentClientStreamEncoder {
                     retry_ms: None,
                 });
             }
-            CanonicalEventKind::SourceExtension { extensions } => {
+            Kind::SourceExtension { extensions } => {
                 if extensions.source != Some(Surface::Gemini) {
-                    return Err(ClientStreamEncodeError::Extension);
+                    return Err(Error::Extension);
                 }
                 if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
                     if extensions.values.len() != 1 {
-                        return Err(ClientStreamEncodeError::Extension);
+                        return Err(Error::Extension);
                     }
                     let (mut raw, semantic_events) =
-                        decode_raw_sse_frame(value).ok_or(ClientStreamEncodeError::Extension)?;
+                        decode_raw_sse_frame(value).ok_or(Error::Extension)?;
                     rewrite_gemini_model(&mut raw, &self.public_model)?;
                     self.skip_native_events = semantic_events;
                     frames.push(raw);
                 } else if !extensions.values.is_empty() {
-                    return Err(ClientStreamEncodeError::Extension);
+                    return Err(Error::Extension);
                 }
             }
-            CanonicalEventKind::RefusalDelta { .. } => {
-                return Err(ClientStreamEncodeError::Role);
+            Kind::RefusalDelta { .. } => {
+                return Err(Error::Role);
             }
-            CanonicalEventKind::Done => {
+            Kind::Done => {
                 if !self.tools.is_empty() {
-                    return Err(ClientStreamEncodeError::UnfinishedTools);
+                    return Err(Error::UnfinishedTools);
                 }
                 self.done = true;
             }
@@ -195,7 +193,7 @@ impl GeminiGenerateContentClientStreamEncoder {
         Ok(frames)
     }
 
-    fn response_frame(&self, mut value: Value) -> SseFrame {
+    fn response_frame(&self, mut value: Value) -> Frame {
         let object = value
             .as_object_mut()
             .expect("Gemini stream chunks are always objects");
@@ -211,7 +209,7 @@ impl GeminiGenerateContentClientStreamEncoder {
             "modelVersion".into(),
             Value::String(self.public_model.clone()),
         );
-        SseFrame {
+        Frame {
             event: None,
             data: value.to_string(),
             id: None,
@@ -220,22 +218,16 @@ impl GeminiGenerateContentClientStreamEncoder {
     }
 }
 
-fn rewrite_gemini_model(
-    frame: &mut SseFrame,
-    public_model: &str,
-) -> Result<(), ClientStreamEncodeError> {
-    let mut value: Value =
-        serde_json::from_str(&frame.data).map_err(|_| ClientStreamEncodeError::Extension)?;
-    let object = value
-        .as_object_mut()
-        .ok_or(ClientStreamEncodeError::Extension)?;
+fn rewrite_gemini_model(frame: &mut Frame, public_model: &str) -> Result<(), Error> {
+    let mut value: Value = serde_json::from_str(&frame.data).map_err(|_| Error::Extension)?;
+    let object = value.as_object_mut().ok_or(Error::Extension)?;
     if object.contains_key("modelVersion") {
         object.insert(
             "modelVersion".into(),
             Value::String(public_model.to_owned()),
         );
     }
-    frame.data = serde_json::to_string(&value).map_err(|_| ClientStreamEncodeError::Extension)?;
+    frame.data = serde_json::to_string(&value).map_err(|_| Error::Extension)?;
     Ok(())
 }
 

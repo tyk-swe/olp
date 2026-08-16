@@ -4,12 +4,11 @@
 //! `apps/olp/tests/openapi_drift.rs` fails CI when the committed copy is
 //! stale.
 
-use olp::management_openapi;
+use olp::management::openapi::document;
 
 fn main() {
     println!(
         "{}",
-        serde_json::to_string_pretty(&management_openapi())
-            .expect("OpenAPI document must serialize")
+        serde_json::to_string_pretty(&document()).expect("OpenAPI document must serialize")
     );
 }

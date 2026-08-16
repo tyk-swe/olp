@@ -1,8 +1,9 @@
 use std::{fmt::Display, str::FromStr};
 
 use olp_engine::domain::{
-    CapabilitySource, OperationKind, ProviderAuthMode, ProviderKind, ProviderState,
-    RouteDraftState, Surface, TransportMode,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    provider::{CapabilitySource, ProviderAuthMode, ProviderState, RouteDraftState},
+    routing::provider::ProviderKind,
 };
 use serde::{Serialize, de::DeserializeOwned};
 

@@ -1,14 +1,14 @@
-use crate::domain::RouteSlugError;
+use crate::domain::ids::RouteSlugError;
 use thiserror::Error;
 
-use crate::protocols::sse::SseDecodeError;
+use crate::protocols::sse::DecodeError;
 
 #[derive(Debug, Error)]
 pub enum ResponsesCodecError {
     #[error(transparent)]
     InvalidRoute(#[from] RouteSlugError),
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("Responses background mode is outside the OLP contract")]
     BackgroundUnsupported,
     #[error("stateful Responses field {field} is unsupported")]
@@ -66,7 +66,7 @@ pub enum ResponsesCodecError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
-    Sse(#[from] SseDecodeError),
+    Sse(#[from] DecodeError),
     #[error("Responses stream ended before a terminal event")]
     UnexpectedEof,
     #[error("Responses stream contained data after its terminal event")]

@@ -6,7 +6,7 @@ pub(crate) mod error_mapping;
 pub(crate) mod idempotency;
 pub(crate) mod json_payload;
 pub(crate) mod oidc;
-mod openapi;
+pub mod openapi;
 pub(crate) mod operations;
 pub(crate) mod pagination;
 pub(crate) mod permissions;
@@ -38,26 +38,12 @@ use auth::{
     UserResponse, authentication_capabilities, current_session, login, logout, setup, setup_status,
 };
 use axum::{Json, Router, routing::get, routing::post};
-pub(crate) use cookies::{
-    RECENT_AUTH_COOKIE, append_recent_auth_cookie, append_security_transition_cookies,
-    clear_recent_auth_cookie, validate_session_cookie_ttl,
-};
-pub(crate) use error_mapping::{map_configuration, map_persistence};
-pub(crate) use idempotency::{idempotency_http_response, require_idempotency_key};
-pub(crate) use json_payload::json_payload;
-pub(crate) use olp_engine::domain::Permission;
-pub(crate) use pagination::{DiffQuery, PageQuery, page};
-pub(crate) use permissions::require_permission;
-pub(crate) use preconditions::{if_match, optional_if_match, with_etag};
-pub(crate) use response_policy::{RuntimeGenerationResponse, prevent_sensitive_response_caching};
-pub(crate) use secrets::WriteOnlySecret;
-pub(crate) use sessions::{
-    CSRF_HEADER, SETUP_TOKEN_HEADER, cookie, enforce_origin, reauthentication_required,
-    require_mutation_session, require_read_session,
-};
 use utoipa::OpenApi;
 
-use crate::{ManagementState, Problem, public_http::public_auth_routes::PublicAuthRoute};
+use crate::{
+    bootstrap::mode_dependencies::ManagementState,
+    public_http::{problem::Problem, public_auth_routes::PublicAuthRoute},
+};
 
 pub fn router() -> Router<ManagementState> {
     Router::new()
@@ -170,7 +156,7 @@ pub fn router() -> Router<ManagementState> {
         (name = "invitations"),
     )
 )]
-pub struct ManagementApiDoc;
+struct ApiDoc;
 
 #[utoipa::path(
     get,
@@ -183,17 +169,7 @@ pub struct ManagementApiDoc;
     ))
 )]
 async fn openapi() -> Json<serde_json::Value> {
-    Json(management_openapi())
-}
-
-#[must_use]
-pub fn management_openapi() -> serde_json::Value {
-    let mut document = ManagementApiDoc::openapi();
-    document.merge(crate::management::oidc::openapi());
-    document.merge(crate::management::operations::OperationsApiDoc::openapi());
-    document.merge(configuration::ConfigurationApiDoc::openapi());
-    document.merge(crate::management::playground::PlaygroundApiDoc::openapi());
-    openapi::complete_openapi_contract(document)
+    Json(openapi::document())
 }
 
 #[cfg(test)]

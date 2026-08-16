@@ -9,8 +9,8 @@ use axum::{
 use chrono::Duration;
 use olp_db::{
     authentication::RecentAuthPurpose, authentication::SessionSecurityContext,
-    security::RecentAuthMaterial, security::SessionMaterial, security::hash_password,
-    security::verify_password,
+    security::password::hash, security::password::verify,
+    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
 };
 use serde::Deserialize;
 use tracing::error;
@@ -22,8 +22,7 @@ use super::users::UserDetailResponse;
 use crate::management::{
     auth::spawn_password_work,
     cookies::{
-        RECENT_AUTH_COOKIE, append_recent_auth_cookie, append_security_transition_cookies,
-        validate_session_cookie_ttl,
+        append_recent_auth_cookie, append_security_transition_cookies, validate_session_cookie_ttl,
     },
     error_mapping::{map_identity, map_persistence, user_not_found},
     json_payload::json_payload,
@@ -32,7 +31,10 @@ use crate::management::{
     secrets::WriteOnlySecret,
     sessions::{cookie, reauthentication_required, require_mutation_session, require_read_session},
 };
-use crate::{ManagementState, Problem};
+use crate::{
+    bootstrap::mode_dependencies::ManagementState,
+    public_http::{problem::Problem, request_cookies::RECENT_AUTH_COOKIE},
+};
 
 const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
 
@@ -175,7 +177,7 @@ pub(in crate::management) async fn recent_authentication(
         })?;
     let password = Zeroizing::new(request.current_password.expose().to_owned());
     let encoded = local.password_hash;
-    let valid = spawn_password_work(move || verify_password(&password, &encoded))?
+    let valid = spawn_password_work(move || verify(&password, &encoded))?
         .await
         .map_err(|error| {
             error!(%error, "recent-authentication password task failed");
@@ -282,10 +284,10 @@ pub(in crate::management) async fn change_password(
     let new_password = Zeroizing::new(request.new_password.expose().to_owned());
     let current_hash = local.password_hash;
     let password_hash = spawn_password_work(move || {
-        if !verify_password(&current_password, &current_hash) {
+        if !verify(&current_password, &current_hash) {
             return Ok(None);
         }
-        hash_password(&new_password).map(Some)
+        hash(&new_password).map(Some)
     })?
     .await
     .map_err(|error| {
@@ -370,7 +372,7 @@ pub(in crate::management) async fn enroll_password(
     let expected_etag = if_match(&headers)?;
     validate_new_password(&request.new_password)?;
     let new_password = Zeroizing::new(request.new_password.expose().to_owned());
-    let password_hash = spawn_password_work(move || hash_password(&new_password))?
+    let password_hash = spawn_password_work(move || hash(&new_password))?
         .await
         .map_err(|error| {
             error!(%error, "password enrollment task failed");

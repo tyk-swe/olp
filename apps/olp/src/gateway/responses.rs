@@ -6,17 +6,26 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_engine::domain::{
-    CanonicalEvent, CanonicalResult, GatewayCapability, Operation, TransportMode,
+    auth::GatewayCapability,
+    canonical::{
+        events::Event, identity::TransportMode, requests::Operation, results::CanonicalResult,
+    },
 };
+use olp_engine::inference::{execution::RoutedEvents, principal::Principal};
 use olp_engine::protocols::openai::{
-    OpenAiResponsesStreamEncoder, ResponseCreateRequest, ResponseInputTokensRequest,
-    decode_response_create, decode_response_input_tokens, encode_response_input_tokens_result,
-    encode_response_object,
+    client::{Encoder, encode_response_object},
+    responses::{
+        request::{Create, decode_response_create},
+        token_count::{
+            ResponseInputTokensRequest, decode_response_input_tokens,
+            encode_response_input_tokens_result,
+        },
+    },
 };
 use serde_json::{Value, json};
 
 use crate::{
-    GatewayState, InferencePrincipal,
+    bootstrap::mode_dependencies::GatewayState,
     public_http::json_media::{
         admit_openai_response_input_tokens, admit_openai_responses, cleanup_admitted,
     },
@@ -29,16 +38,16 @@ use crate::{
 use super::{
     error::{InferenceError, valid_json},
     execution::{
-        RoutedEventExecution, authorize_principal, execute_event_operation, execute_unary_result,
-        incompatible_result, mark_unary_outcome,
+        authorize_principal, execute_event_operation, execute_unary_result, incompatible_result,
+        mark_unary_outcome,
     },
     openai_http::unix_seconds,
 };
 
 pub(super) async fn responses(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
-    payload: Result<Json<ResponseCreateRequest>, JsonRejection>,
+    Extension(principal): Extension<Principal>,
+    payload: Result<Json<Create>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let _ = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
     let Json(mut request) = valid_json(payload)?;
@@ -71,9 +80,7 @@ pub(super) async fn responses(
     }
 }
 
-async fn responses_unary_response(
-    execution: RoutedEventExecution,
-) -> Result<Response, InferenceError> {
+async fn responses_unary_response(execution: RoutedEvents) -> Result<Response, InferenceError> {
     let mut completed = execution.collect().await.map_err(InferenceError::from)?;
     let response = encode_response_object(
         &completed.events,
@@ -90,8 +97,8 @@ async fn responses_unary_response(
     }
 }
 
-fn responses_streaming_response(execution: RoutedEventExecution) -> Response {
-    let encoder = OpenAiResponsesHttpStreamEncoder(OpenAiResponsesStreamEncoder::new(
+fn responses_streaming_response(execution: RoutedEvents) -> Response {
+    let encoder = OpenAiResponsesHttpStreamEncoder(Encoder::new(
         execution.route_slug.as_str(),
         format!("resp_{}", execution.request_id.simple()),
         unix_seconds(),
@@ -99,10 +106,10 @@ fn responses_streaming_response(execution: RoutedEventExecution) -> Response {
     protocol_streaming_response(execution, encoder)
 }
 
-struct OpenAiResponsesHttpStreamEncoder(OpenAiResponsesStreamEncoder);
+struct OpenAiResponsesHttpStreamEncoder(Encoder);
 
 impl ProtocolStreamEncoder for OpenAiResponsesHttpStreamEncoder {
-    fn push(&mut self, event: CanonicalEvent) -> Result<Vec<Bytes>, String> {
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
@@ -112,7 +119,7 @@ impl ProtocolStreamEncoder for OpenAiResponsesHttpStreamEncoder {
 }
 
 fn responses_error_sse(error: &InferenceError) -> Bytes {
-    encode_server_sse_frame(&olp_engine::protocols::sse::SseFrame {
+    encode_server_sse_frame(&olp_engine::protocols::sse::Frame {
         event: Some("error".to_owned()),
         data: json!({
             "type": "error",
@@ -128,7 +135,7 @@ fn responses_error_sse(error: &InferenceError) -> Bytes {
 
 pub(super) async fn response_input_tokens(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     payload: Result<Json<ResponseInputTokensRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let _ = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;

@@ -1,16 +1,19 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{CanonicalEvent, Surface};
+use crate::domain::canonical::{events::Event, identity::Surface};
 use serde_json::Value;
 use thiserror::Error;
 
 use crate::protocols::client::{AggregateError, aggregate_generation};
 use crate::protocols::extensions::{PointerExtensionError, apply_response_extensions};
 
-use super::{ContentBlock, MessagesResponse, Role, TextBlock, ToolUseBlock, Usage, finish_reason};
+use super::{
+    dto::{ContentBlock, MessagesResponse, Role, TextBlock, ToolUseBlock, Usage},
+    finish_reason,
+};
 
 #[derive(Debug, Error)]
-pub enum ClientEncodeError {
+pub enum Error {
     #[error(transparent)]
     Aggregate(#[from] AggregateError),
     #[error("Anthropic Messages supports one output candidate")]
@@ -30,13 +33,13 @@ pub enum ClientEncodeError {
 }
 
 pub fn encode_messages_response(
-    events: &[CanonicalEvent],
+    events: &[Event],
     public_model: &str,
     fallback_id: &str,
-) -> Result<MessagesResponse, ClientEncodeError> {
+) -> Result<MessagesResponse, Error> {
     let aggregate = aggregate_generation(events, Surface::Anthropic)?;
     if aggregate.outputs.len() != 1 || !aggregate.outputs.contains_key(&0) {
-        return Err(ClientEncodeError::CandidateCount);
+        return Err(Error::CandidateCount);
     }
     let output = aggregate
         .outputs
@@ -51,9 +54,9 @@ pub fn encode_messages_response(
         }));
     }
     for tool in output.tools.values() {
-        let id = tool.id.clone().ok_or(ClientEncodeError::IncompleteTool)?;
-        let name = tool.name.clone().ok_or(ClientEncodeError::IncompleteTool)?;
-        let input = serde_json::from_str(&tool.arguments).map_err(ClientEncodeError::ToolJson)?;
+        let id = tool.id.clone().ok_or(Error::IncompleteTool)?;
+        let name = tool.name.clone().ok_or(Error::IncompleteTool)?;
+        let input = serde_json::from_str(&tool.arguments).map_err(Error::ToolJson)?;
         content.push(ContentBlock::ToolUse(ToolUseBlock {
             kind: "tool_use".to_owned(),
             id,
@@ -62,14 +65,11 @@ pub fn encode_messages_response(
             extra: BTreeMap::new(),
         }));
     }
-    let finish = output
-        .finish
-        .as_ref()
-        .ok_or(ClientEncodeError::MissingFinish)?;
+    let finish = output.finish.as_ref().ok_or(Error::MissingFinish)?;
     let stop_reason = finish_reason(finish).to_owned();
     let usage = aggregate.usage.unwrap_or_default();
     if usage.reasoning_tokens.is_some() {
-        return Err(ClientEncodeError::ReasoningUsage);
+        return Err(Error::ReasoningUsage);
     }
     let response = MessagesResponse {
         id: aggregate
@@ -98,17 +98,18 @@ pub fn encode_messages_response(
 fn apply_extensions(
     response: MessagesResponse,
     extensions: &BTreeMap<String, Value>,
-) -> Result<MessagesResponse, ClientEncodeError> {
+) -> Result<MessagesResponse, Error> {
     apply_response_extensions(response, extensions).map_err(|error| match error {
-        PointerExtensionError::InvalidPath(_) => ClientEncodeError::Extension,
-        PointerExtensionError::Json(error) => ClientEncodeError::Json(error),
+        PointerExtensionError::InvalidPath(_) => Error::Extension,
+        PointerExtensionError::Json(error) => Error::Json(error),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{
-        CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Usage as CanonicalUsage,
+    use crate::domain::canonical::{
+        events::{FinishReason, Kind, Usage as CanonicalUsage},
+        requests::{MessageRole, SourceExtensions},
     };
 
     use super::*;
@@ -116,39 +117,39 @@ mod tests {
     #[test]
     fn encodes_messages_response_and_restores_same_surface_extensions() {
         let events = vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: Some("msg_1".into()),
                     provider_model: Some("provider-model".into()),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 1,
-                CanonicalEventKind::MessageStart {
+                Kind::MessageStart {
                     output_index: 0,
                     role: MessageRole::Assistant,
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 2,
-                CanonicalEventKind::TextDelta {
+                Kind::TextDelta {
                     output_index: 0,
                     text: "hello".into(),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 3,
-                CanonicalEventKind::SourceExtension {
+                Kind::SourceExtension {
                     extensions: SourceExtensions::new(
                         Surface::Anthropic,
                         [("/vendor_flag".into(), Value::Bool(true))].into(),
                     ),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 4,
-                CanonicalEventKind::Usage {
+                Kind::Usage {
                     usage: CanonicalUsage {
                         input_tokens: 5,
                         output_tokens: 1,
@@ -158,14 +159,14 @@ mod tests {
                     },
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 5,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index: 0,
                     reason: FinishReason::Stop,
                 },
             ),
-            CanonicalEvent::new(6, CanonicalEventKind::Done),
+            Event::new(6, Kind::Done),
         ];
         let response = encode_messages_response(&events, "route", "fallback").unwrap();
         assert_eq!(response.model, "route");
@@ -176,22 +177,20 @@ mod tests {
     #[test]
     fn rejects_cross_protocol_extensions() {
         let events = vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::SourceExtension {
+                Kind::SourceExtension {
                     extensions: SourceExtensions::new(
                         Surface::OpenAi,
                         [("/field".into(), Value::Bool(true))].into(),
                     ),
                 },
             ),
-            CanonicalEvent::new(1, CanonicalEventKind::Done),
+            Event::new(1, Kind::Done),
         ];
         assert!(matches!(
             encode_messages_response(&events, "route", "fallback"),
-            Err(ClientEncodeError::Aggregate(
-                AggregateError::CrossProtocolExtensions
-            ))
+            Err(Error::Aggregate(AggregateError::CrossProtocolExtensions))
         ));
     }
 }

@@ -7,21 +7,24 @@ use std::{
     sync::{Arc, RwLock, atomic::AtomicU64},
 };
 
-use olp_db::{PgStore, security::AuthHmacKey, security::MasterKey};
-use olp_engine::domain::{MediaSpool, ProviderId, ProviderTransport};
-use olp_engine::inference::{
-    circuit::CircuitBreaker, limits::ReloadableLimiter, request_metadata::RequestMetadataEmitter,
-    runtime::RuntimeManager,
+use olp_db::{security::envelope::MasterKey, security::key_material::AuthHmacKey, store::Store};
+use olp_engine::domain::{
+    ids::ProviderId,
+    ports::{MediaSpool, ProviderTransport},
 };
-#[cfg(any(test, feature = "test-util"))]
-use olp_engine::providers::OpenAiConnector;
+use olp_engine::inference::{
+    circuit::Breaker, limits::ReloadableLimiter, request_metadata::Emitter, runtime::Manager,
+};
+#[cfg(feature = "test-util")]
+use olp_engine::providers::openai::transport::Connector;
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
 use crate::{
-    PublicOrigin, TrustedProxyCidr,
     observability::ObservabilityCache,
-    public_http::request_admission::{self, MultipartAdmissionState},
+    public_http::proxy::TrustedProxyCidr,
+    public_http::public_origin::PublicOrigin,
+    public_http::request_admission::{self, multipart::MultipartAdmissionState},
 };
 
 use super::media_spool;
@@ -51,22 +54,21 @@ impl ApiMode {
 #[derive(Clone)]
 pub struct ProcessComposition {
     pub mode: ApiMode,
-    pub store: Option<PgStore>,
-    pub runtime: Arc<RuntimeManager>,
+    pub store: Option<Store>,
+    pub runtime: Arc<Manager>,
     pub limiter: ReloadableLimiter,
     pub auth_hmac_key: Option<Arc<AuthHmacKey>>,
     pub(crate) trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     pub(crate) bootstrap_token_digest: Arc<AsyncRwLock<Option<Zeroizing<[u8; 32]>>>>,
     pub master_key: Option<Arc<MasterKey>>,
-    pub request_metadata: Option<RequestMetadataEmitter>,
-    pub(crate) circuits: CircuitBreaker,
+    pub request_metadata: Option<Emitter>,
+    pub(crate) circuits: Breaker,
     pub(crate) media_reconciliation_gaps: Arc<AtomicU64>,
     pub media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
-    pub(crate) public_admission: request_admission::PublicAdmission,
+    pub(crate) public_admission: request_admission::public::PublicAdmission,
     pub transports: TransportRegistry,
-    pub(crate) certification_probe_connectors:
-        olp_engine::providers::OpenAiConnectorOverrideRegistry,
+    pub(crate) certification_probe_connectors: olp_engine::providers::factory::overrides::Registry,
     pub public_origin: PublicOrigin,
     pub console_dir: Arc<PathBuf>,
     pub session_ttl: chrono::Duration,
@@ -81,8 +83,8 @@ impl ProcessComposition {
     #[cfg(any(test, feature = "test-util"))]
     pub fn new(
         mode: ApiMode,
-        store: Option<PgStore>,
-        runtime: Arc<RuntimeManager>,
+        store: Option<Store>,
+        runtime: Arc<Manager>,
         public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
     ) -> Self {
@@ -100,8 +102,8 @@ impl ProcessComposition {
 
     pub fn new_with_media_spool(
         mode: ApiMode,
-        store: Option<PgStore>,
-        runtime: Arc<RuntimeManager>,
+        store: Option<Store>,
+        runtime: Arc<Manager>,
         public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
         media_spool: Arc<dyn MediaSpool>,
@@ -121,11 +123,11 @@ impl ProcessComposition {
             bootstrap_token_digest: Arc::new(AsyncRwLock::new(None)),
             master_key: None,
             request_metadata: None,
-            circuits: CircuitBreaker::default(),
+            circuits: Breaker::default(),
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
             media_spool,
             multipart_admission,
-            public_admission: request_admission::PublicAdmission::default(),
+            public_admission: request_admission::public::PublicAdmission::default(),
             transports: TransportRegistry::default(),
             certification_probe_connectors: Default::default(),
             public_origin: PublicOrigin::parse(public_origin.as_ref())
@@ -155,7 +157,7 @@ impl ProcessComposition {
         max_in_flight_inference_requests: usize,
         max_in_flight_management_requests: usize,
     ) {
-        self.public_admission = request_admission::PublicAdmission::new(
+        self.public_admission = request_admission::public::PublicAdmission::new(
             max_in_flight_inference_requests,
             max_in_flight_management_requests,
         );
@@ -167,12 +169,12 @@ impl ProcessComposition {
     /// to exercise real connector I/O against a local mock without weakening
     /// the production custom-endpoint SSRF policy. Production wiring never
     /// installs an override.
-    #[cfg(any(test, feature = "test-util"))]
+    #[cfg(feature = "test-util")]
     #[doc(hidden)]
     pub fn register_certification_probe_connector_for_test(
         &self,
         provider_id: uuid::Uuid,
-        connector: OpenAiConnector,
+        connector: Connector,
     ) {
         self.certification_probe_connectors
             .register(provider_id, connector);

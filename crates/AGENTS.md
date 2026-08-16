@@ -7,8 +7,8 @@
   egress, endpoint building, vendor errors, and explicit factories; and
   `inference/` contains execution, generation pinning, selection, circuits,
   failover, limits, event collection, terminal accounting, telemetry, and
-  `InferenceService`. Cross-crate persistence DTOs and ports belong under
-  `inference/` when they support runtime execution.
+  `inference::service::Service`. Cross-crate persistence DTOs and ports belong
+  under `inference/` when they support runtime execution.
 - `olp-db` implements engine persistence ports with PostgreSQL and Valkey and
   owns encryption, migrations, and subsystem query namespaces
   (`authentication`, `configuration`, `identity`, `idempotency`, `media_jobs`,
@@ -21,7 +21,10 @@ The engine must not depend on `olp-db`. Every package declares
 infrastructure ownership. `olp_engine::providers` owns Reqwest/AWS/Google auth,
 database code owns SQLx/Redis, and delivery owns Axum/Tower/Clap. Keep concrete
 provider construction inside `olp-engine/src/providers/` and do not restore
-wildcard exports. Within the engine, `domain` imports no sibling module,
+re-export facades. Every public item has one defining owner-module path; use
+paths such as `domain::canonical::requests`, `providers::factory::assembly`,
+`inference::service`, `olp_db::store`, and `olp_db::error`. Within the engine,
+`domain` imports no sibling module,
 `protocols` may use only `domain`, `providers` may use `domain` and `protocols`,
 and `inference` may use all three. Only `providers` may use outbound networking
 libraries; inference reaches the database through engine-owned ports.

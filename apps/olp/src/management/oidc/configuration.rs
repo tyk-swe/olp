@@ -8,11 +8,11 @@ use axum::{
 };
 use jsonwebtoken::jwk::{JwkSet, PublicKeyUse};
 use olp_db::{
-    oidc::OidcConfiguration, oidc::OidcError, oidc::OidcRoleMapping, oidc::UpsertOidcConfiguration,
-    security::oidc_client_secret_aad as client_secret_aad,
+    oidc::types::OidcConfiguration, oidc::types::OidcError, oidc::types::OidcRoleMapping,
+    oidc::types::UpsertOidcConfiguration, security::aad::oidc_client_secret as client_secret_aad,
 };
-use olp_engine::domain::Role;
-use olp_engine::providers::OidcNetworkPolicy;
+use olp_engine::domain::auth::{Permission, Role};
+use olp_engine::providers::oidc::Policy;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use url::Url;
@@ -24,39 +24,42 @@ use super::claims::is_allowed_algorithm_name;
 use super::error::{field_problem, map_discovery_network, map_oidc, oidc_not_configured};
 use super::helpers::{network_policy, require_master_key, valid_claim_name};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        Permission, json_payload, optional_if_match, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        json_payload::json_payload,
+        permissions::require_permission,
+        preconditions::{optional_if_match, with_etag},
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 const DISCOVERY_LIMIT: usize = 128 * 1024;
 pub(super) const JWKS_LIMIT: usize = 512 * 1024;
 
 #[derive(Deserialize, ToSchema)]
-pub struct OidcConfigurationRequest {
-    pub discovery_url: String,
+pub(super) struct OidcConfigurationRequest {
+    pub(super) discovery_url: String,
     /// Issuer identifier configured out-of-band with the identity provider.
     /// Discovery must return this exact value.
-    pub issuer: String,
-    pub client_id: String,
+    pub(super) issuer: String,
+    pub(super) client_id: String,
     #[schema(value_type = Option<String>, write_only)]
     #[serde(default)]
     pub(super) client_secret: Option<OidcSecret>,
     #[serde(default = "default_true")]
-    pub enabled: bool,
+    pub(super) enabled: bool,
     #[serde(default = "default_scopes")]
-    pub scopes: Vec<String>,
+    pub(super) scopes: Vec<String>,
     #[serde(default = "default_email_claim")]
-    pub email_claim: String,
+    pub(super) email_claim: String,
     #[serde(default = "default_groups_claim")]
-    pub groups_claim: String,
-    pub default_role: Option<String>,
+    pub(super) groups_claim: String,
+    pub(super) default_role: Option<String>,
     #[serde(default)]
-    pub email_role_mappings: Vec<OidcRoleMappingRequest>,
+    pub(super) email_role_mappings: Vec<OidcRoleMappingRequest>,
     #[serde(default)]
-    pub group_role_mappings: Vec<OidcRoleMappingRequest>,
+    pub(super) group_role_mappings: Vec<OidcRoleMappingRequest>,
 }
 
 impl fmt::Debug for OidcConfigurationRequest {
@@ -79,34 +82,34 @@ impl fmt::Debug for OidcConfigurationRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct OidcRoleMappingRequest {
-    pub claim_value: String,
-    pub role: String,
+pub(super) struct OidcRoleMappingRequest {
+    pub(super) claim_value: String,
+    pub(super) role: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct OidcConfigurationResponse {
+pub(super) struct OidcConfigurationResponse {
     #[schema(value_type = String, format = Uuid)]
-    pub id: Uuid,
-    pub discovery_url: String,
-    pub issuer: String,
-    pub client_id: String,
-    pub has_client_secret: bool,
-    pub enabled: bool,
-    pub scopes: Vec<String>,
-    pub email_claim: String,
-    pub groups_claim: String,
-    pub default_role: Option<String>,
-    pub email_role_mappings: Vec<OidcRoleMappingResponse>,
-    pub group_role_mappings: Vec<OidcRoleMappingResponse>,
+    pub(super) id: Uuid,
+    pub(super) discovery_url: String,
+    pub(super) issuer: String,
+    pub(super) client_id: String,
+    pub(super) has_client_secret: bool,
+    pub(super) enabled: bool,
+    pub(super) scopes: Vec<String>,
+    pub(super) email_claim: String,
+    pub(super) groups_claim: String,
+    pub(super) default_role: Option<String>,
+    pub(super) email_role_mappings: Vec<OidcRoleMappingResponse>,
+    pub(super) group_role_mappings: Vec<OidcRoleMappingResponse>,
     #[schema(value_type = String, format = Uuid)]
-    pub etag: Uuid,
+    pub(super) etag: Uuid,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct OidcRoleMappingResponse {
-    pub claim_value: String,
-    pub role: String,
+pub(super) struct OidcRoleMappingResponse {
+    pub(super) claim_value: String,
+    pub(super) role: String,
 }
 
 pub(super) struct OidcSecret(pub(super) Zeroizing<String>);
@@ -308,10 +311,7 @@ pub(super) async fn put_configuration(
     Ok(response)
 }
 
-async fn validate_discovery(
-    policy: &OidcNetworkPolicy,
-    discovery: &DiscoveryDocument,
-) -> Result<(), Problem> {
+async fn validate_discovery(policy: &Policy, discovery: &DiscoveryDocument) -> Result<(), Problem> {
     if [
         &discovery.issuer,
         &discovery.authorization_endpoint,
@@ -605,7 +605,7 @@ mod tests {
     use axum::{body::Body, http::header};
     use http_body_util::BodyExt as _;
     use jsonwebtoken::jwk::JwkSet;
-    use olp_db::{oidc::OidcConfiguration, security::EncryptedSecret};
+    use olp_db::{oidc::types::OidcConfiguration, security::envelope::EncryptedSecret};
     use serde_json::json;
 
     use super::*;

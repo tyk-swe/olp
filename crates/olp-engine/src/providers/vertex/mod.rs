@@ -12,20 +12,21 @@ mod oauth;
 
 use std::{fmt, sync::Arc};
 
-use crate::domain::{
+use crate::domain::ports::{
     DiscoveredProviderModel, ProviderOutput, ProviderRequest, ProviderTransport, TransportError,
 };
 use crate::providers::gemini::{
-    BearerTokenProvider, ConnectorConfig as GeminiConnectorConfig, GeminiConnector,
+    BearerTokenProvider, ConnectorConfig as GeminiConnectorConfig,
+    transport::operations::Connector as GeminiConnector,
 };
 use url::Url;
 
-pub use oauth::ServiceAccountError;
+use oauth::ServiceAccountError;
 
 const DEFAULT_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 
 #[derive(Clone, Debug)]
-pub struct ConnectorConfig {
+pub(in crate::providers) struct ConnectorConfig {
     inner: GeminiConnectorConfig,
     project: String,
     location: String,
@@ -33,7 +34,7 @@ pub struct ConnectorConfig {
 }
 
 impl ConnectorConfig {
-    pub fn new(
+    pub(in crate::providers) fn new(
         project: impl Into<String>,
         location: impl Into<String>,
         probe_model: impl Into<String>,
@@ -58,7 +59,7 @@ impl ConnectorConfig {
         location: &str,
         probe_model: &str,
         base_url: &str,
-        timeouts: crate::providers::gemini::ConnectorTimeouts,
+        timeouts: crate::providers::connector::Timeouts,
     ) -> Self {
         Self {
             inner: GeminiConnectorConfig::for_local_test(base_url, timeouts),
@@ -69,15 +70,17 @@ impl ConnectorConfig {
     }
 }
 
-pub struct VertexConnector {
+pub(in crate::providers) struct Connector {
     config: ConnectorConfig,
     inner: GeminiConnector,
 }
 
-impl VertexConnector {
+impl Connector {
     /// Uses Application Default Credentials, including attached workload
     /// identity, external-account federation, user ADC, and metadata identity.
-    pub fn with_application_default(config: ConnectorConfig) -> Result<Self, ConnectorBuildError> {
+    pub(in crate::providers) fn with_application_default(
+        config: ConnectorConfig,
+    ) -> Result<Self, ConnectorBuildError> {
         let credentials = google_cloud_auth::credentials::Builder::default()
             .with_scopes([DEFAULT_SCOPE])
             .build_access_token_credentials()
@@ -90,7 +93,7 @@ impl VertexConnector {
     /// Uses a versioned service-account JSON value decrypted by the runtime.
     /// The long-lived key stays inside this generation's connector object;
     /// only cached short-lived access tokens are used for requests.
-    pub fn with_service_account_json(
+    pub(in crate::providers) fn with_service_account_json(
         config: ConnectorConfig,
         credential_json: &str,
     ) -> Result<Self, ConnectorBuildError> {
@@ -102,13 +105,13 @@ impl VertexConnector {
     }
 
     #[must_use]
-    pub fn with_token_provider(
+    pub(in crate::providers) fn with_token_provider(
         config: ConnectorConfig,
         provider: Arc<dyn BearerTokenProvider>,
     ) -> Self {
         let inner = GeminiConnector::with_bearer_token_provider(
             config.inner.clone(),
-            crate::domain::ProviderKind::VertexAi,
+            crate::domain::routing::provider::ProviderKind::VertexAi,
             provider,
         );
         Self { config, inner }
@@ -117,7 +120,9 @@ impl VertexConnector {
     /// Vertex publisher-model collections do not provide the Gemini Developer
     /// API's model-list contract. Probe the configured model with countTokens
     /// and return that explicit model as the discovered target.
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+    pub(in crate::providers) async fn discover_models(
+        &self,
+    ) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         self.inner.probe_model(&self.config.probe_model).await?;
         Ok(vec![DiscoveredProviderModel {
             id: self.config.probe_model.clone(),
@@ -126,10 +131,10 @@ impl VertexConnector {
     }
 }
 
-impl fmt::Debug for VertexConnector {
+impl fmt::Debug for Connector {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("VertexConnector")
+            .debug_struct("Connector")
             .field("project", &self.config.project)
             .field("location", &self.config.location)
             .field("probe_model", &self.config.probe_model)
@@ -138,11 +143,11 @@ impl fmt::Debug for VertexConnector {
     }
 }
 
-impl ProviderTransport for VertexConnector {
+impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         self.inner.execute(request)
     }
 }
@@ -180,7 +185,7 @@ fn normalize_model(model: String) -> Result<String, ConnectorBuildError> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ConnectorBuildError {
+pub(in crate::providers) enum ConnectorBuildError {
     #[error(transparent)]
     Gemini(#[from] crate::providers::gemini::ConnectorBuildError),
     #[error("Vertex AI {0} is not a valid cloud resource identifier")]

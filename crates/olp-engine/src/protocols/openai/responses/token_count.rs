@@ -1,8 +1,12 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ContentPart, Operation, RouteSlug, SourceExtensions, Surface, TokenCountRequest,
-    TokenCountResult,
+    canonical::{
+        identity::Surface,
+        requests::{ContentPart, Operation, SourceExtensions, TokenCountRequest},
+        results::TokenCountResult,
+    },
+    ids::RouteSlug,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

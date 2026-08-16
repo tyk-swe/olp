@@ -1,21 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{
-    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, SourceExtensions, Surface,
+use crate::domain::canonical::{
+    events::{Error as CanonicalError, ErrorClass, Event, Kind},
+    identity::Surface,
+    requests::SourceExtensions,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
 use super::{
-    GenerateContentResponse,
-    translate::{ResponseError, decode_generate_content_chunk},
+    dto::GenerateContentResponse,
+    translate::{errors::ResponseError, response::decode_generate_content_chunk},
 };
 use crate::protocols::sse::{
-    DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame, raw_sse_frame_event,
+    DEFAULT_MAX_EVENT_BYTES, DecodeError, Decoder as SseDecoder, Frame, raw_sse_frame_event,
 };
 
-pub struct GeminiGenerateContentStreamDecoder {
+pub struct Decoder {
     sse: SseDecoder,
     sequence: u64,
     response_started: bool,
@@ -27,10 +29,10 @@ pub struct GeminiGenerateContentStreamDecoder {
     preserve_raw_frames: bool,
 }
 
-impl std::fmt::Debug for GeminiGenerateContentStreamDecoder {
+impl std::fmt::Debug for Decoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("GeminiGenerateContentStreamDecoder")
+            .debug_struct("Decoder")
             .field("next_sequence", &self.sequence)
             .field("response_started", &self.response_started)
             .field("started_candidate_count", &self.started_candidates.len())
@@ -41,13 +43,13 @@ impl std::fmt::Debug for GeminiGenerateContentStreamDecoder {
     }
 }
 
-impl Default for GeminiGenerateContentStreamDecoder {
+impl Default for Decoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GeminiGenerateContentStreamDecoder {
+impl Decoder {
     #[must_use]
     pub fn new() -> Self {
         Self::with_max_event_bytes(DEFAULT_MAX_EVENT_BYTES)
@@ -76,12 +78,12 @@ impl GeminiGenerateContentStreamDecoder {
         }
     }
 
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, StreamError> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Error> {
         let frames = self.sse.push(bytes)?;
         self.decode_frames(frames)
     }
 
-    pub fn finish(&mut self) -> Result<Vec<CanonicalEvent>, StreamError> {
+    pub fn finish(&mut self) -> Result<Vec<Event>, Error> {
         let frames = self.sse.finish()?;
         let mut events = self.decode_frames(frames)?;
         if self.done {
@@ -90,9 +92,9 @@ impl GeminiGenerateContentStreamDecoder {
         let candidates_complete = !self.started_candidates.is_empty()
             && self.started_candidates == self.finished_candidates;
         if !self.prompt_blocked && !candidates_complete {
-            return Err(StreamError::UnexpectedEof);
+            return Err(Error::UnexpectedEof);
         }
-        self.emit(&mut events, CanonicalEventKind::Done);
+        self.emit(&mut events, Kind::Done);
         self.done = true;
         Ok(events)
     }
@@ -102,11 +104,11 @@ impl GeminiGenerateContentStreamDecoder {
         self.done
     }
 
-    fn decode_frames(&mut self, frames: Vec<SseFrame>) -> Result<Vec<CanonicalEvent>, StreamError> {
+    fn decode_frames(&mut self, frames: Vec<Frame>) -> Result<Vec<Event>, Error> {
         let mut events = Vec::new();
         for frame in frames {
             if self.done {
-                return Err(StreamError::DataAfterDone);
+                return Err(Error::DataAfterDone);
             }
             let raw_frame = self.preserve_raw_frames.then(|| frame.clone());
             let event_start = events.len();
@@ -120,7 +122,7 @@ impl GeminiGenerateContentStreamDecoder {
                 {
                     self.emit(
                         &mut events,
-                        CanonicalEventKind::SourceExtension {
+                        Kind::SourceExtension {
                             extensions: SourceExtensions::new(
                                 Surface::Gemini,
                                 BTreeMap::from([("/sse/event".into(), Value::String(event_name))]),
@@ -138,7 +140,7 @@ impl GeminiGenerateContentStreamDecoder {
                     if self.finished_candidates.contains(&output_index)
                         && (candidate.content.is_some() || candidate.finish_reason.is_some())
                     {
-                        return Err(StreamError::CandidateDataAfterFinish(output_index));
+                        return Err(Error::CandidateDataAfterFinish(output_index));
                     }
                 }
                 self.prompt_blocked |= response.candidates.is_empty()
@@ -147,23 +149,23 @@ impl GeminiGenerateContentStreamDecoder {
                 let canonical = decode_generate_content_chunk(response)?;
                 for event in canonical {
                     match event.kind {
-                        CanonicalEventKind::ResponseStart { .. } if self.response_started => {}
-                        CanonicalEventKind::ResponseStart { .. } => {
+                        Kind::ResponseStart { .. } if self.response_started => {}
+                        Kind::ResponseStart { .. } => {
                             self.response_started = true;
                             self.emit(&mut events, event.kind);
                         }
-                        CanonicalEventKind::MessageStart { output_index, .. } => {
+                        Kind::MessageStart { output_index, .. } => {
                             if self.started_candidates.insert(output_index) {
                                 self.emit(&mut events, event.kind);
                             }
                         }
-                        CanonicalEventKind::Finish { output_index, .. } => {
+                        Kind::Finish { output_index, .. } => {
                             if !self.finished_candidates.insert(output_index) {
-                                return Err(StreamError::DuplicateCandidateFinish(output_index));
+                                return Err(Error::DuplicateCandidateFinish(output_index));
                             }
                             self.emit(&mut events, event.kind);
                         }
-                        CanonicalEventKind::ToolCallDelta {
+                        Kind::ToolCallDelta {
                             output_index,
                             id,
                             name,
@@ -173,12 +175,11 @@ impl GeminiGenerateContentStreamDecoder {
                             let tool_index =
                                 self.next_tool_indexes.entry(output_index).or_default();
                             let current = *tool_index;
-                            *tool_index = tool_index
-                                .checked_add(1)
-                                .ok_or(StreamError::TooManyToolCalls)?;
+                            *tool_index =
+                                tool_index.checked_add(1).ok_or(Error::TooManyToolCalls)?;
                             self.emit(
                                 &mut events,
-                                CanonicalEventKind::ToolCallDelta {
+                                Kind::ToolCallDelta {
                                     output_index,
                                     tool_index: current,
                                     id,
@@ -187,7 +188,7 @@ impl GeminiGenerateContentStreamDecoder {
                                 },
                             );
                         }
-                        CanonicalEventKind::Done => {}
+                        Kind::Done => {}
                         kind => self.emit(&mut events, kind),
                     }
                 }
@@ -212,11 +213,7 @@ impl GeminiGenerateContentStreamDecoder {
         Ok(events)
     }
 
-    fn decode_error(
-        &mut self,
-        value: Value,
-        events: &mut Vec<CanonicalEvent>,
-    ) -> Result<(), StreamError> {
+    fn decode_error(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {
         let envelope: ErrorEnvelope = serde_json::from_value(value)?;
         let status = envelope.error.status.unwrap_or_default();
         let code = envelope.error.code;
@@ -235,7 +232,7 @@ impl GeminiGenerateContentStreamDecoder {
         };
         self.emit(
             events,
-            CanonicalEventKind::Error {
+            Kind::Error {
                 error: CanonicalError {
                     class,
                     message: envelope.error.message,
@@ -244,13 +241,13 @@ impl GeminiGenerateContentStreamDecoder {
                 },
             },
         );
-        self.emit(events, CanonicalEventKind::Done);
+        self.emit(events, Kind::Done);
         self.done = true;
         Ok(())
     }
 
-    fn emit(&mut self, events: &mut Vec<CanonicalEvent>, kind: CanonicalEventKind) {
-        events.push(CanonicalEvent::new(self.sequence, kind));
+    fn emit(&mut self, events: &mut Vec<Event>, kind: Kind) {
+        events.push(Event::new(self.sequence, kind));
         self.sequence = self.sequence.saturating_add(1);
     }
 }
@@ -271,9 +268,9 @@ struct WireError {
 }
 
 #[derive(Debug, Error)]
-pub enum StreamError {
+pub enum Error {
     #[error(transparent)]
-    Sse(#[from] SseDecodeError),
+    Sse(#[from] DecodeError),
     #[error("Gemini stream frame is not valid JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("Gemini response chunk is invalid: {0}")]

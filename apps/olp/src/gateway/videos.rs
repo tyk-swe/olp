@@ -13,24 +13,34 @@ use olp_db::{
     media_jobs::NewMediaJobReservation,
 };
 use olp_engine::domain::{
-    CanonicalResult, GatewayCapability, Operation, OperationKind, Surface, TransportMode,
-    VideoJobResult,
+    auth::GatewayCapability,
+    canonical::{
+        identity::{OperationKind, Surface, TransportMode},
+        requests::Operation,
+        results::{CanonicalResult, VideoJobResult},
+    },
 };
-use olp_engine::protocols::openai::{
+use olp_engine::inference::{
+    execution::{RequiredTarget, RoutedUnaryResult},
+    principal::Principal,
+};
+use olp_engine::protocols::openai::video::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
     encode_video_delete_response, encode_video_list_response, encode_video_object,
 };
 use tracing::error;
 
-use crate::{GatewayState, InferencePrincipal, MultipartRequestAdmission};
+use crate::{
+    bootstrap::mode_dependencies::GatewayState,
+    public_http::request_admission::multipart::MultipartRequestAdmission,
+};
 
 use super::{
     error::InferenceError,
     execution::{
-        RequiredTarget, RoutedUnaryResult, authorize_principal, defer_unary_outcome_to_body,
-        execute_routed_result, incompatible_result, mark_unary_outcome,
-        mark_unary_outcome_with_status,
+        authorize_principal, defer_unary_outcome_to_body, execute_routed_result,
+        incompatible_result, mark_unary_outcome, mark_unary_outcome_with_status,
     },
     media::{open_response_media, response_from_opened_media},
     media_jobs::{
@@ -44,14 +54,14 @@ use super::{
 
 pub(super) async fn video_create(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
     let mut form = parse_multipart(
         &state,
         multipart,
-        olp_engine::protocols::openai::DEFAULT_VIDEO_REFERENCE_LIMIT,
+        olp_engine::protocols::openai::video::DEFAULT_VIDEO_REFERENCE_LIMIT,
         1,
         admission,
     )
@@ -90,13 +100,14 @@ pub(super) async fn video_create(
     // The accepted upstream create must outlive client disconnects. Capture
     // the HTTP inference context before spawning so it keeps the original
     // runtime generation, limits reservation, and metadata ownership.
-    let task = crate::spawn_http_inference_task(complete_video_create(
-        state.clone(),
-        principal,
-        operation,
-        reserved,
-        required_target,
-    ));
+    let task =
+        crate::public_http::request_admission::spawn_http_inference_task(complete_video_create(
+            state.clone(),
+            principal,
+            operation,
+            reserved,
+            required_target,
+        ));
     match task.await {
         Ok(result) => result,
         Err(error) => {
@@ -249,7 +260,7 @@ async fn persist_video_create_cleanup_intent(
 
 async fn compensate_video_create(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     executed: &RoutedUnaryResult,
     upstream_job_id: &str,
     required_target: RequiredTarget,
@@ -286,7 +297,7 @@ async fn compensate_video_create(
 
 async fn handle_failed_video_attachment(
     state: &GatewayState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     reserved_id: uuid::Uuid,
     upstream_job_id: &str,
     required_target: RequiredTarget,
@@ -344,7 +355,7 @@ async fn handle_failed_video_attachment(
 
 async fn complete_video_create(
     state: GatewayState,
-    principal: InferencePrincipal,
+    principal: Principal,
     operation: Operation,
     reserved: MediaJobRecord,
     required_target: RequiredTarget,
@@ -397,7 +408,7 @@ async fn complete_video_create(
 
 pub(super) async fn video_list(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
     let key = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
@@ -429,12 +440,15 @@ pub(super) async fn video_list(
         .collect::<Vec<_>>()
         .await;
     let jobs = refreshed.iter().map(media_job_result).collect::<Vec<_>>();
-    let result = olp_engine::domain::VideoListResult {
+    let result = olp_engine::domain::canonical::results::VideoListResult {
         first_id: jobs.first().map(|job| job.id.clone()),
         last_id: jobs.last().map(|job| job.id.clone()),
         jobs,
         has_more: page.next_cursor.is_some(),
-        extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+            Surface::OpenAi,
+            BTreeMap::new(),
+        ),
     };
     let response = encode_video_list_response(&result, "video").map_err(|error| {
         InferenceError::bad_gateway("provider_protocol_error", error.to_string())
@@ -491,7 +505,7 @@ fn validate_video_list_query(
 
 pub(super) async fn video_get(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (key, record) =
@@ -551,7 +565,7 @@ pub(super) async fn video_get(
 
 pub(super) async fn video_content(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(video_id): Path<String>,
     Query(query): Query<OpenAiVideoContentQuery>,
 ) -> Result<Response, InferenceError> {
@@ -600,7 +614,7 @@ pub(super) async fn video_content(
 
 pub(super) async fn video_delete(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (_, loaded) =
@@ -611,11 +625,16 @@ pub(super) async fn video_delete(
         .await
         .map_err(media_job_error)?;
     if record.lifecycle == MediaJobLifecycle::Deleted {
-        let response = encode_video_delete_response(&olp_engine::domain::VideoDeleteResult {
-            id: record.id.to_string(),
-            deleted: true,
-            extensions: olp_engine::domain::SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-        })
+        let response = encode_video_delete_response(
+            &olp_engine::domain::canonical::results::VideoDeleteResult {
+                id: record.id.to_string(),
+                deleted: true,
+                extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                    Surface::OpenAi,
+                    BTreeMap::new(),
+                ),
+            },
+        )
         .map_err(|error| {
             InferenceError::bad_gateway("provider_protocol_error", error.to_string())
         })?;

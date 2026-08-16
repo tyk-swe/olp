@@ -5,10 +5,17 @@ use std::{
 
 use chrono::Utc;
 use olp_engine::domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    Capability, CredentialVersionId, DurationMs, OperationKind, Provider, ProviderId, ProviderKind,
-    Route, RouteId, RouteSlug, RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, Surface,
-    Target, TargetId, TransportMode,
+    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::{
+        ApiKeyId, ApiKeyLookupId, CredentialVersionId, DurationMs, ProviderId, RouteId, RouteSlug,
+        RuntimeGenerationId, TargetId,
+    },
+    routing::{
+        provider::{Capability, Provider, ProviderKind},
+        route::{Route, Target},
+        snapshot::{RuntimeGeneration, Snapshot},
+    },
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -16,7 +23,7 @@ use sqlx::{Postgres, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{PersistenceError, PgStore};
+use crate::{error::Error, store::Store};
 
 use super::PublishedRuntimeRelease;
 
@@ -25,24 +32,24 @@ const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254; // "OLP_RT"
 #[derive(Debug, Error)]
 pub enum RuntimeCompileError {
     #[error(transparent)]
-    Persistence(#[from] PersistenceError),
+    Persistence(#[from] Error),
     #[error("stored runtime configuration is invalid: {0}")]
     InvalidConfiguration(String),
 }
 
 impl From<sqlx::Error> for RuntimeCompileError {
     fn from(error: sqlx::Error) -> Self {
-        Self::Persistence(PersistenceError::Database(error))
+        Self::Persistence(Error::Database(error))
     }
 }
 
 impl From<serde_json::Error> for RuntimeCompileError {
     fn from(error: serde_json::Error) -> Self {
-        Self::Persistence(PersistenceError::Serialize(error))
+        Self::Persistence(Error::Serialize(error))
     }
 }
 
-impl PgStore {
+impl Store {
     /// Compiles normalized configuration while holding a cross-replica
     /// transaction lock, validates it, and publishes the release plus outbox
     /// hint atomically. Concurrent key/route activations therefore cannot
@@ -178,7 +185,7 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
 
 async fn compile_snapshot(
     transaction: &mut Transaction<'_, Postgres>,
-) -> Result<RuntimeSnapshot, RuntimeCompileError> {
+) -> Result<Snapshot, RuntimeCompileError> {
     let mut providers = BTreeMap::new();
     for row in sqlx::query!(
         "SELECT p.id, pr.name, pr.kind, pr.credential_version_id \
@@ -308,7 +315,7 @@ async fn compile_snapshot(
 
     let api_keys = compile_api_keys(transaction).await?;
 
-    Ok(RuntimeSnapshot {
+    Ok(Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 0,

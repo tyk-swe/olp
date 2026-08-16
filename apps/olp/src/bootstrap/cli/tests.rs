@@ -8,8 +8,9 @@ use std::{
 
 use clap::Parser;
 use olp_db::{
-    security::AuthHmacKey, security::EncryptedTable, security::KeyVersionReference,
-    security::MasterKey, security::MasterKeyEncryptionStatus,
+    security::envelope::MasterKey, security::key_material::AuthHmacKey,
+    security::rotation::EncryptedTable, security::rotation::KeyVersionReference,
+    security::rotation::MasterKeyEncryptionStatus,
 };
 use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};

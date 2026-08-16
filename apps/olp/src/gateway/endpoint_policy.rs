@@ -13,9 +13,16 @@ use axum::{
     http::Method,
     routing::{MethodFilter, MethodRouter, on},
 };
-use olp_engine::domain::{GatewayCapability, OperationKind, RouteSlug, Surface};
+use olp_engine::domain::{
+    auth::GatewayCapability,
+    canonical::identity::{OperationKind, Surface},
+    ids::RouteSlug,
+};
 
-use crate::{GatewayState, MAX_JSON_BODY_BYTES, MAX_MEDIA_BODY_BYTES};
+use crate::{
+    bootstrap::mode_dependencies::GatewayState, bootstrap::state::MAX_JSON_BODY_BYTES,
+    bootstrap::state::MAX_MEDIA_BODY_BYTES,
+};
 
 use super::{anthropic, chat, gemini, media, openai_models, responses, videos};
 
@@ -1350,7 +1357,7 @@ mod tests {
                 .expect("registered endpoint has authorization policy");
             assert_eq!(
                 capability,
-                olp_engine::domain::gateway_capability_for_operation(metadata.operation),
+                olp_engine::domain::auth::gateway_capability_for_operation(metadata.operation),
                 "authorization and routing policy diverged for {:?}",
                 spec.id
             );
@@ -1367,7 +1374,7 @@ mod tests {
                     let metadata = endpoint.metadata().expect("supported action has metadata");
                     assert_eq!(
                         endpoint.capability(),
-                        Some(olp_engine::domain::gateway_capability_for_operation(
+                        Some(olp_engine::domain::auth::gateway_capability_for_operation(
                             metadata.operation
                         ))
                     );

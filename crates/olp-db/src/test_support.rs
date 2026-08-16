@@ -12,7 +12,7 @@
 use sqlx::{Connection as _, PgConnection};
 use uuid::Uuid;
 
-use crate::{MIGRATOR, PgStore};
+use crate::{MIGRATOR, store::Store};
 
 /// A uniquely named PostgreSQL database owned by a single test.
 ///
@@ -98,9 +98,9 @@ impl TestDb {
         &self.url
     }
 
-    /// Opens a [`PgStore`] pool on this test's database.
-    pub async fn store(&self, max_connections: u32) -> PgStore {
-        PgStore::connect(&self.url, max_connections)
+    /// Opens a [`Store`] pool on this test's database.
+    pub async fn store(&self, max_connections: u32) -> Store {
+        Store::connect(&self.url, max_connections)
             .await
             .expect("connect to the per-test database")
     }

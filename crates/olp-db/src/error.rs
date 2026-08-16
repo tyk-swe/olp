@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum PersistenceError {
+pub enum Error {
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
     #[error("database migration failed")]
@@ -11,7 +11,7 @@ pub enum PersistenceError {
     #[error("runtime release failed integrity verification")]
     CorruptRelease,
     #[error("runtime snapshot is invalid: {0}")]
-    InvalidRuntimeSnapshot(#[from] olp_engine::domain::SnapshotValidationError),
+    InvalidRuntimeSnapshot(#[from] olp_engine::domain::routing::snapshot::Error),
     #[error("runtime release serialization failed")]
     Serialize(#[from] serde_json::Error),
     #[error("runtime outbox leadership was lost")]

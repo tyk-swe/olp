@@ -8,13 +8,13 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    idempotency::IdempotencyResponse,
-    idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint,
+    idempotency::Replayable,
+    idempotency::Response as IdempotencyResponse,
+    idempotency::fingerprint,
     identity::{AcceptInvitation, InvitationRecord, NewInvitation},
-    security::{SessionMaterial, hash_password},
+    security::{password::hash, session_material::SessionMaterial},
 };
-use olp_engine::domain::Permission;
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
@@ -35,7 +35,10 @@ use crate::management::{
     secrets::WriteOnlySecret,
     sessions::{enforce_origin, require_mutation_session, require_read_session},
 };
-use crate::{FieldErrors, ManagementState, Problem, public_auth_source_target_digests};
+use crate::{
+    bootstrap::mode_dependencies::ManagementState, public_http::problem::FieldErrors,
+    public_http::problem::Problem, public_http::proxy::public_auth_source_target_digests,
+};
 
 pub(in crate::management) const INVALID_INVITATION_RATE_LIMIT_TARGET: &str =
     "<invalid-invitation-token>";
@@ -153,7 +156,7 @@ pub(in crate::management) async fn create_invitation(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&request).map_err(map_persistence)?;
+    let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let master_key = state
         .master_key
@@ -180,7 +183,7 @@ pub(in crate::management) async fn create_invitation(
                 actor: principal.user_id,
                 idempotency_key,
             },
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             |created| {
                 IdempotencyResponse::json(
                     StatusCode::CREATED.as_u16(),
@@ -287,7 +290,7 @@ pub(in crate::management) async fn accept_invitation(
     }
     validate_invitation_acceptance(&request)?;
     let password = Zeroizing::new(request.password.expose().to_owned());
-    let password_hash = spawn_password_work(move || hash_password(&password))?
+    let password_hash = spawn_password_work(move || hash(&password))?
         .await
         .map_err(|error| {
             error!(%error, "invited-user password hashing task failed");

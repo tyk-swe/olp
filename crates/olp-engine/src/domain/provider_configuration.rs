@@ -3,11 +3,14 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::{ProviderAuthMode, ProviderKind, Surface};
+use crate::domain::{
+    canonical::identity::Surface, provider::ProviderAuthMode, routing::provider::ProviderKind,
+};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ProviderConfigurationField {
+#[schema(as = ProviderConfigurationField)]
+pub enum Field {
     Endpoint,
     CloudRegion,
     CloudProject,
@@ -16,7 +19,7 @@ pub enum ProviderConfigurationField {
     Model,
 }
 
-impl ProviderConfigurationField {
+impl Field {
     pub const ALL: [Self; 6] = [
         Self::Endpoint,
         Self::CloudRegion,
@@ -55,7 +58,7 @@ pub struct ProviderAuthModeSpec {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderFieldSpec {
-    pub field: ProviderConfigurationField,
+    pub field: Field,
     pub label: &'static str,
     pub required: bool,
 }
@@ -96,7 +99,7 @@ impl ProviderKindSpec {
     }
 
     #[must_use]
-    pub fn field(self, field: ProviderConfigurationField) -> Option<&'static ProviderFieldSpec> {
+    pub fn field(self, field: Field) -> Option<&'static ProviderFieldSpec> {
         self.fields
             .iter()
             .find(|candidate| candidate.field == field)
@@ -139,14 +142,14 @@ const BEDROCK_AUTH: [ProviderAuthModeSpec; 2] = [
 ];
 
 const MODEL_FIELD: ProviderFieldSpec = ProviderFieldSpec {
-    field: ProviderConfigurationField::Model,
+    field: Field::Model,
     label: "Seed model",
     required: false,
 };
 const COMMON_FIELDS: [ProviderFieldSpec; 1] = [MODEL_FIELD];
 const COMPATIBLE_FIELDS: [ProviderFieldSpec; 2] = [
     ProviderFieldSpec {
-        field: ProviderConfigurationField::Endpoint,
+        field: Field::Endpoint,
         label: "HTTPS endpoint",
         required: true,
     },
@@ -154,24 +157,24 @@ const COMPATIBLE_FIELDS: [ProviderFieldSpec; 2] = [
 ];
 const VERTEX_FIELDS: [ProviderFieldSpec; 3] = [
     ProviderFieldSpec {
-        field: ProviderConfigurationField::CloudProject,
+        field: Field::CloudProject,
         label: "Cloud project",
         required: true,
     },
     ProviderFieldSpec {
-        field: ProviderConfigurationField::CloudRegion,
+        field: Field::CloudRegion,
         label: "Cloud location",
         required: true,
     },
     ProviderFieldSpec {
-        field: ProviderConfigurationField::Model,
+        field: Field::Model,
         label: "Probe model",
         required: true,
     },
 ];
 const BEDROCK_FIELDS: [ProviderFieldSpec; 2] = [
     ProviderFieldSpec {
-        field: ProviderConfigurationField::CloudRegion,
+        field: Field::CloudRegion,
         label: "AWS region",
         required: true,
     },
@@ -179,17 +182,17 @@ const BEDROCK_FIELDS: [ProviderFieldSpec; 2] = [
 ];
 const AZURE_FIELDS: [ProviderFieldSpec; 4] = [
     ProviderFieldSpec {
-        field: ProviderConfigurationField::Endpoint,
+        field: Field::Endpoint,
         label: "Resource endpoint",
         required: true,
     },
     ProviderFieldSpec {
-        field: ProviderConfigurationField::Deployment,
+        field: Field::Deployment,
         label: "Deployment",
         required: true,
     },
     ProviderFieldSpec {
-        field: ProviderConfigurationField::ApiVersion,
+        field: Field::ApiVersion,
         label: "API version",
         required: true,
     },
@@ -354,7 +357,7 @@ pub fn provider_kind_spec(kind: ProviderKind) -> &'static ProviderKindSpec {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ProviderConfiguration<'a> {
+pub struct Configuration<'a> {
     pub kind: ProviderKind,
     pub auth_mode: ProviderAuthMode,
     pub endpoint: Option<&'a str>,
@@ -368,15 +371,15 @@ pub struct ProviderConfiguration<'a> {
     pub credential_present: Option<bool>,
 }
 
-impl<'a> ProviderConfiguration<'a> {
-    fn value(self, field: ProviderConfigurationField) -> Option<&'a str> {
+impl<'a> Configuration<'a> {
+    fn value(self, field: Field) -> Option<&'a str> {
         match field {
-            ProviderConfigurationField::Endpoint => self.endpoint,
-            ProviderConfigurationField::CloudRegion => self.cloud_region,
-            ProviderConfigurationField::CloudProject => self.cloud_project,
-            ProviderConfigurationField::Deployment => self.deployment,
-            ProviderConfigurationField::ApiVersion => self.api_version,
-            ProviderConfigurationField::Model => self.model,
+            Field::Endpoint => self.endpoint,
+            Field::CloudRegion => self.cloud_region,
+            Field::CloudProject => self.cloud_project,
+            Field::Deployment => self.deployment,
+            Field::ApiVersion => self.api_version,
+            Field::Model => self.model,
         }
     }
 }
@@ -410,15 +413,15 @@ impl ProviderViolationField {
     }
 }
 
-impl From<ProviderConfigurationField> for ProviderViolationField {
-    fn from(value: ProviderConfigurationField) -> Self {
+impl From<Field> for ProviderViolationField {
+    fn from(value: Field) -> Self {
         match value {
-            ProviderConfigurationField::Endpoint => Self::Endpoint,
-            ProviderConfigurationField::CloudRegion => Self::CloudRegion,
-            ProviderConfigurationField::CloudProject => Self::CloudProject,
-            ProviderConfigurationField::Deployment => Self::Deployment,
-            ProviderConfigurationField::ApiVersion => Self::ApiVersion,
-            ProviderConfigurationField::Model => Self::Model,
+            Field::Endpoint => Self::Endpoint,
+            Field::CloudRegion => Self::CloudRegion,
+            Field::CloudProject => Self::CloudProject,
+            Field::Deployment => Self::Deployment,
+            Field::ApiVersion => Self::ApiVersion,
+            Field::Model => Self::Model,
         }
     }
 }
@@ -432,40 +435,38 @@ pub enum ProviderViolationCode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProviderConfigurationViolation {
+pub struct Violation {
     pub field: ProviderViolationField,
     pub code: ProviderViolationCode,
     pub detail: &'static str,
 }
 
 #[must_use]
-pub fn validate_provider_configuration(
-    configuration: ProviderConfiguration<'_>,
-) -> Vec<ProviderConfigurationViolation> {
+pub fn validate(configuration: Configuration<'_>) -> Vec<Violation> {
     let spec = provider_kind_spec(configuration.kind);
     let mut violations = Vec::new();
 
     let auth = spec.auth_mode(configuration.auth_mode);
     if auth.is_none() {
-        violations.push(ProviderConfigurationViolation {
+        violations.push(Violation {
             field: ProviderViolationField::AuthMode,
             code: ProviderViolationCode::UnsupportedAuthMode,
             detail: unsupported_auth_detail(configuration.kind),
         });
     }
 
-    for field in ProviderConfigurationField::ALL {
+    for field in Field::ALL {
         match (spec.field(field), configuration.value(field)) {
             (Some(field_spec), value)
                 if field_spec.required && value.is_none_or(|value| value.trim().is_empty()) =>
             {
-                violations.push(ProviderConfigurationViolation {
+                violations.push(Violation {
                     field: field.into(),
                     code: ProviderViolationCode::Required,
                     detail: required_field_detail(configuration.kind, field),
                 });
             }
-            (None, Some(_)) => violations.push(ProviderConfigurationViolation {
+            (None, Some(_)) => violations.push(Violation {
                 field: field.into(),
                 code: ProviderViolationCode::Forbidden,
                 detail: forbidden_field_detail(configuration.kind, field),
@@ -477,14 +478,14 @@ pub fn validate_provider_configuration(
     if let (Some(auth), Some(credential_present)) = (auth, configuration.credential_present) {
         match (auth.credential, credential_present) {
             (CredentialRequirement::Required, false) => {
-                violations.push(ProviderConfigurationViolation {
+                violations.push(Violation {
                     field: ProviderViolationField::Credential,
                     code: ProviderViolationCode::Required,
                     detail: "This authentication mode requires a write-only credential.",
                 });
             }
             (CredentialRequirement::Forbidden, true) => {
-                violations.push(ProviderConfigurationViolation {
+                violations.push(Violation {
                     field: ProviderViolationField::Credential,
                     code: ProviderViolationCode::Forbidden,
                     detail: forbidden_credential_detail(configuration.auth_mode),
@@ -509,78 +510,56 @@ const fn unsupported_auth_detail(kind: ProviderKind) -> &'static str {
     }
 }
 
-const fn required_field_detail(
-    kind: ProviderKind,
-    field: ProviderConfigurationField,
-) -> &'static str {
+const fn required_field_detail(kind: ProviderKind, field: Field) -> &'static str {
     match (kind, field) {
-        (ProviderKind::OpenAiCompatible, ProviderConfigurationField::Endpoint) => {
-            "An HTTPS endpoint is required."
-        }
-        (ProviderKind::VertexAi, ProviderConfigurationField::CloudProject) => {
-            "Vertex AI requires a cloud project."
-        }
-        (ProviderKind::VertexAi, ProviderConfigurationField::CloudRegion) => {
-            "Vertex AI requires a cloud region."
-        }
-        (ProviderKind::VertexAi, ProviderConfigurationField::Model) => {
-            "Vertex AI requires an explicit model to probe."
-        }
-        (ProviderKind::Bedrock, ProviderConfigurationField::CloudRegion) => {
-            "Bedrock requires an AWS region."
-        }
-        (ProviderKind::AzureOpenAi, ProviderConfigurationField::Endpoint) => {
+        (ProviderKind::OpenAiCompatible, Field::Endpoint) => "An HTTPS endpoint is required.",
+        (ProviderKind::VertexAi, Field::CloudProject) => "Vertex AI requires a cloud project.",
+        (ProviderKind::VertexAi, Field::CloudRegion) => "Vertex AI requires a cloud region.",
+        (ProviderKind::VertexAi, Field::Model) => "Vertex AI requires an explicit model to probe.",
+        (ProviderKind::Bedrock, Field::CloudRegion) => "Bedrock requires an AWS region.",
+        (ProviderKind::AzureOpenAi, Field::Endpoint) => {
             "Azure OpenAI requires an HTTPS resource endpoint."
         }
-        (ProviderKind::AzureOpenAi, ProviderConfigurationField::Deployment) => {
+        (ProviderKind::AzureOpenAi, Field::Deployment) => {
             "Azure OpenAI requires a deployment name."
         }
-        (ProviderKind::AzureOpenAi, ProviderConfigurationField::ApiVersion) => {
-            "Azure OpenAI requires an API version."
-        }
+        (ProviderKind::AzureOpenAi, Field::ApiVersion) => "Azure OpenAI requires an API version.",
         _ => "This provider configuration field is required.",
     }
 }
 
-const fn forbidden_field_detail(
-    kind: ProviderKind,
-    field: ProviderConfigurationField,
-) -> &'static str {
+const fn forbidden_field_detail(kind: ProviderKind, field: Field) -> &'static str {
     match (kind, field) {
-        (ProviderKind::OpenAi, ProviderConfigurationField::Endpoint) => {
+        (ProviderKind::OpenAi, Field::Endpoint) => {
             "Native OpenAI uses the official endpoint; use an OpenAI-compatible provider for a custom endpoint."
         }
-        (ProviderKind::Anthropic, ProviderConfigurationField::Endpoint) => {
+        (ProviderKind::Anthropic, Field::Endpoint) => {
             "Native Anthropic uses the official endpoint."
         }
-        (ProviderKind::Gemini, ProviderConfigurationField::Endpoint) => {
+        (ProviderKind::Gemini, Field::Endpoint) => {
             "Gemini Developer API uses the official endpoint."
         }
-        (ProviderKind::VertexAi, ProviderConfigurationField::Endpoint) => {
+        (ProviderKind::VertexAi, Field::Endpoint) => {
             "Vertex AI derives its regional Google endpoint from cloud_project and cloud_region."
         }
-        (ProviderKind::Bedrock, ProviderConfigurationField::Endpoint) => {
+        (ProviderKind::Bedrock, Field::Endpoint) => {
             "Bedrock uses the official regional AWS endpoint; custom endpoints are not accepted."
         }
-        (ProviderKind::AzureOpenAi, ProviderConfigurationField::CloudRegion) => {
+        (ProviderKind::AzureOpenAi, Field::CloudRegion) => {
             "Azure OpenAI does not accept a cloud region."
         }
-        (ProviderKind::AzureOpenAi, ProviderConfigurationField::CloudProject) => {
+        (ProviderKind::AzureOpenAi, Field::CloudProject) => {
             "Azure OpenAI does not accept a cloud project."
         }
-        (ProviderKind::VertexAi, ProviderConfigurationField::Deployment) => {
+        (ProviderKind::VertexAi, Field::Deployment) => {
             "Vertex AI does not accept a deployment field."
         }
-        (ProviderKind::VertexAi, ProviderConfigurationField::ApiVersion) => {
+        (ProviderKind::VertexAi, Field::ApiVersion) => {
             "Vertex AI does not accept an API-version field."
         }
-        (ProviderKind::Bedrock, ProviderConfigurationField::CloudProject) => {
-            "Bedrock does not accept a cloud project."
-        }
-        (ProviderKind::Bedrock, ProviderConfigurationField::Deployment) => {
-            "Bedrock does not accept a deployment field."
-        }
-        (ProviderKind::Bedrock, ProviderConfigurationField::ApiVersion) => {
+        (ProviderKind::Bedrock, Field::CloudProject) => "Bedrock does not accept a cloud project.",
+        (ProviderKind::Bedrock, Field::Deployment) => "Bedrock does not accept a deployment field.",
+        (ProviderKind::Bedrock, Field::ApiVersion) => {
             "Bedrock does not accept an API-version field."
         }
         _ => "This provider does not accept this configuration field.",
@@ -606,8 +585,8 @@ mod tests {
     use super::*;
     use url::Url;
 
-    fn valid(kind: ProviderKind, auth_mode: ProviderAuthMode) -> ProviderConfiguration<'static> {
-        ProviderConfiguration {
+    fn valid(kind: ProviderKind, auth_mode: ProviderAuthMode) -> Configuration<'static> {
+        Configuration {
             kind,
             auth_mode,
             endpoint: matches!(
@@ -701,10 +680,7 @@ mod tests {
     fn every_declared_provider_auth_combination_is_valid() {
         for spec in provider_kind_specs() {
             for auth in spec.auth_modes {
-                assert_eq!(
-                    validate_provider_configuration(valid(spec.kind, auth.mode)),
-                    []
-                );
+                assert_eq!(validate(valid(spec.kind, auth.mode)), []);
             }
             for auth in [
                 ProviderAuthMode::ApiKey,
@@ -717,7 +693,7 @@ mod tests {
                     .auth_modes
                     .iter()
                     .any(|candidate| candidate.mode == auth);
-                let violations = validate_provider_configuration(valid(spec.kind, auth));
+                let violations = validate(valid(spec.kind, auth));
                 assert_eq!(
                     violations
                         .iter()
@@ -731,15 +707,15 @@ mod tests {
     #[test]
     fn required_forbidden_and_credential_rules_are_enforced() {
         for spec in provider_kind_specs() {
-            for field in ProviderConfigurationField::ALL {
+            for field in Field::ALL {
                 let mut candidate = valid(spec.kind, spec.default_auth_mode);
                 let slot = match field {
-                    ProviderConfigurationField::Endpoint => &mut candidate.endpoint,
-                    ProviderConfigurationField::CloudRegion => &mut candidate.cloud_region,
-                    ProviderConfigurationField::CloudProject => &mut candidate.cloud_project,
-                    ProviderConfigurationField::Deployment => &mut candidate.deployment,
-                    ProviderConfigurationField::ApiVersion => &mut candidate.api_version,
-                    ProviderConfigurationField::Model => &mut candidate.model,
+                    Field::Endpoint => &mut candidate.endpoint,
+                    Field::CloudRegion => &mut candidate.cloud_region,
+                    Field::CloudProject => &mut candidate.cloud_project,
+                    Field::Deployment => &mut candidate.deployment,
+                    Field::ApiVersion => &mut candidate.api_version,
+                    Field::Model => &mut candidate.model,
                 };
                 let expected = match spec.field(field) {
                     Some(field) if field.required => {
@@ -752,7 +728,7 @@ mod tests {
                     }
                     Some(_) => continue,
                 };
-                let violations = validate_provider_configuration(candidate);
+                let violations = validate(candidate);
                 assert!(violations.iter().any(|violation| {
                     violation.field == ProviderViolationField::from(field)
                         && violation.code == expected

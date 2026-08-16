@@ -1,9 +1,10 @@
 use axum::http::{HeaderMap, StatusCode, header};
-use olp_db::{authentication::SessionPrincipal, security::SessionMaterial};
+use olp_db::{authentication::SessionPrincipal, security::session_material::SessionMaterial};
 use tracing::warn;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
+    public_http::problem::Problem,
     public_http::request_cookies::{RequestCookies, SESSION_COOKIE},
 };
 
@@ -13,7 +14,7 @@ pub(crate) const CSRF_HEADER: &str = "x-csrf-token";
 pub(crate) const SETUP_TOKEN_HEADER: &str = "x-olp-setup-token";
 
 pub(crate) fn enforce_origin(
-    public_origin: &crate::PublicOrigin,
+    public_origin: &crate::public_http::public_origin::PublicOrigin,
     headers: &HeaderMap,
 ) -> Result<(), Problem> {
     let origin = headers

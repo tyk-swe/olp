@@ -4,25 +4,29 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use futures::stream;
 use olp_engine::domain::{
-    MediaHandle, MediaSpool, MediaSpoolError, MediaUpload, inline_media_marker,
+    canonical::requests::{MediaHandle, inline_media_marker},
+    ports::{MediaSpool, MediaSpoolError, MediaUpload},
 };
 use olp_engine::protocols::{
-    anthropic::{
+    anthropic::dto::{
         ContentBlock as AnthropicContentBlock, Message as AnthropicMessage,
         MessageContent as AnthropicMessageContent, ToolResultContent,
     },
-    gemini::{
+    gemini::dto::{
         Content as GeminiContent, CountTokensRequest as GeminiCountTokensRequest,
         GenerateContentRequest as GeminiGenerateContentRequest, Part as GeminiPart,
     },
     openai::{
-        ChatCompletionRequest, ChatContentPart, ChatMessageContent, ResponseCreateRequest,
-        ResponseInput, ResponseInputTokensRequest,
+        chat::{CompletionRequest, ContentPart, MessageContent},
+        responses::{
+            request::{Create, ResponseInput},
+            token_count::ResponseInputTokensRequest,
+        },
     },
 };
 use serde_json::Value;
 
-use crate::{GatewayState, gateway::InferenceError};
+use crate::{bootstrap::mode_dependencies::GatewayState, gateway::error::InferenceError};
 
 pub(crate) const MAX_INLINE_MEDIA_ITEMS: usize = 4;
 pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
@@ -88,7 +92,7 @@ impl InlineMediaAdmission {
             })
             .await
             .map_err(|error| match error {
-                olp_engine::domain::MediaSpoolError::TooLarge { .. } => {
+                olp_engine::domain::ports::MediaSpoolError::TooLarge { .. } => {
                     invalid_inline_media("Inline media exceeds its decoded size limit.")
                 }
                 _ => InferenceError::unavailable("media_spool_unavailable"),
@@ -285,16 +289,16 @@ pub(crate) async fn admit_gemini_count(
 
 pub(crate) async fn admit_openai_chat(
     state: &GatewayState,
-    request: &mut ChatCompletionRequest,
+    request: &mut CompletionRequest,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         for message in &mut request.messages {
-            let Some(ChatMessageContent::Parts(parts)) = &mut message.content else {
+            let Some(MessageContent::Parts(parts)) = &mut message.content else {
                 continue;
             };
             for part in parts {
-                let ChatContentPart::InputAudio { input_audio, .. } = part else {
+                let ContentPart::InputAudio { input_audio, .. } = part else {
                     continue;
                 };
                 let mime = openai_audio_mime(&input_audio.format)?;
@@ -315,7 +319,7 @@ pub(crate) async fn admit_openai_chat(
 
 pub(crate) async fn admit_openai_responses(
     state: &GatewayState,
-    request: &mut ResponseCreateRequest,
+    request: &mut Create,
 ) -> Result<Vec<MediaHandle>, InferenceError> {
     admit_openai_response_input(state, &mut request.input).await
 }
@@ -446,27 +450,37 @@ mod tests {
 
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use futures::StreamExt as _;
-    use olp_engine::domain::{ContentPart, MediaSource, Operation, Surface};
+    use olp_engine::domain::canonical::{
+        identity::Surface,
+        requests::{ContentPart, MediaSource, Operation},
+    };
     use olp_engine::protocols::{
-        anthropic::{MessagesRequest, decode_messages_request},
-        gemini::{GenerateContentRequest, decode_generate_content_request},
+        anthropic::{dto::MessagesRequest, translate::decode::request as decode_anthropic_request},
+        gemini::{
+            dto::GenerateContentRequest, translate::decode::request as decode_gemini_request,
+        },
         openai::{
-            ChatCompletionRequest, ResponseCreateRequest, ResponseInputTokensRequest,
-            decode_chat_completion, decode_response_create, decode_response_input_tokens,
-            encode_response_input_tokens,
+            chat::{CompletionRequest, decode_chat_completion},
+            responses::{
+                request::{Create, decode_response_create},
+                token_count::{
+                    ResponseInputTokensRequest, decode_response_input_tokens,
+                    encode_response_input_tokens,
+                },
+            },
         },
     };
 
     use super::*;
-    use olp_engine::inference::runtime::RuntimeManager;
+    use olp_engine::inference::runtime::Manager;
 
-    use crate::ApiMode;
+    use crate::bootstrap::state::ApiMode;
 
     fn state() -> GatewayState {
         GatewayState::new(
             ApiMode::Gateway,
             None,
-            Arc::new(RuntimeManager::empty()),
+            Arc::new(Manager::empty()),
             "https://olp.test",
             "console",
         )
@@ -495,7 +509,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!serde_json::to_string(&request).unwrap().contains("aGk="));
-        let operation = decode_messages_request(request).unwrap();
+        let operation = decode_anthropic_request(request).unwrap();
         let Operation::Generation(generation) = operation else {
             panic!("expected generation")
         };
@@ -521,7 +535,7 @@ mod tests {
         .unwrap();
         let handles = admit_gemini_generate(&state, &mut gemini).await.unwrap();
         let Operation::Generation(generation) =
-            decode_generate_content_request("route", gemini, false).unwrap()
+            decode_gemini_request("route", gemini, false).unwrap()
         else {
             panic!("expected generation")
         };
@@ -531,7 +545,7 @@ mod tests {
         ));
         cleanup_admitted(&state, handles).await;
 
-        let mut chat: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
+        let mut chat: CompletionRequest = serde_json::from_value(serde_json::json!({
             "model":"route", "messages":[{"role":"user","content":[{
                 "type":"input_audio","input_audio":{"data":"aGk=","format":"wav"}
             }]}]
@@ -551,7 +565,7 @@ mod tests {
     #[tokio::test]
     async fn responses_inline_pdf_is_admitted_while_remote_files_fail_explicitly() {
         let state = state();
-        let mut request: ResponseCreateRequest = serde_json::from_value(serde_json::json!({
+        let mut request: Create = serde_json::from_value(serde_json::json!({
             "model":"route", "input":[{"type":"message","role":"user","content":[{
                 "type":"input_file","filename":"brief.pdf",
                 "file_data":"data:application/pdf;base64,aGk="
@@ -568,7 +582,7 @@ mod tests {
         ));
         cleanup_admitted(&state, handles).await;
 
-        let mut remote: ResponseCreateRequest = serde_json::from_value(serde_json::json!({
+        let mut remote: Create = serde_json::from_value(serde_json::json!({
             "model":"route", "input":[{"type":"message","role":"user","content":[{
                 "type":"input_file","file_url":"https://example.test/private.pdf"
             }]}]
@@ -632,7 +646,7 @@ mod tests {
             "%%%".to_owned(),
             STANDARD.encode(vec![0_u8; MAX_INLINE_MEDIA_BYTES + 1]),
         ] {
-            let mut request: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
+            let mut request: CompletionRequest = serde_json::from_value(serde_json::json!({
                 "model":"route", "messages":[{"role":"user","content":[{
                     "type":"input_audio","input_audio":{"data":data,"format":"wav"}
                 }]}]

@@ -1,15 +1,17 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    ContentPart, Operation, SourceExtensions, Surface, TokenCountRequest, TokenCountResult,
+use crate::domain::canonical::{
+    identity::Surface,
+    requests::{ContentPart, Operation, SourceExtensions, TokenCountRequest},
+    results::TokenCountResult,
 };
 use thiserror::Error;
 
 use crate::protocols::extensions::insert_flat_extension;
 
 use super::{
-    CountTokensRequest, CountTokensResponse, MessageContent, MessagesRequest, Role,
-    decode_messages_request,
+    dto::{CountTokensRequest, CountTokensResponse, MessageContent, MessagesRequest, Role},
+    translate::decode::request as decode_request,
 };
 
 /// Private, source-scoped extension used to retain every Anthropic count-token
@@ -18,9 +20,9 @@ use super::{
 pub const ANTHROPIC_COUNT_REQUEST_EXTENSION: &str = "/__olp/anthropic_count_tokens_request";
 
 #[derive(Debug, Error)]
-pub enum CountDecodeError {
+pub enum DecodeError {
     #[error("Anthropic countTokens request is invalid: {0}")]
-    Messages(#[from] super::DecodeError),
+    Messages(#[from] super::translate::errors::DecodeError),
     #[error("Anthropic countTokens request could not be preserved")]
     Json(#[from] serde_json::Error),
     #[error("Anthropic countTokens request contains no countable input")]
@@ -28,7 +30,7 @@ pub enum CountDecodeError {
 }
 
 #[derive(Debug, Error)]
-pub enum CountEncodeError {
+pub enum EncodeError {
     #[error("countTokens response extensions came from a different protocol")]
     CrossProtocol,
     #[error("countTokens response contains an invalid or colliding extension path")]
@@ -37,9 +39,7 @@ pub enum CountEncodeError {
     Json(#[from] serde_json::Error),
 }
 
-pub fn decode_count_tokens_request(
-    request: CountTokensRequest,
-) -> Result<Operation, CountDecodeError> {
+pub fn decode_count_tokens_request(request: CountTokensRequest) -> Result<Operation, DecodeError> {
     let plain_text = is_plain_text_request(&request);
     let preserved = serde_json::to_value(&request)?;
     // Reuse the full Messages validator/translator so media boundaries, roles,
@@ -59,7 +59,7 @@ pub fn decode_count_tokens_request(
         extra: request.extra,
     };
     // The Messages decoder's public contract always produces generation.
-    let Operation::Generation(generation) = decode_messages_request(generation)? else {
+    let Operation::Generation(generation) = decode_request(generation)? else {
         unreachable!("Anthropic Messages decoding always returns generation")
     };
     let input = generation
@@ -68,7 +68,7 @@ pub fn decode_count_tokens_request(
         .flat_map(|message| message.content)
         .collect::<Vec<ContentPart>>();
     if input.is_empty() && generation.tools.is_empty() {
-        return Err(CountDecodeError::Empty);
+        return Err(DecodeError::Empty);
     }
     let extensions = if plain_text && generation.extensions.values.is_empty() {
         SourceExtensions::new(Surface::Anthropic, BTreeMap::new())
@@ -101,15 +101,15 @@ fn is_plain_text_request(request: &CountTokensRequest) -> bool {
 
 pub fn encode_count_tokens_result(
     result: &TokenCountResult,
-) -> Result<CountTokensResponse, CountEncodeError> {
+) -> Result<CountTokensResponse, EncodeError> {
     if !result.extensions.values.is_empty() && result.extensions.source != Some(Surface::Anthropic)
     {
-        return Err(CountEncodeError::CrossProtocol);
+        return Err(EncodeError::CrossProtocol);
     }
     let mut value = serde_json::json!({ "input_tokens": result.input_tokens });
     for (pointer, extension) in &result.extensions.values {
         insert_flat_extension(&mut value, pointer, extension.clone())
-            .map_err(|_| CountEncodeError::Extension)?;
+            .map_err(|_| EncodeError::Extension)?;
     }
-    serde_json::from_value(value).map_err(CountEncodeError::Json)
+    serde_json::from_value(value).map_err(EncodeError::Json)
 }

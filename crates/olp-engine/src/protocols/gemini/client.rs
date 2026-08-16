@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{CanonicalEvent, Surface};
+use crate::domain::{canonical::events::Event, canonical::identity::Surface};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -8,12 +8,15 @@ use crate::protocols::client::{AggregateError, aggregate_generation};
 use crate::protocols::extensions::{PointerExtensionError, apply_response_extensions};
 
 use super::{
-    Candidate, Content, FunctionCall, FunctionCallPart, GenerateContentResponse, Part, TextPart,
-    UsageMetadata, finish_reason,
+    dto::{
+        Candidate, Content, FunctionCall, FunctionCallPart, GenerateContentResponse, Part,
+        TextPart, UsageMetadata,
+    },
+    finish_reason,
 };
 
 #[derive(Debug, Error)]
-pub enum ClientEncodeError {
+pub enum Error {
     #[error(transparent)]
     Aggregate(#[from] AggregateError),
     #[error("canonical output is missing a finish reason")]
@@ -29,10 +32,10 @@ pub enum ClientEncodeError {
 }
 
 pub fn encode_generate_content_response(
-    events: &[CanonicalEvent],
+    events: &[Event],
     public_model: &str,
     fallback_id: &str,
-) -> Result<GenerateContentResponse, ClientEncodeError> {
+) -> Result<GenerateContentResponse, Error> {
     let aggregate = aggregate_generation(events, Surface::Gemini)?;
     let mut candidates = Vec::with_capacity(aggregate.outputs.len());
     for (index, output) in aggregate.outputs {
@@ -46,9 +49,8 @@ pub fn encode_generate_content_response(
             }));
         }
         for tool in output.tools.into_values() {
-            let name = tool.name.ok_or(ClientEncodeError::IncompleteTool)?;
-            let args =
-                serde_json::from_str(&tool.arguments).map_err(ClientEncodeError::ToolJson)?;
+            let name = tool.name.ok_or(Error::IncompleteTool)?;
+            let args = serde_json::from_str(&tool.arguments).map_err(Error::ToolJson)?;
             parts.push(Part::FunctionCall(FunctionCallPart {
                 function_call: FunctionCall {
                     name,
@@ -63,7 +65,7 @@ pub fn encode_generate_content_response(
             .finish
             .as_ref()
             .map(finish_reason)
-            .ok_or(ClientEncodeError::MissingFinish)?;
+            .ok_or(Error::MissingFinish)?;
         candidates.push(Candidate {
             content: Some(Content {
                 role: Some("model".to_owned()),
@@ -100,17 +102,18 @@ pub fn encode_generate_content_response(
 fn apply_extensions(
     response: GenerateContentResponse,
     extensions: &BTreeMap<String, Value>,
-) -> Result<GenerateContentResponse, ClientEncodeError> {
+) -> Result<GenerateContentResponse, Error> {
     apply_response_extensions(response, extensions).map_err(|error| match error {
-        PointerExtensionError::InvalidPath(_) => ClientEncodeError::Extension,
-        PointerExtensionError::Json(error) => ClientEncodeError::Json(error),
+        PointerExtensionError::InvalidPath(_) => Error::Extension,
+        PointerExtensionError::Json(error) => Error::Json(error),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{
-        CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Usage as CanonicalUsage,
+    use crate::domain::canonical::{
+        events::{FinishReason, Kind, Usage as CanonicalUsage},
+        requests::{MessageRole, SourceExtensions},
     };
 
     use super::*;
@@ -118,37 +121,37 @@ mod tests {
     #[test]
     fn encodes_multiple_candidates_usage_and_safety_extensions() {
         let events = vec![
-            CanonicalEvent::new(
+            Event::new(
                 0,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: Some("response-1".into()),
                     provider_model: Some("provider-model".into()),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 1,
-                CanonicalEventKind::MessageStart {
+                Kind::MessageStart {
                     output_index: 0,
                     role: MessageRole::Assistant,
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 2,
-                CanonicalEventKind::TextDelta {
+                Kind::TextDelta {
                     output_index: 0,
                     text: "hello".into(),
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 3,
-                CanonicalEventKind::Finish {
+                Kind::Finish {
                     output_index: 0,
                     reason: FinishReason::Stop,
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 4,
-                CanonicalEventKind::Usage {
+                Kind::Usage {
                     usage: CanonicalUsage {
                         input_tokens: 3,
                         output_tokens: 2,
@@ -158,16 +161,16 @@ mod tests {
                     },
                 },
             ),
-            CanonicalEvent::new(
+            Event::new(
                 5,
-                CanonicalEventKind::SourceExtension {
+                Kind::SourceExtension {
                     extensions: SourceExtensions::new(
                         Surface::Gemini,
                         [("/vendorFlag".into(), Value::Bool(true))].into(),
                     ),
                 },
             ),
-            CanonicalEvent::new(6, CanonicalEventKind::Done),
+            Event::new(6, Kind::Done),
         ];
         let response = encode_generate_content_response(&events, "route", "fallback").unwrap();
         assert_eq!(response.model_version.as_deref(), Some("route"));

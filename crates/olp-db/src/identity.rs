@@ -1,11 +1,11 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{PersistenceError, security::InvitationMaterial};
+use crate::{error::Error as PersistenceError, security::session_material::InvitationMaterial};
 
 mod accounts;
 mod auth_admission;
@@ -40,7 +40,7 @@ pub struct InstallationSetupResult {
 }
 
 #[derive(Debug, Error)]
-pub enum IdentityError {
+pub enum Error {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error("identity input is invalid: {0}")]
@@ -75,7 +75,7 @@ pub enum IdentityError {
     SessionUnavailable,
 }
 
-impl From<sqlx::Error> for IdentityError {
+impl From<sqlx::Error> for Error {
     fn from(error: sqlx::Error) -> Self {
         Self::Persistence(PersistenceError::Database(error))
     }
@@ -159,8 +159,8 @@ pub struct SessionRecord {
     pub created_at: DateTime<Utc>,
 }
 
-fn parse_role(value: String) -> Result<Role, IdentityError> {
-    value.parse().map_err(|_| IdentityError::CorruptIdentity)
+fn parse_role(value: String) -> Result<Role, Error> {
+    value.parse().map_err(|_| Error::CorruptIdentity)
 }
 
 async fn insert_audit(

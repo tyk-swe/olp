@@ -2,9 +2,29 @@ use std::collections::BTreeSet;
 
 use olp_conformance::read_json;
 use olp_engine::domain::{
-    ImageOperation, MediaHandle, Operation, OperationKind, Surface, VideoOperation,
+    canonical::{
+        identity::{OperationKind, Surface},
+        requests::{ImageOperation, MediaHandle, Operation, VideoOperation},
+    },
+    ids::RouteSlug,
 };
-use olp_engine::protocols::{anthropic, gemini, openai};
+use olp_engine::protocols::{
+    anthropic::{
+        count as anthropic_count,
+        translate::{decode as anthropic_decode, encode as anthropic_encode},
+    },
+    gemini::{
+        count as gemini_count,
+        translate::{decode as gemini_decode, encode as gemini_encode},
+    },
+    openai::{
+        audio, chat, embeddings, images,
+        media::BoundedMediaPart,
+        moderation,
+        responses::{request as response_request, token_count as response_token_count},
+        video,
+    },
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -32,7 +52,7 @@ fn every_selected_operation_family_has_a_decoding_and_encoding_golden_case() {
             fixture.name
         );
         assert_eq!(
-            operation.route().map(olp_engine::domain::RouteSlug::as_str),
+            operation.route().map(RouteSlug::as_str),
             fixture.expected_route.as_deref(),
             "{} decoded to the wrong public route",
             fixture.name
@@ -72,41 +92,41 @@ fn every_selected_operation_family_has_a_decoding_and_encoding_golden_case() {
 fn decode(fixture: &OperationFixture) -> Operation {
     let wire = fixture.wire.clone();
     match fixture.codec.as_str() {
-        "openai_chat" => openai::decode_chat_completion(from_wire(wire)).unwrap(),
-        "openai_responses" => openai::decode_response_create(from_wire(wire)).unwrap(),
+        "openai_chat" => chat::decode_chat_completion(from_wire(wire)).unwrap(),
+        "openai_responses" => response_request::decode_response_create(from_wire(wire)).unwrap(),
         "openai_response_input_tokens" => {
-            openai::decode_response_input_tokens(from_wire(wire)).unwrap()
+            response_token_count::decode_response_input_tokens(from_wire(wire)).unwrap()
         }
-        "openai_embeddings" => openai::decode_embedding_request(from_wire(wire)).unwrap(),
-        "openai_image_generation" => openai::decode_image_generation(from_wire(wire)).unwrap(),
-        "openai_image_edit" => openai::decode_image_edit(from_wire(wire)).unwrap(),
-        "openai_image_variation" => openai::decode_image_variation(from_wire(wire)).unwrap(),
-        "openai_speech" => openai::decode_speech(from_wire(wire)).unwrap(),
-        "openai_transcription" => openai::decode_transcription(from_wire(wire)).unwrap(),
-        "openai_moderation" => openai::decode_moderation(from_wire(wire)).unwrap(),
-        "openai_video_create" => openai::decode_video_create(from_wire(wire)).unwrap(),
-        "openai_video_list" => openai::decode_video_list(from_wire(wire)).unwrap(),
-        "openai_video_get" => openai::decode_video_get(required_string(&wire, "job_id")),
-        "openai_video_content" => openai::decode_video_content_with_query(
+        "openai_embeddings" => embeddings::decode_embedding_request(from_wire(wire)).unwrap(),
+        "openai_image_generation" => images::decode_image_generation(from_wire(wire)).unwrap(),
+        "openai_image_edit" => images::decode_image_edit(from_wire(wire)).unwrap(),
+        "openai_image_variation" => images::decode_image_variation(from_wire(wire)).unwrap(),
+        "openai_speech" => audio::decode_speech(from_wire(wire)).unwrap(),
+        "openai_transcription" => audio::decode_transcription(from_wire(wire)).unwrap(),
+        "openai_moderation" => moderation::decode(from_wire(wire)).unwrap(),
+        "openai_video_create" => video::decode_video_create(from_wire(wire)).unwrap(),
+        "openai_video_list" => video::decode_video_list(from_wire(wire)).unwrap(),
+        "openai_video_get" => video::decode_video_get(required_string(&wire, "job_id")),
+        "openai_video_content" => video::decode_video_content_with_query(
             required_string(&wire, "job_id"),
-            openai::OpenAiVideoContentQuery {
+            video::OpenAiVideoContentQuery {
                 variant: Some(required_string(&wire, "variant")),
                 extra: Default::default(),
             },
         )
         .unwrap(),
-        "openai_video_delete" => openai::decode_video_delete(required_string(&wire, "job_id")),
-        "anthropic_messages" => anthropic::decode_messages_request(from_wire(wire)).unwrap(),
+        "openai_video_delete" => video::decode_video_delete(required_string(&wire, "job_id")),
+        "anthropic_messages" => anthropic_decode::request(from_wire(wire)).unwrap(),
         "anthropic_count_tokens" => {
-            anthropic::decode_count_tokens_request(from_wire(wire)).unwrap()
+            anthropic_count::decode_count_tokens_request(from_wire(wire)).unwrap()
         }
-        "gemini_generate_content" => gemini::decode_generate_content_request(
+        "gemini_generate_content" => gemini_decode::request(
             fixture.expected_route.as_deref().unwrap(),
             from_wire(wire),
             false,
         )
         .unwrap(),
-        "gemini_count_tokens" => gemini::decode_count_tokens_request(
+        "gemini_count_tokens" => gemini_count::decode_count_tokens_request(
             fixture.expected_route.as_deref().unwrap(),
             from_wire(wire),
         )
@@ -118,66 +138,66 @@ fn decode(fixture: &OperationFixture) -> Operation {
 fn assert_encodes(codec: &str, operation: &Operation) {
     match (codec, operation) {
         ("openai_chat", Operation::Generation(request)) => {
-            openai::encode_chat_completion(request, "provider-model").unwrap();
+            chat::encode_chat_completion(request, "provider-model").unwrap();
         }
         ("openai_responses", Operation::Generation(request)) => {
-            openai::encode_response_create(request, "provider-model").unwrap();
+            response_request::encode_response_create(request, "provider-model").unwrap();
         }
         ("openai_response_input_tokens", Operation::TokenCount(request)) => {
-            openai::encode_response_input_tokens(request, "provider-model").unwrap();
+            response_token_count::encode_response_input_tokens(request, "provider-model").unwrap();
         }
         ("openai_embeddings", Operation::Embeddings(request)) => {
-            openai::encode_embedding_request(request, "provider-model").unwrap();
+            embeddings::encode_embedding_request(request, "provider-model").unwrap();
         }
         ("openai_image_generation", Operation::Images(ImageOperation::Generation(request))) => {
-            openai::encode_image_generation(request, "provider-model").unwrap();
+            images::encode_image_generation(request, "provider-model").unwrap();
         }
         ("openai_image_edit", Operation::Images(ImageOperation::Edit(request))) => {
-            openai::encode_image_edit(request, "provider-model", bounded_image).unwrap();
+            images::encode_image_edit(request, "provider-model", bounded_image).unwrap();
         }
         ("openai_image_variation", Operation::Images(ImageOperation::Variation(request))) => {
-            openai::encode_image_variation(request, "provider-model", bounded_image).unwrap();
+            images::encode_image_variation(request, "provider-model", bounded_image).unwrap();
         }
         ("openai_speech", Operation::Speech(request)) => {
-            openai::encode_speech(request, "provider-model").unwrap();
+            audio::encode_speech(request, "provider-model").unwrap();
         }
         ("openai_transcription", Operation::Transcription(request)) => {
-            openai::encode_transcription(request, "provider-model", |handle| {
-                openai::BoundedMediaPart::new(
+            audio::encode_transcription(request, "provider-model", |handle| {
+                BoundedMediaPart::new(
                     handle.clone(),
                     "fixture.wav",
                     Some("audio/wav".into()),
                     1,
-                    openai::DEFAULT_AUDIO_UPLOAD_LIMIT,
+                    audio::DEFAULT_AUDIO_UPLOAD_LIMIT,
                 )
-                .map_err(|_| openai::AudioCodecError::InvalidMediaPart)
+                .map_err(|_| audio::Error::InvalidMediaPart)
             })
             .unwrap();
         }
         ("openai_moderation", Operation::Moderation(request)) => {
-            openai::encode_moderation(request, "provider-model").unwrap();
+            moderation::encode(request, "provider-model").unwrap();
         }
         ("openai_video_create", Operation::Video(VideoOperation::Create(request))) => {
-            openai::encode_video_create(request, "provider-model", |handle| {
-                openai::BoundedMediaPart::new(
+            video::encode_video_create(request, "provider-model", |handle| {
+                BoundedMediaPart::new(
                     handle.clone(),
                     "fixture.png",
                     Some("image/png".into()),
                     1,
-                    openai::DEFAULT_VIDEO_REFERENCE_LIMIT,
+                    video::DEFAULT_VIDEO_REFERENCE_LIMIT,
                 )
-                .map_err(|error| openai::VideoCodecError::Staging(error.to_string()))
+                .map_err(|error| video::Error::Staging(error.to_string()))
             })
             .unwrap();
         }
         ("openai_video_list", Operation::Video(VideoOperation::List(request))) => {
-            openai::encode_video_list(request).unwrap();
+            video::encode_video_list(request).unwrap();
         }
         ("anthropic_messages", Operation::Generation(request)) => {
-            anthropic::encode_messages_request(request, "provider-model").unwrap();
+            anthropic_encode::request(request, "provider-model").unwrap();
         }
         ("gemini_generate_content", Operation::Generation(request)) => {
-            gemini::encode_generate_content_request(request).unwrap();
+            gemini_encode::request(request).unwrap();
         }
         // These public contracts are encoded by path/query selection or have
         // response-only encoders; successful canonical decoding is the full
@@ -191,17 +211,15 @@ fn assert_encodes(codec: &str, operation: &Operation) {
     }
 }
 
-fn bounded_image(
-    handle: &MediaHandle,
-) -> Result<openai::BoundedMediaPart, openai::ImageCodecError> {
-    openai::BoundedMediaPart::new(
+fn bounded_image(handle: &MediaHandle) -> Result<BoundedMediaPart, images::ImageCodecError> {
+    BoundedMediaPart::new(
         handle.clone(),
         "fixture.png",
         Some("image/png".into()),
         1,
         50 * 1024 * 1024,
     )
-    .map_err(|error| openai::ImageCodecError::InvalidMediaPart(error.to_string()))
+    .map_err(|error| images::ImageCodecError::InvalidMediaPart(error.to_string()))
 }
 
 fn from_wire<T: serde::de::DeserializeOwned>(wire: Value) -> T {

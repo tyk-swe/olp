@@ -1,14 +1,16 @@
-use olp_engine::domain::{OperationKind, ProviderKind, RouteSlug};
+use olp_engine::domain::{
+    canonical::identity::OperationKind, ids::RouteSlug, routing::provider::ProviderKind,
+};
 use uuid::Uuid;
 
 use super::{
-    ConfigurationError,
+    Error,
     resources::{CapabilityRecord, DiscoveredModelInput, UpdateProvider},
 };
 
-pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), ConfigurationError> {
+pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), Error> {
     if update.name.trim().is_empty() || update.name.chars().count() > 100 {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "provider name must contain 1-100 characters".to_owned(),
         ));
     }
@@ -23,32 +25,30 @@ pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), Co
     .flatten()
     {
         if value.chars().count() > 2_000 {
-            return Err(ConfigurationError::Invalid(
-                "provider setting is too long".to_owned(),
-            ));
+            return Err(Error::Invalid("provider setting is too long".to_owned()));
         }
     }
     Ok(())
 }
 
-pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), ConfigurationError> {
+pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Error> {
     if model.upstream_model.trim().is_empty() || model.upstream_model.chars().count() > 200 {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "model ID must contain 1-200 characters".to_owned(),
         ));
     }
     if model.display_name.trim().is_empty() || model.display_name.chars().count() > 200 {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "model display name must contain 1-200 characters".to_owned(),
         ));
     }
     if model.enabled && model.capabilities.is_empty() {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "enabled models require an explicit capability".to_owned(),
         ));
     }
     if model.capabilities.len() > 16 {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "a model can declare at most 16 capability tuples".to_owned(),
         ));
     }
@@ -58,7 +58,7 @@ pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Configu
 pub(crate) fn validate_provider_capability(
     provider_kind: &str,
     capability: &CapabilityRecord,
-) -> Result<(), ConfigurationError> {
+) -> Result<(), Error> {
     let supported = provider_kind
         .parse::<ProviderKind>()
         .ok()
@@ -71,7 +71,7 @@ pub(crate) fn validate_provider_capability(
     if supported {
         Ok(())
     } else {
-        Err(ConfigurationError::Invalid(format!(
+        Err(Error::Invalid(format!(
             "provider kind {provider_kind} cannot serve {} on {} in {} mode",
             capability.operation, capability.surface, capability.mode
         )))
@@ -84,11 +84,10 @@ pub(crate) fn validate_route_input(
     overall_timeout_ms: i32,
     max_attempts: i16,
     targets: &[(Uuid, i32, i32, i32)],
-) -> Result<(), ConfigurationError> {
-    RouteSlug::parse(slug.to_owned())
-        .map_err(|error| ConfigurationError::Invalid(error.to_string()))?;
+) -> Result<(), Error> {
+    RouteSlug::parse(slug.to_owned()).map_err(|error| Error::Invalid(error.to_string()))?;
     if operations.is_empty() || targets.is_empty() {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "route operations and targets cannot be empty".to_owned(),
         ));
     }
@@ -96,7 +95,7 @@ pub(crate) fn validate_route_input(
         || max_attempts <= 0
         || usize::try_from(max_attempts).unwrap_or(usize::MAX) > targets.len()
     {
-        return Err(ConfigurationError::Invalid(
+        return Err(Error::Invalid(
             "route deadlines or maximum attempts are invalid".to_owned(),
         ));
     }
@@ -105,7 +104,7 @@ pub(crate) fn validate_route_input(
             operation,
             OperationKind::ModelList | OperationKind::ModelGet
         ) {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "model list and detail are installation-local APIs, not provider-routed operations"
                     .to_owned(),
             ));
@@ -113,7 +112,7 @@ pub(crate) fn validate_route_input(
     }
     for (_, priority, weight, timeout) in targets {
         if *priority < 0 || *weight <= 0 || *timeout <= 0 || *timeout > overall_timeout_ms {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "route target priority, weight, or timeout is invalid".to_owned(),
             ));
         }
@@ -121,11 +120,11 @@ pub(crate) fn validate_route_input(
     Ok(())
 }
 
-pub(crate) fn checked_limit(limit: i64) -> Result<i64, ConfigurationError> {
+pub(crate) fn checked_limit(limit: i64) -> Result<i64, Error> {
     if (1..=100).contains(&limit) {
         Ok(limit)
     } else {
-        Err(ConfigurationError::Invalid(
+        Err(Error::Invalid(
             "page size must be between 1 and 100".to_owned(),
         ))
     }
@@ -135,11 +134,11 @@ pub(crate) fn enforce_provider_revision_diff_limit(
     actual: usize,
     dimension: &'static str,
     maximum: usize,
-) -> Result<(), ConfigurationError> {
+) -> Result<(), Error> {
     if actual <= maximum {
         Ok(())
     } else {
-        Err(ConfigurationError::ProviderRevisionDiffTooLarge { dimension, maximum })
+        Err(Error::ProviderRevisionDiffTooLarge { dimension, maximum })
     }
 }
 
@@ -152,7 +151,7 @@ mod tests {
             operation: operation.parse().unwrap(),
             surface: surface.parse().unwrap(),
             mode: mode.parse().unwrap(),
-            source: olp_engine::domain::CapabilitySource::Declared,
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
             certified_at: None,
         }
     }
@@ -165,7 +164,7 @@ mod tests {
             cloud_project: None,
             deployment: None,
             api_version: None,
-            auth_mode: olp_engine::domain::ProviderAuthMode::ApiKey,
+            auth_mode: olp_engine::domain::provider::ProviderAuthMode::ApiKey,
         }
     }
 
@@ -178,7 +177,11 @@ mod tests {
             capabilities: vec![],
         };
         assert!(validate_model(&model).is_err());
-        assert!("unknown".parse::<olp_engine::domain::Surface>().is_err());
+        assert!(
+            "unknown"
+                .parse::<olp_engine::domain::canonical::identity::Surface>()
+                .is_err()
+        );
     }
 
     #[test]
@@ -186,7 +189,7 @@ mod tests {
         assert!(enforce_provider_revision_diff_limit(2_000, "models", 2_000).is_ok());
         assert!(matches!(
             enforce_provider_revision_diff_limit(2_001, "models", 2_000),
-            Err(ConfigurationError::ProviderRevisionDiffTooLarge {
+            Err(Error::ProviderRevisionDiffTooLarge {
                 dimension: "models",
                 maximum: 2_000,
             })
@@ -282,7 +285,7 @@ mod tests {
             )
             .unwrap_err();
             assert!(
-                matches!(error, ConfigurationError::Invalid(detail) if detail.contains("installation-local"))
+                matches!(error, Error::Invalid(detail) if detail.contains("installation-local"))
             );
         }
     }

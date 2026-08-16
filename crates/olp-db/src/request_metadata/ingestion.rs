@@ -1,4 +1,4 @@
-use olp_engine::inference::request_metadata::{RequestAttemptMetadata, RequestMetadataEvent};
+use olp_engine::inference::request_metadata::{Event, RequestAttemptMetadata};
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -6,10 +6,10 @@ use uuid::Uuid;
 use super::{
     REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES, REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
 };
-use crate::{PersistenceError, PgStore};
+use crate::{error::Error, store::Store};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RequestMetadataPersistenceOutcome {
+pub enum Outcome {
     Persisted,
     Duplicate,
     RejectedOutsideReplayWindow,
@@ -78,7 +78,7 @@ struct ValidatedRequestMetadata<'a> {
 }
 
 impl<'a> ValidatedRequestMetadata<'a> {
-    fn validate(event: &'a RequestMetadataEvent) -> Result<Self, PersistenceError> {
+    fn validate(event: &'a Event) -> Result<Self, Error> {
         let has_attempts = !event.attempts.is_empty();
         let final_target_matches = event.attempts.last().is_none_or(|attempt| {
             event.provider_id == Some(attempt.provider_id)
@@ -105,7 +105,7 @@ impl<'a> ValidatedRequestMetadata<'a> {
             || !empty_attempt_metadata_is_valid
             || !attempt_usage_shape_is_valid
         {
-            return Err(PersistenceError::InvalidRequestMetadataEvent);
+            return Err(Error::InvalidRequestMetadataEvent);
         }
 
         let attempts = event
@@ -117,14 +117,14 @@ impl<'a> ValidatedRequestMetadata<'a> {
                     || attempt.completed_at < attempt.started_at
                     || !valid_status(attempt.status_code)
                 {
-                    return Err(PersistenceError::InvalidRequestMetadataEvent);
+                    return Err(Error::InvalidRequestMetadataEvent);
                 }
                 let usage = validated_attempt_usage(event, attempt, index)?;
                 Ok(ValidatedAttempt {
                     event: attempt,
                     usage,
                     ordinal: i16::try_from(attempt.ordinal)
-                        .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?,
+                        .map_err(|_| Error::InvalidRequestMetadataEvent)?,
                     status_code: attempt.status_code.map(i32::from),
                     latency_ms: checked_milliseconds(attempt.latency_ms)?,
                     first_byte_ms: attempt
@@ -141,17 +141,17 @@ impl<'a> ValidatedRequestMetadata<'a> {
             latency_ms: checked_milliseconds(event.latency_ms)?,
             first_byte_ms: event.first_byte_ms.map(checked_milliseconds).transpose()?,
             attempt_count: i16::try_from(attempts.len())
-                .map_err(|_| PersistenceError::InvalidRequestMetadataEvent)?,
+                .map_err(|_| Error::InvalidRequestMetadataEvent)?,
             attempts,
         })
     }
 }
 
 fn validated_attempt_usage(
-    request: &RequestMetadataEvent,
+    request: &Event,
     attempt: &RequestAttemptMetadata,
     index: usize,
-) -> Result<ValidatedAttemptUsage, PersistenceError> {
+) -> Result<ValidatedAttemptUsage, Error> {
     let usage = attempt
         .usage
         .as_ref()
@@ -209,7 +209,7 @@ fn validated_attempt_usage(
         || usage.cached_input_tokens.is_some_and(|value| value < 0)
         || usage.media_units.is_some_and(|value| value < Decimal::ZERO)
     {
-        return Err(PersistenceError::InvalidRequestMetadataEvent);
+        return Err(Error::InvalidRequestMetadataEvent);
     }
     Ok(usage)
 }
@@ -229,19 +229,16 @@ const fn valid_status(status: Option<u16>) -> bool {
     }
 }
 
-fn checked_milliseconds(value: u64) -> Result<i32, PersistenceError> {
-    i32::try_from(value).map_err(|_| PersistenceError::InvalidRequestMetadataEvent)
+fn checked_milliseconds(value: u64) -> Result<i32, Error> {
+    i32::try_from(value).map_err(|_| Error::InvalidRequestMetadataEvent)
 }
 
-impl PgStore {
+impl Store {
     /// Persists one idempotent metadata-only stream event. A bounded durable
     /// receipt protects the supported seven-day delivery window after raw
     /// facts roll into hourly usage. Older entries are rejected explicitly so
     /// they cannot silently add to an aggregate after their receipt expires.
-    pub async fn persist_request_metadata_event(
-        &self,
-        event: &RequestMetadataEvent,
-    ) -> Result<RequestMetadataPersistenceOutcome, PersistenceError> {
+    pub async fn persist_request_metadata_event(&self, event: &Event) -> Result<Outcome, Error> {
         let event_sha256: [u8; 32] = Sha256::digest(serde_json::to_vec(event)?).into();
         self.persist_request_metadata_event_with_digest(event, event_sha256)
             .await
@@ -249,12 +246,12 @@ impl PgStore {
 
     /// Processes an event decoded from a Valkey Stream while fingerprinting
     /// the original bytes. Replays therefore remain stable across application
-    /// versions even if Rust's serialization of [`RequestMetadataEvent`] later changes.
+    /// versions even if Rust's serialization of [`Event`] later changes.
     pub async fn persist_request_metadata_stream_event(
         &self,
-        event: &RequestMetadataEvent,
+        event: &Event,
         original_payload: &[u8],
-    ) -> Result<RequestMetadataPersistenceOutcome, PersistenceError> {
+    ) -> Result<Outcome, Error> {
         let event_sha256: [u8; 32] = Sha256::digest(original_payload).into();
         self.persist_request_metadata_event_with_digest(event, event_sha256)
             .await
@@ -262,20 +259,20 @@ impl PgStore {
 
     async fn persist_request_metadata_event_with_digest(
         &self,
-        event: &RequestMetadataEvent,
+        event: &Event,
         event_sha256: [u8; 32],
-    ) -> Result<RequestMetadataPersistenceOutcome, PersistenceError> {
+    ) -> Result<Outcome, Error> {
         let validated = ValidatedRequestMetadata::validate(event)?;
         let mut transaction = self.pool().begin().await?;
         match admit_request_metadata_receipt(&mut transaction, event, &event_sha256).await? {
             ReceiptAdmission::Acquired => {}
             ReceiptAdmission::Duplicate => {
                 transaction.rollback().await?;
-                return Ok(RequestMetadataPersistenceOutcome::Duplicate);
+                return Ok(Outcome::Duplicate);
             }
             ReceiptAdmission::RejectedOutsideReplayWindow => {
                 transaction.commit().await?;
-                return Ok(RequestMetadataPersistenceOutcome::RejectedOutsideReplayWindow);
+                return Ok(Outcome::RejectedOutsideReplayWindow);
             }
         }
         insert_request_metadata_rows(&mut transaction, event, &validated).await?;
@@ -291,7 +288,7 @@ impl PgStore {
             )
             .await?;
             transaction.commit().await?;
-            return Ok(RequestMetadataPersistenceOutcome::Persisted);
+            return Ok(Outcome::Persisted);
         }
 
         let persisted_facts =
@@ -304,15 +301,15 @@ impl PgStore {
         mark_request_metadata_receipt_persisted(&mut transaction, event.event_id, event.request_id)
             .await?;
         transaction.commit().await?;
-        Ok(RequestMetadataPersistenceOutcome::Persisted)
+        Ok(Outcome::Persisted)
     }
 }
 
 async fn insert_request_metadata_rows(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &RequestMetadataEvent,
+    event: &Event,
     validated: &ValidatedRequestMetadata<'_>,
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     sqlx::query!(
         "INSERT INTO requests \
           (id, runtime_generation_id, api_key_id, route_slug, operation, surface, \
@@ -365,9 +362,9 @@ async fn insert_request_metadata_rows(
 
 async fn insert_attempt_usage_facts<'a>(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &'a RequestMetadataEvent,
+    event: &'a Event,
     attempts: &[ValidatedAttempt<'a>],
-) -> Result<Vec<PersistedAttemptFact<'a>>, PersistenceError> {
+) -> Result<Vec<PersistedAttemptFact<'a>>, Error> {
     sqlx::query!(
         "INSERT INTO usage_request_anchors (request_id, request_started_at) \
          VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -510,7 +507,7 @@ async fn insert_attempt_usage_facts<'a>(
 async fn recompute_attempt_fact_markers(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     request_id: Uuid,
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     sqlx::query!(
         "WITH marked AS ( \
              SELECT attempt_id, \
@@ -565,9 +562,9 @@ async fn recompute_attempt_fact_markers(
 
 async fn admit_request_metadata_receipt(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &RequestMetadataEvent,
+    event: &Event,
     event_sha256: &[u8; 32],
-) -> Result<ReceiptAdmission, PersistenceError> {
+) -> Result<ReceiptAdmission, Error> {
     let receipt: Option<Uuid> = sqlx::query_scalar!(
         "INSERT INTO request_metadata_event_receipts \
          (event_id, request_id, event_sha256, status, observed_at) \
@@ -620,7 +617,7 @@ async fn admit_request_metadata_receipt(
         return Ok(ReceiptAdmission::Duplicate);
     }
     if !existing.outside_window {
-        return Err(PersistenceError::InvalidRequestMetadataEvent);
+        return Err(Error::InvalidRequestMetadataEvent);
     }
 
     let rejection: Option<Uuid> = sqlx::query_scalar!(
@@ -674,7 +671,7 @@ async fn admit_request_metadata_receipt(
     if exact_after_race {
         Ok(ReceiptAdmission::Duplicate)
     } else {
-        Err(PersistenceError::InvalidRequestMetadataEvent)
+        Err(Error::InvalidRequestMetadataEvent)
     }
 }
 
@@ -682,7 +679,7 @@ async fn mark_request_metadata_receipt_persisted(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     event_id: Uuid,
     request_id: Uuid,
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     sqlx::query!(
         "UPDATE request_metadata_event_receipts \
             SET status = 'fact_persisted'::request_metadata_event_receipt_status \
@@ -698,9 +695,9 @@ async fn mark_request_metadata_receipt_persisted(
 
 async fn insert_compatibility_usage_fact_if_representable(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &RequestMetadataEvent,
+    event: &Event,
     facts: &[PersistedAttemptFact<'_>],
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     // Keep a truthful request-level aggregate for older readers only when
     // every potentially billable attempt has the same provider/model.
     // Authoritative reads always use attempt_usage_facts.
@@ -722,10 +719,10 @@ async fn insert_compatibility_usage_fact_if_representable(
 
 async fn insert_compatibility_usage_fact(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &RequestMetadataEvent,
+    event: &Event,
     attribution: &PersistedAttemptFact<'_>,
     facts: &[PersistedAttemptFact<'_>],
-) -> Result<(), PersistenceError> {
+) -> Result<(), Error> {
     let billable = facts
         .iter()
         .filter(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
@@ -797,7 +794,7 @@ async fn insert_compatibility_usage_fact(
 fn checked_optional_i64_sum<T>(
     values: &[&T],
     select: impl Fn(&T) -> Option<i64>,
-) -> Result<Option<i64>, PersistenceError> {
+) -> Result<Option<i64>, Error> {
     values.iter().try_fold(None, |sum, value| {
         let Some(value) = select(value) else {
             return Ok(sum);
@@ -805,14 +802,14 @@ fn checked_optional_i64_sum<T>(
         sum.unwrap_or(0_i64)
             .checked_add(value)
             .map(Some)
-            .ok_or(PersistenceError::InvalidRequestMetadataEvent)
+            .ok_or(Error::InvalidRequestMetadataEvent)
     })
 }
 
 fn checked_optional_decimal_sum<T>(
     values: &[&T],
     select: impl Fn(&T) -> Option<Decimal>,
-) -> Result<Option<Decimal>, PersistenceError> {
+) -> Result<Option<Decimal>, Error> {
     values.iter().try_fold(None, |sum, value| {
         let Some(value) = select(value) else {
             return Ok(sum);
@@ -820,7 +817,7 @@ fn checked_optional_decimal_sum<T>(
         sum.unwrap_or(Decimal::ZERO)
             .checked_add(value)
             .map(Some)
-            .ok_or(PersistenceError::InvalidRequestMetadataEvent)
+            .ok_or(Error::InvalidRequestMetadataEvent)
     })
 }
 
@@ -828,10 +825,8 @@ fn checked_optional_decimal_sum<T>(
 mod tests {
     use chrono::{Duration, Utc};
     use olp_engine::{
-        domain::{OperationKind, Surface},
-        inference::request_metadata::{
-            RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestMetadataEvent,
-        },
+        domain::canonical::identity::{OperationKind, Surface},
+        inference::request_metadata::{Event, RequestAttemptMetadata, RequestAttemptUsageMetadata},
     };
 
     use super::*;
@@ -867,11 +862,11 @@ mod tests {
         }
     }
 
-    fn event() -> RequestMetadataEvent {
+    fn event() -> Event {
         let completed_at = Utc::now();
         let first_provider = Uuid::now_v7();
         let final_provider = Uuid::now_v7();
-        RequestMetadataEvent {
+        Event {
             event_id: Uuid::now_v7(),
             request_id: Uuid::now_v7(),
             runtime_generation_id: Uuid::now_v7(),
@@ -902,7 +897,7 @@ mod tests {
         }
     }
 
-    type EventMutation = fn(&mut RequestMetadataEvent);
+    type EventMutation = fn(&mut Event);
 
     fn assert_invalid_events(cases: &[(&str, EventMutation)]) {
         for (name, mutate) in cases {
@@ -911,7 +906,7 @@ mod tests {
             assert!(
                 matches!(
                     ValidatedRequestMetadata::validate(&candidate),
-                    Err(PersistenceError::InvalidRequestMetadataEvent)
+                    Err(Error::InvalidRequestMetadataEvent)
                 ),
                 "accepted {name}"
             );

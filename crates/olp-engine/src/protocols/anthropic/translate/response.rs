@@ -1,19 +1,19 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, SourceExtensions, Surface,
-    Usage as CanonicalUsage,
+use crate::domain::canonical::{
+    events::{Event, FinishReason, Kind, Usage as CanonicalUsage},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde_json::Value;
 
 use super::super::dto::{ContentBlock, MessagesResponse, Role};
 use super::errors::ResponseError;
-use super::extensions::{collect_extra, require_response_kind};
+use super::extensions::require_response_kind;
 use crate::protocols::CanonicalEventBuilder as EventBuilder;
+use crate::protocols::extensions::collect_extra;
 
-pub fn decode_messages_response(
-    response: MessagesResponse,
-) -> Result<Vec<CanonicalEvent>, ResponseError> {
+pub fn decode(response: MessagesResponse) -> Result<Vec<Event>, ResponseError> {
     if response.role != Role::Assistant {
         return Err(ResponseError::UnexpectedRole);
     }
@@ -21,11 +21,11 @@ pub fn decode_messages_response(
         return Err(ResponseError::UnexpectedType(response.kind));
     }
     let mut builder = EventBuilder::default();
-    builder.push(CanonicalEventKind::ResponseStart {
+    builder.push(Kind::ResponseStart {
         response_id: Some(response.id),
         provider_model: Some(response.model),
     });
-    builder.push(CanonicalEventKind::MessageStart {
+    builder.push(Kind::MessageStart {
         output_index: 0,
         role: MessageRole::Assistant,
     });
@@ -37,7 +37,7 @@ pub fn decode_messages_response(
             ContentBlock::Text(block) => {
                 require_response_kind(&block.kind, "text")?;
                 collect_extra(&format!("/content/{index}"), &block.extra, &mut extensions);
-                builder.push(CanonicalEventKind::TextDelta {
+                builder.push(Kind::TextDelta {
                     output_index: 0,
                     text: block.text,
                 });
@@ -45,7 +45,7 @@ pub fn decode_messages_response(
             ContentBlock::ToolUse(block) => {
                 require_response_kind(&block.kind, "tool_use")?;
                 collect_extra(&format!("/content/{index}"), &block.extra, &mut extensions);
-                builder.push(CanonicalEventKind::ToolCallDelta {
+                builder.push(Kind::ToolCallDelta {
                     output_index: 0,
                     tool_index,
                     id: Some(block.id),
@@ -67,21 +67,21 @@ pub fn decode_messages_response(
         extensions.insert("/stop_sequence".into(), Value::String(stop_sequence));
     }
     if !extensions.is_empty() {
-        builder.push(CanonicalEventKind::SourceExtension {
+        builder.push(Kind::SourceExtension {
             extensions: SourceExtensions::new(Surface::Anthropic, extensions),
         });
     }
-    builder.push(CanonicalEventKind::Usage {
+    builder.push(Kind::Usage {
         usage: canonical_usage(&response.usage),
     });
     let stop_reason = response
         .stop_reason
         .ok_or(ResponseError::MissingStopReason)?;
-    builder.push(CanonicalEventKind::Finish {
+    builder.push(Kind::Finish {
         output_index: 0,
         reason: anthropic_finish_reason(&stop_reason),
     });
-    builder.push(CanonicalEventKind::Done);
+    builder.push(Kind::Done);
     Ok(builder.events)
 }
 

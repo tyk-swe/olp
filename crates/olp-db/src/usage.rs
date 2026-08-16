@@ -1,28 +1,23 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use olp_engine::domain::OperationKind;
+use olp_engine::domain::canonical::identity::OperationKind;
 use uuid::Uuid;
 
-mod breakdown;
-mod completeness;
+pub mod breakdown;
+pub mod completeness;
 pub(super) mod query;
-mod series;
-mod summary;
-
-pub use breakdown::{UsageBreakdown, UsageBreakdownReport};
-pub use completeness::UsageCompleteness;
-pub use series::{UsagePoint, UsageSeries};
-pub use summary::UsageSummary;
+pub mod series;
+pub mod summary;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UsageGranularity {
+pub enum Granularity {
     Hour,
     Day,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UsageDimension {
+pub enum Dimension {
     Route,
     Provider,
     Model,
@@ -31,7 +26,7 @@ pub enum UsageDimension {
 }
 
 #[derive(Clone, Debug)]
-pub struct UsageFilters {
+pub struct Filters {
     pub observed_after: DateTime<Utc>,
     pub observed_before: DateTime<Utc>,
     pub route_slug: Option<String>,
@@ -42,7 +37,7 @@ pub struct UsageFilters {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct UsageRangeCoverage {
+pub struct Coverage {
     /// False only when a requested partial hour exists solely as a retained
     /// hourly aggregate and therefore cannot be sliced without guessing.
     pub range_complete: bool,
@@ -52,7 +47,7 @@ pub struct UsageRangeCoverage {
     pub excluded_partial_aggregate_boundaries: u8,
 }
 
-impl fmt::Display for UsageDimension {
+impl fmt::Display for Dimension {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Route => "route",
@@ -66,16 +61,16 @@ impl fmt::Display for UsageDimension {
 
 #[cfg(test)]
 mod tests {
-    use super::UsageDimension;
+    use super::Dimension;
 
     #[test]
     fn usage_dimension_names_are_stable() {
         for (dimension, expected) in [
-            (UsageDimension::Route, "route"),
-            (UsageDimension::Provider, "provider"),
-            (UsageDimension::Model, "model"),
-            (UsageDimension::ApiKey, "api_key"),
-            (UsageDimension::Operation, "operation"),
+            (Dimension::Route, "route"),
+            (Dimension::Provider, "provider"),
+            (Dimension::Model, "model"),
+            (Dimension::ApiKey, "api_key"),
+            (Dimension::Operation, "operation"),
         ] {
             assert_eq!(dimension.to_string(), expected);
         }

@@ -1,14 +1,23 @@
-use super::*;
+use chrono::Utc;
+use rust_decimal::Decimal;
+
+use super::{
+    delivery_health::{
+        ConsumerHealth, ConsumerState, ConsumerStatus,
+        REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS,
+    },
+    reconciliation::request_metadata_gap_count_from_decimal,
+};
 
 #[test]
 fn durable_consumer_status_distinguishes_unknown_backlog_and_staleness() {
     let now = Utc::now();
-    let unknown = RequestMetadataConsumerStatus::from_health(None, now);
-    assert_eq!(unknown.state, RequestMetadataConsumerState::Unknown);
+    let unknown = ConsumerStatus::from_health(None, now);
+    assert_eq!(unknown.state, ConsumerState::Unknown);
     assert!(!unknown.complete());
 
-    let backlogged = RequestMetadataConsumerStatus::from_health(
-        Some(RequestMetadataConsumerHealth {
+    let backlogged = ConsumerStatus::from_health(
+        Some(ConsumerHealth {
             pending_events: 2,
             lag_events: 3,
             oldest_pending_at: Some(now - chrono::Duration::seconds(5)),
@@ -16,11 +25,11 @@ fn durable_consumer_status_distinguishes_unknown_backlog_and_staleness() {
         }),
         now,
     );
-    assert_eq!(backlogged.state, RequestMetadataConsumerState::Backlogged);
+    assert_eq!(backlogged.state, ConsumerState::Backlogged);
     assert!(!backlogged.complete());
 
-    let stale = RequestMetadataConsumerStatus::from_health(
-        Some(RequestMetadataConsumerHealth {
+    let stale = ConsumerStatus::from_health(
+        Some(ConsumerHealth {
             pending_events: 0,
             lag_events: 0,
             oldest_pending_at: None,
@@ -29,11 +38,11 @@ fn durable_consumer_status_distinguishes_unknown_backlog_and_staleness() {
         }),
         now,
     );
-    assert_eq!(stale.state, RequestMetadataConsumerState::Stale);
+    assert_eq!(stale.state, ConsumerState::Stale);
     assert!(!stale.complete());
 
-    let healthy = RequestMetadataConsumerStatus::from_health(
-        Some(RequestMetadataConsumerHealth {
+    let healthy = ConsumerStatus::from_health(
+        Some(ConsumerHealth {
             pending_events: 0,
             lag_events: 0,
             oldest_pending_at: None,
@@ -41,7 +50,7 @@ fn durable_consumer_status_distinguishes_unknown_backlog_and_staleness() {
         }),
         now,
     );
-    assert_eq!(healthy.state, RequestMetadataConsumerState::Healthy);
+    assert_eq!(healthy.state, ConsumerState::Healthy);
     assert!(healthy.complete());
 }
 

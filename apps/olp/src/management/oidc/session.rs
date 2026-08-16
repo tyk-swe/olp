@@ -7,9 +7,10 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use olp_db::{
-    authentication::RecentAuthPurpose, oidc::OidcFlowPurpose, security::EncryptedSecret,
-    security::MasterKey, security::RecentAuthMaterial, security::SessionMaterial,
-    security::constant_time_eq,
+    authentication::RecentAuthPurpose, oidc::types::OidcFlowPurpose,
+    security::envelope::EncryptedSecret, security::envelope::MasterKey,
+    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
+    security::session_material::constant_time_eq,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -19,14 +20,18 @@ use zeroize::{Zeroize, Zeroizing};
 use super::error::invalid_login_flow_cookie;
 use super::helpers::{require_master_key, valid_binding_token};
 use crate::{
-    ManagementState, Problem, RelativeReturnTo,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        append_recent_auth_cookie, append_security_transition_cookies,
-        prevent_sensitive_response_caching,
+        cookies::{append_recent_auth_cookie, append_security_transition_cookies},
+        response_policy::prevent_sensitive_response_caching,
     },
-    public_http::request_cookies::{
-        LEGACY_OIDC_FLOW_COOKIE, LEGACY_OIDC_LOGIN_FLOW_COOKIE, OIDC_LINK_FLOW_COOKIE_PREFIX,
-        OIDC_LOGIN_FLOW_COOKIE_PREFIX, RequestCookies,
+    public_http::{
+        problem::Problem,
+        relative_url::RelativeReturnTo,
+        request_cookies::{
+            LEGACY_OIDC_FLOW_COOKIE, LEGACY_OIDC_LOGIN_FLOW_COOKIE, OIDC_LINK_FLOW_COOKIE_PREFIX,
+            OIDC_LOGIN_FLOW_COOKIE_PREFIX, RequestCookies,
+        },
     },
 };
 

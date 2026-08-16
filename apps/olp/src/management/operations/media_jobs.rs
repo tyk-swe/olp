@@ -9,7 +9,8 @@ use olp_db::{
     media_jobs::MediaJobError, media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle,
     media_jobs::MediaJobRecord, media_jobs::MediaJobState,
 };
-use olp_engine::domain::Surface;
+use olp_engine::domain::auth::Permission;
+use olp_engine::domain::canonical::identity::Surface;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::{IntoParams, ToSchema};
@@ -17,8 +18,11 @@ use uuid::Uuid;
 
 use super::helpers::{not_found, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
-    ManagementState, Problem,
-    management::{Permission, require_permission, require_read_session, with_etag},
+    bootstrap::mode_dependencies::ManagementState,
+    management::{
+        permissions::require_permission, preconditions::with_etag, sessions::require_read_session,
+    },
+    public_http::problem::Problem,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]

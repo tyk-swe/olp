@@ -1,14 +1,15 @@
 use std::path::Path;
 
 use olp_db::{
-    PgStore, security::AuthHmacKey, security::MasterKey, security::MasterKeyEncryptionStatus,
+    security::envelope::MasterKey, security::key_material::AuthHmacKey,
+    security::rotation::MasterKeyEncryptionStatus, store::Store,
 };
 use zeroize::Zeroizing;
 
 use super::{AppResult, config::DatabaseArgs};
 
-pub(super) async fn connect_store(args: &DatabaseArgs) -> AppResult<PgStore> {
-    Ok(PgStore::connect(&args.database_url, args.database_max_connections).await?)
+pub(super) async fn connect_store(args: &DatabaseArgs) -> AppResult<Store> {
+    Ok(Store::connect(&args.database_url, args.database_max_connections).await?)
 }
 
 pub(super) async fn load_auth_hmac_key(path: &Path) -> AppResult<AuthHmacKey> {

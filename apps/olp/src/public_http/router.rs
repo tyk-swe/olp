@@ -22,43 +22,48 @@ use tower_http::{
 };
 
 use crate::{
-    GatewayState, MAX_JSON_BODY_BYTES, ManagementState, ModeDependencies, Problem,
+    bootstrap::mode_dependencies::GatewayState,
+    bootstrap::mode_dependencies::ManagementState,
+    bootstrap::mode_dependencies::ModeDependencies,
     bootstrap::mode_dependencies::RequestBoundaryState,
+    bootstrap::state::MAX_JSON_BODY_BYTES,
     console, gateway, management,
+    public_http::problem::Problem,
     public_http::request_admission::{
-        PublicAdmissionMiddleware, admit_public_request, enforce_request_limits,
+        enforce_request_limits,
+        public::{PublicAdmissionMiddleware, admit_public_request},
     },
 };
 
 pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds the public application router. Observability is intentionally served
-/// by [`crate::observability_router`] on a separate listener. Public-auth
+/// by [`crate::observability::router`] on a separate listener. Public-auth
 /// callers must attach [`axum::extract::ConnectInfo`] with the socket peer; the
 /// hardened application listener does so automatically.
 ///
 #[cfg(any(test, feature = "test-util"))]
-pub trait IntoPublicRouter {
-    fn into_public_router(self) -> Router;
+pub trait IntoPublicState {
+    fn into_public(self) -> Router;
 }
 
 #[cfg(any(test, feature = "test-util"))]
-impl IntoPublicRouter for GatewayState {
-    fn into_public_router(self) -> Router {
+impl IntoPublicState for GatewayState {
+    fn into_public(self) -> Router {
         compose_public_router(Some(self.clone()), None, self.request_boundary.clone())
     }
 }
 
 #[cfg(any(test, feature = "test-util"))]
-impl IntoPublicRouter for ManagementState {
-    fn into_public_router(self) -> Router {
+impl IntoPublicState for ManagementState {
+    fn into_public(self) -> Router {
         compose_public_router(None, Some(self.clone()), self.request_boundary().clone())
     }
 }
 
 #[cfg(any(test, feature = "test-util"))]
-pub fn public_router(state: impl IntoPublicRouter) -> Router {
-    state.into_public_router()
+pub fn for_state(state: impl IntoPublicState) -> Router {
+    state.into_public()
 }
 
 pub(crate) fn validated_public_router(dependencies: ModeDependencies) -> Router {
@@ -306,8 +311,8 @@ pub(crate) fn sensitive_request_headers() -> [HeaderName; 7] {
     [
         axum::http::header::AUTHORIZATION,
         axum::http::header::COOKIE,
-        HeaderName::from_static(management::CSRF_HEADER),
-        HeaderName::from_static(management::SETUP_TOKEN_HEADER),
+        HeaderName::from_static(management::sessions::CSRF_HEADER),
+        HeaderName::from_static(management::sessions::SETUP_TOKEN_HEADER),
         HeaderName::from_static("x-api-key"),
         HeaderName::from_static("x-goog-api-key"),
         HeaderName::from_static("x-litellm-api-key"),
@@ -317,7 +322,7 @@ pub(crate) fn sensitive_request_headers() -> [HeaderName; 7] {
 pub(crate) fn sensitive_response_headers() -> [HeaderName; 2] {
     [
         axum::http::header::SET_COOKIE,
-        HeaderName::from_static(management::CSRF_HEADER),
+        HeaderName::from_static(management::sessions::CSRF_HEADER),
     ]
 }
 
@@ -367,13 +372,16 @@ mod tests {
     };
     use tower::ServiceExt as _;
 
-    use crate::ProcessComposition;
+    use crate::bootstrap::state::ProcessComposition;
 
     use super::*;
 
     #[tokio::test]
     async fn hsts_follows_the_canonical_public_origin_scheme() {
-        for mode in [crate::ApiMode::Gateway, crate::ApiMode::Control] {
+        for mode in [
+            crate::bootstrap::state::ApiMode::Gateway,
+            crate::bootstrap::state::ApiMode::Control,
+        ] {
             for (origin, expected) in [
                 ("https://console.example.test", true),
                 ("http://127.0.0.1:8080", false),
@@ -381,14 +389,20 @@ mod tests {
                 let state = ProcessComposition::new(
                     mode,
                     None,
-                    std::sync::Arc::new(olp_engine::inference::runtime::RuntimeManager::empty()),
+                    std::sync::Arc::new(olp_engine::inference::runtime::Manager::empty()),
                     origin,
                     std::path::PathBuf::from("missing-console"),
                 );
                 let router = match mode {
-                    crate::ApiMode::Gateway => public_router(state.gateway_state_for_test()),
-                    crate::ApiMode::Control => public_router(state.management_state_for_test()),
-                    crate::ApiMode::All => unreachable!("all mode is not part of this test"),
+                    crate::bootstrap::state::ApiMode::Gateway => {
+                        for_state(state.gateway_state_for_test())
+                    }
+                    crate::bootstrap::state::ApiMode::Control => {
+                        for_state(state.management_state_for_test())
+                    }
+                    crate::bootstrap::state::ApiMode::All => {
+                        unreachable!("all mode is not part of this test")
+                    }
                 };
                 let response = router
                     .oneshot(
@@ -412,13 +426,13 @@ mod tests {
     async fn admission_overload_responses_keep_public_boundary_headers() {
         for (mode, hold_uri, reject_uri, expected_content_type) in [
             (
-                crate::ApiMode::Gateway,
+                crate::bootstrap::state::ApiMode::Gateway,
                 "/openai/v1/models",
                 "/openai/v1/models",
                 "application/json",
             ),
             (
-                crate::ApiMode::Control,
+                crate::bootstrap::state::ApiMode::Control,
                 "/metrics",
                 "/api/v1/sessions",
                 "application/problem+json",
@@ -427,15 +441,21 @@ mod tests {
             let mut state = ProcessComposition::new(
                 mode,
                 None,
-                std::sync::Arc::new(olp_engine::inference::runtime::RuntimeManager::empty()),
+                std::sync::Arc::new(olp_engine::inference::runtime::Manager::empty()),
                 "https://console.example.test",
                 std::path::PathBuf::from("missing-console"),
             );
             state.set_public_admission_limits(1, 1);
             let router = match mode {
-                crate::ApiMode::Gateway => public_router(state.gateway_state_for_test()),
-                crate::ApiMode::Control => public_router(state.management_state_for_test()),
-                crate::ApiMode::All => unreachable!("all mode is not part of this test"),
+                crate::bootstrap::state::ApiMode::Gateway => {
+                    for_state(state.gateway_state_for_test())
+                }
+                crate::bootstrap::state::ApiMode::Control => {
+                    for_state(state.management_state_for_test())
+                }
+                crate::bootstrap::state::ApiMode::All => {
+                    unreachable!("all mode is not part of this test")
+                }
             };
 
             let held_response = router

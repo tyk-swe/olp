@@ -1,16 +1,21 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use crate::{
-    TransportRegistry,
     bootstrap::provider_adapter::{runtime_provider_config, runtime_provider_credential},
+    bootstrap::state::TransportRegistry,
 };
-use olp_db::{PgStore, security::MasterKey};
-use olp_engine::domain::{ProviderId, ProviderTransport, RuntimeSnapshot};
-use olp_engine::providers::{ProviderConfig, ProviderCredential, ProviderFactory};
+use olp_db::{security::envelope::MasterKey, store::Store};
+use olp_engine::{
+    domain::{ids::ProviderId, ports::ProviderTransport, routing::snapshot::Snapshot},
+    providers::factory::{
+        assembly::Factory,
+        configuration::{Config, Credential},
+    },
+};
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
-use crate::bootstrap::cli::{AppResult, check_secret_permissions};
+use crate::bootstrap::cli::{AppResult, validation::check_secret_permissions};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,11 +92,11 @@ pub(crate) async fn register_mounted_connectors(
     for provider in config.openai {
         check_secret_permissions(&provider.credential_file).await?;
         let secret = Zeroizing::new(tokio::fs::read_to_string(&provider.credential_file).await?);
-        let transport = ProviderFactory::transport(
-            ProviderConfig::OpenAi {
+        let transport = Factory::transport(
+            Config::OpenAi {
                 endpoint: Some(provider.base_url),
             },
-            ProviderCredential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
+            Credential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -99,13 +104,13 @@ pub(crate) async fn register_mounted_connectors(
     for provider in config.azure_openai {
         check_secret_permissions(&provider.credential_file).await?;
         let secret = Zeroizing::new(tokio::fs::read_to_string(&provider.credential_file).await?);
-        let transport = ProviderFactory::transport(
-            ProviderConfig::AzureOpenAi {
+        let transport = Factory::transport(
+            Config::AzureOpenAi {
                 endpoint: provider.endpoint,
                 deployment: provider.deployment,
                 api_version: provider.api_version,
             },
-            ProviderCredential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
+            Credential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -136,11 +141,11 @@ pub(crate) async fn register_mounted_connectors(
                 .into());
             }
         };
-        let credential = secret.map_or(ProviderCredential::None, |secret| {
-            ProviderCredential::ServiceAccountJson(secret)
+        let credential = secret.map_or(Credential::None, |secret| {
+            Credential::ServiceAccountJson(secret)
         });
-        let transport = ProviderFactory::transport(
-            ProviderConfig::VertexAi {
+        let transport = Factory::transport(
+            Config::VertexAi {
                 project: provider.project,
                 location: provider.location,
                 probe_model: provider.model,
@@ -177,9 +182,9 @@ pub(crate) async fn register_mounted_connectors(
                 .into());
             }
         };
-        let credential = secret.map_or(ProviderCredential::None, ProviderCredential::AwsStatic);
-        let transport = ProviderFactory::transport(
-            ProviderConfig::Bedrock {
+        let credential = secret.map_or(Credential::None, Credential::AwsStatic);
+        let transport = Factory::transport(
+            Config::Bedrock {
                 region: provider.region,
                 auth_mode: provider.auth_mode.parse()?,
             },
@@ -192,9 +197,9 @@ pub(crate) async fn register_mounted_connectors(
 }
 
 pub(crate) async fn load_runtime_transports(
-    store: &PgStore,
+    store: &Store,
     master_key: &MasterKey,
-    snapshot: &RuntimeSnapshot,
+    snapshot: &Snapshot,
     transports: &mut BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
 ) -> AppResult<()> {
     for provider in store.runtime_provider_configurations(snapshot).await? {
@@ -211,8 +216,8 @@ pub(crate) async fn load_runtime_transports(
 mod tests {
     use std::{io::Write as _, path::Path};
 
-    use crate::TransportRegistry;
-    use olp_engine::domain::ProviderId;
+    use crate::bootstrap::state::TransportRegistry;
+    use olp_engine::domain::ids::ProviderId;
     use serde_json::json;
     use tempfile::NamedTempFile;
 

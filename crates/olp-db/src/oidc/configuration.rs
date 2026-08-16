@@ -5,13 +5,13 @@ use sqlx::{FromRow, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::helpers::{encrypted_from_row, normalize_email, required_string, valid_claim_name};
-use super::{OidcConfiguration, OidcError, OidcRoleMapping, UpsertOidcConfiguration};
-use crate::PgStore;
+use super::types::{OidcConfiguration, OidcError, OidcRoleMapping, UpsertOidcConfiguration};
+use crate::store::Store;
 
 pub(super) const OIDC_CONFIGURATION_LOCK_ID: i64 = 0x4f4c_505f_4f49; // "OLP_OI"
 const MAX_MAPPINGS: usize = 500;
 
-impl PgStore {
+impl Store {
     pub async fn oidc_configuration(&self) -> Result<Option<OidcConfiguration>, OidcError> {
         let row = sqlx::query_as!(
             OidcConfigurationRow,
@@ -338,11 +338,11 @@ fn mappings_from_json(value: serde_json::Value) -> Result<Vec<OidcRoleMapping>, 
 
 #[cfg(test)]
 mod tests {
-    use olp_engine::domain::Role;
+    use olp_engine::domain::auth::Role;
     use serde_json::json;
 
     use super::*;
-    use crate::security::EncryptedSecret;
+    use crate::security::envelope::EncryptedSecret;
 
     fn input() -> UpsertOidcConfiguration {
         UpsertOidcConfiguration {

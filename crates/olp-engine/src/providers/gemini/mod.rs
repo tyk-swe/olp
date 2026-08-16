@@ -5,17 +5,15 @@
 //! periodically revalidated DNS identity and has a bounded idle lifetime.
 //! Ambient proxies and reqwest retries are disabled.
 
-mod endpoint;
-mod transport;
+pub mod endpoint;
+pub mod transport;
 
 use std::{fmt, sync::Arc};
 
-use crate::domain::BoxFuture;
-pub use endpoint::EndpointError;
-pub use transport::{GeminiConnector, validate_operation};
+use crate::domain::ports::BoxFuture;
 use zeroize::Zeroizing;
 
-pub use crate::providers::ConnectorTimeouts;
+use crate::providers::connector::Timeouts;
 use crate::providers::gemini::endpoint::Endpoint;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -24,7 +22,7 @@ pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct ConnectorConfig {
     endpoint: Endpoint,
-    timeouts: ConnectorTimeouts,
+    timeouts: Timeouts,
     max_response_bytes: usize,
     max_event_bytes: usize,
 }
@@ -33,7 +31,7 @@ impl Default for ConnectorConfig {
     fn default() -> Self {
         Self {
             endpoint: Endpoint::default(),
-            timeouts: ConnectorTimeouts::default(),
+            timeouts: Timeouts::default(),
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
         }
@@ -50,10 +48,7 @@ impl ConnectorConfig {
         })
     }
 
-    pub fn with_timeouts(
-        mut self,
-        timeouts: ConnectorTimeouts,
-    ) -> Result<Self, ConnectorBuildError> {
+    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Result<Self, ConnectorBuildError> {
         self.timeouts = timeouts
             .validate()
             .map_err(ConnectorBuildError::ZeroTimeout)?;
@@ -75,7 +70,7 @@ impl ConnectorConfig {
 
     #[cfg(any(test, feature = "test-util"))]
     #[doc(hidden)]
-    pub fn for_local_test(base_url: &str, timeouts: ConnectorTimeouts) -> Self {
+    pub fn for_local_test(base_url: &str, timeouts: Timeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
         endpoint.set_connect_timeout(timeouts.connect);
         Self {
@@ -86,9 +81,9 @@ impl ConnectorConfig {
     }
 }
 
-pub struct GeminiApiKey(Zeroizing<String>);
+pub struct ApiKey(Zeroizing<String>);
 
-impl GeminiApiKey {
+impl ApiKey {
     pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
         crate::providers::connector::visible_secret(
             value,
@@ -135,7 +130,7 @@ pub trait BearerTokenProvider: Send + Sync + fmt::Debug {
 pub struct BearerTokenError;
 
 pub(in crate::providers) enum ConnectorCredential {
-    ApiKey(GeminiApiKey),
+    ApiKey(ApiKey),
     Bearer(Arc<dyn BearerTokenProvider>),
 }
 
@@ -148,16 +143,16 @@ impl fmt::Debug for ConnectorCredential {
     }
 }
 
-impl fmt::Debug for GeminiApiKey {
+impl fmt::Debug for ApiKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("GeminiApiKey([REDACTED])")
+        formatter.write_str("ApiKey([REDACTED])")
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorBuildError {
     #[error(transparent)]
-    Endpoint(#[from] EndpointError),
+    Endpoint(#[from] endpoint::Error),
     #[error("Gemini API key cannot be empty")]
     EmptyApiKey,
     #[error("Gemini API key must contain visible ASCII characters only")]
@@ -176,12 +171,12 @@ mod tests {
 
     #[test]
     fn key_debug_is_redacted_and_header_injection_is_rejected() {
-        let key = GeminiApiKey::new("google-secret").unwrap();
+        let key = ApiKey::new("google-secret").unwrap();
         let debug = format!("{key:?}");
         assert!(debug.contains("REDACTED"));
         assert!(!debug.contains("google-secret"));
         assert!(matches!(
-            GeminiApiKey::new("secret\nheader"),
+            ApiKey::new("secret\nheader"),
             Err(ConnectorBuildError::InvalidApiKey)
         ));
     }
@@ -189,9 +184,9 @@ mod tests {
     #[test]
     fn rejects_zero_deadlines_and_limits() {
         assert!(matches!(
-            ConnectorConfig::default().with_timeouts(ConnectorTimeouts {
+            ConnectorConfig::default().with_timeouts(Timeouts {
                 first_byte: Duration::ZERO,
-                ..ConnectorTimeouts::default()
+                ..Timeouts::default()
             }),
             Err(ConnectorBuildError::ZeroTimeout("first_byte"))
         ));

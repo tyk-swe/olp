@@ -1,12 +1,14 @@
 use std::time::Duration;
 
 use olp_db::{
-    access::NewApiKeyRecord, idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse,
-    idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
-    identity::InstallationSetupInput, security::AuthHmacKey, security::MasterKey,
-    security::hash_password,
+    access::NewApiKeyRecord, idempotency::Outcome, idempotency::Replayable, idempotency::Response,
+    idempotency::fingerprint, identity::InstallationSetupInput, security::envelope::MasterKey,
+    security::key_material::AuthHmacKey, security::password::hash,
 };
-use olp_engine::domain::{ApiKeyLimits, ApiKeyScope, RuntimeSnapshot};
+use olp_engine::domain::{
+    auth::{ApiKeyLimits, ApiKeyScope},
+    routing::snapshot::Snapshot,
+};
 use uuid::Uuid;
 
 const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254;
@@ -21,7 +23,7 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
             installation_name: "Runtime publication integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
+            password_hash: hash("correct horse battery staple").unwrap(),
         })
         .await
         .unwrap();
@@ -51,13 +53,11 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
             actor,
             idempotency_key: "runtime-lock-order-0001".to_owned(),
         };
-        let fingerprint = idempotency_fingerprint(&"runtime-lock-order-0001").unwrap();
+        let fingerprint = fingerprint(&"runtime-lock-order-0001").unwrap();
         creating_store
-            .create_api_key_record(
-                &key,
-                ReplayableIdempotency::new(fingerprint, &master_key),
-                |_| IdempotencyResponse::new(201, None, None, Vec::new()),
-            )
+            .create_api_key_record(&key, Replayable::new(fingerprint, &master_key), |_| {
+                Response::new(201, None, None, Vec::new())
+            })
             .await
             .unwrap()
     });
@@ -104,10 +104,10 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
         .unwrap();
     winner.commit().await.unwrap();
 
-    let IdempotencyOutcome::Executed { value, .. } = creation.await.unwrap() else {
+    let Outcome::Executed { value, .. } = creation.await.unwrap() else {
         panic!("fresh key creation unexpectedly replayed");
     };
-    let snapshot: RuntimeSnapshot = serde_json::from_slice(&value.release.payload).unwrap();
+    let snapshot: Snapshot = serde_json::from_slice(&value.release.payload).unwrap();
     assert!(
         snapshot
             .api_keys

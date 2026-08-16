@@ -1,32 +1,32 @@
-use olp_engine::domain::{ProviderId, ProviderKind, RuntimeSnapshot};
+use olp_engine::domain::{
+    ids::ProviderId,
+    routing::{provider::ProviderKind, snapshot::Snapshot},
+};
 use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
+    error::Error as PersistenceError,
     idempotency::{
-        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
-        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
-        complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
+        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
     },
-    runtime::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
-    security::EncryptedSecret,
+    runtime::compiler::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
+    security::envelope::EncryptedSecret,
+    store::Store,
 };
 
-use super::{
-    ConfigurationError, NewProviderDraft, ProviderActivated, ProviderDraftCreated,
-    RuntimeProviderConfiguration,
-};
+use super::{Error, NewProviderDraft, ProviderActivated, ProviderDraftCreated, RuntimeProvider};
 
-impl PgStore {
+impl Store {
     /// Loads the release-exact connector configuration and credential named by
     /// a verified runtime sidecar. Mutable configuration drafts are deliberately not
     /// consulted, so testing a replacement endpoint or credential cannot alter
     /// the transport used by the last activated provider revision.
     pub async fn runtime_provider_configurations(
         &self,
-        snapshot: &RuntimeSnapshot,
-    ) -> Result<Vec<RuntimeProviderConfiguration>, ConfigurationError> {
+        snapshot: &Snapshot,
+    ) -> Result<Vec<RuntimeProvider>, Error> {
         let mut records = Vec::with_capacity(snapshot.providers.len());
         for runtime_provider in snapshot.providers.values() {
             let expected_credential = runtime_provider
@@ -54,10 +54,10 @@ impl PgStore {
             )
             .fetch_optional(self.pool())
             .await?
-            .ok_or(ConfigurationError::InvalidCredential)?;
+            .ok_or(Error::InvalidCredential)?;
             let stored_kind = parse_provider_kind(row.kind.as_str())?;
             if stored_kind != runtime_provider.kind {
-                return Err(ConfigurationError::InvalidCredential);
+                return Err(Error::InvalidCredential);
             }
             records.push(runtime_provider_configuration_from_row(row)?);
         }
@@ -67,11 +67,11 @@ impl PgStore {
     pub async fn create_provider_draft<F>(
         &self,
         provider: NewProviderDraft,
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<ProviderDraftCreated>, ConfigurationError>
+    ) -> Result<Outcome<ProviderDraftCreated>, Error>
     where
-        F: FnOnce(&ProviderDraftCreated) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&ProviderDraftCreated) -> Result<Response, PersistenceError>,
     {
         let mut transaction = self.pool().begin().await?;
         match claim_replayable_idempotency(
@@ -87,25 +87,25 @@ impl PgStore {
             ReplayableIdempotencyClaim::Execute => {}
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(ConfigurationError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
         if provider.credential.is_some() != provider.credential_id.is_some() {
-            return Err(ConfigurationError::InvalidCredential);
+            return Err(Error::InvalidCredential);
         }
         if provider.model.is_some() != provider.model_id.is_some()
             || provider.model.is_some() != provider.display_name.is_some()
             || (provider.model.is_none() && (provider.model_enabled || provider.surface.is_some()))
         {
-            return Err(ConfigurationError::ProviderIncomplete);
+            return Err(Error::ProviderIncomplete);
         }
         let now = chrono::Utc::now();
         let etag = Uuid::now_v7();
@@ -191,7 +191,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: created,
             response,
         })
@@ -203,7 +203,7 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ProviderActivated, ConfigurationError> {
+    ) -> Result<ProviderActivated, Error> {
         let new_etag = Uuid::now_v7();
         let mut transaction = self
             .pool()
@@ -218,7 +218,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let provider = sqlx::query!(
             "SELECT p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
@@ -248,9 +248,9 @@ impl PgStore {
         provider_id)
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::ProviderNotFound)?;
+        .ok_or(Error::ProviderNotFound)?;
         if provider.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.state != "draft"
             || !provider.connector_ready
@@ -259,7 +259,7 @@ impl PgStore {
             || !provider.has_model
             || !provider.capabilities_ready
         {
-            return Err(ConfigurationError::ProviderIncomplete);
+            return Err(Error::ProviderIncomplete);
         }
 
         // Media reservations are short RowExclusive transactions. Holding a
@@ -365,7 +365,7 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?;
         if incompatible_media_job.is_some() {
-            return Err(ConfigurationError::ProviderIncomplete);
+            return Err(Error::ProviderIncomplete);
         }
         let uncovered_route_operation: Option<String> = sqlx::query_scalar!(
             "SELECT concat(r.slug, '/', rro.operation) AS \"value!\" \
@@ -395,7 +395,7 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?;
         if uncovered_route_operation.is_some() {
-            return Err(ConfigurationError::ProviderIncomplete);
+            return Err(Error::ProviderIncomplete);
         }
         sqlx::query!(
             "UPDATE providers SET state = 'active'::provider_state, active_revision_id = $1, \
@@ -466,7 +466,7 @@ struct RuntimeProviderRow {
 
 fn runtime_provider_configuration_from_row(
     row: RuntimeProviderRow,
-) -> Result<RuntimeProviderConfiguration, ConfigurationError> {
+) -> Result<RuntimeProvider, Error> {
     let credential_id: Option<Uuid> = row.credential_id;
     let credential_version = row.credential_version.map(stored_version).transpose()?;
     let nonce = row.nonce;
@@ -475,20 +475,18 @@ fn runtime_provider_configuration_from_row(
     let encrypted = match (nonce, ciphertext, key_version) {
         (Some(nonce), Some(ciphertext), Some(key_version)) => Some(EncryptedSecret {
             key_version,
-            nonce: nonce
-                .try_into()
-                .map_err(|_| ConfigurationError::InvalidCredential)?,
+            nonce: nonce.try_into().map_err(|_| Error::InvalidCredential)?,
             ciphertext,
         }),
         (None, None, None) => None,
-        _ => return Err(ConfigurationError::InvalidCredential),
+        _ => return Err(Error::InvalidCredential),
     };
     if credential_id.is_some() != credential_version.is_some()
         || credential_id.is_some() != encrypted.is_some()
     {
-        return Err(ConfigurationError::InvalidCredential);
+        return Err(Error::InvalidCredential);
     }
-    Ok(RuntimeProviderConfiguration {
+    Ok(RuntimeProvider {
         provider_id: ProviderId::from_uuid(row.id),
         kind: parse_provider_kind(row.kind.as_str())?,
         endpoint: row.endpoint,
@@ -505,22 +503,20 @@ fn runtime_provider_configuration_from_row(
     })
 }
 
-fn parse_provider_kind(value: &str) -> Result<ProviderKind, ConfigurationError> {
-    value
-        .parse()
-        .map_err(|_| ConfigurationError::InvalidCredential)
+fn parse_provider_kind(value: &str) -> Result<ProviderKind, Error> {
+    value.parse().map_err(|_| Error::InvalidCredential)
 }
 
-pub(super) fn database_version(version: u32) -> Result<i32, ConfigurationError> {
+pub(super) fn database_version(version: u32) -> Result<i32, Error> {
     i32::try_from(version)
         .ok()
         .filter(|version| *version > 0)
-        .ok_or(ConfigurationError::InvalidCredential)
+        .ok_or(Error::InvalidCredential)
 }
 
-pub(super) fn stored_version(version: i32) -> Result<u32, ConfigurationError> {
+pub(super) fn stored_version(version: i32) -> Result<u32, Error> {
     u32::try_from(version)
         .ok()
         .filter(|version| *version > 0)
-        .ok_or(ConfigurationError::InvalidCredential)
+        .ok_or(Error::InvalidCredential)
 }

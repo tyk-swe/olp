@@ -6,13 +6,17 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use olp_engine::domain::{CanonicalError, ErrorClass, TransportError};
+use olp_engine::domain::{
+    canonical::events::{Error, ErrorClass},
+    ports::TransportError,
+};
 use olp_engine::inference::{
-    InferenceError as CoreInferenceError, InferenceErrorKind, limits::LimitDimension,
+    error::{Error as CoreInferenceError, Kind as InferenceErrorKind},
+    limits::LimitDimension,
 };
 use serde::Serialize;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 /// Delivery adapter for transport-neutral inference failures.
 ///
@@ -31,8 +35,8 @@ pub(super) fn valid_json<T>(
 }
 
 impl InferenceError {
-    pub(crate) fn accounting_outcome(&self) -> olp_engine::inference::RequestOutcome {
-        olp_engine::inference::RequestOutcome::failure(
+    pub(crate) fn accounting_outcome(&self) -> olp_engine::inference::accounting::RequestOutcome {
+        olp_engine::inference::accounting::RequestOutcome::failure(
             (self.code() != "client_cancelled").then_some(self.status().as_u16()),
             self.code(),
         )
@@ -122,7 +126,7 @@ impl InferenceError {
         CoreInferenceError::from_transport(error).into()
     }
 
-    pub(crate) fn from_canonical(error: &CanonicalError) -> Self {
+    pub(crate) fn from_canonical(error: &Error) -> Self {
         CoreInferenceError::from_canonical(error).into()
     }
 }

@@ -1,11 +1,18 @@
 use olp_conformance::read_json;
-use olp_engine::domain::{GenerationRequest, Operation, Surface};
+use olp_engine::domain::canonical::{
+    identity::Surface,
+    requests::{GenerationRequest, Operation},
+};
 use olp_engine::protocols::{
-    anthropic::{MessagesRequest, decode_messages_request, encode_messages_request},
-    gemini::{
-        GenerateContentRequest, decode_generate_content_request, encode_generate_content_request,
+    anthropic::{
+        dto::MessagesRequest,
+        translate::{decode::request as decode_anthropic, encode::request as encode_anthropic},
     },
-    openai::{ChatCompletionRequest, decode_chat_completion, encode_chat_completion},
+    gemini::{
+        dto::GenerateContentRequest,
+        translate::{decode::request as decode_gemini, encode::request as encode_gemini},
+    },
+    openai::chat::{CompletionRequest, decode_chat_completion, encode_chat_completion},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -42,7 +49,7 @@ fn assert_expected(request: &GenerationRequest, expected: &ExpectedCanonical) {
 
 #[test]
 fn openai_request_fixture_translates_and_round_trips_extensions() {
-    let wire: ChatCompletionRequest = read_json("protocols/openai-chat-request.json");
+    let wire: CompletionRequest = read_json("protocols/openai-chat-request.json");
     let expected: ExpectedCanonical = read_json("protocols/openai-chat-request.expected.json");
     let request = generation(decode_chat_completion(wire).expect("OpenAI fixture must decode"));
     assert_expected(&request, &expected);
@@ -64,7 +71,7 @@ fn anthropic_request_fixture_translates_and_round_trips_extensions() {
     let wire: MessagesRequest = read_json("protocols/anthropic-messages-request.json");
     let expected: ExpectedCanonical =
         read_json("protocols/anthropic-messages-request.expected.json");
-    let request = generation(decode_messages_request(wire).expect("Anthropic fixture must decode"));
+    let request = generation(decode_anthropic(wire).expect("Anthropic fixture must decode"));
     assert_expected(&request, &expected);
 
     let upstream_model = expected
@@ -72,7 +79,7 @@ fn anthropic_request_fixture_translates_and_round_trips_extensions() {
         .as_deref()
         .expect("model is required");
     let encoded = serde_json::to_value(
-        encode_messages_request(&request, upstream_model).expect("Anthropic fixture must encode"),
+        encode_anthropic(&request, upstream_model).expect("Anthropic fixture must encode"),
     )
     .expect("Anthropic DTO must serialize");
     assert_eq!(encoded["model"], upstream_model);
@@ -84,16 +91,13 @@ fn gemini_request_fixture_translates_and_round_trips_extensions() {
     let wire: GenerateContentRequest = read_json("protocols/gemini-generate-content-request.json");
     let expected: ExpectedCanonical =
         read_json("protocols/gemini-generate-content-request.expected.json");
-    let request = generation(
-        decode_generate_content_request(&expected.route, wire, true)
-            .expect("Gemini fixture must decode"),
-    );
+    let request =
+        generation(decode_gemini(&expected.route, wire, true).expect("Gemini fixture must decode"));
     assert_expected(&request, &expected);
 
-    let encoded = serde_json::to_value(
-        encode_generate_content_request(&request).expect("Gemini fixture must encode"),
-    )
-    .expect("Gemini DTO must serialize");
+    let encoded =
+        serde_json::to_value(encode_gemini(&request).expect("Gemini fixture must encode"))
+            .expect("Gemini DTO must serialize");
     assert_eq!(encoded["safetySettings"][0]["threshold"], "BLOCK_ONLY_HIGH");
 }
 

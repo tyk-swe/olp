@@ -5,28 +5,35 @@ struct CountingAdmissionSpool {
     puts: AtomicUsize,
 }
 
-impl olp_engine::domain::MediaSpool for CountingAdmissionSpool {
+impl olp_engine::domain::ports::MediaSpool for CountingAdmissionSpool {
     fn put<'a>(
         &'a self,
-        _upload: olp_engine::domain::MediaUpload,
-    ) -> BoxFuture<'a, Result<olp_engine::domain::MediaArtifact, olp_engine::domain::MediaSpoolError>>
-    {
+        _upload: olp_engine::domain::ports::MediaUpload,
+    ) -> BoxFuture<
+        'a,
+        Result<
+            olp_engine::domain::canonical::results::MediaArtifact,
+            olp_engine::domain::ports::MediaSpoolError,
+        >,
+    > {
         self.puts.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Err(olp_engine::domain::MediaSpoolError::Unavailable) })
+        Box::pin(async { Err(olp_engine::domain::ports::MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<olp_engine::domain::OpenedMedia, olp_engine::domain::MediaSpoolError>>
-    {
-        Box::pin(async { Err(olp_engine::domain::MediaSpoolError::NotFound) })
+    ) -> BoxFuture<
+        'a,
+        Result<olp_engine::domain::ports::OpenedMedia, olp_engine::domain::ports::MediaSpoolError>,
+    > {
+        Box::pin(async { Err(olp_engine::domain::ports::MediaSpoolError::NotFound) })
     }
 
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<(), olp_engine::domain::MediaSpoolError>> {
+    ) -> BoxFuture<'a, Result<(), olp_engine::domain::ports::MediaSpoolError>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -62,9 +69,14 @@ impl MediaSpool for RecordingSpool {
 
     fn put<'a>(
         &'a self,
-        upload: olp_engine::domain::MediaUpload,
-    ) -> BoxFuture<'a, Result<olp_engine::domain::MediaArtifact, olp_engine::domain::MediaSpoolError>>
-    {
+        upload: olp_engine::domain::ports::MediaUpload,
+    ) -> BoxFuture<
+        'a,
+        Result<
+            olp_engine::domain::canonical::results::MediaArtifact,
+            olp_engine::domain::ports::MediaSpoolError,
+        >,
+    > {
         Box::pin(async move {
             let artifact = self.inner.put(upload).await?;
             self.handles.lock().unwrap().push(artifact.handle.clone());
@@ -75,15 +87,17 @@ impl MediaSpool for RecordingSpool {
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<olp_engine::domain::OpenedMedia, olp_engine::domain::MediaSpoolError>>
-    {
+    ) -> BoxFuture<
+        'a,
+        Result<olp_engine::domain::ports::OpenedMedia, olp_engine::domain::ports::MediaSpoolError>,
+    > {
         self.inner.open(handle)
     }
 
     fn remove<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<(), olp_engine::domain::MediaSpoolError>> {
+    ) -> BoxFuture<'a, Result<(), olp_engine::domain::ports::MediaSpoolError>> {
         self.removed.lock().unwrap().push(handle.clone());
         self.inner.remove(handle)
     }
@@ -105,12 +119,7 @@ async fn assert_cleanup(spool: &RecordingSpool, handle: &MediaHandle) {
     .expect("media cleanup must be scheduled promptly");
 }
 
-fn raw_media_extension(
-    source: Surface,
-    data: bool,
-    event: Option<&str>,
-    extra: bool,
-) -> CanonicalEvent {
+fn raw_media_extension(source: Surface, data: bool, event: Option<&str>, extra: bool) -> Event {
     let values = [
         data.then(|| ("/__olp/raw_sse/data".to_owned(), json!({"ok":true}))),
         event.map(|event| ("/__olp/raw_sse/event".to_owned(), json!(event))),
@@ -119,9 +128,9 @@ fn raw_media_extension(
     .into_iter()
     .flatten()
     .collect();
-    CanonicalEvent::new(
+    Event::new(
         0,
-        CanonicalEventKind::SourceExtension {
+        Kind::SourceExtension {
             extensions: SourceExtensions::new(source, values),
         },
     )
@@ -131,7 +140,7 @@ fn raw_media_extension(
 fn raw_media_events_are_strictly_validated_and_encoded() {
     use crate::gateway::media::raw_media_event_bytes;
 
-    let event = |kind| CanonicalEvent::new(0, kind);
+    let event = |kind| Event::new(0, kind);
     assert_eq!(
         raw_media_event_bytes(raw_media_extension(
             Surface::OpenAi,
@@ -144,17 +153,14 @@ fn raw_media_events_are_strictly_validated_and_encoded() {
             b"event: audio.delta\ndata: {\"ok\":true}\n\n"
         ))
     );
-    assert_eq!(
-        raw_media_event_bytes(event(CanonicalEventKind::Done)).unwrap(),
-        None
-    );
+    assert_eq!(raw_media_event_bytes(event(Kind::Done)).unwrap(), None);
 
     for event in [
         raw_media_extension(Surface::Anthropic, true, None, false),
         raw_media_extension(Surface::OpenAi, false, None, false),
         raw_media_extension(Surface::OpenAi, true, None, true),
         raw_media_extension(Surface::OpenAi, true, Some("invalid\nevent"), false),
-        event(CanonicalEventKind::TextDelta {
+        event(Kind::TextDelta {
             output_index: 0,
             text: "unexpected".to_owned(),
         }),
@@ -164,8 +170,8 @@ fn raw_media_events_are_strictly_validated_and_encoded() {
         assert_eq!(error.code(), "provider_protocol_error");
     }
 
-    let error = raw_media_event_bytes(event(CanonicalEventKind::Error {
-        error: CanonicalError {
+    let error = raw_media_event_bytes(event(Kind::Error {
+        error: Error {
             class: ErrorClass::RateLimit,
             message: "slow down".to_owned(),
             provider_code: None,
@@ -181,11 +187,11 @@ fn raw_media_events_are_strictly_validated_and_encoded() {
 fn opened_media(
     content_type: Option<&str>,
     content_length: Option<u64>,
-) -> (olp_engine::domain::OpenedMedia, MediaHandle) {
+) -> (olp_engine::domain::ports::OpenedMedia, MediaHandle) {
     let handle = MediaHandle::new("00000000000000000000000000000000");
     (
-        olp_engine::domain::OpenedMedia {
-            artifact: olp_engine::domain::MediaArtifact {
+        olp_engine::domain::ports::OpenedMedia {
+            artifact: olp_engine::domain::canonical::results::MediaArtifact {
                 handle: handle.clone(),
                 content_type: content_type.map(str::to_owned),
                 content_length,
@@ -370,7 +376,7 @@ async fn multipart_route_header_mismatch_cleans_the_staged_file() {
     assert_eq!(handles.len(), 1);
     assert!(matches!(
         recording.open(&handles[0]).await,
-        Err(olp_engine::domain::MediaSpoolError::NotFound)
+        Err(olp_engine::domain::ports::MediaSpoolError::NotFound)
     ));
 }
 
@@ -408,7 +414,7 @@ async fn malformed_multipart_is_rejected_before_routing() {
 async fn failed_multipart_validation_removes_staged_files() {
     let spool = crate::bootstrap::media_spool::FileMediaSpool::create().unwrap();
     let artifact = spool
-        .put(olp_engine::domain::MediaUpload {
+        .put(olp_engine::domain::ports::MediaUpload {
             filename: "upload.png".to_owned(),
             content_type: Some("image/png".to_owned()),
             maximum_length: 16,
@@ -423,7 +429,7 @@ async fn failed_multipart_validation_removes_staged_files() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             match spool.open(&artifact.handle).await {
-                Err(olp_engine::domain::MediaSpoolError::NotFound) => break,
+                Err(olp_engine::domain::ports::MediaSpoolError::NotFound) => break,
                 Ok(_) => tokio::task::yield_now().await,
                 Err(error) => panic!("unexpected spool cleanup error: {error}"),
             }

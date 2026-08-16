@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
-use super::{UsageFilters, UsageRangeCoverage};
-use crate::{PgStore, operations::OperationsError};
+use super::{Coverage, Filters};
+use crate::{operations::cursor::Error, store::Store};
 
 #[derive(Debug, FromRow)]
 struct UsageBoundaryRow {
@@ -18,7 +18,7 @@ pub(super) enum UsageCountScope {
 }
 
 impl UsageCountScope {
-    pub(super) fn for_filters(filters: &UsageFilters) -> Self {
+    pub(super) fn for_filters(filters: &Filters) -> Self {
         match (
             filters.provider_id.is_some(),
             filters.upstream_model.is_some(),
@@ -81,11 +81,8 @@ impl UsageCountScope {
     }
 }
 
-impl PgStore {
-    pub(super) async fn usage_range_coverage(
-        &self,
-        filters: &UsageFilters,
-    ) -> Result<UsageRangeCoverage, OperationsError> {
+impl Store {
+    pub(super) async fn usage_range_coverage(&self, filters: &Filters) -> Result<Coverage, Error> {
         let mut boundary_buckets = Vec::with_capacity(2);
         let lower_bucket = floor_usage_hour(filters.observed_after);
         if lower_bucket != filters.observed_after {
@@ -98,7 +95,7 @@ impl PgStore {
         boundary_buckets.sort_unstable();
         boundary_buckets.dedup();
         if boundary_buckets.is_empty() {
-            return Ok(UsageRangeCoverage {
+            return Ok(Coverage {
                 range_complete: true,
                 approximate: false,
                 excluded_partial_aggregate_boundaries: 0,
@@ -120,11 +117,9 @@ impl PgStore {
             "excluded partial aggregate boundary count",
         )?;
         let excluded = u8::try_from(excluded).map_err(|_| {
-            OperationsError::Invalid(
-                "excluded partial aggregate boundary count is invalid".to_owned(),
-            )
+            Error::Invalid("excluded partial aggregate boundary count is invalid".to_owned())
         })?;
-        Ok(UsageRangeCoverage {
+        Ok(Coverage {
             range_complete: excluded == 0,
             approximate: excluded > 0,
             excluded_partial_aggregate_boundaries: excluded,
@@ -134,7 +129,7 @@ impl PgStore {
 
 pub(super) fn push_usage_rows_cte(
     query: &mut QueryBuilder<Postgres>,
-    filters: &UsageFilters,
+    filters: &Filters,
     count_scope: UsageCountScope,
 ) {
     let (raw_count, raw_unpriced, raw_incomplete) = count_scope.raw_columns();
@@ -185,7 +180,7 @@ pub(super) fn push_usage_rows_cte(
 
 fn push_usage_source_filters(
     query: &mut QueryBuilder<Postgres>,
-    filters: &UsageFilters,
+    filters: &Filters,
     observed_column: &str,
     hourly: bool,
 ) {
@@ -217,7 +212,7 @@ fn push_usage_source_filters(
     push_usage_dimension_filters(query, filters);
 }
 
-fn push_usage_dimension_filters(query: &mut QueryBuilder<Postgres>, filters: &UsageFilters) {
+fn push_usage_dimension_filters(query: &mut QueryBuilder<Postgres>, filters: &Filters) {
     if let Some(value) = &filters.route_slug {
         query.push(" AND route_slug = ").push_bind(value);
     }
@@ -249,11 +244,11 @@ pub(crate) fn ceil_usage_hour(value: DateTime<Utc>) -> DateTime<Utc> {
     }
 }
 
-pub(super) fn validate_usage_range(filters: &UsageFilters) -> Result<(), OperationsError> {
+pub(super) fn validate_usage_range(filters: &Filters) -> Result<(), Error> {
     if filters.observed_before <= filters.observed_after
         || filters.observed_before - filters.observed_after > chrono::Duration::days(366)
     {
-        return Err(OperationsError::Invalid(
+        return Err(Error::Invalid(
             "usage range must be positive and no longer than 366 days".to_owned(),
         ));
     }
@@ -262,13 +257,13 @@ pub(super) fn validate_usage_range(filters: &UsageFilters) -> Result<(), Operati
 
 #[cfg(test)]
 mod tests {
-    use olp_engine::domain::OperationKind;
+    use olp_engine::domain::canonical::identity::OperationKind;
     use uuid::Uuid;
 
     use super::*;
 
-    fn filters(after: &str, before: &str) -> UsageFilters {
-        UsageFilters {
+    fn filters(after: &str, before: &str) -> Filters {
+        Filters {
             observed_after: after.parse().unwrap(),
             observed_before: before.parse().unwrap(),
             route_slug: None,
@@ -372,7 +367,7 @@ mod tests {
     #[test]
     fn usage_range_is_positive_and_bounded_to_366_days() {
         let start = "2024-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let mut filters = UsageFilters {
+        let mut filters = Filters {
             observed_after: start,
             observed_before: start + chrono::Duration::nanoseconds(1),
             route_slug: None,
@@ -392,10 +387,7 @@ mod tests {
         ] {
             filters.observed_before = invalid_end;
             assert!(
-                matches!(
-                    validate_usage_range(&filters),
-                    Err(OperationsError::Invalid(_))
-                ),
+                matches!(validate_usage_range(&filters), Err(Error::Invalid(_))),
                 "accepted range ending at {invalid_end}"
             );
         }

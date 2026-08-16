@@ -6,19 +6,19 @@ use super::helpers::{
     insert_session, lock_email, lock_subject, normalize_display_name, normalize_email,
     require_current_enabled_configuration, validate_subject,
 };
-use super::{
+use super::types::{
     CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, OidcAuthenticatedUser,
     OidcError, OidcIdentityRecord, UnlinkOidcIdentity,
 };
 use crate::{
-    PgStore,
     authentication::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         install_recent_authentication, revoke_user_sessions,
     },
+    store::Store,
 };
 
-impl PgStore {
+impl Store {
     pub async fn complete_oidc_login(
         &self,
         input: CompleteOidcLogin<'_>,

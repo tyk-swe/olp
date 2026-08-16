@@ -2,4 +2,4 @@
 //! provisioning lives in `olp_db::test_support`.
 #![allow(dead_code)]
 
-pub mod route_fixtures;
+pub(crate) mod route_fixtures;

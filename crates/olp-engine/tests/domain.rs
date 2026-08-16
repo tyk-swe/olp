@@ -4,7 +4,34 @@ use std::{
 };
 
 use chrono::{Duration, TimeZone, Utc};
-use olp_engine::domain::*;
+use olp_engine::domain::{
+    auth::{
+        ApiKey, ApiKeyAuthorizationError, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus,
+        GatewayCapability, OwnerInvariantError, Permission, Role, authorize_api_key,
+        validate_owner_change,
+    },
+    canonical::{
+        events::{
+            Event, EventSequenceError, EventSequenceValidator, Kind, validate_event_sequence,
+        },
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, ExtensionError, GenerationParameters, GenerationRequest, Message,
+            MessageRole, Operation, SourceExtensions,
+        },
+    },
+    ids::{
+        ApiKeyId, ApiKeyLookupId, CredentialVersionId, DurationMs, ProviderId, RequestId, RouteId,
+        RouteSlug, RuntimeGenerationId, TargetId,
+    },
+    ports::{AttemptFailureClass, ProviderRequest, TransportError, TransportPhase},
+    routing::{
+        provider::{Capability, Provider, ProviderKind},
+        route::{Error as RouteValidationError, Route, Target},
+        selection::{AttemptPlan, RoutingError, select_attempts, weighted_rendezvous_score},
+        snapshot::{Error as SnapshotValidationError, RuntimeGeneration, Snapshot},
+    },
+};
 use proptest::prelude::*;
 use serde_json::json;
 use uuid::Uuid;
@@ -46,7 +73,7 @@ fn provider(
     (provider, target)
 }
 
-fn snapshot(targets: Vec<(Provider, Target)>, max_attempts: u16) -> RuntimeSnapshot {
+fn snapshot(targets: Vec<(Provider, Target)>, max_attempts: u16) -> Snapshot {
     let slug = RouteSlug::parse("default").expect("fixture slug is valid");
     let providers = targets
         .iter()
@@ -62,7 +89,7 @@ fn snapshot(targets: Vec<(Provider, Target)>, max_attempts: u16) -> RuntimeSnaps
         targets: targets.into_iter().map(|(_, target)| target).collect(),
     };
 
-    RuntimeSnapshot {
+    Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::from_uuid(id(600)),
             ordinal: 7,
@@ -74,7 +101,7 @@ fn snapshot(targets: Vec<(Provider, Target)>, max_attempts: u16) -> RuntimeSnaps
     }
 }
 
-fn select(snapshot: &RuntimeSnapshot, affinity: &[u8]) -> Vec<AttemptPlan> {
+fn select(snapshot: &Snapshot, affinity: &[u8]) -> Vec<AttemptPlan> {
     select_attempts(
         snapshot,
         &RouteSlug::parse("default").unwrap(),
@@ -221,7 +248,7 @@ fn persisted_routing_ids_drive_rendezvous_and_legacy_payloads_default_to_row_ids
             .iter()
             .all(|target| !target.as_object().unwrap().contains_key("routing_id"))
     );
-    let legacy_runtime: RuntimeSnapshot = serde_json::from_value(legacy_payload).unwrap();
+    let legacy_runtime: Snapshot = serde_json::from_value(legacy_payload).unwrap();
     assert_eq!(select(&legacy_runtime, affinity), legacy_attempts);
 
     let route = runtime
@@ -397,18 +424,18 @@ fn source_extensions_are_forwardable_only_on_the_same_surface() {
 #[test]
 fn canonical_event_sequences_require_order_and_exactly_one_terminal_done() {
     let valid = vec![
-        CanonicalEvent::new(
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("response-1".into()),
                 provider_model: None,
             },
         ),
-        CanonicalEvent::new(1, CanonicalEventKind::Done),
+        Event::new(1, Kind::Done),
     ];
     assert_eq!(validate_event_sequence(&valid), Ok(()));
 
-    let gap = vec![CanonicalEvent::new(1, CanonicalEventKind::Done)];
+    let gap = vec![Event::new(1, Kind::Done)];
     assert_eq!(
         validate_event_sequence(&gap),
         Err(EventSequenceError::OutOfOrder {
@@ -417,18 +444,15 @@ fn canonical_event_sequences_require_order_and_exactly_one_terminal_done() {
         })
     );
 
-    let after_done = vec![
-        CanonicalEvent::new(0, CanonicalEventKind::Done),
-        CanonicalEvent::new(1, CanonicalEventKind::Done),
-    ];
+    let after_done = vec![Event::new(0, Kind::Done), Event::new(1, Kind::Done)];
     assert_eq!(
         validate_event_sequence(&after_done),
         Err(EventSequenceError::AfterDone { sequence: 1 })
     );
 
-    let missing_done = vec![CanonicalEvent::new(
+    let missing_done = vec![Event::new(
         0,
-        CanonicalEventKind::ResponseStart {
+        Kind::ResponseStart {
             response_id: None,
             provider_model: None,
         },

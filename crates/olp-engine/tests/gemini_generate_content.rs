@@ -1,13 +1,20 @@
-use olp_engine::domain::{
-    CanonicalEventKind, FinishReason, MessageRole, Operation, ResponseFormat, Surface,
-    validate_event_sequence,
+use olp_engine::domain::canonical::{
+    events::{FinishReason, Kind, validate_event_sequence},
+    identity::Surface,
+    requests::{MessageRole, Operation, ResponseFormat},
 };
 use olp_engine::protocols::gemini::{
-    CountTokensError, CountTokensRequest, CountTokensResponse,
-    GeminiGenerateContentClientStreamEncoder, GeminiGenerateContentStreamDecoder,
-    GenerateContentRequest, GenerateContentResponse, StreamError, decode_count_tokens_request,
-    decode_generate_content_request, decode_generate_content_response, encode_count_tokens_result,
-    encode_generate_content_request, validate_count_tokens_request,
+    client_stream::Encoder,
+    count::{decode_count_tokens_request, encode_count_tokens_result},
+    dto::{
+        CountTokensRequest, CountTokensResponse, GenerateContentRequest, GenerateContentResponse,
+    },
+    stream::{Decoder, Error as StreamError},
+    translate::{
+        decode::request as decode_request, encode::request as encode_request,
+        errors::CountTokensError, response::decode as decode_response,
+        validation::validate_count_tokens_request,
+    },
 };
 use serde_json::{Value, json};
 
@@ -51,9 +58,7 @@ fn request_translation_round_trips_structured_tools_results_and_extensions() {
         "safetySettings": [{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"}]
     });
     let dto: GenerateContentRequest = serde_json::from_value(wire).unwrap();
-    let Operation::Generation(canonical) =
-        decode_generate_content_request("team-gemini", dto, true).unwrap()
-    else {
+    let Operation::Generation(canonical) = decode_request("team-gemini", dto, true).unwrap() else {
         panic!("wrong operation");
     };
 
@@ -84,9 +89,9 @@ fn request_translation_round_trips_structured_tools_results_and_extensions() {
 
     let mut wrong_source = canonical.clone();
     wrong_source.extensions.source = Some(Surface::Anthropic);
-    assert!(encode_generate_content_request(&wrong_source).is_err());
+    assert!(encode_request(&wrong_source).is_err());
 
-    let encoded = encode_generate_content_request(&canonical).unwrap();
+    let encoded = encode_request(&canonical).unwrap();
     let encoded = serde_json::to_value(encoded).unwrap();
     assert_eq!(
         encoded["systemInstruction"]["parts"][0]["vendorSystem"],
@@ -121,13 +126,11 @@ fn file_media_round_trips_mime_and_inline_media_is_rejected() {
         }]}]
     }))
     .unwrap();
-    let Operation::Generation(canonical) =
-        decode_generate_content_request("default", file_request, false).unwrap()
+    let Operation::Generation(canonical) = decode_request("default", file_request, false).unwrap()
     else {
         unreachable!();
     };
-    let encoded =
-        serde_json::to_value(encode_generate_content_request(&canonical).unwrap()).unwrap();
+    let encoded = serde_json::to_value(encode_request(&canonical).unwrap()).unwrap();
     assert_eq!(
         encoded["contents"][0]["parts"][0]["fileData"]["mimeType"],
         "image/png"
@@ -139,7 +142,7 @@ fn file_media_round_trips_mime_and_inline_media_is_rejected() {
         }]}]
     }))
     .unwrap();
-    assert!(decode_generate_content_request("default", inline_request, false).is_err());
+    assert!(decode_request("default", inline_request, false).is_err());
 }
 
 #[test]
@@ -165,31 +168,31 @@ fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
             "thoughtsTokenCount": 2
         }
     })).unwrap();
-    let events = decode_generate_content_response(response).unwrap();
+    let events = decode_response(response).unwrap();
     validate_event_sequence(&events).unwrap();
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "Calling weather"
+        Kind::TextDelta { text, .. } if text == "Calling weather"
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "weather" && arguments_delta.contains("Paris")
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::SourceExtension { extensions }
+        Kind::SourceExtension { extensions }
             if extensions.values.contains_key("/candidates/0/content/parts/0")
                 && extensions.values.contains_key("/candidates/0/safetyRatings")
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Usage { usage } if usage.input_tokens == 10
+        Kind::Usage { usage } if usage.input_tokens == 10
             && usage.output_tokens == 5 && usage.reasoning_tokens == Some(2)
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Finish {
+        Kind::Finish {
             reason: FinishReason::Stop,
             ..
         }
@@ -221,7 +224,7 @@ fn fragmented_stream_maps_unicode_tool_usage_finish_and_eof_done() {
         "usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 4, "totalTokenCount": 12}
     });
     let wire = format!("{}{}", sse(first), sse(second));
-    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut events = Vec::new();
     for byte in wire.as_bytes() {
         events.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
@@ -233,29 +236,26 @@ fn fragmented_stream_maps_unicode_tool_usage_finish_and_eof_done() {
     let text = events
         .iter()
         .filter_map(|event| match &event.kind {
-            CanonicalEventKind::TextDelta { text, .. } => Some(text.as_str()),
+            Kind::TextDelta { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect::<String>();
     assert_eq!(text, "héllo 🌍");
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "weather" && arguments_delta.contains("Paris")
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Usage { usage } if usage.total_tokens == 12
+        Kind::Usage { usage } if usage.total_tokens == 12
     )));
-    assert!(matches!(
-        events.last().unwrap().kind,
-        CanonicalEventKind::Done
-    ));
+    assert!(matches!(events.last().unwrap().kind, Kind::Done));
 }
 
 #[test]
 fn stream_error_is_terminal_and_missing_finish_reason_is_truncation() {
-    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let events = decoder
         .push(
             sse(json!({
@@ -267,11 +267,11 @@ fn stream_error_is_terminal_and_missing_finish_reason_is_truncation() {
     assert!(decoder.is_done());
     assert!(matches!(
         &events[0].kind,
-        CanonicalEventKind::Error { error } if error.retryable
+        Kind::Error { error } if error.retryable
     ));
-    assert!(matches!(events[1].kind, CanonicalEventKind::Done));
+    assert!(matches!(events[1].kind, Kind::Done));
 
-    let mut truncated = GeminiGenerateContentStreamDecoder::new();
+    let mut truncated = Decoder::new();
     truncated.push(sse(json!({
         "candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": "partial"}]}}]
     })).as_bytes()).unwrap();
@@ -327,19 +327,20 @@ fn count_tokens_preserves_nested_request_and_encodes_native_result() {
         panic!("wrong operation")
     };
     assert_eq!(canonical.route.as_str(), "team-gemini");
-    let preserved =
-        &canonical.extensions.values[olp_engine::protocols::gemini::GEMINI_COUNT_REQUEST_EXTENSION];
+    let preserved = &canonical.extensions.values
+        [olp_engine::protocols::gemini::count::GEMINI_COUNT_REQUEST_EXTENSION];
     assert_eq!(preserved["vendorCountOption"], true);
     assert!(preserved["generateContentRequest"]["safetySettings"].is_array());
 
-    let response = encode_count_tokens_result(&olp_engine::domain::TokenCountResult {
-        input_tokens: 21,
-        extensions: olp_engine::domain::SourceExtensions::new(
-            Surface::Gemini,
-            [("/cachedContentTokenCount".into(), Value::from(3))].into(),
-        ),
-    })
-    .unwrap();
+    let response =
+        encode_count_tokens_result(&olp_engine::domain::canonical::results::TokenCountResult {
+            input_tokens: 21,
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                Surface::Gemini,
+                [("/cachedContentTokenCount".into(), Value::from(3))].into(),
+            ),
+        })
+        .unwrap();
     assert_eq!(response.total_tokens, 21);
     assert_eq!(response.cached_content_token_count, Some(3));
 }
@@ -366,30 +367,30 @@ fn count_tokens_plain_user_text_is_cross_protocol_representable() {
 #[test]
 fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
     let canonical = vec![
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("gem-response".into()),
                 provider_model: Some("private".into()),
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             2,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: "hello".into(),
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             3,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 0,
                 tool_index: 0,
                 id: Some("call-1".into()),
@@ -397,9 +398,9 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
                 arguments_delta: "{\"city\":".into(),
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             4,
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index: 0,
                 tool_index: 0,
                 id: None,
@@ -407,16 +408,16 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
                 arguments_delta: "\"Paris\"}".into(),
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(
+        olp_engine::domain::canonical::events::Event::new(
             5,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::ToolCalls,
             },
         ),
-        olp_engine::domain::CanonicalEvent::new(6, CanonicalEventKind::Done),
+        olp_engine::domain::canonical::events::Event::new(6, Kind::Done),
     ];
-    let mut encoder = GeminiGenerateContentClientStreamEncoder::new("public-route", "fallback");
+    let mut encoder = Encoder::new("public-route", "fallback");
     let mut wire = String::new();
     for event in canonical {
         for frame in encoder.push(event).unwrap() {
@@ -424,7 +425,7 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
         }
     }
     assert!(wire.contains("\"modelVersion\":\"public-route\""));
-    let mut decoder = GeminiGenerateContentStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut decoded = Vec::new();
     for byte in wire.as_bytes() {
         decoded.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
@@ -432,7 +433,7 @@ fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
     decoded.extend(decoder.finish().unwrap());
     assert!(decoded.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "lookup" && arguments_delta.contains("Paris")
     )));
 }
@@ -452,15 +453,12 @@ fn native_gemini_stream_losslessly_preserves_safety_and_grounding_metadata() {
         "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1, "totalTokenCount": 3},
         "promptFeedback": {"safetyRatings": []}
     }));
-    let mut decoder = GeminiGenerateContentStreamDecoder::with_max_event_bytes_and_raw_passthrough(
-        1024 * 1024,
-        true,
-    );
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
     let mut events = decoder.push(wire.as_bytes()).unwrap();
     events.extend(decoder.finish().unwrap());
     validate_event_sequence(&events).unwrap();
 
-    let mut encoder = GeminiGenerateContentClientStreamEncoder::new("public-route", "fallback");
+    let mut encoder = Encoder::new("public-route", "fallback");
     let frames = events
         .into_iter()
         .flat_map(|event| encoder.push(event).unwrap())

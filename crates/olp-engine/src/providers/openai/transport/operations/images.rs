@@ -1,20 +1,24 @@
 use std::collections::VecDeque;
 
 use crate::domain::{
-    CanonicalResult, Operation, ProviderOutput, ProviderRequest, TransportError, TransportMode,
+    canonical::{identity::TransportMode, requests::Operation, results::CanonicalResult},
+    ports::{ProviderOutput, ProviderRequest, TransportError},
 };
-use crate::protocols::openai::{
+use crate::protocols::openai::images::{
     OpenAiImageResponse, encode_image_edit, encode_image_generation, encode_image_variation,
 };
 use reqwest::multipart;
 
-use super::{
-    super::{OpenAiConnector, errors::*, media::*, streams::read_deadline_body},
-    require_content_type,
+use super::super::{
+    Connector,
+    errors::*,
+    media::*,
+    streams::{read_deadline_body, require_content_type},
 };
+use crate::providers::transport_common::protocol_body_error;
 
 pub(super) async fn execute(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only image requests into this module.
@@ -22,7 +26,7 @@ pub(super) async fn execute(
         unreachable!("checked by caller")
     };
     let (path, body) = match operation {
-        crate::domain::ImageOperation::Generation(operation) => {
+        crate::domain::canonical::requests::ImageOperation::Generation(operation) => {
             let wire = encode_image_generation(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("image generation", error))?;
             (
@@ -30,7 +34,8 @@ pub(super) async fn execute(
                 serialize_wire("image generation", &wire)?,
             )
         }
-        crate::domain::ImageOperation::Edit(_) | crate::domain::ImageOperation::Variation(_) => {
+        crate::domain::canonical::requests::ImageOperation::Edit(_)
+        | crate::domain::canonical::requests::ImageOperation::Variation(_) => {
             return execute_multipart(connector, request).await;
         }
     };
@@ -54,7 +59,7 @@ pub(super) async fn execute(
 }
 
 async fn execute_multipart(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     let spool = request
@@ -68,14 +73,14 @@ async fn execute_multipart(
     let mut form = multipart::Form::new();
     let path;
     match operation {
-        crate::domain::ImageOperation::Edit(operation) => {
+        crate::domain::canonical::requests::ImageOperation::Edit(operation) => {
             let mut parts = VecDeque::new();
             for handle in operation.images.iter().chain(operation.mask.iter()) {
                 parts.push_back(bounded_part(spool.as_ref(), handle, 50 * 1024 * 1024).await?);
             }
             let wire = encode_image_edit(operation, &request.attempt.upstream_model, |_| {
                 parts.pop_front().ok_or_else(|| {
-                    crate::protocols::openai::ImageCodecError::InvalidMediaPart(
+                    crate::protocols::openai::images::ImageCodecError::InvalidMediaPart(
                         "media spool metadata was unavailable".into(),
                     )
                 })
@@ -102,7 +107,7 @@ async fn execute_multipart(
             form = add_image_edit_fields(form, &wire);
             path = "images/edits";
         }
-        crate::domain::ImageOperation::Variation(operation) => {
+        crate::domain::canonical::requests::ImageOperation::Variation(operation) => {
             let metadata = bounded_part(spool.as_ref(), &operation.image, 50 * 1024 * 1024).await?;
             let wire = encode_image_variation(operation, &request.attempt.upstream_model, |_| {
                 Ok(metadata.clone())
@@ -125,7 +130,7 @@ async fn execute_multipart(
             path = "images/variations";
         }
         // The outer image dispatcher sends generation through the JSON path.
-        crate::domain::ImageOperation::Generation(_) => {
+        crate::domain::canonical::requests::ImageOperation::Generation(_) => {
             unreachable!("generation uses JSON transport")
         }
     }

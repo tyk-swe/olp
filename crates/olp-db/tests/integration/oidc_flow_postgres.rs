@@ -1,12 +1,13 @@
 use chrono::{Duration, Utc};
 use olp_db::{
     authentication::RecentAuthPurpose, authentication::SessionSecurityContext,
-    identity::InstallationSetupInput, oidc::CompleteOidcLogin, oidc::NewOidcFlow, oidc::OidcError,
-    oidc::OidcFlowPurpose, oidc::UpsertOidcConfiguration, security::MasterKey,
-    security::RecentAuthMaterial, security::SessionMaterial, security::hash_password,
-    security::oidc_client_secret_aad, security::oidc_flow_payload_aad,
+    identity::InstallationSetupInput, oidc::types::CompleteOidcLogin, oidc::types::NewOidcFlow,
+    oidc::types::OidcError, oidc::types::OidcFlowPurpose, oidc::types::UpsertOidcConfiguration,
+    security::aad::oidc_client_secret, security::aad::oidc_flow_payload,
+    security::envelope::MasterKey, security::password::hash,
+    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
 };
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -22,7 +23,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
                 installation_name: "OIDC flow integration".to_owned(),
                 email: "owner@example.test".to_owned(),
                 display_name: "Owner".to_owned(),
-                password_hash: hash_password("correct horse battery staple").unwrap(),
+                password_hash: hash("correct horse battery staple").unwrap(),
             },
             &owner_session,
             Duration::hours(1),
@@ -316,9 +317,7 @@ fn configuration(
         jwks_uri: "https://idp.example.test/jwks".to_owned(),
         token_endpoint_auth_method: "client_secret_basic".to_owned(),
         client_id: "olp".to_owned(),
-        encrypted_client_secret: key
-            .seal(b"client-secret", &oidc_client_secret_aad(id))
-            .unwrap(),
+        encrypted_client_secret: key.seal(b"client-secret", &oidc_client_secret(id)).unwrap(),
         scopes: vec!["openid".to_owned(), "email".to_owned()],
         email_claim: "email".to_owned(),
         groups_claim: "groups".to_owned(),
@@ -354,9 +353,7 @@ fn link_flow(
         recent_auth_token_digest: Some(recent_auth_token_digest),
         state_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         browser_binding_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
-        encrypted_payload: key
-            .seal(b"flow-secret", &oidc_flow_payload_aad(id))
-            .unwrap(),
+        encrypted_payload: key.seal(b"flow-secret", &oidc_flow_payload(id)).unwrap(),
         expires_at: Utc::now() + Duration::minutes(5),
     }
 }
@@ -376,9 +373,7 @@ fn login_flow(key: &MasterKey, configuration_id: Uuid, configuration_etag: Uuid)
         recent_auth_token_digest: None,
         state_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
         browser_binding_digest: Sha256::digest(Uuid::now_v7().as_bytes()).into(),
-        encrypted_payload: key
-            .seal(b"flow-secret", &oidc_flow_payload_aad(id))
-            .unwrap(),
+        encrypted_payload: key.seal(b"flow-secret", &oidc_flow_payload(id)).unwrap(),
         expires_at: Utc::now() + Duration::minutes(5),
     }
 }

@@ -2,8 +2,8 @@ use crate::support::route_fixtures::{
     DraftFixture, LIFECYCLE_OPERATIONS, ProviderFixture, insert_provider, insert_provider_revision,
 };
 use olp_db::{
-    configuration::ConfigurationError, identity::InstallationSetupInput,
-    runtime::RuntimeCompileError, security::SessionMaterial,
+    configuration::Error, identity::InstallationSetupInput, runtime::compiler::RuntimeCompileError,
+    security::session_material::SessionMaterial,
 };
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -340,9 +340,9 @@ async fn insert_media_job(
     job_id
 }
 
-fn assert_invalid_route_contains(error: &ConfigurationError, expected: &str) {
+fn assert_invalid_route_contains(error: &Error, expected: &str) {
     assert!(matches!(
         error,
-        ConfigurationError::InvalidRoute(message) if message.contains(expected)
+        Error::InvalidRoute(message) if message.contains(expected)
     ));
 }

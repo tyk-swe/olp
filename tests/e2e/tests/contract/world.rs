@@ -23,36 +23,36 @@ use tokio::sync::Mutex;
 use crate::harness::{GatewayProcess, Server, WorkerBoundary, WorkerProcess};
 use crate::mock_upstream::{self, MockUpstream};
 
-pub const OPENAI_ROUTE: &str = "e2e-openai";
-pub const CROSS_ROUTE: &str = "e2e-cross";
-pub const OWNER_EMAIL: &str = "owner@e2e.test";
-pub const OWNER_PASSWORD: &str = "correct horse battery staple";
+pub(crate) const OPENAI_ROUTE: &str = "e2e-openai";
+pub(crate) const CROSS_ROUTE: &str = "e2e-cross";
+pub(crate) const OWNER_EMAIL: &str = "owner@e2e.test";
+pub(crate) const OWNER_PASSWORD: &str = "correct horse battery staple";
 
-pub struct MgmtResponse {
-    pub status: u16,
-    pub headers: HeaderMap,
-    pub body: Value,
+pub(crate) struct MgmtResponse {
+    pub(crate) status: u16,
+    pub(crate) headers: HeaderMap,
+    pub(crate) body: Value,
 }
 
 impl MgmtResponse {
-    pub fn header(&self, name: &str) -> Option<String> {
+    pub(crate) fn header(&self, name: &str) -> Option<String> {
         self.headers
             .get(name)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned)
     }
 
-    pub fn etag(&self) -> Option<String> {
+    pub(crate) fn etag(&self) -> Option<String> {
         self.header("etag")
     }
 
-    pub fn require_etag(&self, what: &str) -> Result<String, String> {
+    pub(crate) fn require_etag(&self, what: &str) -> Result<String, String> {
         self.etag()
             .ok_or_else(|| format!("{what} response carries no ETag header"))
     }
 }
 
-pub struct Management {
+pub(crate) struct Management {
     http: reqwest::Client,
     origin: String,
     cookie: String,
@@ -61,7 +61,7 @@ pub struct Management {
 }
 
 impl Management {
-    pub fn new(origin: &str) -> Self {
+    pub(crate) fn new(origin: &str) -> Self {
         Self {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -74,7 +74,7 @@ impl Management {
         }
     }
 
-    pub fn next_idempotency_key(&self) -> String {
+    pub(crate) fn next_idempotency_key(&self) -> String {
         let next = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
         format!("e2e-contract-{next:04}")
     }
@@ -83,7 +83,7 @@ impl Management {
     ///
     /// `POST /api/v1/setup` requires an `Origin` header matching
     /// `OLP_PUBLIC_ORIGIN`; the setup token is single-use.
-    pub async fn setup(&mut self, setup_token: &str) -> Result<MgmtResponse, String> {
+    pub(crate) async fn setup(&mut self, setup_token: &str) -> Result<MgmtResponse, String> {
         let response = self
             .http
             .post(format!("{}/api/v1/setup", self.origin))
@@ -121,7 +121,7 @@ impl Management {
         Ok(parsed)
     }
 
-    pub async fn send(
+    pub(crate) async fn send(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -169,7 +169,7 @@ impl Management {
     /// idempotency key because almost every call needs them. The documented
     /// failure modes are precisely the cases where one of those is absent or
     /// wrong, so they need a builder that adds nothing on the caller's behalf.
-    pub async fn raw(
+    pub(crate) async fn raw(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -192,30 +192,30 @@ impl Management {
         read_response(response).await
     }
 
-    pub fn cookie(&self) -> &str {
+    pub(crate) fn cookie(&self) -> &str {
         &self.cookie
     }
 
-    pub fn csrf(&self) -> &str {
+    pub(crate) fn csrf(&self) -> &str {
         &self.csrf
     }
 
-    pub fn origin(&self) -> &str {
+    pub(crate) fn origin(&self) -> &str {
         &self.origin
     }
 
-    pub async fn get(&self, path: &str) -> Result<MgmtResponse, String> {
+    pub(crate) async fn get(&self, path: &str) -> Result<MgmtResponse, String> {
         self.send(reqwest::Method::GET, path, None, None, None)
             .await
     }
 
-    pub async fn post(&self, path: &str, body: Value) -> Result<MgmtResponse, String> {
+    pub(crate) async fn post(&self, path: &str, body: Value) -> Result<MgmtResponse, String> {
         let key = self.next_idempotency_key();
         self.send(reqwest::Method::POST, path, Some(body), Some(&key), None)
             .await
     }
 
-    pub async fn expect(
+    pub(crate) async fn expect(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -253,46 +253,46 @@ async fn read_response(response: reqwest::Response) -> Result<MgmtResponse, Stri
     })
 }
 
-pub struct World {
+pub(crate) struct World {
     /// Held so teardown can consume it; tests read the copied origins below.
     server: Mutex<Option<Server>>,
-    pub public_origin: String,
-    pub observability_base: String,
-    pub setup_token: String,
-    pub database_url: String,
-    pub mock: MockUpstream,
-    pub management: Management,
-    pub http: reqwest::Client,
-    pub api_key_id: String,
-    pub api_key: String,
-    pub compat_provider: String,
-    pub azure_provider: String,
+    pub(crate) public_origin: String,
+    pub(crate) observability_base: String,
+    pub(crate) setup_token: String,
+    pub(crate) database_url: String,
+    pub(crate) mock: MockUpstream,
+    pub(crate) management: Management,
+    pub(crate) http: reqwest::Client,
+    pub(crate) api_key_id: String,
+    pub(crate) api_key: String,
+    pub(crate) compat_provider: String,
+    pub(crate) azure_provider: String,
 }
 
 /// A gateway response kept whole: assertions need the status line, the headers
 /// and the raw body, and a body that failed to parse must stay readable in the
 /// failure message rather than becoming `null`.
-pub struct GatewayResponse {
-    pub status: u16,
-    pub headers: HeaderMap,
-    pub text: String,
+pub(crate) struct GatewayResponse {
+    pub(crate) status: u16,
+    pub(crate) headers: HeaderMap,
+    pub(crate) text: String,
 }
 
 impl GatewayResponse {
-    pub fn header(&self, name: &str) -> Option<String> {
+    pub(crate) fn header(&self, name: &str) -> Option<String> {
         self.headers
             .get(name)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned)
     }
 
-    pub fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         serde_json::from_str(&self.text).unwrap_or(Value::Null)
     }
 }
 
 impl World {
-    pub async fn valkey_url(&self) -> Result<String, String> {
+    pub(crate) async fn valkey_url(&self) -> Result<String, String> {
         self.server
             .lock()
             .await
@@ -301,7 +301,7 @@ impl World {
             .ok_or_else(|| "server has already shut down".to_owned())
     }
 
-    pub async fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+    pub(crate) async fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
         self.server
             .lock()
             .await
@@ -310,7 +310,7 @@ impl World {
             .release_worker(worker)
     }
 
-    pub async fn hard_kill_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+    pub(crate) async fn hard_kill_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
         let mut guard = self.server.lock().await;
         let server = guard
             .as_mut()
@@ -318,12 +318,12 @@ impl World {
         server.hard_kill_worker(worker).await
     }
 
-    pub fn origin(&self) -> &str {
+    pub(crate) fn origin(&self) -> &str {
         &self.public_origin
     }
 
     /// Posts to a gateway surface with a bearer credential.
-    pub async fn gateway_post(
+    pub(crate) async fn gateway_post(
         &self,
         path: &str,
         body: Value,
@@ -344,7 +344,7 @@ impl World {
     /// Posts to a gateway surface with whatever credential headers the caller
     /// names, so a test can pin the header each vendor dialect documents
     /// (`Authorization`, `x-api-key`, `x-goog-api-key`) or send none at all.
-    pub async fn gateway_send(
+    pub(crate) async fn gateway_send(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -381,7 +381,11 @@ impl World {
     ///
     /// `overrides` is merged into the create body, so a test can pin the limit
     /// fields `CreateApiKeyRequest` documents without restating the rest.
-    pub async fn issue_key(&self, name: &str, overrides: Value) -> Result<IssuedKey, String> {
+    pub(crate) async fn issue_key(
+        &self,
+        name: &str,
+        overrides: Value,
+    ) -> Result<IssuedKey, String> {
         let mut body = json!({
             "name": name,
             "scopes": ["inference", "models_read"],
@@ -434,7 +438,7 @@ impl World {
     /// a response is a race. This waits for the expected count and then *keeps
     /// waiting briefly*, so a duplicate row still fails the caller's exact
     /// assertion instead of being read before it lands.
-    pub async fn await_request_rows(
+    pub(crate) async fn await_request_rows(
         &self,
         api_key_id: &str,
         filter: &str,
@@ -476,7 +480,7 @@ impl World {
 
     /// Stops the server and releases the per-run database. Returns the tail of
     /// its stderr. Idempotent, so a second call is harmless.
-    pub async fn shutdown(&self) -> String {
+    pub(crate) async fn shutdown(&self) -> String {
         let server = self.server.lock().await.take();
         match server {
             Some(server) => server.shutdown().await,
@@ -487,21 +491,21 @@ impl World {
 
 /// Brings up a server, two providers, two routes and an API key, and waits
 /// until the gateway serves the key.
-pub async fn bootstrap() -> Result<World, String> {
+pub(crate) async fn bootstrap() -> Result<World, String> {
     bootstrap_server(Server::launch().await?).await
 }
 
-pub async fn bootstrap_sharing_valkey(valkey_url: &str) -> Result<World, String> {
+pub(crate) async fn bootstrap_sharing_valkey(valkey_url: &str) -> Result<World, String> {
     bootstrap_server(Server::launch_sharing_valkey(valkey_url).await?).await
 }
 
-pub async fn bootstrap_ha() -> Result<(World, GatewayProcess), String> {
+pub(crate) async fn bootstrap_ha() -> Result<(World, GatewayProcess), String> {
     let mut server = Server::launch().await?;
     let gateway = server.launch_gateway().await?;
     Ok((bootstrap_server(server).await?, gateway))
 }
 
-pub async fn bootstrap_worker_ha() -> Result<(World, [WorkerProcess; 3]), String> {
+pub(crate) async fn bootstrap_worker_ha() -> Result<(World, [WorkerProcess; 3]), String> {
     let mut server = Server::launch_control().await?;
     let gateway = server.launch_gateway().await?;
     let first = server
@@ -634,12 +638,12 @@ async fn bootstrap_server_at_gateway(
     })
 }
 
-pub struct IssuedKey {
-    pub id: String,
-    pub secret: String,
-    pub etag: String,
-    pub generation: i64,
-    pub published_at: Instant,
+pub(crate) struct IssuedKey {
+    pub(crate) id: String,
+    pub(crate) secret: String,
+    pub(crate) etag: String,
+    pub(crate) generation: i64,
+    pub(crate) published_at: Instant,
 }
 
 /// Blocks until the gateway accepts `secret`.
@@ -771,7 +775,7 @@ async fn configure_provider(
 /// `/models/{model_id}` paths. Discovery assigns each model a row of its own,
 /// and the capability-review and certify paths address that row, not the name
 /// the provider reports.
-pub async fn resolve_model_row(
+pub(crate) async fn resolve_model_row(
     management: &Management,
     provider_id: &str,
     model_name: &str,

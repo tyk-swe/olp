@@ -4,15 +4,17 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_db::operations::RuntimeGenerationRecord;
+use olp_db::operations::runtime::GenerationRecord;
+use olp_engine::domain::auth::Permission;
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::helpers::{PageQuery, map_operations, page_limit};
 use crate::{
-    ManagementState, Problem,
-    management::{Permission, require_permission, require_read_session},
+    bootstrap::mode_dependencies::ManagementState,
+    management::{permissions::require_permission, sessions::require_read_session},
+    public_http::problem::Problem,
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -27,8 +29,8 @@ pub(super) struct RuntimeGenerationItem {
     created_at: DateTime<Utc>,
 }
 
-impl From<RuntimeGenerationRecord> for RuntimeGenerationItem {
-    fn from(record: RuntimeGenerationRecord) -> Self {
+impl From<GenerationRecord> for RuntimeGenerationItem {
+    fn from(record: GenerationRecord) -> Self {
         Self {
             id: record.id,
             sequence: record.sequence,

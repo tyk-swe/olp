@@ -1,16 +1,17 @@
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
-use super::reconciliation::{RequestMetadataGatewayEpochRecord, RequestMetadataGatewayEpochState};
+use super::reconciliation::{GatewayEpochRecord, GatewayEpochState};
 use crate::{
-    PersistenceError, PgStore,
-    operations::{OperationsError, OperationsPage, TimestampCursor},
+    error::Error as PersistenceError,
+    operations::cursor::{Error, Page, Timestamp},
     split_page,
+    store::Store,
     worker_health::{WorkerTask, WorkerTaskCheckpointOutcome, checkpoint_worker_task_on},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RequestMetadataConsumerHealth {
+pub struct ConsumerHealth {
     pub pending_events: u64,
     pub lag_events: u64,
     pub oldest_pending_at: Option<DateTime<Utc>>,
@@ -22,14 +23,14 @@ pub struct RequestMetadataConsumerHealth {
 pub const REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS: i64 = 20;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RequestMetadataConsumerState {
+pub enum ConsumerState {
     Unknown,
     Healthy,
     Backlogged,
     Stale,
 }
 
-impl RequestMetadataConsumerState {
+impl ConsumerState {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -42,8 +43,8 @@ impl RequestMetadataConsumerState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RequestMetadataConsumerStatus {
-    pub state: RequestMetadataConsumerState,
+pub struct ConsumerStatus {
+    pub state: ConsumerState,
     pub pending_events: u64,
     pub lag_events: u64,
     pub oldest_pending_at: Option<DateTime<Utc>>,
@@ -51,12 +52,12 @@ pub struct RequestMetadataConsumerStatus {
     pub heartbeat_age_seconds: Option<u64>,
 }
 
-impl RequestMetadataConsumerStatus {
+impl ConsumerStatus {
     #[must_use]
-    pub fn from_health(health: Option<RequestMetadataConsumerHealth>, now: DateTime<Utc>) -> Self {
+    pub fn from_health(health: Option<ConsumerHealth>, now: DateTime<Utc>) -> Self {
         let Some(health) = health else {
             return Self {
-                state: RequestMetadataConsumerState::Unknown,
+                state: ConsumerState::Unknown,
                 pending_events: 0,
                 lag_events: 0,
                 oldest_pending_at: None,
@@ -70,11 +71,11 @@ impl RequestMetadataConsumerStatus {
             .max(0);
         let age_seconds = u64::try_from(age).map_or(u64::MAX, |value| value);
         let state = if age > REQUEST_METADATA_CONSUMER_STALE_AFTER_SECONDS {
-            RequestMetadataConsumerState::Stale
+            ConsumerState::Stale
         } else if health.pending_events > 0 || health.lag_events > 0 {
-            RequestMetadataConsumerState::Backlogged
+            ConsumerState::Backlogged
         } else {
-            RequestMetadataConsumerState::Healthy
+            ConsumerState::Healthy
         };
         Self {
             state,
@@ -88,11 +89,11 @@ impl RequestMetadataConsumerStatus {
 
     #[must_use]
     pub const fn complete(self) -> bool {
-        matches!(self.state, RequestMetadataConsumerState::Healthy)
+        matches!(self.state, ConsumerState::Healthy)
     }
 }
 
-impl PgStore {
+impl Store {
     /// Checkpoints the Valkey consumer-group backlog so health and usage
     /// completeness reflect worker-side stalls, not only gateway-local queue
     /// delivery. This contains counts and timestamps only.
@@ -101,7 +102,7 @@ impl PgStore {
         pending_events: u64,
         lag_events: u64,
         oldest_pending_at: Option<DateTime<Utc>>,
-    ) -> Result<RequestMetadataConsumerHealth, PersistenceError> {
+    ) -> Result<ConsumerHealth, PersistenceError> {
         self.report_request_metadata_consumer_health_sampled_at_inner(
             pending_events,
             lag_events,
@@ -114,14 +115,14 @@ impl PgStore {
     #[cfg(feature = "test-util")]
     /// Records a request-metadata consumer health sample captured at a caller
     /// supplied time. Production callers use
-    /// [`PgStore::report_request_metadata_consumer_health`].
+    /// [`Store::report_request_metadata_consumer_health`].
     pub async fn report_request_metadata_consumer_health_sampled_at(
         &self,
         pending_events: u64,
         lag_events: u64,
         oldest_pending_at: Option<DateTime<Utc>>,
         checked_at: DateTime<Utc>,
-    ) -> Result<RequestMetadataConsumerHealth, PersistenceError> {
+    ) -> Result<ConsumerHealth, PersistenceError> {
         self.report_request_metadata_consumer_health_sampled_at_inner(
             pending_events,
             lag_events,
@@ -137,7 +138,7 @@ impl PgStore {
         lag_events: u64,
         oldest_pending_at: Option<DateTime<Utc>>,
         checked_at: DateTime<Utc>,
-    ) -> Result<RequestMetadataConsumerHealth, PersistenceError> {
+    ) -> Result<ConsumerHealth, PersistenceError> {
         if (pending_events == 0) != oldest_pending_at.is_none() {
             return Err(PersistenceError::InvalidRequestMetadataGap);
         }
@@ -174,7 +175,7 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?;
         let health = if let Some(row) = row {
-            RequestMetadataConsumerHealth {
+            ConsumerHealth {
                 pending_events: u64::try_from(row.pending_events)
                     .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
                 lag_events: u64::try_from(row.lag_events)
@@ -189,7 +190,7 @@ impl PgStore {
             )
             .fetch_one(&mut *transaction)
             .await?;
-            RequestMetadataConsumerHealth {
+            ConsumerHealth {
                 pending_events: u64::try_from(row.pending_events)
                     .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
                 lag_events: u64::try_from(row.lag_events)
@@ -211,7 +212,7 @@ impl PgStore {
 
     pub async fn request_metadata_consumer_health(
         &self,
-    ) -> Result<Option<RequestMetadataConsumerHealth>, PersistenceError> {
+    ) -> Result<Option<ConsumerHealth>, PersistenceError> {
         let row = sqlx::query!(
             "SELECT pending_events, lag_events, oldest_pending_at, checked_at \
              FROM request_metadata_consumer_health WHERE singleton",
@@ -219,7 +220,7 @@ impl PgStore {
         .fetch_optional(self.pool())
         .await?;
         row.map(|row| {
-            Ok(RequestMetadataConsumerHealth {
+            Ok(ConsumerHealth {
                 pending_events: u64::try_from(row.pending_events)
                     .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
                 lag_events: u64::try_from(row.lag_events)
@@ -234,8 +235,8 @@ impl PgStore {
     pub async fn request_metadata_consumer_status(
         &self,
         now: DateTime<Utc>,
-    ) -> Result<RequestMetadataConsumerStatus, PersistenceError> {
-        Ok(RequestMetadataConsumerStatus::from_health(
+    ) -> Result<ConsumerStatus, PersistenceError> {
+        Ok(ConsumerStatus::from_health(
             self.request_metadata_consumer_health().await?,
             now,
         ))
@@ -245,10 +246,10 @@ impl PgStore {
     /// cursor is ordered by the last durable checkpoint and UUIDv7 epoch ID.
     pub async fn request_metadata_gateway_epochs(
         &self,
-        state: Option<RequestMetadataGatewayEpochState>,
-        cursor: Option<&TimestampCursor>,
+        state: Option<GatewayEpochState>,
+        cursor: Option<&Timestamp>,
         limit: u16,
-    ) -> Result<OperationsPage<RequestMetadataGatewayEpochRecord>, OperationsError> {
+    ) -> Result<Page<GatewayEpochRecord>, Error> {
         let page_size = limit.clamp(1, 200);
         let mut query = request_metadata_gateway_epochs_query(state, cursor, page_size);
         let rows = query
@@ -260,19 +261,19 @@ impl PgStore {
             .map(request_metadata_gateway_epoch_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
-            TimestampCursor {
+            Timestamp {
                 at: item.updated_at,
                 id: item.process_epoch,
             }
             .encode()
         });
-        Ok(OperationsPage { items, next_cursor })
+        Ok(Page { items, next_cursor })
     }
 }
 
 fn request_metadata_gateway_epochs_query(
-    state: Option<RequestMetadataGatewayEpochState>,
-    cursor: Option<&TimestampCursor>,
+    state: Option<GatewayEpochState>,
+    cursor: Option<&Timestamp>,
     page_size: u16,
 ) -> QueryBuilder<Postgres> {
     let mut query = QueryBuilder::<Postgres>::new(
@@ -285,16 +286,16 @@ fn request_metadata_gateway_epochs_query(
              FROM request_metadata_gateway_epochs WHERE true",
     );
     match state {
-        Some(RequestMetadataGatewayEpochState::Open) => {
+        Some(GatewayEpochState::Open) => {
             query.push(" AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL");
         }
-        Some(RequestMetadataGatewayEpochState::GracefullyClosed) => {
+        Some(GatewayEpochState::GracefullyClosed) => {
             query.push(" AND gracefully_closed_at IS NOT NULL");
         }
-        Some(RequestMetadataGatewayEpochState::Unresolved) => {
+        Some(GatewayEpochState::Unresolved) => {
             query.push(" AND stale_detected_at IS NOT NULL AND acknowledged_at IS NULL");
         }
-        Some(RequestMetadataGatewayEpochState::Acknowledged) => {
+        Some(GatewayEpochState::Acknowledged) => {
             query.push(" AND stale_detected_at IS NOT NULL AND acknowledged_at IS NOT NULL");
         }
         None => {}
@@ -332,24 +333,24 @@ struct RequestMetadataGatewayEpochRow {
 
 fn request_metadata_gateway_epoch_from_row(
     row: RequestMetadataGatewayEpochRow,
-) -> Result<RequestMetadataGatewayEpochRecord, OperationsError> {
+) -> Result<GatewayEpochRecord, Error> {
     let gracefully_closed_at: Option<DateTime<Utc>> = row.gracefully_closed_at;
     let stale_detected_at: Option<DateTime<Utc>> = row.stale_detected_at;
     let acknowledged_at: Option<DateTime<Utc>> = row.acknowledged_at;
     let state = if gracefully_closed_at.is_some() {
-        RequestMetadataGatewayEpochState::GracefullyClosed
+        GatewayEpochState::GracefullyClosed
     } else if stale_detected_at.is_some() && acknowledged_at.is_some() {
-        RequestMetadataGatewayEpochState::Acknowledged
+        GatewayEpochState::Acknowledged
     } else if stale_detected_at.is_some() {
-        RequestMetadataGatewayEpochState::Unresolved
+        GatewayEpochState::Unresolved
     } else {
-        RequestMetadataGatewayEpochState::Open
+        GatewayEpochState::Open
     };
     let checked_count = |value| {
         u64::try_from(value)
-            .map_err(|_| OperationsError::Persistence(PersistenceError::InvalidRequestMetadataGap))
+            .map_err(|_| Error::Persistence(PersistenceError::InvalidRequestMetadataGap))
     };
-    Ok(RequestMetadataGatewayEpochRecord {
+    Ok(GatewayEpochRecord {
         gateway_instance: row.gateway_instance,
         process_epoch: row.process_epoch,
         state,
@@ -399,22 +400,22 @@ mod tests {
     #[test]
     fn gateway_epoch_rows_classify_lifecycle_state_and_preserve_evidence() {
         type Mutation = fn(&mut RequestMetadataGatewayEpochRow);
-        let cases: [(Mutation, RequestMetadataGatewayEpochState); 5] = [
-            (|_| {}, RequestMetadataGatewayEpochState::Open),
+        let cases: [(Mutation, GatewayEpochState); 5] = [
+            (|_| {}, GatewayEpochState::Open),
             (
                 |row| row.acknowledged_at = Some(row.updated_at),
-                RequestMetadataGatewayEpochState::Open,
+                GatewayEpochState::Open,
             ),
             (
                 |row| row.stale_detected_at = Some(row.updated_at),
-                RequestMetadataGatewayEpochState::Unresolved,
+                GatewayEpochState::Unresolved,
             ),
             (
                 |row| {
                     row.stale_detected_at = Some(row.updated_at);
                     row.acknowledged_at = Some(row.updated_at);
                 },
-                RequestMetadataGatewayEpochState::Acknowledged,
+                GatewayEpochState::Acknowledged,
             ),
             (
                 |row| {
@@ -422,7 +423,7 @@ mod tests {
                     row.stale_detected_at = Some(row.updated_at);
                     row.acknowledged_at = Some(row.updated_at);
                 },
-                RequestMetadataGatewayEpochState::GracefullyClosed,
+                GatewayEpochState::GracefullyClosed,
             ),
         ];
 
@@ -468,7 +469,7 @@ mod tests {
             invalidate(&mut row);
             assert!(matches!(
                 request_metadata_gateway_epoch_from_row(row),
-                Err(OperationsError::Persistence(
+                Err(Error::Persistence(
                     PersistenceError::InvalidRequestMetadataGap
                 ))
             ));
@@ -479,19 +480,19 @@ mod tests {
     fn gateway_epoch_query_applies_each_state_and_cursor_clause() {
         for (state, clause) in [
             (
-                RequestMetadataGatewayEpochState::Open,
+                GatewayEpochState::Open,
                 "gracefully_closed_at IS NULL AND stale_detected_at IS NULL",
             ),
             (
-                RequestMetadataGatewayEpochState::GracefullyClosed,
+                GatewayEpochState::GracefullyClosed,
                 "gracefully_closed_at IS NOT NULL",
             ),
             (
-                RequestMetadataGatewayEpochState::Unresolved,
+                GatewayEpochState::Unresolved,
                 "stale_detected_at IS NOT NULL AND acknowledged_at IS NULL",
             ),
             (
-                RequestMetadataGatewayEpochState::Acknowledged,
+                GatewayEpochState::Acknowledged,
                 "stale_detected_at IS NOT NULL AND acknowledged_at IS NOT NULL",
             ),
         ] {
@@ -503,7 +504,7 @@ mod tests {
             );
         }
 
-        let cursor = TimestampCursor {
+        let cursor = Timestamp {
             at: "2026-08-01T10:00:00Z".parse().unwrap(),
             id: Uuid::now_v7(),
         };

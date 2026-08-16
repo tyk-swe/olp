@@ -7,8 +7,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_db::{
-    identity::InstallationSetupInput, security::CsrfMaterial, security::SessionMaterial,
-    security::hash_password, security::verify_password,
+    identity::InstallationSetupInput, security::password::hash, security::password::verify,
+    security::session_material::CsrfMaterial, security::session_material::SessionMaterial,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -29,8 +29,11 @@ use super::{
     sessions::{cookie, enforce_origin, require_read_session},
 };
 use crate::{
-    FieldErrors, FirstOwnerSetupAuthorized, ManagementState, Problem,
-    public_auth_source_target_digests,
+    bootstrap::mode_dependencies::ManagementState,
+    public_http::problem::FieldErrors,
+    public_http::problem::Problem,
+    public_http::proxy::public_auth_source_target_digests,
+    public_http::request_admission::FirstOwnerSetupAuthorized,
     public_http::request_cookies::{CSRF_COOKIE, SESSION_COOKIE},
 };
 
@@ -70,7 +73,7 @@ pub(super) async fn authentication_capabilities(
         .store()
         .oidc_configuration()
         .await
-        .map_err(crate::management::oidc::map_oidc)?
+        .map_err(crate::management::oidc::error::map_oidc)?
         .is_some_and(|configuration| configuration.enabled);
     let mut response = Json(AuthenticationCapabilities {
         local_login_enabled: state.local_login_enabled,
@@ -181,7 +184,7 @@ pub(super) async fn setup(
     let request = json_payload(payload)?;
     validate_setup(&request)?;
     let password = Zeroizing::new(request.password.expose().to_owned());
-    let password_hash = spawn_password_work(move || hash_password(&password))?
+    let password_hash = spawn_password_work(move || hash(&password))?
         .await
         .map_err(|error| {
             error!(%error, "password hashing task failed");
@@ -206,7 +209,7 @@ pub(super) async fn setup(
         )
         .await
         .map_err(|error| match error {
-            olp_db::PersistenceError::AlreadySetup => Problem::conflict(
+            olp_db::error::Error::AlreadySetup => Problem::conflict(
                 "setup_already_completed",
                 "This installation already has an owner.",
             ),
@@ -311,9 +314,9 @@ pub(super) async fn login(
     // Perform an Argon2id operation even for an unknown account so account
     // existence is not exposed through a cheap timing distinction.
     let valid = spawn_password_work(move || match encoded {
-        Some(encoded) => verify_password(&password, &encoded),
+        Some(encoded) => verify(&password, &encoded),
         None => {
-            let _ = hash_password(&password);
+            let _ = hash(&password);
             false
         }
     })?

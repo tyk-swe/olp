@@ -2,19 +2,20 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
-    security::{CsrfMaterial, SessionMaterial},
+    error::Error,
+    security::session_material::{CsrfMaterial, SessionMaterial},
+    store::Store,
 };
 
 use super::{LocalPasswordUser, SessionPrincipal, insert_versioned_session};
 
-impl PgStore {
+impl Store {
     pub async fn create_session(
         &self,
         user_id: Uuid,
         material: &SessionMaterial,
         ttl: chrono::Duration,
-    ) -> Result<Uuid, PersistenceError> {
+    ) -> Result<Uuid, Error> {
         let now = Utc::now();
         let expires_at = checked_session_expiry(now, ttl)?;
         let mut transaction = self.pool().begin().await?;
@@ -24,7 +25,7 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?;
-        let security_version = security_version.ok_or(PersistenceError::SessionUnavailable)?;
+        let security_version = security_version.ok_or(Error::SessionUnavailable)?;
         let id = insert_versioned_session(
             &mut transaction,
             user_id,
@@ -64,10 +65,7 @@ impl PgStore {
     /// email, password, headers, or network metadata. A known active local user
     /// may be attached for operator visibility; unknown identities remain
     /// anonymous.
-    pub async fn record_local_login_failure(
-        &self,
-        user_id: Option<Uuid>,
-    ) -> Result<(), PersistenceError> {
+    pub async fn record_local_login_failure(&self, user_id: Option<Uuid>) -> Result<(), Error> {
         sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
@@ -84,7 +82,7 @@ impl PgStore {
     pub async fn local_password_user(
         &self,
         email: &str,
-    ) -> Result<Option<LocalPasswordUser>, PersistenceError> {
+    ) -> Result<Option<LocalPasswordUser>, Error> {
         let row = sqlx::query!(
             "SELECT id, email, display_name, password_hash AS \"password_hash!\", \
                     role::text AS \"role!\" \
@@ -105,7 +103,7 @@ impl PgStore {
     pub async fn session_principal(
         &self,
         plaintext_token: &str,
-    ) -> Result<Option<SessionPrincipal>, PersistenceError> {
+    ) -> Result<Option<SessionPrincipal>, Error> {
         let digest = SessionMaterial::digest_token(plaintext_token);
         let row = sqlx::query!(
             "WITH authenticated AS MATERIALIZED ( \
@@ -155,7 +153,7 @@ impl PgStore {
         security_version: i64,
         expected_digest: &[u8],
         replacement: &CsrfMaterial,
-    ) -> Result<bool, PersistenceError> {
+    ) -> Result<bool, Error> {
         let now = Utc::now();
         let mut transaction = self.pool().begin().await?;
         let updated = sqlx::query!(
@@ -200,10 +198,7 @@ impl PgStore {
 
     /// Best-effort, token-addressed revocation for idempotent logout. Expired
     /// and security-version-stale rows are deliberately eligible for deletion.
-    pub async fn revoke_session_by_token(
-        &self,
-        plaintext_token: &str,
-    ) -> Result<(), PersistenceError> {
+    pub async fn revoke_session_by_token(&self, plaintext_token: &str) -> Result<(), Error> {
         let digest = SessionMaterial::digest_token(plaintext_token);
         let now = Utc::now();
         let mut transaction = self.pool().begin().await?;
@@ -236,10 +231,9 @@ impl PgStore {
 pub(crate) fn checked_session_expiry(
     now: DateTime<Utc>,
     ttl: chrono::Duration,
-) -> Result<DateTime<Utc>, PersistenceError> {
+) -> Result<DateTime<Utc>, Error> {
     if ttl <= chrono::Duration::zero() {
-        return Err(PersistenceError::InvalidSessionTtl);
+        return Err(Error::InvalidSessionTtl);
     }
-    now.checked_add_signed(ttl)
-        .ok_or(PersistenceError::InvalidSessionTtl)
+    now.checked_add_signed(ttl).ok_or(Error::InvalidSessionTtl)
 }

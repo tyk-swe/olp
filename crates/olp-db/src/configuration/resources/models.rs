@@ -3,13 +3,13 @@ use super::{
     *,
 };
 
-impl PgStore {
+impl Store {
     pub async fn list_provider_models(
         &self,
         provider_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<ProviderModelRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<ProviderModelRecord>, Error> {
         let limit = checked_limit(limit)?;
         ensure_provider_exists(self, provider_id).await?;
         let rows = sqlx::query_as!(
@@ -33,7 +33,7 @@ impl PgStore {
         cursor: Option<Uuid>,
         limit: i64,
         enabled: Option<bool>,
-    ) -> Result<ConfigurationPage<ProviderModelInventoryRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<ProviderModelInventoryRecord>, Error> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query_as!(
             ProviderInventoryRow,
@@ -64,7 +64,7 @@ impl PgStore {
                     ),
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>, ConfigurationError>>()?;
+            .collect::<Result<BTreeMap<_, _>, Error>>()?;
         let model_rows = rows.into_iter().map(ProviderInventoryRow::model).collect();
         let items = self
             .provider_models_from_rows(model_rows)
@@ -83,7 +83,7 @@ impl PgStore {
                     model,
                 })
             })
-            .collect::<Result<Vec<_>, ConfigurationError>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(ConfigurationPage { items, next_cursor })
     }
 
@@ -91,7 +91,7 @@ impl PgStore {
         &self,
         provider_id: Uuid,
         model_id: Uuid,
-    ) -> Result<ProviderModelRecord, ConfigurationError> {
+    ) -> Result<ProviderModelRecord, Error> {
         let rows = sqlx::query_as!(
             ProviderModelRow,
             "SELECT id, upstream_model, display_name, enabled, discovered_at \
@@ -105,13 +105,13 @@ impl PgStore {
             .await?
             .into_iter()
             .next()
-            .ok_or(ConfigurationError::NotFound)
+            .ok_or(Error::NotFound)
     }
 
     async fn provider_models_from_rows(
         &self,
         rows: Vec<ProviderModelRow>,
-    ) -> Result<Vec<ProviderModelRecord>, ConfigurationError> {
+    ) -> Result<Vec<ProviderModelRecord>, Error> {
         let model_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
         let capability_rows = if model_ids.is_empty() {
             Vec::new()
@@ -156,19 +156,15 @@ impl PgStore {
         expected_etag: Uuid,
         models: &[DiscoveredModelInput],
         actor: Uuid,
-    ) -> Result<Uuid, ConfigurationError> {
+    ) -> Result<Uuid, Error> {
         if models.is_empty() {
-            return Err(ConfigurationError::Invalid(
-                "discovery returned no models".to_owned(),
-            ));
+            return Err(Error::Invalid("discovery returned no models".to_owned()));
         }
         let mut names = BTreeSet::new();
         for model in models {
             validate_model(model)?;
             if !names.insert(model.upstream_model.trim()) {
-                return Err(ConfigurationError::Invalid(
-                    "model names must be unique".to_owned(),
-                ));
+                return Err(Error::Invalid("model names must be unique".to_owned()));
             }
         }
         let mut transaction = self.pool().begin().await?;
@@ -178,12 +174,12 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.state == "disabled" {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let provider_kind: String = provider.kind;
         for model in models {
@@ -254,14 +250,14 @@ impl PgStore {
         capabilities: &[CapabilityRecord],
         expected_etag: Uuid,
         actor: Uuid,
-    ) -> Result<Uuid, ConfigurationError> {
+    ) -> Result<Uuid, Error> {
         if enabled && capabilities.is_empty() {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "enabled models require at least one reviewed capability".to_owned(),
             ));
         }
         if capabilities.len() > 16 {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "a model can declare at most 16 capability tuples".to_owned(),
             ));
         }
@@ -273,7 +269,7 @@ impl PgStore {
                 capability.mode.as_str(),
             );
             if !unique.insert(tuple) {
-                return Err(ConfigurationError::Invalid(
+                return Err(Error::Invalid(
                     "model capabilities must be unique".to_owned(),
                 ));
             }
@@ -285,12 +281,12 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.state == "disabled" {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let provider_kind: String = provider.kind;
         for capability in capabilities {
@@ -305,7 +301,7 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?;
         if result.rows_affected() != 1 {
-            return Err(ConfigurationError::NotFound);
+            return Err(Error::NotFound);
         }
         sqlx::query!(
             "DELETE FROM model_capabilities WHERE provider_model_id = $1",
@@ -364,16 +360,16 @@ impl PgStore {
         expected_etag: Uuid,
         actor: Uuid,
         outcomes: &[CapabilityCertificationOutcome],
-    ) -> Result<CapabilityCertificationApplied, ConfigurationError> {
+    ) -> Result<CapabilityCertificationApplied, Error> {
         if outcomes.is_empty() || outcomes.len() > 16 {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "certification requires 1-16 reviewed capability tuples".to_owned(),
             ));
         }
         let mut submitted = BTreeSet::new();
         for outcome in outcomes {
             if !submitted.insert((outcome.operation, outcome.surface, outcome.mode)) {
-                return Err(ConfigurationError::Invalid(
+                return Err(Error::Invalid(
                     "certification capability tuples must be unique".to_owned(),
                 ));
             }
@@ -388,12 +384,12 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if provider.state != "draft" {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let provider_kind = provider.kind;
         if provider_kind != "openai_compatible" {
@@ -402,7 +398,7 @@ impl PgStore {
             let has_fresh_probe = provider.last_probe_status.as_deref() == Some("succeeded")
                 && last_probe_at.is_some_and(|probed_at| probed_at >= updated_at);
             if !has_fresh_probe {
-                return Err(ConfigurationError::Invalid(
+                return Err(Error::Invalid(
                     "native capability certification requires a successful credentialed probe of the current provider draft"
                         .to_owned(),
                 ));
@@ -416,10 +412,10 @@ impl PgStore {
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(model_discovered_at) = discovered_at_row else {
-            return Err(ConfigurationError::NotFound);
+            return Err(Error::NotFound);
         };
         if provider_kind != "openai_compatible" && model_discovered_at.is_none() {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "native capability certification requires a discovered provider model".to_owned(),
             ));
         }
@@ -431,7 +427,7 @@ impl PgStore {
         .fetch_all(&mut *transaction)
         .await?
         .into_iter()
-        .map(|row| -> Result<_, PersistenceError> {
+        .map(|row| -> Result<_, Error> {
             Ok((
                 row.operation
                     .parse()
@@ -446,7 +442,7 @@ impl PgStore {
         })
         .collect::<Result<BTreeSet<_>, _>>()?;
         if current != submitted {
-            return Err(ConfigurationError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
 
         let certified_at = Utc::now();
@@ -471,7 +467,7 @@ impl PgStore {
             .execute(&mut *transaction)
             .await?;
             if updated.rows_affected() != 1 {
-                return Err(ConfigurationError::PreconditionFailed);
+                return Err(Error::PreconditionFailed);
             }
             certified_count += 1;
         }
@@ -572,15 +568,12 @@ impl ProviderInventoryRow {
     }
 }
 
-async fn ensure_provider_exists(
-    store: &PgStore,
-    provider_id: Uuid,
-) -> Result<(), ConfigurationError> {
+async fn ensure_provider_exists(store: &Store, provider_id: Uuid) -> Result<(), Error> {
     let exists: bool = sqlx::query_scalar!(
         "SELECT EXISTS (SELECT 1 FROM providers WHERE id = $1) AS \"value!\"",
         provider_id
     )
     .fetch_one(store.pool())
     .await?;
-    exists.then_some(()).ok_or(ConfigurationError::NotFound)
+    exists.then_some(()).ok_or(Error::NotFound)
 }

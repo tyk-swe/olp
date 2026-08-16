@@ -31,7 +31,7 @@ use serde::de::DeserializeOwned;
 /// Values are compared as `serde_json::Value` rather than through `PartialEq`
 /// so the oracle applies uniformly to DTOs that do not derive it, and so a
 /// failure prints the offending document.
-pub fn roundtrip<Dto, Canonical, Decode, Encode, Error>(
+pub(crate) fn roundtrip<Dto, Canonical, Decode, Encode, Error>(
     data: &[u8],
     label: &str,
     decode: Decode,

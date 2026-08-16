@@ -4,15 +4,18 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_db::operations::ProviderHealthRecord;
+use olp_db::operations::health::ProviderHealthRecord;
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit};
 use crate::{
-    HealthResponse, ManagementState, Problem,
-    management::{Permission, require_permission, require_read_session},
+    bootstrap::mode_dependencies::ManagementState,
+    management::{permissions::require_permission, sessions::require_read_session},
+    observability::HealthResponse,
+    public_http::problem::Problem,
 };
 
 #[utoipa::path(
@@ -51,7 +54,7 @@ pub(super) struct ProviderHealthItem {
     #[schema(value_type = String, format = Uuid)]
     provider_id: Uuid,
     provider_name: String,
-    provider_kind: olp_engine::domain::ProviderKind,
+    provider_kind: olp_engine::domain::routing::provider::ProviderKind,
     provider_state: String,
     status: String,
     last_probe_at: Option<DateTime<Utc>>,

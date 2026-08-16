@@ -1,9 +1,11 @@
-use olp_engine::domain::{
-    CanonicalEventKind, ContentPart, FinishReason, Operation, Surface, validate_event_sequence,
+use olp_engine::domain::canonical::{
+    events::{FinishReason, Kind, validate_event_sequence},
+    identity::Surface,
+    requests::{ContentPart, Operation},
 };
 use olp_engine::protocols::openai::{
-    ChatCompletionRequest, ChatCompletionResponse, OpenAiChatStreamDecoder, OpenAiStreamError,
-    decode_chat_completion, decode_chat_completion_response, encode_chat_completion,
+    chat::{CompletionRequest, decode_chat_completion, encode_chat_completion},
+    response::{Completion, Decoder, OpenAiStreamError, decode},
 };
 use serde_json::{Value, json};
 
@@ -49,7 +51,7 @@ fn chat_request_translation_preserves_source_scoped_fields_and_semantics() {
         },
         "service_tier": "priority"
     });
-    let dto: ChatCompletionRequest = serde_json::from_value(wire).unwrap();
+    let dto: CompletionRequest = serde_json::from_value(wire).unwrap();
     let Operation::Generation(canonical) = decode_chat_completion(dto).unwrap() else {
         panic!("chat request translated to the wrong operation");
     };
@@ -113,20 +115,20 @@ fn chat_request_rejects_ambiguous_or_invalid_parameters() {
         "max_tokens": 10,
         "max_completion_tokens": 20
     });
-    let request: ChatCompletionRequest = serde_json::from_value(both_limits).unwrap();
+    let request: CompletionRequest = serde_json::from_value(both_limits).unwrap();
     assert!(decode_chat_completion(request).is_err());
 
     let invalid_route = json!({
         "model": "provider/model",
         "messages": [{"role": "user", "content": "hello"}]
     });
-    let request: ChatCompletionRequest = serde_json::from_value(invalid_route).unwrap();
+    let request: CompletionRequest = serde_json::from_value(invalid_route).unwrap();
     assert!(decode_chat_completion(request).is_err());
 }
 
 #[test]
 fn unary_response_becomes_one_ordered_canonical_event_sequence() {
-    let response: ChatCompletionResponse = serde_json::from_value(json!({
+    let response: Completion = serde_json::from_value(json!({
         "id": "chatcmpl_1",
         "object": "chat.completion",
         "created": 1800000000,
@@ -147,32 +149,26 @@ fn unary_response_becomes_one_ordered_canonical_event_sequence() {
     }))
     .unwrap();
 
-    let events = decode_chat_completion_response(response).unwrap();
+    let events = decode(response).unwrap();
     validate_event_sequence(&events).unwrap();
-    assert!(matches!(
-        events[0].kind,
-        CanonicalEventKind::ResponseStart { .. }
-    ));
+    assert!(matches!(events[0].kind, Kind::ResponseStart { .. }));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "hello"
+        Kind::TextDelta { text, .. } if text == "hello"
     )));
     assert!(events.iter().any(|event| matches!(
         event.kind,
-        CanonicalEventKind::Finish {
+        Kind::Finish {
             reason: FinishReason::Stop,
             ..
         }
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::SourceExtension { extensions }
+        Kind::SourceExtension { extensions }
             if extensions.values.get("/system_fingerprint") == Some(&Value::String("fp_123".into()))
     )));
-    assert!(matches!(
-        events.last().unwrap().kind,
-        CanonicalEventKind::Done
-    ));
+    assert!(matches!(events.last().unwrap().kind, Kind::Done));
 }
 
 #[test]
@@ -197,7 +193,7 @@ fn fragmented_unicode_sse_and_tool_deltas_decode_without_corruption() {
         "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8}
     });
     let wire = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut events = Vec::new();
     for byte in wire.as_bytes() {
         events.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
@@ -208,17 +204,14 @@ fn fragmented_unicode_sse_and_tool_deltas_decode_without_corruption() {
     assert!(decoder.is_done());
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "héllø 🌍"
+        Kind::TextDelta { text, .. } if text == "héllø 🌍"
     )));
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
             if name == "lookup" && arguments_delta == "{\"id\":1}"
     )));
-    assert!(matches!(
-        events.last().unwrap().kind,
-        CanonicalEventKind::Done
-    ));
+    assert!(matches!(events.last().unwrap().kind, Kind::Done));
 }
 
 #[test]
@@ -230,7 +223,7 @@ fn stream_eof_without_done_is_an_error() {
         "model": "gpt-upstream",
         "choices": [{"index": 0, "delta": {"content": "partial"}, "finish_reason": null}]
     });
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     decoder
         .push(format!("data: {chunk}\n\n").as_bytes())
         .unwrap();
@@ -249,7 +242,7 @@ fn stream_done_without_a_choice_finish_is_an_error() {
         "model": "gpt-upstream",
         "choices": [{"index": 0, "delta": {"content": "partial"}, "finish_reason": null}]
     });
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     decoder
         .push(format!("data: {chunk}\n\n").as_bytes())
         .unwrap();
@@ -299,7 +292,7 @@ fn stream_rejects_data_and_duplicate_finish_after_choice_finish() {
     ];
 
     for invalid in invalid_chunks {
-        let mut decoder = OpenAiChatStreamDecoder::new();
+        let mut decoder = Decoder::new();
         decoder
             .push(format!("data: {finished}\n\n").as_bytes())
             .unwrap();
@@ -339,20 +332,20 @@ fn stream_accepts_extension_only_annotation_after_choice_finish() {
         "usage": null
     });
     let wire = format!("data: {finished}\n\ndata: {annotation}\n\ndata: [DONE]\n\n");
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let mut events = decoder.push(wire.as_bytes()).unwrap();
     events.extend(decoder.finish().unwrap());
 
     validate_event_sequence(&events).unwrap();
     let finish_position = events
         .iter()
-        .position(|event| matches!(event.kind, CanonicalEventKind::Finish { .. }))
+        .position(|event| matches!(event.kind, Kind::Finish { .. }))
         .unwrap();
     let (annotation_position, extensions) = events
         .iter()
         .enumerate()
         .find_map(|(position, event)| match &event.kind {
-            CanonicalEventKind::SourceExtension { extensions } => Some((position, extensions)),
+            Kind::SourceExtension { extensions } => Some((position, extensions)),
             _ => None,
         })
         .unwrap();
@@ -365,18 +358,15 @@ fn stream_accepts_extension_only_annotation_after_choice_finish() {
         extensions.values["/choices/0/content_filter_offsets"],
         annotation["choices"][0]["content_filter_offsets"]
     );
-    assert!(matches!(
-        events.last().unwrap().kind,
-        CanonicalEventKind::Done
-    ));
+    assert!(matches!(events.last().unwrap().kind, Kind::Done));
 }
 
 #[test]
 fn provider_error_frame_is_terminal_and_canonical() {
     let wire = b"data: {\"error\":{\"message\":\"slow down\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit\"}}\n\n";
-    let mut decoder = OpenAiChatStreamDecoder::new();
+    let mut decoder = Decoder::new();
     let events = decoder.push(wire).unwrap();
     assert!(decoder.is_done());
-    assert!(matches!(events[0].kind, CanonicalEventKind::Error { .. }));
-    assert!(matches!(events[1].kind, CanonicalEventKind::Done));
+    assert!(matches!(events[0].kind, Kind::Error { .. }));
+    assert!(matches!(events[1].kind, Kind::Done));
 }

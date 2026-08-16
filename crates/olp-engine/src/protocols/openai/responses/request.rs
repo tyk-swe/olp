@@ -1,9 +1,15 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message, MessageRole,
-    Operation, ResponseFormat, RouteSlug, SourceExtensions, Surface, ToolCall, ToolChoice,
-    ToolDefinition, inline_media_marker, media_handle_from_inline_marker,
+    canonical::{
+        identity::Surface,
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message,
+            MessageRole, Operation, ResponseFormat, SourceExtensions, ToolCall, ToolChoice,
+            ToolDefinition, inline_media_marker, media_handle_from_inline_marker,
+        },
+    },
+    ids::RouteSlug,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -13,7 +19,7 @@ use super::errors::ResponsesCodecError;
 use super::helpers::collect_object_extra;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct ResponseCreateRequest {
+pub struct Create {
     pub model: String,
     pub input: ResponseInput,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,9 +117,7 @@ pub struct ResponseTextFormat {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_response_create(
-    mut request: ResponseCreateRequest,
-) -> Result<Operation, ResponsesCodecError> {
+pub fn decode_response_create(mut request: Create) -> Result<Operation, ResponsesCodecError> {
     if request.background == Some(true) {
         return Err(ResponsesCodecError::BackgroundUnsupported);
     }
@@ -209,7 +213,7 @@ pub fn decode_response_create(
 pub fn encode_response_create(
     request: &GenerationRequest,
     upstream_model: &str,
-) -> Result<ResponseCreateRequest, ResponsesCodecError> {
+) -> Result<Create, ResponsesCodecError> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
@@ -313,7 +317,7 @@ pub fn encode_response_create(
     let mut extension_values = request.extensions.values.clone();
     restore_raw_response_tools(&mut tools, &mut tool_choice, &mut extension_values)?;
     apply_pointer_extensions(
-        ResponseCreateRequest {
+        Create {
             model: upstream_model.into(),
             input: ResponseInput::Items(items),
             instructions,

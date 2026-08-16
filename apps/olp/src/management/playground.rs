@@ -7,10 +7,17 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
+use olp_engine::domain::auth::Permission;
 use olp_engine::domain::{
-    CanonicalEventKind, ContentPart, FinishReason, GenerationParameters, GenerationRequest,
-    Message, MessageRole, Operation, ResponseFormat, RouteSlug, SourceExtensions, Surface,
-    ToolCall, ToolDefinition, Usage,
+    canonical::{
+        events::{FinishReason, Kind, Usage},
+        identity::Surface,
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, Message, MessageRole, Operation,
+            ResponseFormat, SourceExtensions, ToolCall, ToolDefinition,
+        },
+    },
+    ids::RouteSlug,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,9 +25,13 @@ use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    FieldErrors, ManagementState, Problem,
-    gateway::InferenceError,
-    management::{Permission, json_payload, require_mutation_session, require_permission},
+    bootstrap::mode_dependencies::ManagementState,
+    gateway::error::InferenceError,
+    management::{
+        json_payload::json_payload, permissions::require_permission,
+        sessions::require_mutation_session,
+    },
+    public_http::problem::{FieldErrors, Problem},
 };
 
 pub(crate) fn router() -> Router<ManagementState> {
@@ -198,23 +209,23 @@ async fn execute_playground(
     let mut finish_reason = None;
     for event in execution.events {
         match event.kind {
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 provider_model: model,
                 ..
             } => provider_model = model,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text,
             } => {
                 output_text.push_str(&text);
             }
-            CanonicalEventKind::RefusalDelta {
+            Kind::RefusalDelta {
                 output_index: 0,
                 text,
             } => {
                 refusal.push_str(&text);
             }
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
@@ -230,8 +241,8 @@ async fn execute_playground(
                 }
                 call.arguments.push_str(&arguments_delta);
             }
-            CanonicalEventKind::Usage { usage: value } => usage = Some(value.into()),
-            CanonicalEventKind::Finish {
+            Kind::Usage { usage: value } => usage = Some(value.into()),
+            Kind::Finish {
                 output_index: 0,
                 reason,
             } => finish_reason = Some(finish_reason_name(reason)),

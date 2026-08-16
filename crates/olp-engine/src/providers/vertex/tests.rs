@@ -2,15 +2,22 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use super::*;
 use crate::domain::{
-    AttemptPlan, ContentPart, DurationMs, GenerationParameters, GenerationRequest, Message,
-    MessageRole, Operation, OperationKind, ProviderId, ProviderKind, ProviderOutput, RequestId,
-    RequestMetadata, RouteId, RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId,
-    TransportMode,
-};
-use crate::providers::gemini::{
-    BearerTokenError, BearerTokenProvider, ConnectorTimeouts, SecretBearerToken,
+    canonical::{
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, Message, MessageRole, Operation,
+            SourceExtensions,
+        },
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::ProviderOutput,
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use crate::providers::mock_server::{MockResponse, response as http_response, spawn_mock};
+use crate::providers::{
+    connector::Timeouts,
+    gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken},
+};
 use futures::StreamExt;
 
 #[derive(Debug)]
@@ -19,7 +26,7 @@ struct StaticToken;
 impl BearerTokenProvider for StaticToken {
     fn token<'a>(
         &'a self,
-    ) -> crate::domain::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
         Box::pin(async { SecretBearerToken::new("vertex-access-token") })
     }
 }
@@ -81,9 +88,9 @@ async fn streams_from_regional_publisher_path_with_oauth() {
         "us-central1",
         "gemini-2.5-flash",
         &base,
-        ConnectorTimeouts::default(),
+        Timeouts::default(),
     );
-    let connector = VertexConnector::with_token_provider(config, Arc::new(StaticToken));
+    let connector = Connector::with_token_provider(config, Arc::new(StaticToken));
     let ProviderOutput::Events(mut events) = connector.execute(streaming_request()).await.unwrap()
     else {
         panic!("generation must stream events")
@@ -126,9 +133,9 @@ async fn service_account_uses_hardened_token_exchange_and_cached_token() {
         "us-central1",
         "gemini-2.5-flash",
         &base,
-        ConnectorTimeouts::default(),
+        Timeouts::default(),
     );
-    let connector = VertexConnector::with_token_provider(config, Arc::new(provider));
+    let connector = Connector::with_token_provider(config, Arc::new(provider));
     assert_eq!(connector.discover_models().await.unwrap().len(), 1);
 
     let token_request = String::from_utf8(token_request.await.unwrap()).unwrap();
@@ -149,7 +156,7 @@ fn validates_cloud_context_and_redacts_credentials() {
     assert!(ConnectorConfig::new("project", "us/central1", "model").is_err());
     assert!(ConnectorConfig::new("project", "us-central1", "../model").is_err());
     assert!(matches!(
-        VertexConnector::with_service_account_json(
+        Connector::with_service_account_json(
             ConnectorConfig::new("project", "us-central1", "model").unwrap(),
             r#"{"type":"service_account"}"#,
         ),
@@ -165,7 +172,7 @@ async fn live_vertex_adc_smoke() {
     let project = std::env::var("OLP_VERTEX_LIVE_PROJECT").unwrap();
     let location = std::env::var("OLP_VERTEX_LIVE_LOCATION").unwrap();
     let model = std::env::var("OLP_VERTEX_LIVE_MODEL").unwrap();
-    let connector = VertexConnector::with_application_default(
+    let connector = Connector::with_application_default(
         ConnectorConfig::new(project, location, model).unwrap(),
     )
     .unwrap();
@@ -185,7 +192,7 @@ async fn live_provider_vertex_service_account_smoke() {
         .expect("set OLP_VERTEX_LIVE_LOCATION for the ignored live test");
     let model = std::env::var("OLP_VERTEX_LIVE_MODEL")
         .expect("set OLP_VERTEX_LIVE_MODEL for the ignored live test");
-    let connector = VertexConnector::with_service_account_json(
+    let connector = Connector::with_service_account_json(
         ConnectorConfig::new(project, location, model).unwrap(),
         &credential,
     )

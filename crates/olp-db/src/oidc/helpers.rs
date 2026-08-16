@@ -1,13 +1,13 @@
 use chrono::{DateTime, Duration};
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use super::configuration::OIDC_CONFIGURATION_LOCK_ID;
-use super::{OidcAuthenticatedUser, OidcError};
+use super::types::{OidcAuthenticatedUser, OidcError};
 use crate::{
     authentication::insert_versioned_session,
-    security::{EncryptedSecret, SessionMaterial},
+    security::{envelope::EncryptedSecret, session_material::SessionMaterial},
 };
 
 pub(super) fn encrypted_from_row(

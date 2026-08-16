@@ -1,10 +1,19 @@
 use crate::domain::{
-    AttemptPlan, ImageOperation, Operation, Provider, ProviderKind, RouteSlug, RoutingError,
-    RuntimeSnapshot, Surface, Target, TransportMode, VideoOperation, select_attempts_filtered,
+    canonical::{
+        identity::{Surface, TransportMode},
+        requests::{ImageOperation, Operation, VideoOperation},
+    },
+    ids::RouteSlug,
+    routing::{
+        provider::{Provider, ProviderKind},
+        route::Target,
+        selection::{AttemptPlan, RoutingError, select_attempts_filtered},
+        snapshot::Snapshot,
+    },
 };
 use crate::protocols::openai;
 
-use crate::inference::InferenceError;
+use crate::inference::error::Error as InferenceError;
 
 /// Removes targets that cannot encode this concrete request without semantic
 /// loss. Capability tuples are the coarse model boundary; this request-level
@@ -12,7 +21,7 @@ use crate::inference::InferenceError;
 /// media forms before credentials or transport are used.
 #[cfg(test)]
 pub(in crate::inference) fn select_representable_attempts(
-    snapshot: &RuntimeSnapshot,
+    snapshot: &Snapshot,
     route_slug: &RouteSlug,
     operation: &Operation,
     surface: Surface,
@@ -34,7 +43,7 @@ pub(in crate::inference) fn select_representable_attempts(
 /// together with semantic validation before deterministic ordering and the
 /// route's maximum-attempt truncation.
 pub fn select_representable_attempts_filtered(
-    snapshot: &RuntimeSnapshot,
+    snapshot: &Snapshot,
     route_slug: &RouteSlug,
     operation: &Operation,
     surface: Surface,
@@ -120,7 +129,7 @@ fn validate_for_provider(
         }
         ProviderKind::Anthropic => validate_anthropic(operation, upstream_model),
         ProviderKind::Gemini | ProviderKind::VertexAi => validate_gemini(operation, upstream_model),
-        ProviderKind::Bedrock => crate::providers::validate_bedrock_operation(operation)
+        ProviderKind::Bedrock => crate::providers::bedrock::validate_operation(operation)
             .map_err(|error| error.to_string()),
     }
 }
@@ -141,67 +150,71 @@ fn validate_openai(operation: &Operation, upstream_model: &str) -> Result<(), St
                 .and_then(|value| value.as_str().map(str::to_owned))
                 .is_some_and(|endpoint| endpoint == "responses");
             if responses {
-                openai::encode_response_create(&request, upstream_model)
+                openai::responses::request::encode_response_create(&request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             } else {
-                openai::encode_chat_completion(&request, upstream_model)
+                openai::chat::encode_chat_completion(&request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             }
         }
-        Operation::Embeddings(request) => openai::encode_embedding_request(request, upstream_model)
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
+        Operation::Embeddings(request) => {
+            openai::embeddings::encode_embedding_request(request, upstream_model)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         Operation::TokenCount(request) => {
-            openai::encode_response_input_tokens(request, upstream_model)
+            openai::responses::token_count::encode_response_input_tokens(request, upstream_model)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
         Operation::Images(ImageOperation::Generation(request)) => {
-            openai::encode_image_generation(request, upstream_model)
+            openai::images::encode_image_generation(request, upstream_model)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
         Operation::Images(ImageOperation::Edit(request)) => {
-            openai::encode_image_edit(request, upstream_model, |handle| {
+            openai::images::encode_image_edit(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
         Operation::Images(ImageOperation::Variation(request)) => {
-            openai::encode_image_variation(request, upstream_model, |handle| {
+            openai::images::encode_image_variation(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
-        Operation::Speech(request) => openai::encode_speech(request, upstream_model)
+        Operation::Speech(request) => openai::audio::encode_speech(request, upstream_model)
             .map(|_| ())
             .map_err(|error| error.to_string()),
         Operation::Transcription(request) => {
-            openai::encode_transcription(request, upstream_model, |handle| {
+            openai::audio::encode_transcription(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
         Operation::Video(VideoOperation::Create(request)) => {
-            openai::encode_video_create(request, upstream_model, |handle| {
+            openai::video::encode_video_create(request, upstream_model, |handle| {
                 Ok(dummy_media_part(handle))
             })
             .map(|_| ())
             .map_err(|error| error.to_string())
         }
-        Operation::Video(VideoOperation::List(request)) => openai::encode_video_list(request)
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
+        Operation::Video(VideoOperation::List(request)) => {
+            openai::video::encode_video_list(request)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         Operation::Video(
             VideoOperation::Get(_) | VideoOperation::Content(_) | VideoOperation::Delete(_),
         )
         | Operation::Models(_) => Ok(()),
-        Operation::Moderation(request) => openai::encode_moderation(request, upstream_model)
+        Operation::Moderation(request) => openai::moderation::encode(request, upstream_model)
             .map(|_| ())
             .map_err(|error| error.to_string()),
     }
@@ -210,8 +223,11 @@ fn validate_openai(operation: &Operation, upstream_model: &str) -> Result<(), St
 fn validate_anthropic(operation: &Operation, upstream_model: &str) -> Result<(), String> {
     match operation {
         Operation::Generation(_) | Operation::TokenCount(_) => {
-            crate::providers::validate_anthropic_operation(operation, upstream_model)
-                .map_err(|error| error.to_string())
+            crate::providers::anthropic::transport::operations::validate_operation(
+                operation,
+                upstream_model,
+            )
+            .map_err(|error| error.to_string())
         }
         Operation::Models(_) => Ok(()),
         _ => Err("Anthropic does not represent this operation".to_owned()),
@@ -221,16 +237,21 @@ fn validate_anthropic(operation: &Operation, upstream_model: &str) -> Result<(),
 fn validate_gemini(operation: &Operation, upstream_model: &str) -> Result<(), String> {
     match operation {
         Operation::Generation(_) | Operation::TokenCount(_) => {
-            crate::providers::validate_gemini_operation(operation, upstream_model)
-                .map_err(|error| error.to_string())
+            crate::providers::gemini::transport::operations::validate_operation(
+                operation,
+                upstream_model,
+            )
+            .map_err(|error| error.to_string())
         }
         Operation::Models(_) => Ok(()),
         _ => Err("Gemini does not represent this operation".to_owned()),
     }
 }
 
-fn dummy_media_part(handle: &crate::domain::MediaHandle) -> openai::BoundedMediaPart {
-    openai::BoundedMediaPart::new(handle.clone(), "bounded-media", None, 0, 1)
+fn dummy_media_part(
+    handle: &crate::domain::canonical::requests::MediaHandle,
+) -> openai::media::BoundedMediaPart {
+    openai::media::BoundedMediaPart::new(handle.clone(), "bounded-media", None, 0, 1)
         .expect("fixed validation media metadata is valid")
 }
 
@@ -242,10 +263,17 @@ mod tests {
     };
 
     use crate::domain::{
-        Capability, ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaHandle,
-        MediaSource, Message, MessageRole, Provider, ResponseFormat, Route, RouteId, RouteSlug,
-        RuntimeGeneration, RuntimeGenerationId, RuntimeSnapshot, SourceExtensions, Target,
-        TargetId, TokenCountRequest, ToolDefinition,
+        canonical::requests::{
+            ContentPart, GenerationParameters, GenerationRequest, MediaHandle, MediaSource,
+            Message, MessageRole, ResponseFormat, SourceExtensions, TokenCountRequest,
+            ToolDefinition,
+        },
+        ids::{DurationMs, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+        routing::{
+            provider::{Capability, Provider},
+            route::{Route, Target},
+            snapshot::{RuntimeGeneration, Snapshot},
+        },
     };
     use chrono::Utc;
     use serde_json::json;
@@ -280,7 +308,7 @@ mod tests {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
-            provider_id: crate::domain::ProviderId::new(),
+            provider_id: crate::domain::ids::ProviderId::new(),
             provider_kind: kind,
             upstream_model: "upstream-model".into(),
             timeout: DurationMs::new(1_000),
@@ -327,10 +355,7 @@ mod tests {
                 .insert(path.into(), json!({"vendor":"semantic"}));
             let mut attempts = vec![attempt(ProviderKind::Gemini)];
             let error = retain_representable_attempts(&operation, &mut attempts).unwrap_err();
-            assert_eq!(
-                error.kind(),
-                crate::inference::InferenceErrorKind::InvalidRequest
-            );
+            assert_eq!(error.kind(), crate::inference::error::Kind::InvalidRequest);
         }
     }
 
@@ -460,12 +485,12 @@ mod tests {
         };
         request.response_format = Some(ResponseFormat::JsonObject);
         let route_slug = request.route.clone();
-        let incompatible = crate::domain::ProviderId::new();
-        let compatible = crate::domain::ProviderId::new();
+        let incompatible = crate::domain::ids::ProviderId::new();
+        let compatible = crate::domain::ids::ProviderId::new();
         let capability = |model: &str| {
             BTreeSet::from([Capability::new(
                 model,
-                crate::domain::OperationKind::Generation,
+                crate::domain::canonical::identity::OperationKind::Generation,
                 Surface::OpenAi,
                 TransportMode::Unary,
             )])
@@ -474,7 +499,9 @@ mod tests {
             id: RouteId::new(),
             routing_id: None,
             slug: route_slug.clone(),
-            operations: BTreeSet::from([crate::domain::OperationKind::Generation]),
+            operations: BTreeSet::from([
+                crate::domain::canonical::identity::OperationKind::Generation,
+            ]),
             overall_timeout: DurationMs::new(2_000),
             max_attempts: NonZeroU16::new(1).unwrap(),
             targets: vec![
@@ -498,7 +525,7 @@ mod tests {
                 },
             ],
         };
-        let snapshot = RuntimeSnapshot {
+        let snapshot = Snapshot {
             generation: RuntimeGeneration {
                 id: RuntimeGenerationId::new(),
                 ordinal: 1,

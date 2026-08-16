@@ -1,3 +1,6 @@
+#[cfg(feature = "test-util")]
+pub mod commands;
+#[cfg(not(feature = "test-util"))]
 pub(crate) mod commands;
 mod config;
 mod health_probe;
@@ -5,11 +8,11 @@ mod lifecycle;
 mod runtime_activation;
 mod service_supervisors;
 mod startup;
-mod validation;
+pub(crate) mod validation;
 
 use std::{error::Error, time::Duration};
 
-use crate::ApiMode;
+use crate::bootstrap::state::ApiMode;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -20,20 +23,18 @@ use self::{
     startup::serve,
 };
 
-pub(crate) use validation::check_secret_permissions;
-
 pub(crate) type AppError = Box<dyn Error + Send + Sync>;
 pub(crate) type AppResult<T> = Result<T, AppError>;
 const BACKGROUND_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub fn run_cli() -> AppResult<()> {
+pub fn run() -> AppResult<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(run())
+    runtime.block_on(execute())
 }
 
-async fn run() -> AppResult<()> {
+async fn execute() -> AppResult<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("olp=info")),

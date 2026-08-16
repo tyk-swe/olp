@@ -1,7 +1,7 @@
-use olp_db::security::MasterKey;
-use olp_engine::providers::OidcNetworkPolicy;
+use olp_db::security::envelope::MasterKey;
+use olp_engine::providers::oidc::Policy;
 
-use crate::{ManagementState, Problem};
+use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 pub(super) fn callback_url(state: &ManagementState) -> Result<String, Problem> {
     Ok(state
@@ -17,8 +17,8 @@ pub(super) fn require_master_key(state: &ManagementState) -> Result<&MasterKey, 
         .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))
 }
 
-pub(super) fn network_policy(state: &ManagementState) -> OidcNetworkPolicy {
-    OidcNetworkPolicy {
+pub(super) fn network_policy(state: &ManagementState) -> Policy {
+    Policy {
         allow_insecure_test_endpoints: state.oidc_allow_insecure_test_endpoints,
     }
 }
@@ -46,16 +46,16 @@ pub(super) fn oauth_form_component(value: &str) -> String {
 mod tests {
     use std::{path::PathBuf, sync::Arc};
 
-    use olp_db::security::MasterKey;
-    use olp_engine::inference::runtime::RuntimeManager;
+    use olp_db::security::envelope::MasterKey;
+    use olp_engine::inference::runtime::Manager;
 
     use super::*;
 
     fn state() -> ManagementState {
         ManagementState::new(
-            crate::ApiMode::Control,
+            crate::bootstrap::state::ApiMode::Control,
             None,
-            Arc::new(RuntimeManager::empty()),
+            Arc::new(Manager::empty()),
             "https://console.example.test",
             PathBuf::from("missing-console"),
         )

@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use crate::domain::{AttemptFailureClass, CanonicalEvent, CanonicalEventKind, TransportPhase};
+use crate::domain::{
+    canonical::events::{Event, Kind},
+    ports::{AttemptFailureClass, TransportPhase},
+};
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
 use tokio::time::{Instant, advance, sleep, timeout};
@@ -15,14 +18,14 @@ struct TestDecoder;
 impl CanonicalEventDecoder for TestDecoder {
     type Error = String;
 
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, Self::Error> {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Self::Error> {
         match bytes {
-            b"event" => Ok(vec![CanonicalEvent::new(0, CanonicalEventKind::Done)]),
+            b"event" => Ok(vec![Event::new(0, Kind::Done)]),
             _ => Err("invalid frame".into()),
         }
     }
 
-    fn finish(&mut self) -> Result<Vec<CanonicalEvent>, Self::Error> {
+    fn finish(&mut self) -> Result<Vec<Event>, Self::Error> {
         Ok(Vec::new())
     }
 }

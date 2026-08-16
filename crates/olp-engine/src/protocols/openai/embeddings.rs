@@ -1,8 +1,13 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    EmbeddingInput, EmbeddingVector, EmbeddingsRequest, EmbeddingsResult, Operation, RouteSlug,
-    RouteSlugError, SourceExtensions, Surface, Usage,
+    canonical::{
+        events::Usage,
+        identity::Surface,
+        requests::{EmbeddingInput, EmbeddingsRequest, Operation, SourceExtensions},
+        results::{EmbeddingVector, EmbeddingsResult},
+    },
+    ids::{RouteSlug, RouteSlugError},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -304,7 +309,7 @@ pub enum EmbeddingCodecError {
     #[error(transparent)]
     InvalidRoute(#[from] RouteSlugError),
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("embedding input cannot be empty")]
     EmptyInput,
     #[error("embedding input items cannot be empty")]

@@ -1,10 +1,16 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, MediaArtifact, MessageRole, Operation, RouteSlug,
-    RouteSlugError, SourceExtensions, SpeechRequest as CanonicalSpeechRequest, SpeechResult,
-    Surface, TranscriptionRequest as CanonicalTranscriptionRequest, TranscriptionResult,
-    TranscriptionSegment, Usage,
+    canonical::{
+        events::{Event, Kind, Usage},
+        identity::Surface,
+        requests::{
+            MessageRole, Operation, SourceExtensions, SpeechRequest as CanonicalSpeechRequest,
+            TranscriptionRequest as CanonicalTranscriptionRequest,
+        },
+        results::{MediaArtifact, SpeechResult, TranscriptionResult, TranscriptionSegment},
+    },
+    ids::{RouteSlug, RouteSlugError},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,7 +18,7 @@ use thiserror::Error;
 
 use super::extensions::{apply_pointer_extensions, collect_extra};
 use super::media::{BinaryMediaBody, BoundedMediaPart};
-use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame};
+use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, DecodeError, Decoder as SseDecoder, Frame};
 
 pub const DEFAULT_AUDIO_UPLOAD_LIMIT: u64 = 25 * 1024 * 1024;
 
@@ -27,7 +33,7 @@ pub enum TranscriptionResponseFormat {
 }
 
 impl TranscriptionResponseFormat {
-    pub fn parse(value: Option<&str>) -> Result<Self, AudioCodecError> {
+    pub fn parse(value: Option<&str>) -> Result<Self, Error> {
         match value.unwrap_or("json") {
             "json" => Ok(Self::Json),
             "text" => Ok(Self::Text),
@@ -35,9 +41,7 @@ impl TranscriptionResponseFormat {
             "verbose_json" => Ok(Self::VerboseJson),
             "vtt" => Ok(Self::Vtt),
             "diarized_json" => Ok(Self::DiarizedJson),
-            value => Err(AudioCodecError::UnsupportedTranscriptionFormat(
-                value.to_owned(),
-            )),
+            value => Err(Error::UnsupportedTranscriptionFormat(value.to_owned())),
         }
     }
 
@@ -48,7 +52,7 @@ impl TranscriptionResponseFormat {
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiSpeechRequest {
+pub struct SpeechRequest {
     pub model: String,
     pub input: String,
     pub voice: String,
@@ -64,18 +68,18 @@ pub struct OpenAiSpeechRequest {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_speech(request: OpenAiSpeechRequest) -> Result<Operation, AudioCodecError> {
+pub fn decode_speech(request: SpeechRequest) -> Result<Operation, Error> {
     if request.input.is_empty() {
-        return Err(AudioCodecError::EmptySpeechInput);
+        return Err(Error::EmptySpeechInput);
     }
     if request.voice.is_empty() {
-        return Err(AudioCodecError::EmptyVoice);
+        return Err(Error::EmptyVoice);
     }
     if request
         .speed
         .is_some_and(|speed| !(0.25..=4.0).contains(&speed))
     {
-        return Err(AudioCodecError::InvalidSpeed);
+        return Err(Error::InvalidSpeed);
     }
     let route = RouteSlug::parse(request.model)?;
     let stream = request.stream_format.as_deref() == Some("sse");
@@ -104,12 +108,12 @@ pub fn decode_speech(request: OpenAiSpeechRequest) -> Result<Operation, AudioCod
 pub fn encode_speech(
     request: &CanonicalSpeechRequest,
     upstream_model: &str,
-) -> Result<OpenAiSpeechRequest, AudioCodecError> {
+) -> Result<SpeechRequest, Error> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
     apply_pointer_extensions(
-        OpenAiSpeechRequest {
+        SpeechRequest {
             model: upstream_model.into(),
             input: request.input.clone(),
             voice: request.voice.clone(),
@@ -121,7 +125,7 @@ pub fn encode_speech(
         },
         &request.extensions.values,
     )
-    .map_err(AudioCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 pub fn decode_speech_body(body: BinaryMediaBody) -> SpeechResult {
@@ -131,10 +135,10 @@ pub fn decode_speech_body(body: BinaryMediaBody) -> SpeechResult {
     }
 }
 
-pub fn encode_speech_body(result: &SpeechResult) -> Result<BinaryMediaBody, AudioCodecError> {
+pub fn encode_speech_body(result: &SpeechResult) -> Result<BinaryMediaBody, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     if !result.extensions.values.is_empty() {
-        return Err(AudioCodecError::BinaryExtensionsUnsupported);
+        return Err(Error::BinaryExtensionsUnsupported);
     }
     Ok(BinaryMediaBody {
         media: result.audio.clone(),
@@ -142,7 +146,7 @@ pub fn encode_speech_body(result: &SpeechResult) -> Result<BinaryMediaBody, Audi
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiSpeechStreamEvent {
+pub struct SpeechStreamEvent {
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -164,9 +168,9 @@ pub enum SpeechStreamUpdate {
 }
 
 pub fn decode_speech_stream_event(
-    event: OpenAiSpeechStreamEvent,
-    mut stage_base64: impl FnMut(&str) -> Result<MediaArtifact, AudioCodecError>,
-) -> Result<SpeechStreamUpdate, AudioCodecError> {
+    event: SpeechStreamEvent,
+    mut stage_base64: impl FnMut(&str) -> Result<MediaArtifact, Error>,
+) -> Result<SpeechStreamUpdate, Error> {
     let mut extensions = BTreeMap::new();
     collect_extra("", &event.extra, &mut extensions);
     match event.kind.as_str() {
@@ -174,7 +178,7 @@ pub fn decode_speech_stream_event(
             let encoded = event
                 .audio
                 .or(event.delta)
-                .ok_or(AudioCodecError::MissingAudioDelta)?;
+                .ok_or(Error::MissingAudioDelta)?;
             Ok(SpeechStreamUpdate::Audio {
                 media: stage_base64(&encoded)?,
                 extensions: SourceExtensions::new(Surface::OpenAi, extensions),
@@ -183,14 +187,14 @@ pub fn decode_speech_stream_event(
         "speech.audio.done" => Ok(SpeechStreamUpdate::Done {
             extensions: SourceExtensions::new(Surface::OpenAi, extensions),
         }),
-        _ => Err(AudioCodecError::UnsupportedStreamEvent(event.kind)),
+        _ => Err(Error::UnsupportedStreamEvent(event.kind)),
     }
 }
 
 pub fn encode_speech_stream_update(
     update: &SpeechStreamUpdate,
-    mut read_base64: impl FnMut(&MediaArtifact) -> Result<String, AudioCodecError>,
-) -> Result<OpenAiSpeechStreamEvent, AudioCodecError> {
+    mut read_base64: impl FnMut(&MediaArtifact) -> Result<String, Error>,
+) -> Result<SpeechStreamEvent, Error> {
     let (kind, audio, extensions) = match update {
         SpeechStreamUpdate::Audio { media, extensions } => {
             extensions.ensure_representable_on(Surface::OpenAi)?;
@@ -202,7 +206,7 @@ pub fn encode_speech_stream_update(
         }
     };
     apply_pointer_extensions(
-        OpenAiSpeechStreamEvent {
+        SpeechStreamEvent {
             kind: kind.into(),
             audio,
             delta: None,
@@ -210,11 +214,11 @@ pub fn encode_speech_stream_update(
         },
         &extensions.values,
     )
-    .map_err(AudioCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiTranscriptionRequest {
+pub struct TranscriptionRequest {
     pub model: String,
     pub file: BoundedMediaPart,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -241,15 +245,13 @@ const fn is_false(value: &bool) -> bool {
     !*value
 }
 
-pub fn decode_transcription(
-    mut request: OpenAiTranscriptionRequest,
-) -> Result<Operation, AudioCodecError> {
+pub fn decode_transcription(mut request: TranscriptionRequest) -> Result<Operation, Error> {
     validate_audio_part(&request.file)?;
     if request
         .temperature
         .is_some_and(|value| !(0.0..=1.0).contains(&value))
     {
-        return Err(AudioCodecError::InvalidTemperature);
+        return Err(Error::InvalidTemperature);
     }
     let response_format = TranscriptionResponseFormat::parse(request.response_format.as_deref())?;
     validate_transcription_options(&request, response_format)?;
@@ -297,16 +299,16 @@ pub fn encode_transcription(
     request: &CanonicalTranscriptionRequest,
     upstream_model: &str,
     mut resolve_part: impl FnMut(
-        &crate::domain::MediaHandle,
-    ) -> Result<BoundedMediaPart, AudioCodecError>,
-) -> Result<OpenAiTranscriptionRequest, AudioCodecError> {
+        &crate::domain::canonical::requests::MediaHandle,
+    ) -> Result<BoundedMediaPart, Error>,
+) -> Result<TranscriptionRequest, Error> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
     let file = resolve_part(&request.audio)?;
     validate_audio_part(&file)?;
     let wire = apply_pointer_extensions(
-        OpenAiTranscriptionRequest {
+        TranscriptionRequest {
             model: upstream_model.into(),
             file,
             language: request.language.clone(),
@@ -321,7 +323,7 @@ pub fn encode_transcription(
         },
         &request.extensions.values,
     )
-    .map_err(AudioCodecError::InvalidExtension)?;
+    .map_err(Error::InvalidExtension)?;
     let response_format = TranscriptionResponseFormat::parse(wire.response_format.as_deref())?;
     validate_transcription_options(&wire, response_format)?;
     let mut extra = wire.extra.clone();
@@ -338,7 +340,7 @@ struct KnownSpeakers {
 fn take_known_speakers(
     extra: &mut BTreeMap<String, Value>,
     response_format: TranscriptionResponseFormat,
-) -> Result<Option<KnownSpeakers>, AudioCodecError> {
+) -> Result<Option<KnownSpeakers>, Error> {
     let names = take_string_array(extra, "known_speaker_names")?;
     let references = take_string_array(extra, "known_speaker_references")?;
     match (names, references) {
@@ -357,14 +359,14 @@ fn take_known_speakers(
         {
             Ok(Some(KnownSpeakers { names, references }))
         }
-        _ => Err(AudioCodecError::InvalidKnownSpeakers),
+        _ => Err(Error::InvalidKnownSpeakers),
     }
 }
 
 fn take_string_array(
     extra: &mut BTreeMap<String, Value>,
     field: &str,
-) -> Result<Option<Vec<String>>, AudioCodecError> {
+) -> Result<Option<Vec<String>>, Error> {
     let value = extra
         .remove(field)
         .or_else(|| extra.remove(&format!("{field}[]")));
@@ -377,18 +379,18 @@ fn take_string_array(
                 value
                     .as_str()
                     .map(str::to_owned)
-                    .ok_or(AudioCodecError::InvalidKnownSpeakers)
+                    .ok_or(Error::InvalidKnownSpeakers)
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Some),
-        _ => Err(AudioCodecError::InvalidKnownSpeakers),
+        _ => Err(Error::InvalidKnownSpeakers),
     }
 }
 
 fn validate_transcription_options(
-    request: &OpenAiTranscriptionRequest,
+    request: &TranscriptionRequest,
     response_format: TranscriptionResponseFormat,
-) -> Result<(), AudioCodecError> {
+) -> Result<(), Error> {
     if !request.timestamp_granularities.is_empty()
         && (response_format != TranscriptionResponseFormat::VerboseJson
             || request
@@ -396,39 +398,39 @@ fn validate_transcription_options(
                 .iter()
                 .any(|value| !matches!(value.as_str(), "word" | "segment")))
     {
-        return Err(AudioCodecError::InvalidTimestampGranularities);
+        return Err(Error::InvalidTimestampGranularities);
     }
     if !request.include.is_empty()
         && (response_format != TranscriptionResponseFormat::Json
             || request.include.iter().any(|value| value != "logprobs"))
     {
-        return Err(AudioCodecError::InvalidTranscriptionInclude);
+        return Err(Error::InvalidTranscriptionInclude);
     }
     Ok(())
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
-pub enum OpenAiTranscriptionResponse {
-    Json(OpenAiTranscriptionJson),
+pub enum TranscriptionResponse {
+    Json(Transcription),
     Text(String),
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiTranscriptionJson {
+pub struct Transcription {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
     #[serde(default)]
-    pub segments: Vec<OpenAiTranscriptionSegment>,
+    pub segments: Vec<Segment>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct OpenAiTranscriptionSegment {
+pub struct Segment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<u32>,
     pub start: f64,
@@ -440,16 +442,16 @@ pub struct OpenAiTranscriptionSegment {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_transcription_response(response: OpenAiTranscriptionResponse) -> TranscriptionResult {
+pub fn decode_transcription_response(response: TranscriptionResponse) -> TranscriptionResult {
     match response {
-        OpenAiTranscriptionResponse::Text(text) => TranscriptionResult {
+        TranscriptionResponse::Text(text) => TranscriptionResult {
             text,
             language: None,
             duration_seconds: None,
             segments: Vec::new(),
             extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         },
-        OpenAiTranscriptionResponse::Json(response) => {
+        TranscriptionResponse::Json(response) => {
             let mut extensions = BTreeMap::new();
             collect_extra("", &response.extra, &mut extensions);
             let segments = response
@@ -484,12 +486,12 @@ pub fn decode_transcription_response(response: OpenAiTranscriptionResponse) -> T
 
 pub fn encode_transcription_response(
     result: &TranscriptionResult,
-) -> Result<OpenAiTranscriptionResponse, AudioCodecError> {
+) -> Result<TranscriptionResponse, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     let segments = result
         .segments
         .iter()
-        .map(|segment| OpenAiTranscriptionSegment {
+        .map(|segment| Segment {
             id: segment.id,
             start: segment.start_seconds,
             end: segment.end_seconds,
@@ -499,7 +501,7 @@ pub fn encode_transcription_response(
         })
         .collect();
     apply_pointer_extensions(
-        OpenAiTranscriptionResponse::Json(OpenAiTranscriptionJson {
+        TranscriptionResponse::Json(Transcription {
             text: result.text.clone(),
             language: result.language.clone(),
             duration: result.duration_seconds,
@@ -508,20 +510,20 @@ pub fn encode_transcription_response(
         }),
         &result.extensions.values,
     )
-    .map_err(AudioCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
-pub struct OpenAiTranscriptionStreamDecoder {
+pub struct Decoder {
     sse: SseDecoder,
     sequence: u64,
     started: bool,
     done: bool,
 }
 
-impl std::fmt::Debug for OpenAiTranscriptionStreamDecoder {
+impl std::fmt::Debug for Decoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("OpenAiTranscriptionStreamDecoder")
+            .debug_struct("Decoder")
             .field("next_sequence", &self.sequence)
             .field("started", &self.started)
             .field("done", &self.done)
@@ -529,13 +531,13 @@ impl std::fmt::Debug for OpenAiTranscriptionStreamDecoder {
     }
 }
 
-impl Default for OpenAiTranscriptionStreamDecoder {
+impl Default for Decoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OpenAiTranscriptionStreamDecoder {
+impl Decoder {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -546,45 +548,45 @@ impl OpenAiTranscriptionStreamDecoder {
         }
     }
 
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, AudioCodecError> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Error> {
         let frames = self.sse.push(bytes)?;
         self.decode_frames(frames)
     }
 
-    pub fn finish(&mut self) -> Result<Vec<CanonicalEvent>, AudioCodecError> {
+    pub fn finish(&mut self) -> Result<Vec<Event>, Error> {
         let frames = self.sse.finish()?;
         let events = self.decode_frames(frames)?;
         if !self.done {
-            return Err(AudioCodecError::UnexpectedStreamEof);
+            return Err(Error::UnexpectedStreamEof);
         }
         Ok(events)
     }
 
     fn decode_frames(
         &mut self,
-        frames: Vec<crate::protocols::sse::SseFrame>,
-    ) -> Result<Vec<CanonicalEvent>, AudioCodecError> {
+        frames: Vec<crate::protocols::sse::Frame>,
+    ) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
         for frame in frames {
             if self.done {
-                return Err(AudioCodecError::DataAfterDone);
+                return Err(Error::DataAfterDone);
             }
             let value: Value = serde_json::from_str(&frame.data)?;
             let kind = value
                 .get("type")
                 .and_then(Value::as_str)
                 .or(frame.event.as_deref())
-                .ok_or(AudioCodecError::MissingStreamEventType)?;
+                .ok_or(Error::MissingStreamEventType)?;
             self.ensure_started(&mut output);
             match kind {
                 "transcript.text.delta" => self.emit(
                     &mut output,
-                    CanonicalEventKind::TextDelta {
+                    Kind::TextDelta {
                         output_index: 0,
                         text: value
                             .get("delta")
                             .and_then(Value::as_str)
-                            .ok_or(AudioCodecError::MissingTranscriptDelta)?
+                            .ok_or(Error::MissingTranscriptDelta)?
                             .to_owned(),
                     },
                 ),
@@ -600,7 +602,7 @@ impl OpenAiTranscriptionStreamDecoder {
                             .unwrap_or(0);
                         self.emit(
                             &mut output,
-                            CanonicalEventKind::Usage {
+                            Kind::Usage {
                                 usage: Usage {
                                     input_tokens,
                                     output_tokens,
@@ -616,17 +618,17 @@ impl OpenAiTranscriptionStreamDecoder {
                     }
                     self.emit(
                         &mut output,
-                        CanonicalEventKind::Finish {
+                        Kind::Finish {
                             output_index: 0,
-                            reason: crate::domain::FinishReason::Stop,
+                            reason: crate::domain::canonical::events::FinishReason::Stop,
                         },
                     );
-                    self.emit(&mut output, CanonicalEventKind::Done);
+                    self.emit(&mut output, Kind::Done);
                     self.done = true;
                 }
                 _ => self.emit(
                     &mut output,
-                    CanonicalEventKind::SourceExtension {
+                    Kind::SourceExtension {
                         extensions: SourceExtensions::new(
                             Surface::OpenAi,
                             BTreeMap::from([(format!("/stream/{kind}"), value)]),
@@ -638,20 +640,20 @@ impl OpenAiTranscriptionStreamDecoder {
         Ok(output)
     }
 
-    fn ensure_started(&mut self, output: &mut Vec<CanonicalEvent>) {
+    fn ensure_started(&mut self, output: &mut Vec<Event>) {
         if self.started {
             return;
         }
         self.emit(
             output,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: None,
                 provider_model: None,
             },
         );
         self.emit(
             output,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
@@ -659,22 +661,22 @@ impl OpenAiTranscriptionStreamDecoder {
         self.started = true;
     }
 
-    fn emit(&mut self, output: &mut Vec<CanonicalEvent>, kind: CanonicalEventKind) {
-        output.push(CanonicalEvent::new(self.sequence, kind));
+    fn emit(&mut self, output: &mut Vec<Event>, kind: Kind) {
+        output.push(Event::new(self.sequence, kind));
         self.sequence = self.sequence.saturating_add(1);
     }
 }
 
-pub struct OpenAiTranscriptionStreamEncoder {
+pub struct Encoder {
     next_sequence: u64,
     usage: Option<Usage>,
     done: bool,
 }
 
-impl std::fmt::Debug for OpenAiTranscriptionStreamEncoder {
+impl std::fmt::Debug for Encoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("OpenAiTranscriptionStreamEncoder")
+            .debug_struct("Encoder")
             .field("next_sequence", &self.next_sequence)
             .field("has_usage", &self.usage.is_some())
             .field("done", &self.done)
@@ -682,13 +684,13 @@ impl std::fmt::Debug for OpenAiTranscriptionStreamEncoder {
     }
 }
 
-impl Default for OpenAiTranscriptionStreamEncoder {
+impl Default for Encoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OpenAiTranscriptionStreamEncoder {
+impl Encoder {
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -698,32 +700,32 @@ impl OpenAiTranscriptionStreamEncoder {
         }
     }
 
-    pub fn push(&mut self, event: &CanonicalEvent) -> Result<Vec<SseFrame>, AudioCodecError> {
+    pub fn push(&mut self, event: &Event) -> Result<Vec<Frame>, Error> {
         if self.done {
-            return Err(AudioCodecError::DataAfterDone);
+            return Err(Error::DataAfterDone);
         }
         if event.sequence != self.next_sequence {
-            return Err(AudioCodecError::OutOfOrder {
+            return Err(Error::OutOfOrder {
                 expected: self.next_sequence,
                 actual: event.sequence,
             });
         }
         self.next_sequence = self.next_sequence.saturating_add(1);
         let frames = match &event.kind {
-            CanonicalEventKind::ResponseStart { .. }
-            | CanonicalEventKind::MessageStart { .. }
-            | CanonicalEventKind::Finish { .. } => Vec::new(),
-            CanonicalEventKind::TextDelta { text, .. } => vec![transcription_sse_frame(
+            Kind::ResponseStart { .. } | Kind::MessageStart { .. } | Kind::Finish { .. } => {
+                Vec::new()
+            }
+            Kind::TextDelta { text, .. } => vec![transcription_sse_frame(
                 "transcript.text.delta",
                 serde_json::json!({"delta": text}),
             )?],
-            CanonicalEventKind::Usage { usage } => {
+            Kind::Usage { usage } => {
                 self.usage = Some(*usage);
                 Vec::new()
             }
-            CanonicalEventKind::SourceExtension { extensions } => {
+            Kind::SourceExtension { extensions } => {
                 if extensions.source != Some(Surface::OpenAi) {
-                    return Err(AudioCodecError::CrossProtocolExtensions);
+                    return Err(Error::CrossProtocolExtensions);
                 }
                 extensions
                     .values
@@ -733,18 +735,18 @@ impl OpenAiTranscriptionStreamEncoder {
                         let kind = value
                             .get("type")
                             .and_then(Value::as_str)
-                            .ok_or_else(|| AudioCodecError::InvalidExtension(path.clone()))?;
+                            .ok_or_else(|| Error::InvalidExtension(path.clone()))?;
                         transcription_sse_frame(kind, value.clone())
                     })
                     .collect::<Result<Vec<_>, _>>()?
             }
-            CanonicalEventKind::Error { error } => vec![transcription_sse_frame(
+            Kind::Error { error } => vec![transcription_sse_frame(
                 "error",
                 serde_json::json!({
                     "error": {"code": error.provider_code, "message": error.message}
                 }),
             )?],
-            CanonicalEventKind::Done => {
+            Kind::Done => {
                 self.done = true;
                 let usage = self.usage.map(|usage| {
                     serde_json::json!({
@@ -758,20 +760,20 @@ impl OpenAiTranscriptionStreamEncoder {
                     serde_json::json!({"usage": usage}),
                 )?]
             }
-            CanonicalEventKind::RefusalDelta { .. } | CanonicalEventKind::ToolCallDelta { .. } => {
-                return Err(AudioCodecError::UnrepresentableStreamEvent);
+            Kind::RefusalDelta { .. } | Kind::ToolCallDelta { .. } => {
+                return Err(Error::UnrepresentableStreamEvent);
             }
         };
         Ok(frames)
     }
 }
 
-fn transcription_sse_frame(kind: &str, mut payload: Value) -> Result<SseFrame, AudioCodecError> {
+fn transcription_sse_frame(kind: &str, mut payload: Value) -> Result<Frame, Error> {
     let Value::Object(object) = &mut payload else {
-        return Err(AudioCodecError::InvalidStreamPayload);
+        return Err(Error::InvalidStreamPayload);
     };
     object.insert("type".into(), Value::String(kind.into()));
-    Ok(SseFrame {
+    Ok(Frame {
         event: Some(kind.into()),
         data: serde_json::to_string(&payload)?,
         id: None,
@@ -779,10 +781,10 @@ fn transcription_sse_frame(kind: &str, mut payload: Value) -> Result<SseFrame, A
     })
 }
 
-fn validate_audio_part(part: &BoundedMediaPart) -> Result<(), AudioCodecError> {
+fn validate_audio_part(part: &BoundedMediaPart) -> Result<(), Error> {
     if part.content_length > part.maximum_length || part.maximum_length > DEFAULT_AUDIO_UPLOAD_LIMIT
     {
-        return Err(AudioCodecError::InvalidMediaPart);
+        return Err(Error::InvalidMediaPart);
     }
     Ok(())
 }
@@ -794,11 +796,11 @@ fn capture_string(extensions: &mut BTreeMap<String, Value>, path: &str, value: O
 }
 
 #[derive(Debug, Error)]
-pub enum AudioCodecError {
+pub enum Error {
     #[error(transparent)]
     InvalidRoute(#[from] RouteSlugError),
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("speech input cannot be empty")]
@@ -822,7 +824,7 @@ pub enum AudioCodecError {
     #[error("invalid source extension path: {0}")]
     InvalidExtension(String),
     #[error(transparent)]
-    Sse(#[from] SseDecodeError),
+    Sse(#[from] DecodeError),
     #[error("binary speech extensions require an HTTP header representation")]
     BinaryExtensionsUnsupported,
     #[error("speech stream event is missing its audio delta")]

@@ -13,17 +13,33 @@ use std::{
 
 use chrono::Utc;
 use futures::stream;
-use olp::test_support::{ApiMode, ProcessComposition, public_router};
-use olp_db::{PgStore, security::AuthHmacKey};
-use olp_engine::domain::{
-    ApiKey, ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyScope, ApiKeyStatus,
-    AttemptFailureClass, BoxFuture, CanonicalEvent, CanonicalEventKind, Capability, DurationMs,
-    FinishReason, MessageRole, OperationKind, Provider, ProviderId, ProviderKind, ProviderOutput,
-    ProviderRequest, ProviderTransport, Route, RouteId, RouteSlug, RuntimeGeneration,
-    RuntimeGenerationId, RuntimeSnapshot, Surface, Target, TargetId, TransportError, TransportMode,
-    TransportPhase, Usage,
+use olp::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    public_http::router::for_state,
 };
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_db::{security::key_material::AuthHmacKey, store::Store};
+use olp_engine::domain::{
+    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    canonical::{
+        events::{Event, FinishReason, Kind, Usage},
+        identity::{OperationKind, Surface, TransportMode},
+        requests::MessageRole,
+    },
+    ids::{
+        ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
+        TargetId,
+    },
+    ports::{
+        AttemptFailureClass, BoxFuture, ProviderOutput, ProviderRequest, ProviderTransport,
+        TransportError, TransportPhase,
+    },
+    routing::{
+        provider::{Capability, Provider, ProviderKind},
+        route::{Route, Target},
+        snapshot::{RuntimeGeneration, Snapshot},
+    },
+};
+use olp_engine::inference::runtime::Manager;
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 
@@ -64,32 +80,32 @@ impl ProviderTransport for StaticCanonicalTransport {
     }
 }
 
-fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
+fn generation_events(text: &str, upstream_model: &str) -> Vec<Event> {
     vec![
-        CanonicalEvent::new(
+        Event::new(
             0,
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id: Some("sdk-smoke-response".to_owned()),
                 provider_model: Some(upstream_model.to_owned()),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             1,
-            CanonicalEventKind::MessageStart {
+            Kind::MessageStart {
                 output_index: 0,
                 role: MessageRole::Assistant,
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             2,
-            CanonicalEventKind::TextDelta {
+            Kind::TextDelta {
                 output_index: 0,
                 text: text.to_owned(),
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             3,
-            CanonicalEventKind::Usage {
+            Kind::Usage {
                 usage: Usage {
                     input_tokens: 4,
                     output_tokens: 6,
@@ -99,14 +115,14 @@ fn generation_events(text: &str, upstream_model: &str) -> Vec<CanonicalEvent> {
                 },
             },
         ),
-        CanonicalEvent::new(
+        Event::new(
             4,
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index: 0,
                 reason: FinishReason::Stop,
             },
         ),
-        CanonicalEvent::new(5, CanonicalEventKind::Done),
+        Event::new(5, Kind::Done),
     ]
 }
 
@@ -176,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout: DurationMs::new(4_000),
         }],
     };
-    let snapshot = RuntimeSnapshot {
+    let snapshot = Snapshot {
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 1,
@@ -208,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         ]),
     };
-    let runtime = Arc::new(RuntimeManager::empty());
+    let runtime = Arc::new(Manager::empty());
     runtime.install(
         snapshot,
         BTreeMap::from([(
@@ -224,7 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // gateway surface still has a mandatory storage capability. A lazy pool
     // supplies that typed capability without adding a database service to this
     // protocol-only fixture.
-    let store = PgStore::from_pool(
+    let store = Store::from_pool(
         PgPoolOptions::new().connect_lazy("postgres://olp:olp@127.0.0.1/olp-sdk-smoke")?,
     );
     let mut state =
@@ -246,6 +262,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     eprintln!("SDK smoke fixture listening on {origin}");
 
-    axum::serve(listener, public_router(gateway_state)).await?;
+    axum::serve(listener, for_state(gateway_state)).await?;
     Ok(())
 }

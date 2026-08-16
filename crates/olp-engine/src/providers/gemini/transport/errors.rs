@@ -1,9 +1,10 @@
-use crate::domain::TransportError;
+use crate::domain::ports::TransportError;
 use http::{HeaderValue, StatusCode};
 use zeroize::Zeroizing;
 
+use crate::providers::transport_common::protocol_error;
 use crate::providers::{
-    gemini::{GeminiApiKey, SecretBearerToken, endpoint::EndpointError},
+    gemini::{ApiKey, SecretBearerToken, endpoint::Error},
     transport_common,
     transport_io::ProviderResponseIo,
 };
@@ -11,11 +12,7 @@ use crate::providers::{
 const PROVIDER: &str = "Gemini";
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new(PROVIDER);
 
-pub(super) use crate::providers::transport_common::{
-    protocol_body_error, protocol_error, source_extensions, transport_error,
-};
-
-pub(super) fn secret_header(api_key: &GeminiApiKey) -> Result<HeaderValue, TransportError> {
+pub(super) fn secret_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
     transport_common::secret_header(api_key.expose(), PROVIDER)
 }
 
@@ -35,10 +32,10 @@ pub(super) fn safe_upstream_error_message(
     transport_common::safe_upstream_error_message(PROVIDER, status, body, api_key)
 }
 
-pub(super) fn map_endpoint_error(error: EndpointError) -> TransportError {
+pub(super) fn map_endpoint_error(error: Error) -> TransportError {
     let dns_timeout = matches!(
         error,
-        EndpointError::Common(crate::providers::CommonEndpointError::DnsTimeout { .. })
+        Error::Common(crate::providers::endpoint::Error::DnsTimeout { .. })
     );
     transport_common::map_endpoint_error(error, dns_timeout)
 }

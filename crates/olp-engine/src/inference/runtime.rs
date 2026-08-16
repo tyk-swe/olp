@@ -11,25 +11,27 @@ use std::{
 };
 
 use crate::domain::{
-    ApiKey, ApiKeyLookupId, ProviderId, ProviderTransport, RuntimeGeneration, RuntimeGenerationId,
-    RuntimeSnapshot,
+    auth::ApiKey,
+    ids::{ApiKeyLookupId, ProviderId, RuntimeGenerationId},
+    ports::ProviderTransport,
+    routing::snapshot::{RuntimeGeneration, Snapshot},
 };
 use arc_swap::ArcSwap;
 use chrono::Utc;
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
 /// Storage-verified payload proposed for activation by the delivery layer.
 #[derive(Clone, Copy)]
-pub struct RuntimeReleaseCandidate<'a> {
+pub struct ReleaseCandidate<'a> {
     pub generation_id: uuid::Uuid,
     pub sequence: i64,
     pub payload: &'a [u8],
 }
 
-impl fmt::Debug for RuntimeReleaseCandidate<'_> {
+impl fmt::Debug for ReleaseCandidate<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("RuntimeReleaseCandidate")
+            .debug_struct("ReleaseCandidate")
             .field("generation_id", &self.generation_id)
             .field("sequence", &self.sequence)
             .field("payload", &"[REDACTED]")
@@ -37,8 +39,8 @@ impl fmt::Debug for RuntimeReleaseCandidate<'_> {
     }
 }
 
-pub struct RuntimeManager {
-    bundle: ArcSwap<RuntimeBundle>,
+pub struct Manager {
+    bundle: ArcSwap<Bundle>,
     loaded: AtomicBool,
     install_lock: Mutex<()>,
 }
@@ -46,12 +48,12 @@ pub struct RuntimeManager {
 /// Everything a request may resolve after pinning a generation. In particular,
 /// credentials live inside connector objects in this same `Arc`, so a config
 /// activation cannot make an old request observe a future credential.
-pub struct RuntimeBundle {
-    snapshot: RuntimeSnapshot,
+pub struct Bundle {
+    snapshot: Snapshot,
     transports: BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
 }
 
-impl RuntimeBundle {
+impl Bundle {
     #[must_use]
     pub fn transport(&self, provider_id: ProviderId) -> Option<Arc<dyn ProviderTransport>> {
         self.transports.get(&provider_id).cloned()
@@ -66,19 +68,19 @@ impl RuntimeBundle {
     }
 }
 
-impl Deref for RuntimeBundle {
-    type Target = RuntimeSnapshot;
+impl Deref for Bundle {
+    type Target = Snapshot;
 
     fn deref(&self) -> &Self::Target {
         &self.snapshot
     }
 }
 
-impl RuntimeManager {
+impl Manager {
     pub fn empty() -> Self {
         Self {
-            bundle: ArcSwap::from_pointee(RuntimeBundle {
-                snapshot: RuntimeSnapshot {
+            bundle: ArcSwap::from_pointee(Bundle {
+                snapshot: Snapshot {
                     generation: RuntimeGeneration {
                         id: RuntimeGenerationId::new(),
                         ordinal: 0,
@@ -96,7 +98,7 @@ impl RuntimeManager {
     }
 
     /// Pins one immutable generation for the lifetime of a request.
-    pub fn pin(&self) -> Arc<RuntimeBundle> {
+    pub fn pin(&self) -> Arc<Bundle> {
         self.bundle.load_full()
     }
 
@@ -108,16 +110,16 @@ impl RuntimeManager {
 
     pub fn install(
         &self,
-        snapshot: RuntimeSnapshot,
+        snapshot: Snapshot,
         transports: BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
-    ) -> Result<bool, RuntimeInstallError> {
+    ) -> Result<bool, Error> {
         snapshot.validate()?;
         if let Some(provider_id) = snapshot
             .providers
             .keys()
             .find(|provider_id| !transports.contains_key(provider_id))
         {
-            return Err(RuntimeInstallError::MissingTransport(*provider_id));
+            return Err(Error::MissingTransport(*provider_id));
         }
         let _install = self
             .install_lock
@@ -128,7 +130,7 @@ impl RuntimeManager {
         {
             return Ok(false);
         }
-        self.bundle.store(Arc::new(RuntimeBundle {
+        self.bundle.store(Arc::new(Bundle {
             snapshot,
             transports,
         }));
@@ -136,15 +138,13 @@ impl RuntimeManager {
         Ok(true)
     }
 
-    fn decode_release(
-        release: &RuntimeReleaseCandidate<'_>,
-    ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
-        let mut snapshot = RuntimeSnapshot::from_persisted_slice(release.payload)?;
+    fn decode_release(release: &ReleaseCandidate<'_>) -> Result<Snapshot, Error> {
+        let mut snapshot = Snapshot::from_persisted_slice(release.payload)?;
         if snapshot.generation.id.as_uuid() != release.generation_id {
-            return Err(RuntimeInstallError::GenerationMismatch);
+            return Err(Error::GenerationMismatch);
         }
         snapshot.generation.ordinal =
-            u64::try_from(release.sequence).map_err(|_| RuntimeInstallError::GenerationMismatch)?;
+            u64::try_from(release.sequence).map_err(|_| Error::GenerationMismatch)?;
         snapshot.validate()?;
         Ok(snapshot)
     }
@@ -155,9 +155,9 @@ impl RuntimeManager {
     /// expiry, limits, or digest material than an LKG release contains.
     pub fn decode_release_candidate(
         &self,
-        release: RuntimeReleaseCandidate<'_>,
+        release: ReleaseCandidate<'_>,
         current_api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
-    ) -> Result<RuntimeSnapshot, RuntimeInstallError> {
+    ) -> Result<Snapshot, Error> {
         let mut snapshot = Self::decode_release(&release)?;
         snapshot.api_keys = current_api_keys;
         snapshot.validate()?;
@@ -165,16 +165,16 @@ impl RuntimeManager {
     }
 }
 
-impl Default for RuntimeManager {
+impl Default for Manager {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-#[derive(Debug, Error)]
-pub enum RuntimeInstallError {
+#[derive(Debug, ThisError)]
+pub enum Error {
     #[error("runtime snapshot is invalid: {0}")]
-    InvalidSnapshot(#[from] crate::domain::SnapshotValidationError),
+    InvalidSnapshot(#[from] crate::domain::routing::snapshot::Error),
     #[error("runtime release is not valid JSON: {0}")]
     Decode(#[from] serde_json::Error),
     #[error("runtime generation ID does not match its activation candidate")]
@@ -188,9 +188,10 @@ mod tests {
     use std::{collections::BTreeSet, num::NonZeroU32};
 
     use crate::domain::{
-        ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyScope, ApiKeyStatus, BoxFuture, Provider,
-        ProviderEventStream, ProviderKind, ProviderOutput, ProviderRequest, RouteSlug,
-        TransportError,
+        auth::{ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+        ids::{ApiKeyId, RouteSlug},
+        ports::{BoxFuture, ProviderEventStream, ProviderOutput, ProviderRequest, TransportError},
+        routing::provider::{Provider, ProviderKind},
     };
     use chrono::Duration;
     use futures::stream;
@@ -214,7 +215,7 @@ mod tests {
 
     #[test]
     fn swaps_only_forward_and_pins_old_generation() {
-        let manager = RuntimeManager::empty();
+        let manager = Manager::empty();
         let old = manager.pin();
         let mut newer = old.snapshot.clone();
         newer.generation.id = RuntimeGenerationId::new();
@@ -231,9 +232,9 @@ mod tests {
 
     #[test]
     fn pinned_generation_retains_its_own_transport_objects() {
-        let manager = RuntimeManager::empty();
+        let manager = Manager::empty();
         let provider_id = ProviderId::new();
-        let snapshot = |ordinal| RuntimeSnapshot {
+        let snapshot = |ordinal| Snapshot {
             generation: RuntimeGeneration {
                 id: RuntimeGenerationId::new(),
                 ordinal,
@@ -272,7 +273,7 @@ mod tests {
 
     #[test]
     fn fallback_replaces_every_historical_api_key_security_field() {
-        let manager = RuntimeManager::empty();
+        let manager = Manager::empty();
         let lookup_id = ApiKeyLookupId::parse("lookup_same_key").unwrap();
         let key_id = ApiKeyId::new();
         let historical_key = ApiKey {
@@ -286,7 +287,7 @@ mod tests {
             limits: ApiKeyLimits::default(),
         };
         let generation_id = RuntimeGenerationId::new();
-        let historical = RuntimeSnapshot {
+        let historical = Snapshot {
             generation: RuntimeGeneration {
                 id: generation_id,
                 ordinal: 9,
@@ -297,7 +298,7 @@ mod tests {
             api_keys: BTreeMap::from([(lookup_id.clone(), historical_key)]),
         };
         let release_payload = serde_json::to_vec(&historical).unwrap();
-        let release = RuntimeReleaseCandidate {
+        let release = ReleaseCandidate {
             generation_id: generation_id.as_uuid(),
             sequence: 9,
             payload: &release_payload,

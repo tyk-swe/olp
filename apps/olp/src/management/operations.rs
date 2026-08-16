@@ -1,14 +1,17 @@
 use axum::{Router, routing::get};
 use utoipa::OpenApi;
 
-use crate::{HealthResponse, ManagementState, Problem};
+use crate::{
+    bootstrap::mode_dependencies::ManagementState, observability::HealthResponse,
+    public_http::problem::Problem,
+};
 
 #[cfg(test)]
 use axum::http::{HeaderMap, HeaderValue, header};
 #[cfg(test)]
 use chrono::Utc;
 #[cfg(test)]
-use olp_engine::domain::Surface;
+use olp_engine::domain::canonical::identity::Surface;
 #[cfg(test)]
 use uuid::Uuid;
 

@@ -18,47 +18,39 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_engine::{
-    domain::{OperationKind, Surface},
-    inference::request_metadata::{RequestMetadataEmitter, RequestMetadataEvent},
+    domain::canonical::identity::{OperationKind, Surface},
+    inference::request_metadata::{Emitter, Event},
 };
 
 use crate::{
-    MAX_JSON_BODY_BYTES, Problem, RequestBoundaryState, gateway, management,
-    public_http::proxy::public_auth_source, public_http::public_auth_routes::PublicAuthRoute,
-    public_http::router::REQUEST_BODY_TIMEOUT,
+    bootstrap::mode_dependencies::RequestBoundaryState, bootstrap::state::MAX_JSON_BODY_BYTES,
+    gateway, management, public_http::problem::Problem, public_http::proxy::public_auth_source,
+    public_http::public_auth_routes::PublicAuthRoute, public_http::router::REQUEST_BODY_TIMEOUT,
 };
 
-mod limits;
-mod multipart;
-mod public;
-mod validation;
+pub(crate) mod limits;
+pub(crate) mod multipart;
+pub(crate) mod public;
+pub(crate) mod validation;
 
 use limits::{
-    authenticate_inference_headers, estimate_http_non_json_request_tokens,
-    reserve_http_inference_limits,
+    ReleaseReservationBody, authenticate_inference_headers, estimate_http_json_request_tokens,
+    estimate_http_non_json_request_tokens, reserve_http_inference_limits,
 };
-use multipart::preauthorize_multipart;
+use multipart::{MultipartRequestAdmission, preauthorize_multipart, validate_multipart_boundary};
 use validation::{
-    BodyAdmission, payload_too_large, request_body_timeout, validate_body_framing_and_encoding,
-    validate_target_and_headers,
+    BodyAdmission, JsonBodyReadError, payload_too_large, read_json_body, request_body_timeout,
+    validate_body_framing_and_encoding, validate_json_depth, validate_target_and_headers,
 };
 
-pub(crate) use limits::{ReleaseReservationBody, estimate_http_json_request_tokens};
-pub(crate) use multipart::{MultipartAdmissionState, validate_multipart_boundary};
-pub(crate) use multipart::{MultipartRequestAdmission, MultipartRouteAdmission};
-pub(crate) use olp_engine::inference::{InferencePrincipal, InferenceReservation};
-pub(crate) use public::{
-    DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS, DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
-    MAX_ADMISSION_CAPACITY, PublicAdmission, PublicAdmissionMiddleware, admit_public_request,
-};
-pub(crate) use validation::{JsonBodyReadError, read_json_body, validate_json_depth};
+use olp_engine::inference::{limits::Reservation, principal::Principal};
 
 #[derive(Clone, Copy)]
 pub(crate) struct FirstOwnerSetupAuthorized;
 
 tokio::task_local! {
     /// The sole verified API-key identity for an admitted inference request.
-    pub(crate) static HTTP_INFERENCE_PRINCIPAL: InferencePrincipal;
+    pub(crate) static HTTP_INFERENCE_PRINCIPAL: Principal;
 
     /// Set by the canonical pipeline once it owns metadata completion for an
     /// authenticated request. The HTTP boundary emits a content-free fallback
@@ -72,11 +64,11 @@ tokio::task_local! {
 
     /// Keeps the HTTP concurrency reservation alive while request work is
     /// transferred to a detached inference task.
-    pub(crate) static HTTP_INFERENCE_RESERVATION_HOLD: InferenceReservation;
+    pub(crate) static HTTP_INFERENCE_RESERVATION_HOLD: Reservation;
 }
 
 #[cfg(test)]
-pub(crate) fn http_inference_principal() -> Option<InferencePrincipal> {
+pub(crate) fn http_inference_principal() -> Option<Principal> {
     HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok()
 }
 
@@ -86,9 +78,9 @@ pub(crate) fn http_inference_reserved_tokens() -> Option<i64> {
         .ok()
 }
 
-pub(crate) fn http_inference_reservation() -> Option<InferenceReservation> {
+pub(crate) fn http_inference_reservation() -> Option<Reservation> {
     HTTP_INFERENCE_RESERVATION_HOLD
-        .try_with(InferenceReservation::clone)
+        .try_with(Reservation::clone)
         .ok()
 }
 
@@ -105,10 +97,10 @@ pub(crate) fn http_inference_metadata_claim() -> Option<Arc<AtomicBool>> {
 
 #[derive(Clone)]
 struct HttpInferenceTaskContext {
-    principal: Option<InferencePrincipal>,
+    principal: Option<Principal>,
     metadata_claimed: Option<Arc<AtomicBool>>,
     reserved_tokens: Option<i64>,
-    reservation_hold: Option<InferenceReservation>,
+    reservation_hold: Option<Reservation>,
 }
 
 impl HttpInferenceTaskContext {
@@ -159,16 +151,19 @@ pub(crate) async fn enforce_request_limits(
     request: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> Response {
-    let endpoint = gateway::InferenceEndpoint::classify(request.method(), request.uri().path());
-    let surface = endpoint.map(gateway::InferenceEndpoint::surface);
+    let endpoint = gateway::endpoint_policy::InferenceEndpoint::classify(
+        request.method(),
+        request.uri().path(),
+    );
+    let surface = endpoint.map(gateway::endpoint_policy::InferenceEndpoint::surface);
     match enforce_request_limits_inner(&state, request, next, endpoint).await {
         Ok(response) => response,
         Err(RequestLimitRejection::Problem(problem)) => match surface {
-            Some(surface) => gateway::problem_response(surface, problem),
+            Some(surface) => gateway::protocol_error::problem_response(surface, problem),
             None => problem.into_response(),
         },
         Err(RequestLimitRejection::Inference(error)) => match surface {
-            Some(surface) => gateway::inference_error_response(surface, error),
+            Some(surface) => gateway::protocol_error::inference_error_response(surface, error),
             None => Problem::from(error).into_response(),
         },
     }
@@ -176,7 +171,7 @@ pub(crate) async fn enforce_request_limits(
 
 enum RequestLimitRejection {
     Problem(Problem),
-    Inference(gateway::InferenceError),
+    Inference(gateway::error::InferenceError),
 }
 
 impl From<Problem> for RequestLimitRejection {
@@ -185,15 +180,15 @@ impl From<Problem> for RequestLimitRejection {
     }
 }
 
-impl From<gateway::InferenceError> for RequestLimitRejection {
-    fn from(error: gateway::InferenceError) -> Self {
+impl From<gateway::error::InferenceError> for RequestLimitRejection {
+    fn from(error: gateway::error::InferenceError) -> Self {
         Self::Inference(error)
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct LocalRequestMetadata {
-    pub(crate) request_metadata: Option<RequestMetadataEmitter>,
+    pub(crate) request_metadata: Option<Emitter>,
     pub(crate) request_started_at: chrono::DateTime<chrono::Utc>,
     pub(crate) runtime_generation_id: uuid::Uuid,
     pub(crate) api_key_id: uuid::Uuid,
@@ -216,7 +211,7 @@ impl LocalRequestMetadata {
             .try_into()
             .unwrap_or(u64::MAX);
         let operation = self.operation;
-        let event = RequestMetadataEvent {
+        let event = Event {
             event_id: uuid::Uuid::now_v7(),
             request_id: uuid::Uuid::now_v7(),
             runtime_generation_id: self.runtime_generation_id,
@@ -255,10 +250,10 @@ async fn enforce_request_limits_inner(
     state: &RequestBoundaryState,
     request: Request<axum::body::Body>,
     next: middleware::Next,
-    endpoint: Option<gateway::InferenceEndpoint>,
+    endpoint: Option<gateway::endpoint_policy::InferenceEndpoint>,
 ) -> Result<Response, RequestLimitRejection> {
     let request_started_at = chrono::Utc::now();
-    let metadata_policy = endpoint.and_then(gateway::InferenceEndpoint::metadata);
+    let metadata_policy = endpoint.and_then(gateway::endpoint_policy::InferenceEndpoint::metadata);
     validate_target_and_headers(&request)?;
     enforce_public_auth_source(state, &request)?;
     let mut request = request;
@@ -272,7 +267,8 @@ async fn enforce_request_limits_inner(
         ..
     } = body_admission;
 
-    let endpoint_capability = endpoint.and_then(gateway::InferenceEndpoint::capability);
+    let endpoint_capability =
+        endpoint.and_then(gateway::endpoint_policy::InferenceEndpoint::capability);
     let principal = endpoint
         .map(|endpoint| {
             authenticate_inference_headers(
@@ -298,12 +294,13 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
-    let multipart_policy = endpoint.and_then(gateway::InferenceEndpoint::multipart);
+    let multipart_policy =
+        endpoint.and_then(gateway::endpoint_policy::InferenceEndpoint::multipart);
     if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
             metadata.emit(axum::http::StatusCode::BAD_REQUEST);
         }
-        return Err(gateway::InferenceError::invalid_request(
+        return Err(gateway::error::InferenceError::invalid_request(
             "Content-Type must be multipart/form-data.",
         )
         .into());
@@ -336,8 +333,8 @@ async fn enforce_request_limits_inner(
         });
         let requested_tokens = estimate_http_json_request_tokens(
             endpoint
-                .map(gateway::InferenceEndpoint::token_estimate)
-                .unwrap_or(gateway::TokenEstimate::Default),
+                .map(gateway::endpoint_policy::InferenceEndpoint::token_estimate)
+                .unwrap_or(gateway::endpoint_policy::TokenEstimate::Default),
             &bytes,
         );
         // Protocol-shaped misses remain authenticated, but capability-free
@@ -369,8 +366,8 @@ async fn enforce_request_limits_inner(
 
     let requested_tokens = estimate_http_non_json_request_tokens(
         endpoint
-            .map(gateway::InferenceEndpoint::token_estimate)
-            .unwrap_or(gateway::TokenEstimate::Default),
+            .map(gateway::endpoint_policy::InferenceEndpoint::token_estimate)
+            .unwrap_or(gateway::endpoint_policy::TokenEstimate::Default),
     );
     let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
         match reserve_http_inference_limits(state, principal, requested_tokens).await {
@@ -421,7 +418,7 @@ async fn enforce_request_limits_inner(
             finalization
                 .finish_rejection(axum::http::StatusCode::UNAUTHORIZED)
                 .await;
-            return Err(gateway::InferenceError::unauthorized().into());
+            return Err(gateway::error::InferenceError::unauthorized().into());
         };
         let Some(lease) = state
             .multipart_admission
@@ -430,9 +427,10 @@ async fn enforce_request_limits_inner(
             finalization
                 .finish_rejection(axum::http::StatusCode::SERVICE_UNAVAILABLE)
                 .await;
-            return Err(
-                gateway::InferenceError::unavailable("multipart_admission_exhausted").into(),
-            );
+            return Err(gateway::error::InferenceError::unavailable(
+                "multipart_admission_exhausted",
+            )
+            .into());
         };
         Some(MultipartRequestAdmission {
             route,
@@ -494,7 +492,7 @@ async fn preauthorize_first_owner_setup(
     if !store
         .setup_required()
         .await
-        .map_err(management::map_persistence)?
+        .map_err(management::error_mapping::map_persistence)?
     {
         return Err(Problem::conflict(
             "setup_already_completed",
@@ -503,7 +501,7 @@ async fn preauthorize_first_owner_setup(
         .into());
     }
     let supplied_token = headers
-        .get(management::SETUP_TOKEN_HEADER)
+        .get(management::sessions::SETUP_TOKEN_HEADER)
         .and_then(|value| value.to_str().ok());
     match state.verify_bootstrap_token(supplied_token).await {
         Some(true) => {}
@@ -517,26 +515,26 @@ async fn preauthorize_first_owner_setup(
             return Err(Problem::service_unavailable("bootstrap_token_not_configured").into());
         }
     }
-    management::enforce_origin(&state.public_origin, headers)?;
+    management::sessions::enforce_origin(&state.public_origin, headers)?;
     Ok(FirstOwnerSetupAuthorized)
 }
 
 /// Owns all post-reservation cleanup. Explicit rejection paths await release;
 /// successful dispatch transfers release ownership to the response body. If
-/// either future is cancelled, `InferenceReservation` retains its Drop
+/// either future is cancelled, `Reservation` retains its Drop
 /// fallback and starts the same idempotent release operation.
 pub(crate) struct RequestFinalization {
-    reservation: Option<InferenceReservation>,
+    reservation: Option<Reservation>,
     local_metadata: Option<LocalRequestMetadata>,
-    principal: Option<InferencePrincipal>,
+    principal: Option<Principal>,
     reserved_tokens: Option<i64>,
 }
 
 impl RequestFinalization {
     pub(crate) fn new(
-        reservation: Option<InferenceReservation>,
+        reservation: Option<Reservation>,
         local_metadata: Option<LocalRequestMetadata>,
-        principal: Option<InferencePrincipal>,
+        principal: Option<Principal>,
         requested_tokens: i64,
     ) -> Self {
         let reserved_tokens = reservation.as_ref().map(|_| requested_tokens);
@@ -548,7 +546,7 @@ impl RequestFinalization {
         }
     }
 
-    fn principal(&self) -> Option<&InferencePrincipal> {
+    fn principal(&self) -> Option<&Principal> {
         self.principal.as_ref()
     }
 

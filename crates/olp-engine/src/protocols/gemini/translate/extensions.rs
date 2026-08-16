@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-pub(in crate::protocols) use crate::protocols::extensions::collect_extra;
 use crate::protocols::extensions::{PointerExtensionError, apply_request_extensions};
 
 use super::super::dto::GenerateContentRequest;

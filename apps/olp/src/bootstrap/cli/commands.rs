@@ -2,12 +2,12 @@ use std::{path::Path, time::Duration};
 
 use base64::Engine as _;
 use olp_db::{
-    PgStore,
     limits::DistributedLimiter,
-    runtime::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
-    security::MasterKey,
-    security::MasterKeyEncryptionStatus,
-    valkey::{RuntimeHintPublisher, ValkeyAdapterError, run_request_metadata_consumer},
+    runtime::outbox::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
+    security::envelope::MasterKey,
+    security::rotation::MasterKeyEncryptionStatus,
+    store::Store,
+    valkey::{Error, RuntimeHintPublisher, request_metadata::run_request_metadata_consumer},
     worker_health::{WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use serde_json::json;
@@ -16,7 +16,8 @@ use tokio::{sync::watch, task::JoinSet};
 use tracing::{error, info, warn};
 
 use crate::{
-    TransportRegistry, bootstrap::connectors::register_mounted_connectors, create_media_spool,
+    bootstrap::connectors::register_mounted_connectors, bootstrap::media_spool,
+    bootstrap::state::TransportRegistry,
 };
 
 const DATABASE_IDENTITY_QUERY_PARAMS: &[&str] = &["dbname", "host", "hostaddr", "port"];
@@ -207,7 +208,7 @@ pub(super) async fn stop_worker_tasks(
 
 fn spawn_worker_supervisors(
     workers: &mut JoinSet<()>,
-    store: PgStore,
+    store: Store,
     valkey_url: String,
     runtime_hint_channel: String,
     request_metadata_stream: String,
@@ -231,7 +232,7 @@ fn spawn_worker_supervisors(
     workers.spawn(request_metadata_epoch_supervisor(store, shutdown));
 }
 
-pub(super) async fn maintenance_supervisor(store: PgStore, mut shutdown: watch::Receiver<bool>) {
+pub(super) async fn maintenance_supervisor(store: Store, mut shutdown: watch::Receiver<bool>) {
     // Frequent bounded passes keep receipt expiry from becoming one large
     // hourly DELETE/WAL spike at qualified request rates.
     let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -285,7 +286,7 @@ pub(super) async fn maintenance_supervisor(store: PgStore, mut shutdown: watch::
 }
 
 pub(super) async fn request_metadata_epoch_supervisor(
-    store: PgStore,
+    store: Store,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
@@ -343,7 +344,7 @@ pub(super) async fn request_metadata_epoch_supervisor(
 }
 
 pub(super) async fn outbox_supervisor(
-    store: PgStore,
+    store: Store,
     valkey_url: String,
     runtime_hint_channel: String,
     mut shutdown: watch::Receiver<bool>,
@@ -388,18 +389,18 @@ pub(super) async fn outbox_supervisor(
     }
 }
 
-const OUTBOX_BATCH_SIZE: u16 = 100;
+pub const OUTBOX_BATCH_SIZE: u16 = 100;
 const OUTBOX_IDLE_INTERVAL: Duration = Duration::from_millis(250);
 const OUTBOX_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const OUTBOX_LEADERSHIP_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 #[allow(async_fn_in_trait)]
 pub trait RuntimeHintPublication {
-    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError>;
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, Error>;
 }
 
 impl RuntimeHintPublication for RuntimeHintPublisher {
-    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, Error> {
         self.publish(payload).await
     }
 }
@@ -412,7 +413,7 @@ pub enum OutboxBatchOutcome {
 }
 
 pub(super) async fn request_metadata_consumer_supervisor(
-    store: PgStore,
+    store: Store,
     valkey_url: String,
     request_metadata_stream: String,
     consumer: String,
@@ -460,7 +461,7 @@ pub(super) async fn request_metadata_consumer_supervisor(
 }
 
 async fn outbox_loop(
-    store: PgStore,
+    store: Store,
     valkey_url: &str,
     runtime_hint_channel: &str,
     mut shutdown: watch::Receiver<bool>,
@@ -574,11 +575,11 @@ async fn run_owned_outbox_loop(
     }
 }
 
-async fn publish_outbox_batch<P: RuntimeHintPublication>(
+pub async fn publish_outbox_batch<P: RuntimeHintPublication>(
     leader: &mut RuntimeOutboxLeader,
     publisher: &mut P,
     shutdown: &mut watch::Receiver<bool>,
-) -> AppResult<OutboxBatchOutcome> {
+) -> Result<OutboxBatchOutcome, Box<dyn std::error::Error + Send + Sync>> {
     let records = leader.pending(OUTBOX_BATCH_SIZE).await?;
     let mut published = 0_usize;
     'records: for record in records {
@@ -701,28 +702,8 @@ async fn publish_outbox_batch<P: RuntimeHintPublication>(
     Ok(OutboxBatchOutcome::Published(published))
 }
 
-#[cfg(feature = "test-util")]
-pub mod test_support {
-    use std::error::Error;
-
-    use olp_db::runtime::RuntimeOutboxLeader;
-    use tokio::sync::watch;
-
-    pub use super::{OutboxBatchOutcome, RuntimeHintPublication};
-
-    pub const OUTBOX_BATCH_SIZE: u16 = super::OUTBOX_BATCH_SIZE;
-
-    pub async fn publish_outbox_batch<P: RuntimeHintPublication>(
-        leader: &mut RuntimeOutboxLeader,
-        publisher: &mut P,
-        shutdown: &mut watch::Receiver<bool>,
-    ) -> Result<OutboxBatchOutcome, Box<dyn Error + Send + Sync>> {
-        super::publish_outbox_batch(leader, publisher, shutdown).await
-    }
-}
-
 async fn request_metadata_consumer_loop(
-    store: PgStore,
+    store: Store,
     valkey_url: &str,
     request_metadata_stream: &str,
     consumer: &str,
@@ -965,7 +946,8 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
         .media_spool_dir
         .as_deref()
         .map_or_else(std::env::temp_dir, Path::to_path_buf);
-    let media_spool = create_media_spool(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
+    let media_spool =
+        media_spool::create(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     drop(media_spool);
     checks.insert(
         "media_spool".into(),

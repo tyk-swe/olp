@@ -1,9 +1,16 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    ContentPart, GenerationParameters, GenerationRequest, MediaSource as CanonicalMediaSource,
-    Message as CanonicalMessage, MessageRole, Operation, RouteSlug, SourceExtensions, Surface,
-    ToolCall, ToolChoice as CanonicalToolChoice, ToolDefinition, media_handle_from_inline_marker,
+    canonical::{
+        identity::Surface,
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest,
+            MediaSource as CanonicalMediaSource, Message as CanonicalMessage, MessageRole,
+            Operation, SourceExtensions, ToolCall, ToolChoice as CanonicalToolChoice,
+            ToolDefinition, media_handle_from_inline_marker,
+        },
+    },
+    ids::RouteSlug,
 };
 use serde_json::Value;
 
@@ -12,9 +19,10 @@ use super::super::dto::{
     SystemPrompt, ToolChoice, ToolResultBlock, ToolResultContent,
 };
 use super::errors::DecodeError;
-use super::extensions::{collect_extra, require_kind};
+use super::extensions::require_kind;
+use crate::protocols::extensions::collect_extra;
 
-pub fn decode_messages_request(request: MessagesRequest) -> Result<Operation, DecodeError> {
+pub fn request(request: MessagesRequest) -> Result<Operation, DecodeError> {
     validate_request(&request)?;
     let route = RouteSlug::parse(request.model.clone())?;
     let mut extensions = BTreeMap::new();

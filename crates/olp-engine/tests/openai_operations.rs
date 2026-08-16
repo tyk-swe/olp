@@ -1,35 +1,58 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use olp_engine::domain::{
-    CanonicalEventKind, GenerationParameters, GenerationRequest, ImageOperation, MediaArtifact,
-    MediaHandle, MediaSource, Message, MessageRole, Operation, RouteSlug, SourceExtensions,
-    Surface, VideoOperation, validate_event_sequence,
+    canonical::{
+        events::{Kind, validate_event_sequence},
+        identity::Surface,
+        requests::{
+            GenerationParameters, GenerationRequest, ImageOperation, MediaHandle, MediaSource,
+            Message, MessageRole, Operation, SourceExtensions, VideoOperation,
+        },
+        results::MediaArtifact,
+    },
+    ids::RouteSlug,
 };
 use olp_engine::protocols::openai::{
-    BoundedMediaPart, EmbeddingRequest, EmbeddingResponse, ImageStreamOperation,
-    OpenAiImageEditRequest, OpenAiImageGenerationRequest, OpenAiImageResponse,
-    OpenAiImageStreamEvent, OpenAiModerationRequest, OpenAiModerationResponse,
-    OpenAiResponsesStreamDecoder, OpenAiResponsesStreamEncoder, OpenAiSpeechRequest,
-    OpenAiSpeechStreamEvent, OpenAiTranscriptionRequest, OpenAiTranscriptionResponse,
-    OpenAiTranscriptionStreamDecoder, OpenAiTranscriptionStreamEncoder, OpenAiVideoCreateRequest,
-    OpenAiVideoDeleteResponse, OpenAiVideoListQuery, OpenAiVideoListResponse, OpenAiVideoObject,
-    ResponseCreateRequest, ResponseInputTokensRequest, ResponseInputTokensResponse, ResponseObject,
-    decode_embedding_request, decode_embedding_response, decode_image_edit,
-    decode_image_generation, decode_image_response, decode_image_stream_event, decode_moderation,
-    decode_moderation_response, decode_response_create, decode_response_input_tokens,
-    decode_response_input_tokens_result, decode_response_object, decode_speech,
-    decode_speech_stream_event, decode_transcription, decode_transcription_response,
-    decode_video_create, decode_video_delete_response, decode_video_list,
-    decode_video_list_response, encode_embedding_request, encode_embedding_response,
-    encode_image_generation, encode_image_response, encode_image_stream_update,
-    encode_moderation_response, encode_response_create, encode_response_object,
-    encode_speech_stream_update, encode_transcription_response, encode_video_delete_response,
-    encode_video_list_response,
+    audio::{
+        Decoder as AudioDecoder, Encoder as AudioEncoder, SpeechRequest, SpeechStreamEvent,
+        SpeechStreamUpdate, TranscriptionRequest, TranscriptionResponse, decode_speech,
+        decode_speech_stream_event, decode_transcription, decode_transcription_response,
+        encode_speech_stream_update, encode_transcription, encode_transcription_response,
+    },
+    client::{Encoder as ResponseEncoder, encode_response_object},
+    embeddings::{
+        EmbeddingRequest, EmbeddingResponse, decode_embedding_request, decode_embedding_response,
+        encode_embedding_request, encode_embedding_response,
+    },
+    images::{
+        ImageStreamOperation, ImageStreamUpdate, OpenAiImageEditRequest,
+        OpenAiImageGenerationRequest, OpenAiImagePayload, OpenAiImageResponse,
+        OpenAiImageStreamEvent, decode_image_edit, decode_image_generation, decode_image_response,
+        decode_image_stream_event, encode_image_generation, encode_image_response,
+        encode_image_stream_update,
+    },
+    media::BoundedMediaPart,
+    moderation::{Request, Response, decode, decode_response, encode_response},
+    responses::{
+        request::{Create, decode_response_create, encode_response_create},
+        response::{Object, decode_response_object},
+        stream::Decoder as ResponseDecoder,
+        token_count::{
+            ResponseInputTokensRequest, ResponseInputTokensResponse, decode_response_input_tokens,
+            decode_response_input_tokens_result, encode_response_input_tokens,
+        },
+    },
+    video::{
+        OpenAiVideoCreateRequest, OpenAiVideoDeleteResponse, OpenAiVideoListQuery,
+        OpenAiVideoListResponse, OpenAiVideoObject, decode_video_create,
+        decode_video_delete_response, decode_video_list, decode_video_list_response,
+        encode_video_delete_response, encode_video_list_response,
+    },
 };
 use serde_json::json;
 
 #[test]
 fn responses_request_round_trips_supported_semantics_and_extensions() {
-    let wire: ResponseCreateRequest = serde_json::from_value(json!({
+    let wire: Create = serde_json::from_value(json!({
         "model": "team-responses",
         "instructions": "Be concise",
         "input": [{
@@ -84,7 +107,7 @@ fn responses_request_round_trips_supported_semantics_and_extensions() {
 
 #[test]
 fn responses_rejects_stateful_and_unspooled_media_semantics() {
-    let stateful: ResponseCreateRequest = serde_json::from_value(json!({
+    let stateful: Create = serde_json::from_value(json!({
         "model": "default",
         "input": "hello",
         "previous_response_id": "resp_previous"
@@ -92,7 +115,7 @@ fn responses_rejects_stateful_and_unspooled_media_semantics() {
     .unwrap();
     assert!(decode_response_create(stateful).is_err());
 
-    let conversation: ResponseCreateRequest = serde_json::from_value(json!({
+    let conversation: Create = serde_json::from_value(json!({
         "model": "default",
         "input": "hello",
         "conversation": {"id": "conv_stateful"}
@@ -100,7 +123,7 @@ fn responses_rejects_stateful_and_unspooled_media_semantics() {
     .unwrap();
     assert!(decode_response_create(conversation).is_err());
 
-    let inline_file: ResponseCreateRequest = serde_json::from_value(json!({
+    let inline_file: Create = serde_json::from_value(json!({
         "model": "default",
         "input": [{"type": "message", "role": "user", "content": [{
             "type": "input_file", "file_data": "large-inline-payload"
@@ -112,7 +135,7 @@ fn responses_rejects_stateful_and_unspooled_media_semantics() {
 
 #[test]
 fn responses_preserves_builtin_tools_only_for_same_protocol() {
-    let wire: ResponseCreateRequest = serde_json::from_value(json!({
+    let wire: Create = serde_json::from_value(json!({
         "model": "team-responses",
         "input": "search",
         "tools": [{
@@ -143,7 +166,7 @@ fn responses_preserves_builtin_tools_only_for_same_protocol() {
 
 #[test]
 fn responses_unary_and_fragmented_stream_become_ordered_events() {
-    let response: ResponseObject = serde_json::from_value(json!({
+    let response: Object = serde_json::from_value(json!({
         "id": "resp_1",
         "object": "response",
         "created_at": 1800000000,
@@ -163,13 +186,13 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
     validate_event_sequence(&events).unwrap();
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "hello"
+        Kind::TextDelta { text, .. } if text == "hello"
     )));
     let client = encode_response_object(&events, "team-route", "fallback").unwrap();
     assert_eq!(client.model, "team-route");
     validate_event_sequence(&decode_response_object(client).unwrap()).unwrap();
 
-    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1_800_000_000);
+    let mut encoder = ResponseEncoder::new("team-route", "fallback", 1_800_000_000);
     let mut client_frames = Vec::new();
     for event in events.clone() {
         client_frames.extend(encoder.push(event).unwrap());
@@ -193,7 +216,7 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
             )
         })
         .collect::<String>();
-    let mut decoder = OpenAiResponsesStreamDecoder::new();
+    let mut decoder = ResponseDecoder::new();
     let mut streamed = Vec::new();
     for byte in wire.as_bytes() {
         streamed.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
@@ -202,13 +225,13 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
     validate_event_sequence(&streamed).unwrap();
     assert!(streamed.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "hé 🌍"
+        Kind::TextDelta { text, .. } if text == "hé 🌍"
     )));
 }
 
 #[test]
 fn unary_incomplete_response_remains_incomplete_when_streamed_to_the_client() {
-    let response: ResponseObject = serde_json::from_value(json!({
+    let response: Object = serde_json::from_value(json!({
         "id": "resp_incomplete",
         "object": "response",
         "created_at": 1800000000,
@@ -225,7 +248,7 @@ fn unary_incomplete_response_remains_incomplete_when_streamed_to_the_client() {
     }))
     .unwrap();
     let events = decode_response_object(response).unwrap();
-    let mut encoder = OpenAiResponsesStreamEncoder::new("team-route", "fallback", 1_800_000_000);
+    let mut encoder = ResponseEncoder::new("team-route", "fallback", 1_800_000_000);
     let mut frames = Vec::new();
     for event in events {
         frames.extend(encoder.push(event).unwrap());
@@ -243,7 +266,7 @@ fn unary_incomplete_response_remains_incomplete_when_streamed_to_the_client() {
 
 #[test]
 fn responses_reasoning_output_round_trips_without_becoming_message_content() {
-    let response: ResponseObject = serde_json::from_value(json!({
+    let response: Object = serde_json::from_value(json!({
         "id": "resp_reasoning",
         "object": "response",
         "created_at": 1800000000,
@@ -311,9 +334,7 @@ fn response_input_tokens_preserves_full_stateless_multi_item_input() {
         panic!("wrong operation")
     };
     assert_eq!(request.input.len(), 5);
-    let forwarded =
-        olp_engine::protocols::openai::encode_response_input_tokens(&request, "gpt-upstream")
-            .unwrap();
+    let forwarded = encode_response_input_tokens(&request, "gpt-upstream").unwrap();
     let forwarded = serde_json::to_value(forwarded).unwrap();
     assert_eq!(forwarded["model"], "gpt-upstream");
     assert_eq!(forwarded["input"].as_array().unwrap().len(), 4);
@@ -465,7 +486,7 @@ fn image_json_and_multipart_forms_use_handles_and_preserve_extensions() {
         MediaSource::Handle(handle) if handle.as_str() == "spooled-image"
     ));
     let wire = encode_image_response(&result, |_| {
-        Ok(olp_engine::protocols::openai::OpenAiImagePayload::Base64Json("re-encoded".into()))
+        Ok(OpenAiImagePayload::Base64Json("re-encoded".into()))
     })
     .unwrap();
     assert_eq!(wire.data[0].b64_json.as_deref(), Some("re-encoded"));
@@ -473,7 +494,7 @@ fn image_json_and_multipart_forms_use_handles_and_preserve_extensions() {
 
 #[test]
 fn audio_requests_never_embed_uploaded_bytes() {
-    let speech: OpenAiSpeechRequest = serde_json::from_value(json!({
+    let speech: SpeechRequest = serde_json::from_value(json!({
         "model": "speech-route",
         "input": "hello",
         "voice": "coral",
@@ -487,7 +508,7 @@ fn audio_requests_never_embed_uploaded_bytes() {
     };
     assert!(speech.stream);
 
-    let transcription = OpenAiTranscriptionRequest {
+    let transcription = TranscriptionRequest {
         model: "transcribe-route".into(),
         file: media_part("audio-ref", "audio.wav", 1024),
         language: Some("en".into()),
@@ -505,7 +526,7 @@ fn audio_requests_never_embed_uploaded_bytes() {
     };
     assert_eq!(canonical.audio.as_str(), "audio-ref");
 
-    let response: OpenAiTranscriptionResponse = serde_json::from_value(json!({
+    let response: TranscriptionResponse = serde_json::from_value(json!({
         "text": "hello",
         "language": "en",
         "duration": 1.5,
@@ -528,7 +549,7 @@ fn transcription_formats_and_known_speakers_are_validated_and_preserved() {
         "vtt",
         "diarized_json",
     ] {
-        let request = OpenAiTranscriptionRequest {
+        let request = TranscriptionRequest {
             model: "transcribe-route".into(),
             file: media_part("audio-ref", "audio.wav", 1024),
             language: None,
@@ -544,7 +565,7 @@ fn transcription_formats_and_known_speakers_are_validated_and_preserved() {
         assert!(decode_transcription(request).is_ok(), "format {format}");
     }
 
-    let request = OpenAiTranscriptionRequest {
+    let request = TranscriptionRequest {
         model: "transcribe-route".into(),
         file: media_part("audio-ref", "audio.wav", 1024),
         language: None,
@@ -571,18 +592,16 @@ fn transcription_formats_and_known_speakers_are_validated_and_preserved() {
         canonical.extensions.values["/known_speaker_names"],
         json!(["agent", "customer"])
     );
-    let encoded = olp_engine::protocols::openai::encode_transcription(
-        &canonical,
-        "gpt-4o-transcribe-diarize",
-        |_| Ok(media_part("audio-ref", "audio.wav", 1024)),
-    )
+    let encoded = encode_transcription(&canonical, "gpt-4o-transcribe-diarize", |_| {
+        Ok(media_part("audio-ref", "audio.wav", 1024))
+    })
     .unwrap();
     assert_eq!(
         encoded.extra["known_speaker_references"],
         json!(["data:audio/wav;base64,AAAA", "data:audio/wav;base64,BBBB"])
     );
 
-    let invalid = OpenAiTranscriptionRequest {
+    let invalid = TranscriptionRequest {
         response_format: Some("xml".into()),
         ..encoded
     };
@@ -591,7 +610,7 @@ fn transcription_formats_and_known_speakers_are_validated_and_preserved() {
 
 #[test]
 fn moderation_preserves_dynamic_categories_and_multimodal_input() {
-    let request: OpenAiModerationRequest = serde_json::from_value(json!({
+    let request: Request = serde_json::from_value(json!({
         "model": "moderation-route",
         "input": [
             {"type": "text", "text": "hello", "locale": "en"},
@@ -599,13 +618,13 @@ fn moderation_preserves_dynamic_categories_and_multimodal_input() {
         ]
     }))
     .unwrap();
-    let Operation::Moderation(canonical) = decode_moderation(request).unwrap() else {
+    let Operation::Moderation(canonical) = decode(request).unwrap() else {
         panic!("wrong operation")
     };
     assert_eq!(canonical.input.len(), 2);
     assert_eq!(canonical.extensions.values["/input/0/locale"], "en");
 
-    let response: OpenAiModerationResponse = serde_json::from_value(json!({
+    let response: Response = serde_json::from_value(json!({
         "id": "modr_1",
         "model": "omni-moderation-latest",
         "results": [{
@@ -616,12 +635,12 @@ fn moderation_preserves_dynamic_categories_and_multimodal_input() {
         }]
     }))
     .unwrap();
-    let result = decode_moderation_response(response);
+    let result = decode_response(response);
     assert!(result.results[0].categories["violence"]);
     assert_eq!(result.results[0].category_scores["new/category"], 0.1);
-    let encoded = encode_moderation_response(&result, "moderation-route", "modr_fallback").unwrap();
+    let encoded = encode_response(&result, "moderation-route", "modr_fallback").unwrap();
     assert_eq!(encoded.model, "moderation-route");
-    assert!(decode_moderation_response(encoded).results[0].flagged);
+    assert!(decode_response(encoded).results[0].flagged);
 }
 
 #[test]
@@ -702,9 +721,9 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
         decode_image_stream_event(image, |_| Ok(MediaHandle::new("partial-image"))).unwrap();
     assert!(matches!(
         &update,
-        olp_engine::protocols::openai::ImageStreamUpdate::Partial {
+        ImageStreamUpdate::Partial {
             index: 2,
-            image: olp_engine::domain::ImageArtifact {
+            image: olp_engine::domain::canonical::results::ImageArtifact {
                 source: MediaSource::Handle(handle),
                 ..
             },
@@ -717,7 +736,7 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
     .unwrap();
     assert_eq!(encoded.b64_json.as_deref(), Some("re-encoded"));
 
-    let speech: OpenAiSpeechStreamEvent = serde_json::from_value(json!({
+    let speech: SpeechStreamEvent = serde_json::from_value(json!({
         "type": "speech.audio.delta",
         "delta": "opaque"
     }))
@@ -732,7 +751,7 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
     .unwrap();
     assert!(matches!(
         &update,
-        olp_engine::protocols::openai::SpeechStreamUpdate::Audio { media, .. }
+        SpeechStreamUpdate::Audio { media, .. }
             if media.handle.as_str() == "speech-chunk"
     ));
     let encoded = encode_speech_stream_update(&update, |_| Ok("re-encoded".into())).unwrap();
@@ -744,7 +763,7 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
         "event: transcript.text.done\n",
         "data: {\"type\":\"transcript.text.done\",\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"total_tokens\":4}}\n\n"
     );
-    let mut decoder = OpenAiTranscriptionStreamDecoder::new();
+    let mut decoder = AudioDecoder::new();
     let mut events = Vec::new();
     for byte in wire.as_bytes() {
         events.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
@@ -753,9 +772,9 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
     validate_event_sequence(&events).unwrap();
     assert!(events.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::TextDelta { text, .. } if text == "hé 🌍"
+        Kind::TextDelta { text, .. } if text == "hé 🌍"
     )));
-    let mut encoder = OpenAiTranscriptionStreamEncoder::new();
+    let mut encoder = AudioEncoder::new();
     let frames = events
         .iter()
         .flat_map(|event| encoder.push(event).unwrap())
@@ -772,7 +791,7 @@ fn cross_protocol_extensions_fail_closed() {
         route: RouteSlug::parse("route").unwrap(),
         messages: vec![Message {
             role: MessageRole::User,
-            content: vec![olp_engine::domain::ContentPart::Text {
+            content: vec![olp_engine::domain::canonical::requests::ContentPart::Text {
                 text: "hello".into(),
             }],
             name: None,

@@ -1,22 +1,22 @@
 use std::time::Duration;
 
-use olp_engine::inference::request_metadata::RequestMetadataReceiver;
+use olp_engine::inference::request_metadata::Receiver;
 use redis::{Client, RedisError, aio::ConnectionManager};
 use tokio::sync::watch;
 
-use crate::valkey::ValkeyAdapterError;
+use crate::valkey::Error;
 
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Establishes the initial Valkey connection without dropping the bounded
 /// local queue when Valkey starts after the gateway. The connection manager
 /// handles subsequent reconnects.
-pub async fn run_request_metadata_writer_connecting(
-    mut receiver: RequestMetadataReceiver,
+pub async fn run_connecting(
+    mut receiver: Receiver,
     valkey_url: &str,
     stream: &str,
     mut shutdown: watch::Receiver<bool>,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     let client = match Client::open(valkey_url) {
         Ok(client) => client,
         Err(error) => {
@@ -40,7 +40,7 @@ pub async fn run_request_metadata_writer_connecting(
         };
         if let Ok(connection) = connection {
             receiver.set_retrying(false);
-            return run_request_metadata_writer(receiver, connection, stream, shutdown)
+            return run(receiver, connection, stream, shutdown)
                 .await
                 .map_err(Into::into);
         }
@@ -62,8 +62,8 @@ pub async fn run_request_metadata_writer_connecting(
 /// bounded local buffering. On an outage the current event is retried, the
 /// channel fills to its configured bound, and further loss is counted by the
 /// engine emitter.
-pub async fn run_request_metadata_writer(
-    mut receiver: RequestMetadataReceiver,
+pub async fn run(
+    mut receiver: Receiver,
     mut connection: ConnectionManager,
     stream: &str,
     mut shutdown: watch::Receiver<bool>,
@@ -155,19 +155,17 @@ pub async fn run_request_metadata_writer(
 mod tests {
     use chrono::Utc;
     use olp_engine::{
-        domain::{OperationKind, Surface},
-        inference::request_metadata::{
-            RequestAttemptMetadata, RequestMetadataEmitter, RequestMetadataEvent,
-        },
+        domain::canonical::identity::{OperationKind, Surface},
+        inference::request_metadata::{Emitter, Event, RequestAttemptMetadata},
     };
     use uuid::Uuid;
 
     use super::*;
 
-    fn event() -> RequestMetadataEvent {
+    fn event() -> Event {
         let observed_at = Utc::now();
         let provider_id = Uuid::now_v7();
-        RequestMetadataEvent {
+        Event {
             event_id: Uuid::now_v7(),
             request_id: Uuid::now_v7(),
             runtime_generation_id: Uuid::now_v7(),
@@ -210,20 +208,15 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_valkey_configuration_accounts_for_queued_events() {
-        let (emitter, receiver) = RequestMetadataEmitter::bounded(2);
+        let (emitter, receiver) = Emitter::bounded(2);
         emitter.emit(event()).unwrap();
         emitter.emit(event()).unwrap();
         let (_shutdown_sender, shutdown) = watch::channel(false);
 
         assert!(
-            run_request_metadata_writer_connecting(
-                receiver,
-                "://invalid",
-                "request-metadata",
-                shutdown,
-            )
-            .await
-            .is_err()
+            run_connecting(receiver, "://invalid", "request-metadata", shutdown,)
+                .await
+                .is_err()
         );
         let snapshot = emitter.snapshot();
         assert_eq!(snapshot.abandoned, 2);

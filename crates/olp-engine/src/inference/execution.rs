@@ -8,24 +8,30 @@ use std::{
 };
 
 use crate::domain::{
-    ApiKey, CanonicalEvent, CanonicalResult, GatewayCapability, Operation, OperationKind,
-    RequestId, RequestMetadata, RouteSlug, Surface, TransportMode, authorize_api_key,
-    gateway_capability_for_operation,
+    auth::{ApiKey, GatewayCapability, authorize_api_key, gateway_capability_for_operation},
+    canonical::{
+        events::Event,
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::Operation,
+        results::CanonicalResult,
+    },
+    ids::{RequestId, RouteSlug},
 };
 use crate::inference::{
-    InferenceError, InferenceService,
     accounting::{
         RequestAccountingGuard, RequestAccountingInput, RequestMetadataFinalizer, RequestOutcome,
         usage_from_result,
     },
+    error::Error as InferenceError,
     events::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collect_provider_events_with_observer},
-    failover::{ExecutionOutput, ExecutionSuccess, FailoverContext, execute_with_failover},
-    limits::{DistributedLimitReservation, InferenceReservation, release_limits, reserve_limits},
+    failover::{Context, ExecutionOutput, ExecutionSuccess, execute},
+    limits::{DistributedLimitReservation, Reservation, release, reserve},
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
-    principal::InferencePrincipal,
+    principal::Principal,
     request_metadata::RequestAttemptMetadata,
-    runtime::RuntimeBundle,
+    runtime::Bundle,
     selection::select_representable_attempts_filtered,
+    service::Service,
     telemetry::elapsed_ms,
 };
 use chrono::Utc;
@@ -34,7 +40,7 @@ use chrono::Utc;
 /// uses it to avoid double charging and to reconcile actual token usage.
 #[derive(Clone, Default)]
 pub struct RequestAdmission {
-    reservation: Option<InferenceReservation>,
+    reservation: Option<Reservation>,
     reserved_tokens: Option<i64>,
     metadata_claimed: Option<Arc<AtomicBool>>,
 }
@@ -42,7 +48,7 @@ pub struct RequestAdmission {
 impl RequestAdmission {
     #[must_use]
     pub const fn new(
-        reservation: Option<InferenceReservation>,
+        reservation: Option<Reservation>,
         reserved_tokens: Option<i64>,
         metadata_claimed: Option<Arc<AtomicBool>>,
     ) -> Self {
@@ -103,16 +109,16 @@ struct CompletedExecution {
     accounting: RequestAccountingGuard,
 }
 
-pub struct RoutedEventExecution {
-    pub first: CanonicalEvent,
-    pub events: crate::domain::ProviderEventStream,
+pub struct RoutedEvents {
+    pub first: Event,
+    pub events: crate::domain::ports::ProviderEventStream,
     pub deadline: tokio::time::Instant,
     pub request_id: uuid::Uuid,
     pub route_slug: RouteSlug,
     accounting: Option<RequestAccountingGuard>,
 }
 
-impl RoutedEventExecution {
+impl RoutedEvents {
     #[must_use]
     pub fn take_accounting(&mut self) -> RequestAccountingGuard {
         self.accounting
@@ -120,7 +126,7 @@ impl RoutedEventExecution {
             .expect("routed event execution owns request accounting")
     }
 
-    pub async fn collect(mut self) -> Result<CompletedEventExecution, InferenceError> {
+    pub async fn collect(mut self) -> Result<CompletedEvents, InferenceError> {
         let mut accounting = self.take_accounting();
         let events = collect_provider_events_with_observer(
             self.first.clone(),
@@ -139,9 +145,9 @@ impl RoutedEventExecution {
                 return Err(failure);
             }
         };
-        accounting.release_limits().await;
+        accounting.release().await;
         let finalizer = accounting.into_finalizer();
-        Ok(CompletedEventExecution {
+        Ok(CompletedEvents {
             events,
             route_slug: self.route_slug,
             request_id: self.request_id,
@@ -150,14 +156,14 @@ impl RoutedEventExecution {
     }
 }
 
-pub struct CompletedEventExecution {
-    pub events: Vec<CanonicalEvent>,
+pub struct CompletedEvents {
+    pub events: Vec<Event>,
     pub route_slug: RouteSlug,
     pub request_id: uuid::Uuid,
     request_metadata_finalizer: Option<RequestMetadataFinalizer>,
 }
 
-impl CompletedEventExecution {
+impl CompletedEvents {
     pub fn mark_success(&mut self) {
         if let Some(finalizer) = self.request_metadata_finalizer.take() {
             finalizer.finalize(&RequestOutcome::success());
@@ -165,7 +171,7 @@ impl CompletedEventExecution {
     }
 }
 
-impl Drop for CompletedEventExecution {
+impl Drop for CompletedEvents {
     fn drop(&mut self) {
         if let Some(finalizer) = self.request_metadata_finalizer.take() {
             finalizer.finalize(&RequestOutcome::provider_protocol_failure());
@@ -248,10 +254,10 @@ impl Drop for RoutedUnaryResult {
     }
 }
 
-impl InferenceService {
+impl Service {
     pub fn authorize_principal<'a>(
         &self,
-        principal: &'a InferencePrincipal,
+        principal: &'a Principal,
         capability: GatewayCapability,
         route: Option<&RouteSlug>,
     ) -> Result<&'a ApiKey, InferenceError> {
@@ -268,11 +274,11 @@ impl InferenceService {
 
     pub async fn execute_event(
         &self,
-        principal: &InferencePrincipal,
+        principal: &Principal,
         operation: Operation,
         mode: TransportMode,
         admission: RequestAdmission,
-    ) -> Result<RoutedEventExecution, InferenceError> {
+    ) -> Result<RoutedEvents, InferenceError> {
         let request_media = RequestMediaGuard::new(
             self.media_spool().clone(),
             operation_media_handles(&operation),
@@ -286,11 +292,11 @@ impl InferenceService {
 
     async fn execute_event_inner(
         &self,
-        principal: &InferencePrincipal,
+        principal: &Principal,
         operation: Operation,
         mode: TransportMode,
         admission: RequestAdmission,
-    ) -> Result<RoutedEventExecution, InferenceError> {
+    ) -> Result<RoutedEvents, InferenceError> {
         let CompletedExecution {
             context,
             success,
@@ -316,7 +322,7 @@ impl InferenceService {
                 .await;
             return Err(failure);
         };
-        Ok(RoutedEventExecution {
+        Ok(RoutedEvents {
             first,
             events,
             deadline,
@@ -328,7 +334,7 @@ impl InferenceService {
 
     pub async fn execute_result(
         &self,
-        principal: &InferencePrincipal,
+        principal: &Principal,
         operation: Operation,
         mode: TransportMode,
         required_target: Option<RequiredTarget>,
@@ -424,7 +430,7 @@ impl InferenceService {
         let execution = {
             let mut record_attempt_started =
                 |completed: &[RequestAttemptMetadata],
-                 attempt: &crate::domain::AttemptPlan,
+                 attempt: &crate::domain::routing::selection::AttemptPlan,
                  ordinal: u16,
                  started_at: chrono::DateTime<Utc>,
                  started: tokio::time::Instant| {
@@ -437,8 +443,8 @@ impl InferenceService {
                         started,
                     );
                 };
-            execute_with_failover(
-                FailoverContext {
+            execute(
+                Context {
                     runtime: &runtime,
                     overall_timeout: route.overall_timeout.as_duration(),
                     media_spool: self.media_spool().clone(),
@@ -489,7 +495,7 @@ impl InferenceService {
 
     async fn execute_result_inner(
         &self,
-        principal: &InferencePrincipal,
+        principal: &Principal,
         operation: Operation,
         mode: TransportMode,
         required_target: Option<RequiredTarget>,
@@ -526,7 +532,7 @@ impl InferenceService {
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
-        accounting.release_limits().await;
+        accounting.release().await;
         let finalizer = accounting.into_finalizer();
         Ok(RoutedUnaryResult {
             result,
@@ -541,7 +547,7 @@ impl InferenceService {
 
     async fn execute_operation(
         &self,
-        principal: &InferencePrincipal,
+        principal: &Principal,
         operation: Operation,
         mode: TransportMode,
         required_target: Option<RequiredTarget>,
@@ -586,7 +592,7 @@ impl InferenceService {
             .map(|route| route.overall_timeout.as_duration())
             .unwrap_or(Duration::from_secs(30))
             .saturating_add(Duration::from_secs(30));
-        let lease = match reserve_limits(
+        let lease = match reserve(
             self.limiter(),
             principal.key(),
             &operation,
@@ -654,7 +660,7 @@ impl InferenceService {
         let execution = {
             let mut record_attempt_started =
                 |completed: &[RequestAttemptMetadata],
-                 attempt: &crate::domain::AttemptPlan,
+                 attempt: &crate::domain::routing::selection::AttemptPlan,
                  ordinal: u16,
                  started_at: chrono::DateTime<Utc>,
                  started: tokio::time::Instant| {
@@ -667,8 +673,8 @@ impl InferenceService {
                         started,
                     );
                 };
-            execute_with_failover(
-                FailoverContext {
+            execute(
+                Context {
                     runtime: principal.runtime(),
                     overall_timeout: route.overall_timeout.as_duration(),
                     media_spool: self.media_spool().clone(),
@@ -703,21 +709,25 @@ impl InferenceService {
 
     pub fn authorize_model_access<'a>(
         &self,
-        principal: &'a InferencePrincipal,
-    ) -> Result<(&'a RuntimeBundle, &'a ApiKey), InferenceError> {
+        principal: &'a Principal,
+    ) -> Result<(&'a Bundle, &'a ApiKey), InferenceError> {
         let key = self.authorize_principal(principal, GatewayCapability::ModelsRead, None)?;
         Ok((principal.runtime(), key))
     }
 
     pub async fn reserve_model_limits(
         &self,
-        principal: &InferencePrincipal,
+        principal: &Principal,
         admission_reserved_tokens: Option<i64>,
     ) -> Result<Option<DistributedLimitReservation>, InferenceError> {
-        let operation = Operation::Models(crate::domain::ModelOperation::List {
-            extensions: crate::domain::SourceExtensions::new(principal.surface(), BTreeMap::new()),
-        });
-        reserve_limits(
+        let operation =
+            Operation::Models(crate::domain::canonical::requests::ModelOperation::List {
+                extensions: crate::domain::canonical::requests::SourceExtensions::new(
+                    principal.surface(),
+                    BTreeMap::new(),
+                ),
+            });
+        reserve(
             self.limiter(),
             principal.key(),
             &operation,
@@ -729,6 +739,6 @@ impl InferenceService {
     }
 
     pub async fn release_model_limits(&self, lease: Option<DistributedLimitReservation>) {
-        release_limits(lease, None).await;
+        release(lease, None).await;
     }
 }

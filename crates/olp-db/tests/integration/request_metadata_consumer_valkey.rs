@@ -4,17 +4,17 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
 use olp_db::{
-    PgStore,
     identity::InstallationSetupInput,
-    request_metadata::RequestMetadataPersistenceOutcome,
-    security::hash_password,
-    valkey::request_metadata_test_support::{
+    request_metadata::ingestion::Outcome,
+    security::password::hash,
+    store::Store,
+    valkey::request_metadata::test_support::{
         RequestMetadataConsumerTestPolicy, run_request_metadata_consumer,
     },
 };
 use olp_engine::{
-    domain::{OperationKind, Surface},
-    inference::request_metadata::{RequestAttemptMetadata, RequestMetadataEvent},
+    domain::canonical::identity::{OperationKind, Surface},
+    inference::request_metadata::{Event, RequestAttemptMetadata},
 };
 use redis::{
     AsyncCommands,
@@ -55,13 +55,13 @@ async fn valkey_connection() -> MultiplexedConnection {
         .unwrap()
 }
 
-async fn fixture(store: &PgStore, label: &str) -> Fixture {
+async fn fixture(store: &Store, label: &str) -> Fixture {
     let owner = store
         .setup_installation(InstallationSetupInput {
             installation_name: format!("Request metadata {label}"),
             email: format!("owner-{label}@example.test"),
             display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
+            password_hash: hash("correct horse battery staple").unwrap(),
         })
         .await
         .unwrap();
@@ -108,9 +108,9 @@ async fn fixture(store: &PgStore, label: &str) -> Fixture {
     }
 }
 
-fn event(fixture: &Fixture) -> RequestMetadataEvent {
+fn event(fixture: &Fixture) -> Event {
     let observed_at = Utc::now();
-    RequestMetadataEvent {
+    Event {
         event_id: Uuid::now_v7(),
         request_id: Uuid::now_v7(),
         runtime_generation_id: fixture.generation_id,
@@ -184,7 +184,7 @@ async fn add_payload(
 async fn add_event(
     connection: &mut MultiplexedConnection,
     stream: &str,
-    event: &RequestMetadataEvent,
+    event: &Event,
 ) -> (String, Vec<u8>) {
     let payload = serde_json::to_vec(event).unwrap();
     let id = add_payload(connection, stream, &payload).await;
@@ -220,12 +220,12 @@ fn test_policy(reclaim_idle: Duration) -> RequestMetadataConsumerTestPolicy {
 }
 
 fn spawn_consumer(
-    store: PgStore,
+    store: Store,
     stream: String,
     consumer: &'static str,
     shutdown: watch::Receiver<bool>,
     policy: RequestMetadataConsumerTestPolicy,
-) -> JoinHandle<Result<(), olp_db::valkey::ValkeyAdapterError>> {
+) -> JoinHandle<Result<(), olp_db::valkey::Error>> {
     tokio::spawn(async move {
         run_request_metadata_consumer(&store, &valkey_url(), &stream, consumer, shutdown, policy)
             .await
@@ -234,7 +234,7 @@ fn spawn_consumer(
 
 async fn stop_consumers(
     shutdown: watch::Sender<bool>,
-    consumers: Vec<JoinHandle<Result<(), olp_db::valkey::ValkeyAdapterError>>>,
+    consumers: Vec<JoinHandle<Result<(), olp_db::valkey::Error>>>,
 ) {
     shutdown.send(true).unwrap();
     for consumer in consumers {
@@ -274,7 +274,7 @@ async fn wait_for_consumers(
     .expect("all consumers must join the group");
 }
 
-async fn wait_for_usage_facts(store: &PgStore, expected: i64) {
+async fn wait_for_usage_facts(store: &Store, expected: i64) {
     tokio::time::timeout(WAIT_TIMEOUT, async {
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         loop {
@@ -292,11 +292,7 @@ async fn wait_for_usage_facts(store: &PgStore, expected: i64) {
     .expect("expected request metadata must be persisted");
 }
 
-async fn wait_for_group_drain(
-    store: &PgStore,
-    connection: &mut MultiplexedConnection,
-    stream: &str,
-) {
+async fn wait_for_group_drain(store: &Store, connection: &mut MultiplexedConnection, stream: &str) {
     tokio::time::timeout(WAIT_TIMEOUT, async {
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         loop {
@@ -653,7 +649,7 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
             .persist_request_metadata_stream_event(&event, &payload)
             .await
             .unwrap(),
-        RequestMetadataPersistenceOutcome::Persisted
+        Outcome::Persisted
     );
 
     let (shutdown, receiver) = watch::channel(false);
@@ -685,7 +681,7 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
             .persist_request_metadata_stream_event(&event, &payload)
             .await
             .unwrap(),
-        RequestMetadataPersistenceOutcome::Duplicate
+        Outcome::Duplicate
     );
     let counts: (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM requests), \

@@ -1,8 +1,8 @@
 use olp_db::authentication::SessionPrincipal;
-use olp_engine::domain::{Permission, Role};
+use olp_engine::domain::auth::{Permission, Role};
 use tracing::error;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 pub(crate) fn parse_user_role(role: &str) -> Result<Role, Problem> {
     role.parse().map_err(|_| {

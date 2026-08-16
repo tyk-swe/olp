@@ -5,16 +5,16 @@ use axum::{
     response::Response,
 };
 use olp_db::{
-    configuration::NewProviderDraft, idempotency::IdempotencyOutcome,
-    idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint, idempotency::idempotency_secret_digest,
-    security::credential_aad,
+    configuration::NewProviderDraft, idempotency::Outcome, idempotency::Replayable,
+    idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
+    idempotency::secret_digest, security::aad::credential as credential_aad,
 };
 use olp_engine::domain::{
-    ProviderAuthMode, ProviderConfiguration, ProviderKind, provider_kind_spec,
-    validate_provider_configuration,
+    provider::ProviderAuthMode,
+    provider_configuration::{Configuration, provider_kind_spec, validate},
+    routing::provider::ProviderKind,
 };
-use olp_engine::providers::ProviderError;
+use olp_engine::providers::factory::configuration::Error;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
@@ -31,8 +31,10 @@ use crate::management::{
     sessions::require_mutation_session,
 };
 use crate::{
-    FieldErrors, ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_credential},
+    public_http::problem::FieldErrors,
+    public_http::problem::Problem,
 };
 
 #[derive(Deserialize, ToSchema)]
@@ -88,20 +90,18 @@ impl<'a> From<&'a CreateProviderRequest> for CreateProviderFingerprint<'a> {
             credential_sha256: request
                 .credential
                 .as_ref()
-                .map(|credential| idempotency_secret_digest(credential.expose().as_bytes())),
+                .map(|credential| secret_digest(credential.expose().as_bytes())),
             model: request.model.as_deref(),
             display_name: request.display_name.as_deref(),
         }
     }
 }
 
-fn provider_connector_validation(kind: ProviderKind, error: ProviderError) -> Problem {
+fn provider_connector_validation(kind: ProviderKind, error: Error) -> Problem {
     let (field, detail) = match error {
-        ProviderError::Configuration(detail) if kind == ProviderKind::Bedrock => {
-            ("cloud_region", detail)
-        }
-        ProviderError::Configuration(detail) => ("endpoint", detail),
-        ProviderError::Credential(detail) => ("credential", detail),
+        Error::Configuration(detail) if kind == ProviderKind::Bedrock => ("cloud_region", detail),
+        Error::Configuration(detail) => ("endpoint", detail),
+        Error::Credential(detail) => ("credential", detail),
     };
     Problem::field_validation(field, detail)
 }
@@ -152,8 +152,8 @@ pub(crate) async fn create_provider(
     require_provider_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&CreateProviderFingerprint::from(&request))
-        .map_err(map_persistence)?;
+    let request_fingerprint =
+        fingerprint(&CreateProviderFingerprint::from(&request)).map_err(map_persistence)?;
     let master_key = state
         .master_key
         .as_deref()
@@ -198,7 +198,7 @@ pub(crate) async fn create_provider(
     let kind = request.kind;
     let spec = provider_kind_spec(kind);
     let auth_mode = request.auth_mode.unwrap_or(spec.default_auth_mode);
-    for violation in validate_provider_configuration(ProviderConfiguration {
+    for violation in validate(Configuration {
         kind,
         auth_mode,
         endpoint: request.endpoint.as_deref(),
@@ -290,7 +290,7 @@ pub(crate) async fn create_provider(
                 actor: principal.user_id,
                 idempotency_key,
             },
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             |created| {
                 IdempotencyResponse::json(
                     StatusCode::CREATED.as_u16(),
@@ -309,12 +309,12 @@ pub(crate) async fn create_provider(
         .await
         .map_err(map_configuration)?;
     let executed_provider_id = match &created {
-        IdempotencyOutcome::Executed { value, .. } => Some(value.provider_id),
-        IdempotencyOutcome::Replayed(_) => None,
+        Outcome::Executed { value, .. } => Some(value.provider_id),
+        Outcome::Replayed(_) => None,
     };
     if let Some(provider_id) = executed_provider_id {
         state.transports.register(
-            olp_engine::domain::ProviderId::from_uuid(provider_id),
+            olp_engine::domain::ids::ProviderId::from_uuid(provider_id),
             transport,
         );
     }

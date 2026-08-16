@@ -1,16 +1,15 @@
 use olp_engine::domain::{
-    ApiKey, OperationKind, RouteSlug, Surface, TransportMode, select_attempts,
+    auth::ApiKey,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ids::RouteSlug,
+    routing::selection::select_attempts,
 };
 
-use olp_engine::inference::runtime::RuntimeBundle;
+use olp_engine::inference::runtime::Bundle;
 
 use super::protocol_error::ProtocolError;
 
-pub(super) fn visible_routes(
-    runtime: &RuntimeBundle,
-    key: &ApiKey,
-    surface: Surface,
-) -> Vec<RouteSlug> {
+pub(super) fn visible_routes(runtime: &Bundle, key: &ApiKey, surface: Surface) -> Vec<RouteSlug> {
     runtime
         .routes
         .keys()
@@ -21,7 +20,7 @@ pub(super) fn visible_routes(
 }
 
 pub(super) fn visible_route(
-    runtime: &RuntimeBundle,
+    runtime: &Bundle,
     key: &ApiKey,
     id: &str,
     surface: Surface,
@@ -76,7 +75,7 @@ pub(super) fn before_cursor_end(
 }
 
 pub(super) fn supported_operations(
-    runtime: &RuntimeBundle,
+    runtime: &Bundle,
     slug: &RouteSlug,
     surface: Surface,
 ) -> Vec<OperationKind> {
@@ -95,7 +94,7 @@ pub(super) fn supported_operations(
         .collect()
 }
 
-fn route_is_visible(runtime: &RuntimeBundle, slug: &RouteSlug, surface: Surface) -> bool {
+fn route_is_visible(runtime: &Bundle, slug: &RouteSlug, surface: Surface) -> bool {
     !supported_operations(runtime, slug, surface).is_empty()
 }
 

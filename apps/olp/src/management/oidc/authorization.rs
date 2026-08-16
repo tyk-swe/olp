@@ -11,9 +11,10 @@ use axum::{
 };
 use chrono::Utc;
 use olp_db::{
-    authentication::RecentAuthPurpose, authentication::SessionPrincipal, oidc::NewOidcFlow,
-    oidc::OidcFlowMaterial, oidc::OidcFlowPurpose, security::RecentAuthMaterial,
-    security::oidc_flow_payload_aad as flow_payload_aad,
+    authentication::RecentAuthPurpose, authentication::SessionPrincipal, oidc::types::NewOidcFlow,
+    oidc::types::OidcFlowMaterial, oidc::types::OidcFlowPurpose,
+    security::aad::oidc_flow_payload as flow_payload_aad,
+    security::session_material::RecentAuthMaterial,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -30,22 +31,26 @@ use super::session::{
     seal_login_flow_cookie,
 };
 use crate::{
-    ManagementState, Problem, RelativeReturnTo,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        RECENT_AUTH_COOKIE, clear_recent_auth_cookie, cookie, enforce_origin, json_payload,
-        reauthentication_required, require_mutation_session,
+        cookies::clear_recent_auth_cookie,
+        json_payload::json_payload,
+        sessions::{cookie, enforce_origin, reauthentication_required, require_mutation_session},
+    },
+    public_http::{
+        problem::Problem, relative_url::RelativeReturnTo, request_cookies::RECENT_AUTH_COOKIE,
     },
 };
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct OidcAuthorizationResponse {
-    pub authorization_url: String,
+pub(super) struct OidcAuthorizationResponse {
+    pub(super) authorization_url: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct OidcLoginRequest {
+pub(super) struct OidcLoginRequest {
     /// Same-origin absolute-path destination used only after a successful callback.
-    pub return_to: Option<String>,
+    pub(super) return_to: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -54,12 +59,12 @@ pub(super) struct OidcLoginQuery {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct OidcReauthenticationRequest {
+pub(super) struct OidcReauthenticationRequest {
     /// Exact durable security operation that the resulting one-time grant may authorize.
-    pub purpose: String,
+    pub(super) purpose: String,
     /// Required only when unlinking one specific OIDC identity.
     #[schema(value_type = Option<String>, format = Uuid)]
-    pub resource_id: Option<Uuid>,
+    pub(super) resource_id: Option<Uuid>,
 }
 
 struct PersistentFlowContext<'a> {
@@ -245,7 +250,11 @@ async fn admit_login(
     let peer = connect_info.map(|Extension(ConnectInfo(address))| address);
     // Admit before constructing cryptographic material or issuing a redirect.
     // The source digest is keyed and never persisted in its raw network form.
-    let source_digest = crate::public_auth_source_digest(state.request_boundary(), headers, peer)?;
+    let source_digest = crate::public_http::proxy::public_auth_source_digest(
+        state.request_boundary(),
+        headers,
+        peer,
+    )?;
     let admitted = state
         .store()
         .admit_oidc_login_attempt(source_digest)

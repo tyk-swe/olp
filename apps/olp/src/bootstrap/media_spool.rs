@@ -12,8 +12,8 @@ use std::{
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
 use olp_engine::domain::{
-    BoxFuture, MediaArtifact, MediaByteStream, MediaHandle, MediaSpool, MediaSpoolError,
-    MediaUpload, OpenedMedia,
+    canonical::{requests::MediaHandle, results::MediaArtifact},
+    ports::{BoxFuture, MediaByteStream, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia},
 };
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -406,10 +406,7 @@ fn spawn_blocking_cleanup(job: SpoolCleanupJob) {
 /// The bound is enforced atomically across concurrent uploads. Deployment
 /// manifests should give the backing volume additional headroom for filesystem
 /// metadata and writes already in flight at the operating-system boundary.
-pub fn create_media_spool(
-    base_dir: &Path,
-    capacity_bytes: u64,
-) -> std::io::Result<Arc<dyn MediaSpool>> {
+pub fn create(base_dir: &Path, capacity_bytes: u64) -> std::io::Result<Arc<dyn MediaSpool>> {
     if capacity_bytes < MIN_MEDIA_SPOOL_CAPACITY_BYTES {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -422,7 +419,7 @@ pub fn create_media_spool(
 /// Creates the production bounded filesystem spool for local conformance and
 /// fuzz harnesses without exposing its private path or concrete type.
 #[cfg(any(test, feature = "test-util"))]
-pub fn create_bounded_media_spool_for_test() -> std::io::Result<Arc<dyn MediaSpool>> {
+pub fn create_bounded_for_test() -> std::io::Result<Arc<dyn MediaSpool>> {
     FileMediaSpool::create().map(|spool| spool as Arc<dyn MediaSpool>)
 }
 

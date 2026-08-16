@@ -1,25 +1,25 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{MessageRole, SourceExtensions};
+use super::requests::{MessageRole, SourceExtensions};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct CanonicalEvent {
+pub struct Event {
     pub sequence: u64,
     #[serde(flatten)]
-    pub kind: CanonicalEventKind,
+    pub kind: Kind,
 }
 
-impl CanonicalEvent {
+impl Event {
     #[must_use]
-    pub const fn new(sequence: u64, kind: CanonicalEventKind) -> Self {
+    pub const fn new(sequence: u64, kind: Kind) -> Self {
         Self { sequence, kind }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
-pub enum CanonicalEventKind {
+pub enum Kind {
     ResponseStart {
         response_id: Option<String>,
         provider_model: Option<String>,
@@ -51,7 +51,7 @@ pub enum CanonicalEventKind {
         reason: FinishReason,
     },
     Error {
-        error: CanonicalError,
+        error: Error,
     },
     SourceExtension {
         extensions: SourceExtensions,
@@ -80,7 +80,7 @@ pub enum FinishReason {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CanonicalError {
+pub struct Error {
     pub class: ErrorClass,
     pub message: String,
     pub provider_code: Option<String>,
@@ -100,7 +100,7 @@ pub enum ErrorClass {
     Internal,
 }
 
-pub fn validate_event_sequence(events: &[CanonicalEvent]) -> Result<(), EventSequenceError> {
+pub fn validate_event_sequence(events: &[Event]) -> Result<(), EventSequenceError> {
     let mut validator = EventSequenceValidator::new();
     for event in events {
         validator.push(event)?;
@@ -125,7 +125,7 @@ impl EventSequenceValidator {
         }
     }
 
-    pub fn push(&mut self, event: &CanonicalEvent) -> Result<(), EventSequenceError> {
+    pub fn push(&mut self, event: &Event) -> Result<(), EventSequenceError> {
         if self.done {
             return Err(EventSequenceError::AfterDone {
                 sequence: event.sequence,
@@ -137,7 +137,7 @@ impl EventSequenceValidator {
                 actual: event.sequence,
             });
         }
-        self.done = matches!(event.kind, CanonicalEventKind::Done);
+        self.done = matches!(event.kind, Kind::Done);
         self.expected = self.expected.saturating_add(1);
         Ok(())
     }

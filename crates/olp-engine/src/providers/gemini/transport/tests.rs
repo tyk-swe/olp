@@ -2,18 +2,34 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use super::*;
 use crate::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaHandle, MediaSource,
-    MediaSpool, Message, MessageRole, ModerationRequest, Operation, OperationKind, ProviderId,
-    ProviderKind, ProviderOutput, ProviderRequest, ProviderTransport, RequestId, RequestMetadata,
-    RouteId, RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId,
-    TokenCountRequest, TransportMode,
+    canonical::{
+        events::{Event, Kind},
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, MediaHandle, MediaSource,
+            Message, MessageRole, ModerationRequest, Operation, SourceExtensions,
+            TokenCountRequest,
+        },
+        results::CanonicalResult,
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{AttemptFailureClass, MediaSpool, ProviderOutput, ProviderRequest, ProviderTransport},
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
-use crate::protocols::gemini::{Content, GEMINI_COUNT_REQUEST_EXTENSION, Part};
+use crate::protocols::gemini::{
+    count::GEMINI_COUNT_REQUEST_EXTENSION,
+    dto::{Blob, Content, InlineDataPart, Part},
+};
 use crate::providers::gemini::transport::media::hydrate_gemini_contents;
-use crate::providers::gemini::{ConnectorConfig, ConnectorTimeouts, GeminiApiKey};
 use crate::providers::mock_server::{
     MockResponse, find_bytes, response, spawn_mock as spawn_http_mock, status_response,
+};
+use crate::providers::{
+    connector::Timeouts,
+    gemini::{
+        ApiKey, ConnectorConfig,
+        transport::operations::{Connector, validate_operation},
+    },
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -24,25 +40,28 @@ struct InlineSpool;
 impl MediaSpool for InlineSpool {
     fn put<'a>(
         &'a self,
-        _upload: crate::domain::MediaUpload,
-    ) -> crate::domain::BoxFuture<
+        _upload: crate::domain::ports::MediaUpload,
+    ) -> crate::domain::ports::BoxFuture<
         'a,
-        Result<crate::domain::MediaArtifact, crate::domain::MediaSpoolError>,
+        Result<
+            crate::domain::canonical::results::MediaArtifact,
+            crate::domain::ports::MediaSpoolError,
+        >,
     > {
-        Box::pin(async { Err(crate::domain::MediaSpoolError::Unavailable) })
+        Box::pin(async { Err(crate::domain::ports::MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
-        handle: &'a crate::domain::MediaHandle,
-    ) -> crate::domain::BoxFuture<
+        handle: &'a crate::domain::canonical::requests::MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<
         'a,
-        Result<crate::domain::OpenedMedia, crate::domain::MediaSpoolError>,
+        Result<crate::domain::ports::OpenedMedia, crate::domain::ports::MediaSpoolError>,
     > {
         let handle = handle.clone();
         Box::pin(async move {
-            Ok(crate::domain::OpenedMedia {
-                artifact: crate::domain::MediaArtifact {
+            Ok(crate::domain::ports::OpenedMedia {
+                artifact: crate::domain::canonical::results::MediaArtifact {
                     handle,
                     content_type: Some("image/png".into()),
                     content_length: Some(2),
@@ -55,21 +74,22 @@ impl MediaSpool for InlineSpool {
 
     fn remove<'a>(
         &'a self,
-        _handle: &'a crate::domain::MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<(), crate::domain::MediaSpoolError>> {
+        _handle: &'a crate::domain::canonical::requests::MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), crate::domain::ports::MediaSpoolError>>
+    {
         Box::pin(async { Ok(()) })
     }
 }
 
 #[tokio::test]
 async fn same_protocol_inline_data_handle_is_rehydrated() {
-    let handle = crate::domain::MediaHandle::new("inline");
+    let handle = crate::domain::canonical::requests::MediaHandle::new("inline");
     let mut contents = vec![Content {
         role: Some("user".into()),
-        parts: vec![Part::InlineData(crate::protocols::gemini::InlineDataPart {
-            inline_data: crate::protocols::gemini::Blob {
+        parts: vec![Part::InlineData(InlineDataPart {
+            inline_data: Blob {
                 mime_type: "image/png".into(),
-                data: crate::domain::inline_media_marker(&handle),
+                data: crate::domain::canonical::requests::inline_media_marker(&handle),
                 extra: BTreeMap::new(),
             },
             extra: BTreeMap::new(),
@@ -374,10 +394,10 @@ async fn request_envelope_and_transport_mode_mismatches_stop_before_network() {
     }
 }
 
-fn connector(base_url: &str) -> GeminiConnector {
-    GeminiConnector::new(
-        ConnectorConfig::for_local_test(base_url, ConnectorTimeouts::default()),
-        GeminiApiKey::new("upstream-secret").unwrap(),
+fn connector(base_url: &str) -> Connector {
+    Connector::new(
+        ConnectorConfig::for_local_test(base_url, Timeouts::default()),
+        ApiKey::new("upstream-secret").unwrap(),
     )
 }
 
@@ -474,7 +494,7 @@ async fn upstream_statuses_and_unary_body_contracts_are_classified() {
     }
 }
 
-async fn collect(connector: &GeminiConnector, request: ProviderRequest) -> Vec<CanonicalEvent> {
+async fn collect(connector: &Connector, request: ProviderRequest) -> Vec<Event> {
     let ProviderOutput::Events(mut stream) = connector.execute(request).await.unwrap() else {
         panic!("Gemini connector returned a unary result for an event operation");
     };
@@ -497,10 +517,14 @@ async fn executes_unary_generation_with_header_auth_and_model_path() {
     })
     .await;
     let events = collect(&connector(&base), generation(false)).await;
-    assert!(events.iter().any(|event| matches!(&event.kind, CanonicalEventKind::TextDelta { text, .. } if text == "hello back")));
+    assert!(
+        events.iter().any(
+            |event| matches!(&event.kind, Kind::TextDelta { text, .. } if text == "hello back")
+        )
+    );
     assert!(matches!(
         events.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     let request = String::from_utf8(captured.await.unwrap())
         .unwrap()
@@ -526,7 +550,11 @@ async fn decodes_fragmented_sse_and_count_tokens() {
     })
     .await;
     let events = collect(&connector(&base), generation(true)).await;
-    assert!(events.iter().any(|event| matches!(&event.kind, CanonicalEventKind::TextDelta { text, .. } if text == "snow ☃")));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(&event.kind, Kind::TextDelta { text, .. } if text == "snow ☃"))
+    );
     let request = String::from_utf8(captured.await.unwrap()).unwrap();
     assert!(
         request.starts_with("POST /v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse ")
@@ -585,9 +613,9 @@ async fn redirects_are_not_followed_and_error_messages_redact_keys() {
 async fn live_provider_discovers_gemini_models() {
     let key = std::env::var("OLP_LIVE_GEMINI_API_KEY")
         .expect("set OLP_LIVE_GEMINI_API_KEY for the ignored live test");
-    let connector = GeminiConnector::new(
+    let connector = Connector::new(
         ConnectorConfig::default(),
-        GeminiApiKey::new(key).expect("live Gemini key must be representable"),
+        ApiKey::new(key).expect("live Gemini key must be representable"),
     );
     assert!(!connector.discover_models().await.unwrap().is_empty());
 }

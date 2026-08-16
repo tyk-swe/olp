@@ -1,14 +1,18 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{CanonicalEvent, CanonicalEventKind, ErrorClass, MessageRole, Surface, Usage};
+use crate::domain::canonical::{
+    events::{ErrorClass, Event, Kind, Usage},
+    identity::Surface,
+    requests::MessageRole,
+};
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use super::finish_reason;
-use crate::protocols::sse::{RAW_SSE_FRAME_EXTENSION, SseFrame, decode_raw_sse_frame};
+use crate::protocols::sse::{Frame, RAW_SSE_FRAME_EXTENSION, decode_raw_sse_frame};
 
 #[derive(Debug, Error)]
-pub enum ClientStreamEncodeError {
+pub enum Error {
     #[error("Anthropic stream received events out of order")]
     Sequence,
     #[error("Anthropic Messages supports one assistant candidate")]
@@ -26,7 +30,7 @@ pub enum ClientStreamEncodeError {
 }
 
 #[derive(Debug)]
-pub struct AnthropicMessagesClientStreamEncoder {
+pub struct Encoder {
     public_model: String,
     fallback_id: String,
     expected_sequence: u64,
@@ -50,7 +54,7 @@ struct ToolState {
     name: String,
 }
 
-impl AnthropicMessagesClientStreamEncoder {
+impl Encoder {
     #[must_use]
     pub fn new(public_model: impl Into<String>, fallback_id: impl Into<String>) -> Self {
         Self {
@@ -71,38 +75,35 @@ impl AnthropicMessagesClientStreamEncoder {
         }
     }
 
-    pub fn push(
-        &mut self,
-        event: CanonicalEvent,
-    ) -> Result<Vec<SseFrame>, ClientStreamEncodeError> {
+    pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, Error> {
         if self.done || event.sequence != self.expected_sequence {
-            return Err(ClientStreamEncodeError::Sequence);
+            return Err(Error::Sequence);
         }
         self.expected_sequence = self.expected_sequence.saturating_add(1);
         if self.skip_native_events > 0 {
             self.skip_native_events -= 1;
-            if matches!(event.kind, CanonicalEventKind::Done) {
+            if matches!(event.kind, Kind::Done) {
                 self.done = true;
             }
             return Ok(Vec::new());
         }
         let mut frames = Vec::new();
         match event.kind {
-            CanonicalEventKind::ResponseStart { response_id, .. } => {
+            Kind::ResponseStart { response_id, .. } => {
                 if self.response_started {
-                    return Err(ClientStreamEncodeError::Sequence);
+                    return Err(Error::Sequence);
                 }
                 self.response_id = response_id;
                 self.response_started = true;
             }
-            CanonicalEventKind::MessageStart { output_index, role } => {
+            Kind::MessageStart { output_index, role } => {
                 require_candidate(output_index)?;
                 if role != MessageRole::Assistant || self.message_declared {
-                    return Err(ClientStreamEncodeError::Candidate);
+                    return Err(Error::Candidate);
                 }
                 self.message_declared = true;
             }
-            CanonicalEventKind::TextDelta { output_index, text } => {
+            Kind::TextDelta { output_index, text } => {
                 require_candidate(output_index)?;
                 self.ensure_message(&mut frames)?;
                 let block = match self.text_block {
@@ -132,7 +133,7 @@ impl AnthropicMessagesClientStreamEncoder {
                     ));
                 }
             }
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
@@ -145,11 +146,11 @@ impl AnthropicMessagesClientStreamEncoder {
                     if id.as_ref().is_some_and(|id| id != &tool.id)
                         || name.as_ref().is_some_and(|name| name != &tool.name)
                     {
-                        return Err(ClientStreamEncodeError::Tool);
+                        return Err(Error::Tool);
                     }
                 } else {
-                    let id = id.ok_or(ClientStreamEncodeError::Tool)?;
-                    let name = name.ok_or(ClientStreamEncodeError::Tool)?;
+                    let id = id.ok_or(Error::Tool)?;
+                    let name = name.ok_or(Error::Tool)?;
                     let block = self.allocate_block()?;
                     frames.push(frame(
                         "content_block_start",
@@ -161,11 +162,7 @@ impl AnthropicMessagesClientStreamEncoder {
                     ));
                     self.tools.insert(tool_index, ToolState { block, id, name });
                 }
-                let block = self
-                    .tools
-                    .get(&tool_index)
-                    .ok_or(ClientStreamEncodeError::Tool)?
-                    .block;
+                let block = self.tools.get(&tool_index).ok_or(Error::Tool)?.block;
                 if !arguments_delta.is_empty() {
                     frames.push(frame(
                         "content_block_delta",
@@ -177,22 +174,22 @@ impl AnthropicMessagesClientStreamEncoder {
                     ));
                 }
             }
-            CanonicalEventKind::Usage { usage } => {
+            Kind::Usage { usage } => {
                 if usage.reasoning_tokens.is_some() {
-                    return Err(ClientStreamEncodeError::ReasoningUsage);
+                    return Err(Error::ReasoningUsage);
                 }
                 self.usage = usage;
                 if self.message_declared && !self.message_emitted {
                     self.ensure_message(&mut frames)?;
                 }
             }
-            CanonicalEventKind::Finish {
+            Kind::Finish {
                 output_index,
                 reason,
             } => {
                 require_candidate(output_index)?;
                 if self.finished {
-                    return Err(ClientStreamEncodeError::Sequence);
+                    return Err(Error::Sequence);
                 }
                 self.ensure_message(&mut frames)?;
                 let mut blocks = self
@@ -222,7 +219,7 @@ impl AnthropicMessagesClientStreamEncoder {
                 ));
                 self.finished = true;
             }
-            CanonicalEventKind::Error { error } => {
+            Kind::Error { error } => {
                 frames.push(frame(
                     "error",
                     json!({
@@ -232,29 +229,29 @@ impl AnthropicMessagesClientStreamEncoder {
                 ));
                 self.finished = true;
             }
-            CanonicalEventKind::SourceExtension { extensions } => {
+            Kind::SourceExtension { extensions } => {
                 if extensions.source != Some(Surface::Anthropic) {
-                    return Err(ClientStreamEncodeError::Extension);
+                    return Err(Error::Extension);
                 }
                 if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
                     if extensions.values.len() != 1 {
-                        return Err(ClientStreamEncodeError::Extension);
+                        return Err(Error::Extension);
                     }
                     let (mut raw, semantic_events) =
-                        decode_raw_sse_frame(value).ok_or(ClientStreamEncodeError::Extension)?;
+                        decode_raw_sse_frame(value).ok_or(Error::Extension)?;
                     rewrite_anthropic_model(&mut raw, &self.public_model)?;
                     self.skip_native_events = semantic_events;
                     frames.push(raw);
                 } else if !extensions.values.is_empty() {
-                    return Err(ClientStreamEncodeError::Extension);
+                    return Err(Error::Extension);
                 }
             }
-            CanonicalEventKind::RefusalDelta { .. } => {
-                return Err(ClientStreamEncodeError::Candidate);
+            Kind::RefusalDelta { .. } => {
+                return Err(Error::Candidate);
             }
-            CanonicalEventKind::Done => {
+            Kind::Done => {
                 if !self.finished {
-                    return Err(ClientStreamEncodeError::MissingFinish);
+                    return Err(Error::MissingFinish);
                 }
                 if self.message_emitted {
                     frames.push(frame("message_stop", json!({"type": "message_stop"})));
@@ -265,15 +262,12 @@ impl AnthropicMessagesClientStreamEncoder {
         Ok(frames)
     }
 
-    fn ensure_message(
-        &mut self,
-        frames: &mut Vec<SseFrame>,
-    ) -> Result<(), ClientStreamEncodeError> {
+    fn ensure_message(&mut self, frames: &mut Vec<Frame>) -> Result<(), Error> {
         if self.message_emitted {
             return Ok(());
         }
         if !self.response_started || !self.message_declared {
-            return Err(ClientStreamEncodeError::Response);
+            return Err(Error::Response);
         }
         frames.push(frame(
             "message_start",
@@ -299,36 +293,29 @@ impl AnthropicMessagesClientStreamEncoder {
         Ok(())
     }
 
-    fn allocate_block(&mut self) -> Result<u32, ClientStreamEncodeError> {
+    fn allocate_block(&mut self) -> Result<u32, Error> {
         let block = self.next_block;
-        self.next_block = self
-            .next_block
-            .checked_add(1)
-            .ok_or(ClientStreamEncodeError::Candidate)?;
+        self.next_block = self.next_block.checked_add(1).ok_or(Error::Candidate)?;
         Ok(block)
     }
 }
 
-fn rewrite_anthropic_model(
-    frame: &mut SseFrame,
-    public_model: &str,
-) -> Result<(), ClientStreamEncodeError> {
-    let mut value: Value =
-        serde_json::from_str(&frame.data).map_err(|_| ClientStreamEncodeError::Extension)?;
+fn rewrite_anthropic_model(frame: &mut Frame, public_model: &str) -> Result<(), Error> {
+    let mut value: Value = serde_json::from_str(&frame.data).map_err(|_| Error::Extension)?;
     if let Some(message) = value.get_mut("message").and_then(Value::as_object_mut)
         && message.contains_key("model")
     {
         message.insert("model".into(), Value::String(public_model.to_owned()));
     }
-    frame.data = serde_json::to_string(&value).map_err(|_| ClientStreamEncodeError::Extension)?;
+    frame.data = serde_json::to_string(&value).map_err(|_| Error::Extension)?;
     Ok(())
 }
 
-fn require_candidate(index: u32) -> Result<(), ClientStreamEncodeError> {
+fn require_candidate(index: u32) -> Result<(), Error> {
     if index == 0 {
         Ok(())
     } else {
-        Err(ClientStreamEncodeError::Candidate)
+        Err(Error::Candidate)
     }
 }
 
@@ -345,8 +332,8 @@ fn anthropic_error_type(class: ErrorClass) -> &'static str {
     }
 }
 
-fn frame(event: &'static str, value: Value) -> SseFrame {
-    SseFrame {
+fn frame(event: &'static str, value: Value) -> Frame {
+    Frame {
         event: Some(event.to_owned()),
         data: value.to_string(),
         id: None,

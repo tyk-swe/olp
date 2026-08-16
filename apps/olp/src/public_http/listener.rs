@@ -31,8 +31,8 @@ use tokio::{
 use tower::ServiceExt as _;
 use tracing::{debug, warn};
 
-const HTTP1_MAX_HEADERS: usize = crate::MAX_HTTP_HEADER_COUNT;
-const HTTP1_MAX_HEADER_BYTES: usize = crate::MAX_HTTP_HEADER_BYTES;
+const HTTP1_MAX_HEADERS: usize = crate::bootstrap::state::MAX_HTTP_HEADER_COUNT;
+const HTTP1_MAX_HEADER_BYTES: usize = crate::bootstrap::state::MAX_HTTP_HEADER_BYTES;
 const HTTP2_MAX_CONCURRENT_STREAMS: u32 = 100;
 const HTTP2_MAX_HEADER_LIST_BYTES: u32 = 32 * 1024;
 const HTTP2_MAX_PENDING_RESET_STREAMS: usize = 32;

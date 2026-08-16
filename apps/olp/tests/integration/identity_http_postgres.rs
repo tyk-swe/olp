@@ -6,9 +6,12 @@ use axum::{
     http::{Method, Request, Response, StatusCode, header},
 };
 use http_body_util::BodyExt as _;
-use olp::test_support::{ApiMode, ProcessComposition, public_router};
-use olp_db::security::MasterKey;
-use olp_engine::inference::runtime::RuntimeManager;
+use olp::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    public_http::router::for_state,
+};
+use olp_db::security::envelope::MasterKey;
+use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
 use sqlx::Row as _;
 use tower::ServiceExt as _;
@@ -25,13 +28,13 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-api-test"),
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [8; 32]);
-    let app = public_router(state.mode_dependencies().unwrap().management().unwrap());
+    let app = for_state(state.mode_dependencies().unwrap().management().unwrap());
 
     let setup = send_json(
         &app,

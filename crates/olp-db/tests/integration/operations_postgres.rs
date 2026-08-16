@@ -1,18 +1,17 @@
 use chrono::{Duration, Timelike, Utc};
 use olp_db::{
-    PgStore, idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse,
-    idempotency::ReplayableIdempotency, identity::InstallationSetupInput,
-    operations::OperationsError, operations::PriceInput, operations::RequestFilters,
-    request_metadata::RequestMetadataConsumerState, request_metadata::RequestMetadataGap,
-    request_metadata::RequestMetadataGatewayEpochState,
-    request_metadata::RequestMetadataPersistenceOutcome, security::MasterKey,
-    security::hash_password, usage::UsageDimension, usage::UsageFilters, usage::UsageGranularity,
+    idempotency::Outcome as IdempotencyOutcome, idempotency::Replayable, idempotency::Response,
+    identity::InstallationSetupInput, operations::cursor::Error, operations::pricing::PriceInput,
+    operations::requests::RequestFilters, request_metadata::delivery_health::ConsumerState,
+    request_metadata::ingestion::Outcome as IngestionOutcome,
+    request_metadata::reconciliation::Gap, request_metadata::reconciliation::GatewayEpochState,
+    security::envelope::MasterKey, security::password::hash, store::Store, usage::Dimension,
+    usage::Filters, usage::Granularity,
 };
 use olp_engine::{
-    domain::Surface,
+    domain::canonical::identity::Surface,
     inference::request_metadata::{
-        RequestAttemptMetadata, RequestAttemptUsageMetadata, RequestMetadataBufferSnapshot,
-        RequestMetadataEvent,
+        Event, RequestAttemptMetadata, RequestAttemptUsageMetadata, Snapshot,
     },
 };
 use rust_decimal::Decimal;
@@ -32,7 +31,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
             installation_name: "Operations integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
+            password_hash: hash("correct horse battery staple").unwrap(),
         })
         .await
         .unwrap();

@@ -1,30 +1,28 @@
 use chrono::{DateTime, Utc};
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    PgStore,
     authentication::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, revoke_user_sessions,
     },
-    security::SessionMaterial,
+    security::session_material::SessionMaterial,
     split_page,
+    store::Store,
 };
 
-use super::{
-    IdentityError, PasswordSessionRotation, SessionRecord, UserRecord, insert_audit, parse_role,
-};
+use super::{Error, PasswordSessionRotation, SessionRecord, UserRecord, insert_audit, parse_role};
 
 const MAX_PAGE_SIZE: i64 = 100;
 
-impl PgStore {
+impl Store {
     pub async fn list_users(
         &self,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<(Vec<UserRecord>, Option<Uuid>), IdentityError> {
+    ) -> Result<(Vec<UserRecord>, Option<Uuid>), Error> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query_as!(
             UserRow,
@@ -41,7 +39,7 @@ impl PgStore {
         Ok((users, next_cursor))
     }
 
-    pub async fn user(&self, id: Uuid) -> Result<Option<UserRecord>, IdentityError> {
+    pub async fn user(&self, id: Uuid) -> Result<Option<UserRecord>, Error> {
         let row = sqlx::query_as!(
             UserRow,
             "SELECT id, email, display_name, role::text AS \"role!\", active, etag, created_at, updated_at \
@@ -58,14 +56,14 @@ impl PgStore {
         role: Role,
         expected_etag: Uuid,
         actor: Uuid,
-    ) -> Result<UserRecord, IdentityError> {
+    ) -> Result<UserRecord, Error> {
         let mut transaction = self.pool().begin().await?;
         let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(IdentityError::NotFound)?;
+            .ok_or(Error::NotFound)?;
         if current.etag != expected_etag {
-            return Err(IdentityError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
 
         let etag = Uuid::now_v7();
@@ -80,7 +78,7 @@ impl PgStore {
         .await
         {
             Ok(row) => row,
-            Err(error) if is_last_owner_violation(&error) => return Err(IdentityError::LastOwner),
+            Err(error) if is_last_owner_violation(&error) => return Err(Error::LastOwner),
             Err(error) => return Err(error.into()),
         };
 
@@ -117,9 +115,9 @@ impl PgStore {
         active: Option<bool>,
         expected_etag: Uuid,
         actor: Uuid,
-    ) -> Result<UserRecord, IdentityError> {
+    ) -> Result<UserRecord, Error> {
         if role.is_none() && active.is_none() {
-            return Err(IdentityError::Invalid(
+            return Err(Error::Invalid(
                 "role or active status is required".to_owned(),
             ));
         }
@@ -127,9 +125,9 @@ impl PgStore {
         let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(IdentityError::NotFound)?;
+            .ok_or(Error::NotFound)?;
         if current.etag != expected_etag {
-            return Err(IdentityError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         let etag = Uuid::now_v7();
         let row = match sqlx::query_as!(
@@ -145,7 +143,7 @@ impl PgStore {
         .await
         {
             Ok(row) => row,
-            Err(error) if is_last_owner_violation(&error) => return Err(IdentityError::LastOwner),
+            Err(error) if is_last_owner_violation(&error) => return Err(Error::LastOwner),
             Err(error) => return Err(error.into()),
         };
         let revoked = sqlx::query!("DELETE FROM sessions WHERE user_id = $1", id)
@@ -179,10 +177,10 @@ impl PgStore {
         id: Uuid,
         display_name: &str,
         expected_etag: Uuid,
-    ) -> Result<UserRecord, IdentityError> {
+    ) -> Result<UserRecord, Error> {
         let display_name = display_name.trim();
         if display_name.is_empty() || display_name.chars().count() > 100 {
-            return Err(IdentityError::Invalid(
+            return Err(Error::Invalid(
                 "display name must contain 1-100 characters".to_owned(),
             ));
         }
@@ -208,9 +206,9 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             return Err(if exists {
-                IdentityError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                IdentityError::NotFound
+                Error::NotFound
             });
         };
         insert_audit(
@@ -232,13 +230,13 @@ impl PgStore {
         context: SessionSecurityContext,
         replacement: &SessionMaterial,
         session_ttl: chrono::Duration,
-    ) -> Result<PasswordSessionRotation, IdentityError> {
+    ) -> Result<PasswordSessionRotation, Error> {
         let id = context.user_id;
         let now = Utc::now();
         let expires_at = now
             .checked_add_signed(session_ttl)
             .filter(|expires_at| *expires_at > now)
-            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
+            .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
         let current = sqlx::query!(
             "SELECT etag, password_hash IS NOT NULL AS \"local!\", active, security_version \
@@ -247,18 +245,18 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(IdentityError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if !current.local {
-            return Err(IdentityError::LocalPasswordUnavailable);
+            return Err(Error::LocalPasswordUnavailable);
         }
         if !current.active
             || current.security_version != context.security_version
             || !session_is_current(&mut transaction, context).await?
         {
-            return Err(IdentityError::SessionUnavailable);
+            return Err(Error::SessionUnavailable);
         }
         if current.etag != expected_etag {
-            return Err(IdentityError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         let etag = Uuid::now_v7();
         let row = sqlx::query_as!(
@@ -328,13 +326,13 @@ impl PgStore {
         recent_auth_token_digest: [u8; 32],
         replacement: &SessionMaterial,
         session_ttl: chrono::Duration,
-    ) -> Result<PasswordSessionRotation, IdentityError> {
+    ) -> Result<PasswordSessionRotation, Error> {
         let id = context.user_id;
         let now = Utc::now();
         let expires_at = now
             .checked_add_signed(session_ttl)
             .filter(|expires_at| *expires_at > now)
-            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
+            .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
         let current = sqlx::query!(
             "SELECT etag, password_hash IS NOT NULL AS \"local!\", active, security_version \
@@ -343,15 +341,15 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(IdentityError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         if current.local {
-            return Err(IdentityError::LocalPasswordAlreadyConfigured);
+            return Err(Error::LocalPasswordAlreadyConfigured);
         }
         if !current.active || current.security_version != context.security_version {
-            return Err(IdentityError::SessionUnavailable);
+            return Err(Error::SessionUnavailable);
         }
         if current.etag != expected_etag {
-            return Err(IdentityError::PreconditionFailed);
+            return Err(Error::PreconditionFailed);
         }
         if !consume_recent_authentication(
             &mut transaction,
@@ -364,7 +362,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(IdentityError::RecentAuthenticationRequired);
+            return Err(Error::RecentAuthenticationRequired);
         }
         let etag = Uuid::now_v7();
         let row = sqlx::query_as!(
@@ -436,7 +434,7 @@ impl PgStore {
         user_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<(Vec<SessionRecord>, Option<Uuid>), IdentityError> {
+    ) -> Result<(Vec<SessionRecord>, Option<Uuid>), Error> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query!(
             "SELECT session.id, session.user_id, session.expires_at, session.last_seen_at, \
@@ -471,7 +469,7 @@ impl PgStore {
         session_id: Uuid,
         actor: Uuid,
         can_manage_all: bool,
-    ) -> Result<(), IdentityError> {
+    ) -> Result<(), Error> {
         let mut transaction = self.pool().begin().await?;
         let session = sqlx::query!(
             "SELECT user_id FROM sessions WHERE id = $1 FOR UPDATE",
@@ -479,10 +477,10 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(IdentityError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         let user_id: Uuid = session.user_id;
         if user_id != actor && !can_manage_all {
-            return Err(IdentityError::SessionForbidden);
+            return Err(Error::SessionForbidden);
         }
         sqlx::query!("DELETE FROM sessions WHERE id = $1", session_id)
             .execute(&mut *transaction)
@@ -558,7 +556,7 @@ impl PasswordUserRow {
     }
 }
 
-pub(super) fn user_from_row(row: UserRow) -> Result<UserRecord, IdentityError> {
+pub(super) fn user_from_row(row: UserRow) -> Result<UserRecord, Error> {
     Ok(UserRecord {
         id: row.id,
         email: row.email,

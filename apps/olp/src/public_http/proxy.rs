@@ -12,9 +12,9 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_db::security::AuthHmacKey;
+use olp_db::security::key_material::AuthHmacKey;
 
-use crate::{Problem, RequestBoundaryState};
+use crate::{bootstrap::mode_dependencies::RequestBoundaryState, public_http::problem::Problem};
 
 const UNCONFIGURED_PROXY_WARNING_INTERVAL_SECONDS: u64 = 60;
 static LAST_UNCONFIGURED_PROXY_WARNING: AtomicU64 = AtomicU64::new(0);

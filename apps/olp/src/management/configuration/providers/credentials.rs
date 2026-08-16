@@ -6,26 +6,31 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    configuration::CredentialVersionRecord, configuration::ProviderRecord,
-    configuration::RotateCredentialInput, idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint, idempotency::idempotency_secret_digest,
-    security::credential_aad,
+    configuration::resources::CredentialVersionRecord, configuration::resources::ProviderRecord,
+    configuration::resources::RotateCredentialInput, idempotency::Replayable,
+    idempotency::fingerprint, idempotency::secret_digest, security::aad::credential,
 };
-use olp_engine::providers::ProviderFactory;
+use olp_engine::{domain::auth::Permission, providers::factory::assembly::Factory};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     bootstrap::provider_adapter::{provider_config, provider_credential},
     management::{
-        PageQuery, Permission, RuntimeGenerationResponse, WriteOnlySecret,
-        idempotency_http_response, if_match, json_payload, map_configuration, page,
-        require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        error_mapping::map_configuration,
+        idempotency::{idempotency_http_response, require_idempotency_key},
+        json_payload::json_payload,
+        pagination::{PageQuery, page},
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        response_policy::RuntimeGenerationResponse,
+        secrets::WriteOnlySecret,
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -141,12 +146,12 @@ pub(crate) async fn rotate_provider_credential(
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
-    let request_fingerprint = idempotency_fingerprint(&RotateProviderCredentialFingerprint {
+    let request_fingerprint = fingerprint(&RotateProviderCredentialFingerprint {
         provider_id,
         expected_etag,
-        credential_sha256: idempotency_secret_digest(request.credential.expose().as_bytes()),
+        credential_sha256: secret_digest(request.credential.expose().as_bytes()),
     })
-    .map_err(crate::management::map_persistence)?;
+    .map_err(crate::management::error_mapping::map_persistence)?;
     if request.credential.expose().trim().is_empty() || request.credential.expose().len() > 8_192 {
         return Err(Problem::field_validation(
             "credential",
@@ -172,7 +177,7 @@ pub(crate) async fn rotate_provider_credential(
     let encrypted = master_key
         .seal(
             request.credential.expose().as_bytes(),
-            &credential_aad(provider_id, credential_id, version),
+            &credential(provider_id, credential_id, version),
         )
         .map_err(|error| {
             error!(%error, "provider credential encryption failed");
@@ -189,9 +194,9 @@ pub(crate) async fn rotate_provider_credential(
                 actor: principal.user_id,
                 idempotency_key,
             },
-            ReplayableIdempotency::new(request_fingerprint, master_key),
+            Replayable::new(request_fingerprint, master_key),
             |result| {
-                olp_db::idempotency::IdempotencyResponse::json(
+                olp_db::idempotency::Response::json(
                     StatusCode::CREATED.as_u16(),
                     &ProviderMutationResponse {
                         provider_id,
@@ -213,7 +218,7 @@ fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> R
     let config = provider_config(provider.into()).map_err(|error| error.to_string())?;
     let credential = provider_credential(&config, Some(credential.as_bytes()))
         .map_err(|error| error.to_string())?;
-    ProviderFactory::validate_credential(&config, &credential).map_err(|error| error.to_string())
+    Factory::validate_credential(&config, &credential).map_err(|error| error.to_string())
 }
 
 #[utoipa::path(

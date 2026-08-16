@@ -1,8 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, ContentPart, FinishReason, GenerationRequest, Message,
-    MessageRole, ResponseFormat, TokenCountRequest, ToolChoice, TransportError, Usage,
+    canonical::{
+        events::{Event, FinishReason, Kind, Usage},
+        requests::{
+            ContentPart, GenerationRequest, Message, MessageRole, ResponseFormat,
+            TokenCountRequest, ToolChoice,
+        },
+    },
+    ports::TransportError,
 };
 use aws_sdk_bedrockruntime::{
     operation::converse::ConverseOutput,
@@ -294,18 +300,18 @@ fn encode_tools(request: &GenerationRequest) -> Result<Option<ToolConfiguration>
 pub(in crate::providers) fn decode_converse(
     response: ConverseOutput,
     upstream_model: &str,
-) -> Result<Vec<CanonicalEvent>, TransportError> {
+) -> Result<Vec<Event>, TransportError> {
     if response.trace.is_some() || response.additional_model_response_fields.is_some() {
         return Err(protocol_body_error(
             "Bedrock returned guardrail or vendor semantics that cannot be represented canonically",
         ));
     }
     let mut kinds = vec![
-        CanonicalEventKind::ResponseStart {
+        Kind::ResponseStart {
             response_id: None,
             provider_model: Some(upstream_model.to_owned()),
         },
-        CanonicalEventKind::MessageStart {
+        Kind::MessageStart {
             output_index: 0,
             role: MessageRole::Assistant,
         },
@@ -321,13 +327,13 @@ pub(in crate::providers) fn decode_converse(
     let mut tool_index = 0_u32;
     for block in message.content {
         match block {
-            ContentBlock::Text(text) => kinds.push(CanonicalEventKind::TextDelta {
+            ContentBlock::Text(text) => kinds.push(Kind::TextDelta {
                 output_index: 0,
                 text,
             }),
             ContentBlock::ToolUse(tool) => {
                 let arguments = document_to_json(tool.input)?;
-                kinds.push(CanonicalEventKind::ToolCallDelta {
+                kinds.push(Kind::ToolCallDelta {
                     output_index: 0,
                     tool_index,
                     id: Some(tool.tool_use_id),
@@ -346,19 +352,19 @@ pub(in crate::providers) fn decode_converse(
         }
     }
     if let Some(usage) = response.usage {
-        kinds.push(CanonicalEventKind::Usage {
+        kinds.push(Kind::Usage {
             usage: decode_usage(&usage)?,
         });
     }
-    kinds.push(CanonicalEventKind::Finish {
+    kinds.push(Kind::Finish {
         output_index: 0,
         reason: decode_stop_reason(&response.stop_reason),
     });
-    kinds.push(CanonicalEventKind::Done);
+    kinds.push(Kind::Done);
     Ok(kinds
         .into_iter()
         .enumerate()
-        .map(|(sequence, kind)| CanonicalEvent::new(sequence as u64, kind))
+        .map(|(sequence, kind)| Event::new(sequence as u64, kind))
         .collect())
 }
 
@@ -387,7 +393,9 @@ pub(in crate::providers) fn decode_stop_reason(reason: &StopReason) -> FinishRea
     }
 }
 
-fn reject_extensions(extensions: &crate::domain::SourceExtensions) -> Result<(), TransportError> {
+fn reject_extensions(
+    extensions: &crate::domain::canonical::requests::SourceExtensions,
+) -> Result<(), TransportError> {
     if extensions.is_empty() {
         Ok(())
     } else {
@@ -478,8 +486,8 @@ fn nonnegative_tokens(value: i32, label: &str) -> Result<u64, TransportError> {
 
 pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> TransportError {
     TransportError {
-        phase: crate::domain::TransportPhase::Connect,
-        class: crate::domain::AttemptFailureClass::Protocol,
+        phase: crate::domain::ports::TransportPhase::Connect,
+        class: crate::domain::ports::AttemptFailureClass::Protocol,
         response_committed: false,
         message: message.into(),
     }
@@ -487,8 +495,8 @@ pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> Transp
 
 pub(in crate::providers) fn protocol_body_error(message: impl Into<String>) -> TransportError {
     TransportError {
-        phase: crate::domain::TransportPhase::Body,
-        class: crate::domain::AttemptFailureClass::Protocol,
+        phase: crate::domain::ports::TransportPhase::Body,
+        class: crate::domain::ports::AttemptFailureClass::Protocol,
         response_committed: true,
         message: message.into(),
     }
@@ -499,7 +507,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::domain::{
-        GenerationParameters, Message, RouteSlug, SourceExtensions, ToolCall, ToolDefinition,
+        canonical::requests::{
+            GenerationParameters, Message, SourceExtensions, ToolCall, ToolDefinition,
+        },
+        ids::RouteSlug,
     };
     use aws_sdk_bedrockruntime::types::{
         ConverseOutput as BedrockConverseOutput, TokenUsage, ToolUseBlock,
@@ -537,7 +548,10 @@ mod tests {
 
     fn assert_protocol(result: Result<EncodedConverse, TransportError>, message: &str) {
         let error = result.err().unwrap();
-        assert_eq!(error.class, crate::domain::AttemptFailureClass::Protocol);
+        assert_eq!(
+            error.class,
+            crate::domain::ports::AttemptFailureClass::Protocol
+        );
         assert!(error.message.contains(message), "{}", error.message);
     }
 
@@ -629,12 +643,9 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|event| matches!(event.kind, CanonicalEventKind::ToolCallDelta { .. }))
+                .any(|event| matches!(event.kind, Kind::ToolCallDelta { .. }))
         );
-        assert!(matches!(
-            events.last().unwrap().kind,
-            CanonicalEventKind::Done
-        ));
+        assert!(matches!(events.last().unwrap().kind, Kind::Done));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use chrono::{Duration, Timelike, Utc};
-use olp_db::{MIGRATOR, request_metadata::RequestMetadataConsumerState, usage::UsageFilters};
+use olp_db::{MIGRATOR, request_metadata::delivery_health::ConsumerState, usage::Filters};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -242,7 +242,7 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
         ]
     );
 
-    let filters = UsageFilters {
+    let filters = Filters {
         observed_after: cold_bucket,
         observed_before: bucket + Duration::hours(1),
         route_slug: None,
@@ -260,7 +260,7 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     assert!(completeness.coverage.range_complete);
     assert_eq!(
         completeness.request_metadata_consumer.state,
-        RequestMetadataConsumerState::Healthy
+        ConsumerState::Healthy
     );
     assert!(!completeness.complete);
 }

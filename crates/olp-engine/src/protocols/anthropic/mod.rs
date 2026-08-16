@@ -1,29 +1,11 @@
-mod client;
-mod client_stream;
-mod count;
-mod dto;
-mod stream;
-mod translate;
+pub mod client;
+pub mod client_stream;
+pub mod count;
+pub mod dto;
+pub mod stream;
+pub mod translate;
 
-use crate::domain::FinishReason;
-
-pub use client::{ClientEncodeError, encode_messages_response};
-pub use client_stream::{AnthropicMessagesClientStreamEncoder, ClientStreamEncodeError};
-pub use count::{
-    ANTHROPIC_COUNT_REQUEST_EXTENSION, CountDecodeError, CountEncodeError,
-    decode_count_tokens_request, encode_count_tokens_result,
-};
-pub use dto::{
-    ContentBlock, CountTokensRequest, CountTokensResponse, ImageBlock, MediaSource, Message,
-    MessageContent, MessagesRequest, MessagesResponse, RedactedThinkingBlock, Role, SystemPrompt,
-    TextBlock, ThinkingBlock, Tool, ToolChoice, ToolResultBlock, ToolResultContent, ToolUseBlock,
-    Usage,
-};
-pub use stream::{AnthropicMessagesStreamDecoder, StreamError};
-pub use translate::{
-    DecodeError, EncodeError, ResponseError, decode_messages_request, decode_messages_response,
-    encode_messages_request,
-};
+use crate::domain::canonical::events::FinishReason;
 
 fn finish_reason(reason: &FinishReason) -> &str {
     match reason {

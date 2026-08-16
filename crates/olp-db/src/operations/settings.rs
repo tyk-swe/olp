@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::cursor::OperationsError;
-use crate::PgStore;
+use super::cursor::Error;
+use crate::store::Store;
 
 #[derive(Clone, Debug)]
 pub struct SettingRecord {
@@ -13,8 +13,8 @@ pub struct SettingRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-impl PgStore {
-    pub async fn settings(&self) -> Result<Vec<SettingRecord>, OperationsError> {
+impl Store {
+    pub async fn settings(&self) -> Result<Vec<SettingRecord>, Error> {
         let rows = sqlx::query!(
             "SELECT key, value, etag, updated_by, updated_at FROM settings ORDER BY key",
         )
@@ -38,9 +38,9 @@ impl PgStore {
         value: &str,
         expected_etag: Uuid,
         actor: Uuid,
-    ) -> Result<SettingRecord, OperationsError> {
+    ) -> Result<SettingRecord, Error> {
         if key.trim().is_empty() || key.len() > 100 || value.len() > 4_096 {
-            return Err(OperationsError::Invalid(
+            return Err(Error::Invalid(
                 "setting key or value exceeds its limit".to_owned(),
             ));
         }
@@ -52,7 +52,7 @@ impl PgStore {
             .ok()
             .is_none_or(|days| !(1..=3_650).contains(&days))
         {
-            return Err(OperationsError::Invalid(
+            return Err(Error::Invalid(
                 "retention days must be an integer between 1 and 3650".to_owned(),
             ));
         }
@@ -80,9 +80,9 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             return Err(if exists {
-                OperationsError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                OperationsError::NotFound
+                Error::NotFound
             });
         };
         sqlx::query!(

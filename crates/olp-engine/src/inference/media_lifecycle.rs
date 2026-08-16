@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::domain::{MediaByteStream, MediaHandle, MediaSpool, Operation};
+use crate::domain::{
+    canonical::requests::{MediaHandle, Operation},
+    ports::{MediaByteStream, MediaSpool},
+};
 use bytes::Bytes;
 use tracing::warn;
 
@@ -13,20 +16,22 @@ pub(in crate::inference) fn operation_media_handles(operation: &Operation) -> Ve
             }
         }
         Operation::TokenCount(request) => capture_content_handles(&request.input, &mut handles),
-        Operation::Images(crate::domain::ImageOperation::Edit(request)) => {
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Edit(request)) => {
             handles.extend(request.images.iter().cloned());
             handles.extend(request.mask.iter().cloned());
         }
-        Operation::Images(crate::domain::ImageOperation::Variation(request)) => {
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Variation(
+            request,
+        )) => {
             handles.push(request.image.clone());
         }
         Operation::Transcription(request) => handles.push(request.audio.clone()),
-        Operation::Video(crate::domain::VideoOperation::Create(request)) => {
+        Operation::Video(crate::domain::canonical::requests::VideoOperation::Create(request)) => {
             handles.extend(request.input.iter().cloned());
         }
         Operation::Moderation(request) => capture_content_handles(&request.input, &mut handles),
         Operation::Embeddings(_)
-        | Operation::Images(crate::domain::ImageOperation::Generation(_))
+        | Operation::Images(crate::domain::canonical::requests::ImageOperation::Generation(_))
         | Operation::Speech(_)
         | Operation::Video(_)
         | Operation::Models(_) => {}
@@ -36,15 +41,22 @@ pub(in crate::inference) fn operation_media_handles(operation: &Operation) -> Ve
     handles
 }
 
-fn capture_content_handles(parts: &[crate::domain::ContentPart], handles: &mut Vec<MediaHandle>) {
+fn capture_content_handles(
+    parts: &[crate::domain::canonical::requests::ContentPart],
+    handles: &mut Vec<MediaHandle>,
+) {
     for part in parts {
         match part {
-            crate::domain::ContentPart::Image {
-                source: crate::domain::MediaSource::Handle(handle),
+            crate::domain::canonical::requests::ContentPart::Image {
+                source: crate::domain::canonical::requests::MediaSource::Handle(handle),
                 ..
             }
-            | crate::domain::ContentPart::InputAudio { media: handle, .. }
-            | crate::domain::ContentPart::InputFile { media: handle, .. } => {
+            | crate::domain::canonical::requests::ContentPart::InputAudio {
+                media: handle, ..
+            }
+            | crate::domain::canonical::requests::ContentPart::InputFile {
+                media: handle, ..
+            } => {
                 handles.push(handle.clone());
             }
             _ => {}
@@ -55,7 +67,7 @@ fn capture_content_handles(parts: &[crate::domain::ContentPart], handles: &mut V
 async fn cleanup_request_media(spool: &Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) {
     for handle in handles {
         match spool.remove(&handle).await {
-            Ok(()) | Err(crate::domain::MediaSpoolError::NotFound) => {}
+            Ok(()) | Err(crate::domain::ports::MediaSpoolError::NotFound) => {}
             Err(error) => warn!(%error, "failed to remove request media from the bounded spool"),
         }
     }
@@ -128,7 +140,7 @@ impl CleanupMediaStream {
 }
 
 impl futures::Stream for CleanupMediaStream {
-    type Item = Result<Bytes, crate::domain::MediaSpoolError>;
+    type Item = Result<Bytes, crate::domain::ports::MediaSpoolError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -157,9 +169,15 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::domain::{
-        BoxFuture, ContentPart, MediaArtifact, MediaHandle, MediaSource, MediaSpool,
-        MediaSpoolError, MediaUpload, OpenedMedia, Operation, RouteSlug, SourceExtensions,
-        TokenCountRequest,
+        canonical::{
+            requests::{
+                ContentPart, MediaHandle, MediaSource, Operation, SourceExtensions,
+                TokenCountRequest,
+            },
+            results::MediaArtifact,
+        },
+        ids::RouteSlug,
+        ports::{BoxFuture, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia},
     };
 
     use super::{CleanupMediaStream, RequestMediaGuard, operation_media_handles};

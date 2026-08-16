@@ -44,7 +44,7 @@ impl fmt::Debug for ApplicationDefaultTokenProvider {
 impl BearerTokenProvider for ApplicationDefaultTokenProvider {
     fn token<'a>(
         &'a self,
-    ) -> crate::domain::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
         Box::pin(async move {
             let token = self
                 .credentials
@@ -220,7 +220,7 @@ impl fmt::Debug for ServiceAccountTokenProvider {
 impl BearerTokenProvider for ServiceAccountTokenProvider {
     fn token<'a>(
         &'a self,
-    ) -> crate::domain::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<SecretBearerToken, BearerTokenError>> {
         Box::pin(async move {
             if let Some(token) = self.cached_token()? {
                 return Ok(token);
@@ -373,7 +373,7 @@ fn validate_credential(
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceAccountError {
+pub(in crate::providers) enum ServiceAccountError {
     #[error("credential JSON exceeds 64 KiB")]
     CredentialTooLarge,
     #[error("credential JSON is malformed or missing required service-account fields")]

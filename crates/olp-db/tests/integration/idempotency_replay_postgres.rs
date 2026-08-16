@@ -1,13 +1,20 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    access::AccessError, access::NewApiKeyRecord, configuration::ConfigurationError,
-    configuration::RotateApiKeyInput, idempotency::IdempotencyOutcome,
-    idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint, identity::IdentityError,
-    identity::InstallationSetupInput, identity::NewInvitation, security::AuthHmacKey,
-    security::MasterKey, security::hash_password,
+    access::{Error as AccessError, NewApiKeyRecord},
+    configuration::Error as ConfigurationError,
+    configuration::resources::RotateApiKeyInput,
+    idempotency::Outcome,
+    idempotency::Replayable,
+    idempotency::Response,
+    idempotency::fingerprint,
+    identity::Error as IdentityError,
+    identity::InstallationSetupInput,
+    identity::NewInvitation,
+    security::envelope::MasterKey,
+    security::key_material::AuthHmacKey,
+    security::password::hash,
 };
-use olp_engine::domain::{ApiKeyLimits, ApiKeyScope, Role};
+use olp_engine::domain::auth::{ApiKeyLimits, ApiKeyScope, Role};
 use serde_json::{Value, json};
 use sqlx::Executor as _;
 
@@ -21,7 +28,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
             installation_name: "Idempotency replay integration".to_owned(),
             email: "owner@idempotency.test".to_owned(),
             display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
+            password_hash: hash("correct horse battery staple").unwrap(),
         })
         .await
         .unwrap();
@@ -34,7 +41,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         "role": "developer",
         "expires_in_hours": 24
     });
-    let invitation_fingerprint = idempotency_fingerprint(&invitation_request).unwrap();
+    let invitation_fingerprint = fingerprint(&invitation_request).unwrap();
     let invitation_expires_at = Utc::now() + Duration::hours(24);
     let first_invitation = store
         .create_invitation(
@@ -45,9 +52,9 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: invitation_key.to_owned(),
             },
-            ReplayableIdempotency::new(invitation_fingerprint, &master_key),
+            Replayable::new(invitation_fingerprint, &master_key),
             |created| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "invitation": {
@@ -63,7 +70,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         response: first_invitation_response,
         ..
     } = first_invitation
@@ -87,12 +94,12 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: invitation_key.to_owned(),
             },
-            ReplayableIdempotency::new(invitation_fingerprint, &master_key),
+            Replayable::new(invitation_fingerprint, &master_key),
             |_| panic!("completed invitation replay must not build a new secret"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(replayed_invitation_response) = replayed_invitation else {
+    let Outcome::Replayed(replayed_invitation_response) = replayed_invitation else {
         panic!("the duplicate invitation request must replay");
     };
     let (status, _, _, replayed_invitation_body) = replayed_invitation_response.into_parts();
@@ -122,7 +129,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
             .any(|window| window == invitation_token.as_bytes())
     );
 
-    let changed_fingerprint = idempotency_fingerprint(&json!({
+    let changed_fingerprint = fingerprint(&json!({
         "email": "changed@idempotency.test",
         "role": "viewer",
         "expires_in_hours": 24
@@ -138,7 +145,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                     actor,
                     idempotency_key: invitation_key.to_owned(),
                 },
-                ReplayableIdempotency::new(changed_fingerprint, &master_key),
+                Replayable::new(changed_fingerprint, &master_key),
                 |_| panic!("a mismatched request must not execute"),
             )
             .await,
@@ -157,7 +164,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         )
         .await
         .unwrap();
-    let concurrent_fingerprint = idempotency_fingerprint(&json!({
+    let concurrent_fingerprint = fingerprint(&json!({
         "email": "concurrent@idempotency.test",
         "role": "viewer",
         "expires_in_hours": 24
@@ -173,7 +180,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                     actor,
                     idempotency_key: concurrent_key.to_owned(),
                 },
-                ReplayableIdempotency::new(concurrent_fingerprint, &master_key),
+                Replayable::new(concurrent_fingerprint, &master_key),
                 |_| panic!("a concurrent duplicate must not execute"),
             )
             .await,
@@ -183,7 +190,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
 
     let auth_hmac_key = AuthHmacKey::new([9; 32]);
     let create_key = "api-key-replay-test-001";
-    let create_fingerprint = idempotency_fingerprint(&json!({
+    let create_fingerprint = fingerprint(&json!({
         "name": "Replay key",
         "scopes": ["inference"],
         "allowed_routes": []
@@ -203,9 +210,9 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: create_key.to_owned(),
             },
-            ReplayableIdempotency::new(create_fingerprint, &master_key),
+            Replayable::new(create_fingerprint, &master_key),
             |created| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "id": created.id,
@@ -222,7 +229,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: created_key,
         response: first_key_response,
     } = first_key
@@ -251,19 +258,19 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: create_key.to_owned(),
             },
-            ReplayableIdempotency::new(create_fingerprint, &master_key),
+            Replayable::new(create_fingerprint, &master_key),
             |_| panic!("completed API-key replay must not build a new secret"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(replayed_key_response) = replayed_key else {
+    let Outcome::Replayed(replayed_key_response) = replayed_key else {
         panic!("the duplicate API-key request must replay");
     };
     assert_eq!(replayed_key_response.into_parts(), first_key_parts);
 
     let expiring_key = "api-key-expiration-replay-test-001";
     let expires_at = Utc::now() + Duration::seconds(1);
-    let expiring_fingerprint = idempotency_fingerprint(&json!({
+    let expiring_fingerprint = fingerprint(&json!({
         "name": "Expiring replay key",
         "scopes": ["inference"],
         "allowed_routes": [],
@@ -284,9 +291,9 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: expiring_key.to_owned(),
             },
-            ReplayableIdempotency::new(expiring_fingerprint, &master_key),
+            Replayable::new(expiring_fingerprint, &master_key),
             |created| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "id": created.id,
@@ -299,7 +306,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         response: first_expiring_response,
         ..
     } = first_expiring_key
@@ -322,12 +329,12 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: expiring_key.to_owned(),
             },
-            ReplayableIdempotency::new(expiring_fingerprint, &master_key),
+            Replayable::new(expiring_fingerprint, &master_key),
             |_| panic!("expired API-key replay must not validate or execute again"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(replayed_expiring_response) = replayed_expiring_key else {
+    let Outcome::Replayed(replayed_expiring_response) = replayed_expiring_key else {
         panic!("the expired duplicate API-key request must replay");
     };
     assert_eq!(
@@ -336,7 +343,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
     );
 
     let rotation_key = "api-key-rotation-replay-test-001";
-    let rotation_fingerprint = idempotency_fingerprint(&json!({
+    let rotation_fingerprint = fingerprint(&json!({
         "api_key_id": created_key.id,
         "expected_etag": created_key.etag
     }))
@@ -352,9 +359,9 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: rotation_key,
             },
-            ReplayableIdempotency::new(rotation_fingerprint, &master_key),
+            Replayable::new(rotation_fingerprint, &master_key),
             |rotation| {
-                IdempotencyResponse::json(
+                Response::json(
                     200,
                     &json!({
                         "id": rotation.id,
@@ -372,7 +379,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         response: first_rotation_response,
         ..
     } = first_rotation
@@ -391,12 +398,12 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                 actor,
                 idempotency_key: rotation_key,
             },
-            ReplayableIdempotency::new(rotation_fingerprint, &master_key),
+            Replayable::new(rotation_fingerprint, &master_key),
             |_| panic!("completed rotation replay must not build a new secret"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(replayed_rotation_response) = replayed_rotation else {
+    let Outcome::Replayed(replayed_rotation_response) = replayed_rotation else {
         panic!("the duplicate API-key rotation must replay");
     };
     assert_eq!(
@@ -404,7 +411,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
         first_rotation_parts
     );
 
-    let changed_create_fingerprint = idempotency_fingerprint(&json!({
+    let changed_create_fingerprint = fingerprint(&json!({
         "name": "Changed replay key",
         "scopes": ["inference"],
         "allowed_routes": []
@@ -424,14 +431,14 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                     actor,
                     idempotency_key: create_key.to_owned(),
                 },
-                ReplayableIdempotency::new(changed_create_fingerprint, &master_key),
+                Replayable::new(changed_create_fingerprint, &master_key),
                 |_| panic!("a mismatched API-key request must not execute"),
             )
             .await,
         Err(AccessError::IdempotencyConflict)
     ));
 
-    let changed_rotation_fingerprint = idempotency_fingerprint(&json!({
+    let changed_rotation_fingerprint = fingerprint(&json!({
         "api_key_id": created_key.id,
         "expected_etag": "different"
     }))
@@ -447,7 +454,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
                     actor,
                     idempotency_key: rotation_key,
                 },
-                ReplayableIdempotency::new(changed_rotation_fingerprint, &master_key),
+                Replayable::new(changed_rotation_fingerprint, &master_key),
                 |_| panic!("a mismatched rotation must not execute"),
             )
             .await,

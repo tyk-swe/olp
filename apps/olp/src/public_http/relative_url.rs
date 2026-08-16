@@ -4,16 +4,16 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use url::{Position, Url};
 
 const VALIDATION_BASE: &str = "https://return.invalid/";
-pub const MAX_RELATIVE_RETURN_TO_BYTES: usize = 2_048;
+pub(crate) const MAX_RELATIVE_RETURN_TO_BYTES: usize = 2_048;
 const LOGIN_LOOP_PATHS: &[&str] = &["/login", "/api/v1/oidc/login", "/api/v1/oidc/callback"];
 
 /// A canonical same-origin absolute-path reference suitable for post-login
 /// navigation. It may contain a query and fragment, but never an authority.
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub struct RelativeReturnTo(String);
+pub(crate) struct RelativeReturnTo(String);
 
 impl RelativeReturnTo {
-    pub fn parse(value: &str) -> Result<Self, RelativeReturnToError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, RelativeReturnToError> {
         if value.is_empty()
             || value.len() > MAX_RELATIVE_RETURN_TO_BYTES
             || !value.starts_with('/')
@@ -75,7 +75,7 @@ impl RelativeReturnTo {
     }
 
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -121,7 +121,7 @@ impl<'de> Deserialize<'de> for RelativeReturnTo {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RelativeReturnToError;
+pub(crate) struct RelativeReturnToError;
 
 impl fmt::Display for RelativeReturnToError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

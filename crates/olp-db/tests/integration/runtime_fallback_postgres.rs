@@ -1,8 +1,8 @@
 use std::num::NonZeroU32;
 
 use chrono::{Duration, Utc};
-use olp_db::{identity::InstallationSetupInput, security::SessionMaterial};
-use olp_engine::domain::{ApiKeyScope, RuntimeSnapshot};
+use olp_db::{identity::InstallationSetupInput, security::session_material::SessionMaterial};
+use olp_engine::domain::{auth::ApiKeyScope, routing::snapshot::Snapshot};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -100,7 +100,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
         .unwrap();
 
     let release = store.compile_and_publish_runtime(actor).await.unwrap();
-    let historical: RuntimeSnapshot = serde_json::from_slice(&release.payload).unwrap();
+    let historical: Snapshot = serde_json::from_slice(&release.payload).unwrap();
     let historical_key = historical.api_keys.values().next().unwrap();
     assert_eq!(historical_key.digest.as_bytes(), &[1; 32]);
     assert_eq!(historical_key.scopes, [ApiKeyScope::Inference].into());

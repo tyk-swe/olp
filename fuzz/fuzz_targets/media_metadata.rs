@@ -12,10 +12,11 @@
 //! the media spool.
 
 use libfuzzer_sys::fuzz_target;
-use olp_engine::domain::{ImageOperation, MediaHandle, Operation};
+use olp_engine::domain::canonical::requests::{ImageOperation, MediaHandle, Operation};
 use olp_engine::protocols::openai::{
-    self, BoundedMediaPart, ImageCodecError, MediaPartError, OpenAiImageEditRequest,
-    OpenAiImageVariationRequest, OpenAiTranscriptionRequest,
+    audio::{self, TranscriptionRequest},
+    images::{self, ImageCodecError, OpenAiImageEditRequest, OpenAiImageVariationRequest},
+    media::{BoundedMediaPart, Error as MediaError},
 };
 
 mod oracle;
@@ -27,38 +28,38 @@ fuzz_target!(|data: &[u8]| {
     roundtrip(
         data,
         "openai::image_edit",
-        |value: OpenAiImageEditRequest| match openai::decode_image_edit(value) {
+        |value: OpenAiImageEditRequest| match images::decode_image_edit(value) {
             Ok(Operation::Images(ImageOperation::Edit(canonical))) => Some(canonical),
             _ => None,
         },
-        |canonical| openai::encode_image_edit(canonical, UPSTREAM_MODEL, bounded_image_part),
+        |canonical| images::encode_image_edit(canonical, UPSTREAM_MODEL, bounded_image_part),
     );
     roundtrip(
         data,
         "openai::image_variation",
-        |value: OpenAiImageVariationRequest| match openai::decode_image_variation(value) {
+        |value: OpenAiImageVariationRequest| match images::decode_image_variation(value) {
             Ok(Operation::Images(ImageOperation::Variation(canonical))) => Some(canonical),
             _ => None,
         },
-        |canonical| openai::encode_image_variation(canonical, UPSTREAM_MODEL, bounded_image_part),
+        |canonical| images::encode_image_variation(canonical, UPSTREAM_MODEL, bounded_image_part),
     );
     roundtrip(
         data,
         "openai::transcription",
-        |value: OpenAiTranscriptionRequest| match openai::decode_transcription(value) {
+        |value: TranscriptionRequest| match audio::decode_transcription(value) {
             Ok(Operation::Transcription(canonical)) => Some(canonical),
             _ => None,
         },
         |canonical| {
-            openai::encode_transcription(canonical, UPSTREAM_MODEL, |handle| {
+            audio::encode_transcription(canonical, UPSTREAM_MODEL, |handle| {
                 BoundedMediaPart::new(
                     handle.clone(),
                     "fuzz.wav",
                     Some("audio/wav".into()),
                     1,
-                    openai::DEFAULT_AUDIO_UPLOAD_LIMIT,
+                    audio::DEFAULT_AUDIO_UPLOAD_LIMIT,
                 )
-                .map_err(|_| openai::AudioCodecError::InvalidMediaPart)
+                .map_err(|_| audio::Error::InvalidMediaPart)
             })
         },
     );
@@ -99,11 +100,11 @@ fn bounded_part_contract(data: &[u8]) {
     let handle = MediaHandle::new("fuzz-handle");
 
     let expected = if filename.trim().is_empty() {
-        Some(MediaPartError::EmptyFilename)
+        Some(MediaError::EmptyFilename)
     } else if maximum == 0 {
-        Some(MediaPartError::ZeroLimit)
+        Some(MediaError::ZeroLimit)
     } else if content_length > maximum {
-        Some(MediaPartError::TooLarge {
+        Some(MediaError::TooLarge {
             actual: content_length,
             maximum,
         })

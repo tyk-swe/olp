@@ -1,6 +1,6 @@
 use axum::{Json, extract::rejection::JsonRejection};
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 pub(crate) fn json_payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, Problem> {
     payload.map(|Json(value)| value).map_err(|error| {

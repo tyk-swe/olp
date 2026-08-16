@@ -2,17 +2,18 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
-    authentication::{checked_session_expiry, insert_versioned_session},
-    security::SessionMaterial,
+    authentication::{insert_versioned_session, sessions::checked_session_expiry},
+    error::Error,
+    security::session_material::SessionMaterial,
+    store::Store,
 };
 
 use super::{InstallationSetupInput, InstallationSetupResult};
 
 const SETUP_LOCK_ID: i64 = 0x4f4c_505f_5632; // "OLP_V2"
 
-impl PgStore {
-    pub async fn setup_required(&self) -> Result<bool, PersistenceError> {
+impl Store {
+    pub async fn setup_required(&self) -> Result<bool, Error> {
         let exists: bool =
             sqlx::query_scalar!("SELECT EXISTS (SELECT 1 FROM installation) AS \"value!\"")
                 .fetch_one(self.pool())
@@ -26,7 +27,7 @@ impl PgStore {
     pub async fn setup_installation(
         &self,
         input: InstallationSetupInput,
-    ) -> Result<InstallationSetupResult, PersistenceError> {
+    ) -> Result<InstallationSetupResult, Error> {
         self.setup_installation_inner(input, None)
             .await
             .map(|(result, _)| result)
@@ -39,7 +40,7 @@ impl PgStore {
         input: InstallationSetupInput,
         material: &SessionMaterial,
         ttl: chrono::Duration,
-    ) -> Result<(InstallationSetupResult, Uuid), PersistenceError> {
+    ) -> Result<(InstallationSetupResult, Uuid), Error> {
         checked_session_expiry(Utc::now(), ttl)?;
         let (result, session_id) = self
             .setup_installation_inner(input, Some((material, ttl)))
@@ -54,7 +55,7 @@ impl PgStore {
         &self,
         input: InstallationSetupInput,
         session: Option<(&SessionMaterial, chrono::Duration)>,
-    ) -> Result<(InstallationSetupResult, Option<Uuid>), PersistenceError> {
+    ) -> Result<(InstallationSetupResult, Option<Uuid>), Error> {
         let mut transaction = self.pool().begin().await?;
         sqlx::query!("SELECT pg_advisory_xact_lock($1)", SETUP_LOCK_ID)
             .fetch_one(&mut *transaction)
@@ -65,7 +66,7 @@ impl PgStore {
                 .fetch_one(&mut *transaction)
                 .await?;
         if already_setup {
-            return Err(PersistenceError::AlreadySetup);
+            return Err(Error::AlreadySetup);
         }
 
         let user_id = Uuid::now_v7();

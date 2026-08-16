@@ -9,7 +9,7 @@ struct NotifyingPendingTransport {
 #[derive(Clone)]
 struct CollectingPendingTransport {
     reached_pending: Arc<tokio::sync::Notify>,
-    events: Vec<CanonicalEvent>,
+    events: Vec<Event>,
 }
 
 struct BlockingRemoveSpool {
@@ -24,24 +24,31 @@ impl MediaSpool for BlockingRemoveSpool {
 
     fn put<'a>(
         &'a self,
-        upload: olp_engine::domain::MediaUpload,
-    ) -> BoxFuture<'a, Result<olp_engine::domain::MediaArtifact, olp_engine::domain::MediaSpoolError>>
-    {
+        upload: olp_engine::domain::ports::MediaUpload,
+    ) -> BoxFuture<
+        'a,
+        Result<
+            olp_engine::domain::canonical::results::MediaArtifact,
+            olp_engine::domain::ports::MediaSpoolError,
+        >,
+    > {
         self.inner.put(upload)
     }
 
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<olp_engine::domain::OpenedMedia, olp_engine::domain::MediaSpoolError>>
-    {
+    ) -> BoxFuture<
+        'a,
+        Result<olp_engine::domain::ports::OpenedMedia, olp_engine::domain::ports::MediaSpoolError>,
+    > {
         self.inner.open(handle)
     }
 
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> BoxFuture<'a, Result<(), olp_engine::domain::MediaSpoolError>> {
+    ) -> BoxFuture<'a, Result<(), olp_engine::domain::ports::MediaSpoolError>> {
         let remove_started = self.remove_started.clone();
         Box::pin(async move {
             remove_started.notify_one();
@@ -83,7 +90,7 @@ impl ProviderTransport for CollectingPendingTransport {
         Box::pin(async move {
             let pending = stream::once(async move {
                 reached_pending.notify_one();
-                std::future::pending::<Result<CanonicalEvent, TransportError>>().await
+                std::future::pending::<Result<Event, TransportError>>().await
             });
             Ok(ProviderOutput::Events(Box::pin(
                 stream::iter(events.into_iter().map(Ok)).chain(pending),
@@ -99,8 +106,12 @@ impl ProviderTransport for CapturingPendingTransport {
     ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         if let Operation::TokenCount(operation) = &request.operation
             && let Some(handle) = operation.input.iter().find_map(|part| match part {
-                olp_engine::domain::ContentPart::InputAudio { media, .. }
-                | olp_engine::domain::ContentPart::InputFile { media, .. } => Some(media.clone()),
+                olp_engine::domain::canonical::requests::ContentPart::InputAudio {
+                    media, ..
+                }
+                | olp_engine::domain::canonical::requests::ContentPart::InputFile {
+                    media, ..
+                } => Some(media.clone()),
                 _ => None,
             })
         {
@@ -116,9 +127,9 @@ async fn cancelling_response_input_tokens_handler_cleans_admitted_media() {
     install_result(
         &state,
         OperationKind::TokenCount,
-        CanonicalResult::TokenCount(olp_engine::domain::TokenCountResult {
+        CanonicalResult::TokenCount(olp_engine::domain::canonical::results::TokenCountResult {
             input_tokens: 1,
-            extensions: olp_engine::domain::SourceExtensions::default(),
+            extensions: olp_engine::domain::canonical::requests::SourceExtensions::default(),
         }),
     );
     let (captured, mut handles) = tokio::sync::mpsc::unbounded_channel();
@@ -144,7 +155,7 @@ async fn cancelling_response_input_tokens_handler_cleans_admitted_media() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             match state.media_spool().open(&handle).await {
-                Err(olp_engine::domain::MediaSpoolError::NotFound) => break,
+                Err(olp_engine::domain::ports::MediaSpoolError::NotFound) => break,
                 Ok(_) => tokio::task::yield_now().await,
                 Err(error) => panic!("unexpected media cleanup error: {error}"),
             }
@@ -159,7 +170,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
     let (state, _) = test_state(false);
     let artifact = state
         .media_spool()
-        .put(olp_engine::domain::MediaUpload {
+        .put(olp_engine::domain::ports::MediaUpload {
             filename: "inline.wav".into(),
             content_type: Some("audio/wav".into()),
             maximum_length: 16,
@@ -168,7 +179,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
         .await
         .unwrap();
     install_transport(&state, Arc::new(PendingTransport));
-    let request: ChatCompletionRequest = serde_json::from_value(json!({
+    let request: CompletionRequest = serde_json::from_value(json!({
         "model":"default","messages":[{"role":"user","content":"hello"}]
     }))
     .unwrap();
@@ -176,10 +187,12 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
     let Operation::Generation(generation) = &mut operation else {
         unreachable!()
     };
-    generation.messages[0].content = vec![olp_engine::domain::ContentPart::InputAudio {
-        media: artifact.handle.clone(),
-        format: "wav".into(),
-    }];
+    generation.messages[0].content = vec![
+        olp_engine::domain::canonical::requests::ContentPart::InputAudio {
+            media: artifact.handle.clone(),
+            format: "wav".into(),
+        },
+    ];
 
     let principal = test_principal(&state, Surface::OpenAi);
     let state_for_task = state.clone();
@@ -199,7 +212,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             match state.media_spool().open(&artifact.handle).await {
-                Err(olp_engine::domain::MediaSpoolError::NotFound) => break,
+                Err(olp_engine::domain::ports::MediaSpoolError::NotFound) => break,
                 Ok(_) => tokio::task::yield_now().await,
                 Err(error) => panic!("unexpected media cleanup error: {error}"),
             }
@@ -213,7 +226,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
 async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     let reached_pending = Arc::new(tokio::sync::Notify::new());
     install_transport(
@@ -221,17 +234,17 @@ async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
         Arc::new(CollectingPendingTransport {
             reached_pending: reached_pending.clone(),
             events: vec![
-                CanonicalEvent::new(
+                Event::new(
                     0,
-                    CanonicalEventKind::ResponseStart {
+                    Kind::ResponseStart {
                         response_id: Some("chatcmpl-cancelled".to_owned()),
                         provider_model: Some("upstream-model".to_owned()),
                     },
                 ),
-                CanonicalEvent::new(
+                Event::new(
                     1,
-                    CanonicalEventKind::Usage {
-                        usage: olp_engine::domain::Usage {
+                    Kind::Usage {
+                        usage: olp_engine::domain::canonical::events::Usage {
                             input_tokens: 7,
                             output_tokens: 3,
                             total_tokens: 10,
@@ -276,7 +289,7 @@ async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
 async fn cancelling_during_transport_wait_records_the_active_attempt() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     let started = Arc::new(tokio::sync::Notify::new());
     install_transport(
@@ -319,7 +332,7 @@ async fn cancelling_during_transport_wait_records_the_active_attempt() {
 async fn cancelling_media_cleanup_preserves_the_completed_attempt_outcome() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     let remove_started = Arc::new(tokio::sync::Notify::new());
     state.replace_media_spool_for_test(Arc::new(BlockingRemoveSpool {
@@ -365,7 +378,7 @@ async fn cancelling_media_cleanup_preserves_the_completed_attempt_outcome() {
 async fn cancelling_shared_event_collection_preserves_partial_usage() {
     let (mut state, key) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     let reached_pending = Arc::new(tokio::sync::Notify::new());
     install_transport(
@@ -373,17 +386,17 @@ async fn cancelling_shared_event_collection_preserves_partial_usage() {
         Arc::new(CollectingPendingTransport {
             reached_pending: reached_pending.clone(),
             events: vec![
-                CanonicalEvent::new(
+                Event::new(
                     0,
-                    CanonicalEventKind::ResponseStart {
+                    Kind::ResponseStart {
                         response_id: Some("resp_cancelled".to_owned()),
                         provider_model: Some("upstream-model".to_owned()),
                     },
                 ),
-                CanonicalEvent::new(
+                Event::new(
                     1,
-                    CanonicalEventKind::Usage {
-                        usage: olp_engine::domain::Usage {
+                    Kind::Usage {
+                        usage: olp_engine::domain::canonical::events::Usage {
                             input_tokens: 11,
                             output_tokens: 5,
                             total_tokens: 16,
@@ -427,12 +440,12 @@ async fn cancelling_shared_event_collection_preserves_partial_usage() {
 async fn dropping_completed_unary_result_records_client_cancellation() {
     let (mut state, _) = test_state(false);
     let (emitter, mut request_metadata) =
-        olp_engine::inference::request_metadata::RequestMetadataEmitter::bounded(2);
+        olp_engine::inference::request_metadata::Emitter::bounded(2);
     state.replace_request_metadata_for_test(emitter);
     install_result(
         &state,
         OperationKind::TokenCount,
-        CanonicalResult::TokenCount(olp_engine::domain::TokenCountResult {
+        CanonicalResult::TokenCount(olp_engine::domain::canonical::results::TokenCountResult {
             input_tokens: 4,
             extensions: SourceExtensions::default(),
         }),

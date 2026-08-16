@@ -5,18 +5,22 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use olp_db::operations::SettingRecord;
+use olp_db::operations::settings::SettingRecord;
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::helpers::{map_operations, not_found};
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        Permission, if_match, json_payload, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        json_payload::json_payload,
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 #[derive(Debug, Serialize, ToSchema)]

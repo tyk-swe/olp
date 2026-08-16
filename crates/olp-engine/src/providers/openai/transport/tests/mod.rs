@@ -10,24 +10,38 @@ use std::{
 
 use super::*;
 use crate::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEventKind, CanonicalResult, ContentPart, DurationMs,
-    EmbeddingInput, EmbeddingsRequest, GenerationParameters, GenerationRequest, ImageEditRequest,
-    ImageGenerationRequest, ImageOperation, ImageVariationRequest,
-    MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, MediaArtifact, MediaHandle, MediaSource, MediaSpool,
-    MediaSpoolError, MediaUpload, Message, MessageRole, ModerationRequest, OpenedMedia, Operation,
-    OperationKind, ProviderEventStream, ProviderId, ProviderKind, ProviderOutput, ProviderRequest,
-    RequestId, RequestMetadata, RouteId, RouteSlug, RuntimeGenerationId, SourceExtensions,
-    SpeechRequest, Surface, TargetId, TranscriptionRequest, TransportError, TransportMode,
-    TransportPhase, VideoCreateRequest, VideoJobRequest, VideoOperation, VideoStatus,
+    canonical::{
+        events::Kind,
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
+            GenerationRequest, ImageEditRequest, ImageGenerationRequest, ImageOperation,
+            ImageVariationRequest, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, MediaHandle,
+            MediaSource, Message, MessageRole, ModerationRequest, Operation, SourceExtensions,
+            SpeechRequest, TranscriptionRequest, VideoCreateRequest, VideoJobRequest,
+            VideoOperation,
+        },
+        results::{CanonicalResult, MediaArtifact, VideoStatus},
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{
+        AttemptFailureClass, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia,
+        ProviderEventStream, ProviderOutput, ProviderRequest, TransportError, TransportPhase,
+    },
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use crate::protocols::openai::{
-    ChatCompletionRequest, ChatContentPart, ChatMessageContent, OpenAiImageResponse, ResponseInput,
+    chat::{CompletionRequest, ContentPart as OpenAiContentPart, MessageContent},
+    images::OpenAiImageResponse,
+    responses::request::ResponseInput,
 };
 use crate::providers::mock_server::{
     MockResponse, find_bytes, response as http_response, spawn_mock as spawn_http_mock,
 };
-use crate::providers::openai::{
-    ConnectorTimeouts, DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES,
+use crate::providers::{
+    connector::Timeouts,
+    openai::{DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES, transport::Connector},
+    transport_common::transport_error,
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -65,14 +79,14 @@ impl MediaSpool for StaticMediaSpool {
     fn put<'a>(
         &'a self,
         _upload: MediaUpload,
-    ) -> crate::domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         let handle = handle.clone();
         Box::pin(async move {
             Ok(OpenedMedia {
@@ -90,7 +104,7 @@ impl MediaSpool for StaticMediaSpool {
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -115,14 +129,14 @@ impl MediaSpool for FixtureMediaSpool {
     fn put<'a>(
         &'a self,
         _upload: MediaUpload,
-    ) -> crate::domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
         handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         let artifact = MediaArtifact {
             handle: handle.clone(),
             content_type: Some(self.content_type.clone()),
@@ -142,7 +156,7 @@ impl MediaSpool for FixtureMediaSpool {
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -151,7 +165,7 @@ impl MediaSpool for RecordingMediaSpool {
     fn put<'a>(
         &'a self,
         mut upload: MediaUpload,
-    ) -> crate::domain::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
         Box::pin(async move {
             let index = self.puts.fetch_add(1, Ordering::AcqRel);
             let mut bytes = Vec::new();
@@ -182,14 +196,14 @@ impl MediaSpool for RecordingMediaSpool {
     fn open<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
         Box::pin(async { Err(MediaSpoolError::NotFound) })
     }
 
     fn remove<'a>(
         &'a self,
         _handle: &'a MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<(), MediaSpoolError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
         self.removes.fetch_add(1, Ordering::AcqRel);
         Box::pin(async { Ok(()) })
     }
@@ -225,7 +239,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             route: RouteSlug::parse("default").unwrap(),
             messages: vec![Message {
                 role: MessageRole::User,
-                content: vec![crate::domain::ContentPart::Text {
+                content: vec![crate::domain::canonical::requests::ContentPart::Text {
                     text: "hello".into(),
                 }],
                 name: None,
@@ -271,7 +285,7 @@ fn responses_request(streaming: bool) -> ProviderRequest {
 }
 
 fn responses_input_tokens_request() -> ProviderRequest {
-    let wire: crate::protocols::openai::ResponseInputTokensRequest =
+    let wire: crate::protocols::openai::responses::token_count::ResponseInputTokensRequest =
         serde_json::from_value(serde_json::json!({
             "model": "count-route",
             "input": [
@@ -283,7 +297,9 @@ fn responses_input_tokens_request() -> ProviderRequest {
             "tools": [{"type":"function","name":"lookup","parameters":{"type":"object"}}]
         }))
         .unwrap();
-    let operation = crate::protocols::openai::decode_response_input_tokens(wire).unwrap();
+    let operation =
+        crate::protocols::openai::responses::token_count::decode_response_input_tokens(wire)
+            .unwrap();
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::TokenCount;
     request.attempt.upstream_model = "gpt-count-upstream".into();
@@ -433,24 +449,21 @@ fn video_job_request(operation: OperationKind) -> ProviderRequest {
     request
 }
 
-fn test_connector(base_url: &str, timeouts: ConnectorTimeouts) -> OpenAiConnector {
-    OpenAiConnector::new(
+fn test_connector(base_url: &str, timeouts: Timeouts) -> Connector {
+    Connector::new(
         ConnectorConfig::for_local_test(base_url, timeouts),
-        OpenAiApiKey::new("upstream-secret").unwrap(),
+        ApiKey::new("upstream-secret").unwrap(),
     )
 }
 
-async fn execute_error(connector: &OpenAiConnector, request: ProviderRequest) -> TransportError {
+async fn execute_error(connector: &Connector, request: ProviderRequest) -> TransportError {
     match connector.execute(request).await {
         Ok(_) => panic!("connector unexpectedly returned a response stream"),
         Err(error) => error,
     }
 }
 
-async fn execute_events(
-    connector: &OpenAiConnector,
-    request: ProviderRequest,
-) -> ProviderEventStream {
+async fn execute_events(connector: &Connector, request: ProviderRequest) -> ProviderEventStream {
     match connector.execute(request).await.unwrap() {
         ProviderOutput::Events(events) => events,
         ProviderOutput::Result(_) => panic!("connector unexpectedly returned a unary result"),

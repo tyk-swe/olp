@@ -1,24 +1,29 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    CanonicalEvent, MediaSpool, Operation, OperationKind, RequestId, RequestMetadata, RouteSlug,
-    Surface, TransportMode,
+    canonical::{
+        events::Event,
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::Operation,
+    },
+    ids::{RequestId, RouteSlug},
+    ports::MediaSpool,
 };
 use crate::inference::{
-    InferenceError,
-    circuit::CircuitBreaker,
-    events::collect_provider_events,
-    failover::{ExecutionOutput, FailoverContext, execute_with_failover},
+    circuit::Breaker,
+    error::Error as InferenceError,
+    events::collect,
+    failover::{Context, ExecutionOutput, execute},
     limits::ReloadableLimiter,
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
-    request_metadata::RequestMetadataEmitter,
-    runtime::RuntimeManager,
+    request_metadata::Emitter,
+    runtime::Manager,
     selection::select_representable_attempts_filtered,
     telemetry::elapsed_ms,
 };
 
 pub struct SessionGenerationExecution {
-    pub events: Vec<CanonicalEvent>,
+    pub events: Vec<Event>,
     pub request_id: RequestId,
     pub route_slug: RouteSlug,
     pub latency_ms: u64,
@@ -27,21 +32,21 @@ pub struct SessionGenerationExecution {
 /// Shared transport-neutral inference capability installed into each delivery
 /// surface that is allowed to execute or observe inference work.
 #[derive(Clone)]
-pub struct InferenceService {
-    runtime: Arc<RuntimeManager>,
+pub struct Service {
+    runtime: Arc<Manager>,
     limiter: ReloadableLimiter,
-    request_metadata: Option<RequestMetadataEmitter>,
-    circuits: CircuitBreaker,
+    request_metadata: Option<Emitter>,
+    circuits: Breaker,
     media_spool: Arc<dyn MediaSpool>,
 }
 
-impl InferenceService {
+impl Service {
     #[must_use]
     pub fn new(
-        runtime: Arc<RuntimeManager>,
+        runtime: Arc<Manager>,
         limiter: ReloadableLimiter,
-        request_metadata: Option<RequestMetadataEmitter>,
-        circuits: CircuitBreaker,
+        request_metadata: Option<Emitter>,
+        circuits: Breaker,
         media_spool: Arc<dyn MediaSpool>,
     ) -> Self {
         Self {
@@ -54,12 +59,12 @@ impl InferenceService {
     }
 
     #[must_use]
-    pub fn runtime(&self) -> &RuntimeManager {
+    pub fn runtime(&self) -> &Manager {
         &self.runtime
     }
 
     #[must_use]
-    pub fn runtime_handle(&self) -> Arc<RuntimeManager> {
+    pub fn runtime_handle(&self) -> Arc<Manager> {
         Arc::clone(&self.runtime)
     }
 
@@ -69,12 +74,12 @@ impl InferenceService {
     }
 
     #[must_use]
-    pub const fn request_metadata(&self) -> Option<&RequestMetadataEmitter> {
+    pub const fn request_metadata(&self) -> Option<&Emitter> {
         self.request_metadata.as_ref()
     }
 
     #[must_use]
-    pub const fn circuits(&self) -> &CircuitBreaker {
+    pub const fn circuits(&self) -> &Breaker {
         &self.circuits
     }
 
@@ -83,7 +88,7 @@ impl InferenceService {
         &self.media_spool
     }
 
-    pub fn replace_request_metadata(&mut self, emitter: Option<RequestMetadataEmitter>) {
+    pub fn replace_request_metadata(&mut self, emitter: Option<Emitter>) {
         self.request_metadata = emitter;
     }
 
@@ -140,8 +145,8 @@ impl InferenceService {
             .get(&route_slug)
             .expect("attempt selection returned a known route");
         let started = tokio::time::Instant::now();
-        let execution = execute_with_failover(
-            FailoverContext {
+        let execution = execute(
+            Context {
                 runtime: &snapshot,
                 overall_timeout: route.overall_timeout.as_duration(),
                 media_spool: Arc::clone(&self.media_spool),
@@ -165,7 +170,7 @@ impl InferenceService {
                 "The provider returned an incompatible generation response.",
             ));
         };
-        let events = collect_provider_events(first, &mut events, success.deadline).await?;
+        let events = collect(first, &mut events, success.deadline).await?;
         Ok(SessionGenerationExecution {
             events,
             request_id,

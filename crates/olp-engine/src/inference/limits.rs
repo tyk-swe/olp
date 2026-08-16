@@ -10,12 +10,12 @@ use std::{
     time::Duration,
 };
 
-use crate::domain::{ApiKey, BoxFuture, Operation};
+use crate::domain::{auth::ApiKey, canonical::requests::Operation, ports::BoxFuture};
 use arc_swap::ArcSwapOption;
 use thiserror::Error;
 use tracing::{error, warn};
 
-use crate::inference::InferenceError;
+use crate::inference::error::Error as InferenceError;
 
 type ReleaseFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
@@ -190,11 +190,11 @@ struct DistributedReconciliation {
 /// Cancellation-safe ownership of the request-boundary distributed limit
 /// reservation. All clones share one idempotent reconciliation/release path.
 #[derive(Clone)]
-pub struct InferenceReservation {
+pub struct Reservation {
     inner: Arc<InferenceReservationInner>,
 }
 
-impl InferenceReservation {
+impl Reservation {
     #[must_use]
     pub fn distributed(lease: Arc<dyn LimitLease>) -> Self {
         let reconcile = DistributedReconciliation {
@@ -367,7 +367,7 @@ impl ReloadableLimiter {
     }
 }
 
-pub async fn reserve_limits(
+pub async fn reserve(
     limiter: &ReloadableLimiter,
     key: &ApiKey,
     operation: &Operation,
@@ -507,25 +507,29 @@ fn estimate_tokens(operation: &Operation) -> i64 {
             .input
             .iter()
             .map(|input| match input {
-                crate::domain::EmbeddingInput::Text(text) => estimated_text_tokens(text),
-                crate::domain::EmbeddingInput::Tokens(tokens) => tokens.len(),
+                crate::domain::canonical::requests::EmbeddingInput::Text(text) => {
+                    estimated_text_tokens(text)
+                }
+                crate::domain::canonical::requests::EmbeddingInput::Tokens(tokens) => tokens.len(),
             })
             .sum(),
         Operation::TokenCount(request) => estimated_content_tokens(&request.input),
-        Operation::Images(crate::domain::ImageOperation::Generation(request)) => {
-            estimated_text_tokens(&request.prompt)
-        }
-        Operation::Images(crate::domain::ImageOperation::Edit(request)) => {
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Generation(
+            request,
+        )) => estimated_text_tokens(&request.prompt),
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Edit(request)) => {
             estimated_text_tokens(&request.prompt)
                 .saturating_add(request.images.len().saturating_mul(1_000))
                 .saturating_add(usize::from(request.mask.is_some()) * 1_000)
         }
-        Operation::Images(crate::domain::ImageOperation::Variation(_)) => 1_000,
+        Operation::Images(crate::domain::canonical::requests::ImageOperation::Variation(_)) => {
+            1_000
+        }
         Operation::Speech(request) => estimated_text_tokens(&request.input),
         Operation::Transcription(request) => request.prompt.as_deref().map_or(1_500, |prompt| {
             1_500_usize.saturating_add(estimated_text_tokens(prompt))
         }),
-        Operation::Video(crate::domain::VideoOperation::Create(request)) => {
+        Operation::Video(crate::domain::canonical::requests::VideoOperation::Create(request)) => {
             estimated_text_tokens(&request.prompt)
                 .saturating_add(usize::from(request.input.is_some()) * 2_000)
         }
@@ -539,23 +543,22 @@ fn estimated_text_tokens(text: &str) -> usize {
     text.chars().count().saturating_add(3) / 4
 }
 
-fn estimated_content_tokens(parts: &[crate::domain::ContentPart]) -> usize {
+fn estimated_content_tokens(parts: &[crate::domain::canonical::requests::ContentPart]) -> usize {
     parts
         .iter()
         .map(|part| match part {
-            crate::domain::ContentPart::Text { text }
-            | crate::domain::ContentPart::Refusal { text } => estimated_text_tokens(text),
-            crate::domain::ContentPart::Image { .. } => 1_000,
-            crate::domain::ContentPart::InputAudio { .. }
-            | crate::domain::ContentPart::InputFile { .. } => 2_000,
+            crate::domain::canonical::requests::ContentPart::Text { text }
+            | crate::domain::canonical::requests::ContentPart::Refusal { text } => {
+                estimated_text_tokens(text)
+            }
+            crate::domain::canonical::requests::ContentPart::Image { .. } => 1_000,
+            crate::domain::canonical::requests::ContentPart::InputAudio { .. }
+            | crate::domain::canonical::requests::ContentPart::InputFile { .. } => 2_000,
         })
         .sum()
 }
 
-pub async fn release_limits(
-    reservation: Option<DistributedLimitReservation>,
-    actual_tokens: Option<i64>,
-) {
+pub async fn release(reservation: Option<DistributedLimitReservation>, actual_tokens: Option<i64>) {
     if let Some(reservation) = reservation {
         reservation.cleanup(actual_tokens).await;
     }
@@ -569,7 +572,10 @@ mod tests {
         sync::atomic::{AtomicBool, AtomicI64, AtomicUsize},
     };
 
-    use crate::domain::{ApiKeyDigest, ApiKeyId, ApiKeyLimits, ApiKeyLookupId, ApiKeyStatus};
+    use crate::domain::{
+        auth::{ApiKeyDigest, ApiKeyLimits, ApiKeyStatus},
+        ids::{ApiKeyId, ApiKeyLookupId},
+    };
     use serde_json::json;
 
     use super::*;
@@ -717,7 +723,7 @@ mod tests {
         operation: &Operation,
         pre_reserved: Option<i64>,
     ) -> Result<Option<DistributedLimitReservation>, InferenceError> {
-        reserve_limits(
+        super::reserve(
             limiter,
             key,
             operation,
@@ -783,7 +789,7 @@ mod tests {
             concurrency: NonZeroU32::new(2),
         });
 
-        let reservation = reserve_limits(
+        let reservation = super::reserve(
             &limiter,
             &key,
             &text_count("12345678"),
@@ -805,7 +811,7 @@ mod tests {
             }]
         );
 
-        release_limits(reservation, Some(1)).await;
+        release(reservation, Some(1)).await;
         assert_eq!(calls.reconciles.load(Ordering::Relaxed), 1);
         assert_eq!(calls.actual_tokens.load(Ordering::Relaxed), 1);
         assert_eq!(calls.releases.load(Ordering::Relaxed), 1);
@@ -850,7 +856,7 @@ mod tests {
             assert_eq!(requests[0].max_concurrency, None);
             assert_eq!(requests[0].requested_tokens, 2);
         }
-        release_limits(reservation, None).await;
+        release(reservation, None).await;
     }
 
     #[tokio::test]
@@ -901,7 +907,7 @@ mod tests {
         let lease: Arc<dyn LimitLease> = Arc::new(FakeLease {
             calls: Arc::clone(&calls),
         });
-        let reservation = InferenceReservation::distributed(lease);
+        let reservation = Reservation::distributed(lease);
         let clone = reservation.clone();
 
         reservation.reconcile(17).await;
@@ -917,7 +923,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_a_test_reservation_schedules_its_release() {
         let (released, observed) = tokio::sync::oneshot::channel();
-        let reservation = InferenceReservation::for_test(async move {
+        let reservation = Reservation::for_test(async move {
             let _ = released.send(());
         });
         drop(reservation);

@@ -1,11 +1,12 @@
-use crate::domain::{AttemptFailureClass, ProviderRequest, TransportError, TransportPhase};
+use crate::domain::ports::{AttemptFailureClass, ProviderRequest, TransportError, TransportPhase};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
-use super::super::{OpenAiConnector, errors::*, streams::*};
+use super::super::{Connector, errors::*, streams::*};
+use crate::providers::{transport_common::transport_error, transport_io::bounded_duration};
 
-impl OpenAiConnector {
+impl Connector {
     pub(super) async fn post_raw_json(
         &self,
         request: &ProviderRequest,

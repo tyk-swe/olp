@@ -1,14 +1,13 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    configuration::ConfigurationError, configuration::NewProviderDraft,
+    configuration::Error as ConfigurationError, configuration::NewProviderDraft,
     configuration::NewRouteDraft, configuration::NewRouteTarget,
-    configuration::RotateCredentialInput, idempotency::IdempotencyOutcome,
-    idempotency::IdempotencyResponse, idempotency::ReplayableIdempotency,
-    idempotency::idempotency_fingerprint, identity::InstallationSetupInput,
-    operations::OperationsError, operations::PriceInput, security::MasterKey,
-    security::credential_aad, security::hash_password,
+    configuration::resources::RotateCredentialInput, idempotency::Outcome, idempotency::Replayable,
+    idempotency::Response, idempotency::fingerprint, identity::InstallationSetupInput,
+    operations::cursor::Error as OperationsError, operations::pricing::PriceInput,
+    security::aad::credential, security::envelope::MasterKey, security::password::hash,
 };
-use olp_engine::domain::{OperationKind, ProviderKind};
+use olp_engine::domain::{canonical::identity::OperationKind, routing::provider::ProviderKind};
 use serde_json::json;
 use sqlx::Executor as _;
 use uuid::Uuid;
@@ -23,7 +22,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
             installation_name: "Management replay integration".to_owned(),
             email: "owner@management-replay.test".to_owned(),
             display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
+            password_hash: hash("correct horse battery staple").unwrap(),
         })
         .await
         .unwrap();
@@ -31,7 +30,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let master_key = MasterKey::new(11, [61; 32]);
 
     let provider_key = "provider-replay-001";
-    let provider_fingerprint = idempotency_fingerprint(&json!({
+    let provider_fingerprint = fingerprint(&json!({
         "name": "replay-provider",
         "kind": "openai",
         "credential_sha256": "stable-provider-secret",
@@ -44,7 +43,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let provider_secret = master_key
         .seal(
             b"provider-secret",
-            &credential_aad(provider_id, credential_id, 1),
+            &credential(provider_id, credential_id, 1),
         )
         .unwrap();
     let first_provider = store
@@ -58,9 +57,9 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 provider_key,
                 "replay-provider",
             ),
-            ReplayableIdempotency::new(provider_fingerprint, &master_key),
+            Replayable::new(provider_fingerprint, &master_key),
             |created| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "id": created.provider_id,
@@ -76,7 +75,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: created_provider,
         response: provider_response,
     } = first_provider
@@ -98,7 +97,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let replay_provider_secret = master_key
         .seal(
             b"provider-secret",
-            &credential_aad(replay_provider_id, replay_credential_id, 1),
+            &credential(replay_provider_id, replay_credential_id, 1),
         )
         .unwrap();
     let replayed_provider = store
@@ -112,12 +111,12 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 provider_key,
                 "replay-provider",
             ),
-            ReplayableIdempotency::new(provider_fingerprint, &master_key),
+            Replayable::new(provider_fingerprint, &master_key),
             |_| panic!("provider replay must not rebuild its response"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(response) = replayed_provider else {
+    let Outcome::Replayed(response) = replayed_provider else {
         panic!("identical provider draft must replay");
     };
     assert_eq!(response.into_parts(), provider_parts);
@@ -129,14 +128,13 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         1
     );
 
-    let changed_provider_fingerprint =
-        idempotency_fingerprint(&json!({"name": "changed-provider"})).unwrap();
+    let changed_provider_fingerprint = fingerprint(&json!({"name": "changed-provider"})).unwrap();
     let changed_provider_id = Uuid::now_v7();
     let changed_credential_id = Uuid::now_v7();
     let changed_secret = master_key
         .seal(
             b"changed-provider-secret",
-            &credential_aad(changed_provider_id, changed_credential_id, 1),
+            &credential(changed_provider_id, changed_credential_id, 1),
         )
         .unwrap();
     assert!(matches!(
@@ -151,7 +149,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                     provider_key,
                     "changed-provider",
                 ),
-                ReplayableIdempotency::new(changed_provider_fingerprint, &master_key),
+                Replayable::new(changed_provider_fingerprint, &master_key),
                 |_| panic!("mismatched provider request must not execute"),
             )
             .await,
@@ -187,7 +185,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         .unwrap();
 
     let route_key = "route-replay-001";
-    let route_fingerprint = idempotency_fingerprint(&json!({
+    let route_fingerprint = fingerprint(&json!({
         "slug": "replay-route",
         "operations": ["generation"],
         "target": {"provider_id": provider_id, "model": "replay-model"}
@@ -196,9 +194,9 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let first_route = store
         .create_route_draft(
             route_input(actor, provider_id, route_key, "replay-route"),
-            ReplayableIdempotency::new(route_fingerprint, &master_key),
+            Replayable::new(route_fingerprint, &master_key),
             |created| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "id": created.id,
@@ -212,7 +210,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: created_route,
         response: route_response,
     } = first_route
@@ -228,12 +226,12 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let replayed_route = store
         .create_route_draft(
             route_input(actor, provider_id, route_key, "replay-route"),
-            ReplayableIdempotency::new(route_fingerprint, &master_key),
+            Replayable::new(route_fingerprint, &master_key),
             |_| panic!("route replay must not rebuild its response"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(response) = replayed_route else {
+    let Outcome::Replayed(response) = replayed_route else {
         panic!("identical route draft must replay");
     };
     assert_eq!(response.into_parts(), route_parts);
@@ -244,13 +242,12 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
             .unwrap(),
         1
     );
-    let changed_route_fingerprint =
-        idempotency_fingerprint(&json!({"slug": "changed-route"})).unwrap();
+    let changed_route_fingerprint = fingerprint(&json!({"slug": "changed-route"})).unwrap();
     assert!(matches!(
         store
             .create_route_draft(
                 route_input(actor, provider_id, route_key, "changed-route"),
-                ReplayableIdempotency::new(changed_route_fingerprint, &master_key),
+                Replayable::new(changed_route_fingerprint, &master_key),
                 |_| panic!("mismatched route request must not execute"),
             )
             .await,
@@ -258,7 +255,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     ));
 
     let rotation_key = "provider-credential-replay-001";
-    let rotation_fingerprint = idempotency_fingerprint(&json!({
+    let rotation_fingerprint = fingerprint(&json!({
         "provider_id": provider_id,
         "expected_etag": activated_provider.etag,
         "credential_sha256": "rotated-provider-secret"
@@ -268,7 +265,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let rotation_secret = master_key
         .seal(
             b"rotated-provider-secret",
-            &credential_aad(provider_id, rotation_credential_id, 2),
+            &credential(provider_id, rotation_credential_id, 2),
         )
         .unwrap();
     let first_rotation = store
@@ -282,9 +279,9 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 actor,
                 idempotency_key: rotation_key.to_owned(),
             },
-            ReplayableIdempotency::new(rotation_fingerprint, &master_key),
+            Replayable::new(rotation_fingerprint, &master_key),
             |result| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "provider_id": provider_id,
@@ -299,7 +296,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: rotation,
         response: rotation_response,
     } = first_rotation
@@ -320,7 +317,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let discarded_secret = master_key
         .seal(
             b"rotated-provider-secret",
-            &credential_aad(provider_id, discarded_credential_id, 3),
+            &credential(provider_id, discarded_credential_id, 3),
         )
         .unwrap();
     let replayed_rotation = store
@@ -334,12 +331,12 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 actor,
                 idempotency_key: rotation_key.to_owned(),
             },
-            ReplayableIdempotency::new(rotation_fingerprint, &master_key),
+            Replayable::new(rotation_fingerprint, &master_key),
             |_| panic!("credential rotation replay must not rebuild its response"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(response) = replayed_rotation else {
+    let Outcome::Replayed(response) = replayed_rotation else {
         panic!("identical provider credential rotation must replay");
     };
     assert_eq!(response.into_parts(), rotation_parts);
@@ -354,7 +351,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         2
     );
 
-    let changed_precondition_fingerprint = idempotency_fingerprint(&json!({
+    let changed_precondition_fingerprint = fingerprint(&json!({
         "provider_id": provider_id,
         "expected_etag": rotation.etag,
         "credential_sha256": "rotated-provider-secret"
@@ -364,7 +361,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let changed_precondition_secret = master_key
         .seal(
             b"rotated-provider-secret",
-            &credential_aad(provider_id, changed_precondition_id, 3),
+            &credential(provider_id, changed_precondition_id, 3),
         )
         .unwrap();
     assert!(matches!(
@@ -379,7 +376,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                     actor,
                     idempotency_key: rotation_key.to_owned(),
                 },
-                ReplayableIdempotency::new(changed_precondition_fingerprint, &master_key),
+                Replayable::new(changed_precondition_fingerprint, &master_key),
                 |_| panic!("changed rotation precondition must not execute"),
             )
             .await,
@@ -388,17 +385,17 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
 
     let effective_at = Utc::now() - Duration::hours(1);
     let prices = vec![PriceInput {
-        provider_kind: olp_engine::domain::ProviderKind::OpenAi,
+        provider_kind: olp_engine::domain::routing::provider::ProviderKind::OpenAi,
         provider_id: None,
         model: "replay-model".to_owned(),
-        operation: olp_engine::domain::OperationKind::Generation,
+        operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
         input_per_million: Some("1.250000000000".to_owned()),
         output_per_million: Some("2.500000000000".to_owned()),
         unit_price: None,
         currency: "USD".to_owned(),
     }];
     let pricing_key = "pricing-replay-001";
-    let pricing_fingerprint = idempotency_fingerprint(&json!({
+    let pricing_fingerprint = fingerprint(&json!({
         "effective_at": effective_at,
         "prices": [{
             "provider_kind": "openai",
@@ -416,9 +413,9 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
             pricing_key,
             effective_at,
             &prices,
-            ReplayableIdempotency::new(pricing_fingerprint, &master_key),
+            Replayable::new(pricing_fingerprint, &master_key),
             |revision| {
-                IdempotencyResponse::json(
+                Response::json(
                     201,
                     &json!({
                         "id": revision.id,
@@ -432,7 +429,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: pricing,
         response: pricing_response,
     } = first_pricing
@@ -447,12 +444,12 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
             pricing_key,
             effective_at,
             &prices,
-            ReplayableIdempotency::new(pricing_fingerprint, &master_key),
+            Replayable::new(pricing_fingerprint, &master_key),
             |_| panic!("pricing replay must not rebuild its response"),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Replayed(response) = replayed_pricing else {
+    let Outcome::Replayed(response) = replayed_pricing else {
         panic!("identical pricing revision must replay");
     };
     assert_eq!(response.into_parts(), pricing_parts);
@@ -464,8 +461,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         1
     );
     let changed_pricing_fingerprint =
-        idempotency_fingerprint(&json!({"effective_at": effective_at, "price": "changed"}))
-            .unwrap();
+        fingerprint(&json!({"effective_at": effective_at, "price": "changed"})).unwrap();
     assert!(matches!(
         store
             .create_pricing_revision(
@@ -473,7 +469,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 pricing_key,
                 effective_at,
                 &prices,
-                ReplayableIdempotency::new(changed_pricing_fingerprint, &master_key),
+                Replayable::new(changed_pricing_fingerprint, &master_key),
                 |_| panic!("mismatched pricing request must not execute"),
             )
             .await,
@@ -498,7 +494,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
                 concurrent_key,
                 effective_at,
                 &prices,
-                ReplayableIdempotency::new([83; 32], &master_key),
+                Replayable::new([83; 32], &master_key),
                 |_| panic!("in-progress pricing request must not execute"),
             )
             .await,
@@ -511,7 +507,7 @@ fn provider_input(
     provider_id: Uuid,
     credential_id: Uuid,
     model_id: Uuid,
-    credential: olp_db::security::EncryptedSecret,
+    credential: olp_db::security::envelope::EncryptedSecret,
     actor: Uuid,
     idempotency_key: &str,
     name: &str,

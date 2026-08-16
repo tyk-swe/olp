@@ -52,6 +52,11 @@ Transport-neutral behavior belongs in `olp_engine::inference`. Delivery roots
 are `bootstrap/`, `public_http/`, `gateway/`, `management/`, `observability/`,
 and `console/`.
 
+Rust APIs are exposed only from their defining owner modules. Import leaf
+paths such as `domain::canonical::requests`, `inference::service`,
+`providers::factory::assembly`, and `olp_db::store`; do not add root or
+layer-level re-export facades.
+
 ### Source map
 
 - Provider kinds, auth, fields, presets: `crates/olp-engine/src/domain/provider_configuration.rs`.

@@ -15,11 +15,15 @@ use axum::{
     routing::{get, post},
 };
 use http_body_util::BodyExt as _;
-use olp::test_support::{ApiMode, ProcessComposition, public_router};
-use olp_db::security::MasterKey;
-use olp_engine::inference::runtime::RuntimeManager;
-use olp_engine::providers::openai::{
-    ConnectorConfig, ConnectorTimeouts, OpenAiApiKey, OpenAiConnector,
+use olp::{
+    bootstrap::state::{ApiMode, ProcessComposition},
+    public_http::router::for_state,
+};
+use olp_db::security::envelope::MasterKey;
+use olp_engine::inference::runtime::Manager;
+use olp_engine::providers::{
+    connector::Timeouts,
+    openai::{ApiKey, ConnectorConfig, transport::Connector},
 };
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -46,14 +50,14 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         Some(store.clone()),
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-configuration-test"),
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [9; 32]);
     let configuration_state = state.clone();
-    let app = public_router(state.mode_dependencies().unwrap().management().unwrap());
+    let app = for_state(state.mode_dependencies().unwrap().management().unwrap());
     let mock_provider = MockOpenAiProvider::spawn().await;
 
     let setup = send(

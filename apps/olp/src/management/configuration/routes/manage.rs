@@ -6,22 +6,28 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    configuration::ReplaceRouteDraftInput, configuration::RouteDraftRecord,
-    configuration::RouteRecord, configuration::RouteRevisionDiff,
-    configuration::RouteRevisionRecord, configuration::RouteSimulation,
-    configuration::RouteSimulationTarget, configuration::RouteTargetRecord,
+    configuration::resources::ReplaceRouteDraftInput, configuration::resources::RouteDraftRecord,
+    configuration::resources::RouteRecord, configuration::resources::RouteRevisionDiff,
+    configuration::resources::RouteRevisionRecord, configuration::resources::RouteSimulation,
+    configuration::resources::RouteSimulationTarget, configuration::resources::RouteTargetRecord,
 };
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    ManagementState, Problem,
+    bootstrap::mode_dependencies::ManagementState,
     management::{
-        DiffQuery, PageQuery, Permission, if_match, json_payload, map_configuration, page,
-        require_idempotency_key, require_mutation_session, require_permission,
-        require_read_session, with_etag,
+        error_mapping::map_configuration,
+        idempotency::require_idempotency_key,
+        json_payload::json_payload,
+        pagination::{DiffQuery, PageQuery, page},
+        permissions::require_permission,
+        preconditions::{if_match, with_etag},
+        sessions::{require_mutation_session, require_read_session},
     },
+    public_http::problem::Problem,
 };
 
 #[derive(Clone, Debug, Serialize, ToSchema)]

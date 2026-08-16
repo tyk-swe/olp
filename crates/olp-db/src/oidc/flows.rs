@@ -2,11 +2,11 @@ use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use super::helpers::{encrypted_from_row, require_current_enabled_configuration};
-use super::{NewOidcFlow, OidcError, OidcFlowPurpose, OidcFlowRecord};
+use super::types::{NewOidcFlow, OidcError, OidcFlowPurpose, OidcFlowRecord};
 use crate::{
-    PgStore,
     authentication::{RecentAuthPurpose, consume_recent_authentication, insert_security_audit},
-    security::token_digest,
+    security::session_material::token_digest,
+    store::Store,
 };
 
 const OIDC_FLOW_CAPACITY_LOCK_ID: i64 = 0x4f4c_505f_4f46; // "OLP_OF"
@@ -14,7 +14,7 @@ const MAX_ACTIVE_FLOWS: i64 = 10_000;
 const MAX_AUTHORIZATION_FLOWS_PER_MINUTE: i64 = 300;
 const OIDC_LOGIN_CONSUMPTION_DELETE_BATCH: i64 = 1_000;
 
-impl PgStore {
+impl Store {
     /// Persists an authenticated link or reauthentication flow. The exact
     /// initiating session and security version are part of the durable flow.
     /// Link creation additionally consumes its one-time recent-auth grant in

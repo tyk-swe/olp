@@ -1,20 +1,24 @@
 use crate::domain::{
-    CanonicalResult, Operation, ProviderOutput, ProviderRequest, TransportError, TransportMode,
+    canonical::{identity::TransportMode, requests::Operation, results::CanonicalResult},
+    ports::{ProviderOutput, ProviderRequest, TransportError},
 };
-use crate::protocols::openai::{
-    OpenAiTranscriptionResponse, TranscriptionResponseFormat, decode_speech_body,
+use crate::protocols::openai::audio::{
+    TranscriptionResponse, TranscriptionResponseFormat, decode_speech_body,
     decode_transcription_response, encode_speech, encode_transcription,
 };
 use http::header;
 use reqwest::{Response, multipart};
 
-use super::{
-    super::{OpenAiConnector, errors::*, media::*, streams::read_deadline_body},
-    require_content_type,
+use super::super::{
+    Connector,
+    errors::*,
+    media::*,
+    streams::{read_deadline_body, require_content_type},
 };
+use crate::providers::transport_common::{protocol_body_error, transport_error};
 
 pub(super) async fn execute_speech(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only speech requests here.
@@ -53,12 +57,12 @@ pub(super) async fn execute_speech(
     )
     .await?;
     Ok(ProviderOutput::Result(Box::new(CanonicalResult::Speech(
-        decode_speech_body(crate::protocols::openai::BinaryMediaBody { media: artifact }),
+        decode_speech_body(crate::protocols::openai::media::BinaryMediaBody { media: artifact }),
     ))))
 }
 
 pub(super) async fn execute_transcription(
-    connector: &OpenAiConnector,
+    connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only transcription requests here.
@@ -124,7 +128,7 @@ pub(super) async fn execute_transcription(
     )
     .await?;
     let response = if response_format.is_text() {
-        OpenAiTranscriptionResponse::Text(
+        TranscriptionResponse::Text(
             String::from_utf8(bytes)
                 .map_err(|error| protocol_decode_error("transcription text", error))?,
         )
@@ -158,8 +162,8 @@ fn require_transcription_text_content_type(
         Ok(())
     } else {
         Err(transport_error(
-            crate::domain::TransportPhase::FirstByte,
-            crate::domain::AttemptFailureClass::Protocol,
+            crate::domain::ports::TransportPhase::FirstByte,
+            crate::domain::ports::AttemptFailureClass::Protocol,
             false,
             "OpenAI transcription response used an invalid text content type",
         ))

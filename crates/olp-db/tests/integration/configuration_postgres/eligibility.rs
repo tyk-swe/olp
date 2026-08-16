@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn exercise(
-    store: &PgStore,
+    store: &Store,
     actor: Uuid,
     master_key: &MasterKey,
     provider_id: Uuid,
@@ -49,7 +49,7 @@ pub(super) async fn exercise(
                 "provider-activate-vertex-adc-without-probe-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     certify_all_capabilities(store, adc_provider_id).await;
     store
@@ -71,8 +71,7 @@ pub(super) async fn exercise(
         )
         .await
         .unwrap();
-    let adc_runtime: RuntimeSnapshot =
-        serde_json::from_slice(&adc_activated.release.payload).unwrap();
+    let adc_runtime: Snapshot = serde_json::from_slice(&adc_activated.release.payload).unwrap();
     let active = store
         .runtime_provider_configurations(&adc_runtime)
         .await
@@ -83,7 +82,7 @@ pub(super) async fn exercise(
         .unwrap();
     assert_eq!(
         adc.auth_mode,
-        olp_engine::domain::ProviderAuthMode::ApplicationDefault
+        olp_engine::domain::provider::ProviderAuthMode::ApplicationDefault
     );
     assert_eq!(adc.cloud_project.as_deref(), Some("project-workload"));
     assert!(adc.credential_id.is_none());
@@ -99,7 +98,7 @@ pub(super) async fn exercise(
                 "provider-disable-while-referenced-01",
             )
             .await,
-        Err(ConfigurationError::InUse)
+        Err(Error::InUse)
     ));
 
     let replacement_route = store
@@ -149,8 +148,7 @@ pub(super) async fn exercise(
         .await
         .unwrap();
     let disabled_release = disabled.release.as_ref().unwrap();
-    let disabled_runtime: RuntimeSnapshot =
-        serde_json::from_slice(&disabled_release.payload).unwrap();
+    let disabled_runtime: Snapshot = serde_json::from_slice(&disabled_release.payload).unwrap();
     assert!(
         !disabled_runtime
             .providers
@@ -163,7 +161,7 @@ pub(super) async fn exercise(
     );
     assert_eq!(
         store.get_provider(provider_id).await.unwrap().state,
-        olp_engine::domain::ProviderState::Disabled
+        olp_engine::domain::provider::ProviderState::Disabled
     );
 
     let restored_provider_etag = store
@@ -178,7 +176,7 @@ pub(super) async fn exercise(
     let restored_provider = store.get_provider(provider_id).await.unwrap();
     assert_eq!(
         restored_provider.state,
-        olp_engine::domain::ProviderState::Draft
+        olp_engine::domain::provider::ProviderState::Draft
     );
     assert!(restored_provider.last_probe_at.is_none());
     assert!(restored_provider.last_probe_status.is_none());
@@ -188,7 +186,7 @@ pub(super) async fn exercise(
             .iter()
             .all(|model| {
                 model.capabilities.iter().all(|capability| {
-                    capability.source == olp_engine::domain::CapabilitySource::Declared
+                    capability.source == olp_engine::domain::provider::CapabilitySource::Declared
                         && capability.certified_at.is_none()
                 })
             })
@@ -202,7 +200,7 @@ pub(super) async fn exercise(
                 "provider-activate-restored-without-probe-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     certify_all_capabilities(store, provider_id).await;
     store
@@ -238,7 +236,7 @@ pub(super) async fn exercise(
     let compatible_secret = master_key
         .seal(
             b"compatible-secret",
-            &credential_aad(compatible_id, compatible_credential_id, 1),
+            &credential(compatible_id, compatible_credential_id, 1),
         )
         .unwrap();
     let compatible = store
@@ -311,13 +309,13 @@ pub(super) async fn exercise(
             .capabilities
             .iter()
             .filter(|capability| {
-                capability.source == olp_engine::domain::CapabilitySource::Certified
+                capability.source == olp_engine::domain::provider::CapabilitySource::Certified
             })
             .count(),
         1
     );
     assert!(partial_models[0].capabilities.iter().any(|capability| {
-        capability.source == olp_engine::domain::CapabilitySource::Certified
+        capability.source == olp_engine::domain::provider::CapabilitySource::Certified
             && capability.certified_at.is_some()
     }));
     assert!(
@@ -365,14 +363,14 @@ pub(super) async fn exercise(
                     operation: "generation".parse().unwrap(),
                     surface: "openai".parse().unwrap(),
                     mode: "unary".parse().unwrap(),
-                    source: olp_engine::domain::CapabilitySource::Declared,
+                    source: olp_engine::domain::provider::CapabilitySource::Declared,
                     certified_at: None,
                 },
                 CapabilityRecord {
                     operation: "generation".parse().unwrap(),
                     surface: "openai".parse().unwrap(),
                     mode: "streaming".parse().unwrap(),
-                    source: olp_engine::domain::CapabilitySource::Declared,
+                    source: olp_engine::domain::provider::CapabilitySource::Declared,
                     certified_at: None,
                 },
             ],
@@ -386,7 +384,7 @@ pub(super) async fn exercise(
             .capabilities
             .iter()
             .all(|capability| {
-                capability.source == olp_engine::domain::CapabilitySource::Declared
+                capability.source == olp_engine::domain::provider::CapabilitySource::Declared
                     && capability.certified_at.is_none()
             })
     );
@@ -441,7 +439,7 @@ pub(super) async fn exercise(
             .capabilities
             .iter()
             .all(|capability| {
-                capability.source == olp_engine::domain::CapabilitySource::Certified
+                capability.source == olp_engine::domain::provider::CapabilitySource::Certified
                     && capability.certified_at.is_some()
             })
     );
@@ -472,7 +470,7 @@ pub(super) async fn exercise(
             .capabilities
             .iter()
             .all(|capability| {
-                capability.source == olp_engine::domain::CapabilitySource::Declared
+                capability.source == olp_engine::domain::provider::CapabilitySource::Declared
                     && capability.certified_at.is_none()
             })
     );
@@ -485,7 +483,7 @@ pub(super) async fn exercise(
                 "provider-compatible-activate-after-patch-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
 
     let post_patch_certified = store
@@ -520,7 +518,7 @@ pub(super) async fn exercise(
                 "provider-compatible-activate-without-fresh-probe-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     store
         .record_provider_probe(
@@ -541,7 +539,7 @@ pub(super) async fn exercise(
                 "provider-compatible-activate-after-failed-probe-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     store
         .record_provider_probe(

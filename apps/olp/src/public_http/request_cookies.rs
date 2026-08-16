@@ -1,6 +1,6 @@
 use axum::http::{HeaderMap, header};
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 pub(crate) const SESSION_COOKIE: &str = "__Host-olp_session";
 pub(crate) const CSRF_COOKIE: &str = "__Host-olp_csrf";

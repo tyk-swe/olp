@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    CanonicalEvent, CanonicalEventKind, FinishReason, MessageRole, Surface, Usage,
-    validate_event_sequence,
+use crate::domain::canonical::{
+    events::{Event, FinishReason, Kind, Usage, validate_event_sequence},
+    identity::Surface,
+    requests::MessageRole,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -49,14 +50,11 @@ pub enum AggregateError {
 }
 
 pub(in crate::protocols) fn aggregate_generation(
-    events: &[CanonicalEvent],
+    events: &[Event],
     target: Surface,
 ) -> Result<AggregatedGeneration, AggregateError> {
     validate_event_sequence(events).map_err(|_| AggregateError::Sequence)?;
-    if !matches!(
-        events.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
-    ) {
+    if !matches!(events.last().map(|event| &event.kind), Some(Kind::Done)) {
         return Err(AggregateError::MissingDone);
     }
     let mut aggregate = AggregatedGeneration {
@@ -68,20 +66,20 @@ pub(in crate::protocols) fn aggregate_generation(
     };
     for event in events {
         match &event.kind {
-            CanonicalEventKind::ResponseStart {
+            Kind::ResponseStart {
                 response_id,
                 provider_model,
             } => {
                 aggregate.response_id.clone_from(response_id);
                 aggregate.provider_model.clone_from(provider_model);
             }
-            CanonicalEventKind::MessageStart { output_index, role } => {
+            Kind::MessageStart { output_index, role } => {
                 if *role != MessageRole::Assistant {
                     return Err(AggregateError::Role);
                 }
                 aggregate.outputs.entry(*output_index).or_default();
             }
-            CanonicalEventKind::TextDelta { output_index, text } => {
+            Kind::TextDelta { output_index, text } => {
                 aggregate
                     .outputs
                     .entry(*output_index)
@@ -89,7 +87,7 @@ pub(in crate::protocols) fn aggregate_generation(
                     .text
                     .push_str(text);
             }
-            CanonicalEventKind::RefusalDelta { output_index, text } => {
+            Kind::RefusalDelta { output_index, text } => {
                 if target != Surface::OpenAi {
                     return Err(AggregateError::Refusal);
                 }
@@ -100,7 +98,7 @@ pub(in crate::protocols) fn aggregate_generation(
                     .refusal
                     .push_str(text);
             }
-            CanonicalEventKind::ToolCallDelta {
+            Kind::ToolCallDelta {
                 output_index,
                 tool_index,
                 id,
@@ -122,15 +120,15 @@ pub(in crate::protocols) fn aggregate_generation(
                 }
                 tool.arguments.push_str(arguments_delta);
             }
-            CanonicalEventKind::Usage { usage } => aggregate.usage = Some(*usage),
-            CanonicalEventKind::Finish {
+            Kind::Usage { usage } => aggregate.usage = Some(*usage),
+            Kind::Finish {
                 output_index,
                 reason,
             } => {
                 aggregate.outputs.entry(*output_index).or_default().finish = Some(reason.clone());
             }
-            CanonicalEventKind::Error { .. } => return Err(AggregateError::Upstream),
-            CanonicalEventKind::SourceExtension { extensions } => {
+            Kind::Error { .. } => return Err(AggregateError::Upstream),
+            Kind::SourceExtension { extensions } => {
                 if extensions.source != Some(target) {
                     return Err(AggregateError::CrossProtocolExtensions);
                 }
@@ -144,7 +142,7 @@ pub(in crate::protocols) fn aggregate_generation(
                     }
                 }
             }
-            CanonicalEventKind::Done => {}
+            Kind::Done => {}
         }
     }
     Ok(aggregate)

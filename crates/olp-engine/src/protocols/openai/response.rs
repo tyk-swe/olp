@@ -1,20 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{
-    CanonicalError, CanonicalEvent, CanonicalEventKind, ErrorClass, FinishReason, MessageRole,
-    SourceExtensions, Surface, Usage,
+use crate::domain::canonical::{
+    events::{Error, ErrorClass, Event, FinishReason, Kind, Usage},
+    identity::Surface,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::chat::{ChatRole, ChatToolCall};
+use super::chat::{Role, ToolCall};
 use super::extensions::collect_extra;
 use crate::protocols::CanonicalEventBuilder as EventBuilder;
-use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, SseDecodeError, SseDecoder, SseFrame};
+use crate::protocols::sse::{DEFAULT_MAX_EVENT_BYTES, DecodeError, Decoder as SseDecoder, Frame};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ChatCompletionResponse {
+pub struct Completion {
     pub id: String,
     pub object: String,
     pub created: i64,
@@ -38,13 +39,13 @@ pub struct ChatCompletionChoice {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ChatResponseMessage {
-    pub role: ChatRole,
+    pub role: Role,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<ChatToolCall>,
+    pub tool_calls: Vec<ToolCall>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -81,11 +82,9 @@ pub struct CompletionTokenDetails {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_chat_completion_response(
-    response: ChatCompletionResponse,
-) -> Result<Vec<CanonicalEvent>, OpenAiResponseError> {
+pub fn decode(response: Completion) -> Result<Vec<Event>, OpenAiResponseError> {
     let mut builder = EventBuilder::default();
-    builder.push(CanonicalEventKind::ResponseStart {
+    builder.push(Kind::ResponseStart {
         response_id: Some(response.id),
         provider_model: Some(response.model),
     });
@@ -101,18 +100,18 @@ pub fn decode_chat_completion_response(
             &choice.message.extra,
             &mut extensions,
         );
-        builder.push(CanonicalEventKind::MessageStart {
+        builder.push(Kind::MessageStart {
             output_index: choice.index,
             role: canonical_role(choice.message.role),
         });
         if let Some(content) = choice.message.content {
-            builder.push(CanonicalEventKind::TextDelta {
+            builder.push(Kind::TextDelta {
                 output_index: choice.index,
                 text: content,
             });
         }
         if let Some(refusal) = choice.message.refusal {
-            builder.push(CanonicalEventKind::RefusalDelta {
+            builder.push(Kind::RefusalDelta {
                 output_index: choice.index,
                 text: refusal,
             });
@@ -128,7 +127,7 @@ pub fn decode_chat_completion_response(
                 &call.function.extra,
                 &mut extensions,
             );
-            builder.push(CanonicalEventKind::ToolCallDelta {
+            builder.push(Kind::ToolCallDelta {
                 output_index: choice.index,
                 tool_index: tool_index
                     .try_into()
@@ -139,7 +138,7 @@ pub fn decode_chat_completion_response(
             });
         }
         if let Some(reason) = choice.finish_reason {
-            builder.push(CanonicalEventKind::Finish {
+            builder.push(Kind::Finish {
                 output_index: choice.index,
                 reason: finish_reason(&reason),
             });
@@ -148,16 +147,16 @@ pub fn decode_chat_completion_response(
 
     if let Some(usage) = response.usage {
         collect_usage_extensions("/usage", &usage, &mut extensions);
-        builder.push(CanonicalEventKind::Usage {
+        builder.push(Kind::Usage {
             usage: canonical_usage(&usage),
         });
     }
     if !extensions.is_empty() {
-        builder.push(CanonicalEventKind::SourceExtension {
+        builder.push(Kind::SourceExtension {
             extensions: SourceExtensions::new(Surface::OpenAi, extensions),
         });
     }
-    builder.push(CanonicalEventKind::Done);
+    builder.push(Kind::Done);
     Ok(builder.events)
 }
 
@@ -200,7 +199,7 @@ impl ChatChunkChoice {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct ChatDelta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<ChatRole>,
+    pub role: Option<Role>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,7 +247,7 @@ struct OpenAiWireError {
     kind: Option<String>,
 }
 
-pub struct OpenAiChatStreamDecoder {
+pub struct Decoder {
     sse: SseDecoder,
     sequence: u64,
     response_started: bool,
@@ -257,10 +256,10 @@ pub struct OpenAiChatStreamDecoder {
     done: bool,
 }
 
-impl std::fmt::Debug for OpenAiChatStreamDecoder {
+impl std::fmt::Debug for Decoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("OpenAiChatStreamDecoder")
+            .debug_struct("Decoder")
             .field("next_sequence", &self.sequence)
             .field("response_started", &self.response_started)
             .field("started_choice_count", &self.started_choices.len())
@@ -270,13 +269,13 @@ impl std::fmt::Debug for OpenAiChatStreamDecoder {
     }
 }
 
-impl Default for OpenAiChatStreamDecoder {
+impl Default for Decoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OpenAiChatStreamDecoder {
+impl Decoder {
     #[must_use]
     pub fn new() -> Self {
         Self::with_max_event_bytes(DEFAULT_MAX_EVENT_BYTES)
@@ -294,12 +293,12 @@ impl OpenAiChatStreamDecoder {
         }
     }
 
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, OpenAiStreamError> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, OpenAiStreamError> {
         let frames = self.sse.push(bytes)?;
         self.decode_frames(frames)
     }
 
-    pub fn finish(&mut self) -> Result<Vec<CanonicalEvent>, OpenAiStreamError> {
+    pub fn finish(&mut self) -> Result<Vec<Event>, OpenAiStreamError> {
         let frames = self.sse.finish()?;
         let events = self.decode_frames(frames)?;
         if !self.done {
@@ -313,10 +312,7 @@ impl OpenAiChatStreamDecoder {
         self.done
     }
 
-    fn decode_frames(
-        &mut self,
-        frames: Vec<SseFrame>,
-    ) -> Result<Vec<CanonicalEvent>, OpenAiStreamError> {
+    fn decode_frames(&mut self, frames: Vec<Frame>) -> Result<Vec<Event>, OpenAiStreamError> {
         let mut events = Vec::new();
         for frame in frames {
             if self.done {
@@ -327,7 +323,7 @@ impl OpenAiChatStreamDecoder {
                 {
                     return Err(OpenAiStreamError::UnexpectedEof);
                 }
-                self.emit(&mut events, CanonicalEventKind::Done);
+                self.emit(&mut events, Kind::Done);
                 self.done = true;
                 continue;
             }
@@ -337,11 +333,11 @@ impl OpenAiChatStreamDecoder {
                 let envelope: OpenAiErrorEnvelope = serde_json::from_value(value)?;
                 self.emit(
                     &mut events,
-                    CanonicalEventKind::Error {
+                    Kind::Error {
                         error: canonical_error(envelope.error),
                     },
                 );
-                self.emit(&mut events, CanonicalEventKind::Done);
+                self.emit(&mut events, Kind::Done);
                 self.done = true;
                 continue;
             }
@@ -354,12 +350,12 @@ impl OpenAiChatStreamDecoder {
     fn decode_chunk(
         &mut self,
         chunk: ChatCompletionChunk,
-        events: &mut Vec<CanonicalEvent>,
+        events: &mut Vec<Event>,
     ) -> Result<(), OpenAiStreamError> {
         if !self.response_started {
             self.emit(
                 events,
-                CanonicalEventKind::ResponseStart {
+                Kind::ResponseStart {
                     response_id: Some(chunk.id.clone()),
                     provider_model: Some(chunk.model.clone()),
                 },
@@ -388,7 +384,7 @@ impl OpenAiChatStreamDecoder {
             if self.started_choices.insert(choice.index) {
                 self.emit(
                     events,
-                    CanonicalEventKind::MessageStart {
+                    Kind::MessageStart {
                         output_index: choice.index,
                         role: choice
                             .delta
@@ -400,7 +396,7 @@ impl OpenAiChatStreamDecoder {
             if let Some(content) = choice.delta.content {
                 self.emit(
                     events,
-                    CanonicalEventKind::TextDelta {
+                    Kind::TextDelta {
                         output_index: choice.index,
                         text: content,
                     },
@@ -409,7 +405,7 @@ impl OpenAiChatStreamDecoder {
             if let Some(refusal) = choice.delta.refusal {
                 self.emit(
                     events,
-                    CanonicalEventKind::RefusalDelta {
+                    Kind::RefusalDelta {
                         output_index: choice.index,
                         text: refusal,
                     },
@@ -432,7 +428,7 @@ impl OpenAiChatStreamDecoder {
                 }
                 self.emit(
                     events,
-                    CanonicalEventKind::ToolCallDelta {
+                    Kind::ToolCallDelta {
                         output_index: choice.index,
                         tool_index: tool.index,
                         id: tool.id,
@@ -451,7 +447,7 @@ impl OpenAiChatStreamDecoder {
                 self.finished_choices.insert(choice.index);
                 self.emit(
                     events,
-                    CanonicalEventKind::Finish {
+                    Kind::Finish {
                         output_index: choice.index,
                         reason: finish_reason(&reason),
                     },
@@ -463,7 +459,7 @@ impl OpenAiChatStreamDecoder {
             collect_usage_extensions("/usage", &usage, &mut extensions);
             self.emit(
                 events,
-                CanonicalEventKind::Usage {
+                Kind::Usage {
                     usage: canonical_usage(&usage),
                 },
             );
@@ -471,7 +467,7 @@ impl OpenAiChatStreamDecoder {
         if !extensions.is_empty() {
             self.emit(
                 events,
-                CanonicalEventKind::SourceExtension {
+                Kind::SourceExtension {
                     extensions: SourceExtensions::new(Surface::OpenAi, extensions),
                 },
             );
@@ -479,19 +475,19 @@ impl OpenAiChatStreamDecoder {
         Ok(())
     }
 
-    fn emit(&mut self, events: &mut Vec<CanonicalEvent>, kind: CanonicalEventKind) {
-        events.push(CanonicalEvent::new(self.sequence, kind));
+    fn emit(&mut self, events: &mut Vec<Event>, kind: Kind) {
+        events.push(Event::new(self.sequence, kind));
         self.sequence = self.sequence.saturating_add(1);
     }
 }
 
-fn canonical_role(role: ChatRole) -> MessageRole {
+fn canonical_role(role: Role) -> MessageRole {
     match role {
-        ChatRole::System => MessageRole::System,
-        ChatRole::Developer => MessageRole::Developer,
-        ChatRole::User => MessageRole::User,
-        ChatRole::Assistant => MessageRole::Assistant,
-        ChatRole::Tool => MessageRole::Tool,
+        Role::System => MessageRole::System,
+        Role::Developer => MessageRole::Developer,
+        Role::User => MessageRole::User,
+        Role::Assistant => MessageRole::Assistant,
+        Role::Tool => MessageRole::Tool,
     }
 }
 
@@ -543,7 +539,7 @@ fn collect_usage_extensions(
     }
 }
 
-fn canonical_error(error: OpenAiWireError) -> CanonicalError {
+fn canonical_error(error: OpenAiWireError) -> Error {
     let provider_code = error.code.map(|code| match code {
         Value::String(value) => value,
         value => value.to_string(),
@@ -561,7 +557,7 @@ fn canonical_error(error: OpenAiWireError) -> CanonicalError {
     } else {
         (ErrorClass::Upstream, false)
     };
-    CanonicalError {
+    Error {
         class,
         message: error.message,
         provider_code,
@@ -580,7 +576,7 @@ pub enum OpenAiResponseError {
 #[derive(Debug, Error)]
 pub enum OpenAiStreamError {
     #[error(transparent)]
-    Sse(#[from] SseDecodeError),
+    Sse(#[from] DecodeError),
     #[error("OpenAI stream frame did not contain valid JSON")]
     Json(#[from] serde_json::Error),
     #[error("OpenAI stream emitted data after [DONE]")]

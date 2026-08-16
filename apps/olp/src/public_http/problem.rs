@@ -8,23 +8,23 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-pub type FieldErrors = BTreeMap<String, Vec<String>>;
+pub(crate) type FieldErrors = BTreeMap<String, Vec<String>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Problem {
+pub(crate) struct Problem {
     #[serde(rename = "type")]
-    pub problem_type: Box<str>,
-    pub title: Box<str>,
-    pub status: u16,
-    pub detail: Box<str>,
+    pub(crate) problem_type: Box<str>,
+    pub(crate) title: Box<str>,
+    pub(crate) status: u16,
+    pub(crate) detail: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub instance: Option<Box<str>>,
+    pub(crate) instance: Option<Box<str>>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
-    pub errors: Box<FieldErrors>,
+    pub(crate) errors: Box<FieldErrors>,
 }
 
 impl Problem {
-    pub fn new(
+    pub(crate) fn new(
         status: StatusCode,
         code: &str,
         title: impl Into<String>,
@@ -40,11 +40,11 @@ impl Problem {
         }
     }
 
-    pub fn bad_request(code: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(code: &str, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, code, "Invalid request", detail)
     }
 
-    pub fn validation(errors: FieldErrors) -> Self {
+    pub(crate) fn validation(errors: FieldErrors) -> Self {
         let mut problem = Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "validation_failed",
@@ -61,7 +61,7 @@ impl Problem {
         Self::validation(errors)
     }
 
-    pub fn unauthorized(detail: impl Into<String>) -> Self {
+    pub(crate) fn unauthorized(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
@@ -70,15 +70,15 @@ impl Problem {
         )
     }
 
-    pub fn forbidden(code: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn forbidden(code: &str, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, code, "Forbidden", detail)
     }
 
-    pub fn conflict(code: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn conflict(code: &str, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, code, "Conflict", detail)
     }
 
-    pub fn service_unavailable(code: &str) -> Self {
+    pub(crate) fn service_unavailable(code: &str) -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
             code,
@@ -87,7 +87,7 @@ impl Problem {
         )
     }
 
-    pub fn internal() -> Self {
+    pub(crate) fn internal() -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -96,7 +96,7 @@ impl Problem {
         )
     }
 
-    pub fn with_instance(mut self, uri: &Uri) -> Self {
+    pub(crate) fn with_instance(mut self, uri: &Uri) -> Self {
         self.instance = Some(uri.path().to_owned().into_boxed_str());
         self
     }

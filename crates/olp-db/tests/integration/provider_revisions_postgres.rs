@@ -1,14 +1,18 @@
 use olp_db::{
-    PgStore, access::NewApiKeyRecord, configuration::ConfigurationError,
-    configuration::NewProviderDraft, configuration::NewRouteDraft, configuration::NewRouteTarget,
-    configuration::RotateCredentialInput, configuration::UpdateProvider,
-    idempotency::IdempotencyOutcome, idempotency::IdempotencyResponse,
-    idempotency::ReplayableIdempotency, idempotency::idempotency_fingerprint,
+    access::NewApiKeyRecord, configuration::Error, configuration::NewProviderDraft,
+    configuration::NewRouteDraft, configuration::NewRouteTarget,
+    configuration::resources::RotateCredentialInput, configuration::resources::UpdateProvider,
+    idempotency::Outcome, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
     identity::InstallationSetupInput, media_jobs::MediaJobState, media_jobs::MediaJobUpdate,
-    media_jobs::NewMediaJobReservation, security::AuthHmacKey, security::MasterKey,
-    security::SessionMaterial, security::credential_aad,
+    media_jobs::NewMediaJobReservation, security::aad::credential, security::envelope::MasterKey,
+    security::key_material::AuthHmacKey, security::session_material::SessionMaterial, store::Store,
 };
-use olp_engine::domain::{ApiKeyLimits, ApiKeyScope, OperationKind, RouteSlug, RuntimeSnapshot};
+use olp_engine::domain::{
+    auth::{ApiKeyLimits, ApiKeyScope},
+    canonical::identity::OperationKind,
+    ids::RouteSlug,
+    routing::snapshot::Snapshot,
+};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -38,10 +42,10 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let first_credential = master_key
         .seal(
             b"first-provider-secret",
-            &credential_aad(provider_id, first_credential_id, 1),
+            &credential(provider_id, first_credential_id, 1),
         )
         .unwrap();
-    let provider_fingerprint = idempotency_fingerprint(&"provider-revision-create-01").unwrap();
+    let provider_fingerprint = fingerprint(&"provider-revision-create-01").unwrap();
     let provider = store
         .create_provider_draft(
             NewProviderDraft {
@@ -49,7 +53,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 credential_id: Some(first_credential_id),
                 model_id: Some(model_id),
                 name: "revision-provider".to_owned(),
-                kind: olp_engine::domain::ProviderKind::OpenAi,
+                kind: olp_engine::domain::routing::provider::ProviderKind::OpenAi,
                 endpoint: Some("https://old.example.test/v1/".to_owned()),
                 cloud_region: None,
                 cloud_project: None,
@@ -65,12 +69,12 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 actor,
                 idempotency_key: "provider-revision-create-01".to_owned(),
             },
-            ReplayableIdempotency::new(provider_fingerprint, &master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new(provider_fingerprint, &master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: provider, ..
     } = provider
     else {
@@ -165,7 +169,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         .unwrap();
     assert!(live_media_job.provider_revision_id.is_some());
 
-    let route_fingerprint = idempotency_fingerprint(&"provider-revision-route-create-01").unwrap();
+    let route_fingerprint = fingerprint(&"provider-revision-route-create-01").unwrap();
     let route = store
         .create_route_draft(
             NewRouteDraft {
@@ -192,12 +196,12 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 actor,
                 idempotency_key: "provider-revision-route-create-01".to_owned(),
             },
-            ReplayableIdempotency::new(route_fingerprint, &master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new(route_fingerprint, &master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed { value: route, .. } = route else {
+    let Outcome::Executed { value: route, .. } = route else {
         panic!("new route creation must execute");
     };
     let (route_etag, _) = store
@@ -235,10 +239,10 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let second_credential = master_key
         .seal(
             b"second-provider-secret",
-            &credential_aad(provider_id, second_credential_id, 2),
+            &credential(provider_id, second_credential_id, 2),
         )
         .unwrap();
-    let rotation_fingerprint = idempotency_fingerprint(&"provider-revision-rotate-01").unwrap();
+    let rotation_fingerprint = fingerprint(&"provider-revision-rotate-01").unwrap();
     let rotation = store
         .rotate_provider_credential(
             provider_id,
@@ -250,12 +254,12 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 actor,
                 idempotency_key: "provider-revision-rotate-01".to_owned(),
             },
-            ReplayableIdempotency::new(rotation_fingerprint, &master_key),
-            |_| IdempotencyResponse::new(200, None, None, Vec::new()),
+            Replayable::new(rotation_fingerprint, &master_key),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: rotation, ..
     } = rotation
     else {
@@ -306,7 +310,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                     idempotency_key,
                 )
                 .await,
-            Err(ConfigurationError::InUse)
+            Err(Error::InUse)
         ));
     }
 
@@ -314,7 +318,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     // endpoint and credential currently being tested in the mutable draft.
     let auth_hmac_key = AuthHmacKey::new([23; 32]);
     let key_material = auth_hmac_key.generate_api_key();
-    let key_fingerprint = idempotency_fingerprint(&"provider-revision-key-create-01").unwrap();
+    let key_fingerprint = fingerprint(&"provider-revision-key-create-01").unwrap();
     let key_creation = store
         .create_api_key_record(
             &NewApiKeyRecord {
@@ -327,19 +331,19 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 actor,
                 idempotency_key: "provider-revision-key-create-01".to_owned(),
             },
-            ReplayableIdempotency::new(key_fingerprint, &master_key),
-            |_| IdempotencyResponse::new(201, None, None, Vec::new()),
+            Replayable::new(key_fingerprint, &master_key),
+            |_| Response::new(201, None, None, Vec::new()),
         )
         .await
         .unwrap();
-    let IdempotencyOutcome::Executed {
+    let Outcome::Executed {
         value: key_creation,
         ..
     } = key_creation
     else {
         panic!("new key creation must execute");
     };
-    let staged_publication: RuntimeSnapshot =
+    let staged_publication: Snapshot =
         serde_json::from_slice(&key_creation.release.payload).unwrap();
     let staged_provider = staged_publication.providers.values().next().unwrap();
     assert_eq!(staged_provider.name, "revision-provider");
@@ -386,7 +390,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 "provider-revision-activate-live-media-01",
             )
             .await,
-        Err(ConfigurationError::ProviderIncomplete)
+        Err(Error::ProviderIncomplete)
     ));
     store
         .begin_media_job_deletion(live_media_job_id)
@@ -407,8 +411,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         )
         .await
         .unwrap();
-    let activated: RuntimeSnapshot =
-        serde_json::from_slice(&second_activation.release.payload).unwrap();
+    let activated: Snapshot = serde_json::from_slice(&second_activation.release.payload).unwrap();
     let activated_configuration = store.get_provider(provider_id).await.unwrap();
     assert_eq!(activated_configuration.active_revision, Some(2));
     assert!(!activated_configuration.pending_activation);
@@ -483,7 +486,10 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         )
         .await
         .unwrap();
-    assert_eq!(restored.state, olp_engine::domain::ProviderState::Draft);
+    assert_eq!(
+        restored.state,
+        olp_engine::domain::provider::ProviderState::Draft
+    );
     assert_eq!(
         restored.endpoint.as_deref(),
         Some("https://old.example.test/v1/")
@@ -501,7 +507,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     assert!(restored_models.next_cursor.is_none());
     assert!(restored_models.items.iter().all(|model| {
         model.capabilities.iter().all(|capability| {
-            capability.source == olp_engine::domain::CapabilitySource::Declared
+            capability.source == olp_engine::domain::provider::CapabilitySource::Declared
                 && capability.certified_at.is_none()
         })
     }));
@@ -515,7 +521,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 "provider-revision-restore-01",
             )
             .await,
-        Err(ConfigurationError::IdempotencyConflict)
+        Err(Error::IdempotencyConflict)
     ));
     let restore_audit: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_events \
@@ -530,7 +536,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     assert_eq!(restore_audit, 1);
 }
 
-async fn certify_all_draft_capabilities(store: &PgStore, provider_id: Uuid) {
+async fn certify_all_draft_capabilities(store: &Store, provider_id: Uuid) {
     sqlx::query(
         "UPDATE model_capabilities SET source = 'certified', certified_at = now() \
          WHERE provider_model_id IN (SELECT id FROM provider_models WHERE provider_id = $1)",

@@ -1,27 +1,27 @@
 use std::fmt;
 
-use crate::domain::{
+use crate::domain::ports::{
     DiscoveredProviderModel, ProviderOutput, ProviderRequest, ProviderTransport, TransportError,
 };
 use http::{HeaderMap, HeaderValue, header};
 use tokio::time::{Instant, timeout};
 
-use crate::providers::openai::{ConnectorConfig, OpenAiApiKey};
+use crate::providers::openai::{ApiKey, ConnectorConfig};
 
 mod errors;
 mod media;
 mod operations;
 mod streams;
 
+use crate::providers::transport_common::protocol_body_error;
 use errors::{
-    bearer_header, first_byte_timeout, map_endpoint_error, map_send_error, protocol_body_error,
-    raw_api_key_header,
+    bearer_header, first_byte_timeout, map_endpoint_error, map_send_error, raw_api_key_header,
 };
 use streams::read_bounded_body;
 
-pub struct OpenAiConnector {
+pub struct Connector {
     config: ConnectorConfig,
-    api_key: OpenAiApiKey,
+    api_key: ApiKey,
     auth_style: AuthStyle,
 }
 
@@ -31,9 +31,9 @@ enum AuthStyle {
     ApiKeyHeader,
 }
 
-impl OpenAiConnector {
+impl Connector {
     #[must_use]
-    pub fn new(config: ConnectorConfig, api_key: OpenAiApiKey) -> Self {
+    pub fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
         Self {
             config,
             api_key,
@@ -45,7 +45,7 @@ impl OpenAiConnector {
     /// The endpoint retains the same DNS pinning, redirect, retry, and private
     /// address protections as the ordinary OpenAI connector.
     #[must_use]
-    pub fn new_with_api_key_header(config: ConnectorConfig, api_key: OpenAiApiKey) -> Self {
+    pub fn new_with_api_key_header(config: ConnectorConfig, api_key: ApiKey) -> Self {
         Self {
             config,
             api_key,
@@ -98,7 +98,7 @@ impl OpenAiConnector {
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
-        operations::require_content_type(&response, "application/json")?;
+        streams::require_content_type(&response, "application/json")?;
         let body = read_bounded_body(
             response,
             first_byte_deadline,
@@ -132,21 +132,21 @@ impl OpenAiConnector {
     }
 }
 
-impl fmt::Debug for OpenAiConnector {
+impl fmt::Debug for Connector {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("OpenAiConnector")
+            .debug_struct("Connector")
             .field("config", &self.config)
             .field("api_key", &"[REDACTED]")
             .finish()
     }
 }
 
-impl ProviderTransport for OpenAiConnector {
+impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(self.execute_request(request))
     }
 }

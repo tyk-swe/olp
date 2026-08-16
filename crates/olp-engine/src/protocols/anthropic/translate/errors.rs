@@ -1,4 +1,4 @@
-use crate::domain::RouteSlugError;
+use crate::domain::ids::RouteSlugError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -44,7 +44,7 @@ pub enum DecodeError {
 #[derive(Debug, Error)]
 pub enum EncodeError {
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("Anthropic Messages requires max_output_tokens")]
     MissingMaxOutputTokens,
     #[error("Anthropic Messages requires at least one conversation message")]

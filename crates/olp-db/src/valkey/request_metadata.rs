@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use chrono::{DateTime, Utc};
-use olp_engine::inference::request_metadata::RequestMetadataEvent;
+use olp_engine::inference::request_metadata::Event;
 use redis::{
     AsyncCommands, Value,
     aio::ConnectionManager,
@@ -11,12 +11,13 @@ use tokio::sync::watch;
 use tracing::{error, warn};
 
 use crate::{
-    PersistenceError, PgStore,
-    request_metadata::{RequestMetadataGap, RequestMetadataPersistenceOutcome},
+    error::Error as PersistenceError,
+    request_metadata::{ingestion::Outcome, reconciliation::Gap},
+    store::Store,
     worker_health::RequestMetadataConsumerActivity,
 };
 
-use super::{ValkeyAdapterError, valkey_connection};
+use super::{Error, valkey_connection};
 
 pub const LEGACY_REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
 const REQUEST_METADATA_GROUP: &str = "olp:persistence";
@@ -95,12 +96,12 @@ enum EntryProcessingOutcome {
 /// worker processes. PostgreSQL is always committed before the atomic
 /// `XACK`/`XDEL` transaction.
 pub async fn run_request_metadata_consumer(
-    store: &PgStore,
+    store: &Store,
     valkey_url: &str,
     stream: &str,
     consumer: &str,
     shutdown: watch::Receiver<bool>,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     run_request_metadata_consumer_with_policy(
         store,
         valkey_url,
@@ -113,13 +114,13 @@ pub async fn run_request_metadata_consumer(
 }
 
 async fn run_request_metadata_consumer_with_policy(
-    store: &PgStore,
+    store: &Store,
     valkey_url: &str,
     stream: &str,
     consumer: &str,
     mut shutdown: watch::Receiver<bool>,
     policy: ConsumerPolicy,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     validate_configuration(stream, consumer, policy)?;
     let mut connection = valkey_connection(valkey_url).await?;
     create_consumer_group(&mut connection, stream).await?;
@@ -198,9 +199,8 @@ async fn run_request_metadata_consumer_with_policy(
             if !page.entries.is_empty() {
                 store
                     .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
-                        reclaimed: u64::try_from(page.entries.len()).map_err(|_| {
-                            ValkeyAdapterError::InvalidState("reclaimed entry count overflow")
-                        })?,
+                        reclaimed: u64::try_from(page.entries.len())
+                            .map_err(|_| Error::InvalidState("reclaimed entry count overflow"))?,
                         ..RequestMetadataConsumerActivity::default()
                     })
                     .await?;
@@ -288,16 +288,12 @@ fn validate_configuration(
     stream: &str,
     consumer: &str,
     policy: ConsumerPolicy,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     if stream.is_empty() || consumer.is_empty() {
-        return Err(ValkeyAdapterError::InvalidState(
-            "empty stream or consumer name",
-        ));
+        return Err(Error::InvalidState("empty stream or consumer name"));
     }
     if policy.batch_size == 0 || policy.batch_size > 1_000 {
-        return Err(ValkeyAdapterError::InvalidState(
-            "invalid request metadata batch size",
-        ));
+        return Err(Error::InvalidState("invalid request metadata batch size"));
     }
     for interval in [
         policy.block_interval,
@@ -315,7 +311,7 @@ fn validate_configuration(
 async fn create_consumer_group(
     connection: &mut ConnectionManager,
     stream: &str,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     let result: Result<String, redis::RedisError> = redis::cmd("XGROUP")
         .arg("CREATE")
         .arg(stream)
@@ -326,9 +322,7 @@ async fn create_consumer_group(
         .await;
     match result {
         Ok(reply) if reply == "OK" => Ok(()),
-        Ok(_) => Err(ValkeyAdapterError::InvalidState(
-            "invalid consumer group creation reply",
-        )),
+        Ok(_) => Err(Error::InvalidState("invalid consumer group creation reply")),
         Err(error) if error.code() == Some("BUSYGROUP") => Ok(()),
         Err(error) => Err(error.into()),
     }
@@ -341,7 +335,7 @@ async fn read_group(
     id: &str,
     batch_size: usize,
     block: Option<Duration>,
-) -> Result<Vec<StreamEntry>, ValkeyAdapterError> {
+) -> Result<Vec<StreamEntry>, Error> {
     let mut command = redis::cmd("XREADGROUP");
     command
         .arg("GROUP")
@@ -368,7 +362,7 @@ async fn auto_claim(
     min_idle: Duration,
     start: &str,
     batch_size: usize,
-) -> Result<AutoClaimPage, ValkeyAdapterError> {
+) -> Result<AutoClaimPage, Error> {
     let reply: Value = redis::cmd("XAUTOCLAIM")
         .arg(stream)
         .arg(REQUEST_METADATA_GROUP)
@@ -383,13 +377,13 @@ async fn auto_claim(
 }
 
 async fn process_entries(
-    store: &PgStore,
+    store: &Store,
     connection: &mut ConnectionManager,
     stream: &str,
     consumer: &str,
     entries: Vec<StreamEntry>,
     shutdown: &watch::Receiver<bool>,
-) -> Result<ProcessingSummary, ValkeyAdapterError> {
+) -> Result<ProcessingSummary, Error> {
     let mut summary = ProcessingSummary::default();
     for entry in entries {
         if *shutdown.borrow() {
@@ -408,10 +402,10 @@ async fn process_entries(
 }
 
 async fn report_processing_activity(
-    store: &PgStore,
+    store: &Store,
     summary: ProcessingSummary,
     recovered: bool,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     if summary.completed == 0 && summary.duplicates == 0 {
         return Ok(());
     }
@@ -429,18 +423,18 @@ async fn report_processing_activity(
 /// Returns `true` when PostgreSQL rejected the attempt transiently and the
 /// entry must remain in the PEL for a later pass.
 async fn process_entry(
-    store: &PgStore,
+    store: &Store,
     connection: &mut ConnectionManager,
     stream: &str,
     consumer: &str,
     entry: StreamEntry,
-) -> Result<EntryProcessingOutcome, ValkeyAdapterError> {
+) -> Result<EntryProcessingOutcome, Error> {
     let Some(payload) = entry.payload else {
         error!(stream_id = %entry.id, "discarding malformed request metadata stream event");
         let now = Utc::now();
         let result = store
             .report_request_metadata_gap_once(
-                RequestMetadataGap {
+                Gap {
                     gateway_instance: consumer.to_owned(),
                     event_count: 1,
                     reason: "malformed_stream_event".to_owned(),
@@ -452,14 +446,14 @@ async fn process_entry(
             .await;
         return finish_gap_or_retry(result, connection, stream, &entry.id).await;
     };
-    let event = match serde_json::from_slice::<RequestMetadataEvent>(&payload) {
+    let event = match serde_json::from_slice::<Event>(&payload) {
         Ok(event) => event,
         Err(_) => {
             error!(stream_id = %entry.id, "discarding malformed request metadata stream event");
             let now = Utc::now();
             let result = store
                 .report_request_metadata_gap_once(
-                    RequestMetadataGap {
+                    Gap {
                         gateway_instance: consumer.to_owned(),
                         event_count: 1,
                         reason: "malformed_stream_event".to_owned(),
@@ -483,12 +477,12 @@ async fn process_entry(
         .await
     {
         Ok(outcome) => {
-            if outcome == RequestMetadataPersistenceOutcome::RejectedOutsideReplayWindow {
+            if outcome == Outcome::RejectedOutsideReplayWindow {
                 warn!(stream_id = %entry.id, "request metadata event outside the replay window was recorded as an uncertain gap");
             }
             acknowledge_and_delete(connection, stream, &entry.id).await?;
             Ok(EntryProcessingOutcome::Completed {
-                duplicate: outcome == RequestMetadataPersistenceOutcome::Duplicate,
+                duplicate: outcome == Outcome::Duplicate,
             })
         }
         Err(PersistenceError::InvalidRequestMetadataEvent) => {
@@ -496,7 +490,7 @@ async fn process_entry(
             let observed_at = Utc::now();
             let result = store
                 .report_request_metadata_gap_once(
-                    RequestMetadataGap {
+                    Gap {
                         gateway_instance: consumer.to_owned(),
                         event_count: 1,
                         reason: "invalid_request_metadata_event".to_owned(),
@@ -537,7 +531,7 @@ async fn finish_gap_or_retry(
     connection: &mut ConnectionManager,
     stream: &str,
     id: &str,
-) -> Result<EntryProcessingOutcome, ValkeyAdapterError> {
+) -> Result<EntryProcessingOutcome, Error> {
     match result {
         Ok(_) => {
             acknowledge_and_delete(connection, stream, id).await?;
@@ -554,7 +548,7 @@ async fn acknowledge_and_delete(
     connection: &mut ConnectionManager,
     stream: &str,
     id: &str,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     let (acknowledged, deleted): (usize, usize) = redis::pipe()
         .atomic()
         .cmd("XACK")
@@ -567,23 +561,21 @@ async fn acknowledge_and_delete(
         .query_async(connection)
         .await?;
     if acknowledged > 1 || deleted > 1 {
-        return Err(ValkeyAdapterError::InvalidState(
-            "invalid stream acknowledgement reply",
-        ));
+        return Err(Error::InvalidState("invalid stream acknowledgement reply"));
     }
     Ok(())
 }
 
 async fn report_deleted_pending_entries(
-    store: &PgStore,
+    store: &Store,
     consumer: &str,
     deleted_ids: &[String],
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     for id in deleted_ids {
         let now = Utc::now();
         store
             .report_request_metadata_gap_once(
-                RequestMetadataGap {
+                Gap {
                     gateway_instance: consumer.to_owned(),
                     event_count: 1,
                     reason: "missing_stream_event".to_owned(),
@@ -598,28 +590,25 @@ async fn report_deleted_pending_entries(
 }
 
 async fn checkpoint_request_metadata_consumer_health(
-    store: &PgStore,
+    store: &Store,
     connection: &mut ConnectionManager,
     stream: &str,
-) -> Result<(), ValkeyAdapterError> {
+) -> Result<(), Error> {
     let pending: StreamPendingReply = connection.xpending(stream, REQUEST_METADATA_GROUP).await?;
     let (pending_events, oldest_pending_at) = match pending {
         StreamPendingReply::Empty => (0_u64, None),
         StreamPendingReply::Data(data) => {
             let (millis, _) = parse_stream_id(&data.start_id)?;
             let millis = i64::try_from(millis)
-                .map_err(|_| ValkeyAdapterError::InvalidState("pending stream ID overflow"))?;
-            let timestamp = DateTime::<Utc>::from_timestamp_millis(millis).ok_or(
-                ValkeyAdapterError::InvalidState("invalid pending stream ID timestamp"),
-            )?;
+                .map_err(|_| Error::InvalidState("pending stream ID overflow"))?;
+            let timestamp = DateTime::<Utc>::from_timestamp_millis(millis)
+                .ok_or(Error::InvalidState("invalid pending stream ID timestamp"))?;
             let count = u64::try_from(data.count)
-                .map_err(|_| ValkeyAdapterError::InvalidState("pending count overflow"))?;
+                .map_err(|_| Error::InvalidState("pending count overflow"))?;
             (count, Some(timestamp))
         }
         _ => {
-            return Err(ValkeyAdapterError::InvalidState(
-                "unrecognized pending stream reply",
-            ));
+            return Err(Error::InvalidState("unrecognized pending stream reply"));
         }
     };
     let groups: StreamInfoGroupsReply = connection.xinfo_groups(stream).await?;
@@ -627,9 +616,7 @@ async fn checkpoint_request_metadata_consumer_health(
         .groups
         .into_iter()
         .find(|candidate| candidate.name == REQUEST_METADATA_GROUP)
-        .ok_or(ValkeyAdapterError::InvalidState(
-            "consumer group disappeared",
-        ))?;
+        .ok_or(Error::InvalidState("consumer group disappeared"))?;
     // Valkey may transiently return a null lag while concurrent deliveries
     // and deletions advance the group. This stream deletes every acknowledged
     // entry in the same transaction as XACK, so its remaining length is the
@@ -643,8 +630,7 @@ async fn checkpoint_request_metadata_consumer_health(
             stream_length.saturating_sub(group.pending)
         }
     };
-    let lag_events =
-        u64::try_from(lag).map_err(|_| ValkeyAdapterError::InvalidState("stream lag overflow"))?;
+    let lag_events = u64::try_from(lag).map_err(|_| Error::InvalidState("stream lag overflow"))?;
     store
         .report_request_metadata_consumer_health(pending_events, lag_events, oldest_pending_at)
         .await?;
@@ -662,18 +648,16 @@ fn parse_xread_reply(
     reply: Value,
     expected_stream: &str,
     batch_size: usize,
-) -> Result<Vec<StreamEntry>, ValkeyAdapterError> {
+) -> Result<Vec<StreamEntry>, Error> {
     let (stream, entries) = match reply {
         Value::Nil => return Ok(Vec::new()),
         Value::Array(mut streams) if streams.len() == 1 => {
             let stream = streams.pop().expect("one stream reply was validated");
             let Value::Array(mut pair) = stream else {
-                return Err(ValkeyAdapterError::InvalidState(
-                    "invalid XREADGROUP stream tuple",
-                ));
+                return Err(Error::InvalidState("invalid XREADGROUP stream tuple"));
             };
             if pair.len() != 2 {
-                return Err(ValkeyAdapterError::InvalidState(
+                return Err(Error::InvalidState(
                     "invalid XREADGROUP stream tuple length",
                 ));
             }
@@ -685,28 +669,23 @@ fn parse_xread_reply(
             streams.pop().expect("one stream map entry was validated")
         }
         _ => {
-            return Err(ValkeyAdapterError::InvalidState("invalid XREADGROUP reply"));
+            return Err(Error::InvalidState("invalid XREADGROUP reply"));
         }
     };
     if value_bytes(stream).as_deref() != Some(expected_stream.as_bytes()) {
-        return Err(ValkeyAdapterError::InvalidState(
+        return Err(Error::InvalidState(
             "XREADGROUP returned an unexpected stream",
         ));
     }
     parse_entries(entries, batch_size)
 }
 
-fn parse_auto_claim_reply(
-    reply: Value,
-    batch_size: usize,
-) -> Result<AutoClaimPage, ValkeyAdapterError> {
+fn parse_auto_claim_reply(reply: Value, batch_size: usize) -> Result<AutoClaimPage, Error> {
     let Value::Array(mut items) = reply else {
-        return Err(ValkeyAdapterError::InvalidState("invalid XAUTOCLAIM reply"));
+        return Err(Error::InvalidState("invalid XAUTOCLAIM reply"));
     };
     if !(2..=3).contains(&items.len()) {
-        return Err(ValkeyAdapterError::InvalidState(
-            "invalid XAUTOCLAIM reply length",
-        ));
+        return Err(Error::InvalidState("invalid XAUTOCLAIM reply length"));
     }
     let deleted = if items.len() == 3 {
         items.pop().expect("XAUTOCLAIM reply length was validated")
@@ -719,7 +698,7 @@ fn parse_auto_claim_reply(
     let entries = parse_entries(entries, batch_size)?;
     let deleted_ids = parse_id_list(deleted)?;
     if deleted_ids.len() > batch_size.saturating_mul(10) {
-        return Err(ValkeyAdapterError::InvalidState(
+        return Err(Error::InvalidState(
             "XAUTOCLAIM deleted-ID scan exceeded its protocol bound",
         ));
     }
@@ -731,7 +710,7 @@ fn parse_auto_claim_reply(
         .iter()
         .any(|id| claimed_ids.contains(id.as_str()))
     {
-        return Err(ValkeyAdapterError::InvalidState(
+        return Err(Error::InvalidState(
             "XAUTOCLAIM returned overlapping claimed and deleted IDs",
         ));
     }
@@ -742,17 +721,12 @@ fn parse_auto_claim_reply(
     })
 }
 
-fn parse_entries(
-    entries: Value,
-    batch_size: usize,
-) -> Result<Vec<StreamEntry>, ValkeyAdapterError> {
+fn parse_entries(entries: Value, batch_size: usize) -> Result<Vec<StreamEntry>, Error> {
     let Value::Array(entries) = entries else {
-        return Err(ValkeyAdapterError::InvalidState(
-            "invalid stream entry list",
-        ));
+        return Err(Error::InvalidState("invalid stream entry list"));
     };
     if entries.len() > batch_size {
-        return Err(ValkeyAdapterError::InvalidState(
+        return Err(Error::InvalidState(
             "stream reply exceeded the requested batch size",
         ));
     }
@@ -761,20 +735,16 @@ fn parse_entries(
         .into_iter()
         .map(|entry| {
             let Value::Array(mut fields) = entry else {
-                return Err(ValkeyAdapterError::InvalidState(
-                    "invalid stream entry tuple",
-                ));
+                return Err(Error::InvalidState("invalid stream entry tuple"));
             };
             if fields.len() != 2 {
-                return Err(ValkeyAdapterError::InvalidState(
-                    "invalid stream entry tuple length",
-                ));
+                return Err(Error::InvalidState("invalid stream entry tuple length"));
             }
             let field_values = fields.pop().expect("entry tuple length was validated");
             let id = value_string(fields.pop().expect("entry tuple length was validated"))?;
             parse_stream_id(&id)?;
             if !ids.insert(id.clone()) {
-                return Err(ValkeyAdapterError::InvalidState(
+                return Err(Error::InvalidState(
                     "stream reply contained a duplicate entry ID",
                 ));
             }
@@ -786,14 +756,12 @@ fn parse_entries(
         .collect()
 }
 
-fn parse_event_payload(fields: Value) -> Result<Option<Vec<u8>>, ValkeyAdapterError> {
+fn parse_event_payload(fields: Value) -> Result<Option<Vec<u8>>, Error> {
     let pairs = match fields {
         Value::Nil => return Ok(None),
         Value::Array(values) => {
             if values.len() % 2 != 0 {
-                return Err(ValkeyAdapterError::InvalidState(
-                    "stream field list has odd length",
-                ));
+                return Err(Error::InvalidState("stream field list has odd length"));
             }
             let mut values = values.into_iter();
             let mut pairs = Vec::with_capacity(values.len() / 2);
@@ -805,9 +773,7 @@ fn parse_event_payload(fields: Value) -> Result<Option<Vec<u8>>, ValkeyAdapterEr
         }
         Value::Map(pairs) => pairs,
         _ => {
-            return Err(ValkeyAdapterError::InvalidState(
-                "invalid stream field container",
-            ));
+            return Err(Error::InvalidState("invalid stream field container"));
         }
     };
     if pairs.len() != 1 {
@@ -823,11 +789,9 @@ fn parse_event_payload(fields: Value) -> Result<Option<Vec<u8>>, ValkeyAdapterEr
     Ok(value_bytes(value))
 }
 
-fn parse_id_list(value: Value) -> Result<Vec<String>, ValkeyAdapterError> {
+fn parse_id_list(value: Value) -> Result<Vec<String>, Error> {
     let Value::Array(values) = value else {
-        return Err(ValkeyAdapterError::InvalidState(
-            "invalid XAUTOCLAIM deleted-ID list",
-        ));
+        return Err(Error::InvalidState("invalid XAUTOCLAIM deleted-ID list"));
     };
     let mut ids = HashSet::with_capacity(values.len());
     values
@@ -836,7 +800,7 @@ fn parse_id_list(value: Value) -> Result<Vec<String>, ValkeyAdapterError> {
             let id = value_string(value)?;
             parse_stream_id(&id)?;
             if !ids.insert(id.clone()) {
-                return Err(ValkeyAdapterError::InvalidState(
+                return Err(Error::InvalidState(
                     "XAUTOCLAIM returned a duplicate deleted ID",
                 ));
             }
@@ -845,12 +809,12 @@ fn parse_id_list(value: Value) -> Result<Vec<String>, ValkeyAdapterError> {
         .collect()
 }
 
-fn value_string(value: Value) -> Result<String, ValkeyAdapterError> {
-    let bytes = value_bytes(value).ok_or(ValkeyAdapterError::InvalidState(
+fn value_string(value: Value) -> Result<String, Error> {
+    let bytes = value_bytes(value).ok_or(Error::InvalidState(
         "stream reply contained a non-string value",
     ))?;
     String::from_utf8(bytes)
-        .map_err(|_| ValkeyAdapterError::InvalidState("stream reply contained invalid UTF-8"))
+        .map_err(|_| Error::InvalidState("stream reply contained invalid UTF-8"))
 }
 
 fn value_bytes(value: Value) -> Option<Vec<u8>> {
@@ -861,42 +825,39 @@ fn value_bytes(value: Value) -> Option<Vec<u8>> {
     }
 }
 
-fn parse_stream_id(id: &str) -> Result<(u64, u64), ValkeyAdapterError> {
-    let (milliseconds, sequence) = id.split_once('-').ok_or(ValkeyAdapterError::InvalidState(
-        "stream reply contained an invalid ID",
-    ))?;
+fn parse_stream_id(id: &str) -> Result<(u64, u64), Error> {
+    let (milliseconds, sequence) = id
+        .split_once('-')
+        .ok_or(Error::InvalidState("stream reply contained an invalid ID"))?;
     if milliseconds.is_empty()
         || sequence.is_empty()
         || !milliseconds.bytes().all(|byte| byte.is_ascii_digit())
         || !sequence.bytes().all(|byte| byte.is_ascii_digit())
     {
-        return Err(ValkeyAdapterError::InvalidState(
-            "stream reply contained an invalid ID",
-        ));
+        return Err(Error::InvalidState("stream reply contained an invalid ID"));
     }
     Ok((
-        milliseconds.parse().map_err(|_| {
-            ValkeyAdapterError::InvalidState("stream reply contained an overflowing ID")
-        })?,
-        sequence.parse().map_err(|_| {
-            ValkeyAdapterError::InvalidState("stream reply contained an overflowing ID")
-        })?,
+        milliseconds
+            .parse()
+            .map_err(|_| Error::InvalidState("stream reply contained an overflowing ID"))?,
+        sequence
+            .parse()
+            .map_err(|_| Error::InvalidState("stream reply contained an overflowing ID"))?,
     ))
 }
 
-fn checked_milliseconds(duration: Duration) -> Result<u64, ValkeyAdapterError> {
+fn checked_milliseconds(duration: Duration) -> Result<u64, Error> {
     if duration.is_zero() {
-        return Err(ValkeyAdapterError::InvalidState(
+        return Err(Error::InvalidState(
             "request metadata interval must be positive",
         ));
     }
     checked_milliseconds_allow_zero(duration)
 }
 
-fn checked_milliseconds_allow_zero(duration: Duration) -> Result<u64, ValkeyAdapterError> {
-    u64::try_from(duration.as_millis()).map_err(|_| {
-        ValkeyAdapterError::InvalidState("request metadata interval millisecond overflow")
-    })
+fn checked_milliseconds_allow_zero(duration: Duration) -> Result<u64, Error> {
+    u64::try_from(duration.as_millis())
+        .map_err(|_| Error::InvalidState("request metadata interval millisecond overflow"))
 }
 
 #[cfg(all(feature = "test-util", debug_assertions))]
@@ -930,13 +891,13 @@ pub mod test_support {
     }
 
     pub async fn run_request_metadata_consumer(
-        store: &PgStore,
+        store: &Store,
         valkey_url: &str,
         stream: &str,
         consumer: &str,
         shutdown: watch::Receiver<bool>,
         policy: RequestMetadataConsumerTestPolicy,
-    ) -> Result<(), ValkeyAdapterError> {
+    ) -> Result<(), Error> {
         run_request_metadata_consumer_with_policy(
             store,
             valkey_url,

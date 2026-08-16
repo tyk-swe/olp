@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{
-    ContentPart, GenerationRequest, MediaSource as CanonicalMediaSource,
-    Message as CanonicalMessage, MessageRole, Surface, ToolChoice as CanonicalToolChoice,
-    inline_media_marker,
+use crate::domain::canonical::{
+    identity::Surface,
+    requests::{
+        ContentPart, GenerationRequest, MediaSource as CanonicalMediaSource,
+        Message as CanonicalMessage, MessageRole, ToolChoice as CanonicalToolChoice,
+        inline_media_marker,
+    },
 };
 
 use super::super::dto::{
@@ -13,7 +16,7 @@ use super::super::dto::{
 use super::errors::EncodeError;
 use super::extensions::apply_extensions;
 
-pub fn encode_messages_request(
+pub fn request(
     request: &GenerationRequest,
     upstream_model: &str,
 ) -> Result<MessagesRequest, EncodeError> {

@@ -4,10 +4,13 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use olp_db::configuration::UpdateApiKeyInput;
-use olp_engine::domain::{ApiKeyLimits, ApiKeyScope, RouteSlug};
+use olp_db::configuration::resources::UpdateApiKeyInput;
+use olp_engine::domain::{
+    auth::{ApiKeyLimits, ApiKeyScope},
+    ids::RouteSlug,
+};
 
-use crate::{FieldErrors, Problem};
+use crate::{public_http::problem::FieldErrors, public_http::problem::Problem};
 
 use super::{create::CreateApiKeyRequest, manage::UpdateApiKeyRequest};
 
@@ -69,7 +72,7 @@ pub(super) struct NormalizedApiKeyPolicy {
 }
 
 impl NormalizedApiKeyPolicy {
-    pub fn into_update_input(self) -> UpdateApiKeyInput {
+    pub(super) fn into_update_input(self) -> UpdateApiKeyInput {
         UpdateApiKeyInput {
             name: self.name,
             scopes: self
@@ -234,7 +237,7 @@ fn normalize_u64_limit(
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
-    use olp_db::idempotency::idempotency_fingerprint;
+    use olp_db::idempotency::fingerprint;
     use serde_json::json;
 
     use super::*;
@@ -470,8 +473,8 @@ mod tests {
             normalize_create(&trimmed).unwrap()
         );
         assert_ne!(
-            idempotency_fingerprint(&padded).unwrap(),
-            idempotency_fingerprint(&trimmed).unwrap()
+            fingerprint(&padded).unwrap(),
+            fingerprint(&trimmed).unwrap()
         );
     }
 }

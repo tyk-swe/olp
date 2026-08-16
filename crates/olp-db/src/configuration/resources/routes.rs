@@ -1,11 +1,11 @@
 use super::{helpers::audit_in_transaction, *};
 
-impl PgStore {
+impl Store {
     pub async fn list_route_drafts(
         &self,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<RouteDraftRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<RouteDraftRecord>, Error> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
             "SELECT id FROM route_drafts WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
@@ -23,17 +23,14 @@ impl PgStore {
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_route_draft(
-        &self,
-        draft_id: Uuid,
-    ) -> Result<RouteDraftRecord, ConfigurationError> {
+    pub async fn get_route_draft(&self, draft_id: Uuid) -> Result<RouteDraftRecord, Error> {
         let row = sqlx::query!(
             "SELECT id, routing_id, slug, state::text AS \"state!\", overall_timeout_ms, max_attempts, etag, \
                     based_on_revision_id, created_at, updated_at FROM route_drafts WHERE id = $1",
         draft_id)
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         Ok(RouteDraftRecord {
             id: row.id,
             routing_id: row.routing_id,
@@ -59,7 +56,7 @@ impl PgStore {
         expected_etag: Uuid,
         input: &ReplaceRouteDraftInput,
         actor: Uuid,
-    ) -> Result<Uuid, ConfigurationError> {
+    ) -> Result<Uuid, Error> {
         validate_route_input(
             &input.slug,
             &input.operations,
@@ -80,7 +77,7 @@ impl PgStore {
             .as_deref()
             .is_some_and(|lineage_slug| lineage_slug != input.slug.as_str())
         {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "a restored route draft must retain its original stable slug".to_owned(),
             ));
         }
@@ -106,9 +103,9 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             return Err(if exists {
-                ConfigurationError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                ConfigurationError::NotFound
+                Error::NotFound
             });
         }
         let previous_targets = sqlx::query!(
@@ -143,7 +140,7 @@ impl PgStore {
             input.targets.iter().enumerate()
         {
             let position = i32::try_from(position)
-                .map_err(|_| ConfigurationError::Invalid("too many targets".to_owned()))?;
+                .map_err(|_| Error::Invalid("too many targets".to_owned()))?;
             let enabled: bool = sqlx::query_scalar!(
                 "SELECT EXISTS (SELECT 1 FROM providers p \
                  JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
@@ -153,7 +150,7 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             if !enabled {
-                return Err(ConfigurationError::Invalid(format!(
+                return Err(Error::Invalid(format!(
                     "provider model {provider_model_id} is not active"
                 )));
             }
@@ -193,7 +190,7 @@ impl PgStore {
         draft_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
-    ) -> Result<(), ConfigurationError> {
+    ) -> Result<(), Error> {
         let mut transaction = self.pool().begin().await?;
         let referenced: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM route_revisions WHERE source_draft_id = $1) AS \"value!\"",
@@ -202,7 +199,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if referenced {
-            return Err(ConfigurationError::InUse);
+            return Err(Error::InUse);
         }
         let result = sqlx::query!(
             "DELETE FROM route_drafts WHERE id = $1 AND etag = $2",
@@ -219,9 +216,9 @@ impl PgStore {
             .fetch_one(&mut *transaction)
             .await?;
             return Err(if exists {
-                ConfigurationError::PreconditionFailed
+                Error::PreconditionFailed
             } else {
-                ConfigurationError::NotFound
+                Error::NotFound
             });
         }
         audit_in_transaction(
@@ -244,15 +241,15 @@ impl PgStore {
         surface: Surface,
         mode: TransportMode,
         seed: &str,
-    ) -> Result<RouteSimulation, ConfigurationError> {
+    ) -> Result<RouteSimulation, Error> {
         if seed.is_empty() || seed.len() > 256 {
-            return Err(ConfigurationError::Invalid(
+            return Err(Error::Invalid(
                 "simulation seed must contain 1-256 bytes".to_owned(),
             ));
         }
         let draft = self.get_route_draft(draft_id).await?;
         if !draft.operations.contains(&operation) {
-            return Err(ConfigurationError::Invalid(format!(
+            return Err(Error::Invalid(format!(
                 "route does not support {operation}"
             )));
         }
@@ -276,9 +273,7 @@ impl PgStore {
                 let weight = u32::try_from(target.weight)
                     .ok()
                     .and_then(NonZeroU32::new)
-                    .ok_or_else(|| {
-                        ConfigurationError::Invalid("route target weight is invalid".to_owned())
-                    })?;
+                    .ok_or_else(|| Error::Invalid("route target weight is invalid".to_owned()))?;
                 let score = weighted_rendezvous_score(
                     scoring_route_id,
                     TargetId::from_uuid(target.routing_id),
@@ -346,7 +341,7 @@ impl PgStore {
         route_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<RouteRevisionRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<RouteRevisionRecord>, Error> {
         let limit = checked_limit(limit)?;
         let exists: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM routes WHERE id = $1) AS \"value!\"",
@@ -355,7 +350,7 @@ impl PgStore {
         .fetch_one(self.pool())
         .await?;
         if !exists {
-            return Err(ConfigurationError::NotFound);
+            return Err(Error::NotFound);
         }
         let before_revision: Option<i32> = match cursor {
             Some(cursor) => Some(
@@ -367,9 +362,7 @@ impl PgStore {
                 .fetch_optional(self.pool())
                 .await?
                 .ok_or_else(|| {
-                    ConfigurationError::Invalid(
-                        "route-revision pagination cursor is invalid".to_owned(),
-                    )
+                    Error::Invalid("route-revision pagination cursor is invalid".to_owned())
                 })?,
             ),
             None => None,
@@ -399,7 +392,7 @@ impl PgStore {
         &self,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<RouteRecord>, ConfigurationError> {
+    ) -> Result<ConfigurationPage<RouteRecord>, Error> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
             "SELECT id FROM routes WHERE ($1::uuid IS NULL OR id > $1)
@@ -418,7 +411,7 @@ impl PgStore {
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_route(&self, id: Uuid) -> Result<RouteRecord, ConfigurationError> {
+    pub async fn get_route(&self, id: Uuid) -> Result<RouteRecord, Error> {
         let row = sqlx::query!(
             "SELECT r.id, r.slug, r.created_at,
                     (SELECT rr.id FROM route_revisions rr WHERE rr.route_id = r.id
@@ -430,14 +423,13 @@ impl PgStore {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         let latest_revision_id: Option<Uuid> = row.latest_revision_id;
         let latest_revision_id = latest_revision_id.ok_or_else(|| {
-            ConfigurationError::Invalid("activated route has no immutable revision".to_owned())
+            Error::Invalid("activated route has no immutable revision".to_owned())
         })?;
-        let revision_count = u64::try_from(row.revision_count).map_err(|_| {
-            ConfigurationError::Invalid("route revision count is invalid".to_owned())
-        })?;
+        let revision_count = u64::try_from(row.revision_count)
+            .map_err(|_| Error::Invalid("route revision count is invalid".to_owned()))?;
         Ok(RouteRecord {
             id: row.id,
             slug: row.slug,
@@ -451,14 +443,14 @@ impl PgStore {
         &self,
         route_id: Uuid,
         revision_id: Uuid,
-    ) -> Result<RouteRevisionRecord, ConfigurationError> {
+    ) -> Result<RouteRevisionRecord, Error> {
         let row = sqlx::query!(
             "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, \
                     activated_by, activated_at FROM route_revisions WHERE route_id = $1 AND id = $2",
         route_id, revision_id)
         .fetch_optional(self.pool())
         .await?
-        .ok_or(ConfigurationError::NotFound)?;
+        .ok_or(Error::NotFound)?;
         Ok(RouteRevisionRecord {
             id: row.id,
             routing_id: row.routing_id,
@@ -480,7 +472,7 @@ impl PgStore {
         route_id: Uuid,
         from_id: Uuid,
         to_id: Uuid,
-    ) -> Result<RouteRevisionDiff, ConfigurationError> {
+    ) -> Result<RouteRevisionDiff, Error> {
         let from = self.get_route_revision(route_id, from_id).await?;
         let to = self.get_route_revision(route_id, to_id).await?;
         let from_operations: BTreeSet<_> = from.operations.iter().cloned().collect();
@@ -529,7 +521,7 @@ impl PgStore {
         revision_id: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<RouteDraftRecord, ConfigurationError> {
+    ) -> Result<RouteDraftRecord, Error> {
         let revision = self.get_route_revision(route_id, revision_id).await?;
         let mut transaction = self.pool().begin().await?;
         if !claim_idempotency(
@@ -540,7 +532,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(ConfigurationError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let id = Uuid::now_v7();
         let etag = Uuid::now_v7();
@@ -589,10 +581,7 @@ impl PgStore {
     }
 }
 
-async fn draft_operations(
-    pool: &sqlx::PgPool,
-    id: Uuid,
-) -> Result<Vec<OperationKind>, ConfigurationError> {
+async fn draft_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
     sqlx::query_scalar!(
         "SELECT operation FROM route_draft_operations WHERE route_draft_id = $1 ORDER BY operation",
         id
@@ -608,20 +597,14 @@ async fn draft_operations(
     .collect()
 }
 
-async fn revision_operations(
-    pool: &sqlx::PgPool,
-    id: Uuid,
-) -> Result<Vec<OperationKind>, ConfigurationError> {
+async fn revision_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
     sqlx::query_scalar!("SELECT operation FROM route_revision_operations WHERE route_revision_id = $1 ORDER BY operation", id).fetch_all(pool).await?
         .into_iter()
         .map(|value: String| value.parse().map_err(|_| PersistenceError::InvalidStoredValue("route revision operation").into()))
         .collect()
 }
 
-async fn draft_targets(
-    pool: &sqlx::PgPool,
-    id: Uuid,
-) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
+async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
     Ok(target_rows(
         sqlx::query_as!(
             RouteTargetRow,
@@ -638,10 +621,7 @@ async fn draft_targets(
     ))
 }
 
-async fn revision_targets(
-    pool: &sqlx::PgPool,
-    id: Uuid,
-) -> Result<Vec<RouteTargetRecord>, ConfigurationError> {
+async fn revision_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
     Ok(target_rows(
         sqlx::query_as!(
             RouteTargetRow,

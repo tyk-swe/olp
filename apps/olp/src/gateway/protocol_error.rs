@@ -4,12 +4,12 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_engine::domain::Surface;
+use olp_engine::domain::canonical::identity::Surface;
 use serde_json::json;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
-use super::{InferenceError, error::insert_retry_after_header};
+use super::error::{InferenceError, insert_retry_after_header};
 
 #[derive(Debug)]
 pub(super) struct ProtocolError {

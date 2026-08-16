@@ -1,11 +1,19 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    CanonicalError, ErrorClass, MediaHandle, Operation, RouteSlug, RouteSlugError,
-    SourceExtensions, Surface, VideoContentResult,
-    VideoCreateRequest as CanonicalVideoCreateRequest, VideoDeleteResult, VideoJobRequest,
-    VideoJobResult, VideoListRequest as CanonicalVideoListRequest, VideoListResult, VideoOperation,
-    VideoStatus,
+    canonical::{
+        events::{Error as CanonicalError, ErrorClass},
+        identity::Surface,
+        requests::{
+            MediaHandle, Operation, SourceExtensions,
+            VideoCreateRequest as CanonicalVideoCreateRequest, VideoJobRequest,
+            VideoListRequest as CanonicalVideoListRequest, VideoOperation,
+        },
+        results::{
+            VideoContentResult, VideoDeleteResult, VideoJobResult, VideoListResult, VideoStatus,
+        },
+    },
+    ids::{RouteSlug, RouteSlugError},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,11 +39,9 @@ pub struct OpenAiVideoCreateRequest {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_video_create(
-    request: OpenAiVideoCreateRequest,
-) -> Result<Operation, VideoCodecError> {
+pub fn decode_video_create(request: OpenAiVideoCreateRequest) -> Result<Operation, Error> {
     if request.prompt.is_empty() || request.prompt.len() > MAX_VIDEO_PROMPT_LENGTH {
-        return Err(VideoCodecError::InvalidPrompt);
+        return Err(Error::InvalidPrompt);
     }
     validate_seconds(request.seconds.as_deref())?;
     validate_size(request.size.as_deref())?;
@@ -56,7 +62,7 @@ pub fn decode_video_create(
                 .as_deref()
                 .is_some_and(|value| !value.starts_with("image/"))
             {
-                return Err(VideoCodecError::InvalidInputReferenceMediaType);
+                return Err(Error::InvalidInputReferenceMediaType);
             }
             Ok(reference.handle)
         })
@@ -74,8 +80,8 @@ pub fn decode_video_create(
 pub fn encode_video_create(
     request: &CanonicalVideoCreateRequest,
     upstream_model: &str,
-    mut publish_reference: impl FnMut(&MediaHandle) -> Result<BoundedMediaPart, VideoCodecError>,
-) -> Result<OpenAiVideoCreateRequest, VideoCodecError> {
+    mut publish_reference: impl FnMut(&MediaHandle) -> Result<BoundedMediaPart, Error>,
+) -> Result<OpenAiVideoCreateRequest, Error> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
@@ -95,7 +101,7 @@ pub fn encode_video_create(
         },
         &request.extensions.values,
     )
-    .map_err(VideoCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -110,15 +116,15 @@ pub struct OpenAiVideoListQuery {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_video_list(query: OpenAiVideoListQuery) -> Result<Operation, VideoCodecError> {
+pub fn decode_video_list(query: OpenAiVideoListQuery) -> Result<Operation, Error> {
     if query.limit == Some(0) || query.limit.is_some_and(|limit| limit > 100) {
-        return Err(VideoCodecError::InvalidListLimit);
+        return Err(Error::InvalidListLimit);
     }
     let mut extensions = BTreeMap::new();
     collect_extra("", &query.extra, &mut extensions);
     if let Some(order) = query.order {
         if order != "asc" && order != "desc" {
-            return Err(VideoCodecError::InvalidOrder);
+            return Err(Error::InvalidOrder);
         }
         extensions.insert("/order".into(), Value::String(order));
     }
@@ -134,12 +140,12 @@ pub fn decode_video_list(query: OpenAiVideoListQuery) -> Result<Operation, Video
 
 pub fn encode_video_list(
     request: &CanonicalVideoListRequest,
-) -> Result<OpenAiVideoListQuery, VideoCodecError> {
+) -> Result<OpenAiVideoListQuery, Error> {
     request
         .extensions
         .ensure_representable_on(Surface::OpenAi)?;
     if request.route.is_some() {
-        return Err(VideoCodecError::RouteCannotBeEncoded);
+        return Err(Error::RouteCannotBeEncoded);
     }
     apply_pointer_extensions(
         OpenAiVideoListQuery {
@@ -150,7 +156,7 @@ pub fn encode_video_list(
         },
         &request.extensions.values,
     )
-    .map_err(VideoCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 pub fn decode_video_get(job_id: impl Into<String>) -> Operation {
@@ -172,13 +178,13 @@ pub struct OpenAiVideoContentQuery {
 pub fn decode_video_content_with_query(
     job_id: impl Into<String>,
     query: OpenAiVideoContentQuery,
-) -> Result<Operation, VideoCodecError> {
+) -> Result<Operation, Error> {
     if query
         .variant
         .as_deref()
         .is_some_and(|variant| !matches!(variant, "video" | "thumbnail" | "spritesheet"))
     {
-        return Err(VideoCodecError::InvalidContentVariant);
+        return Err(Error::InvalidContentVariant);
     }
     let mut extensions = BTreeMap::new();
     collect_extra("", &query.extra, &mut extensions);
@@ -251,9 +257,9 @@ pub struct OpenAiVideoError {
     pub extra: BTreeMap<String, Value>,
 }
 
-pub fn decode_video_object(video: OpenAiVideoObject) -> Result<VideoJobResult, VideoCodecError> {
+pub fn decode_video_object(video: OpenAiVideoObject) -> Result<VideoJobResult, Error> {
     if video.object != "video" {
-        return Err(VideoCodecError::UnexpectedObject(video.object));
+        return Err(Error::UnexpectedObject(video.object));
     }
     let status = match video.status.as_str() {
         "queued" => VideoStatus::Queued,
@@ -295,7 +301,7 @@ pub fn decode_video_object(video: OpenAiVideoObject) -> Result<VideoJobResult, V
 pub fn encode_video_object(
     result: &VideoJobResult,
     client_model: &str,
-) -> Result<OpenAiVideoObject, VideoCodecError> {
+) -> Result<OpenAiVideoObject, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     let status = match &result.status {
         VideoStatus::Queued => "queued",
@@ -334,7 +340,7 @@ pub fn encode_video_object(
         },
         &result.extensions.values,
     )
-    .map_err(VideoCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -353,9 +359,9 @@ pub struct OpenAiVideoListResponse {
 
 pub fn decode_video_list_response(
     response: OpenAiVideoListResponse,
-) -> Result<VideoListResult, VideoCodecError> {
+) -> Result<VideoListResult, Error> {
     if response.object != "list" {
-        return Err(VideoCodecError::UnexpectedObject(response.object));
+        return Err(Error::UnexpectedObject(response.object));
     }
     let mut extensions = BTreeMap::new();
     collect_extra("", &response.extra, &mut extensions);
@@ -376,7 +382,7 @@ pub fn decode_video_list_response(
 pub fn encode_video_list_response(
     result: &VideoListResult,
     fallback_model: &str,
-) -> Result<OpenAiVideoListResponse, VideoCodecError> {
+) -> Result<OpenAiVideoListResponse, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     let data = result
         .jobs
@@ -394,7 +400,7 @@ pub fn encode_video_list_response(
         },
         &result.extensions.values,
     )
-    .map_err(VideoCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
 pub fn decode_video_content_body(body: BinaryMediaBody) -> VideoContentResult {
@@ -404,12 +410,10 @@ pub fn decode_video_content_body(body: BinaryMediaBody) -> VideoContentResult {
     }
 }
 
-pub fn encode_video_content_body(
-    result: &VideoContentResult,
-) -> Result<BinaryMediaBody, VideoCodecError> {
+pub fn encode_video_content_body(result: &VideoContentResult) -> Result<BinaryMediaBody, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     if !result.extensions.values.is_empty() {
-        return Err(VideoCodecError::BinaryExtensionsUnsupported);
+        return Err(Error::BinaryExtensionsUnsupported);
     }
     Ok(BinaryMediaBody {
         media: result.media.clone(),
@@ -441,7 +445,7 @@ pub fn decode_video_delete_response(response: OpenAiVideoDeleteResponse) -> Vide
 
 pub fn encode_video_delete_response(
     result: &VideoDeleteResult,
-) -> Result<OpenAiVideoDeleteResponse, VideoCodecError> {
+) -> Result<OpenAiVideoDeleteResponse, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
     let mut extensions = result.extensions.values.clone();
     let object = extensions
@@ -457,31 +461,31 @@ pub fn encode_video_delete_response(
         },
         &extensions,
     )
-    .map_err(VideoCodecError::InvalidExtension)
+    .map_err(Error::InvalidExtension)
 }
 
-fn validate_seconds(value: Option<&str>) -> Result<(), VideoCodecError> {
+fn validate_seconds(value: Option<&str>) -> Result<(), Error> {
     if value.is_some_and(|value| !matches!(value, "4" | "8" | "12")) {
-        return Err(VideoCodecError::InvalidSeconds);
+        return Err(Error::InvalidSeconds);
     }
     Ok(())
 }
 
-fn validate_size(value: Option<&str>) -> Result<(), VideoCodecError> {
+fn validate_size(value: Option<&str>) -> Result<(), Error> {
     if value
         .is_some_and(|value| !matches!(value, "720x1280" | "1280x720" | "1024x1792" | "1792x1024"))
     {
-        return Err(VideoCodecError::InvalidSize);
+        return Err(Error::InvalidSize);
     }
     Ok(())
 }
 
 #[derive(Debug, Error)]
-pub enum VideoCodecError {
+pub enum Error {
     #[error(transparent)]
     InvalidRoute(#[from] RouteSlugError),
     #[error(transparent)]
-    Extensions(#[from] crate::domain::ExtensionError),
+    Extensions(#[from] crate::domain::canonical::requests::ExtensionError),
     #[error("video prompt must contain 1 to 32000 bytes")]
     InvalidPrompt,
     #[error("video seconds must be one of 4, 8, or 12")]

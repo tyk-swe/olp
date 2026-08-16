@@ -2,21 +2,33 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use super::*;
 use crate::domain::{
-    AttemptFailureClass, AttemptPlan, CanonicalEvent, CanonicalEventKind, CanonicalResult,
-    ContentPart, DurationMs, GenerationParameters, GenerationRequest, MediaSpool,
-    Message as CoreMessage, MessageRole, Operation, OperationKind, ProviderId, ProviderKind,
-    ProviderOutput, ProviderRequest, ProviderTransport, RequestId, RequestMetadata, RouteId,
-    RouteSlug, RuntimeGenerationId, SourceExtensions, Surface, TargetId, TokenCountRequest,
-    TokenCountResult, TransportMode,
+    canonical::{
+        events::{Event, Kind},
+        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        requests::{
+            ContentPart, GenerationParameters, GenerationRequest, Message as CoreMessage,
+            MessageRole, Operation, SourceExtensions, TokenCountRequest,
+        },
+        results::{CanonicalResult, TokenCountResult},
+    },
+    ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
+    ports::{AttemptFailureClass, MediaSpool, ProviderOutput, ProviderRequest, ProviderTransport},
+    routing::{provider::ProviderKind, selection::AttemptPlan},
 };
 use crate::protocols::anthropic::{
-    ANTHROPIC_COUNT_REQUEST_EXTENSION, ContentBlock, ImageBlock,
-    MediaSource as AnthropicMediaSource, Message, MessageContent, Role,
+    count::ANTHROPIC_COUNT_REQUEST_EXTENSION,
+    dto::{
+        ContentBlock, ImageBlock, MediaSource as AnthropicMediaSource, Message, MessageContent,
+        Role,
+    },
 };
 use crate::providers::anthropic::transport::media::hydrate_anthropic_messages;
-use crate::providers::anthropic::{AnthropicApiKey, ConnectorConfig, ConnectorTimeouts};
 use crate::providers::mock_server::{
     MockResponse, find_bytes, response, spawn_mock as spawn_http_mock,
+};
+use crate::providers::{
+    anthropic::{ApiKey, ConnectorConfig, transport::operations::Connector},
+    connector::Timeouts,
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -27,25 +39,28 @@ struct InlineSpool;
 impl MediaSpool for InlineSpool {
     fn put<'a>(
         &'a self,
-        _upload: crate::domain::MediaUpload,
-    ) -> crate::domain::BoxFuture<
+        _upload: crate::domain::ports::MediaUpload,
+    ) -> crate::domain::ports::BoxFuture<
         'a,
-        Result<crate::domain::MediaArtifact, crate::domain::MediaSpoolError>,
+        Result<
+            crate::domain::canonical::results::MediaArtifact,
+            crate::domain::ports::MediaSpoolError,
+        >,
     > {
-        Box::pin(async { Err(crate::domain::MediaSpoolError::Unavailable) })
+        Box::pin(async { Err(crate::domain::ports::MediaSpoolError::Unavailable) })
     }
 
     fn open<'a>(
         &'a self,
-        handle: &'a crate::domain::MediaHandle,
-    ) -> crate::domain::BoxFuture<
+        handle: &'a crate::domain::canonical::requests::MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<
         'a,
-        Result<crate::domain::OpenedMedia, crate::domain::MediaSpoolError>,
+        Result<crate::domain::ports::OpenedMedia, crate::domain::ports::MediaSpoolError>,
     > {
         let handle = handle.clone();
         Box::pin(async move {
-            Ok(crate::domain::OpenedMedia {
-                artifact: crate::domain::MediaArtifact {
+            Ok(crate::domain::ports::OpenedMedia {
+                artifact: crate::domain::canonical::results::MediaArtifact {
                     handle,
                     content_type: Some("image/png".into()),
                     content_length: Some(2),
@@ -58,15 +73,16 @@ impl MediaSpool for InlineSpool {
 
     fn remove<'a>(
         &'a self,
-        _handle: &'a crate::domain::MediaHandle,
-    ) -> crate::domain::BoxFuture<'a, Result<(), crate::domain::MediaSpoolError>> {
+        _handle: &'a crate::domain::canonical::requests::MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), crate::domain::ports::MediaSpoolError>>
+    {
         Box::pin(async { Ok(()) })
     }
 }
 
 #[tokio::test]
 async fn same_protocol_base64_image_handle_is_rehydrated() {
-    let handle = crate::domain::MediaHandle::new("inline");
+    let handle = crate::domain::canonical::requests::MediaHandle::new("inline");
     let mut messages = vec![Message {
         role: Role::User,
         content: MessageContent::Blocks(vec![ContentBlock::Image(ImageBlock {
@@ -74,7 +90,9 @@ async fn same_protocol_base64_image_handle_is_rehydrated() {
             source: AnthropicMediaSource {
                 kind: "base64".into(),
                 media_type: Some("image/png".into()),
-                data: Some(crate::domain::inline_media_marker(&handle)),
+                data: Some(crate::domain::canonical::requests::inline_media_marker(
+                    &handle,
+                )),
                 url: None,
                 extra: BTreeMap::new(),
             },
@@ -199,10 +217,10 @@ fn preserved_count_tokens_body_is_forwarded_exactly_with_late_bound_model() {
     assert_eq!(wire["vendor"], true);
 }
 
-fn connector(base_url: &str) -> AnthropicConnector {
-    AnthropicConnector::new(
-        ConnectorConfig::for_local_test(base_url, ConnectorTimeouts::default()),
-        AnthropicApiKey::new("upstream-secret").unwrap(),
+fn connector(base_url: &str) -> Connector {
+    Connector::new(
+        ConnectorConfig::for_local_test(base_url, Timeouts::default()),
+        ApiKey::new("upstream-secret").unwrap(),
     )
 }
 
@@ -220,7 +238,7 @@ async fn model_discovery_uses_anthropic_pagination_contract() {
     assert!(request.contains("x-api-key: upstream-secret"));
 }
 
-async fn collect(connector: &AnthropicConnector, request: ProviderRequest) -> Vec<CanonicalEvent> {
+async fn collect(connector: &Connector, request: ProviderRequest) -> Vec<Event> {
     let ProviderOutput::Events(mut stream) = connector.execute(request).await.unwrap() else {
         panic!("Anthropic connector returned a unary result for an event operation");
     };
@@ -245,10 +263,14 @@ async fn executes_unary_messages_with_late_bound_headers() {
     })
     .await;
     let events = collect(&connector(&base), generation(false)).await;
-    assert!(events.iter().any(|event| matches!(&event.kind, CanonicalEventKind::TextDelta { text, .. } if text == "hello back")));
+    assert!(
+        events.iter().any(
+            |event| matches!(&event.kind, Kind::TextDelta { text, .. } if text == "hello back")
+        )
+    );
     assert!(matches!(
         events.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     let request = String::from_utf8(captured.await.unwrap())
         .unwrap()
@@ -280,7 +302,11 @@ async fn decodes_fragmented_stream_and_token_count() {
     })
     .await;
     let events = collect(&connector(&base), generation(true)).await;
-    assert!(events.iter().any(|event| matches!(&event.kind, CanonicalEventKind::TextDelta { text, .. } if text == "snow ☃")));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(&event.kind, Kind::TextDelta { text, .. } if text == "snow ☃"))
+    );
 
     let count_body = br#"{"input_tokens":7}"#;
     let (base, captured) = spawn_mock(MockResponse {
@@ -326,9 +352,9 @@ async fn redirects_are_not_followed_and_errors_redact_credentials() {
 async fn live_provider_discovers_anthropic_models() {
     let key = std::env::var("OLP_LIVE_ANTHROPIC_API_KEY")
         .expect("set OLP_LIVE_ANTHROPIC_API_KEY for the ignored live test");
-    let connector = AnthropicConnector::new(
+    let connector = Connector::new(
         ConnectorConfig::default(),
-        AnthropicApiKey::new(key).expect("live Anthropic key must be representable"),
+        ApiKey::new(key).expect("live Anthropic key must be representable"),
     );
     assert!(!connector.discover_models().await.unwrap().is_empty());
 }

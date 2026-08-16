@@ -6,7 +6,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::identity::UserRecord;
-use olp_engine::domain::Permission;
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -19,7 +19,7 @@ use crate::management::{
     preconditions::{if_match, with_etag},
     sessions::{require_mutation_session, require_read_session},
 };
-use crate::{ManagementState, Problem};
+use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct UserDetailResponse {

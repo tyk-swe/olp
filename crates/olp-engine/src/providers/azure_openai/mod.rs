@@ -17,18 +17,22 @@
 use std::fmt;
 
 use crate::domain::{
-    AttemptFailureClass, DiscoveredProviderModel, OperationKind, ProviderOutput, ProviderRequest,
-    ProviderTransport, Surface, TransportError, TransportMode, TransportPhase,
+    canonical::identity::{OperationKind, Surface, TransportMode},
+    ports::{
+        AttemptFailureClass, DiscoveredProviderModel, ProviderOutput, ProviderRequest,
+        ProviderTransport, TransportError, TransportPhase,
+    },
 };
 use crate::providers::openai::{
-    CompatibleCapability, CompatibleCapabilityCertificationError,
-    ConnectorConfig as OpenAiConnectorConfig, OpenAiApiKey, OpenAiConnector,
+    ApiKey as OpenAiApiKey, ConnectorConfig as OpenAiConnectorConfig,
+    certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
+    transport::Connector as OpenAiConnector,
 };
 use url::Url;
 use zeroize::Zeroizing;
 
 #[derive(Clone, Debug)]
-pub struct ConnectorConfig {
+pub(in crate::providers) struct ConnectorConfig {
     inner: OpenAiConnectorConfig,
     resource_endpoint: Url,
     deployment: String,
@@ -36,7 +40,7 @@ pub struct ConnectorConfig {
 }
 
 impl ConnectorConfig {
-    pub fn new(
+    pub(in crate::providers) fn new(
         resource_endpoint: &str,
         deployment: impl Into<String>,
         api_version: impl Into<String>,
@@ -53,7 +57,7 @@ impl ConnectorConfig {
     /// Accepts plain-HTTP and non-public resource endpoints. Exists only for
     /// test builds; release binaries never compile this constructor.
     #[cfg(any(test, feature = "test-util"))]
-    pub fn new_unsafe_test_target(
+    pub(in crate::providers) fn new_unsafe_test_target(
         resource_endpoint: &str,
         deployment: impl Into<String>,
         api_version: impl Into<String>,
@@ -100,7 +104,7 @@ impl ConnectorConfig {
         resource_endpoint: &str,
         deployment: &str,
         api_version: &str,
-        timeouts: crate::providers::openai::ConnectorTimeouts,
+        timeouts: crate::providers::connector::Timeouts,
     ) -> Self {
         let endpoint = validate_resource_endpoint(resource_endpoint, true).unwrap();
         let base_url = deployment_base_url(&endpoint, deployment).unwrap();
@@ -115,10 +119,10 @@ impl ConnectorConfig {
     }
 }
 
-pub struct AzureOpenAiApiKey(Zeroizing<String>);
+pub(in crate::providers) struct ApiKey(Zeroizing<String>);
 
-impl AzureOpenAiApiKey {
-    pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
+impl ApiKey {
+    pub(in crate::providers) fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
         crate::providers::connector::visible_secret(
             value,
             ConnectorBuildError::EmptyApiKey,
@@ -128,22 +132,22 @@ impl AzureOpenAiApiKey {
     }
 }
 
-impl fmt::Debug for AzureOpenAiApiKey {
+impl fmt::Debug for ApiKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("AzureOpenAiApiKey([REDACTED])")
+        formatter.write_str("ApiKey([REDACTED])")
     }
 }
 
-pub struct AzureOpenAiConnector {
+pub(in crate::providers) struct Connector {
     resource_endpoint: Url,
     deployment: String,
     api_version: String,
     inner: OpenAiConnector,
 }
 
-impl AzureOpenAiConnector {
+impl Connector {
     #[must_use]
-    pub fn new(config: ConnectorConfig, api_key: AzureOpenAiApiKey) -> Self {
+    pub(in crate::providers) fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
         let inference_key = OpenAiApiKey::new(api_key.0.as_str().to_owned())
             .expect("Azure key validation is at least as strict as OpenAI key validation");
         let inner = OpenAiConnector::new_with_api_key_header(config.inner, inference_key);
@@ -160,7 +164,9 @@ impl AzureOpenAiConnector {
     /// plane request that proves a deployment can serve inference, so chat is
     /// attempted first and embeddings second. A 404, invalid API version, or
     /// deployment that supports neither operation fails closed.
-    pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
+    pub(in crate::providers) async fn discover_models(
+        &self,
+    ) -> Result<Vec<DiscoveredProviderModel>, TransportError> {
         let chat = self
             .inner
             .certify_chat_completions_capability(&self.deployment, TransportMode::Unary)
@@ -191,7 +197,7 @@ impl AzureOpenAiConnector {
     /// Cross-origin generation uses Chat Completions, the translation path
     /// selected when no OpenAI endpoint hint exists. Media/job tuples are not
     /// certified until a safe content-minimal probe exists.
-    pub async fn certify_deployment_capability(
+    pub(in crate::providers) async fn certify_deployment_capability(
         &self,
         upstream_model: &str,
         capability: CompatibleCapability,
@@ -241,10 +247,10 @@ fn deployment_probe_error(
     }
 }
 
-impl fmt::Debug for AzureOpenAiConnector {
+impl fmt::Debug for Connector {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("AzureOpenAiConnector")
+            .debug_struct("Connector")
             .field("host", &self.resource_endpoint.host_str())
             .field("deployment", &self.deployment)
             .field("api_version", &self.api_version)
@@ -253,12 +259,14 @@ impl fmt::Debug for AzureOpenAiConnector {
     }
 }
 
-impl ProviderTransport for AzureOpenAiConnector {
+impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
         request: ProviderRequest,
-    ) -> crate::domain::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
-        if request.attempt.provider_kind != crate::domain::ProviderKind::AzureOpenAi {
+    ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
+        if request.attempt.provider_kind
+            != crate::domain::routing::provider::ProviderKind::AzureOpenAi
+        {
             return Box::pin(async {
                 Err(TransportError {
                     phase: TransportPhase::Connect,
@@ -362,7 +370,7 @@ fn deployment_base_url(
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ConnectorBuildError {
+pub(in crate::providers) enum ConnectorBuildError {
     #[error(
         "Azure OpenAI resource endpoint must be an HTTPS origin without credentials, query, fragment, or path"
     )]

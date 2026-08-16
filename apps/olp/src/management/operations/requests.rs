@@ -4,15 +4,20 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
-use olp_db::{operations::AttemptRecord, operations::RequestFilters, operations::RequestRecord};
+use olp_db::{
+    operations::requests::AttemptRecord, operations::requests::RequestFilters,
+    operations::requests::RequestRecord,
+};
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
-    ManagementState, Problem,
-    management::{Permission, require_permission, require_read_session},
+    bootstrap::mode_dependencies::ManagementState,
+    management::{permissions::require_permission, sessions::require_read_session},
+    public_http::problem::Problem,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]

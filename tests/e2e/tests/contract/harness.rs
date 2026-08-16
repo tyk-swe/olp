@@ -15,22 +15,22 @@ use redis::{
 };
 use sqlx::Connection as _;
 
-pub struct Server {
+pub(crate) struct Server {
     child: Child,
     stderr: Arc<Mutex<String>>,
     additional_children: Vec<Child>,
     additional_stderr: Vec<Arc<Mutex<String>>>,
     additional_pid_files: Vec<PathBuf>,
     /// Public listener origin, e.g. `http://127.0.0.1:41234`.
-    pub public_origin: String,
+    pub(crate) public_origin: String,
     /// Observability listener base.
-    pub observability_base: String,
+    pub(crate) observability_base: String,
     /// Base64 setup token exactly as written to the bootstrap token file.
-    pub setup_token: String,
+    pub(crate) setup_token: String,
     /// Connection URL for this run's database, so assertions about durable
     /// state can read the tables directly rather than through the API that
     /// wrote them.
-    pub database_url: String,
+    pub(crate) database_url: String,
     app_database_url: String,
     valkey_url: String,
     admin_url: String,
@@ -39,25 +39,25 @@ pub struct Server {
     valkey_reservation: Option<ValkeyReservation>,
 }
 
-pub struct GatewayProcess {
-    pub public_origin: String,
-    pub observability_base: String,
+pub(crate) struct GatewayProcess {
+    pub(crate) public_origin: String,
+    pub(crate) observability_base: String,
 }
 
 #[derive(Clone, Copy)]
-pub enum WorkerBoundary {
+pub(crate) enum WorkerBoundary {
     RequestMetadata,
     RuntimeOutbox,
     None,
 }
 
-pub struct WorkerProcess {
+pub(crate) struct WorkerProcess {
     child_index: usize,
     start_marker: PathBuf,
-    pub ownership_marker: PathBuf,
+    pub(crate) ownership_marker: PathBuf,
 }
 
-pub fn admin_url() -> String {
+pub(crate) fn admin_url() -> String {
     std::env::var("OLP_E2E_DATABASE_ADMIN_URL")
         .unwrap_or_else(|_| "postgres://olp_test:olp_test@localhost:5433/postgres".to_owned())
 }
@@ -115,22 +115,22 @@ struct ValkeyReservation {
 /// Owns one test Valkey lease independently of any OLP installation. Multiple
 /// independently migrated servers can therefore share the exact URL while the
 /// advisory lease remains held until every server has stopped.
-pub struct SharedValkey {
+pub(crate) struct SharedValkey {
     url: String,
     reservation: Option<ValkeyReservation>,
 }
 
 impl SharedValkey {
-    pub async fn reserve() -> Result<Self, String> {
+    pub(crate) async fn reserve() -> Result<Self, String> {
         let (url, reservation) = valkey(&admin_url()).await?;
         Ok(Self { url, reservation })
     }
 
-    pub fn url(&self) -> &str {
+    pub(crate) fn url(&self) -> &str {
         &self.url
     }
 
-    pub async fn release(mut self) {
+    pub(crate) async fn release(mut self) {
         if let Some(reservation) = self.reservation.take() {
             reservation.release().await;
         }
@@ -542,23 +542,23 @@ impl LaunchGuard {
 }
 
 impl Server {
-    pub async fn launch() -> Result<Self, String> {
+    pub(crate) async fn launch() -> Result<Self, String> {
         Self::launch_process("all", None).await
     }
 
-    pub async fn launch_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
+    pub(crate) async fn launch_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
         Self::launch_process("all", Some(valkey_url)).await
     }
 
-    pub async fn launch_control() -> Result<Self, String> {
+    pub(crate) async fn launch_control() -> Result<Self, String> {
         Self::launch_process("control", None).await
     }
 
-    pub async fn launch_control_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
+    pub(crate) async fn launch_control_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
         Self::launch_process("control", Some(valkey_url)).await
     }
 
-    pub async fn launch_control_from_legacy_request_metadata_upgrade(
+    pub(crate) async fn launch_control_from_legacy_request_metadata_upgrade(
         valkey_url: &str,
     ) -> Result<(Self, String), String> {
         let (server, event_id) = Self::launch_process_with_migration_fixture(
@@ -638,11 +638,11 @@ impl Server {
         }
     }
 
-    pub fn valkey_url(&self) -> &str {
+    pub(crate) fn valkey_url(&self) -> &str {
         &self.valkey_url
     }
 
-    pub fn stderr_tail(&self) -> String {
+    pub(crate) fn stderr_tail(&self) -> String {
         let mut output = stderr_tail(&self.stderr);
         for (index, stderr) in self.additional_stderr.iter().enumerate() {
             output.push_str(&format!(
@@ -654,7 +654,7 @@ impl Server {
         output
     }
 
-    pub async fn launch_gateway(&mut self) -> Result<GatewayProcess, String> {
+    pub(crate) async fn launch_gateway(&mut self) -> Result<GatewayProcess, String> {
         let binary = binary()?;
         for attempt in 1..=3 {
             let public_port = free_port()?;
@@ -717,7 +717,7 @@ impl Server {
         unreachable!("bounded startup loop either succeeds or returns an error")
     }
 
-    pub async fn launch_worker(
+    pub(crate) async fn launch_worker(
         &mut self,
         label: &str,
         boundary: WorkerBoundary,
@@ -779,13 +779,13 @@ impl Server {
         })
     }
 
-    pub fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
+    pub(crate) fn release_worker(&self, worker: &WorkerProcess) -> Result<(), String> {
         let release = format!("{}.release", worker.start_marker.display());
         std::fs::write(release, b"release\n")
             .map_err(|error| format!("failed to release worker: {error}"))
     }
 
-    pub async fn hard_kill_worker(&mut self, worker: &WorkerProcess) -> Result<(), String> {
+    pub(crate) async fn hard_kill_worker(&mut self, worker: &WorkerProcess) -> Result<(), String> {
         let child = &mut self.additional_children[worker.child_index];
         child
             .kill()
@@ -799,12 +799,12 @@ impl Server {
         Ok(())
     }
 
-    pub fn worker_ownership_marker(&self, label: &str) -> PathBuf {
+    pub(crate) fn worker_ownership_marker(&self, label: &str) -> PathBuf {
         self.run_dir.join(format!("{label}-owned"))
     }
 
     /// SIGTERM, bounded wait, then SIGKILL as a last resort.
-    pub async fn shutdown(mut self) -> String {
+    pub(crate) async fn shutdown(mut self) -> String {
         for (index, child) in self.additional_children.iter_mut().enumerate() {
             terminate_child(child).await;
             if let Some(pid_file) = self.additional_pid_files.get(index) {

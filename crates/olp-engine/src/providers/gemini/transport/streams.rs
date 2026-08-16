@@ -1,27 +1,30 @@
-use crate::domain::{CanonicalEvent, ProviderEventStream, TransportError};
-use crate::protocols::gemini::GeminiGenerateContentStreamDecoder;
+use crate::domain::{
+    canonical::events::Event,
+    ports::{ProviderEventStream, TransportError},
+};
+use crate::protocols::gemini::stream::Decoder;
 use reqwest::Response;
 use tokio::time::Instant;
 
-use crate::providers::transport_io::{CanonicalEventDecoder, ProviderResponseIo};
+use crate::providers::transport_io::{ProviderResponseIo, event_stream::CanonicalEventDecoder};
 
-use super::operations::GeminiConnector;
+use super::operations::Connector;
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
 
-impl CanonicalEventDecoder for GeminiGenerateContentStreamDecoder {
-    type Error = crate::protocols::gemini::StreamError;
+impl CanonicalEventDecoder for Decoder {
+    type Error = crate::protocols::gemini::stream::Error;
 
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<CanonicalEvent>, Self::Error> {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Self::Error> {
         Self::push(self, bytes)
     }
 
-    fn finish(&mut self) -> Result<Vec<CanonicalEvent>, Self::Error> {
+    fn finish(&mut self) -> Result<Vec<Event>, Self::Error> {
         Self::finish(self)
     }
 }
 
-impl GeminiConnector {
+impl Connector {
     pub(super) async fn streaming_response(
         &self,
         response: Response,
@@ -29,7 +32,7 @@ impl GeminiConnector {
         attempt_deadline: Instant,
         preserve_raw_frames: bool,
     ) -> Result<ProviderEventStream, TransportError> {
-        let decoder = GeminiGenerateContentStreamDecoder::with_max_event_bytes_and_raw_passthrough(
+        let decoder = Decoder::with_max_event_bytes_and_raw_passthrough(
             self.config.max_event_bytes,
             preserve_raw_frames,
         );

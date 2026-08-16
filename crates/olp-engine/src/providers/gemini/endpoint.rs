@@ -3,13 +3,13 @@ use std::{fmt, time::Duration};
 use reqwest::{Client, Url};
 use thiserror::Error;
 
-use crate::providers::{CommonEndpointError, endpoint::EndpointCore};
+use crate::providers::endpoint::{EndpointCore, Error as CommonEndpointError};
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";
 const PROVIDER: &str = "Gemini";
 
 #[derive(Debug, Error)]
-pub enum EndpointError {
+pub enum Error {
     #[error(transparent)]
     Common(#[from] CommonEndpointError),
     #[error("Gemini provider model name is invalid")]
@@ -36,11 +36,11 @@ impl Default for Endpoint {
 }
 
 impl Endpoint {
-    pub(in crate::providers) fn parse(value: &str) -> Result<Self, EndpointError> {
+    pub(in crate::providers) fn parse(value: &str) -> Result<Self, Error> {
         Self::parse_with_policy(value, false)
     }
 
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
+    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
         Ok(Self {
             core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
         })
@@ -55,7 +55,7 @@ impl Endpoint {
         &self,
         upstream_model: &str,
         streaming: bool,
-    ) -> Result<Url, EndpointError> {
+    ) -> Result<Url, Error> {
         let action = if streaming {
             "streamGenerateContent"
         } else {
@@ -71,11 +71,11 @@ impl Endpoint {
     pub(in crate::providers) fn count_tokens_url(
         &self,
         upstream_model: &str,
-    ) -> Result<Url, EndpointError> {
+    ) -> Result<Url, Error> {
         self.model_action_url(upstream_model, "countTokens")
     }
 
-    pub(in crate::providers) fn models_url(&self) -> Result<Url, EndpointError> {
+    pub(in crate::providers) fn models_url(&self) -> Result<Url, Error> {
         self.core.join("models").map_err(Into::into)
     }
 
@@ -83,7 +83,7 @@ impl Endpoint {
         self.core.set_connect_timeout(value);
     }
 
-    fn model_action_url(&self, upstream_model: &str, action: &str) -> Result<Url, EndpointError> {
+    fn model_action_url(&self, upstream_model: &str, action: &str) -> Result<Url, Error> {
         let model = upstream_model
             .strip_prefix("models/")
             .unwrap_or(upstream_model);
@@ -94,13 +94,11 @@ impl Endpoint {
                 .any(|segment| segment.is_empty() || matches!(*segment, "." | ".."))
             || upstream_model.chars().any(char::is_control)
         {
-            return Err(EndpointError::InvalidModelName);
+            return Err(Error::InvalidModelName);
         }
         let mut url = self.core.url().clone();
         {
-            let mut path = url
-                .path_segments_mut()
-                .map_err(|()| EndpointError::CannotBeBase)?;
+            let mut path = url.path_segments_mut().map_err(|()| Error::CannotBeBase)?;
             path.pop_if_empty().push("models");
             for (index, segment) in segments.iter().enumerate() {
                 if index + 1 == segments.len() {
@@ -116,7 +114,7 @@ impl Endpoint {
     pub(in crate::providers) async fn pinned_client(
         &self,
         connect_timeout: Duration,
-    ) -> Result<Client, EndpointError> {
+    ) -> Result<Client, Error> {
         self.core
             .pinned_client(connect_timeout)
             .await
@@ -134,19 +132,15 @@ mod tests {
     fn endpoint_policy_and_action_paths_are_safe() {
         assert!(matches!(
             Endpoint::parse("http://generativelanguage.googleapis.com/v1beta"),
-            Err(EndpointError::Common(
-                CommonEndpointError::HttpsRequired { .. }
-            ))
+            Err(Error::Common(CommonEndpointError::HttpsRequired { .. }))
         ));
         assert!(matches!(
             Endpoint::parse("https://key@googleapis.com/v1beta"),
-            Err(EndpointError::Common(
-                CommonEndpointError::UserInfoForbidden { .. }
-            ))
+            Err(Error::Common(CommonEndpointError::UserInfoForbidden { .. }))
         ));
         assert!(matches!(
             Endpoint::parse("https://googleapis.com/v1beta?key=ambient"),
-            Err(EndpointError::Common(
+            Err(Error::Common(
                 CommonEndpointError::QueryOrFragmentForbidden { .. }
             ))
         ));
@@ -167,7 +161,7 @@ mod tests {
         );
         assert!(matches!(
             endpoint.generate_url("../metadata", false),
-            Err(EndpointError::InvalidModelName)
+            Err(Error::InvalidModelName)
         ));
     }
 
@@ -180,7 +174,7 @@ mod tests {
         let address: IpAddr = "127.0.0.1".parse().unwrap();
         assert!(matches!(
             Endpoint::parse("https://127.0.0.1/v1beta"),
-            Err(EndpointError::Common(CommonEndpointError::ForbiddenAddress {
+            Err(Error::Common(CommonEndpointError::ForbiddenAddress {
                 address: blocked,
                 ..
             })) if blocked == address

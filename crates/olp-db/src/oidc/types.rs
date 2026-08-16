@@ -1,22 +1,25 @@
 use std::fmt;
 
 use chrono::{DateTime, Duration, Utc};
-use olp_engine::domain::Role;
+use olp_engine::domain::auth::Role;
 use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use super::helpers::role_rank;
 use crate::{
-    PersistenceError,
     authentication::RecentAuthPurpose,
-    security::{EncryptedSecret, RecentAuthMaterial, SessionMaterial, random_token, token_digest},
+    error::Error,
+    security::{
+        envelope::EncryptedSecret,
+        session_material::{RecentAuthMaterial, SessionMaterial, random_token, token_digest},
+    },
 };
 
 #[derive(Debug, Error)]
 pub enum OidcError {
     #[error(transparent)]
-    Persistence(#[from] PersistenceError),
+    Persistence(#[from] Error),
     #[error("OIDC configuration input is invalid: {0}")]
     Invalid(String),
     #[error("OIDC is not configured")]
@@ -59,7 +62,7 @@ pub enum OidcError {
 
 impl From<sqlx::Error> for OidcError {
     fn from(error: sqlx::Error) -> Self {
-        Self::Persistence(PersistenceError::Database(error))
+        Self::Persistence(Error::Database(error))
     }
 }
 

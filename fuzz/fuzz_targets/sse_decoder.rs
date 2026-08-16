@@ -20,12 +20,13 @@ use std::mem::{Discriminant, discriminant};
 
 use libfuzzer_sys::fuzz_target;
 use olp_engine::protocols::{
-    anthropic::AnthropicMessagesStreamDecoder,
-    gemini::GeminiGenerateContentStreamDecoder,
+    anthropic::stream::Decoder as AnthropicDecoder,
+    gemini::stream::Decoder as GeminiDecoder,
     openai::{
-        OpenAiChatStreamDecoder, OpenAiResponsesStreamDecoder, OpenAiTranscriptionStreamDecoder,
+        audio::Decoder as TranscriptionDecoder, response::Decoder as ChatDecoder,
+        responses::stream::Decoder as ResponsesDecoder,
     },
-    sse::{SseDecodeError, SseDecoder, SseFrame, encode_frame},
+    sse::{DecodeError, Decoder as SseDecoder, Frame, encode_frame},
 };
 
 /// Generous enough that the fidelity oracle is never confounded by the size
@@ -45,7 +46,7 @@ fn decode_chunked(
     data: &[u8],
     width: usize,
     max_event_bytes: usize,
-) -> Result<Vec<SseFrame>, Discriminant<SseDecodeError>> {
+) -> Result<Vec<Frame>, Discriminant<DecodeError>> {
     let mut decoder = SseDecoder::new(max_event_bytes);
     let mut frames = Vec::new();
     for chunk in data.chunks(width.max(1)) {
@@ -55,11 +56,11 @@ fn decode_chunked(
     Ok(frames)
 }
 
-fn frame_from(data: &[u8]) -> SseFrame {
+fn frame_from(data: &[u8]) -> Frame {
     let third = data.len() / 3;
     let (event_bytes, rest) = data.split_at(third);
     let (id_bytes, data_bytes) = rest.split_at(third.min(rest.len()));
-    SseFrame {
+    Frame {
         event: (!event_bytes.is_empty()).then(|| String::from_utf8_lossy(event_bytes).into_owned()),
         id: (!id_bytes.is_empty()).then(|| String::from_utf8_lossy(id_bytes).into_owned()),
         data: String::from_utf8_lossy(data_bytes).into_owned(),
@@ -71,7 +72,7 @@ fn frame_from(data: &[u8]) -> SseFrame {
 }
 
 /// `encode_frame` rejects exactly three things. Anything else must encode.
-fn assert_rejection_contract(frame: &SseFrame) {
+fn assert_rejection_contract(frame: &Frame) {
     let splits_stream = |value: &String| value.contains(['\r', '\n']);
     let must_reject = frame.event.as_ref().is_some_and(splits_stream)
         || frame.id.as_ref().is_some_and(splits_stream)
@@ -91,7 +92,7 @@ fn assert_rejection_contract(frame: &SseFrame) {
 
 /// A frame that encodes must decode back to itself, with `data` line endings
 /// normalised the way `encode_frame` documents.
-fn assert_encode_decode_fidelity(frame: &SseFrame) {
+fn assert_encode_decode_fidelity(frame: &Frame) {
     let Ok(encoded) = encode_frame(frame) else {
         return;
     };
@@ -103,7 +104,7 @@ fn assert_encode_decode_fidelity(frame: &SseFrame) {
         1,
         "encoding one frame must decode exactly once: {frame:?}"
     );
-    let expected = SseFrame {
+    let expected = Frame {
         event: frame.event.clone(),
         id: frame.id.clone(),
         retry_ms: frame.retry_ms,
@@ -136,7 +137,7 @@ fuzz_target!(|data: &[u8]| {
 
     // The same frame with the stream-splitting characters removed, so the
     // fidelity oracle still gets exercised when the raw one is rejected.
-    let sanitized = SseFrame {
+    let sanitized = Frame {
         event: frame
             .event
             .as_ref()
@@ -169,9 +170,9 @@ fuzz_target!(|data: &[u8]| {
             }
         }};
     }
-    drive_vendor_decoder!(OpenAiChatStreamDecoder::new());
-    drive_vendor_decoder!(OpenAiResponsesStreamDecoder::new());
-    drive_vendor_decoder!(OpenAiTranscriptionStreamDecoder::new());
-    drive_vendor_decoder!(AnthropicMessagesStreamDecoder::new());
-    drive_vendor_decoder!(GeminiGenerateContentStreamDecoder::new());
+    drive_vendor_decoder!(ChatDecoder::new());
+    drive_vendor_decoder!(ResponsesDecoder::new());
+    drive_vendor_decoder!(TranscriptionDecoder::new());
+    drive_vendor_decoder!(AnthropicDecoder::new());
+    drive_vendor_decoder!(GeminiDecoder::new());
 });

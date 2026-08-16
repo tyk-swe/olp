@@ -5,7 +5,7 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
@@ -31,12 +31,12 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
     let mut state = ProcessComposition::new(
         ApiMode::Gateway,
         None,
-        Arc::new(RuntimeManager::empty()),
+        Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
     state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([3; 32])));
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     for (path, header_name, value, expected_pointer) in [
         (
@@ -89,7 +89,7 @@ async fn inference_authentication_precedes_body_decode_with_native_errors() {
 #[tokio::test]
 async fn every_inference_surface_and_models_endpoint_requires_its_own_well_formed_header() {
     let (state, key) = inference_state(false);
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     let cases = [
         (
             axum::http::Method::POST,
@@ -237,7 +237,7 @@ async fn every_inference_surface_and_models_endpoint_requires_its_own_well_forme
 #[tokio::test]
 async fn litellm_gateway_credentials_authenticate_each_surface_in_both_forms() {
     let (state, key) = inference_state(false);
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     for (path, value) in [
         ("/openai/v1/models", format!("Bearer {key}")),
         ("/anthropic/v1/models", key.clone()),
@@ -311,7 +311,7 @@ async fn litellm_gateway_credentials_are_authoritative_and_conflicts_fail_closed
         .generate_api_key()
         .expose_once()
         .to_owned();
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
 
     for (path, native_header, native_value, pointer, expected) in [
         (
@@ -429,7 +429,7 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
         state
             .runtime
             .install(
-                RuntimeSnapshot {
+                Snapshot {
                     generation: RuntimeGeneration {
                         id: RuntimeGenerationId::new(),
                         ordinal: pinned.generation.ordinal + 1,
@@ -442,7 +442,7 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
                 BTreeMap::new(),
             )
             .unwrap();
-        let app = public_router(state.gateway_state_for_test());
+        let app = for_state(state.gateway_state_for_test());
         let litellm_response = app
             .clone()
             .oneshot(
@@ -475,7 +475,7 @@ async fn authenticated_hard_limited_unknown_paths_keep_the_not_found_fallback() 
     // No distributed limiter is installed, so any reservation attempt would
     // replace the expected fallback with a service-unavailable response.
     let (state, key) = inference_state(true);
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     for (path, header_name, header_value) in [
         (
             "/openai/v1/not-enabled",
@@ -547,7 +547,7 @@ async fn authenticated_hard_limited_wrong_method_keeps_the_method_not_allowed_fa
     // No distributed limiter is installed, so any reservation attempt would
     // replace the expected fallback with a service-unavailable response.
     let (state, key) = inference_state(true);
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     let response = app
         .oneshot(
             Request::get("/openai/v1/chat/completions")
@@ -566,7 +566,7 @@ async fn authenticated_hard_limited_wrong_method_keeps_the_method_not_allowed_fa
 #[tokio::test]
 async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode() {
     let (state, key) = inference_state(true);
-    let app = public_router(state.gateway_state_for_test());
+    let app = for_state(state.gateway_state_for_test());
     for (path, header_name, header_value, content_type, body, pointer, expected) in [
         (
             "/openai/v1/chat/completions",
@@ -638,9 +638,9 @@ async fn malformed_inference_requests_with_hard_limits_fail_closed_before_decode
 #[tokio::test]
 async fn malformed_inference_json_without_hard_limits_reaches_native_decoder() {
     let (mut state, key) = inference_state(false);
-    let (request_metadata, mut receiver) = RequestMetadataEmitter::bounded(2);
+    let (request_metadata, mut receiver) = Emitter::bounded(2);
     state.request_metadata = Some(request_metadata);
-    let response = public_router(state.gateway_state_for_test())
+    let response = for_state(state.gateway_state_for_test())
         .oneshot(
             Request::post("/openai/v1/chat/completions")
                 .header(axum::http::header::AUTHORIZATION, format!("Bearer {key}"))

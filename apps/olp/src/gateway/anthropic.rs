@@ -4,19 +4,28 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use olp_engine::domain::{ApiKey, CanonicalResult, RouteSlug, Surface, TransportMode};
+use olp_engine::domain::{
+    auth::ApiKey,
+    canonical::{
+        identity::{Surface, TransportMode},
+        results::CanonicalResult,
+    },
+    ids::RouteSlug,
+};
 use olp_engine::protocols::anthropic::{
-    AnthropicMessagesClientStreamEncoder, CountTokensRequest, MessagesRequest,
-    decode_count_tokens_request, decode_messages_request, encode_count_tokens_result,
-    encode_messages_response,
+    client::encode_messages_response,
+    client_stream::Encoder,
+    count::{decode_count_tokens_request, encode_count_tokens_result},
+    dto::{CountTokensRequest, MessagesRequest},
+    translate::decode::request as decode_request,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use olp_engine::inference::{CompletedEventExecution, runtime::RuntimeBundle};
+use olp_engine::inference::{execution::CompletedEvents, principal::Principal, runtime::Bundle};
 
 use crate::{
-    GatewayState, InferencePrincipal,
+    bootstrap::mode_dependencies::GatewayState,
     public_http::json_media::{admit_anthropic_messages, cleanup_admitted},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
@@ -25,8 +34,9 @@ use crate::{
 };
 
 use super::{
-    InferenceError, authorize_model_access, execute_event_operation_for_surface,
-    execute_routed_result_for_surface,
+    authorize_model_access,
+    error::InferenceError,
+    execute_event_operation_for_surface, execute_routed_result_for_surface,
     native_models::{after_cursor_start, before_cursor_end, visible_route, visible_routes},
     protocol_error::{ProtocolError, anthropic_error_kind, valid_json},
     release_model_limits, reserve_model_limits,
@@ -34,7 +44,7 @@ use super::{
 
 pub(super) async fn messages(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     payload: Result<Json<MessagesRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
@@ -42,7 +52,7 @@ pub(super) async fn messages(
     let admitted = admit_anthropic_messages(&state, &mut request.messages)
         .await
         .map_err(ProtocolError::anthropic)?;
-    let operation = match decode_messages_request(request) {
+    let operation = match decode_request(request) {
         Ok(operation) => operation,
         Err(error) => {
             cleanup_admitted(&state, admitted).await;
@@ -61,7 +71,7 @@ pub(super) async fn messages(
         .await
         .map_err(ProtocolError::anthropic)?;
     if streaming {
-        let encoder = AnthropicHttpStreamEncoder(AnthropicMessagesClientStreamEncoder::new(
+        let encoder = AnthropicHttpStreamEncoder(Encoder::new(
             execution.route_slug.as_str(),
             format!("msg_{}", execution.request_id.simple()),
         ));
@@ -75,7 +85,7 @@ pub(super) async fn messages(
     unary_response(completed)
 }
 
-fn unary_response(mut completed: CompletedEventExecution) -> Result<Response, ProtocolError> {
+fn unary_response(mut completed: CompletedEvents) -> Result<Response, ProtocolError> {
     let response = encode_messages_response(
         &completed.events,
         completed.route_slug.as_str(),
@@ -93,7 +103,7 @@ fn unary_response(mut completed: CompletedEventExecution) -> Result<Response, Pr
 
 pub(super) async fn count_tokens(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     payload: Result<Json<CountTokensRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
@@ -166,7 +176,7 @@ struct Model {
 
 pub(super) async fn models(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =
@@ -180,7 +190,7 @@ pub(super) async fn models(
 }
 
 fn models_response(
-    runtime: &RuntimeBundle,
+    runtime: &Bundle,
     key: &ApiKey,
     query: ModelsQuery,
 ) -> Result<Response, ProtocolError> {
@@ -234,7 +244,7 @@ fn model_page<'a>(
 
 pub(super) async fn model(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<InferencePrincipal>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =
@@ -248,7 +258,7 @@ pub(super) async fn model(
     result
 }
 
-fn model_object(runtime: &RuntimeBundle, slug: &RouteSlug) -> Model {
+fn model_object(runtime: &Bundle, slug: &RouteSlug) -> Model {
     Model {
         id: slug.to_string(),
         created_at: runtime.generation.activated_at.to_rfc3339(),
@@ -257,18 +267,18 @@ fn model_object(runtime: &RuntimeBundle, slug: &RouteSlug) -> Model {
     }
 }
 
-struct AnthropicHttpStreamEncoder(AnthropicMessagesClientStreamEncoder);
+struct AnthropicHttpStreamEncoder(Encoder);
 
 impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
     fn push(
         &mut self,
-        event: olp_engine::domain::CanonicalEvent,
+        event: olp_engine::domain::canonical::events::Event,
     ) -> Result<Vec<bytes::Bytes>, String> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
-        encode_server_sse_frame(&olp_engine::protocols::sse::SseFrame {
+        encode_server_sse_frame(&olp_engine::protocols::sse::Frame {
             event: Some("error".to_owned()),
             data: json!({
                 "type": "error",

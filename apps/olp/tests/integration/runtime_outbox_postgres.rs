@@ -5,11 +5,11 @@ use std::{
 };
 
 use chrono::{TimeDelta, Utc};
-use olp::test_support::{
+use olp::bootstrap::cli::commands::{
     OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch,
 };
 use olp_db::{
-    PgStore, runtime::RuntimeOutboxState, test_support::TestDb, valkey::ValkeyAdapterError,
+    runtime::outbox::RuntimeOutboxState, store::Store, test_support::TestDb, valkey::Error,
 };
 use tokio::sync::{Barrier, oneshot, watch};
 use uuid::Uuid;
@@ -41,14 +41,12 @@ impl RecordingPublisher {
 }
 
 impl RuntimeHintPublication for RecordingPublisher {
-    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, Error> {
         let mut state = self.state.lock().unwrap();
         state.attempts.push(payload.to_vec());
         if state.failures_remaining > 0 {
             state.failures_remaining -= 1;
-            return Err(ValkeyAdapterError::InvalidState(
-                "injected ambiguous publication result",
-            ));
+            return Err(Error::InvalidState("injected ambiguous publication result"));
         }
         Ok(1)
     }
@@ -59,7 +57,7 @@ struct BlockingPublisher {
 }
 
 impl RuntimeHintPublication for BlockingPublisher {
-    async fn publish_runtime_hint(&mut self, _payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+    async fn publish_runtime_hint(&mut self, _payload: &[u8]) -> Result<u64, Error> {
         if let Some(started) = self.started.take() {
             let _ = started.send(());
         }
@@ -87,7 +85,7 @@ impl RetryAfterWatchChangePublisher {
 }
 
 impl RuntimeHintPublication for RetryAfterWatchChangePublisher {
-    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, ValkeyAdapterError> {
+    async fn publish_runtime_hint(&mut self, payload: &[u8]) -> Result<u64, Error> {
         let first_attempt = {
             let mut state = self.state.lock().unwrap();
             state.attempts.push(payload.to_vec());
@@ -110,7 +108,7 @@ struct TestOutboxRow {
     payload: Vec<u8>,
 }
 
-async fn insert_outbox_rows(store: &PgStore, count: usize) -> Vec<TestOutboxRow> {
+async fn insert_outbox_rows(store: &Store, count: usize) -> Vec<TestOutboxRow> {
     let first_created_at = Utc::now() - TimeDelta::minutes(1);
     let mut rows = Vec::with_capacity(count);
     for index in 0..count {
@@ -135,7 +133,7 @@ async fn insert_outbox_rows(store: &PgStore, count: usize) -> Vec<TestOutboxRow>
     rows
 }
 
-async fn unpublished_count(store: &PgStore) -> i64 {
+async fn unpublished_count(store: &Store) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM transactional_outbox WHERE published_at IS NULL")
         .fetch_one(store.pool())
         .await

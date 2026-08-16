@@ -4,24 +4,24 @@
 //! keeps a product decoder bug from masking a product encoder bug.
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SseEvent {
+pub(crate) struct SseEvent {
     /// Event type buffer; empty means the default `message` type.
-    pub event: String,
+    pub(crate) event: String,
     /// Data lines joined with a single newline, per specification.
-    pub data: String,
-    pub id: Option<String>,
-    pub retry: Option<String>,
+    pub(crate) data: String,
+    pub(crate) id: Option<String>,
+    pub(crate) retry: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SseStream {
-    pub events: Vec<SseEvent>,
+pub(crate) struct SseStream {
+    pub(crate) events: Vec<SseEvent>,
     /// Field lines buffered after the final dispatched event. A conforming
     /// producer ends every event with a blank line, so this must be empty.
-    pub undispatched_tail: Vec<String>,
+    pub(crate) undispatched_tail: Vec<String>,
 }
 
-pub fn decode(bytes: &[u8]) -> Result<SseStream, String> {
+pub(crate) fn decode(bytes: &[u8]) -> Result<SseStream, String> {
     let text =
         std::str::from_utf8(bytes).map_err(|error| format!("stream is not UTF-8: {error}"))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);

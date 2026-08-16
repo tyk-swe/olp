@@ -4,12 +4,12 @@ use uuid::Uuid;
 
 use super::{
     MAX_PAGE_SIZE,
-    cursor::{OperationsError, OperationsPage, TimestampCursor},
+    cursor::{Error, Page, Timestamp},
 };
-use crate::{PgStore, split_page};
+use crate::{split_page, store::Store};
 
 #[derive(Clone, Debug)]
-pub struct AuditRecord {
+pub struct Record {
     pub id: Uuid,
     pub actor_user_id: Option<Uuid>,
     pub actor_email: Option<String>,
@@ -36,12 +36,12 @@ struct AuditRow {
     occurred_at: DateTime<Utc>,
 }
 
-impl PgStore {
+impl Store {
     pub async fn audit_events(
         &self,
-        cursor: Option<&TimestampCursor>,
+        cursor: Option<&Timestamp>,
         limit: u16,
-    ) -> Result<OperationsPage<AuditRecord>, OperationsError> {
+    ) -> Result<Page<Record>, Error> {
         let page_size = limit.clamp(1, MAX_PAGE_SIZE);
         let mut query = QueryBuilder::<Postgres>::new(
             "SELECT a.id, a.actor_user_id, u.email AS actor_email, a.action, a.resource_type, \
@@ -64,7 +64,7 @@ impl PgStore {
             .await?;
         let items = rows
             .into_iter()
-            .map(|row| AuditRecord {
+            .map(|row| Record {
                 id: row.id,
                 actor_user_id: row.actor_user_id,
                 actor_email: row.actor_email,
@@ -78,12 +78,12 @@ impl PgStore {
             })
             .collect::<Vec<_>>();
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
-            TimestampCursor {
+            Timestamp {
                 at: item.occurred_at,
                 id: item.id,
             }
             .encode()
         });
-        Ok(OperationsPage { items, next_cursor })
+        Ok(Page { items, next_cursor })
     }
 }

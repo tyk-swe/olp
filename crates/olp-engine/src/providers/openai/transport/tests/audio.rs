@@ -7,7 +7,7 @@ async fn speech_unary_spools_bounded_audio_and_streaming_preserves_sse() {
         chunks: vec![(Duration::ZERO, http_response("audio/mpeg", b"mp3-audio"))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut request = speech_request(false);
     request.media = Some(spool.clone());
     let ProviderOutput::Result(result) = connector.execute(request).await.unwrap() else {
@@ -51,7 +51,7 @@ async fn speech_unary_spools_bounded_audio_and_streaming_preserves_sse() {
         )],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut events = execute_events(&connector, speech_request(true)).await;
     let mut collected = Vec::new();
     while let Some(event) = events.next().await {
@@ -59,12 +59,12 @@ async fn speech_unary_spools_bounded_audio_and_streaming_preserves_sse() {
     }
     assert!(collected.iter().any(|event| matches!(
         &event.kind,
-        CanonicalEventKind::SourceExtension { extensions }
+        Kind::SourceExtension { extensions }
             if extensions.values["/__olp/raw_sse/event"] == "speech.audio.delta"
     )));
     assert!(matches!(
         collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     let captured = String::from_utf8(captured.await.unwrap()).unwrap();
     assert!(captured.starts_with("POST /v1/audio/speech HTTP/1.1"));
@@ -85,7 +85,7 @@ async fn transcription_unary_and_streaming_forward_bounded_multipart_audio() {
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let ProviderOutput::Result(result) = connector
         .execute(transcription_request(false))
         .await
@@ -132,7 +132,7 @@ async fn transcription_unary_and_streaming_forward_bounded_multipart_audio() {
         )],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut events = execute_events(&connector, transcription_request(true)).await;
     let mut collected = Vec::new();
     while let Some(event) = events.next().await {
@@ -140,7 +140,7 @@ async fn transcription_unary_and_streaming_forward_bounded_multipart_audio() {
     }
     assert!(matches!(
         collected.last().map(|event| &event.kind),
-        Some(CanonicalEventKind::Done)
+        Some(Kind::Done)
     ));
     assert!(
         collected
@@ -166,7 +166,7 @@ async fn transcription_text_formats_and_known_speakers_use_current_multipart_con
         )],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut request = transcription_request(false);
     let Operation::Transcription(operation) = &mut request.operation else {
         unreachable!()
@@ -192,7 +192,7 @@ async fn transcription_text_formats_and_known_speakers_use_current_multipart_con
         chunks: vec![(Duration::ZERO, http_response("application/json", &response))],
     })
     .await;
-    let connector = test_connector(&base_url, ConnectorTimeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default());
     let mut request = transcription_request(false);
     request.attempt.upstream_model = "gpt-4o-transcribe-diarize".into();
     let Operation::Transcription(operation) = &mut request.operation else {

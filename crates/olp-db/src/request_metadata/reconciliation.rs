@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
-use olp_engine::inference::request_metadata::RequestMetadataBufferSnapshot;
+use olp_engine::inference::request_metadata::Snapshot;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use crate::{PersistenceError, PgStore};
+use crate::{error::Error, store::Store};
 
 const REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED: i64 = 0x4f4c_505f_5545;
 
 #[derive(Debug, Clone)]
-pub struct RequestMetadataGap {
+pub struct Gap {
     pub gateway_instance: String,
     pub event_count: i64,
     pub reason: String,
@@ -16,17 +16,17 @@ pub struct RequestMetadataGap {
     pub last_observed_at: DateTime<Utc>,
 }
 
-impl PgStore {
+impl Store {
     /// Records a gap exactly once for a durable source identity such as a
     /// Valkey Stream entry or decoded event ID. This closes the
     /// commit-before-acknowledgement crash window without storing content.
     pub async fn report_request_metadata_gap_once(
         &self,
-        gap: RequestMetadataGap,
+        gap: Gap,
         deduplication_key: &str,
-    ) -> Result<bool, PersistenceError> {
+    ) -> Result<bool, Error> {
         if deduplication_key.is_empty() || deduplication_key.len() > 256 {
-            return Err(PersistenceError::InvalidRequestMetadataGap);
+            return Err(Error::InvalidRequestMetadataGap);
         }
         self.insert_request_metadata_gap(gap, Some(deduplication_key))
             .await
@@ -34,15 +34,15 @@ impl PgStore {
 
     async fn insert_request_metadata_gap(
         &self,
-        gap: RequestMetadataGap,
+        gap: Gap,
         deduplication_key: Option<&str>,
-    ) -> Result<bool, PersistenceError> {
+    ) -> Result<bool, Error> {
         if gap.event_count <= 0
             || gap.gateway_instance.trim().is_empty()
             || gap.reason.trim().is_empty()
             || gap.last_observed_at < gap.first_observed_at
         {
-            return Err(PersistenceError::InvalidRequestMetadataGap);
+            return Err(Error::InvalidRequestMetadataGap);
         }
         let result = sqlx::query!(
             "INSERT INTO request_metadata_ingestion_gaps \
@@ -65,7 +65,7 @@ impl PgStore {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RequestMetadataLossReport {
+pub struct LossReport {
     pub reported_events: u64,
     pub reported_dropped: u64,
     pub reported_abandoned: u64,
@@ -73,14 +73,14 @@ pub struct RequestMetadataLossReport {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RequestMetadataEpochDetection {
+pub struct EpochDetection {
     pub candidate_epochs: u64,
     pub detected_epochs: u64,
     pub uncertain_event_lower_bound: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RequestMetadataEpochHealth {
+pub struct EpochHealth {
     pub open_epochs: u64,
     pub unresolved_epochs: u64,
     pub historical_uncertain_gap_count: u64,
@@ -88,7 +88,7 @@ pub struct RequestMetadataEpochHealth {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RequestMetadataEpochAcknowledgement {
+pub struct EpochAcknowledgement {
     pub gateway_instance: String,
     pub process_epoch: Uuid,
     pub acknowledged_at: DateTime<Utc>,
@@ -96,14 +96,14 @@ pub struct RequestMetadataEpochAcknowledgement {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RequestMetadataGatewayEpochState {
+pub enum GatewayEpochState {
     Open,
     GracefullyClosed,
     Unresolved,
     Acknowledged,
 }
 
-impl RequestMetadataGatewayEpochState {
+impl GatewayEpochState {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -116,10 +116,10 @@ impl RequestMetadataGatewayEpochState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RequestMetadataGatewayEpochRecord {
+pub struct GatewayEpochRecord {
     pub gateway_instance: String,
     pub process_epoch: Uuid,
-    pub state: RequestMetadataGatewayEpochState,
+    pub state: GatewayEpochState,
     pub started_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub accepted: u64,
@@ -154,7 +154,7 @@ struct UncleanRequestMetadataEpoch<'a> {
 async fn record_unclean_request_metadata_epoch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     epoch: UncleanRequestMetadataEpoch<'_>,
-) -> Result<i64, PersistenceError> {
+) -> Result<i64, Error> {
     let lower_bound = epoch
         .accepted
         .saturating_sub(epoch.persisted)
@@ -190,15 +190,15 @@ async fn record_unclean_request_metadata_epoch(
     Ok(lower_bound)
 }
 
-impl PgStore {
+impl Store {
     /// Durably checkpoints the current gateway epoch and records exact unseen
     /// local-loss deltas. This runs only in the background reporter; inference
     /// requests never wait for PostgreSQL.
     pub async fn report_request_metadata_buffer_loss(
         &self,
         gateway_instance: &str,
-        snapshot: &RequestMetadataBufferSnapshot,
-    ) -> Result<RequestMetadataLossReport, PersistenceError> {
+        snapshot: &Snapshot,
+    ) -> Result<LossReport, Error> {
         self.checkpoint_request_metadata_buffer_epoch(gateway_instance, snapshot, false)
             .await
     }
@@ -209,8 +209,8 @@ impl PgStore {
     pub async fn close_request_metadata_buffer_epoch(
         &self,
         gateway_instance: &str,
-        snapshot: &RequestMetadataBufferSnapshot,
-    ) -> Result<RequestMetadataLossReport, PersistenceError> {
+        snapshot: &Snapshot,
+    ) -> Result<LossReport, Error> {
         self.checkpoint_request_metadata_buffer_epoch(gateway_instance, snapshot, true)
             .await
     }
@@ -218,9 +218,9 @@ impl PgStore {
     async fn checkpoint_request_metadata_buffer_epoch(
         &self,
         gateway_instance: &str,
-        snapshot: &RequestMetadataBufferSnapshot,
+        snapshot: &Snapshot,
         graceful_close: bool,
-    ) -> Result<RequestMetadataLossReport, PersistenceError> {
+    ) -> Result<LossReport, Error> {
         let gateway_instance = gateway_instance.trim();
         if gateway_instance.is_empty()
             || gateway_instance.len() > 200
@@ -229,16 +229,16 @@ impl PgStore {
             || snapshot.abandoned > snapshot.accepted - snapshot.persisted
             || (graceful_close && !snapshot.gracefully_drained())
         {
-            return Err(PersistenceError::InvalidRequestMetadataGap);
+            return Err(Error::InvalidRequestMetadataGap);
         }
-        let accepted = i64::try_from(snapshot.accepted)
-            .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
-        let persisted = i64::try_from(snapshot.persisted)
-            .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
-        let dropped = i64::try_from(snapshot.dropped)
-            .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
-        let abandoned = i64::try_from(snapshot.abandoned)
-            .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?;
+        let accepted =
+            i64::try_from(snapshot.accepted).map_err(|_| Error::InvalidRequestMetadataGap)?;
+        let persisted =
+            i64::try_from(snapshot.persisted).map_err(|_| Error::InvalidRequestMetadataGap)?;
+        let dropped =
+            i64::try_from(snapshot.dropped).map_err(|_| Error::InvalidRequestMetadataGap)?;
+        let abandoned =
+            i64::try_from(snapshot.abandoned).map_err(|_| Error::InvalidRequestMetadataGap)?;
         let now = Utc::now();
         let mut transaction = self.pool().begin().await?;
         sqlx::query!(
@@ -292,7 +292,7 @@ impl PgStore {
         let (previous_dropped, previous_abandoned, previous_checkpoint) =
             if let Some(row) = previous {
                 if row.stale_detected_at.is_some() {
-                    return Err(PersistenceError::InvalidRequestMetadataGap);
+                    return Err(Error::InvalidRequestMetadataGap);
                 }
                 let previous_accepted = row.accepted;
                 let previous_persisted = row.persisted;
@@ -305,7 +305,7 @@ impl PgStore {
                     || abandoned < previous_abandoned
                     || (previously_closed && !snapshot.closed)
                 {
-                    return Err(PersistenceError::InvalidRequestMetadataGap);
+                    return Err(Error::InvalidRequestMetadataGap);
                 }
                 if row.gracefully_closed_at.is_some() {
                     if graceful_close
@@ -316,14 +316,14 @@ impl PgStore {
                         && abandoned == previous_abandoned
                     {
                         transaction.commit().await?;
-                        return Ok(RequestMetadataLossReport {
+                        return Ok(LossReport {
                             reported_events: 0,
                             reported_dropped: 0,
                             reported_abandoned: 0,
                             process_epoch_changed: false,
                         });
                     }
-                    return Err(PersistenceError::InvalidRequestMetadataGap);
+                    return Err(Error::InvalidRequestMetadataGap);
                 }
                 (previous_dropped, previous_abandoned, row.updated_at)
             } else {
@@ -333,7 +333,7 @@ impl PgStore {
         let abandoned_delta = abandoned - previous_abandoned;
         let event_count = dropped_delta
             .checked_add(abandoned_delta)
-            .ok_or(PersistenceError::InvalidRequestMetadataGap)?;
+            .ok_or(Error::InvalidRequestMetadataGap)?;
         if event_count > 0 {
             let last_observed_at = snapshot.last_loss_at.unwrap_or(now);
             let first_observed_at = if process_epoch_changed {
@@ -394,13 +394,13 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Ok(RequestMetadataLossReport {
+        Ok(LossReport {
             reported_events: u64::try_from(event_count)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                .map_err(|_| Error::InvalidRequestMetadataGap)?,
             reported_dropped: u64::try_from(dropped_delta)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                .map_err(|_| Error::InvalidRequestMetadataGap)?,
             reported_abandoned: u64::try_from(abandoned_delta)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                .map_err(|_| Error::InvalidRequestMetadataGap)?,
             process_epoch_changed,
         })
     }
@@ -411,7 +411,7 @@ impl PgStore {
     pub async fn detect_stale_request_metadata_gateway_epochs(
         &self,
         now: DateTime<Utc>,
-    ) -> Result<RequestMetadataEpochDetection, PersistenceError> {
+    ) -> Result<EpochDetection, Error> {
         let stale_cutoff =
             now - chrono::Duration::seconds(REQUEST_METADATA_GATEWAY_EPOCH_STALE_AFTER_SECONDS);
         let confirmation_cutoff =
@@ -429,7 +429,7 @@ impl PgStore {
         )
         .fetch_all(&mut *transaction)
         .await?;
-        let mut report = RequestMetadataEpochDetection::default();
+        let mut report = EpochDetection::default();
         for row in rows {
             let gateway_instance: String = row.gateway_instance;
             let process_epoch: Uuid = row.process_epoch;
@@ -473,9 +473,7 @@ impl PgStore {
         Ok(report)
     }
 
-    pub async fn request_metadata_gateway_epoch_health(
-        &self,
-    ) -> Result<RequestMetadataEpochHealth, PersistenceError> {
+    pub async fn request_metadata_gateway_epoch_health(&self) -> Result<EpochHealth, Error> {
         let row = sqlx::query!(
             "SELECT count(*) FILTER (WHERE gracefully_closed_at IS NULL \
                                       AND stale_detected_at IS NULL) AS \"open_epochs!\", \
@@ -496,11 +494,11 @@ impl PgStore {
             request_metadata_gap_count_from_decimal(row.historical_uncertain_gap_count)?;
         let unresolved_event_lower_bound =
             request_metadata_gap_count_from_decimal(row.unresolved_lower_bound)?;
-        Ok(RequestMetadataEpochHealth {
+        Ok(EpochHealth {
             open_epochs: u64::try_from(row.open_epochs)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                .map_err(|_| Error::InvalidRequestMetadataGap)?,
             unresolved_epochs: u64::try_from(row.unresolved_epochs)
-                .map_err(|_| PersistenceError::InvalidRequestMetadataGap)?,
+                .map_err(|_| Error::InvalidRequestMetadataGap)?,
             historical_uncertain_gap_count,
             unresolved_event_lower_bound,
         })
@@ -513,7 +511,7 @@ impl PgStore {
         &self,
         process_epoch: Uuid,
         actor: Uuid,
-    ) -> Result<Option<RequestMetadataEpochAcknowledgement>, PersistenceError> {
+    ) -> Result<Option<EpochAcknowledgement>, Error> {
         let mut transaction = self.pool().begin().await?;
         let row = sqlx::query!(
             "SELECT gateway_instance, acknowledged_at, acknowledged_by \
@@ -532,7 +530,7 @@ impl PgStore {
         let existing_actor: Option<Uuid> = row.acknowledged_by;
         if let Some(acknowledged_at) = existing_at {
             transaction.commit().await?;
-            return Ok(Some(RequestMetadataEpochAcknowledgement {
+            return Ok(Some(EpochAcknowledgement {
                 gateway_instance,
                 process_epoch,
                 acknowledged_at,
@@ -562,7 +560,7 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Ok(Some(RequestMetadataEpochAcknowledgement {
+        Ok(Some(EpochAcknowledgement {
             gateway_instance,
             process_epoch,
             acknowledged_at,
@@ -571,11 +569,9 @@ impl PgStore {
     }
 }
 
-pub(super) fn request_metadata_gap_count_from_decimal(
-    value: Decimal,
-) -> Result<u64, PersistenceError> {
+pub(super) fn request_metadata_gap_count_from_decimal(value: Decimal) -> Result<u64, Error> {
     if !value.fract().is_zero() {
-        return Err(PersistenceError::InvalidRequestMetadataGap);
+        return Err(Error::InvalidRequestMetadataGap);
     }
-    u64::try_from(value).map_err(|_| PersistenceError::InvalidRequestMetadataGap)
+    u64::try_from(value).map_err(|_| Error::InvalidRequestMetadataGap)
 }

@@ -8,21 +8,25 @@ use axum::{
     body::{Body, HttpBody},
     http::HeaderMap,
 };
-use olp_engine::domain::{ApiKeyLookupId, ApiKeyStatus, GatewayCapability, Surface};
-use olp_engine::inference::{
-    InferencePrincipal, InferenceReservation,
-    limits::{LimitError, LimitRequest},
+use olp_engine::domain::{
+    auth::{ApiKeyStatus, GatewayCapability},
+    canonical::identity::Surface,
+    ids::ApiKeyLookupId,
 };
-use olp_engine::protocols::openai::EmbeddingWireInput;
+use olp_engine::inference::{
+    limits::{LimitError, LimitRequest, Reservation},
+    principal::Principal,
+};
+use olp_engine::protocols::openai::embeddings::EmbeddingWireInput;
 use serde::Deserialize;
 
-use crate::{RequestBoundaryState, gateway};
+use crate::{bootstrap::mode_dependencies::RequestBoundaryState, gateway};
 
 const LITELLM_API_KEY_HEADER: &str = "x-litellm-api-key";
 
 pub(crate) struct ReleaseReservationBody {
     pub(crate) inner: Body,
-    pub(crate) reservation: InferenceReservation,
+    pub(crate) reservation: Reservation,
 }
 
 impl HttpBody for ReleaseReservationBody {
@@ -61,7 +65,7 @@ pub(super) fn authenticate_inference_headers(
     headers: &HeaderMap,
     surface: Surface,
     gateway_capability: Option<GatewayCapability>,
-) -> Result<InferencePrincipal, crate::Problem> {
+) -> Result<Principal, crate::public_http::problem::Problem> {
     let litellm_header_present = headers.contains_key(LITELLM_API_KEY_HEADER);
     let native_token = native_inference_token(headers, surface);
     let litellm_token = if litellm_header_present {
@@ -74,33 +78,47 @@ pub(super) fn authenticate_inference_headers(
         None
     };
     let token = if litellm_header_present {
-        litellm_token
-            .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
+        litellm_token.ok_or_else(|| {
+            crate::public_http::problem::Problem::unauthorized(
+                "The API key is invalid or unavailable.",
+            )
+        })?
     } else {
-        native_token
-            .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
+        native_token.ok_or_else(|| {
+            crate::public_http::problem::Problem::unauthorized(
+                "The API key is invalid or unavailable.",
+            )
+        })?
     };
     let auth_hmac_key = &state.auth_hmac_key;
     let lookup = auth_hmac_key
         .lookup_id(token)
-        .map_err(|_| crate::Problem::unauthorized("The API key is invalid or unavailable."))?
+        .map_err(|_| {
+            crate::public_http::problem::Problem::unauthorized(
+                "The API key is invalid or unavailable.",
+            )
+        })?
         .to_owned();
-    let lookup_id = ApiKeyLookupId::parse(&lookup)
-        .map_err(|_| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
+    let lookup_id = ApiKeyLookupId::parse(&lookup).map_err(|_| {
+        crate::public_http::problem::Problem::unauthorized("The API key is invalid or unavailable.")
+    })?;
     let snapshot = state.inference.runtime().pin();
-    let key = snapshot
-        .api_keys
-        .get(&lookup_id)
-        .ok_or_else(|| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
+    let key = snapshot.api_keys.get(&lookup_id).ok_or_else(|| {
+        crate::public_http::problem::Problem::unauthorized("The API key is invalid or unavailable.")
+    })?;
     auth_hmac_key
         .parse_and_verify(token, key.digest.as_bytes())
-        .map_err(|_| crate::Problem::unauthorized("The API key is invalid or unavailable."))?;
+        .map_err(|_| {
+            crate::public_http::problem::Problem::unauthorized(
+                "The API key is invalid or unavailable.",
+            )
+        })?;
     if key.status != ApiKeyStatus::Active
         || key
             .expires_at
             .is_some_and(|expires_at| expires_at <= chrono::Utc::now())
     {
-        return Err(crate::Problem::unauthorized(
+        return Err(crate::public_http::problem::Problem::unauthorized(
             "The API key is invalid or unavailable.",
         ));
     }
@@ -109,11 +127,11 @@ pub(super) fn authenticate_inference_headers(
             native_token != token && auth_hmac_key.lookup_id(native_token).is_ok()
         })
     {
-        return Err(crate::Problem::unauthorized(
+        return Err(crate::public_http::problem::Problem::unauthorized(
             "The API key is invalid or unavailable.",
         ));
     }
-    Ok(InferencePrincipal::new(
+    Ok(Principal::new(
         snapshot,
         lookup_id,
         surface,
@@ -123,23 +141,22 @@ pub(super) fn authenticate_inference_headers(
 
 pub(super) async fn reserve_http_inference_limits(
     state: &RequestBoundaryState,
-    principal: &InferencePrincipal,
+    principal: &Principal,
     requested_tokens: i64,
-) -> Result<Option<InferenceReservation>, gateway::InferenceError> {
+) -> Result<Option<Reservation>, gateway::error::InferenceError> {
     if !principal.key().limits.has_hard_limits() {
         return Ok(None);
     }
-    let limiter =
-        state.inference.limiter().current().ok_or_else(|| {
-            gateway::InferenceError::unavailable("distributed_limits_unavailable")
-        })?;
+    let limiter = state.inference.limiter().current().ok_or_else(|| {
+        gateway::error::InferenceError::unavailable("distributed_limits_unavailable")
+    })?;
     let tokens_per_minute = principal
         .key()
         .limits
         .tokens_per_minute
         .map(|value| i64::try_from(value.get()))
         .transpose()
-        .map_err(|_| gateway::InferenceError::unavailable("limit_configuration_invalid"))?;
+        .map_err(|_| gateway::error::InferenceError::unavailable("limit_configuration_invalid"))?;
     let route_timeout = principal
         .runtime()
         .routes
@@ -173,19 +190,19 @@ pub(super) async fn reserve_http_inference_limits(
         }),
     )
     .await
-    .map_err(|_| gateway::InferenceError::unavailable("distributed_limits_unavailable"))?;
+    .map_err(|_| gateway::error::InferenceError::unavailable("distributed_limits_unavailable"))?;
     match result {
-        Ok(lease) => Ok(Some(InferenceReservation::distributed(lease))),
+        Ok(lease) => Ok(Some(Reservation::distributed(lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
-        }) => Err(gateway::InferenceError::rate_limited(
+        }) => Err(gateway::error::InferenceError::rate_limited(
             dimension,
             retry_after,
         )),
         Err(error) => {
             tracing::error!(%error, "hard HTTP limit reservation failed closed");
-            Err(gateway::InferenceError::unavailable(
+            Err(gateway::error::InferenceError::unavailable(
                 "distributed_limits_unavailable",
             ))
         }
@@ -193,11 +210,11 @@ pub(super) async fn reserve_http_inference_limits(
 }
 
 pub(crate) fn estimate_http_json_request_tokens(
-    category: gateway::TokenEstimate,
+    category: gateway::endpoint_policy::TokenEstimate,
     body: &[u8],
 ) -> i64 {
     let encoded_body = body.len().saturating_add(3) / 4;
-    let baseline = if category == gateway::TokenEstimate::Generation {
+    let baseline = if category == gateway::endpoint_policy::TokenEstimate::Generation {
         let value = serde_json::from_slice::<serde_json::Value>(body).ok();
         let output = value
             .as_ref()
@@ -232,7 +249,7 @@ pub(crate) fn estimate_http_json_request_tokens(
     let byte_estimate = encoded_body.saturating_add(baseline).max(1);
     // Generation paths and embeddings are mutually exclusive, so the body is
     // parsed at most once per request, and only for paths that consume it.
-    let embedding_token_floor = if category == gateway::TokenEstimate::Embeddings {
+    let embedding_token_floor = if category == gateway::endpoint_policy::TokenEstimate::Embeddings {
         serde_json::from_slice::<EmbeddingTokenProbe>(body)
             .ok()
             .map(|probe| embedding_token_count(probe.input))
@@ -259,12 +276,15 @@ fn embedding_token_count(input: EmbeddingWireInput) -> usize {
     }
 }
 
-pub(super) const fn estimate_http_non_json_request_tokens(category: gateway::TokenEstimate) -> i64 {
+pub(super) const fn estimate_http_non_json_request_tokens(
+    category: gateway::endpoint_policy::TokenEstimate,
+) -> i64 {
     match category {
-        gateway::TokenEstimate::Generation => 4_096,
-        gateway::TokenEstimate::Transcription => 1_500,
-        gateway::TokenEstimate::Media => 2_000,
-        gateway::TokenEstimate::Default | gateway::TokenEstimate::Embeddings => 1,
+        gateway::endpoint_policy::TokenEstimate::Generation => 4_096,
+        gateway::endpoint_policy::TokenEstimate::Transcription => 1_500,
+        gateway::endpoint_policy::TokenEstimate::Media => 2_000,
+        gateway::endpoint_policy::TokenEstimate::Default
+        | gateway::endpoint_policy::TokenEstimate::Embeddings => 1,
     }
 }
 
@@ -366,11 +386,14 @@ mod tests {
     #[test]
     fn non_json_estimates_are_conservative_by_operation_cost() {
         for (category, expected) in [
-            (gateway::TokenEstimate::Generation, 4_096),
-            (gateway::TokenEstimate::Transcription, 1_500),
-            (gateway::TokenEstimate::Media, 2_000),
-            (gateway::TokenEstimate::Default, 1),
-            (gateway::TokenEstimate::Embeddings, 1),
+            (gateway::endpoint_policy::TokenEstimate::Generation, 4_096),
+            (
+                gateway::endpoint_policy::TokenEstimate::Transcription,
+                1_500,
+            ),
+            (gateway::endpoint_policy::TokenEstimate::Media, 2_000),
+            (gateway::endpoint_policy::TokenEstimate::Default, 1),
+            (gateway::endpoint_policy::TokenEstimate::Embeddings, 1),
         ] {
             assert_eq!(estimate_http_non_json_request_tokens(category), expected);
         }

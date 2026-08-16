@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use olp_engine::domain::{OperationKind, Surface};
+use olp_engine::domain::canonical::identity::{OperationKind, Surface};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;

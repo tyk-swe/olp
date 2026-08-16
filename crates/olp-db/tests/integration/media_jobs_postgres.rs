@@ -1,9 +1,9 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    configuration::ConfigurationError, identity::InstallationSetupInput, media_jobs::MediaJobError,
+    configuration::Error, identity::InstallationSetupInput, media_jobs::MediaJobError,
     media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder,
     media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
-    security::hash_password,
+    security::password::hash,
 };
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             installation_name: "Media jobs integration".to_owned(),
             email: "owner@example.test".to_owned(),
             display_name: "Owner".to_owned(),
-            password_hash: hash_password("correct horse battery staple").unwrap(),
+            password_hash: hash("correct horse battery staple").unwrap(),
         })
         .await
         .unwrap();
@@ -163,7 +163,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].id, second.id);
     let cursor =
-        olp_db::operations::TimestampCursor::parse(page.next_cursor.as_deref().unwrap()).unwrap();
+        olp_db::operations::cursor::Timestamp::parse(page.next_cursor.as_deref().unwrap()).unwrap();
     let next = store
         .media_jobs(&MediaJobFilters::default(), Some(&cursor), 1)
         .await
@@ -420,7 +420,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
                 "media-provider-disable-01",
             )
             .await,
-        Err(ConfigurationError::InUse)
+        Err(Error::InUse)
     ));
 
     let columns: Vec<String> = sqlx::query_scalar(

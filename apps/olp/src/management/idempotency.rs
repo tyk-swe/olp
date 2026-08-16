@@ -3,9 +3,9 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
 };
-use olp_db::idempotency::IdempotencyOutcome;
+use olp_db::idempotency::Outcome;
 
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 use super::response_policy::prevent_sensitive_response_caching;
 
@@ -32,13 +32,9 @@ pub(crate) fn require_idempotency_key(headers: &HeaderMap) -> Result<&str, Probl
     Ok(value)
 }
 
-pub(crate) fn idempotency_http_response<T>(
-    outcome: IdempotencyOutcome<T>,
-) -> Result<Response, Problem> {
+pub(crate) fn idempotency_http_response<T>(outcome: Outcome<T>) -> Result<Response, Problem> {
     let replay = match outcome {
-        IdempotencyOutcome::Executed { response, .. } | IdempotencyOutcome::Replayed(response) => {
-            response
-        }
+        Outcome::Executed { response, .. } | Outcome::Replayed(response) => response,
     };
     let (status, content_type, etag, body) = replay.into_parts();
     let mut response = Response::new(Body::from(body));

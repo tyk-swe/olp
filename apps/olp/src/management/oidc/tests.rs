@@ -3,8 +3,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode, jwk::JwkSet};
-use olp_db::{oidc::OidcConfiguration, oidc::OidcFlowPurpose, security::MasterKey};
-use olp_engine::inference::runtime::RuntimeManager;
+use olp_db::{
+    oidc::types::OidcConfiguration, oidc::types::OidcFlowPurpose, security::envelope::MasterKey,
+};
+use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -18,7 +20,7 @@ use super::session::{
     OidcCallbackState, OidcFlowId, consume_login_flow_cookie, flow_cookie_name,
     seal_login_flow_cookie,
 };
-use crate::management::optional_if_match;
+use crate::management::preconditions::optional_if_match;
 
 // Public test fixture used only to exercise the verifier.
 const ED25519_PRIVATE_DER_B64: &str =
@@ -97,9 +99,9 @@ fn optional_etag_parser_requires_a_strong_quoted_uuid() {
 #[test]
 fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
     let mut state = ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        std::sync::Arc::new(RuntimeManager::empty()),
+        std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
         std::path::PathBuf::from("missing-console"),
     );
@@ -117,7 +119,10 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
         configuration_id,
         configuration_etag,
         expires_at_unix: (Utc::now() + FLOW_TTL).timestamp(),
-        return_to: crate::RelativeReturnTo::parse("/settings?tab=security#sessions").unwrap(),
+        return_to: crate::public_http::relative_url::RelativeReturnTo::parse(
+            "/settings?tab=security#sessions",
+        )
+        .unwrap(),
     };
     let encoded = seal_login_flow_cookie(&state, &master_key, &payload).unwrap();
     assert!(encoded.starts_with("v2."));
@@ -143,9 +148,9 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
     assert!(consume_login_flow_cookie(&state, &encoded, &wrong_state).is_err());
 
     let mut other_origin = ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        std::sync::Arc::new(RuntimeManager::empty()),
+        std::sync::Arc::new(Manager::empty()),
         "https://other.example.test",
         std::path::PathBuf::from("missing-console"),
     );
@@ -156,9 +161,9 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
 #[test]
 fn callback_prefers_the_flow_specific_cookie_matching_its_state() {
     let mut state = ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        std::sync::Arc::new(RuntimeManager::empty()),
+        std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
         std::path::PathBuf::from("missing-console"),
     );
@@ -226,9 +231,9 @@ fn callback_prefers_the_flow_specific_cookie_matching_its_state() {
 #[test]
 fn expired_or_tampered_stateless_login_cookie_is_rejected() {
     let mut state = ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        std::sync::Arc::new(RuntimeManager::empty()),
+        std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
         std::path::PathBuf::from("missing-console"),
     );
@@ -266,9 +271,9 @@ fn expired_or_tampered_stateless_login_cookie_is_rejected() {
 #[tokio::test]
 async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
     let state = ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        std::sync::Arc::new(RuntimeManager::empty()),
+        std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
         std::path::PathBuf::from("missing-console"),
     );
@@ -295,9 +300,9 @@ async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
 #[tokio::test]
 async fn callback_clears_the_matching_scoped_cookie_when_query_extraction_fails() {
     let state = ManagementState::new(
-        crate::ApiMode::Control,
+        crate::bootstrap::state::ApiMode::Control,
         None,
-        std::sync::Arc::new(RuntimeManager::empty()),
+        std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
         std::path::PathBuf::from("missing-console"),
     );
@@ -426,7 +431,7 @@ fn test_configuration() -> OidcConfiguration {
         jwks_uri: "https://idp.example/jwks".to_owned(),
         token_endpoint_auth_method: "client_secret_basic".to_owned(),
         client_id: "olp".to_owned(),
-        encrypted_client_secret: olp_db::security::EncryptedSecret {
+        encrypted_client_secret: olp_db::security::envelope::EncryptedSecret {
             key_version: 1,
             nonce: [0; 12],
             ciphertext: vec![0; 16],

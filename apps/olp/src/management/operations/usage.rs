@@ -1,11 +1,11 @@
 use chrono::{DateTime, Utc};
-use olp_db::{usage::UsageFilters, usage::UsageRangeCoverage};
+use olp_db::{usage::Coverage, usage::Filters};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use super::helpers::validate_time_range;
-use crate::Problem;
+use crate::public_http::problem::Problem;
 
 pub(super) mod breakdown;
 pub(super) mod completeness;
@@ -27,8 +27,8 @@ pub(super) struct UsageQuery {
 }
 
 impl UsageQuery {
-    pub(super) fn filters(&self) -> Result<UsageFilters, Problem> {
-        Ok(UsageFilters {
+    pub(super) fn filters(&self) -> Result<Filters, Problem> {
+        Ok(Filters {
             observed_after: self.start,
             observed_before: self.end,
             route_slug: self.route.clone(),
@@ -58,8 +58,8 @@ pub(super) struct UsageRangeCoverageResponse {
     excluded_partial_aggregate_boundaries: u8,
 }
 
-impl From<UsageRangeCoverage> for UsageRangeCoverageResponse {
-    fn from(coverage: UsageRangeCoverage) -> Self {
+impl From<Coverage> for UsageRangeCoverageResponse {
+    fn from(coverage: Coverage) -> Self {
         Self {
             range_complete: coverage.range_complete,
             approximate: coverage.approximate,

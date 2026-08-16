@@ -2,8 +2,7 @@ use std::{fmt, time::Duration};
 
 use reqwest::{Client, Url};
 
-pub use crate::providers::CommonEndpointError as EndpointError;
-use crate::providers::endpoint::EndpointCore;
+use crate::providers::endpoint::{EndpointCore, Error};
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1/";
 const PROVIDER: &str = "Anthropic";
@@ -26,11 +25,11 @@ impl Default for Endpoint {
 }
 
 impl Endpoint {
-    pub(in crate::providers) fn parse(value: &str) -> Result<Self, EndpointError> {
+    pub(in crate::providers) fn parse(value: &str) -> Result<Self, Error> {
         Self::parse_with_policy(value, false)
     }
 
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, EndpointError> {
+    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
         Ok(Self {
             core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
         })
@@ -41,19 +40,19 @@ impl Endpoint {
         Self::parse_with_policy(value, true).expect("local test endpoint must be valid")
     }
 
-    pub(in crate::providers) fn messages_url(&self) -> Result<Url, EndpointError> {
+    pub(in crate::providers) fn messages_url(&self) -> Result<Url, Error> {
         self.join("messages")
     }
 
-    pub(in crate::providers) fn count_tokens_url(&self) -> Result<Url, EndpointError> {
+    pub(in crate::providers) fn count_tokens_url(&self) -> Result<Url, Error> {
         self.join("messages/count_tokens")
     }
 
-    pub(in crate::providers) fn models_url(&self) -> Result<Url, EndpointError> {
+    pub(in crate::providers) fn models_url(&self) -> Result<Url, Error> {
         self.join("models")
     }
 
-    fn join(&self, path: &str) -> Result<Url, EndpointError> {
+    fn join(&self, path: &str) -> Result<Url, Error> {
         self.core.join(path)
     }
 
@@ -64,7 +63,7 @@ impl Endpoint {
     pub(in crate::providers) async fn pinned_client(
         &self,
         connect_timeout: Duration,
-    ) -> Result<Client, EndpointError> {
+    ) -> Result<Client, Error> {
         self.core.pinned_client(connect_timeout).await
     }
 }
@@ -79,15 +78,15 @@ mod tests {
     fn endpoint_policy_and_path_join_are_fail_closed() {
         assert!(matches!(
             Endpoint::parse("http://api.anthropic.com/v1"),
-            Err(EndpointError::HttpsRequired { .. })
+            Err(Error::HttpsRequired { .. })
         ));
         assert!(matches!(
             Endpoint::parse("https://user:secret@api.anthropic.com/v1"),
-            Err(EndpointError::UserInfoForbidden { .. })
+            Err(Error::UserInfoForbidden { .. })
         ));
         assert!(matches!(
             Endpoint::parse("https://api.anthropic.com/v1?next=x"),
-            Err(EndpointError::QueryOrFragmentForbidden { .. })
+            Err(Error::QueryOrFragmentForbidden { .. })
         ));
         let endpoint = Endpoint::parse("https://example.com/proxy/v1").unwrap();
         assert_eq!(
@@ -109,7 +108,7 @@ mod tests {
         let address: IpAddr = "169.254.169.254".parse().unwrap();
         assert!(matches!(
             Endpoint::parse("https://169.254.169.254/v1"),
-            Err(EndpointError::ForbiddenAddress { address: blocked, .. }) if blocked == address
+            Err(Error::ForbiddenAddress { address: blocked, .. }) if blocked == address
         ));
     }
 }

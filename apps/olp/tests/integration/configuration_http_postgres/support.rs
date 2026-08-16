@@ -32,17 +32,17 @@ impl MockOpenAiProvider {
         }
     }
 
-    pub(super) fn connector(&self, api_key: &str) -> OpenAiConnector {
-        OpenAiConnector::new(
+    pub(super) fn connector(&self, api_key: &str) -> Connector {
+        Connector::new(
             ConnectorConfig::for_local_test(
                 &self.base_url,
-                ConnectorTimeouts {
+                Timeouts {
                     connect: Duration::from_secs(1),
                     first_byte: Duration::from_secs(1),
                     idle: Duration::from_secs(1),
                 },
             ),
-            OpenAiApiKey::new(api_key).unwrap(),
+            ApiKey::new(api_key).unwrap(),
         )
     }
 

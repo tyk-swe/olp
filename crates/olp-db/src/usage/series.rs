@@ -2,16 +2,16 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use super::{
-    UsageFilters, UsageGranularity, UsageRangeCoverage,
+    Coverage, Filters, Granularity,
     query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
 };
 use crate::{
-    PgStore,
-    operations::{OperationsError, cursor::checked_u64},
+    operations::cursor::{Error, checked_u64},
+    store::Store,
 };
 
 #[derive(Clone, Debug)]
-pub struct UsagePoint {
+pub struct Point {
     pub bucket: DateTime<Utc>,
     pub request_count: u64,
     pub input_tokens: String,
@@ -25,9 +25,9 @@ pub struct UsagePoint {
 }
 
 #[derive(Clone, Debug)]
-pub struct UsageSeries {
-    pub points: Vec<UsagePoint>,
-    pub coverage: UsageRangeCoverage,
+pub struct Report {
+    pub points: Vec<Point>,
+    pub coverage: Coverage,
 }
 
 #[derive(Debug, FromRow)]
@@ -44,16 +44,16 @@ struct UsagePointRow {
     currency: Option<String>,
 }
 
-impl PgStore {
+impl Store {
     pub async fn usage_series(
         &self,
-        filters: &UsageFilters,
-        granularity: UsageGranularity,
-    ) -> Result<UsageSeries, OperationsError> {
+        filters: &Filters,
+        granularity: Granularity,
+    ) -> Result<Report, Error> {
         validate_usage_range(filters)?;
         let bucket = match granularity {
-            UsageGranularity::Hour => "date_trunc('hour', observed_at)",
-            UsageGranularity::Day => "date_trunc('day', observed_at)",
+            Granularity::Hour => "date_trunc('hour', observed_at)",
+            Granularity::Day => "date_trunc('day', observed_at)",
         };
         let mut query = QueryBuilder::<Postgres>::new("");
         push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
@@ -81,15 +81,15 @@ impl PgStore {
             .into_iter()
             .map(usage_point_from_row)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(UsageSeries {
+        Ok(Report {
             points,
             coverage: self.usage_range_coverage(filters).await?,
         })
     }
 }
 
-fn usage_point_from_row(row: UsagePointRow) -> Result<UsagePoint, OperationsError> {
-    Ok(UsagePoint {
+fn usage_point_from_row(row: UsagePointRow) -> Result<Point, Error> {
+    Ok(Point {
         bucket: row.bucket,
         request_count: checked_u64(row.request_count, "request count")?,
         input_tokens: row.input_tokens,
@@ -152,7 +152,7 @@ mod tests {
             mutate(&mut candidate);
             assert!(matches!(
                 usage_point_from_row(candidate),
-                Err(OperationsError::Invalid(_))
+                Err(Error::Invalid(_))
             ));
         }
     }

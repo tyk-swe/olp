@@ -3,34 +3,34 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    PersistenceError, PgStore,
     authentication::insert_versioned_session,
+    error::Error as PersistenceError,
     idempotency::{
-        IdempotencyOutcome, IdempotencyResponse, ReplayableIdempotency, ReplayableIdempotencyClaim,
-        claim_idempotency, claim_replayable_idempotency, complete_idempotency,
-        complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
+        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
     },
-    security::{InvitationMaterial, SessionMaterial},
+    security::session_material::{InvitationMaterial, SessionMaterial},
     split_page,
+    store::Store,
 };
 
 use super::{
-    AcceptInvitation, AcceptedInvitation, IdentityError, InvitationCreated, InvitationRecord,
+    AcceptInvitation, AcceptedInvitation, Error, InvitationCreated, InvitationRecord,
     NewInvitation, accounts::UserRow, insert_audit, parse_role,
 };
 
 const MAX_PAGE_SIZE: i64 = 100;
 const IDENTITY_EMAIL_LOCK_SEED: i64 = 0x4f4c_505f_4944;
 
-impl PgStore {
+impl Store {
     pub async fn create_invitation<F>(
         &self,
         invitation: NewInvitation,
-        replay: ReplayableIdempotency<'_>,
+        replay: Replayable<'_>,
         build_response: F,
-    ) -> Result<IdempotencyOutcome<InvitationCreated>, IdentityError>
+    ) -> Result<Outcome<InvitationCreated>, Error>
     where
-        F: FnOnce(&InvitationCreated) -> Result<IdempotencyResponse, PersistenceError>,
+        F: FnOnce(&InvitationCreated) -> Result<Response, PersistenceError>,
     {
         let email = normalize_email(&invitation.email)?;
         let mut transaction = self.pool().begin().await?;
@@ -47,20 +47,20 @@ impl PgStore {
             ReplayableIdempotencyClaim::Execute => {}
             ReplayableIdempotencyClaim::Replay(response) => {
                 transaction.rollback().await?;
-                return Ok(IdempotencyOutcome::Replayed(response));
+                return Ok(Outcome::Replayed(response));
             }
             ReplayableIdempotencyClaim::Conflict => {
                 transaction.rollback().await?;
-                return Err(IdentityError::IdempotencyConflict);
+                return Err(Error::IdempotencyConflict);
             }
             ReplayableIdempotencyClaim::InProgress => {
                 transaction.rollback().await?;
-                return Err(IdentityError::IdempotencyInProgress);
+                return Err(Error::IdempotencyInProgress);
             }
         }
         let now = Utc::now();
         if invitation.expires_at <= now || invitation.expires_at > now + Duration::days(30) {
-            return Err(IdentityError::Invalid(
+            return Err(Error::Invalid(
                 "expiration must be within the next 30 days".to_owned(),
             ));
         }
@@ -72,7 +72,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if member_exists {
-            return Err(IdentityError::EmailAlreadyMember);
+            return Err(Error::EmailAlreadyMember);
         }
         let pending_exists: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM invitations WHERE email = $1 \
@@ -82,7 +82,7 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         if pending_exists {
-            return Err(IdentityError::PendingInvitationExists);
+            return Err(Error::PendingInvitationExists);
         }
         // Expired pending rows no longer reserve the partial unique index.
         sqlx::query!(
@@ -106,7 +106,7 @@ impl PgStore {
         {
             Ok(row) => row,
             Err(error) if is_constraint(&error, "invitations_pending_email_idx") => {
-                return Err(IdentityError::PendingInvitationExists);
+                return Err(Error::PendingInvitationExists);
             }
             Err(error) => return Err(error.into()),
         };
@@ -134,7 +134,7 @@ impl PgStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(IdempotencyOutcome::Executed {
+        Ok(Outcome::Executed {
             value: created,
             response,
         })
@@ -144,7 +144,7 @@ impl PgStore {
         &self,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<(Vec<InvitationRecord>, Option<Uuid>), IdentityError> {
+    ) -> Result<(Vec<InvitationRecord>, Option<Uuid>), Error> {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query_as!(
             InvitationRow,
@@ -167,7 +167,7 @@ impl PgStore {
         id: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<InvitationRecord, IdentityError> {
+    ) -> Result<InvitationRecord, Error> {
         let mut transaction = self.pool().begin().await?;
         if !claim_idempotency(
             &mut transaction,
@@ -177,7 +177,7 @@ impl PgStore {
         )
         .await?
         {
-            return Err(IdentityError::IdempotencyConflict);
+            return Err(Error::IdempotencyConflict);
         }
         let row = sqlx::query_as!(
             InvitationRow,
@@ -187,7 +187,7 @@ impl PgStore {
         id, actor)
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(IdentityError::InvitationUnavailable)?;
+        .ok_or(Error::InvitationUnavailable)?;
         insert_audit(
             &mut transaction,
             actor,
@@ -213,17 +213,17 @@ impl PgStore {
         acceptance: AcceptInvitation,
         session: &SessionMaterial,
         session_ttl: Duration,
-    ) -> Result<AcceptedInvitation, IdentityError> {
+    ) -> Result<AcceptedInvitation, Error> {
         if acceptance.token.len() != 43
             || acceptance.display_name.trim().is_empty()
             || acceptance.display_name.chars().count() > 100
         {
-            return Err(IdentityError::InvitationUnavailable);
+            return Err(Error::InvitationUnavailable);
         }
         let session_expires_at = Utc::now()
             .checked_add_signed(session_ttl)
             .filter(|expires_at| *expires_at > Utc::now())
-            .ok_or_else(|| IdentityError::Invalid("session lifetime is invalid".to_owned()))?;
+            .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let digest = InvitationMaterial::digest_token(&acceptance.token);
         let mut transaction = self.pool().begin().await?;
         let invitation_email: String = sqlx::query_scalar!(
@@ -232,7 +232,7 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(IdentityError::InvitationUnavailable)?;
+        .ok_or(Error::InvitationUnavailable)?;
         lock_identity_email(&mut transaction, &invitation_email).await?;
         let invitation = sqlx::query!(
             "SELECT id, email, role::text AS \"role!\", expires_at, accepted_at, revoked_at \
@@ -241,13 +241,13 @@ impl PgStore {
         )
         .fetch_optional(&mut *transaction)
         .await?
-        .ok_or(IdentityError::InvitationUnavailable)?;
+        .ok_or(Error::InvitationUnavailable)?;
         let expires_at: DateTime<Utc> = invitation.expires_at;
         if invitation.accepted_at.is_some()
             || invitation.revoked_at.is_some()
             || expires_at <= Utc::now()
         {
-            return Err(IdentityError::InvitationUnavailable);
+            return Err(Error::InvitationUnavailable);
         }
         let invitation_id: Uuid = invitation.id;
         let email: String = invitation.email;
@@ -267,7 +267,7 @@ impl PgStore {
         {
             Ok(row) => row,
             Err(error) if is_constraint(&error, "users_email_unique") => {
-                return Err(IdentityError::EmailAlreadyMember);
+                return Err(Error::EmailAlreadyMember);
             }
             Err(error) => return Err(error.into()),
         };
@@ -281,7 +281,7 @@ impl PgStore {
         .execute(&mut *transaction)
         .await?;
         if updated.rows_affected() != 1 {
-            return Err(IdentityError::InvitationUnavailable);
+            return Err(Error::InvitationUnavailable);
         }
         insert_audit(
             &mut transaction,
@@ -325,10 +325,10 @@ impl PgStore {
     }
 }
 
-pub(super) fn normalize_email(email: &str) -> Result<String, IdentityError> {
+pub(super) fn normalize_email(email: &str) -> Result<String, Error> {
     let email = email.trim().to_lowercase();
     if email.len() > 254 || !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
-        return Err(IdentityError::Invalid("email is invalid".to_owned()));
+        return Err(Error::Invalid("email is invalid".to_owned()));
     }
     Ok(email)
 }
@@ -345,7 +345,7 @@ struct InvitationRow {
     created_at: DateTime<Utc>,
 }
 
-fn invitation_from_row(row: InvitationRow) -> Result<InvitationRecord, IdentityError> {
+fn invitation_from_row(row: InvitationRow) -> Result<InvitationRecord, Error> {
     Ok(InvitationRecord {
         id: row.id,
         email: row.email,
