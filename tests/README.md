@@ -1,9 +1,9 @@
 # Compatibility and contract tests
 
-The test tree contains the framework-independent wire corpus, official SDK
-smoke tests, end-to-end contracts, HA proof, and fuzz targets. Repository-wide
-Rust validation is `make test` (locked nextest); use the focused commands below
-when changing one suite.
+The repository's test assets include the framework-independent wire corpus,
+official SDK smoke tests, end-to-end contracts, HA proof, and a separate fuzz
+workspace. Repository-wide Rust validation is `make test` (locked nextest);
+use the focused commands below when changing one suite.
 
 ## Conformance corpus
 
@@ -18,13 +18,15 @@ SQLX_OFFLINE=true cargo nextest run --locked -p olp-conformance
 ```
 
 The provider conformance matrix exercises every connector transport,
-deadlines, malformed bodies, error mapping, and failover. It includes the
-Bedrock no-code/malformed-body cases fixed in the current release.
+deadlines, malformed bodies, error mapping, and failover, including Bedrock
+responses with missing error codes or malformed bodies.
 
 ## SDK smoke
 
 Official OpenAI, Anthropic, and Google GenAI JavaScript clients run against an
-ephemeral local server with retries disabled and no live provider access:
+ephemeral local server with retries disabled and no live provider access. The
+OpenAI checks cover `/v1`, `/openai/v1`, trailing-slash bases, and
+`x-litellm-api-key` authentication:
 
 ```sh
 make sdk-smoke

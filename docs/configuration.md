@@ -1,9 +1,9 @@
 # Configuration reference
 
-Runtime configuration is environment-driven; every binary setting also has a
-CLI flag in `olp <subcommand> --help`. The source of truth is
-`apps/olp/src/bootstrap/cli/config.rs`. Secrets are file paths, never inline
-values.
+Application configuration is environment-driven; each application setting
+also has a CLI flag in `olp <subcommand> --help`. Logging uses `RUST_LOG`. The
+source of truth is `apps/olp/src/bootstrap/cli/config.rs`. Secrets are file
+paths, never inline values.
 
 ## Runtime variables
 
@@ -11,7 +11,7 @@ values.
 |---|---|---|
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
 | `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size. |
-| `OLP_VALKEY_URL` | optional for `serve`; required for `worker`, `migrate`, `doctor` | Valkey for installation-scoped limits, hints, and streams. |
+| `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker`, `migrate`, `doctor` | Valkey for installation-scoped limits, hints, and streams. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; containers override to `0.0.0.0:8080`. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
 | `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Admitted TCP connections. |
@@ -30,21 +30,24 @@ The CLI loopback default is intentional; Compose and Helm set their container
 listener explicitly. Keep the observability listener private and set trusted
 proxy CIDRs only to peers that append a trustworthy forwarding chain.
 
-Values are resolved per process mode: `all` needs database, encryption, and
-authentication settings; `gateway` needs the runtime and authentication
-settings; `control` additionally needs the master key and management stores;
-`worker` and migration/doctor modes require their backing services but do not
-publish a public listener. CLI flags override environment values, and a file
-path always wins over an inline or generated secret value. Missing required
-settings fail during startup before a listener is bound.
+All HTTP modes (`all`, `gateway`, and `control`) require PostgreSQL and the
+authentication HMAC key. Configure Valkey for production gateway traffic:
+without it, runtime hints fall back to PostgreSQL polling and keys with hard
+limits fail closed. The master key is required wherever database-managed
+provider or OIDC credentials and encrypted management replays are used.
+`worker`, `migrate`, and `doctor` require both backing services but publish no
+public listener. CLI flags override environment values. CLI-required settings
+fail during startup before a listener is bound; omitting the master key instead
+leaves database-encrypted runtime activation and control-plane operations
+unavailable.
 
 ## File-based secrets
 
 | Variable | Required by | Purpose |
 |---|---|---|
-| `OLP_MASTER_KEY_FILE` | `serve` (control), `doctor`, `master-key` | Versioned envelope-encryption keyring. |
-| `OLP_AUTH_HMAC_KEY_FILE` | `serve` (control), `doctor` | Session and authentication HMAC key. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first run | One-time owner-setup token. |
+| `OLP_MASTER_KEY_FILE` | `all`, `control`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | Versioned envelope-encryption keyring. |
+| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `doctor` | Session and authentication HMAC key. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | One-time owner-setup token. |
 
 Generate and rotate these through
 [`deploy/secrets/README.md`](../deploy/secrets/README.md). Keep the HMAC key

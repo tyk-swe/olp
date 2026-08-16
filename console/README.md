@@ -2,8 +2,8 @@
 
 The console is a client-only SvelteKit application served as static assets by
 OpenLLMProxy. Its build output is `build/` with `index.html` as the SPA
-fallback. Use Node.js 24+ and pnpm 11; repository-wide setup is in
-[`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+fallback. Use Node.js 24.15 or newer within the 24.x line (or Node.js 26+) and
+pnpm 11; repository-wide setup is in [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Local development
 
@@ -30,7 +30,16 @@ start.
 
 Management requests use the generated `openapi-fetch` client. After changing
 `../openapi/management.json`, run `pnpm api:generate`; `pnpm api:check` fails
-when the checked-in TypeScript schema is stale.
+when the checked-in TypeScript schema is stale. Never hand-edit
+`src/lib/api/schema.d.ts`.
+
+## Layout and boundaries
+
+`src/lib/features/` contains independent gateway, access, operations, and
+settings slices. ESLint rejects cross-slice imports; put shared code in a
+neutral `$lib` module and keep `src/routes/(console)/` files thin. The console
+must remain a client-only `adapter-static` application: do not add server
+routes, server hooks, `lib/server/`, or a production Node adapter.
 
 ## Integration environment
 

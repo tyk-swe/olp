@@ -1,15 +1,17 @@
 # Contributing
 
-This guide is the contributor-facing index for the repository. The root and
-subtree `AGENTS.md` files carry agent-specific constraints; the docs linked
-below are the behavioral sources of truth.
+This guide is the contributor-facing index for the repository. Keep product
+behavior, operational guidance, and the focused READMEs in sync with the code
+that owns them.
 
 ## Development environment
 
-Use Rust 1.97.1, Node.js 24 or newer, pnpm 11, ripgrep, PostgreSQL 18, and
-Valkey 9.1. Rust is pinned by
+Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
+pnpm 11, ripgrep, PostgreSQL 18, and Valkey 9.1. Rust is pinned by
 `rust-toolchain.toml`; the Compose stack supplies PostgreSQL and Valkey for
-local service tests.
+local service tests. The main Cargo workspace contains the application and
+test harnesses, `console/` and `tests/sdk-smoke/` are separate pnpm projects,
+and `fuzz/` is a separate nightly Cargo workspace.
 
 The normal local gate needs `cargo-nextest`:
 
@@ -70,6 +72,12 @@ may never depend on test harnesses.
   and accounting live in `crates/olp-engine/src/inference/`.
 - Public egress classification lives in
   `crates/olp-engine/src/providers/http_egress.rs`.
+
+Do not hand-edit generated artifacts: use `make openapi` for
+`openapi/management.json` and `console/src/lib/api/schema.d.ts`,
+`make sqlx-prepare` for `.sqlx/`, and `make screenshots` for
+`docs/assets/screenshots/*.png`. When adding a workspace package, declare its
+`[package.metadata.olp]` role and update the Docker build inputs if needed.
 
 ## Validation
 

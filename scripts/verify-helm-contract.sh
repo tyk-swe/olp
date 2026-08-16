@@ -297,6 +297,7 @@ for expected in \
   'kind: Ingress' \
   'ingressClassName: "nginx"' \
   'host: "olp.example.com"' \
+  'path: /v1' \
   'path: /openai' \
   'path: /anthropic' \
   'path: /gemini' \

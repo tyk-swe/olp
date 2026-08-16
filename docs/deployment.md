@@ -46,7 +46,7 @@ disconnects:
 
 | Prefix | Service |
 |---|---|
-| `/openai`, `/anthropic`, `/gemini` | gateway |
+| `/v1`, `/openai`, `/anthropic`, `/gemini` | gateway |
 | `/api`, `/`, and console deep links | control |
 
 Example values:

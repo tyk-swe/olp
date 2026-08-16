@@ -29,10 +29,10 @@ spec:
     - host: {{ $host | quote }}
       http:
         paths:
-          # Kubernetes Prefix matching chooses these vendor routes before the
+          # Kubernetes Prefix matching chooses these inference routes before the
           # root console route. No rewrite is used: Rust receives its public
           # protocol paths unchanged.
-          {{- range $path := list "/openai" "/anthropic" "/gemini" }}
+          {{- range $path := list "/v1" "/openai" "/anthropic" "/gemini" }}
           - path: {{ $path }}
             pathType: Prefix
             backend:

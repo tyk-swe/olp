@@ -2,7 +2,7 @@
 
 This document records the boundaries and runtime contracts that are useful to
 operators and contributors. Implementation ownership and command details are
-kept in [`CONTRIBUTING.md`](../CONTRIBUTING.md) and the agent guides.
+kept in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Component boundaries
 
@@ -34,11 +34,15 @@ use all three. `domain` imports no sibling module, and no engine module except
 `providers` may use outbound networking libraries or construct concrete
 connectors. Inference reaches persistence only through its own ports.
 
-Delivery is grouped under `bootstrap/`, `public_http/`, `gateway/`,
-`management/`, `observability/`, and `console/`. The database crate exposes
-subsystem namespaces rather than a flat persistence API. The role checker
-validates semantic package-role edges, the engine's module ordering, and
-infrastructure ownership.
+Delivery is grouped by owner: `bootstrap/` contains CLI, process composition,
+activation, workers, and shutdown; `public_http/` contains shared listener,
+admission, proxy, origin, and response policy; `gateway/` contains protocol
+HTTP adapters; `management/` contains the `/api/v1` control plane;
+`observability/` contains the private health/metrics surface; and `console/`
+contains static-asset delivery. The database crate exposes subsystem
+namespaces rather than a flat persistence API. The role checker validates
+semantic package-role edges, the engine's module ordering, and infrastructure
+ownership.
 
 Rust APIs likewise follow ownership rather than layers: public items are
 imported from the leaf module that defines them, with no crate-root or

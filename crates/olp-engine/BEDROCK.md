@@ -1,9 +1,10 @@
 # Amazon Bedrock connector
 
-The provider crate uses the official AWS SDK for Rust: Bedrock Runtime for
-`Converse`, `ConverseStream`, and `CountTokens`, and the control-plane client
-for foundation-model discovery. The SDK owns SigV4, credential resolution,
-and event framing; model IDs and supported ARNs pass through unchanged.
+The `olp-engine` Bedrock provider uses the official AWS SDK for Rust: Bedrock
+Runtime for `Converse`, `ConverseStream`, and `CountTokens`, and the
+control-plane client for foundation-model discovery. The SDK owns SigV4,
+credential resolution, and event framing; model IDs and supported ARNs pass
+through unchanged.
 
 ## Authentication
 

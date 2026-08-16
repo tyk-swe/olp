@@ -4,8 +4,8 @@ use super::*;
 // Public interface surface
 //
 // README.md "Interfaces": all public interfaces share one origin — console at
-// `/`, management at `/api/v1`, OpenAI at `/openai/v1`, Anthropic at
-// `/anthropic/v1`, Gemini at `/gemini/v1` *and* `/gemini/v1beta`.
+// `/`, management at `/api/v1`, OpenAI at `/v1` and `/openai/v1`, Anthropic
+// at `/anthropic/v1`, Gemini at `/gemini/v1` *and* `/gemini/v1beta`.
 // ---------------------------------------------------------------------------
 
 #[test]

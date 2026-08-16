@@ -96,7 +96,7 @@ control:
     limits: { cpu: "1", memory: 512Mi }
 
 # Optional same-origin edge routing. The root and management API terminate at
-# control, while vendor inference prefixes terminate at gateway. Keep this off
+# control, while inference prefixes terminate at gateway. Keep this off
 # when an external Gateway API/Ingress controller owns the equivalent routes.
 ingress:
   enabled: false

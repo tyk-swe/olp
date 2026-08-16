@@ -70,14 +70,16 @@ before removing a key.
 
 Console-managed providers use encrypted credentials and do not set
 `OLP_CONNECTOR_CONFIG_FILE`. A custom deployment may point that variable at a
-read-only JSON file; every `provider_id` must match the active runtime.
+read-only JSON file; every `provider_id` must match the active runtime. Start
+from [`deploy/connectors.example.json`](../connectors.example.json); unknown
+fields are rejected.
 
-| Array key | Required fields |
+| Array key | Fields |
 |---|---|
-| `openai` | `provider_id`, optional `base_url`, `credential_file` |
+| `openai` | Required `provider_id` and `credential_file`; optional `base_url` |
 | `azure_openai` | `provider_id`, `endpoint`, `deployment`, `api_version`, `credential_file` |
-| `vertex` | `provider_id`, `project`, `location`, `model`; `adc` omits `credential_file`, `service_account` requires it |
-| `bedrock` | `provider_id`, `region`; `default_chain` omits `credential_file`, `static` requires it |
+| `vertex` | Required `provider_id`, `project`, `location`, and `model`; optional `auth_mode` defaults to `adc`, which must omit `credential_file`; `service_account` requires it |
+| `bedrock` | Required `provider_id` and `region`; optional `auth_mode` defaults to `default_chain`, which must omit `credential_file`; `static` requires it |
 
 Mount the configuration and credential files read-only (`0600` for credentials).
 Prefer workload identity. A static Bedrock file is:

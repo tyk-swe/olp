@@ -115,11 +115,16 @@ screenshots with `pnpm --dir console screenshots`.
 | [Operations](docs/operations.md) | Monitoring, recovery, upgrades, incidents, and master-key rotation |
 | [Contributing](CONTRIBUTING.md) | Toolchain, sources of truth, and validation |
 | [Security](SECURITY.md) | Supported releases and private vulnerability reporting |
+| [Console development](console/README.md) | Frontend commands, boundaries, integration tests, and screenshots |
+| [Compatibility and contract tests](tests/README.md) | Conformance, SDK, end-to-end, HA, and fuzz suites |
+| [Compose secrets](deploy/secrets/README.md) | Bootstrap lifecycle, key rotation, and file-backed connectors |
+| [Amazon Bedrock connector](crates/olp-engine/BEDROCK.md) | Authentication, transport behavior, and focused tests |
 
 ## Contributing
 
-Use Rust 1.97.1, Node.js 24+, pnpm 11, and ripgrep. Install the console
-dependencies once, then run the standard local gate:
+Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
+pnpm 11, and ripgrep. Install the console dependencies once, then run the
+standard local gate:
 
 ```bash
 make console-install
